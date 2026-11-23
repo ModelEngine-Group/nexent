@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: WB-PICKER-EFFECTS-20261014
+  change_type: bugfix
+  bug_id: WB-PICKER-EFFECTS-20261014
+  title: Preserve resource picker transitions while fixing synchronous effect updates
+  description: Reset local drafts on guarded input transitions and derive loading from the active request rather than synchronously changing state in effects.
+  observed_behavior: Eight effect locations in the three resource controllers fail react-hooks/set-state-in-effect.
+  expected_behavior: All affected controllers pass the unmodified lint rule and retain draft, filtering, configuration, cancellation and stale-response handling.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Functional journeys passed but the affected controller lint gate was still failing; request and reopen boundaries need additional unit proof.
+  feature_contract_changed: false
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-001, WB-CONTROLS-D4-002]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [frontend/tests/workbench/AgentPicker.test.tsx, frontend/tests/workbench/SkillPicker.test.tsx, frontend/tests/workbench/KnowledgePicker.test.tsx]
+    behaviors:
+      - Closing and reopening discards unconfirmed drafts and restores committed selection.
+      - Pending and obsolete requests cannot enable confirmation or overwrite current resources.
+    reason: Extend controller interaction regressions for transition and asynchronous boundaries; use full scoped ESLint as the direct defect regression.
+  no_case_change_reason: Existing browser selection and creation journeys prove unchanged business behavior; lint and controller request boundaries require local tooling/unit evidence, not a duplicate formal Case.
+  notes: Existing chat-workbench-resource-controls design owns this follow-up. No lint suppression, deferred setter workaround, API or visual changes.

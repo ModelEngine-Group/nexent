@@ -1,0 +1,15 @@
+tool: |-
+  - {{ name }}: {{ description }} 
+   Inputs: {{ inputs }}
+   Output type: {{ output_type }}
+worker_agent: "- {{ name }}: {{ description }}"
+generation_knowledge_scope: |-
+  Knowledge tools represent capabilities only. Do not include concrete knowledge base names, IDs, index names, KDS IDs, fixed index_names, or fixed kds_list values. Refer to the knowledge scope allowed for the current conversation.
+optimization_knowledge_scope: |-
+  The optimized content must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, fixed index_names, or fixed kds_list values. Refer to the scope allowed for the current conversation.
+optimization_global_scope: |-
+  The optimized prompt must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, fixed index_names, or fixed kds_list values. Rewrite them to use the knowledge scope allowed for the current conversation.
+section_titles:
+  duty: Agent Role
+  constraint: Usage Requirements
+  few_shots: Few Shots

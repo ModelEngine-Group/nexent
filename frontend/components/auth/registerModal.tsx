@@ -26,10 +26,12 @@ import { useAuthenticationContext } from "@/components/providers/AuthenticationP
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import type { AuthFormValues } from "@/types/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { withBasePath, withoutBasePath } from "@/lib/basePath";
 import { authEventUtils } from "@/lib/authEvents";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
 import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 const { Text } = Typography;
 
@@ -73,6 +75,7 @@ export function RegisterModal() {
   const resetForm = () => {
     setEmailError("");
     setPasswordError({ target: "", message: "" });
+    setPasswordValue("");
     form.resetFields();
   };
 
@@ -144,6 +147,7 @@ export function RegisterModal() {
 
     setEmailError("");
     setPasswordError({ target: "", message: "" });
+    setPasswordValue("");
     form.resetFields();
     if (registerModalOptions?.email) {
       form.setFieldsValue({ email: registerModalOptions.email });
@@ -202,8 +206,8 @@ export function RegisterModal() {
         authEventUtils.emitRegisterSuccess();
         authEventUtils.emitLoginSuccess();
 
-        const locale = pathname.split("/").find(Boolean) || "zh";
-        window.location.href = `/${locale}`;
+        const locale = withoutBasePath(pathname).split("/").find(Boolean) || "zh";
+        window.location.href = withBasePath(`/${locale}`);
         return;
       }
 
@@ -251,6 +255,16 @@ export function RegisterModal() {
 
       if (isOAuthCompletion) {
         handleOAuthCompleteError("auth.oauthCompleteFailed", values);
+        setIsLoading(false);
+        return;
+      }
+
+      const tenantResourceLimitMessage = getTenantResourceLimitMessage(
+        error,
+        t
+      );
+      if (tenantResourceLimitMessage) {
+        message.error(tenantResourceLimitMessage);
         setIsLoading(false);
         return;
       }
@@ -384,7 +398,7 @@ export function RegisterModal() {
     closeRegisterModal();
 
     if (isOAuthCompletion) {
-      const locale = pathname.split("/").find(Boolean) || "zh";
+      const locale = withoutBasePath(pathname).split("/").find(Boolean) || "zh";
       router.push(`/${locale}`);
       return;
     }

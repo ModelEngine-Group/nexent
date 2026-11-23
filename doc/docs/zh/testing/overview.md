@@ -15,33 +15,35 @@ Nexent 提供了一个全面的测试框架，确保所有组件的代码质量�
 
 ## 测试框架
 
-项目使用多种测试框架的组合：
+项目使用以下测试工具组合：
 
-- **unittest**：Python 标准单元测试框架，用于测试组织和断言
-- **unittest.mock**：用于模拟依赖项和隔离组件
+- **pytest**：核心测试框架，用于测试发现和执行（pytest only，不使用 unittest 组织新测试）
+- **pytest-asyncio**：异步测试支持（`test/pytest.ini` 已配置 `asyncio_mode = auto`，异步测试函数会被自动识别，也可显式使用 `@pytest.mark.asyncio`）
+- **pytest-mock / unittest.mock**：用于模拟依赖项和隔离组件（在导入处使用全限定路径打补丁）
 - **TestClient** from FastAPI：用于测试 API 端点而无需运行实际服务器
-- **pytest**：用于高级测试发现和执行
-- **coverage**：用于代码覆盖率分析和报告
+- **pytest-cov + coverage**：用于代码覆盖率分析和报告
 
 ## 测试结构
 
 ```
 test/
-├── backend/                 # 后端测试
-│   ├── app/                # API 端点测试
-│   ├── services/           # 服务层测试
-│   └── utils/              # 工具函数测试
-├── frontend/               # 前端测试（未来）
-├── integration/            # 集成测试（未来）
-└── run_all_tests.py       # 主测试运行器
+├── backend/                # 后端测试（apps、services、database、agents、utils 等）
+├── sdk/                    # SDK 测试
+├── ext_components/         # 扩展组件测试（如 aidp）
+├── common/                 # 公共测试工具与 mock
+├── stress/                 # 压力测试脚本
+├── conftest.py             # 全局 fixtures
+├── pytest.ini              # pytest 配置
+└── run_all_test.py         # 主测试运行器
 ```
 
 ## 主要特性
 
-- 🔍 **自动发现测试文件** - 自动查找所有 `test_*.py` 文件
+- 🔍 **自动发现测试文件** - 自动查找所有 `test_*.py` 文件（覆盖 `test/backend`、`test/sdk`、`test/ext_components`）
 - 📊 **覆盖率报告** - 生成控制台、HTML 和 XML 格式的覆盖率报告
-- 🔧 **自动安装依赖** - 自动安装所需的包（如果需要）
-- ✅ **详细输出** - 显示每个测试的运行状态和结果
+- 🧵 **并行执行** - 通过 `NEXENT_PYTEST_WORKERS` 控制并发工作进程数（默认 auto）
+- ⏱️ **超时保护** - 通过 `NEXENT_PYTEST_FILE_TIMEOUT` 限制单文件执行时间（默认 600 秒）
+- ✅ **详细输出** - 显示每个测试文件的运行状态和结果
 - 🚫 **完全隔离** - 从不接触真实的外部服务
 - ⚡ **快速执行** - 无网络延迟或外部服务处理时间
 
@@ -50,16 +52,16 @@ test/
 ### 快速开始
 
 ```bash
-# 运行所有测试并生成覆盖率报告
-cd test
-python run_all_tests.py
+# 激活后端虚拟环境后，在项目根运行所有测试并生成覆盖率报告
+source backend/.venv/bin/activate
+python test/run_all_test.py
 ```
 
 ### 后端测试
 
 ```bash
-# 仅运行后端测试
-python test/backend/run_all_test.py
+# 仅运行后端测试（通过目标路径环境变量）
+NEXENT_PYTEST_TARGETS=test/backend python test/run_all_test.py
 ```
 
 ### 单个测试文件
@@ -71,11 +73,11 @@ python -m pytest test/backend/services/test_agent_service.py -v
 
 ## 输出文件
 
-测试完成后，您将找到：
+测试完成后，您将在 `test/` 目录下找到：
 
-- `coverage_html/` - 详细的 HTML 格式覆盖率报告
-- `coverage.xml` - XML 格式覆盖率报告（用于 CI/CD）
-- `.coverage` - 覆盖率数据文件
+- `test/coverage_html/` - 详细的 HTML 格式覆盖率报告
+- `test/coverage.xml` - XML 格式覆盖率报告（用于 CI/CD）
+- `test/.coverage` - 覆盖率数据文件
 - 包含详细测试结果和覆盖率统计的控制台输出
 
 ## 测试策略
@@ -98,7 +100,7 @@ python -m pytest test/backend/services/test_agent_service.py -v
 
 ### 3. 测试组织
 
-- 测试组织为继承自 `unittest.TestCase` 的类
+- 测试统一使用 pytest 组织（函数或类风格），异步测试使用 `@pytest.mark.asyncio` 或依赖 `asyncio_mode = auto`
 - 每个 API 端点或函数都有多个测试用例（成功、失败、异常场景）
 - 应用全面的补丁来隔离被测试的代码
 - 测试遵循清晰的设置-执行-断言模式
@@ -127,7 +129,7 @@ patches = [
     patch('botocore.client.BaseClient._make_api_call', return_value={}),
     patch('backend.database.client.MinioClient', MagicMock()),
     patch('backend.database.client.db_client', MagicMock()),
-    patch('backend.utils.auth_utils.get_current_user_id', 
+    patch('backend.utils.auth_utils.get_current_user_id',
           MagicMock(return_value=('test_user', 'test_tenant'))),
     patch('httpx.AsyncClient', MagicMock())
 ]
@@ -137,7 +139,7 @@ for p in patches:
     p.start()
 
 # 现在在应用所有补丁后导入模块
-from backend.apps.file_management_app import router
+from apps.file_management_app import router
 ```
 
 ### 这种方法的优势
@@ -150,24 +152,32 @@ from backend.apps.file_management_app import router
 
 ## 测试示例
 
-以下是测试结构化的详细示例：
+以下是测试结构化的详细示例（pytest 风格，mock 使用函数被引用处的模块全限定路径，确保对已导入的引用生效；底层依赖需在导入前打补丁，见上文"模块补丁技术"）：
 
 ```python
-@patch("utils.auth_utils.get_current_user_id")
-@patch("database.agent_db.query_all_tools")
-async def test_list_tools_api_success(self, mock_query_all_tools, mock_get_current_user_id):
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from apps.tool_config_app import list_tools_api
+
+
+@pytest.mark.asyncio
+@patch("apps.tool_config_app.get_current_user_id")
+@patch("apps.tool_config_app.list_all_tools")
+async def test_list_tools_api_success(mock_list_all_tools, mock_get_current_user_id):
     # 设置
     mock_get_current_user_id.return_value = ("user123", "tenant456")
     expected_tools = [{"id": 1, "name": "Tool1"}, {"id": 2, "name": "Tool2"}]
-    mock_query_all_tools.return_value = expected_tools
-    
+    mock_list_all_tools.return_value = expected_tools
+
     # 执行
     result = await list_tools_api(authorization="Bearer fake_token")
-    
+
     # 断言
     mock_get_current_user_id.assert_called_once_with("Bearer fake_token")
-    mock_query_all_tools.assert_called_once_with(tenant_id="tenant456")
-    self.assertEqual(result, expected_tools)
+    mock_list_all_tools.assert_called_once_with(tenant_id="tenant456", labels=None)
+    assert result == expected_tools
 ```
 
 ## 覆盖率报告
@@ -182,50 +192,31 @@ async def test_list_tools_api_success(self, mock_query_all_tools, mock_get_curre
 ## 示例输出
 
 ```
-Nexent Community - Unit Test Runner
 ============================================================
-发现的测试文件：
-----------------------------------------
-  • backend/services/test_agent_service.py
-  • backend/services/test_conversation_management_service.py
-  • backend/services/test_knowledge_summary_service.py
-
-总计：3 个测试文件
-
+Test Summary
 ============================================================
-运行单元测试和覆盖率
-============================================================
+PASSED - test/backend/services/test_agent_service.py
+PASSED - test/backend/services/test_conversation_management_service.py
+PASSED - test/backend/services/test_knowledge_summary_service.py
 
-test_get_enable_tool_id_by_agent_id ... ok
-test_save_message_with_string_content ... ok
-test_load_knowledge_prompts ... ok
-...
+Test Results:
+  Total Tests: 96
+  Passed: 96
+  Failed: 0
+  Pass Rate: 100.0%
 
-============================================================
-覆盖率报告
-============================================================
-名称                                               Stmts   Miss  Cover   Missing
---------------------------------------------------------------------------------
-backend/services/agent_service.py                   120     15    88%   45-50, 78-82
-backend/services/conversation_management_service.py  180     25    86%   123-128, 156-162
-backend/services/knowledge_summary_service.py        45      8    82%   35-42
---------------------------------------------------------------------------------
-总计                                               345     48    86%
-
-HTML 覆盖率报告生成在：test/coverage_html
-XML 覆盖率报告生成：test/coverage.xml
-
-============================================================
-✅ 所有测试通过！
+Total Coverage: 86.5%
+HTML coverage report generated in: test\coverage_html
+XML coverage report generated: test\coverage.xml
 ```
 
 ## 依赖项
 
-测试运行器会自动安装所需的包（如果尚未可用）：
+测试运行器启动时会检查所需依赖（不会自动安装），缺失时会退出并提示安装命令：
 
 - `pytest-cov` - 用于 pytest 覆盖率集成
 - `coverage` - 用于代码覆盖率分析
-- `pytest` - 用于高级测试发现和执行
+- `pytest-asyncio` - 用于异步测试执行
 
 ## 最佳实践
 
@@ -237,4 +228,4 @@ XML 覆盖率报告生成：test/coverage.xml
 6. **使用有意义的模拟数据**来代表真实世界的场景
 7. **用清晰的注释记录复杂的测试场景**
 
-这个测试框架确保所有代码更改在部署前都经过彻底验证，在整个 Nexent 平台中保持高代码质量和可靠性。 
+这个测试框架确保所有代码更改在部署前都经过彻底验证，在整个 Nexent 平台中保持高代码质量和可靠性。

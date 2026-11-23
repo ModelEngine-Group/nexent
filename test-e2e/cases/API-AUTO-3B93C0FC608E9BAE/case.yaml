@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-3B93C0FC608E9BAE
+  feature_id: F-079
+  business_rule_ids:
+  - F-079-RULE-01
+  title: 技能仓库标签统计与我的技能计数端点｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 技能仓库标签统计与我的技能计数端点｜核心流程
+  preconditions:
+  - 测试环境可运行，skill_repository 接口已注册，数据库可访问；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中可提供具备技能仓库访问权限的 DEV/ADMIN 账号、无权限的 USER 账号，测试租户数据可被清理。
+  - 测试租户内已准备技能仓库记录：含 status=shared 且 delete_flag≠Y 且 tags 非空的记录、status=shared 但 delete_flag=Y 的记录、status 为 not_shared/pending_review/rejected
+    的记录，且不同 created_by 归属不同用户。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 使用 DEV 或 ADMIN 账号登录获取 authorization；同时准备 USER 角色账号与无效/缺失 token。
+    expected: GET /repository/skill/tags 返回 HTTP 200，body 形如 {items:[{tag,count},...]}。
+  - order: 2
+    action: 在测试租户内准备技能仓库记录：创建 status=shared、delete_flag≠Y 且带标签（如 tags=["nlp","math"]）的共享记录，并准备 status=shared 但 delete_flag=Y、status=not_shared/pending_review/rejected
+      的记录，记录期望标签及计数。
+    expected: items 仅含 status=shared 且 delete_flag≠Y 的租户内共享标签；tag 升序，count 为 int 且与数据库计数一致；not_shared/pending_review/rejected
+      及软删除记录的标签不出现；相同 tag 合并计次。
+  - order: 3
+    action: 携带 authorization 调用 GET /repository/skill/tags，记录响应状态码与 JSON 体。
+    expected: USER 角色访问 /repository/skill/tags 返回 403，缺失或无效 token 返回 401。
+  - order: 4
+    action: 断言响应体为 {items:[{tag,count}]}，items 仅含 status=shared 且 delete_flag≠Y 记录的标签，tag 按字典序升序，count 为对应共享 listing 数量；非
+      shared 与软删除记录的标签不出现。
+    expected: GET /repository/skill/mine/counts 返回 HTTP 200，body 为 {counts:{all,created,others}}，三者均为 int 且满足 all==created+others。
+  - order: 5
+    action: 使用 USER 角色账号调用 GET /repository/skill/tags 断言返回 403 Forbidden；使用缺失/无效 authorization 断言返回 401 Unauthorized。
+    expected: 缺失或无效 token 调用 /repository/skill/mine/counts 返回 401。
+  - order: 6
+    action: 携带 authorization 调用 GET /repository/skill/mine/counts，记录响应状态码与 JSON 体。
+    expected: 关键状态在 API 返回与数据库保持一致，无跨租户泄露，响应中不包含明文 token。
+  - order: 7
+    action: 断言响应体为 {counts:{all,created,others}}，其中 all/created/others 均为非负整数，all 等于当前用户可视技能总数，created 等于 created_by 为当前用户的技能数，且
+      all==created+others 与数据库一致。
+    expected: 关键状态在 API 返回与数据库保持一致，无跨租户泄露，响应中不包含明文 token。
+  - order: 8
+    action: 使用缺失/无效 authorization 调用 GET /repository/skill/mine/counts 断言返回 401 Unauthorized。
+    expected: 关键状态在 API 返回与数据库保持一致，无跨租户泄露，响应中不包含明文 token。
+  - order: 9
+    action: 确认响应与日志不包含明文 token/凭据，测试结束后清理测试租户数据。
+    expected: 关键状态在 API 返回与数据库保持一致，无跨租户泄露，响应中不包含明文 token。
+  expected_results:
+  - GET /repository/skill/tags 返回 HTTP 200，body 形如 {items:[{tag,count},...]}。
+  - items 仅含 status=shared 且 delete_flag≠Y 的租户内共享标签；tag 升序，count 为 int 且与数据库计数一致；not_shared/pending_review/rejected 及软删除记录的标签不出现；相同
+    tag 合并计次。
+  - USER 角色访问 /repository/skill/tags 返回 403，缺失或无效 token 返回 401。
+  - GET /repository/skill/mine/counts 返回 HTTP 200，body 为 {counts:{all,created,others}}，三者均为 int 且满足 all==created+others。
+  - 缺失或无效 token 调用 /repository/skill/mine/counts 返回 401。
+  - 关键状态在 API 返回与数据库保持一致，无跨租户泄露，响应中不包含明文 token。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 494
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 使用 DEV 或 ADMIN 账号登录获取 authorization；同时准备 USER 角色账号与无效/缺失 token。
+    - 在测试租户内准备技能仓库记录：创建 status=shared、delete_flag≠Y 且带标签（如 tags=["nlp","math"]）的共享记录，并准备 status=shared 但 delete_flag=Y、status=not_shared/pending_review/rejected
+      的记录，记录期望标签及计数。
+    - 携带 authorization 调用 GET /repository/skill/tags，记录响应状态码与 JSON 体。
+    - 断言响应体为 {items:[{tag,count}]}，items 仅含 status=shared 且 delete_flag≠Y 记录的标签，tag 按字典序升序，count 为对应共享 listing 数量；非 shared
+      与软删除记录的标签不出现。
+    - 使用 USER 角色账号调用 GET /repository/skill/tags 断言返回 403 Forbidden；使用缺失/无效 authorization 断言返回 401 Unauthorized。
+    - 携带 authorization 调用 GET /repository/skill/mine/counts，记录响应状态码与 JSON 体。
+    - 断言响应体为 {counts:{all,created,others}}，其中 all/created/others 均为非负整数，all 等于当前用户可视技能总数，created 等于 created_by 为当前用户的技能数，且
+      all==created+others 与数据库一致。
+    - 使用缺失/无效 authorization 调用 GET /repository/skill/mine/counts 断言返回 401 Unauthorized。
+    - 确认响应与日志不包含明文 token/凭据，测试结束后清理测试租户数据。
+    response_expectations:
+    - GET /repository/skill/tags 返回 HTTP 200，body 形如 {items:[{tag,count},...]}。
+    - items 仅含 status=shared 且 delete_flag≠Y 的租户内共享标签；tag 升序，count 为 int 且与数据库计数一致；not_shared/pending_review/rejected 及软删除记录的标签不出现；相同
+      tag 合并计次。
+    - USER 角色访问 /repository/skill/tags 返回 403，缺失或无效 token 返回 401。
+    - GET /repository/skill/mine/counts 返回 HTTP 200，body 为 {counts:{all,created,others}}，三者均为 int 且满足 all==created+others。
+    - 缺失或无效 token 调用 /repository/skill/mine/counts 返回 401。
+    - 关键状态在 API 返回与数据库保持一致，无跨租户泄露，响应中不包含明文 token。

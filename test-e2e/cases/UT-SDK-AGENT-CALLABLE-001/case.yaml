@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AGENT-CALLABLE-001
+  feature_id: F-096
+  business_rule_ids: [F-096-RULE-02]
+  title: External callable identity survives prompt, wrapper and sandbox bridge dispatch
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove generated aliases execute the intended host Agent without breaking an unrelated tool.
+  preconditions:
+  - Python backend and SDK dependencies are installed; no external model or Docker is required.
+  test_data:
+    names: [parallel_probe_a, agent-one, class, duplicate]
+  steps:
+  - order: 1
+    action: Resolve external configurations against an existing tool and generate real model context and wrapper definitions.
+    expected: Legal unique legacy names remain unchanged; invalid, reserved and duplicate names receive unique stable aliases and original display names remain available.
+  - order: 2
+    action: Register every wrapper and an unrelated tool through the real host bridge into a controlled Python kernel; execute calls using the model-visible aliases.
+    expected: Proxy bootstrap compiles and each call reaches the intended controlled external Agent or unrelated tool with unchanged arguments.
+  - order: 3
+    action: Inspect observer identities and close the bridge and its managed threads.
+    expected: Events retain original names and callable aliases; all bridge resources are released.
+  expected_results:
+  - The same callable name is used by prompt context, wrapper registration and Python execution.
+  - Original names and external IDs identify the correct invoked Agents; unrelated tool execution succeeds.
+  - No managed bridge thread remains after cleanup.
+  forbidden_side_effects:
+  - No real external provider, model, Docker or database access.
+  - No duplicate alias or overwrite of an existing tool.
+  unit_boundary: Real alias resolution, prompt formatting, Agent wrappers and HTTP host bridge collaborate; Python kernel and remote A2A transport are controlled boundaries. This adds component identity/dispatch evidence beyond allocator UT and does not claim a deployed protocol/runtime integration.
+  inputs: [legal legacy names, hyphens, keywords, duplicate names, tool name conflicts]
+  assertions:
+  - Compile and execute generated proxy source, rather than mocking registration success.
+  - Assert actual dispatch arguments, observer names and no overwritten tool.
+  acceptance:
+  - id: AC-01
+    description: Identity and compatibility remain consistent from model context through actual host dispatch.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Observer identity remains readable and bridge resources are released.
+    steps: [3]
+    expected_results: [3]

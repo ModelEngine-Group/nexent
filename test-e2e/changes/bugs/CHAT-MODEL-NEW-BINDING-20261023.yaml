@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-MODEL-NEW-BINDING-20261023
+  change_type: bugfix
+  bug_id: CHAT-MODEL-NEW-BINDING-20261023
+  title: Retain newly created chat model controls after server identity binding
+  description: Associate the local draft and returned server conversation identity in the page-owned model control cache.
+  observed_behavior: A new chat initially uses a local thread key and an empty remote ID. The first run returns a server ID, but a reloaded history entry uses a different cache key, so the non-default model resets on return.
+  expected_behavior: A successfully created conversation retains the same scoped model, reasoning and sampling controls before and after history listing and reopening; existing histories and other entries preserve their current behavior.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: Earlier history regression starts from a pre-existing server ID and mock run responses omit conversation_id headers, so it never proves draft-to-server identity binding.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-MODEL-CONTROLS, WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS-D4-003]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Bind a new local thread to its server ID without resetting controls or changing an earlier snapshot; retain edits made after the first response.
+    - Preserve independent drafts, late background binding, first binding precedence, rejected/removed model blocking and per-model values.
+    - Existing histories, account and Agent scopes, and consumers without the page provider remain isolated and compatible.
+    reason: Frontend identity/cache fix only. Strengthen provider/hook UT and the existing D4 journey; no new D1 or backend change.
+    test_selectors:
+    - frontend/tests/workbench/ConversationModelThreadIdentity.test.tsx
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+  notes: >-
+    Reuse model-controls SPEC and CHAT-MODEL-CONTROLS-RULE-002/006.
+    Extend WB-CONTROLS-D4-003 with an actual blank conversation, response conversation_id header,
+    mutable history listing, subsequent non-default send, history return and exact restored run payload.
+    Preserve earlier acceptance. D2/D3/D5 contracts and turn snapshot/serializer logic are unchanged.

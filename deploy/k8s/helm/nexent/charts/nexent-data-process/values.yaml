@@ -1,5 +1,8 @@
 replicaCount: 1
 
+strategy:
+  type: Recreate
+
 images:
   dataProcess:
     repository: nexent/nexent-data-process
@@ -19,3 +22,7 @@ config:
   skipProxy: "true"
   pythonPath: "/opt/backend"
   dockerEnvironment: "false"
+
+service:
+  type: ClusterIP
+  nodePorts: {}

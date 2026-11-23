@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-CITATION-NUMBERING-20261015
+  change_type: bugfix
+  bug_id: CHAT-CITATION-NUMBERING-20261015
+  title: Align inline citation numbers with source and image cards
+  description: Share first-appearance numbering across citation markers, hover labels and every source-panel entry point while retaining original citation identities.
+  observed_behavior: A text hit referenced after two figures displays 4 in the answer but its source card displays the raw retrieval index 2.
+  expected_behavior: The same hit displays 4 in both places; images share the same numbering sequence and clicks still match the original toolSign plus citeIndex.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing citation component coverage checks key matching and scrolling but does not assert display-number agreement when image citations precede a text source.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-065]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-AUTO-82166F602745F6D7]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Image citations count toward message-wide first-appearance numbering without mutating source identities.
+      - Equal indices from different tools remain distinct; normalized markers and numeric legacy aliases share the correct identity.
+      - Unknown markers and uncited hits cannot collide; invalid identities remain unnumbered.
+    reason: Pure mapping boundaries belong in frontend UT. Strengthen the existing D1 for actual citation-to-panel collaboration; no new formal Case is needed.
+    test_selectors:
+      - frontend/tests/component/citationDisplay.test.tsx
+  notes: 'Design scope: answer citation numbering through inline markers, hover labels, source summary/tool-card entry points and both panel tabs. Source metadata, downloads, persistence and backend APIs are unchanged. Evidence baseline: current F-065, UT-FE-AUTO-82166F602745F6D7 and newchat callers. The sibling nexent-doc repository is unavailable in this checkout, so its SPEC baseline cannot be searched or updated; do not invent a replacement document repository. D2/D3/D5 are not affected because this fix changes presentation only. Browser verification uses the existing historical conversation; UT and formal D1 execution are reported separately.'

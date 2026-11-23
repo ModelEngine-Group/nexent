@@ -1,0 +1,23 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-MCP-LOCALIMAGE-20261009
+  change_type: test-fix
+  title: Remove the unprepared Local Image MCP journey at user request
+  description: >-
+    Physically remove PW-MCP-LOCALIMG-01 from the formal case baseline and the
+    D4 execution order. This case only had a definition, with no fixed script
+    or execution binding. Preserve the feature behavior and historical audit
+    evidence; clear its required stage because no retained case covers it.
+    Removal reduces coverage and does not prove Local Image MCP works.
+  affected_features:
+    existing: [V5-PW-MCP-LOCALIMG-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: The deleted ID is recorded here rather than retained as a dangling case reference.
+  notes: Removed ID PW-MCP-LOCALIMG-01; original definition backed up outside Git. Historical execution and migration records remain unchanged.

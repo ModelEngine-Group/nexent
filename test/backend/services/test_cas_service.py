@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import unittest
@@ -14,10 +16,10 @@ _MODULES_TO_RESTORE = [
     "database.cas_session_db",
     "database.oauth_account_db",
     "database.user_tenant_db",
-    "services.oauth_service",
-    "services.skill_service",
-    "services.tool_configuration_service",
-    "utils.auth_utils",
+    "management.services.permission.identity.oauth",
+    "management.services.skill.transfer",
+    "management.services.tool.configuration",
+    "management.services.permission.identity.authentication_helpers",
 ]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
@@ -25,8 +27,14 @@ consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 consts_mock.const.CAS_CA_BUNDLE = ""
 consts_mock.const.CAS_CALLBACK_BASE_URL = "http://localhost:3000"
+consts_mock.const.CAS_DEFAULT_ROLE = "USER"
+consts_mock.const.CAS_DEFAULT_TENANT_ID = "cas-default-tenant"
 consts_mock.const.CAS_EMAIL_ATTRIBUTE = "mail"
 consts_mock.const.CAS_ENABLED = True
+consts_mock.const.CAS_HEARTBEAT_COOKIE_NAME = "AUTH_TOKEN"
+consts_mock.const.CAS_HEARTBEAT_INTERVAL_SECONDS = 300
+consts_mock.const.CAS_HEARTBEAT_URL = ""
+consts_mock.const.CAS_INTERNAL_SERVER_URL = ""
 consts_mock.const.CAS_LOGIN_MODE = "button"
 consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300
@@ -48,18 +56,20 @@ sys.modules["consts.const"] = consts_mock.const
 sys.modules["database.cas_session_db"] = MagicMock()
 sys.modules["database.oauth_account_db"] = MagicMock()
 sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["services.oauth_service"] = MagicMock()
-sys.modules["services.skill_service"] = MagicMock()
-sys.modules["services.tool_configuration_service"] = MagicMock()
-sys.modules["utils.auth_utils"] = MagicMock()
+sys.modules["management.services.permission.identity.oauth"] = MagicMock()
+sys.modules["management.services.skill.transfer"] = MagicMock()
+sys.modules["management.services.tool.configuration"] = MagicMock()
+sys.modules["management.services.permission.identity.authentication_helpers"] = MagicMock()
 
-from services.cas_service import (  # noqa: E402
+from management.services.permission.identity.cas import (  # noqa: E402
     CasAuthenticationError,
     build_login_url,
     build_logout_url,
+    get_cas_config,
     parse_logout_request,
     parse_service_validate_response,
     revoke_from_logout_request,
+    validate_service_ticket,
 )
 
 for _name, _module in _ORIGINAL_MODULES.items():
@@ -67,10 +77,68 @@ for _name, _module in _ORIGINAL_MODULES.items():
         sys.modules.pop(_name, None)
     else:
         sys.modules[_name] = _module
-sys.modules.pop("services.cas_service", None)
+sys.modules.pop("management.services.permission.identity.cas", None)
 
 
 class TestCasServiceParsing(unittest.TestCase):
+    def test_validate_service_ticket_uses_internal_server_url(self):
+        """Use the internal CAS URL when validating a ticket from the backend."""
+        validate_globals = validate_service_ticket.__globals__
+        original_internal_url = validate_globals["CAS_INTERNAL_SERVER_URL"]
+        original_http_get_text = validate_globals["_http_get_text"]
+        http_get_text = MagicMock(
+            return_value="""
+            <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+              <cas:authenticationSuccess>
+                <cas:user>cas-user-1</cas:user>
+              </cas:authenticationSuccess>
+            </cas:serviceResponse>
+            """
+        )
+        validate_globals["CAS_INTERNAL_SERVER_URL"] = "http://cas-mock:3001/cas"
+        validate_globals["_http_get_text"] = http_get_text
+        try:
+            principal = validate_service_ticket("ST-123", "http://app/callback")
+        finally:
+            validate_globals["CAS_INTERNAL_SERVER_URL"] = original_internal_url
+            validate_globals["_http_get_text"] = original_http_get_text
+
+        self.assertEqual(principal.cas_user_id, "cas-user-1")
+        http_get_text.assert_called_once_with(
+            "http://cas-mock:3001/cas/p3/serviceValidate?service=http://app/callback&ticket=ST-123"
+        )
+
+    def test_get_cas_config_returns_heartbeat_settings(self):
+        config = get_cas_config()
+
+        self.assertEqual(config["heartbeat_url"], "")
+        self.assertEqual(config["heartbeat_interval_seconds"], 300)
+        self.assertEqual(config["heartbeat_cookie_name"], "AUTH_TOKEN")
+
+        heartbeat_globals = get_cas_config.__globals__
+        original_values = (
+            heartbeat_globals["CAS_HEARTBEAT_URL"],
+            heartbeat_globals["CAS_HEARTBEAT_INTERVAL_SECONDS"],
+            heartbeat_globals["CAS_HEARTBEAT_COOKIE_NAME"],
+        )
+        heartbeat_globals["CAS_HEARTBEAT_URL"] = "https://cas.example.com/heartbeat"
+        heartbeat_globals["CAS_HEARTBEAT_INTERVAL_SECONDS"] = 60
+        heartbeat_globals["CAS_HEARTBEAT_COOKIE_NAME"] = "SESSION"
+        try:
+            custom_config = get_cas_config()
+        finally:
+            (
+                heartbeat_globals["CAS_HEARTBEAT_URL"],
+                heartbeat_globals["CAS_HEARTBEAT_INTERVAL_SECONDS"],
+                heartbeat_globals["CAS_HEARTBEAT_COOKIE_NAME"],
+            ) = original_values
+
+        self.assertEqual(
+            custom_config["heartbeat_url"], "https://cas.example.com/heartbeat"
+        )
+        self.assertEqual(custom_config["heartbeat_interval_seconds"], 60)
+        self.assertEqual(custom_config["heartbeat_cookie_name"], "SESSION")
+
     def test_parse_success_response_with_attributes(self):
         xml = """
         <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
@@ -96,6 +164,92 @@ class TestCasServiceParsing(unittest.TestCase):
         self.assertEqual(principal.tenant_id, "tenant-a")
         self.assertEqual(principal.session_index, "ST-123")
         self.assertIsInstance(principal.expires_at, datetime)
+
+    def test_parse_response_uses_configured_default_tenant_when_attribute_is_missing(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+
+        principal = parse_service_validate_response(xml)
+
+        self.assertEqual(principal.tenant_id, "cas-default-tenant")
+
+    def test_parse_response_uses_configured_default_role_when_attribute_is_missing(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        role_globals = parse_service_validate_response.__globals__
+        original_default = role_globals["CAS_DEFAULT_ROLE"]
+        role_globals["CAS_DEFAULT_ROLE"] = "DEV"
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            role_globals["CAS_DEFAULT_ROLE"] = original_default
+
+        self.assertEqual(principal.role, "DEV")
+
+    def test_parse_response_uses_default_role_for_invalid_cas_role(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+            <cas:attributes><cas:memberOf>unknown-role</cas:memberOf></cas:attributes>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        role_globals = parse_service_validate_response.__globals__
+        original_default = role_globals["CAS_DEFAULT_ROLE"]
+        role_globals["CAS_DEFAULT_ROLE"] = "ADMIN"
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            role_globals["CAS_DEFAULT_ROLE"] = original_default
+
+        self.assertEqual(principal.role, "ADMIN")
+
+    def test_parse_response_falls_back_to_user_for_invalid_default_role(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        role_globals = parse_service_validate_response.__globals__
+        original_default = role_globals["CAS_DEFAULT_ROLE"]
+        role_globals["CAS_DEFAULT_ROLE"] = "unsupported-role"
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            role_globals["CAS_DEFAULT_ROLE"] = original_default
+
+        self.assertEqual(principal.role, "USER")
+
+    def test_parse_response_uses_global_default_tenant_when_cas_default_is_empty(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+            <cas:attributes><cas:tenant></cas:tenant></cas:attributes>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        original_default = parse_service_validate_response.__globals__["CAS_DEFAULT_TENANT_ID"]
+        parse_service_validate_response.__globals__["CAS_DEFAULT_TENANT_ID"] = ""
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            parse_service_validate_response.__globals__["CAS_DEFAULT_TENANT_ID"] = original_default
+
+        self.assertEqual(principal.tenant_id, "tenant_id")
 
     def test_parse_failure_response_raises(self):
         xml = """

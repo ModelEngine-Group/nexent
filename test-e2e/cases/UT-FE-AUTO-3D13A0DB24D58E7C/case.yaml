@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-3D13A0DB24D58E7C
+  feature_id: F-054
+  business_rule_ids:
+  - F-054-RULE-01
+  title: Agent 资源标签展示、分配弹窗增删、标签定义管理与只读态禁用编辑｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent 资源标签展示、分配弹窗增删、标签定义管理与只读态禁用编辑｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 组件测试内已准备：useAgentStore 的 agentId/editedAgent/isReadOnly 状态；mock 的 useTagLibraries 返回含 bucket_key=default_resource 的标签库，useTagDefinitions
+    返回固定标签定义列表。
+  test_data:
+    legacy_asset_declaration: 无本地文件资产；测试内 mock useTagLibraries / useTagDefinitions 返回值与 useAgentStore(agentId、editedAgent、isReadOnly)
+      状态。
+  steps:
+  - order: 1
+    action: 在组件测试环境渲染 AgentInfo，注入 useAgentStore（agentId 为有效值、editedAgent、isReadOnly=false）与 mock 的 useTagLibraries（返回含 bucket_key=default_resource
+      的标签库）、useTagDefinitions（返回固定标签定义列表）。
+    expected: 标签区按契约渲染：resourceType=agent、max=4、singleLine；无标签时显示空态“—”，有标签时最多展示 4 个。
+  - order: 2
+    action: 首次渲染后断言标签区 Form.Item 展示“分配标签”文案，ResourceTagChips 以 resourceType=agent、resourceId=String(agentId)、max=4、singleLine
+      渲染；无标签时展示空态“—”（emptyText），不渲染编辑内容。
+    expected: 编辑入口启用状态正确：agentId 有效且非只读时可点击，agentId===null 或 isReadOnly=true 时 disabled。
+  - order: 3
+    action: 使用真实用户事件点击“编辑标签”按钮，断言 ResourceTagAssignmentModal 以 open=true、resourceType=agent、resourceId、definitions、canEdit=true
+      打开，且 onManageDefinitions 回调可用。
+    expected: 分配弹窗打开时收到的 resourceType/resourceId/definitions/canEdit 与契约一致；新增/移除标签由真实用户事件触发，请求的 resourceId/tagId 参数正确，关闭后
+      tagPreviewRefreshKey 递增并刷新预览。
+  - order: 4
+    action: 在分配弹窗内新增一个标签定义并确认（真实点击增删控件/确认按钮），断言标签分配请求的 resourceId 与所选 tagId 参数正确；触发 onClose 关闭后断言 tagPreviewRefreshKey 递增、ResourceTagChips
+      的 refreshKey 变化并重新拉取，预览回显最新标签。
+    expected: 定义管理弹窗打开时收到的 bucketId/bucketName/canManage 与契约一致；增删改定义后关闭触发 refreshTagDefinitions 重新拉取。
+  - order: 5
+    action: 在分配弹窗内移除一个已分配标签，断言移除请求的 resourceId/tagId 参数正确，关闭后标签预览同步移除对应标签。
+    expected: 只读态或无 Agent 时，编辑按钮禁用、canEdit=false、canManage=false，权限校验不绕过，不产生任何标签写请求。
+  - order: 6
+    action: 通过 onManageDefinitions 打开 TagDefinitionManagementModal，断言以 open=true、bucketId=defaultTagLibrary.bucket_id、bucketName、canManage=true
+      打开；执行标签定义的增/删/改并关闭（onClose），断言调用 refreshTagDefinitions 重新拉取定义。
+    expected: 接口异常或空列表时展示空态或错误提示，不出现半写入或错误提交。
+  - order: 7
+    action: 将 useAgentStore 的 isReadOnly 置为 true（另覆盖 agentId=null），重新渲染，断言“编辑标签”按钮 disabled=true、ResourceTagAssignmentModal
+      的 canEdit=false、TagDefinitionManagementModal 的 canManage=false，且通过 UI 事件无法绕过只读进入编辑或管理。
+    expected: 测试过程无未处理异常，日志/Trace 不输出明文 API Key、Token 或密码。
+  - order: 8
+    action: 模拟标签库/定义接口 4xx/5xx 或空列表，断言组件展示空态或错误提示且不提交写操作；加载中不回写错误状态。
+    expected: 测试过程无未处理异常，日志/Trace 不输出明文 API Key、Token 或密码。
+  expected_results:
+  - 标签区按契约渲染：resourceType=agent、max=4、singleLine；无标签时显示空态“—”，有标签时最多展示 4 个。
+  - 编辑入口启用状态正确：agentId 有效且非只读时可点击，agentId===null 或 isReadOnly=true 时 disabled。
+  - 分配弹窗打开时收到的 resourceType/resourceId/definitions/canEdit 与契约一致；新增/移除标签由真实用户事件触发，请求的 resourceId/tagId 参数正确，关闭后 tagPreviewRefreshKey
+    递增并刷新预览。
+  - 定义管理弹窗打开时收到的 bucketId/bucketName/canManage 与契约一致；增删改定义后关闭触发 refreshTagDefinitions 重新拉取。
+  - 只读态或无 Agent 时，编辑按钮禁用、canEdit=false、canManage=false，权限校验不绕过，不产生任何标签写请求。
+  - 接口异常或空列表时展示空态或错误提示，不出现半写入或错误提交。
+  - 测试过程无未处理异常，日志/Trace 不输出明文 API Key、Token 或密码。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 427
+  unit_boundary: 资源标签
+  inputs:
+  - 无本地文件资产；测试内 mock useTagLibraries / useTagDefinitions 返回值与 useAgentStore(agentId、editedAgent、isReadOnly) 状态。
+  assertions:
+  - 标签区按契约渲染：resourceType=agent、max=4、singleLine；无标签时显示空态“—”，有标签时最多展示 4 个。
+  - 编辑入口启用状态正确：agentId 有效且非只读时可点击，agentId===null 或 isReadOnly=true 时 disabled。
+  - 分配弹窗打开时收到的 resourceType/resourceId/definitions/canEdit 与契约一致；新增/移除标签由真实用户事件触发，请求的 resourceId/tagId 参数正确，关闭后 tagPreviewRefreshKey
+    递增并刷新预览。
+  - 定义管理弹窗打开时收到的 bucketId/bucketName/canManage 与契约一致；增删改定义后关闭触发 refreshTagDefinitions 重新拉取。
+  - 只读态或无 Agent 时，编辑按钮禁用、canEdit=false、canManage=false，权限校验不绕过，不产生任何标签写请求。
+  - 接口异常或空列表时展示空态或错误提示，不出现半写入或错误提交。
+  - 测试过程无未处理异常，日志/Trace 不输出明文 API Key、Token 或密码。

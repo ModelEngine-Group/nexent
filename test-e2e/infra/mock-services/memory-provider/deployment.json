@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "memory-provider",
+  "aliases": ["memory", "mem0"],
+  "project": "nexent-mock-memory",
+  "compose_files": ["test-e2e/infra/mock-services/compose/compose.memory.yaml"],
+  "product_network_files": ["test-e2e/infra/mock-services/compose/compose.memory.product-network.yaml"],
+  "services": ["memory-provider"],
+  "readiness": [
+    {"url": "http://127.0.0.1:18120/readyz", "json_equals": {"status": "ready", "profile": "mock", "protocol": "mem0-v3"}}
+  ]
+}

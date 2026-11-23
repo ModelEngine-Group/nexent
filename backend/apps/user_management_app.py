@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 
 from dotenv import load_dotenv
@@ -16,16 +17,23 @@ from consts.exceptions import (
     UserRegistrationException,
     AppException,
     UnauthorizedError,
+    TenantResourceLimitError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.error_code import ErrorCode
-from services.cas_service import build_logout_url, CasAuthenticationError
-from services.user_management_service import get_authorized_client, validate_token, \
+from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
+from management.services.permission.identity.authentication import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
-    update_password
-from services.user_service import delete_user_and_cleanup
-from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
+    update_password, get_provider_username
+from management.services.permission.identity.users import delete_user_and_cleanup
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import (
+    extract_session_id_from_authorization,
+    get_current_user_context,
+    get_current_user_id,
+)
 
 
 load_dotenv()
@@ -53,7 +61,7 @@ async def service_health():
 
 
 @router.post("/signup")
-async def signup(request: UserSignUpRequest):
+async def signup(request: UserSignUpRequest, http_request: Request):
     """User registration"""
     try:
         user_data = await signup_user_with_invitation(email=request.email,
@@ -61,6 +69,11 @@ async def signup(request: UserSignUpRequest):
                                                       invite_code=request.invite_code,
                                                       auto_login=request.auto_login)
         success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        signup_user_info = (user_data or {}).get("user") or {}
+        record_security_event("user_signup", request=http_request,
+                              user_id=signup_user_info.get("id"),
+                              user_email=signup_user_info.get("email") or request.email,
+                              details={"registration_type": (user_data or {}).get("registration_type", "")})
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": success_message, "data": user_data})
     except NoInviteCodeException as e:
@@ -71,6 +84,12 @@ async def signup(request: UserSignUpRequest):
         logging.error(f"User registration failed by invite code: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
+    except TenantResourceLimitError as e:
+        logging.warning("User registration rejected by resource limit: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(e),
+        )
     except ValidationError as e:
         detail = str(e)
         if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:
@@ -100,11 +119,16 @@ async def signup(request: UserSignUpRequest):
 
 
 @router.post("/signin")
-async def signin(request: UserSignInRequest):
+async def signin(request: UserSignInRequest, http_request: Request):
     """User login"""
     try:
         signin_content = await signin_user(email=request.email,
                                            password=request.password)
+        signin_data = (signin_content or {}).get("data") or {}
+        signin_user_info = signin_data.get("user") or {}
+        record_security_event("user_signin", request=http_request,
+                              user_id=signin_user_info.get("id"),
+                              user_email=signin_user_info.get("email") or request.email)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content=signin_content)
     except AuthApiError as e:
@@ -153,6 +177,13 @@ async def logout(request: Request):
         # Make logout idempotent: if no token or token expired, still return success
         session_id = None
         cas_logout_url = ""
+        # Audit-only identity resolution: failure never affects the logout flow.
+        logout_user_id, logout_tenant_id = None, None
+        if authorization:
+            try:
+                logout_user_id, logout_tenant_id = get_current_user_id(authorization)
+            except Exception:
+                pass
         if authorization:
             session_id = extract_session_id_from_authorization(authorization)
             if session_id:
@@ -170,6 +201,9 @@ async def logout(request: Request):
                 # Ignore sign out errors to keep logout idempotent
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
+        record_security_event("user_logout", request=request,
+                              user_id=logout_user_id, tenant_id=logout_tenant_id,
+                              session_id=session_id)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={
                                 "message": "Logout successful",
@@ -231,9 +265,10 @@ async def get_user_information(request: Request):
         if not user_info:
             raise UnauthorizedError("User information not found")
 
-        user_info["user"]["auth_provider"] = (
-            "cas" if extract_session_id_from_authorization(authorization) else "local"
-        )
+        is_cas_user = bool(extract_session_id_from_authorization(authorization))
+        user_info["user"]["auth_provider"] = "cas" if is_cas_user else "local"
+        if is_cas_user:
+            user_info["user"]["username"] = get_provider_username(user_id, "cas")
 
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Success",
@@ -312,6 +347,8 @@ async def revoke_user_account(request: Request):
         # Orchestrate revoke for regular user
         await delete_user_and_cleanup(user_id=user_id, tenant_id=tenant_id)
 
+        record_security_event("account_revoke", request=request,
+                              user_id=user_id, tenant_id=tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User account revoked"})
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -325,6 +362,7 @@ async def revoke_user_account(request: Request):
 
 @router.post("/tokens")
 async def create_token_endpoint(
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Create a new token for the authenticated user.
@@ -337,12 +375,15 @@ async def create_token_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization header found")
 
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
 
         result = create_token(str(user_id))
+        record_security_event("token_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"token_id": (result or {}).get("token_id")})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": result}
@@ -362,14 +403,17 @@ async def list_tokens_endpoint(
 ):
     """List all tokens for the specified user.
 
-    Returns token information with masked access keys (middle part replaced with *).
+    Each item carries ``masked_access_key`` for display and ``access_key``
+    for copying, together with ``can_copy``. The real key is present in
+    ``access_key`` only when ``can_copy`` is true, so a client can render a
+    masked key while still copying the complete one.
     """
     try:
         if not authorization:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization header found")
 
-        request_user_id, _ = get_current_user_id(authorization)
+        request_user_id, _, requester_role = get_current_user_context(authorization)
         if not request_user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
@@ -379,7 +423,7 @@ async def list_tokens_endpoint(
             raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
                                 detail="Forbidden: cannot list tokens for other users")
 
-        tokens = list_tokens_by_user(user_id)
+        tokens = list_tokens_by_user(user_id, requester_role)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": tokens}
@@ -395,6 +439,7 @@ async def list_tokens_endpoint(
 @router.delete("/tokens/{token_id}")
 async def delete_token_endpoint(
     token_id: int,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Soft delete a token.
@@ -406,7 +451,7 @@ async def delete_token_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization header found")
 
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
@@ -416,6 +461,9 @@ async def delete_token_endpoint(
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Token not found or not owned by user")
 
+        record_security_event("token_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"token_id": token_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": {"token_id": token_id}}
@@ -431,6 +479,7 @@ async def delete_token_endpoint(
 @router.put("/password")
 async def update_password_endpoint(
     request: UpdatePasswordRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Update current user's password.
@@ -443,7 +492,7 @@ async def update_password_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization token provided")
 
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
@@ -456,6 +505,8 @@ async def update_password_endpoint(
 
         logger.info(f"Password updated successfully for user {user_id}")
 
+        record_security_event("password_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Password updated successfully"}

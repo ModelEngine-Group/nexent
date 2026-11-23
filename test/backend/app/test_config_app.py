@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for config_app module.
 
@@ -8,9 +9,13 @@ This test file focuses on testing config_app by importing it from the app_factor
 module and verifying the app structure without triggering all the complex router
 dependencies.
 """
+import asyncio
 import atexit
-from unittest.mock import patch, Mock, MagicMock
+import asyncio
+import importlib.util
+from unittest.mock import AsyncMock, patch, Mock, MagicMock
 import os
+from pathlib import Path
 import sys
 import types
 import warnings
@@ -85,6 +90,245 @@ class TestConfigAppIntegration:
 class TestConfigAppRouterConfiguration:
     """Test class for router configuration patterns."""
 
+    def test_config_app_registers_api_key_routes(self, monkeypatch):
+        class RecordingApp:
+            def __init__(self, lifespan=None):
+                self.included_routers = []
+                self.get_routes = []
+                self.lifespan = lifespan
+
+            def on_event(self, _event):
+                return lambda handler: handler
+
+            def include_router(self, router):
+                self.included_routers.append(router)
+
+            def get(self, path, **kwargs):
+                def register(handler):
+                    self.get_routes.append((path, kwargs, handler))
+                    return handler
+
+                return register
+
+        app_factory_module = types.ModuleType("apps.app_factory")
+        app_factory_module.create_app = (
+            lambda **kwargs: RecordingApp(kwargs.get("lifespan"))
+        )
+        monkeypatch.setitem(sys.modules, "apps.app_factory", app_factory_module)
+
+        api_key_router = APIRouter(prefix="/api-keys")
+
+        @api_key_router.get("")
+        def list_api_keys():
+            return {}
+
+        @api_key_router.post("/refresh")
+        def refresh_api_key():
+            return {}
+
+        router_modules = {
+            "apps.agent_app": {"agent_config_router": APIRouter()},
+            "apps.agent_repository_app": {"agent_repository_router": APIRouter()},
+            "apps.skill_repository_app": {"skill_repository_router": APIRouter()},
+            "apps.config_sync_app": {"router": APIRouter()},
+            "apps.datamate_app": {"router": APIRouter()},
+            "apps.vectordatabase_app": {"router": APIRouter()},
+            "apps.dify_app": {"router": APIRouter()},
+            "apps.idata_app": {"router": APIRouter()},
+            "apps.ragflow_app": {"router": APIRouter()},
+            "apps.file_management_app": {"file_management_config_router": APIRouter()},
+            "apps.image_app": {"router": APIRouter()},
+            "apps.knowledge_summary_app": {"router": APIRouter()},
+            "apps.mock_user_management_app": {"router": APIRouter()},
+            "apps.model_managment_app": {"router": APIRouter()},
+            "apps.oauth_app": {"router": APIRouter()},
+            "apps.prompt_app": {"router": APIRouter()},
+            "apps.mcp_management_app": {"router": APIRouter()},
+            "apps.remote_mcp_app": {"router": APIRouter()},
+            "apps.skill_app": {"router": APIRouter()},
+            "apps.tenant_config_app": {"router": APIRouter()},
+            "apps.tool_config_app": {"router": APIRouter()},
+            "apps.user_management_app": {"router": APIRouter()},
+            "apps.voice_app": {"voice_config_router": APIRouter()},
+            "apps.tenant_app": {"router": APIRouter()},
+            "apps.group_app": {"router": APIRouter()},
+            "apps.user_app": {"router": APIRouter()},
+            "apps.api_key_app": {"router": api_key_router},
+            "apps.invitation_app": {"router": APIRouter()},
+            "apps.notification_app": {"router": APIRouter()},
+            "apps.a2a_client_app": {"router": APIRouter()},
+            "apps.monitoring_app": {"router": APIRouter()},
+            "apps.a2a_server_app": {"router": APIRouter()},
+            "apps.haotian_app": {"router": APIRouter()},
+            "apps.ind_aidp_app": {"router": APIRouter()},
+            "apps.evaluation_set_app": {"router": APIRouter()},
+            "apps.agent_evaluation_app": {"router": APIRouter()},
+            "apps.evaluator_app": {"router": APIRouter()},
+            "apps.evaluation_annotation_app": {"router": APIRouter()},
+            "apps.cas_app": {"router": APIRouter()},
+            "apps.memory_config_app": {"router": APIRouter()},
+            "apps.memory_record_app": {"router": APIRouter()},
+            "apps.memory_long_term_app": {"router": APIRouter()},
+            "apps.memory_dreaming_app": {"router": APIRouter()},
+            "apps.memory_provider_app": {"router": APIRouter()},
+            "apps.tag_management_app": {"router": APIRouter()},
+            "apps.quota_app": {
+                "tenant_quota_router": APIRouter(),
+                "platform_quota_router": APIRouter(),
+                "personal_quota_router": APIRouter(),
+            },
+        }
+        for module_name, attributes in router_modules.items():
+            module = types.ModuleType(module_name)
+            for attribute, value in attributes.items():
+                setattr(module, attribute, value)
+            monkeypatch.setitem(sys.modules, module_name, module)
+
+        retired_router = APIRouter(prefix="/prompt-template")
+        retired_module = types.ModuleType("apps.prompt_template_app")
+        retired_module.router = retired_router
+        monkeypatch.setitem(sys.modules, "apps.prompt_template_app", retired_module)
+
+        const_module = types.ModuleType("consts.const")
+        const_module.AIDP_API_KEY = ""
+        const_module.AIDP_SERVER_URL = ""
+        const_module.ENABLE_AIDP_KNOWLEDGE = False
+        const_module.ENABLE_AGENT_WORKBENCH = False
+        const_module.IS_SPEED_MODE = False
+        const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
+        monkeypatch.setitem(sys.modules, "consts.const", const_module)
+        manager_state = types.SimpleNamespace(CREATED="created")
+
+        class ManagedTaskSpec:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class ConfigThreadManager:
+            def __init__(self):
+                self.state = manager_state.CREATED
+
+            def start(self):
+                self.state = "running"
+
+            async def run(self, _lane, _spec, fn, *args, **kwargs):
+                return fn(*args, **kwargs)
+
+            async def shutdown(self, timeout):
+                self.state = "closed"
+
+            def snapshot(self):
+                return {"service_name": "config", "active_count": 0}
+
+        concurrency_module = types.ModuleType("nexent.core.concurrency")
+        concurrency_module.ManagedTaskSpec = ManagedTaskSpec
+        concurrency_module.ManagerState = manager_state
+        concurrency_module.set_default_thread_manager = MagicMock()
+        concurrency_module.clear_default_thread_manager = MagicMock()
+        monkeypatch.setitem(
+            sys.modules, "nexent.core.concurrency", concurrency_module
+        )
+        thread_lifecycle_module = types.ModuleType(
+            "infrastructure.concurrency"
+        )
+        thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
+        monkeypatch.setitem(
+            sys.modules,
+            "infrastructure.concurrency",
+            thread_lifecycle_module,
+        )
+
+        module_path = Path(backend_dir) / "apps" / "config_app.py"
+        spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
+        config_app = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config_app)
+
+        assert all(router is not retired_router for router in config_app.app.included_routers)
+        assert api_key_router in config_app.app.included_routers
+        assert {route.path for route in api_key_router.routes} == {
+            "/api-keys",
+            "/api-keys/refresh",
+        }
+        assert [route[0] for route in config_app.app.get_routes] == [
+            "/internal/thread-capacity"
+        ]
+        assert asyncio.run(config_app.thread_capacity()) == {
+            "service_name": "config",
+            "active_count": 0,
+        }
+
+        asyncio.run(config_app.validate_external_service_configuration())
+        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
+            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
+                asyncio.run(config_app.validate_external_service_configuration())
+
+        recover_config_tasks = MagicMock()
+        schedule_upload_cleanup = AsyncMock()
+        schedule_workbench_main_backfill = MagicMock()
+        startup_recovery_module = types.ModuleType(
+            "management.recovery"
+        )
+        startup_recovery_module.recover_config_tasks = recover_config_tasks
+        startup_recovery_module.schedule_interrupted_upload_cleanup = (
+            schedule_upload_cleanup
+        )
+        startup_recovery_module.schedule_workbench_main_backfill = (
+            schedule_workbench_main_backfill
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "management.recovery",
+            startup_recovery_module,
+        )
+
+        start_evaluation_maintenance = MagicMock()
+        evaluation_maintenance_module = types.ModuleType(
+            "management.services.evaluation.maintenance"
+        )
+        evaluation_maintenance_module.start = start_evaluation_maintenance
+        evaluation_maintenance_module.stop = MagicMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "management.services.evaluation.maintenance",
+            evaluation_maintenance_module,
+        )
+
+        dreaming_scheduler = MagicMock()
+        dreaming_scheduler.start = AsyncMock()
+        dreaming_scheduler.stop = AsyncMock()
+        dreaming_scheduler_module = types.ModuleType(
+            "management.services.memory.dreaming.scheduler"
+        )
+        dreaming_scheduler_module.dreaming_scheduler = dreaming_scheduler
+        monkeypatch.setitem(
+            sys.modules,
+            "management.services.memory.dreaming.scheduler",
+            dreaming_scheduler_module,
+        )
+
+        validate_external = AsyncMock()
+
+        async def exercise_lifespan():
+            async with config_app.config_lifespan(None):
+                pass
+
+        with patch.object(
+            config_app,
+            "validate_external_service_configuration",
+            new=validate_external,
+        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
+            asyncio.run(exercise_lifespan())
+
+        assert config_app.app.lifespan is config_app.config_lifespan
+        recover_config_tasks.assert_called_once_with()
+        start_evaluation_maintenance.assert_called_once_with(
+            config_app.config_thread_manager
+        )
+        schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
+        schedule_workbench_main_backfill.assert_called_once_with()
+        validate_external.assert_awaited_once_with()
+        dreaming_scheduler.start.assert_awaited_once_with()
+        dreaming_scheduler.stop.assert_awaited_once_with()
+
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""
         from backend.apps.app_factory import create_app
@@ -127,8 +371,6 @@ class TestConfigAppRouterConfiguration:
         # Check that routes are registered
         routes = [r for r in app.routes if hasattr(r, 'path')]
         assert len(routes) >= 1
-
-
 class TestConfigAppExceptionHandling:
     """Test class for exception handling patterns in config app."""
 
@@ -187,7 +429,7 @@ class TestConfigAppMonitoring:
         from unittest.mock import patch
 
         # Test with monitoring enabled but module not available
-        with patch.dict('sys.modules', {'utils.monitoring': None}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None

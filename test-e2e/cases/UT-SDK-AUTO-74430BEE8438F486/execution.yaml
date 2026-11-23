@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: UT-SDK-AUTO-74430BEE8438F486
+implementations:
+- framework: pytest
+  file: test.py
+  selector: UT-SDK-AUTO-74430BEE8438F486
+notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-01:
+  - test_w2_context_budget_snapshot_rename_and_dispatch_boundary
+  AC-02:
+  - test_implicit_output_budget_preserves_context_and_wire_contract

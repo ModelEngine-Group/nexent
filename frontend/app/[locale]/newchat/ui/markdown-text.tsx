@@ -1,0 +1,614 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import { getSourceLabel } from "@/lib/source";
+
+import "@assistant-ui/react-markdown/styles/dot.css";
+
+import {
+  type CodeHeaderProps,
+  MarkdownTextPrimitive,
+  type SyntaxHighlighterProps,
+  unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
+  useIsMarkdownCodeBlock,
+} from "@assistant-ui/react-markdown";
+import { useAuiState } from "@assistant-ui/react";
+import { type FC, memo, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import remarkGfm from "remark-gfm";
+import { defaultUrlTransform, type UrlTransform } from "react-markdown";
+
+import { MermaidDiagram } from "./mermaid-diagram";
+
+import { SyntaxHighlighter } from "./shiki-highlighter";
+import { TooltipIconButton } from "./tooltip-icon-button";
+import { cn } from "@/lib/utils";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
+import { remarkCite } from "./remark-cite";
+import { CiteMarker } from "./cite-marker";
+import { AuthenticatedImage } from "./authenticated-image";
+import {
+  getLocalFileDownloadUrl,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
+import { useSourcesPanelActions } from "./sources-panel-context";
+import {
+  useMessageSources,
+  findMessageSource,
+  type MessageSourcePart,
+} from "./message-sources";
+import { getCitationKey, getCitationLabel } from "./sources-panel";
+import { searchImagesRegistry } from "../adapter/remote-chat-model-adapter";
+
+const markdownUrlTransform: UrlTransform = (url) => {
+  // React Markdown rejects non-web protocols by default. s3:// is Nexent's
+  // permanent file-reference protocol and is converted by custom renderers.
+  if (url.startsWith("s3://")) {
+    return url;
+  }
+  return defaultUrlTransform(url);
+};
+
+/**
+ * A reference marker belongs to the one sentence immediately before it.
+ * Consecutive markers, such as [[a1]][[b2]], share that sentence.  Newlines
+ * and Markdown table cell separators also stop the scope so a marker never
+ * expands to a following paragraph or table.
+ */
+function getSentenceStartOffset(text: string, endOffset: number): number {
+  for (let offset = endOffset - 1; offset >= 0; offset -= 1) {
+    const character = text[offset];
+    if (character === "\n" || character === "|") return offset + 1;
+    if ("。！？!?".includes(character)) return offset + 1;
+    if (
+      character === "." &&
+      (offset + 1 === text.length || /\s|\[/.test(text[offset + 1]))
+    ) {
+      return offset + 1;
+    }
+  }
+  return 0;
+}
+
+function getCitationScopeText(
+  content: readonly MessageSourcePart[],
+  citekey: string,
+  citationElement: HTMLElement | null
+): string {
+  const answerText = content
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+  if (!answerText) return "";
+
+  const normalizedKey = citekey.trim().toLowerCase();
+  const markers = Array.from(answerText.matchAll(/\[\[([^\]]+)\]\]/g));
+  const matchingMarkers = markers.filter(
+    (marker) => marker[1].trim().toLowerCase() === normalizedKey
+  );
+  if (!matchingMarkers.length) return "";
+
+  const renderedMarkers = citationElement
+    ? Array.from(
+        citationElement
+          .closest(".aui-md")
+          ?.querySelectorAll<HTMLElement>("[data-citekey]") || []
+      ).filter((marker) => marker.dataset.citekey === normalizedKey)
+    : [];
+  const occurrence = Math.max(0, renderedMarkers.indexOf(citationElement!));
+  const selectedMarker =
+    matchingMarkers[Math.min(occurrence, matchingMarkers.length - 1)];
+  const selectedMarkerIndex = markers.indexOf(selectedMarker);
+  if (selectedMarker.index === undefined || selectedMarkerIndex < 0) return "";
+
+  let groupStart = selectedMarkerIndex;
+  while (
+    groupStart > 0 &&
+    !answerText
+      .slice(
+        (markers[groupStart - 1].index || 0) +
+          markers[groupStart - 1][0].length,
+        markers[groupStart].index
+      )
+      .trim()
+  ) {
+    groupStart -= 1;
+  }
+  let groupEnd = selectedMarkerIndex;
+  while (
+    groupEnd < markers.length - 1 &&
+    !answerText
+      .slice(
+        (markers[groupEnd].index || 0) + markers[groupEnd][0].length,
+        markers[groupEnd + 1].index
+      )
+      .trim()
+  ) {
+    groupEnd += 1;
+  }
+
+  const groupStartOffset = markers[groupStart].index || 0;
+  const scopeStart = getSentenceStartOffset(answerText, groupStartOffset);
+  return answerText
+    .slice(scopeStart, groupStartOffset)
+    .replace(/\[\[[^\]]+\]\]/g, "")
+    .trim();
+}
+
+/**
+ * Custom cite component rendered for [[citekey]] markers in markdown.
+ * Looks up the source from the registry and renders a CiteMarker with hover.
+ */
+const CiteComponent = memo(function CiteComponent({
+  citekey,
+}: React.ComponentProps<"cite"> & { citekey?: string }) {
+  const model = useMessageSources();
+  const { messageId, content, sources, images, displayIndices } = model;
+  const { open } = useSourcesPanelActions();
+  const { t } = useTranslation();
+  if (!citekey) return null;
+  const source = findMessageSource(model, citekey);
+  const sourceIndex =
+    source?.citeIndex ??
+    (Number.parseInt(citekey.replace(/^[a-z]+/i, ""), 10) || 0);
+  const citationKey = source
+    ? getCitationKey(source)
+    : citekey.trim().toLowerCase();
+  const displayIndex =
+    displayIndices.get(citekey.trim().toLowerCase()) ?? sourceIndex;
+  const panelSource = source;
+
+  return (
+    <CiteMarker
+      citekey={citekey}
+      displayIndex={displayIndex}
+      sourceIndex={sourceIndex}
+      label={
+        panelSource
+          ? getCitationLabel(panelSource, {
+              knowledgeBase: t("chat.sources.knowledgeBase"),
+              web: t("chat.sources.web"),
+              source: t("chat.sources.source"),
+            })
+          : `${t("chat.sources.source")} ${displayIndex}`
+      }
+      title={source?.title ?? `Source ${displayIndex}`}
+      text={panelSource?.text}
+      filename={panelSource?.filename}
+      url={panelSource?.url}
+      sourceType={panelSource?.sourceType}
+      sourceLabel={
+        panelSource
+          ? getSourceLabel(panelSource, {
+              knowledgeBase: t("chat.sources.knowledgeBase"),
+              web: t("chat.sources.web"),
+              document: t("chat.sources.document"),
+              source: t("chat.sources.source"),
+            })
+          : undefined
+      }
+      loading={!source}
+      onClick={
+        source && messageId
+          ? (citationElement) =>
+              open({
+                messageId,
+                groupId: "citations",
+                sources,
+                images,
+                selectedCitationKey: citationKey,
+                // The flag only gates sentence-level highlight terms; the
+                // panel still selects and scrolls to the source card.
+                citationContext: ENABLE_CITATION_CLICK_HIGHLIGHT
+                  ? getCitationScopeText(content, citekey, citationElement)
+                  : undefined,
+              })
+          : undefined
+      }
+    />
+  );
+});
+
+// Wrapper component that safely renders MarkdownTextPrimitive
+// Guards against rendering for non-text parts or when text is not a valid string
+const MarkdownTextImpl = () => {
+  const { messageId, displayIndices: citationDisplayIndexMap } =
+    useMessageSources();
+  // Check if we have a valid text part context using useAuiState
+  const isValidTextPart = useAuiState((s) => {
+    const part = s.part;
+    return (
+      part &&
+      part.type === "text" &&
+      typeof part.text === "string" &&
+      part.text.length > 0
+    );
+  });
+  const citationIndexMapAttribute = useMemo(
+    () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),
+    [citationDisplayIndexMap]
+  );
+
+  useEffect(() => {
+    if (citationDisplayIndexMap.size === 0) return;
+
+    console.info("[Nexent] Citation display index mapping", {
+      messageId,
+      citationIndexMap: Object.fromEntries(citationDisplayIndexMap),
+    });
+  }, [citationDisplayIndexMap, messageId]);
+
+  if (!isValidTextPart) {
+    return null;
+  }
+
+  return (
+    <div data-citation-index-map={citationIndexMapAttribute}>
+      <MarkdownTextPrimitive
+        remarkPlugins={[remarkGfm, remarkCite]}
+        urlTransform={markdownUrlTransform}
+        className="aui-md"
+        components={defaultComponents}
+        componentsByLanguage={{
+          mermaid: {
+            SyntaxHighlighter: MermaidDiagram,
+          },
+        }}
+      />
+    </div>
+  );
+};
+
+export const MarkdownText = memo(MarkdownTextImpl);
+
+const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+  const { t } = useTranslation();
+  const { isCopied, copyToClipboard } = useCopyToClipboard();
+  const onCopy = () => {
+    if (!code || isCopied) return;
+    copyToClipboard(code);
+  };
+
+  return (
+    <div className="aui-code-header-root border-border/50 bg-muted/50 mt-3 flex items-center justify-between rounded-t-xl border border-b-0 px-3.5 py-1.5 text-xs">
+      <span className="aui-code-header-language text-muted-foreground font-medium lowercase">
+        {language}
+      </span>
+      <TooltipIconButton
+        tooltip={t("chat.thread.copy")}
+        tooltipDelayDuration={0}
+        className="size-6 p-1"
+        onClick={onCopy}
+      >
+        {!isCopied && (
+          <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
+        )}
+        {isCopied && (
+          <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
+        )}
+      </TooltipIconButton>
+    </div>
+  );
+};
+
+const useCopyToClipboard = ({
+  copiedDuration = 3000,
+}: {
+  copiedDuration?: number;
+} = {}) => {
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+
+  const copyToClipboard = (value: string) => {
+    if (!value || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+
+    navigator.clipboard.writeText(value).then(
+      () => {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), copiedDuration);
+      },
+      () => {}
+    );
+  };
+
+  return { isCopied, copyToClipboard };
+};
+
+const MarkdownSyntaxHighlighter: FC<Omit<SyntaxHighlighterProps, "node">> = (
+  props
+) => <SyntaxHighlighter {...props} />;
+
+const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
+  src,
+  alt,
+  ...props
+}) => {
+  const imageSrc = typeof src === "string" ? src : undefined;
+  const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const messageContent = useAuiState(
+    (s) => s.message.content as readonly MessageSourcePart[]
+  );
+  const trustedImages = Array.isArray(messageContent)
+    ? messageContent.filter(
+        (part): part is MessageSourcePart & { url: string } =>
+          part.type === "source" &&
+          part.isImage === true &&
+          typeof part.url === "string"
+      )
+    : [];
+  const markerMatch = imageSrc?.match(
+    /\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i
+  );
+  if (markerMatch) {
+    const contentImage = trustedImages.find(
+      (image) => image.imageKey === markerMatch[1]
+    );
+    const image =
+      contentImage ??
+      (messageId
+        ? searchImagesRegistry.get(messageId)?.get(markerMatch[1])
+        : undefined);
+    if (!image) return null;
+    return (
+      <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
+        <AuthenticatedImage
+          src={image.url}
+          alt={alt || image.title}
+          className="max-h-[32rem] w-full cursor-zoom-in object-contain"
+          preview
+        />
+      </figure>
+    );
+  }
+
+  // Local knowledge-base and web-search images use their real URL in the
+  // answer markdown instead of an AIDP marker. Public URLs must also arrive
+  // through PICTURE_WEB. Local storage URLs can be resolved directly because
+  // the authenticated file endpoint performs its own access check; this also
+  // covers relevant S3 images that were omitted by optional image filtering.
+  const trustedImage = imageSrc
+    ? trustedImages.find((image) => image.url === imageSrc)
+    : undefined;
+  const verifiedImageUrl =
+    trustedImage?.url ||
+    (imageSrc && isLocalStorageObjectUrl(imageSrc) ? imageSrc : undefined);
+  if (verifiedImageUrl) {
+    return (
+      <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
+        <AuthenticatedImage
+          src={verifiedImageUrl}
+          alt={alt || trustedImage?.title}
+          className="max-h-[32rem] w-full cursor-zoom-in object-contain"
+          preview
+          proxy={Boolean(trustedImage)}
+        />
+      </figure>
+    );
+  }
+
+  if (trustedImages.length > 0 || !imageSrc) {
+    return null;
+  }
+
+  return <AuthenticatedImage src={imageSrc} alt={alt} {...props} />;
+};
+
+const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
+  href,
+  className,
+  ...props
+}) => {
+  const resolvedHref = getLocalFileDownloadUrl(href) || href;
+  return (
+    <a
+      href={resolvedHref}
+      className={cn(
+        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        className
+      )}
+      {...props}
+    />
+  );
+};
+
+const defaultComponents = memoizeMarkdownComponents({
+  SyntaxHighlighter: MarkdownSyntaxHighlighter,
+  img: VerifiedMarkdownImage,
+  h1: ({ className, ...props }) => (
+    <h1
+      className={cn(
+        "aui-md-h1 mt-5 mb-2 scroll-m-20 text-xl font-semibold first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  h2: ({ className, ...props }) => (
+    <h2
+      className={cn(
+        "aui-md-h2 mt-5 mb-2 scroll-m-20 text-lg font-semibold first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  h3: ({ className, ...props }) => (
+    <h3
+      className={cn(
+        "aui-md-h3 mt-4 mb-1.5 scroll-m-20 text-base font-semibold first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  h4: ({ className, ...props }) => (
+    <h4
+      className={cn(
+        "aui-md-h4 mt-3.5 mb-1 scroll-m-20 text-base font-medium first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  h5: ({ className, ...props }) => (
+    <h5
+      className={cn(
+        "aui-md-h5 mt-3 mb-1 text-sm font-semibold first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  h6: ({ className, ...props }) => (
+    <h6
+      className={cn(
+        "aui-md-h6 mt-3 mb-1 text-sm font-medium first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  p: ({ className, ...props }) => (
+    <p
+      className={cn(
+        "aui-md-p my-3 leading-relaxed first:mt-0 last:mb-0",
+        className
+      )}
+      {...props}
+    />
+  ),
+  a: PermanentFileLink,
+  blockquote: ({ className, ...props }) => (
+    <blockquote
+      className={cn(
+        "aui-md-blockquote border-muted-foreground/30 text-muted-foreground my-3 border-s-2 ps-4",
+        className
+      )}
+      {...props}
+    />
+  ),
+  ul: ({ className, ...props }) => (
+    <ul
+      className={cn(
+        "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc [&>li]:mt-1",
+        className
+      )}
+      {...props}
+    />
+  ),
+  ol: ({ className, ...props }) => (
+    <ol
+      className={cn(
+        "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal [&>li]:mt-1",
+        className
+      )}
+      {...props}
+    />
+  ),
+  hr: ({ className, ...props }) => (
+    <hr
+      className={cn("aui-md-hr border-muted-foreground/20 my-3", className)}
+      {...props}
+    />
+  ),
+  table: ({ className, ...props }) => (
+    <table
+      className={cn(
+        "aui-md-table my-3 w-full border-separate border-spacing-0 overflow-y-auto",
+        className
+      )}
+      {...props}
+    />
+  ),
+  th: ({ className, ...props }) => (
+    <th
+      className={cn(
+        "aui-md-th bg-muted px-3 py-1.5 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right",
+        className
+      )}
+      {...props}
+    />
+  ),
+  td: ({ className, ...props }) => (
+    <td
+      className={cn(
+        "aui-md-td border-muted-foreground/20 border-s border-b px-3 py-1.5 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right",
+        className
+      )}
+      {...props}
+    />
+  ),
+  tr: ({ className, ...props }) => (
+    <tr
+      className={cn(
+        "aui-md-tr m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg",
+        className
+      )}
+      {...props}
+    />
+  ),
+  li: ({ className, ...props }) => (
+    <li className={cn("aui-md-li leading-relaxed", className)} {...props} />
+  ),
+  strong: ({ className, ...props }) => (
+    <strong
+      className={cn("aui-md-strong font-semibold", className)}
+      {...props}
+    />
+  ),
+  del: ({ children, ...props }) => <span {...props}>{children}</span>,
+  sup: ({ className, ...props }) => (
+    <sup
+      className={cn("aui-md-sup [&>a]:text-xs [&>a]:no-underline", className)}
+      {...props}
+    />
+  ),
+  pre: ({ className, ...props }) => (
+    <pre
+      className={cn(
+        "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 text-[13px] leading-relaxed",
+        className
+      )}
+      {...props}
+    />
+  ),
+  code: function Code({ className, children, ...props }) {
+    const isCodeBlock = useIsMarkdownCodeBlock();
+    const inlineValue = typeof children === "string" ? children.trim() : "";
+    const isCiteSequence =
+      !isCodeBlock && /^(?:\[\[[^\]]+\]\])+$/.test(inlineValue);
+
+    if (isCiteSequence) {
+      const citekeys = Array.from(
+        inlineValue.matchAll(/\[\[([^\]]+)\]\]/g),
+        (match) => match[1]
+      );
+      return (
+        <>
+          {citekeys.map((citekey, index) => (
+            <CiteComponent key={`${citekey}-${index}`} citekey={citekey} />
+          ))}
+        </>
+      );
+    }
+
+    return (
+      <code
+        className={cn(
+          !isCodeBlock &&
+            "aui-md-inline-code bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em]",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  CodeHeader,
+  cite: CiteComponent,
+});
+export { defaultComponents };

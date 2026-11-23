@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-095
+  feature_id: F-094
+  business_rule_ids:
+  - F-094-RULE-01
+  title: 本地Agent与外部A2A sub-agent add/remove/list/get｜异常/边界/越权
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 本地Agent与外部A2A sub-agent add/remove/list/get｜异常/边界/越权
+  preconditions:
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  - 从 models.yaml/secrets.env 为两个租户分别创建本用例独占的模型配置并预检；不要求租户B预装模型，不修改租户默认模型。
+  test_data:
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
+  steps:
+  - order: 1
+    action: 从已有模型配置为租户A、B各准备独占模型，再分别创建本次本地Agent与外部Agent
+    expected: 使用动态ID且各资源归属正确的创建租户
+  - order: 2
+    action: 租户B查询关系及sub-agents
+    expected: 无租户A数据
+  - order: 3
+    action: 租户B尝试关联租户A的两个ID、自己的父Agent与租户A的子Agent、租户A的父Agent与自己的子Agent；通过独立绑定和Agent update入口提交
+    expected: 400/403/404拒绝，不允许新增越权关系
+  - order: 4
+    action: 核对owner未变化并清理
+    expected: 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系
+  expected_results:
+  - 使用动态ID且各资源归属正确的创建租户
+  - 无租户A数据
+  - 400/403/404拒绝，不允许新增越权关系
+  - 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系
+  forbidden_side_effects:
+  - 拒绝请求不得修改父Agent名称或新增绑定，不得发起额外外部请求
+  acceptance:
+  - id: AC-01
+    description: 动态创建两个租户的父子资源并隔离查询
+    steps: [1, 2]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: 两个入口拒绝全部跨租户组合且保持资源不变
+    steps: [3, 4]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1]
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 187
+  integration_boundary:
+  - Nexent实际HTTP API与受控外部A2A服务及本地持久化，非Mock自测。
+  observations:
+  - 使用动态ID且各资源归属正确的创建租户
+  - 无租户A数据
+  - 400/403/404拒绝，不允许新增越权关系
+  - 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系
+  cleanup:
+  - 清理本次动态资源或恢复故障场景；本地保留脱敏wire、JUnit及清理记录。

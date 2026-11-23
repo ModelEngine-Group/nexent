@@ -14,13 +14,9 @@ logger = logging.getLogger("move_item_tool")
 class MoveItemTool(Tool):
     """Move tool for moving files or directories to a new location"""
     name = "move_item"
-    description = "Move a file or directory from source path to destination path. " \
-                  "Both paths should be relative to the workspace (e.g., 'documents/file.txt' to 'backup/file.txt'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "Works for both files and directories. If destination directory doesn't exist, it will be created. " \
-                  "If destination already exists, the operation will fail to prevent overwriting."
+    description = "Move a workspace file or directory. Missing destination parents are created; existing targets are never overwritten."
 
-    description_zh = "将文件或目录从源路径移动到目标路径，路径需为工作区相对路径（例如，从'documents/file.txt'移动到'backup/file.txt'），出于安全考虑，不支持绝对路径。如果目标目录不存在，则自动创建。为防止文件覆盖，如果目标文件已存在，操作会执行失败。"
+    description_zh = "移动工作区文件或目录；目标父目录不存在时自动创建，目标已存在时不会覆盖。"
 
     inputs = {
         "source_path": {
@@ -63,8 +59,6 @@ class MoveItemTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
-        self.running_prompt_zh = "正在移动文件/文件夹..."
-        self.running_prompt_en = "Moving file/directory..."
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -98,10 +92,9 @@ class MoveItemTool(Tool):
 
     def forward(self, source_path: str, destination_path: str) -> str:
         try:
-            # Send tool run message if observer is available
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the move card from inside the tool.
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "move", "text": f"Moving {source_path} to {destination_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MCP-REMOTE-01
+  feature_id: V5-PW-MCP-REMOTE-01
+  business_rule_ids:
+  - V5-PW-MCP-REMOTE-01-RULE-01
+  title: Mine新增Remote MCP→真实健康检查→启用→Agent调用
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 覆盖Remote类型到Agent Tool的真实协议链。
+  preconditions:
+  - Test MCP Server健康
+  - get_test_code等确定性Tool
+  - 真实LLM支持tool call
+  test_data:
+    legacy_asset_declaration: config/mcp.yaml；services/test-mcp/
+  steps:
+  - order: 1
+    action: 打开/mcp-space→Mine→【Add MCP】。
+    expected: Remote MCP健康/Tool真实来自Test Server。
+  - order: 2
+    action: 选择Remote/REMOTE_LINK，填run_id名称、URL和当前UI真实提供的认证/Header字段。
+    expected: Agent真实调用且marker正确。
+  - order: 3
+    action: 提交创建，等待Mine出现。
+    expected: Header/metadata/参数精确值由CONTRACT。
+  - order: 4
+    action: 执行健康检查/刷新状态，确认真实Server健康。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  - order: 5
+    action: 若有启停Switch则启用并等待稳定。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  - order: 6
+    action: 打开详情确认get_test_code等Tool可见。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  - order: 7
+    action: 到/agents绑定该MCP Tool。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  - order: 8
+    action: Debug发送必须调用Tool的问题，等待NX-92831。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  - order: 9
+    action: 检查Test MCP wire log关联本次调用。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  - order: 10
+    action: 完成真实工具调用后从 UI 删除该 MCP，重新打开原 Agent 的工具与技能，确认对应工具绑定已同步移除。
+    expected: MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  expected_results:
+  - Remote MCP健康/Tool真实来自Test Server。
+  - Agent真实调用且marker正确。
+  - Header/metadata/参数精确值由CONTRACT。
+  - MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 28
+  actor: Nexent browser user
+  journey:
+  - 打开/mcp-space→Mine→【Add MCP】。
+  - 选择Remote/REMOTE_LINK，填run_id名称、URL和当前UI真实提供的认证/Header字段。
+  - 提交创建，等待Mine出现。
+  - 执行健康检查/刷新状态，确认真实Server健康。
+  - 若有启停Switch则启用并等待稳定。
+  - 打开详情确认get_test_code等Tool可见。
+  - 到/agents绑定该MCP Tool。
+  - Debug发送必须调用Tool的问题，等待NX-92831。
+  - 检查Test MCP wire log关联本次调用。
+  - 完成真实工具调用后从 UI 删除该 MCP，重新打开原 Agent 的工具与技能，确认对应工具绑定已同步移除。
+  final_business_result:
+  - Remote MCP健康/Tool真实来自Test Server。
+  - Agent真实调用且marker正确。
+  - Header/metadata/参数精确值由CONTRACT。
+  - MCP 卡片消失，Agent 草稿中 get_test_code 绑定同步移除。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MCP-REMOTE-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

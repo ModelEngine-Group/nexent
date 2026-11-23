@@ -1,23 +1,63 @@
-const { createServer } = require("http");
-const http = require("http");
-const https = require("https");
-const { parse } = require("url");
-const next = require("next");
-const { createProxyServer } = require("http-proxy");
-const cookie = require("cookie");
-const path = require("path");
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import { parse } from "node:url";
+import httpProxy from "http-proxy";
+import cookie from "cookie";
+import path from "node:path";
+import multiparty from "multiparty";
+import dotenv from "dotenv";
+import { BASE_PATH } from "./base-path.mjs";
+import { buildPublicFrontendConfig } from "./base-path.mjs";
+import {
+  ensureDir,
+  readLocaleConfig,
+  saveLocaleConfig,
+} from "./build-config.js";
+
+const { createProxyServer } = httpProxy;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dev = process.env.NODE_ENV !== "production";
+let nextConfig;
+
+if (!dev) {
+  nextConfig = JSON.parse(
+    fs.readFileSync(
+      path.join(__dirname, ".next", "required-server-files.json"),
+      "utf8"
+    )
+  ).config;
+  process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
+}
+
+const { default: next } = await import("next");
 
 // Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
 // Using optional: true to avoid errors if .env file is not found
-require("dotenv").config({
+dotenv.config({
   path: path.resolve(__dirname, "../deploy/env/.env"),
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
-const dev = process.env.NODE_ENV !== "production";
+// Standalone production packaging does not include development-only helpers.
+const devBundlerOptions = dev
+  ? (await import("./dev-server-options.mjs")).getDevBundlerOptions(
+      dev,
+      path.join(__dirname, "node_modules")
+    )
+  : {};
+
 const app = next({
   dev,
+  ...devBundlerOptions,
+  ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
 
@@ -26,12 +66,95 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
+// Reuse the existing northbound service address, which conventionally ends with /api.
+const NORTHBOUND_HTTP_BACKEND = (
+  process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
+).replace(/\/api$/, ""); // northbound
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
-const MARKET_BACKEND =
-  process.env.MARKET_BACKEND || "http://60.204.251.153:8010"; // market
-const PORT = 3000;
 
-const proxy = createProxyServer();
+const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
+const PROJECT_CONFIG_DIR = path.resolve(
+  process.env.PROJECT_CONFIG_DIR || BUILT_IN_PUBLIC_DIR
+);
+const ICON_UPLOAD_DIR = PROJECT_CONFIG_DIR;
+const PORT = Number(process.env.PORT) || 3000;
+
+const PROJECT_CONFIG_ASSETS = {
+  "/modelengine-logo.png": {
+    relativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/modelengine-logo2.png": {
+    relativePath: "modelengine-logo2.png",
+    contentType: "image/png",
+  },
+  "/browser-tab-logo.png": {
+    relativePath: "browser-tab-logo.png",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/browser-tab-logo.jpg": {
+    relativePath: "browser-tab-logo.jpg",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/jpeg",
+  },
+  "/home-logo.png": {
+    relativePath: "home-logo.png",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/home-logo.jpg": {
+    relativePath: "home-logo.jpg",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/jpeg",
+  },
+  "/locales/zh/custom.json": {
+    relativePath: path.join("locales", "zh", "custom.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+  "/locales/en/custom.json": {
+    relativePath: path.join("locales", "en", "custom.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+};
+
+function withoutBasePath(pathname) {
+  if (
+    !BASE_PATH ||
+    (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))
+  ) {
+    return pathname;
+  }
+
+  return pathname.slice(BASE_PATH.length) || "/";
+}
+
+function withBasePath(pathname) {
+  return BASE_PATH ? `${BASE_PATH}${pathname}` : pathname;
+}
+
+function parseTimeout(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const PROXY_TIMEOUT_MS = parseTimeout(
+  process.env.PROXY_TIMEOUT_MS,
+  10 * 60 * 1000
+);
+const PROXY_WS_TIMEOUT_MS = parseTimeout(
+  process.env.PROXY_WS_TIMEOUT_MS,
+  PROXY_TIMEOUT_MS
+);
+const SSE_PROXY_TIMEOUT_MS = parseTimeout(
+  process.env.SSE_PROXY_TIMEOUT_MS,
+  PROXY_TIMEOUT_MS
+);
+
+const proxy = createProxyServer({
+  proxyTimeout: PROXY_TIMEOUT_MS,
+  timeout: PROXY_TIMEOUT_MS,
+});
 
 // ============================================================================
 // Cookie configuration
@@ -50,7 +173,7 @@ function buildCookieOptions(httpOnly) {
     httpOnly,
     secure: false, // cookie can be send through http
     sameSite: "lax",
-    path: "/",
+    path: BASE_PATH || "/",
   };
 }
 
@@ -146,6 +269,73 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
+// Matches backend consts/const.py: IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
+const IS_SPEED_MODE = (process.env.DEPLOYMENT_VERSION || "speed") === "speed";
+
+// Matches backend consts/notification.py SU_ROLES and services/mcp_management_service.py SUPER_ADMIN_ROLES
+const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
+
+async function isSuperAdminRequest(req) {
+  // Speed mode: SPEED role has SU-level privileges (see backend is_speed_admin logic in user_service.py)
+  if (IS_SPEED_MODE) {
+    return true;
+  }
+
+  const cookies = parseCookies(req);
+  const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
+  if (!token) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${HTTP_BACKEND}/user/current_user_info`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+    const userRole = data?.data?.user?.user_role;
+    return SUPER_ADMIN_ROLES.has(userRole);
+  } catch (error) {
+    console.error(
+      "[isSuperAdminRequest] Error checking super admin:",
+      error.message
+    );
+    return false;
+  }
+}
+
+function renameFile(oldPath, newFileName) {
+  ensureDir(ICON_UPLOAD_DIR);
+  fs.renameSync(oldPath, path.join(ICON_UPLOAD_DIR, newFileName));
+}
+
+function updateLocalConfig(oldData, newData) {
+  if (!oldData || !newData) {
+    return oldData;
+  }
+  const result = { ...oldData };
+  for (const key of Object.keys(oldData)) {
+    if (key === "homeLogo" || key === "tabLogo") continue;
+    if (
+      (key === "productName" || key === "homeTitle" || key === "tabTitle") &&
+      typeof newData[key] === "string"
+    ) {
+      result[key] = newData[key].trim();
+    } else if (newData[key]) {
+      result[key] = newData[key];
+    }
+  }
+  const homeTitle = newData.homeTitle ?? newData.tabTitle;
+  if (typeof homeTitle === "string") result.homeTitle = homeTitle.trim();
+  return result;
+}
+
 // ============================================================================
 // Auth endpoint interception — manually forward and intercept tokens
 // ============================================================================
@@ -182,11 +372,8 @@ function collectRequestBody(req) {
  * If no refresh_token cookie exists, return 401 immediately.
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
-  if (
-    pathname === "/api/user/refresh_token" ) {
-    const refreshToken =
-    cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ;
+  if (pathname === "/api/user/refresh_token") {
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
@@ -219,12 +406,17 @@ function forwardAuthRequest(req, res, targetUrl) {
 
   collectRequestBody(req)
     .then((rawBody) => {
-      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+      const body = prepareAuthRequestBody(
+        req.parsedPathname,
+        rawBody,
+        cookies,
+        res
+      );
 
-    // If body is null, prepareAuthRequestBody already sent the error response
-    if (body === null) {
-      return;
-    }
+      // If body is null, prepareAuthRequestBody already sent the error response
+      if (body === null) {
+        return;
+      }
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
@@ -287,7 +479,9 @@ function forwardAuthRequest(req, res, targetUrl) {
               ) {
                 setPendingOAuthCookie(res, data.data.pending_token);
                 const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: `/${locale}/oauth/complete` });
+                res.writeHead(302, {
+                  Location: withBasePath(`/${locale}/oauth/complete`),
+                });
                 res.end();
                 return;
               } else if (data.data && data.data.session) {
@@ -301,13 +495,13 @@ function forwardAuthRequest(req, res, targetUrl) {
                 const isCasRenewCallback =
                   req.parsedPathname === "/api/user/cas/renew_callback";
                 if (isOAuthCallback) {
-                  res.writeHead(302, { Location: "/" });
+                  res.writeHead(302, { Location: withBasePath("/") });
                   res.end();
                   return;
                 }
                 if (isCasCallback) {
                   res.writeHead(302, {
-                    Location: data.data.redirect_url || "/",
+                    Location: data.data.redirect_url || withBasePath("/"),
                   });
                   res.end();
                   return;
@@ -354,7 +548,9 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   oauth_error_description:
                     data.data.oauth_error_description || "",
                 });
-                res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+                res.writeHead(302, {
+                  Location: `${withBasePath("/")}?${errorParams.toString()}`,
+                });
                 res.end();
                 return;
               }
@@ -424,77 +620,65 @@ proxy.on("proxyReq", (proxyReq, req) => {
   }
 });
 
+proxy.on("error", (err, req, res) => {
+  console.error("[Proxy] Forward error:", err.message);
+  if (!res || res.headersSent || res.destroyed) return;
+  res.writeHead(502, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ detail: "Backend unavailable" }));
+});
+
 // ============================================================================
 // Server setup
 // ============================================================================
 app.prepare().then(() => {
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     const parsedUrl = parse(req.url, true);
     const { pathname } = parsedUrl;
-    req.parsedPathname = pathname;
+    const internalPathname = withoutBasePath(pathname);
+    req.parsedPathname = internalPathname;
 
-    // Proxy HTTP requests
-    if (pathname.includes("/attachments/") && !pathname.startsWith("/api/")) {
-      proxy.web(req, res, { target: MINIO_BACKEND });
-    } else if (pathname.startsWith("/api/")) {
-      // Intercept auth endpoints to manage HttpOnly cookies
-      if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
-        const target = HTTP_BACKEND;
-        forwardAuthRequest(req, res, target);
-      } else if (pathname.startsWith("/api/market/")) {
-        // Route market endpoints to market backend
-        req.url = req.url.replace("/api/market", "");
-        proxy.web(req, res, { target: MARKET_BACKEND, changeOrigin: true });
-      } else {
-        // Route runtime endpoints to runtime backend, others to config backend
-        const isRuntime =
-          pathname.startsWith("/api/agent/run") ||
-          pathname.startsWith("/api/agent/stop") ||
-          pathname.startsWith("/api/conversation/") ||
-          pathname.startsWith("/api/share/") ||
-          pathname.startsWith("/api/memory/") ||
-          pathname.startsWith("/api/file/storage") ||
-          pathname.startsWith("/api/file/preprocess");
-        if (isRuntime) {
-          proxy.web(req, res, {
-            target: RUNTIME_HTTP_BACKEND,
-            changeOrigin: true,
-          });
-        } else if (
-          pathname === "/api/skills/create" ||
-          pathname.startsWith("/api/skills/stop/")
-        ) {
-          proxy.web(req, res, {
-            target: RUNTIME_HTTP_BACKEND,
-            changeOrigin: true,
-          });
-        } else {
-          proxy.web(req, res, { target: HTTP_BACKEND, changeOrigin: true });
-        }
-      }
-    } else {
-      // Let Next.js handle the request
-      handle(req, res, parsedUrl);
+    const isProxyRequest =
+      internalPathname.startsWith("/api/") ||
+      internalPathname.startsWith("/nb/") ||
+      (internalPathname.includes("/attachments/") &&
+        !internalPathname.startsWith("/api/"));
+    if (isProxyRequest && BASE_PATH) {
+      req.url = req.url.slice(BASE_PATH.length) || "/";
     }
-  });
 
+    // Route dispatch uses paths without the Next.js base path.
+    if (handleFrontendConfigApi(internalPathname, req, res)) return;
+    if (handleProjectConfigAsset(internalPathname, req, res)) return;
+    if (await handleProjectConfigApi(internalPathname, req, res)) return;
+    if (handleAttachmentProxy(internalPathname, req, res)) return;
+    if (handleNorthboundProxy(internalPathname, req, res)) return;
+    if (handleAllApiProxy(internalPathname, req, res)) return;
+
+    // Fallback: let Next.js render pages and framework resources with basePath intact.
+    handle(req, res, parsedUrl);
+  });
   // Proxy WebSocket upgrade requests
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url);
-    if (pathname.startsWith("/api/voice/")) {
+    const internalPathname = withoutBasePath(pathname);
+    if (internalPathname.startsWith("/api/voice/")) {
+      if (BASE_PATH) {
+        req.url = req.url.slice(BASE_PATH.length) || "/";
+      }
       proxy.ws(
         req,
         socket,
         head,
-        { target: WS_BACKEND, changeOrigin: true },
+        {
+          target: WS_BACKEND,
+          changeOrigin: true,
+          proxyTimeout: PROXY_WS_TIMEOUT_MS,
+          timeout: PROXY_WS_TIMEOUT_MS,
+        },
         (err) => {
           console.error("[Proxy] WebSocket Proxy Error:", err);
           socket.destroy();
         }
-      );
-    } else {
-      console.log(
-        `[Proxy] Ignoring non-voice WebSocket upgrade for: ${pathname}`
       );
     }
   });
@@ -506,7 +690,297 @@ app.prepare().then(() => {
     console.log(`> HTTP Backend Target: ${HTTP_BACKEND}`);
     console.log(`> WebSocket Backend Target: ${WS_BACKEND}`);
     console.log(`> MinIO Backend Target: ${MINIO_BACKEND}`);
-    console.log(`> Market Backend Target: ${MARKET_BACKEND}`);
     console.log("> ---------------------------------");
   });
 });
+
+// ====================== 拆分独立路由处理函数 ======================
+/**
+ * 接口：/api/frontend-config
+ */
+function handleFrontendConfigApi(pathname, req, res) {
+  if (pathname !== "/api/frontend-config") return false;
+
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(buildPublicFrontendConfig(process.env)));
+  return true;
+}
+
+function handleProjectConfigAsset(pathname, req, res) {
+  const asset = PROJECT_CONFIG_ASSETS[pathname];
+  if (!asset || (req.method !== "GET" && req.method !== "HEAD")) return false;
+
+  const persistedPath = path.join(PROJECT_CONFIG_DIR, asset.relativePath);
+  const builtInPath = path.join(BUILT_IN_PUBLIC_DIR, asset.relativePath);
+  const fallbackPath = asset.fallbackRelativePath
+    ? path.join(PROJECT_CONFIG_DIR, asset.fallbackRelativePath)
+    : builtInPath;
+  const selectedPath = fs.existsSync(persistedPath)
+    ? persistedPath
+    : fs.existsSync(fallbackPath)
+      ? fallbackPath
+      : asset.fallbackRelativePath
+        ? path.join(BUILT_IN_PUBLIC_DIR, asset.fallbackRelativePath)
+        : builtInPath;
+  if (!fs.existsSync(selectedPath)) return false;
+
+  res.writeHead(200, {
+    "Content-Type":
+      asset.fallbackRelativePath && selectedPath !== persistedPath
+        ? "image/png"
+        : asset.contentType,
+    "Cache-Control": "no-store",
+  });
+  if (req.method === "HEAD") {
+    res.end();
+  } else {
+    fs.createReadStream(selectedPath).pipe(res);
+  }
+  return true;
+}
+
+/**
+ * 接口：/api/config/project-config 上传Logo+修改多语言配置
+ */
+async function handleProjectConfigApi(pathname, req, res) {
+  if (pathname !== "/api/config/project-config") return false;
+
+  // 权限校验
+  if (!(await isSuperAdminRequest(req))) {
+    sendJsonResponse(res, 403, { message: "Super admin access required" });
+    return true;
+  }
+
+  // 文件上传处理
+  ensureDir(ICON_UPLOAD_DIR);
+  const form = new multiparty.Form({ uploadDir: ICON_UPLOAD_DIR });
+  let uploadedFiles = {};
+  try {
+    const { fields, files } = await parseMultipartForm(form, req);
+    uploadedFiles = files;
+    updateAndSaveLocaleConfig(fields, files);
+    sendJsonResponse(res, 200, { message: "success update" });
+  } catch (err) {
+    console.error(err);
+    const status = err.httpCode || 400;
+    res.writeHead(status, { "Content-Type": "text/plain" });
+    res.end("Request failed");
+  } finally {
+    // Remove only multipart temporary files that were not moved into place.
+    for (const file of Object.values(uploadedFiles).flat()) {
+      if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    }
+  }
+
+  return true;
+}
+
+/**
+ * 静态附件代理 /attachments/
+ */
+function handleAttachmentProxy(pathname, req, res) {
+  const isAttachmentRoute =
+    pathname.includes("/attachments/") && !pathname.startsWith("/api/");
+  if (!isAttachmentRoute) return false;
+
+  proxy.web(req, res, { target: MINIO_BACKEND });
+  return true;
+}
+
+/**
+ * Keep northbound calls on the same public origin as the web application.
+ */
+function handleNorthboundProxy(pathname, req, res) {
+  if (!pathname.startsWith("/nb/")) return false;
+
+  proxy.web(req, res, {
+    target: NORTHBOUND_HTTP_BACKEND,
+    changeOrigin: true,
+    proxyTimeout: SSE_PROXY_TIMEOUT_MS,
+    timeout: SSE_PROXY_TIMEOUT_MS,
+  });
+  return true;
+}
+
+/**
+ * 统一处理所有 /api/ 代理转发逻辑
+ */
+function handleAllApiProxy(pathname, req, res) {
+  if (!pathname.startsWith("/api/")) return false;
+
+  // 1. 认证接口单独处理
+  if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
+    forwardAuthRequest(req, res, HTTP_BACKEND);
+    return true;
+  }
+
+  // 2. 判断是否为 runtime 运行时接口
+  const runtimePathPrefixes = [
+    "/api/agent/run",
+    "/api/agent/nl2agent/run",
+    "/api/agent/human-interactions",
+    "/api/skills/nl2skill/run",
+    "/api/agent/stop",
+    "/api/agent/automations",
+    "/api/conversation/",
+    "/api/share/",
+    "/api/file/preprocess",
+  ];
+  const isStorageUpload =
+    req.method === "POST" && /^\/api\/file\/storage\/?$/.test(pathname);
+  const isRuntime =
+    isStorageUpload ||
+    runtimePathPrefixes.some((prefix) => pathname.startsWith(prefix));
+
+  // 3. skills 特殊接口
+  // 分发代理目标
+  if (isRuntime) {
+    const runtimeProxyTimeout =
+      pathname.startsWith("/api/agent/run") ||
+      pathname.startsWith("/api/agent/nl2agent/run") ||
+      pathname.startsWith("/api/skills/nl2skill/run")
+        ? SSE_PROXY_TIMEOUT_MS
+        : PROXY_TIMEOUT_MS;
+    proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
+  } else {
+    proxy.web(req, res, {
+      target: HTTP_BACKEND,
+      changeOrigin: true,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      timeout: PROXY_TIMEOUT_MS,
+    });
+  }
+
+  return true;
+}
+
+// ====================== 通用工具函数（消除重复代码） ======================
+/**
+ * 通用返回JSON响应
+ */
+function sendJsonResponse(res, statusCode, data) {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
+/**
+ * 解析 multipart/form-data 表单封装 Promise
+ */
+function parseMultipartForm(form, req) {
+  return new Promise((resolve, reject) => {
+    form.parse(req, (err, fields, files) => {
+      if (err) reject(err);
+      else resolve({ fields, files });
+    });
+  });
+}
+
+/**
+ * Persist homepage branding and accept the previous upload field as an alias.
+ */
+function handleLogoUpload(files, fields = {}) {
+  const homeFile = files.homeLogo?.[0] ?? files.tabLogo?.[0];
+  let homeImage;
+  let homeFilename;
+  if (homeFile) {
+    if (fs.statSync(homeFile.path).size > 200 * 1024) {
+      throw Object.assign(new Error("Homepage logo exceeds 200KB"), {
+        httpCode: 400,
+      });
+    }
+    homeImage = fs.readFileSync(homeFile.path);
+    const isPng = homeImage
+      .subarray(0, 8)
+      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const isJpeg = homeImage
+      .subarray(0, 3)
+      .equals(Buffer.from([255, 216, 255]));
+    if (!isPng && !isJpeg) {
+      throw Object.assign(new Error("Homepage logo must be PNG or JPEG"), {
+        httpCode: 400,
+      });
+    }
+    homeFilename = isPng ? "home-logo.png" : "home-logo.jpg";
+  }
+  if (files.logo) renameFile(files.logo[0].path, "modelengine-logo2.png");
+  if (files.logo2) renameFile(files.logo2[0].path, "modelengine-logo.png");
+  if (homeFile) {
+    renameFile(homeFile.path, homeFilename);
+    return `${homeFilename}?v=${createHash("sha256").update(homeImage).digest("hex").slice(0, 12)}`;
+  }
+  if (
+    fields.removeHomeLogo?.[0] === "true" ||
+    fields.removeTabLogo?.[0] === "true"
+  ) {
+    for (const name of ["home-logo.png", "home-logo.jpg"]) {
+      const filename = path.join(ICON_UPLOAD_DIR, name);
+      if (fs.existsSync(filename)) fs.unlinkSync(filename);
+    }
+    return "";
+  }
+  return undefined;
+}
+
+/**
+ * Preserve legacy keys while storing localized homepage titles and a shared logo.
+ */
+function updateAndSaveLocaleConfig(fields, files = {}) {
+  const configZh = readLocaleConfig("zh");
+  const configEn = readLocaleConfig("en");
+
+  const fieldsZh = JSON.parse(fields.configZh[0]);
+  const fieldsEn = JSON.parse(fields.configEn[0]);
+  if (
+    !fieldsZh ||
+    typeof fieldsZh !== "object" ||
+    Array.isArray(fieldsZh) ||
+    !fieldsEn ||
+    typeof fieldsEn !== "object" ||
+    Array.isArray(fieldsEn)
+  ) {
+    throw new Error("Locale configuration must be an object");
+  }
+  for (const [values, nameLimit, titleLimit] of [
+    [fieldsZh, 20, 50],
+    [fieldsEn, 50, 100],
+  ]) {
+    for (const [key, limit] of [
+      ["productName", nameLimit],
+      ["homeTitle", titleLimit],
+      ["tabTitle", titleLimit],
+    ]) {
+      const value = values[key];
+      if (
+        value !== undefined &&
+        (typeof value !== "string" || value.trim().length > limit)
+      ) {
+        throw Object.assign(new Error("Invalid branding title"), {
+          httpCode: 400,
+        });
+      }
+    }
+  }
+  const homeLogo = handleLogoUpload(files, fields);
+
+  const newConfigZh = updateLocalConfig(configZh, fieldsZh);
+  const newConfigEn = updateLocalConfig(configEn, fieldsEn);
+  if (homeLogo !== undefined) {
+    newConfigZh.homeLogo = homeLogo;
+    newConfigEn.homeLogo = homeLogo;
+  }
+
+  saveLocaleConfig(JSON.stringify(newConfigZh, null, 2), "zh");
+  saveLocaleConfig(JSON.stringify(newConfigEn, null, 2), "en");
+}
+
+/**
+ * 获取 Runtime 代理公共配置
+ */
+function getRuntimeProxyConfig(timeout) {
+  return {
+    target: RUNTIME_HTTP_BACKEND,
+    changeOrigin: true,
+    proxyTimeout: timeout,
+    timeout: timeout,
+  };
+}

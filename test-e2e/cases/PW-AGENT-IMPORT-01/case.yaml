@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AGENT-IMPORT-01
+  feature_id: V5-PW-AGENT-IMPORT-01
+  business_rule_ids:
+  - V5-PW-AGENT-IMPORT-01-RULE-01
+  title: Agent导出→下载→导入→冲突处理
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证浏览器下载/上传和冲突交互。
+  preconditions:
+  - 配置完整run_id Agent
+  - 下载目录可写
+  test_data:
+    legacy_asset_declaration: assets/agents/*；runs/{run_id}/downloads
+  steps:
+  - order: 1
+    action: 选择run_id Agent，更多操作点击导出。
+    expected: 真实下载/上传成功。
+  - order: 2
+    action: 等待download event并保存文件。
+    expected: 冲突不静默覆盖。
+  - order: 3
+    action: 确认文件非空、扩展名符合当前产品。
+    expected: 导入后关键配置可读且可运行。
+  - order: 4
+    action: 点击导入入口，setInputFiles上传刚导出文件。
+    expected: 导入后关键配置可读且可运行。
+  - order: 5
+    action: 按预览/确认完成导入，等待新Agent出现。
+    expected: 导入后关键配置可读且可运行。
+  - order: 6
+    action: 再次导入同一文件制造冲突。
+    expected: 导入后关键配置可读且可运行。
+  - order: 7
+    action: 检查覆盖/重命名/拒绝等当前策略有明确交互。
+    expected: 导入后关键配置可读且可运行。
+  - order: 8
+    action: 打开成功导入Agent检查关键配置并Debug。
+    expected: 导入后关键配置可读且可运行。
+  expected_results:
+  - 真实下载/上传成功。
+  - 冲突不静默覆盖。
+  - 导入后关键配置可读且可运行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 23
+  actor: Nexent browser user
+  journey:
+  - 选择run_id Agent，更多操作点击导出。
+  - 等待download event并保存文件。
+  - 确认文件非空、扩展名符合当前产品。
+  - 点击导入入口，setInputFiles上传刚导出文件。
+  - 按预览/确认完成导入，等待新Agent出现。
+  - 再次导入同一文件制造冲突。
+  - 检查覆盖/重命名/拒绝等当前策略有明确交互。
+  - 打开成功导入Agent检查关键配置并Debug。
+  final_business_result:
+  - 真实下载/上传成功。
+  - 冲突不静默覆盖。
+  - 导入后关键配置可读且可运行。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AGENT-IMPORT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

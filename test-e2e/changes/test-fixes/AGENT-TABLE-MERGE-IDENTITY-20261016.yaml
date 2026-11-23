@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-TABLE-MERGE-IDENTITY-20261016
+  change_type: test-fix
+  title: Retain table component coverage after merging creator identity presentation
+  description: >-
+    Keep the branch's Ant Design table, column resizing, fixed actions and metadata
+    styles together with develop's UserIdentity creator rendering. The traditional
+    agentListTable suite retains all existing assertions and adds CAS/local creator
+    composition coverage with missing-metadata fallback and unchanged source records.
+    The existing formal table Case now supplies a local authorization boundary for
+    the real UserIdentity component; all original assertions remain unchanged.
+  affected_features:
+    existing: [AGENT-LIST-VIEWS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-LIST-D1-001]
+    retired: []
+  notes: >-
+    Reuse the existing component contract; no duplicate Case is introduced.
+    Traditional UT and formal execution remain separate. The merged identity
+    dependency must not make the existing table Case require a real login session.

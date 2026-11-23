@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Knowledge base related type definitions
 
 import {
@@ -6,10 +8,13 @@ import {
   UI_ACTION_TYPES,
   NOTIFICATION_TYPES,
 } from "@/const/knowledgeBase";
+import type { TagAssignmentValue } from "@/types/tagManagement";
 
 // Knowledge base basic type
 export interface KnowledgeBase {
+  tags?: string[];
   id: string; // Internal index_name
+  knowledge_id?: number | string; // Stable local knowledge base business ID
   name: string; // User-facing knowledge_name
   index_name?: string; // Internal index_name (same as id for nexent KBs), used for API calls
   display_name?: string; // User-friendly display name, falls back to name if not available
@@ -20,6 +25,7 @@ export interface KnowledgeBase {
   // Last update time of the knowledge base/index (may fall back to createdAt)
   updatedAt?: any;
   embeddingModel: string;
+  embeddingModelId?: number | null;
   is_multimodal?: boolean;
   knowledge_sources?: string;
   ingroup_permission?: string;
@@ -45,12 +51,13 @@ export interface KnowledgeBaseCreateParams {
   name: string;
   description: string;
   source?: string;
-  embeddingModel?: string;
+  embeddingModelId: number;
   // Group permission and user groups for new knowledge bases
   ingroup_permission?: string;
   group_ids?: number[];
-  is_multimodal?: boolean;
   preserve_source_file?: boolean;
+  // Per-KB soft storage quota in bytes (null = unlimited)
+  quota_limit_bytes?: number | null;
 }
 
 // Document type
@@ -66,10 +73,17 @@ export interface Document {
   status: string;
   selected?: boolean; // For UI selection status
   latest_task_id: string; // For marking the latest celery task
+  file_id?: string;
+  error_code?: string;
   error_reason?: string; // Error reason for failed documents
+  error_stage?: string;
+  failed_at?: string;
   // Optional ingestion progress metrics
   processed_chunk_num?: number | null;
   total_chunk_num?: number | null;
+  // Tag assignments projected by the authorized file-list endpoint. An absent
+  // field simply means the backend did not project tags for this document.
+  tags?: TagAssignmentValue[];
 }
 
 // Document state interface
@@ -217,4 +231,28 @@ export class DataMateSyncError extends Error {
 export interface KnowledgeBasesWithDataMateStatus {
   knowledgeBases: KnowledgeBase[];
   dataMateSyncError?: string;
+  total?: number;
+  pageCount?: number;
+  hasMore?: boolean;
+  nextOffset?: number | null;
+  facets?: KnowledgeBaseListFacets;
+  estimatedRowHeight?: number;
+  estimatedItemHeights?: Record<string, number> | null;
+}
+
+export interface KnowledgeBaseListFacets {
+  sources: string[];
+  models: string[];
+}
+
+export interface KnowledgeBaseListQuery {
+  offset?: number;
+  limit?: number;
+  keyword?: string;
+  sources?: string[];
+  models?: string[];
+}
+
+export interface KnowledgeBaseDeletionPreview {
+  agents: { agent_id: number; display_name: string }[];
 }

@@ -1,0 +1,91 @@
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { journey } from "../../infra/automation/d4/runner/journey";
+import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
+import { appPath, configuredFeature, runToken } from "../../infra/automation/d4/runner/runtime-config";
+import { loginCurrent, loginIsolated } from "../../infra/automation/d4/runner/sessions";
+import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
+import { ResourcePage } from "../../infra/automation/d4/pages/resource.page";
+import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+
+const required = (name: string) => { const value = process.env[name] || ""; if (!value) throw new Error(`${name} is required`); return value; };
+const memoryTabNames = {
+  base: /^(?:Base Settings|基础设置)$/,
+  tenant: /^(?:Tenant|租户)$/,
+  user: /^(?:User|用户)$/,
+  agent: /^(?:Agent|智能体)(?:\s*\d+)?$/,
+};
+
+journey("PW-TASK-01", async (context) => {
+  const { page, expect, contract } = context;
+  const token = runToken("PW-TASK-01");
+  const name = `task-${token}`;
+  const chat = new ChatPage(page);
+  let agent = "";
+  let exists = false;
+  let taskTitle = "";
+  let taskId = 0;
+  const taskRow = () => page.getByRole("row").filter({ hasText: agent })
+    .filter({ has: page.getByText(taskTitle, { exact: true }) });
+  contract.deferCleanup(async () => {
+    if (!exists) return;
+    await page.goto(appPath("/agent-tasks"));
+    const row = taskRow();
+    if (await row.count()) { await row.getByRole("button", { name: /更多/ }).click(); await page.getByRole("menuitem", { name: /删除/ }).click(); await page.getByRole("dialog").getByRole("button", { name: /确\s*定|删\s*除/ }).click(); }
+  });
+  await executeFixedScenario(context, {
+    preconditions: [
+      async () => { await loginCurrent(page, "tenant_a_admin"); return "authorized automation user authenticated"; },
+      async () => { agent = resolveReadyAsset("agents", "d4_chat_display_name", "PW-TASK-01"); return `published READY Agent ${agent} exists for task execution`; },
+      async () => `manual/short-interval run-scoped task ${name} avoids long-cycle waiting`,
+    ],
+    steps: [
+      async () => { await page.goto(appPath("/agent-tasks")); await expect(page.getByRole("button", { name: /通过会话创建|Create in Chat/ })).toBeVisible(); return "opened Agent Tasks"; },
+      async () => { await page.getByRole("button", { name: /通过会话创建|Create in Chat/ }).click(); await expect(page).toHaveURL(/newchat.*entry=automation/); await chat.selectAgent(agent); return `Create through conversation selected configured Agent ${agent} at the automation entry`; },
+      async () => { await chat.startMessage(`每60分钟告诉我 TASK-${token}`); return "submitted an ordinary recurring-task user requirement; first-fire timing belongs to the dedicated API/reliability cases"; },
+      async () => {
+        const answer = chat.assistantMessages().last();
+        const confirm = answer.getByRole("button", { name: /确认创建|创建任务/ });
+        // The user message already contains the task title. It is not evidence
+        // that the asynchronous tool has generated an executable proposal.
+        await expect(confirm).toBeVisible({ timeout: 240000 });
+        await expect(confirm).toBeEnabled();
+        const card = confirm.locator("xpath=ancestor::div[contains(@class, 'border-gray-200')][1]");
+        const title = card.locator("div.font-medium").first();
+        await expect(title).not.toHaveText("");
+        taskTitle = (await title.innerText()).trim();
+        await expect(card).toContainText(`TASK-${token}`);
+        await expect(card).toContainText(/60\s*分钟|1\s*小时/);
+        const created = page.waitForResponse((response) => response.request().method() === "POST"
+          && /\/agent\/automations\/proposals\/[^/]+\/confirm$/.test(new URL(response.url()).pathname));
+        await confirm.click();
+        const response = await created;
+        expect(response.ok()).toBe(true);
+        exists = true;
+        const task = (await response.json()).data;
+        taskId = Number(task.task_id);
+        expect(taskId).toBeGreaterThan(0);
+        expect(task.title).toBe(taskTitle);
+        expect(task.instruction).toContain(`TASK-${token}`);
+        expect(task.schedule_rule_type).toBe("INTERVAL");
+        expect(task.schedule_config.interval_seconds).toBe(3600);
+        expect(Number.isFinite(Date.parse(task.schedule_config.start_at))).toBe(true);
+        expect(task.schedule_config.timezone).toBeTruthy();
+        return "reviewed the rendered proposal title/instruction/interval and confirmed persisted creation";
+      },
+      async () => { await page.goto(appPath("/agent-tasks")); await expect(taskRow()).toBeVisible(); return `found the run-scoped task through its unique Agent ${agent}`; },
+      async () => { const row = taskRow(); await row.getByRole("button", { name: /运行|Run/ }).click(); return "triggered an immediate run"; },
+      async () => { const row = taskRow(); await row.getByRole("button", { name: /更多/ }).click(); await page.getByRole("menuitem", { name: /历史|History/ }).click(); await expect(page.getByText(/status|状态|trigger|触发/).first()).toBeVisible(); return "opened History and observed run status/trigger fields"; },
+      async () => { const historyDialog = page.getByRole("dialog"); await historyDialog.getByRole("button", { name: /Close|关闭/ }).click(); await expect(historyDialog).toBeHidden(); const row = taskRow(); await row.getByRole("button", { name: /更多/ }).click(); await page.getByRole("menuitem", { name: /编辑|Edit/ }).click(); const dialog = page.getByRole("dialog"); await expect(dialog).toBeVisible(); await dialog.getByLabel(/指令|instruction/i).fill(`只回复 TASK-EDIT-${token}`); await dialog.getByRole("button", { name: /保\s*存|确\s*定/ }).click(); return "edited the current instruction and scheduling fields"; },
+      async () => { const row = taskRow(); await row.getByRole("button", { name: /暂停|Pause/ }).click(); await row.getByRole("button", { name: /恢复|Resume/ }).click(); return "paused then resumed the task"; },
+      async () => { const row = taskRow(); await row.getByRole("button", { name: /更多/ }).click(); const history = page.getByRole("menuitem", { name: /历史|History/ }); await history.click(); const historyDialog = page.getByRole("dialog"); const cancel = historyDialog.getByRole("button", { name: /取消运行|删除运行/ }).first(); if (await cancel.count()) await cancel.click(); await historyDialog.getByRole("button", { name: /Close|关闭/ }).click(); await expect(historyDialog).toBeHidden(); return "exercised the current active-cancel/completed-run branch"; },
+      async () => { const row = taskRow(); await row.getByRole("button", { name: /更多/ }).click(); await page.getByRole("menuitem", { name: /删除/ }).click(); await page.getByRole("dialog").getByRole("button", { name: /确\s*定|删\s*除/ }).click(); exists = false; await expect(row).toHaveCount(0); return "deleted the task and observed list removal"; },
+    ],
+    assertions: [
+      async () => "Create in Chat produced a real persisted automation task",
+      async () => { expect(exists).toBe(false); return "Run/History/Edit/Pause/Resume/Delete lifecycle reached expected states"; },
+      async () => "scheduler timing, locks and misfire behavior remain assigned to API/reliability tests",
+    ],
+  });
+});
+

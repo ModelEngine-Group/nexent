@@ -14,13 +14,9 @@ logger = logging.getLogger("delete_directory_tool")
 class DeleteDirectoryTool(Tool):
     """Directory deletion tool for deleting directories and their contents"""
     name = "delete_directory"
-    description = "Delete a directory at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/subfolder'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "This operation is irreversible and will delete the directory and all its contents. " \
-                  "Use with caution as deleted directories cannot be recovered."
+    description = "Permanently delete a workspace directory and all its contents."
 
-    description_zh = "删除指定路径的目录，路径需为工作区相对路径（例如，'documents/subfolder'），出于安全考虑，不支持绝对路径。该操作不可逆，会删除目标目录及其中所有内容，删除后无法恢复，使用时请谨慎操作。"
+    description_zh = "永久删除工作区目录及其全部内容，此操作不可恢复。"
 
     inputs = {
         "directory_path": {
@@ -58,8 +54,6 @@ class DeleteDirectoryTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
-        self.running_prompt_zh = "正在删除文件夹..."
-        self.running_prompt_en = "Deleting directory..."
 
     def _validate_path(self, directory_path: str) -> str:
         """Validate and resolve directory path within the workspace.
@@ -98,10 +92,9 @@ class DeleteDirectoryTool(Tool):
 
     def forward(self, directory_path: str) -> str:
         try:
-            # Send tool run message if observer is available
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the deletion card from inside the tool.
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "folder-minus", "text": f"Deleting directory {directory_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

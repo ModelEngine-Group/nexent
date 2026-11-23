@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/database/remote_mcp_db.py
 
@@ -38,7 +39,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
 
 # Mock boto3
 boto3_mock = MagicMock()
@@ -86,7 +87,11 @@ from backend.database.remote_mcp_db import (
     get_mcp_custom_headers_by_name_and_url,
     check_mcp_name_exists,
     check_enabled_mcp_name_exists,
+    update_mcp_record_market_id_by_id,
+    clear_mcp_record_market_id,
+    update_mcp_record_registry_json_by_id,
 )
+import backend.database.remote_mcp_db as remote_mcp_db
 
 
 class MockMcpRecord:
@@ -188,6 +193,28 @@ def test_create_mcp_record_failure(monkeypatch, mock_session):
 
     with pytest.raises(SQLAlchemyError):
         create_mcp_record({"mcp_name": "test_mcp"}, "tenant1", "user1")
+
+
+def test_create_mcp_record_rejects_tenant_limit(monkeypatch, mock_session):
+    """The database write enforces the quota atomically at the boundary."""
+    session, query = mock_session
+    query.filter.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.remote_mcp_db._MCP_SERVICE_LIMIT", 1)
+
+    class LimitReached(Exception):
+        def __init__(self, message, **kwargs):
+            super().__init__(message)
+            self.details = kwargs
+
+    monkeypatch.setattr(remote_mcp_db, "TenantResourceLimitError", LimitReached)
+
+    with pytest.raises(LimitReached, match="maximum 1 MCP services per tenant"):
+        create_mcp_record({"mcp_name": "over-limit"}, "tenant1", "user1")
+    session.add.assert_not_called()
 
 
 # ============================================================================
@@ -363,6 +390,7 @@ def test_update_mcp_record_manage_fields_by_id_success(monkeypatch, mock_session
         name="new-name", server_url="http://new.url",
         description="desc", tags=["a"], source="local",
         authorization_token="tok", custom_headers=None, config_json={"key": "val"},
+        market_id=None,
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
@@ -389,6 +417,7 @@ def test_update_mcp_record_manage_fields_by_id_none_tags(monkeypatch, mock_sessi
         name="n", server_url="u", description=None,
         tags=None, source="local", authorization_token=None,
         custom_headers=None, config_json=None,
+        market_id=None,
     )
     call_args = mock_update.call_args[0][0]
     assert call_args["tags"] == []
@@ -415,12 +444,69 @@ def test_update_mcp_record_manage_fields_by_id_with_custom_headers(monkeypatch, 
         source="community", authorization_token="new_token",
         custom_headers=custom_headers,
         config_json={"timeout": 30},
+        market_id=None,
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
     assert call_args["custom_headers"] == custom_headers
     assert call_args["mcp_name"] == "new-name"
     assert call_args["authorization_token"] == "new_token"
+
+
+def test_update_mcp_record_manage_fields_by_id_with_group_permissions(monkeypatch, mock_session):
+    """Test group_ids and ingroup_permission in update_mcp_record_manage_fields_by_id."""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="n", server_url="u", description=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
+        market_id=None,
+        group_ids="2,4",
+        ingroup_permission="EDIT",
+    )
+    call_args = mock_update.call_args[0][0]
+    assert call_args["group_ids"] == "2,4"
+    assert call_args["ingroup_permission"] == "EDIT"
+
+
+def test_update_mcp_record_manage_fields_by_id_with_shared_fields(monkeypatch, mock_session):
+    """Test shared_fields in update_mcp_record_manage_fields_by_id."""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    shared = {"serverUrl": True, "authorizationToken": False}
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="n", server_url="u", description=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
+        market_id=None,
+        group_ids="2", ingroup_permission="READ_ONLY",
+        shared_fields=shared,
+    )
+    call_args = mock_update.call_args[0][0]
+    assert call_args["group_ids"] == "2"
+    assert call_args["ingroup_permission"] == "READ_ONLY"
+    assert call_args["shared_fields"] == shared
 
 
 # ============================================================================
@@ -1007,6 +1093,73 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
 
     # 5. Delete by ID
     delete_mcp_record_by_id(mcp_id=1, tenant_id="tenant1", user_id="user1")
+
+
+# ============================================================================
+# update_mcp_record_market_id_by_id (NEW)
+# ============================================================================
+
+def test_update_mcp_record_market_id_by_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_mcp_record_market_id_by_id(mcp_id=1, tenant_id="tid", user_id="uid", market_id=100)
+    mock_update.assert_called_once_with({"market_id": 100, "updated_by": "uid"})
+
+    update_mcp_record_market_id_by_id(mcp_id=2, tenant_id="tid", user_id="uid", market_id=None)
+    assert mock_update.call_count == 2
+
+
+# ============================================================================
+# clear_mcp_record_market_id (NEW)
+# ============================================================================
+
+def test_clear_mcp_record_market_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    clear_mcp_record_market_id(tenant_id="tid", user_id="uid", market_id=100)
+    mock_update.assert_called_once_with({"market_id": None, "updated_by": "uid"})
+
+
+# ============================================================================
+# update_mcp_record_registry_json_by_id (NEW)
+# ============================================================================
+
+def test_update_mcp_record_registry_json_by_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    registry_json = {"tools": [{"name": "tool1", "description": "desc1"}]}
+    update_mcp_record_registry_json_by_id(mcp_id=1, tenant_id="tid", user_id="uid", registry_json=registry_json)
+    mock_update.assert_called_once_with({
+        "registry_json": registry_json,
+        "updated_by": "uid",
+    })
 
 
 if __name__ == "__main__":

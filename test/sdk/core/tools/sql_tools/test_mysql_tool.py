@@ -37,7 +37,7 @@ class TestClassAttributes:
 
     def test_inputs_has_max_rows(self):
         assert "max_rows" in MySqlTool.inputs
-        assert MySqlTool.inputs["max_rows"]["default"] == 100
+        assert MySqlTool.inputs["max_rows"]["default"] == 0
 
     def test_inputs_has_timeout(self):
         assert "timeout" in MySqlTool.inputs
@@ -120,7 +120,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.mysql_tool.pymysql")
     def test_execute_query_success(self, mock_pymysql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [{"col1": "val1", "col2": "val2"}]
+        mock_cursor.fetchmany.return_value = [{"col1": "val1", "col2": "val2"}]
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -136,7 +136,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.mysql_tool.pymysql")
     def test_execute_query_with_params(self, mock_pymysql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [{"id": 1, "name": "Alice"}]
+        mock_cursor.fetchmany.return_value = [{"id": 1, "name": "Alice"}]
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -165,7 +165,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.mysql_tool.pymysql")
     def test_execute_query_empty_result(self, mock_pymysql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchmany.return_value = []
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -180,7 +180,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.mysql_tool.pymysql")
     def test_execute_query_connects_with_timeout(self, mock_pymysql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchmany.return_value = []
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -199,7 +199,7 @@ class TestExecuteQuery:
     def test_execute_query_closes_conn_on_exception(self, mock_pymysql):
         mock_cursor = MagicMock()
         mock_cursor.description = []
-        mock_cursor.fetchall.side_effect = Exception("Query error")
+        mock_cursor.fetchmany.side_effect = Exception("Query error")
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor

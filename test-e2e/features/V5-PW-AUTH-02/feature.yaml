@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-AUTH-02
+  name: 邀请码注册→首次登录→普通用户自助注销
+  status: active
+  description: 覆盖邀请码驱动的新用户生命周期，不把Token管理混在本场景。
+  business_rules:
+  - rule_id: V5-PW-AUTH-02-RULE-01
+    description: 邀请码注册→首次登录→普通用户自助注销
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

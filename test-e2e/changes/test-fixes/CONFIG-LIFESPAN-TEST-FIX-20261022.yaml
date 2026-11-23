@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: CONFIG-LIFESPAN-TEST-FIX-20261022
+  change_type: test-fix
+  title: Repair configuration lifespan reliability contract after prompt-template retirement
+  description: >-
+    Replace the retired prompt-template startup branch with current external-service
+    validation; retain startup recovery, readiness and resource-release obligations.
+    Use the real process-local ThreadManager and actual lifespan/health code, with
+    controlled persistence and scheduler boundaries. Route this service lifecycle
+    Case to system management rather than scheduled automation tasks. No product
+    source, environment configuration or historical Daily result is changed.
+  affected_features:
+    existing: []
+    added: []
+    modified: [V5-REL-AUTO-AF6CA560E762D682]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [REL-AUTO-AF6CA560E762D682]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Existing config-app UT checks current AIDP configuration validation and successful lifespan wiring.
+    reason: >-
+      This test-only repair changes no product behavior. Existing UT remains separate;
+      D5 adds fault-path readiness, real manager recovery and cleanup proof, not a UT wrapper.
+    test_selectors:
+    - test/backend/app/test_config_app.py
+  notes: >-
+    Baseline formal execution reproduces AUTOMATION_ERROR at the deleted
+    sync_system_default_prompt_template replacement. #4134 updated imports and
+    traditional UT but not this formal behavior contract. AC-01/02/03 preserve
+    startup/configuration/readiness proof; AC-04 closes the previously unasserted
+    startup-failure resource-release gap; AC-05/06 verify shutdown and exception
+    propagation; AC-07 checks evidence and isolation. Keep newly exposed product
+    failures visible instead of dropping requirements or changing production code.
+    Detailed assertion locations and execution evidence are recorded in the adjacent
+    CONFIG-LIFESPAN-TEST-FIX-20261022.md after validation.

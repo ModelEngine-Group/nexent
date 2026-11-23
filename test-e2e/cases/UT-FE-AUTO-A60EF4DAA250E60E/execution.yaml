@@ -1,0 +1,20 @@
+schema_version: '1.0'
+case_id: UT-FE-AUTO-A60EF4DAA250E60E
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: UT-FE-AUTO-A60EF4DAA250E60E
+notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-FILTER:
+  - ' 模型可用性过滤与主模型回退 > UT-FE-AUTO-A60EF4DAA250E60E  AgentPrompt 过滤失效 model_ids 并同步 model/model_names'
+  - ' 模型可用性过滤与主模型回退 >  AgentPrompt 空 model_ids 回退 defaultLlmConfig.id'
+  - ' 模型可用性过滤与主模型回退 >  AgentPrompt defaultLlmConfig.id 不可用时 selectedModelIds 为空'
+  AC-SELECTION:
+  - ' 模型可用性过滤与主模型回退 > Debug Panel 通过真实 Chat/Thread 过滤不可用模型并回退首个可用 ID'
+  - ' 模型可用性过滤与主模型回退 > Debug Panel 全部不可用时模型列表为空且禁止发送'
+  - ' 模型可用性过滤与主模型回退 > Debug Panel 已选模型失效后禁止发送且不静默切换'
+  - ' 模型可用性过滤与主模型回退 >  Thread useAgentModels 仅保留 connect_status=available 并回退首个可用模型'
+  - ' 模型可用性过滤与主模型回退 >  Thread useAgentModels 全部不可用时返回空列表'
+  AC-STABILITY:
+  - ' 模型可用性过滤与主模型回退 >  Thread useAgentModels 全部不可用时返回空列表'

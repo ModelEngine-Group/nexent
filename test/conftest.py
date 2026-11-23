@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Global test configuration for third-party component environment variables.
 
@@ -8,26 +9,18 @@ import sys
 import shutil
 import tempfile
 import types
+import importlib.machinery
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch as _patch
 
 import pytest
 
-# Stub out mem0 and smolagents modules before anything else imports them.
-# The sdk imports these at module level, so stubs must be registered first.
-_mem0_stubs = {
-    "mem0": MagicMock(),
-    "mem0.memory": MagicMock(),
-    "mem0.memory.main": MagicMock(),
-    "mem0.embeddings": MagicMock(),
-    "mem0.embeddings.base": MagicMock(),
-    "mem0.configs": MagicMock(),
-    "mem0.configs.embeddings": MagicMock(),
-    "mem0.configs.embeddings.base": MagicMock(),
-}
+# Optional SDK stubs (xlrd, supabase, etc.) live below; see the per-section
+# comments.  The legacy mem0 stub block has been removed because the SDK
+# no longer imports mem0 at module load time.
 
-_optional_sdk_stubs = {}
+_optional_sdk_stubs: dict = {}
 
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
@@ -40,8 +33,118 @@ if _backend_dir not in sys.path:
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
-sys.modules.update({k: v for k, v in _mem0_stubs.items() if k not in sys.modules})
-sys.modules.update({k: v for k, v in _optional_sdk_stubs.items() if k not in sys.modules})
+_canonical_backend_packages = {}
+for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process"):
+    _namespace_path = Path(_backend_dir) / _namespace
+    _canonical_backend_packages[_namespace] = str(_namespace_path)
+    for _initializer in _namespace_path.rglob("__init__.py"):
+        _relative = _initializer.parent.relative_to(_namespace_path)
+        _package_name = ".".join((_namespace, *_relative.parts))
+        _canonical_backend_packages[_package_name] = str(_initializer.parent)
+
+
+def _restore_project_package_metadata() -> None:
+    """Keep package-level test doubles capable of resolving real submodules."""
+    package_paths = {
+        "agents": os.path.join(_backend_dir, "agents"),
+        "consts": os.path.join(_backend_dir, "consts"),
+        "services": os.path.join(_backend_dir, "services"),
+        "utils": os.path.join(_backend_dir, "utils"),
+        "nexent": os.path.join(_sdk_dir, "nexent"),
+    }
+    package_paths.update(_canonical_backend_packages)
+    active_parents = set()
+    for module_name in tuple(sys.modules):
+        parts = module_name.split(".")
+        for count in range(1, len(parts)):
+            active_parents.add(".".join(parts[:count]))
+    for package_name, package_path in package_paths.items():
+        package_module = sys.modules.get(package_name)
+        if package_module is None:
+            if package_name not in active_parents:
+                continue
+            package_module = types.ModuleType(package_name)
+            sys.modules[package_name] = package_module
+
+        package_module.__path__ = [package_path]
+        package_module.__package__ = package_name
+        package_module.__spec__ = importlib.machinery.ModuleSpec(
+            package_name,
+            loader=None,
+            is_package=True,
+        )
+        package_module.__spec__.submodule_search_locations = [package_path]
+
+    for module_name, module in list(sys.modules.items()):
+        parent_name, separator, child_name = module_name.rpartition(".")
+        if not separator or parent_name not in package_paths:
+            continue
+        parent_module = sys.modules.get(parent_name)
+        if parent_module is not None:
+            setattr(parent_module, child_name, module)
+
+
+def pytest_collectstart(collector):
+    """Repair package metadata before pytest imports each test module."""
+    _restore_project_package_metadata()
+
+
+@pytest.fixture(autouse=True)
+def _restore_project_packages():
+    """Repair package links changed during collection before each test runs."""
+    _restore_project_package_metadata()
+    yield
+
+# Some test modules replace the ``consts`` package in ``sys.modules`` with a
+# lightweight stub during collection.  Keep the agent-stream constant
+# available as a fully-qualified module so later imports do not depend on the
+# replacement parent still behaving like a package.
+_agent_consts_stub = types.ModuleType("consts.agent")
+_agent_consts_stub.SAFE_AGENT_STREAM_ERROR_MESSAGE = (
+    "Agent execution failed. Please try again later."
+)
+sys.modules.setdefault("consts.agent", _agent_consts_stub)
+
+# Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
+# in environments where the optional SDK is not installed.  We register a
+# permissive module-like object that exposes ``open_workbook`` so the .xls
+# parsing path can be imported without raising.  Individual test files
+# (e.g. ``test_evaluation_set_excel_utils.py``) replace this with a richer
+# fake that mimics the sheet-level API for the .xls tests.
+class _XlrdProxy(types.ModuleType):
+    """Permissive xlrd stub.
+
+    Exposes a callable ``open_workbook`` attribute so that ``xlrd.open_workbook(...)``
+    works at import time.  Returns a shape that satisfies the bits of the .xls
+    parsing path used by ``evaluation_set_excel_utils`` well enough to import
+    without crashing; richer behaviour is supplied by per-test-file overrides.
+    """
+
+    def __init__(self):
+        super().__init__("xlrd")
+        self._sentinel = object()
+
+    def open_workbook(self, file_contents=b""):
+        # Return a fully-formed stub book that survives ``sheet_by_index``,
+        # ``sheet.nrows``, ``sheet.row_values`` and ``sheet.cell_value`` —
+        # these are the four accessors used in the .xls branch.
+        class _Sheet:
+            nrows = 0
+            def row_values(self, _rowx):
+                return []
+
+            def cell_value(self, _rowx, _colx):
+                return None
+
+        class _Book:
+            def sheet_by_index(self, _idx):
+                return _Sheet()
+
+        return _Book()
+
+
+if "xlrd" not in sys.modules or not hasattr(sys.modules["xlrd"], "open_workbook"):
+    sys.modules["xlrd"] = _XlrdProxy()
 
 _tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))
 os.makedirs(_tmp_root, exist_ok=True)
@@ -121,12 +224,12 @@ def tmp_path():
 def install_supabase_mock():
     """Install a structured supabase package mock into ``sys.modules``.
 
-    ``backend.utils.auth_utils`` imports ``from supabase.lib.client_options
+    ``management.services.permission.identity.authentication_helpers`` imports ``from supabase.lib.client_options
     import SyncClientOptions`` at module load time. Test files that simply
     replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
     import to fail (the mock has no ``.lib.client_options`` attribute),
     which in turn makes every test that transitively imports ``auth_utils``
-    (for example anything that imports ``services.user_service``) fail
+    (for example anything that imports ``management.services.permission.identity.users``) fail
     during collection.
 
     This helper installs a package-like mock that exposes the attributes
@@ -165,7 +268,7 @@ def _supabase_mock():
     Module-level ``sys.modules['supabase']`` overrides in test files
     (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
     structured attributes (``lib``, ``lib.client_options``,
-    ``SyncClientOptions``) that ``backend.utils.auth_utils`` resolves at
+    ``SyncClientOptions``) that ``management.services.permission.identity.authentication_helpers`` resolves at
     import time. The module-level install below covers collection, but
     any test that re-mocks ``supabase`` after collection needs the
     structured attributes re-installed before its test body runs.
@@ -175,7 +278,7 @@ def _supabase_mock():
 
 
 # Install a sane supabase mock at collection time so test modules that
-# import ``backend.utils.auth_utils`` (directly or transitively) succeed
+# import ``management.services.permission.identity.authentication_helpers`` (directly or transitively) succeed
 # during pytest's collection phase, before any test fixture has had a
 # chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
 # install before each test body in case individual test modules

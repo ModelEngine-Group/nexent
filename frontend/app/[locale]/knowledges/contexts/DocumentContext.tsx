@@ -13,7 +13,9 @@ import { useTranslation } from "react-i18next";
 import { DOCUMENT_ACTION_TYPES } from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { DocumentState, DocumentAction } from "@/types/knowledgeBase";
+import type { QuotaStatusResponse } from "@/types/quota";
 import log from "@/lib/logger";
+import { areDocumentsEqual } from "@/lib/documentStateUtils";
 
 // Reducer function
 const documentReducer = (
@@ -22,11 +24,25 @@ const documentReducer = (
 ): DocumentState => {
   switch (action.type) {
     case DOCUMENT_ACTION_TYPES.FETCH_SUCCESS:
+      const documentsUnchanged = areDocumentsEqual(
+        state.documentsMap[action.payload.kbId],
+        action.payload.documents
+      );
+      if (
+        documentsUnchanged &&
+        !state.isLoadingDocuments &&
+        state.error === null
+      ) {
+        return state;
+      }
+
       return {
         ...state,
         documentsMap: {
           ...state.documentsMap,
-          [action.payload.kbId]: action.payload.documents,
+          [action.payload.kbId]: documentsUnchanged
+            ? state.documentsMap[action.payload.kbId]
+            : action.payload.documents,
         },
         isLoadingDocuments: false,
         error: null,
@@ -138,10 +154,13 @@ export const DocumentContext = createContext<{
   ) => Promise<void>;
   uploadDocuments: (
     kbId: string,
-    files: File[],
-    modelId?: number
+    files: File[]
+  ) => Promise<{ quota_status?: QuotaStatusResponse } | undefined>;
+  deleteDocument: (
+    kbId: string,
+    docId: string,
+    fileId?: string
   ) => Promise<void>;
-  deleteDocument: (kbId: string, docId: string) => Promise<void>;
 }>({
   state: {
     documentsMap: {},
@@ -154,7 +173,7 @@ export const DocumentContext = createContext<{
   },
   dispatch: () => {},
   fetchDocuments: async () => {},
-  uploadDocuments: async () => {},
+  uploadDocuments: async () => undefined,
   deleteDocument: async () => {},
 });
 
@@ -262,15 +281,13 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
   // Upload documents to a knowledge base
   const uploadDocuments = useCallback(
-    async (kbId: string, files: File[], modelId?: number) => {
+    async (kbId: string, files: File[]) => {
       dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: true });
 
       try {
-        await knowledgeBaseService.uploadDocuments(
+        const uploadResult = await knowledgeBaseService.uploadDocuments(
           kbId,
-          files,
-          undefined,
-          modelId
+          files
         );
 
         // Set loading state before fetching latest documents
@@ -299,12 +316,24 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
         // Clear upload files
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES, payload: [] });
+        return uploadResult;
       } catch (error) {
-        log.error(t("document.error.upload"), error);
+        // A rejected upload can still have a durable FAILED lifecycle row;
+        // refresh so the user can see its timestamp and reason immediately.
+        try {
+          const latestDocuments = await knowledgeBaseService.getAllFiles(kbId);
+          dispatch({
+            type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS,
+            payload: { kbId, documents: latestDocuments },
+          });
+        } catch (refreshError) {
+          log.error("Failed to refresh documents after upload error", refreshError);
+        }
         dispatch({
           type: DOCUMENT_ACTION_TYPES.ERROR,
           payload: `${t("document.error.upload")}. ${t("document.error.retry")}`,
         });
+        throw error;
       } finally {
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: false });
         dispatch({
@@ -318,9 +347,9 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
   // Delete a document
   const deleteDocument = useCallback(
-    async (kbId: string, docId: string) => {
+    async (kbId: string, docId: string, fileId?: string) => {
       try {
-        await knowledgeBaseService.deleteDocument(docId, kbId);
+        await knowledgeBaseService.deleteDocument(docId, kbId, fileId);
         dispatch({
           type: DOCUMENT_ACTION_TYPES.DELETE_DOCUMENT,
           payload: { kbId, docId },

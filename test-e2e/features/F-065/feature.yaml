@@ -1,0 +1,23 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-065
+  name: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复；执行代码块(parse)、可恢复告警(warning)、历史摘要(history_summary)、引用角标(citation key)与句级高亮、模型可用性过滤、线程Agent绑定
+  status: active
+  description: '智能体运行时与对话 / 前端流式状态: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复；执行代码块(parse)、可恢复告警(warning)、历史摘要(history_summary)、引用角标(citation
+    key)与句级高亮、模型可用性过滤、线程Agent绑定'
+  business_rules:
+  - rule_id: F-065-RULE-01
+    description: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复；执行代码块(parse)、可恢复告警(warning)、历史摘要(history_summary)、引用角标(citation key)与句级高亮、模型可用性过滤、线程Agent绑定
+  - rule_id: F-065-RULE-02
+    description: 引用来源按每条命中保留业务 metadata、技术引用和检索提供方；实时与历史一致，原始字段两行标签及悬浮详情可访问，业务 source 不覆盖提供方。
+  - rule_id: F-065-RULE-03
+    description: 当前 AIDP 检索来源不支持原文下载，来源面板不显示下载动作；本地附件下载功能保留。
+  - rule_id: F-065-RULE-04
+    description: 正文角标、引用悬浮提示、侧栏来源与图片卡片使用同一回答首次引用顺序的显示编号，图片参与统一编号；未引用命中随后编号，原始引用键不变，角标和来源汇总入口保持一致。
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,95 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-ACTIVITY-D5-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - CHAT-AUTOMATION-ACTIVITY-20261020
+  - CHAT-ACTIVITY-TIMESTAMP-20261021
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-004
+  title: Additive activity and message-source migration preserves mixed legacy conversations
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Additive activity and message-source migration preserves mixed legacy conversations
+  preconditions:
+  - Repository dependencies and the declared controlled profile are available; fixtures are isolated.
+  test_data:
+    profile: mock
+    identities:
+    - owner
+    - other
+    histories:
+    - ordinary
+    - automation
+    - mixed
+    - deleted
+    - older
+    - newer
+  steps:
+  - order: 1
+    action: Apply migration to legacy tables containing mixed ordinary/automation/soft-deleted messages and run
+      references.
+    expected: Only explicit automation message identities are classified; last visible message time is backfilled,
+      not administrative update time.
+  - order: 2
+    action: Repeat migration and query defaults, activity, indexes and row preservation.
+    expected: Second application is idempotent; normal defaults and existing rows are preserved; no new business
+      table is introduced.
+  - order: 3
+    action: Apply and replay the migration under UTC, Asia/Shanghai and America/New_York to both develop-era fixtures without an activity column and an existing UTC TIMESTAMP activity column with its current index.
+    expected: Activity has timestamp without time zone type; existing UTC values and microseconds, sources and unrelated audit values remain unchanged; the index uses the same naive fallback as list queries.
+  expected_results:
+  - Only explicit automation message identities are classified; last visible message time is backfilled, not administrative
+    update time.
+  - Second application is idempotent; normal defaults and existing rows are preserved; no new business table is
+    introduced.
+  - First-time upgrades and existing TIMESTAMP schemas preserve UTC activity and subsecond precision across connection timezones, with matching indexes and repeatable execution.
+  forbidden_side_effects:
+  - No production data/schema mutation, quota bypass by ordinary requests, loss of composer/stream state or changes
+    to unrelated histories.
+  observations:
+  - Persisted source/activity, API order and errors, visible browser state or migration output.
+  cleanup:
+  - Dispose only the fixture schema, browser context and temporary test data.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Only explicit automation message identities are classified; last visible message time is backfilled,
+      not administrative update time.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Second application is idempotent; normal defaults and existing rows are preserved; no new business
+      table is introduced.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: First-time upgrades and existing UTC TIMESTAMP activity schemas preserve native UTC values across database timezones and replay.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  risk: Legacy migration and idempotency
+  metrics:
+  - All assertions pass
+  thresholds:
+  - Zero misclassified ordinary rows and zero changes on second application
+  condition:
+  - Legacy fixtures in disposable PostgreSQL schema
+  recovery_expectations:
+  - Drop only the isolated fixture schema
+  risk_type: DEPLOYMENT

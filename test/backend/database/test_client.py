@@ -300,6 +300,23 @@ class TestMinioClient:
 
     @patch('backend.database.client.create_storage_client_from_config')
     @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_get_file_size_strict(self, mock_config_class, mock_create_client):
+        """Test strict size lookup preserves missing versus error semantics."""
+        MinioClient._instance = None
+        MinioClient._initialized = False
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.get_file_size_strict.side_effect = [1024, None]
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        assert client.get_file_size_strict('file.txt', 'bucket') == 1024
+        assert client.get_file_size_strict('missing.txt', 'bucket') is None
+        assert mock_storage_client.get_file_size_strict.call_count == 2
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
     def test_minio_client_list_files(self, mock_config_class, mock_create_client):
         """Test MinioClient.list_files delegates to storage client"""
         MinioClient._instance = None
@@ -637,7 +654,7 @@ class TestAdditionalCoverage:
         assert client.default_bucket == "fallback-bucket"
 
     def test_as_dict_for_sqlalchemy_object_and_mapping(self, mocker):
-        from datetime import datetime
+        from datetime import datetime, timezone
         dt = datetime(2025, 1, 1, 0, 0, 0)
 
         class Obj:
@@ -651,12 +668,29 @@ class TestAdditionalCoverage:
         mock_col_name.key = "name"
         mocker.patch("backend.database.client.class_mapper", return_value=MagicMock(columns=[mock_col_created, mock_col_name]))
         orm_result = as_dict(Obj())
-        assert orm_result["created"] == dt.isoformat()
+        # Naive datetimes are normalized to UTC-equivalent by appending ``Z``.
+        assert orm_result["created"] == dt.isoformat() + "Z"
         assert orm_result["name"] == "n1"
 
         mapping_obj = MagicMock()
         mapping_obj._mapping = {"a": 1}
         assert as_dict(mapping_obj) == {"a": 1}
+
+        # Timezone-aware datetimes must keep their offset and NOT get ``Z``
+        # appended — that would clobber the original timezone.
+        aware_dt = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        class AwareObj:
+            __mapper__ = object()
+            updated = aware_dt
+
+        mock_col_updated = MagicMock()
+        mock_col_updated.key = "updated"
+        mocker.patch(
+            "backend.database.client.class_mapper",
+            return_value=MagicMock(columns=[mock_col_updated]),
+        )
+        assert as_dict(AwareObj())["updated"] == aware_dt.isoformat()
 
     def test_get_monitoring_db_session_paths(self, mocker):
         mock_session = MagicMock()

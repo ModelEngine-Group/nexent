@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-RESOURCE-03
+  name: USER/Admin/SU菜单与直接URL权限矩阵
+  status: active
+  description: 证明前端显隐和真实路由保护同时存在。
+  business_rules:
+  - rule_id: V5-PW-RESOURCE-03-RULE-01
+    description: USER/Admin/SU菜单与直接URL权限矩阵
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

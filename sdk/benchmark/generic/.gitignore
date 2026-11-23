@@ -1,0 +1,14 @@
+/configs/*
+!/configs/agent_7_test.yaml
+!/configs/gaia_solver.yaml
+!/configs/gsm8k_solver_assistant.yaml
+*.jsonl
+__pycache__/
+*.pyc
+*.log
+.omo/
+/datasets/gaia_level1/
+/datasets/gaia_level2/
+/datasets/gaia_level3/
+/datasets/files/
+/artifacts

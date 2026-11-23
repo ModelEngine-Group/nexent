@@ -1,0 +1,86 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.chunkChoicesWrapper {
+  container-type: inline-size;
+}
+
+.chunkChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.chunkOption:global(.ant-radio-wrapper) {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-height: 80px;
+  align-items: flex-start;
+  margin: 0 !important;
+  padding: 16px !important;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  color: var(--aidp-text, #191919);
+  white-space: normal;
+}
+
+.chunkOption:global(.ant-radio-wrapper):hover {
+  border-color: #1677ff;
+}
+
+.chunkOption:global(.ant-radio-wrapper) > :global(.ant-radio) {
+  visibility: hidden;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.chunkOption:global(.ant-radio-wrapper) > :global(.ant-radio) + span {
+  padding-inline: 0;
+}
+
+.chunkOption:global(.ant-radio-wrapper):focus-within {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.chunkOptionSelected:global(.ant-radio-wrapper) {
+  border-color: #1677ff;
+  background: #f0f5ff;
+}
+
+.chunkOptionUnselected:global(.ant-radio-wrapper) {
+  background: #fff;
+}
+
+.chunkOptionContent {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+
+.chunkOptionContent > span:first-child {
+  color: var(--aidp-text, #191919);
+  font-size: var(--aidp-body-size, 14px);
+  font-weight: 500;
+  line-height: var(--aidp-body-line-height, 22px);
+}
+
+.chunkOptionHint {
+  color: var(--aidp-secondary, #595959);
+  font-size: var(--aidp-caption-size, 12px);
+  line-height: var(--aidp-caption-line-height, 20px);
+  text-wrap: balance;
+}
+
+@container (max-width: 480px) {
+  .chunkChoices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chunkOption:global(.ant-radio-wrapper) {
+    padding: 16px 12px !important;
+  }
+}

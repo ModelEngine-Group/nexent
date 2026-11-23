@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-118
+  name: 共享 asset download/preview/Range/ETag 与 token 绑定
+  status: active
+  description: '会话与分享 / 分享附件: 共享 asset download/preview/Range/ETag 与 token 绑定'
+  business_rules:
+  - rule_id: F-118-RULE-01
+    description: 共享 asset download/preview/Range/ETag 与 token 绑定
+  required_test_stages:
+  - D5
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

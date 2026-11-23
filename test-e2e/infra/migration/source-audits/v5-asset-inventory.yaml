@@ -1,0 +1,36 @@
+schema_version: "1.0"
+source: "external V5 suite: assets/manifest.json"
+policy: "Inventory only; no fixture is copied until its content and licence are reviewed. Machine credentials and runtime IDs never enter Git."
+static_assets:
+  - {asset_id: MISC-001, path: "Nexent_测试资产准备清单.xlsx", disposition: review_before_copy}
+  - {asset_id: AGT-001, path: "agents/总结助手.json", disposition: review_before_copy}
+  - {asset_id: AUD-001, path: "audio/stt-16k-mono.pcm", disposition: review_before_copy}
+  - {asset_id: AUD-002, path: "audio/stt_zh_number.wav", disposition: review_before_copy}
+  - {asset_id: AUD-003, path: "audio/stt_zh_number_16k.pcm", disposition: review_before_copy}
+  - {asset_id: AUD-004, path: "audio/八字分析.mp3", disposition: review_before_copy}
+  - {asset_id: MISC-002, path: "d4/eval_set.xlsx", disposition: review_before_copy}
+  - {asset_id: MISC-003, path: "d4/invalid.pdf", disposition: review_before_copy}
+  - {asset_id: MISC-004, path: "d4/sample.pdf", disposition: review_before_copy}
+  - {asset_id: MISC-005, path: "d4/vlm_number_7429.png", disposition: review_before_copy}
+  - {asset_id: MISC-006, path: "deployment-sandbox/Dockerfile", disposition: review_before_copy}
+  - {asset_id: DOC-001, path: "documents/Nexent 全量测试用例库(B09整合版)_执行记录.xlsx", disposition: review_before_copy}
+  - {asset_id: DOC-002, path: "documents/新建 DOC 文档_20260609150857.pdf", disposition: review_before_copy}
+  - {asset_id: DOC-003, path: "documents/肝胆介绍.doc", disposition: review_before_copy}
+  - {asset_id: DOC-004, path: "documents/肝胆介绍.docx", disposition: review_before_copy}
+  - {asset_id: EVAL-001, path: "evaluation/评估集-坏案例.xlsx", disposition: review_before_copy}
+  - {asset_id: ORACLE-001, path: "expected/stt_expected.json", disposition: review_before_copy}
+  - {asset_id: IMG-001, path: "images/肝脏图片.jpg", disposition: review_before_copy}
+  - {asset_id: KB-001, path: "knowledge/alpha-nx-92831.txt", disposition: review_before_copy}
+  - {asset_id: KB-002, path: "knowledge/beta-nx-57264.txt", disposition: review_before_copy}
+  - {asset_id: KB-003, path: "knowledge/肝脏介绍.txt", disposition: review_before_copy}
+  - {asset_id: SKILL-001, path: "skills/SKILL.md", disposition: review_before_copy}
+  - {asset_id: VID-001, path: "video/20260829_110109.mp4", disposition: review_before_copy}
+machine_local:
+  config: [environment.yaml, models.yaml, users.yaml, secrets.env]
+  disposition: keep_under_nexent_test_home
+runtime_ids:
+  disposition: create_during_run_and_register_for_cleanup
+  examples: [tenant_id, user_id, agent_id, knowledge_base_id, file_id, task_id, provider_config_id]
+policy_skipped:
+  case_ids: [PW-AUTH-03, PW-AUTH-04]
+  disposition: do_not_provision_external_oauth_or_cas_for_this_migration

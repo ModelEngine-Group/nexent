@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import io
 import os
 import uuid
@@ -8,6 +10,13 @@ from .client import minio_client
 from consts.const import S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
+
+from infrastructure.observability.knowledge import set_span_attributes, trace_knowledge_operation
+
+
+def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:
+    """Upload bytes to an exact object key without generating attachment metadata."""
+    return minio_client.upload_fileobj(io.BytesIO(content), object_name)
 
 
 def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
@@ -147,6 +156,7 @@ def upload_file(
     return response
 
 
+@trace_knowledge_operation("knowledge.minio.upload", "minio.upload")
 def upload_fileobj(
         file_obj: BinaryIO,
         file_name: str,
@@ -154,7 +164,8 @@ def upload_fileobj(
         prefix: str = "attachments",
         generate_presigned_url: bool = True,
         presigned_url_expires: int = 86400,
-        file_size: Optional[int] = None
+        file_size: Optional[int] = None,
+        object_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Upload file object to MinIO
@@ -171,8 +182,8 @@ def upload_fileobj(
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
     """
-    # Generate object name
-    object_name = generate_object_name(file_name, prefix=prefix)
+    # Generate object name when the caller did not pre-allocate one.
+    object_name = object_name or generate_object_name(file_name, prefix=prefix)
 
     # Calculate file size if not provided
     if file_size is None:
@@ -188,6 +199,7 @@ def upload_fileobj(
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
+    set_span_attributes(file_size_bytes=file_size, stage="minio.upload")
 
     # Restore original position (if file is still open)
     try:
@@ -275,6 +287,15 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     minio_client._ensure_initialized()
     bucket = bucket or minio_client.storage_config.default_bucket
     return minio_client.get_file_size(object_name, bucket)
+
+
+def get_file_size_from_minio_strict(
+    object_name: str,
+    bucket: Optional[str] = None,
+) -> Optional[int]:
+    """Return authoritative size, ``None`` only when MinIO confirms the object is missing."""
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    return minio_client.get_file_size_strict(object_name, bucket)
 
 
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:

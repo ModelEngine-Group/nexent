@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-ED416510CCE29002
+  feature_id: F-096
+  business_rule_ids:
+  - F-096-RULE-01
+  title: RunCancellationScope 取消时触发 cancel_active 主动取消在途任务并关闭 httpx 客户端｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: RunCancellationScope 取消时触发 cancel_active 主动取消在途任务并关闭 httpx 客户端｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 无本地固定资产依赖；httpx.AsyncClient、RunCancellationScope 与事件循环均通过测试替身（mock/stub）注入，不访问真实外部 A2A 服务。
+  test_data:
+    legacy_asset_declaration: '- 无（纯 mock 单元测试：注入 mock RunCancellationScope 与 mock httpx.AsyncClient，不加载本地 fixture/配置）'
+  steps:
+  - order: 1
+    action: 在本地工作区直接导入 sdk/nexent/core/agents/a2a_agent_proxy.py 的 ExternalA2AAgentProxy、A2AAgentInfo，构造最小有效输入。
+    expected: RunCancellationScope 取消时通过 register_closer 正确触发 cancel_active，在途 asyncio 任务被取消、httpx 连接被关闭，外部 A2A 流式/非流式调用及时释放且不再产出重复回调。
+  - order: 2
+    action: 注入 mock RunCancellationScope（提供 stop_event、register_closer、unregister_closer 契约）与 mock httpx.AsyncClient，并进入 asyncio
+      事件循环。
+    expected: _activate_call/_deactivate_call 正确维护活动 loop/task/token 生命周期，注册与注销成对、无泄漏。
+  - order: 3
+    action: 执行 _activate_call，断言 register_closer 以 cancel_active 作为 closer 被注册一次并记录返回 token，同时断言 _active_loop/_active_task
+      被设置为当前 loop 与当前 task。
+    expected: 边界分支（无 cancellation_scope、loop 已关闭）不抛异常、不产生额外副作用。
+  - order: 4
+    action: 调用 cancel_active，断言 stop_event 被 set、活动 task 通过 loop.call_soon_threadsafe 提交取消、httpx 客户端经 _close_client_once 触发
+      aclose 关闭连接。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 执行 _deactivate_call(token)，断言 unregister_closer 被调用一次，且 _active_loop/_active_task/_active_token 被清空。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 覆盖边界：cancellation_scope 为 None 时 _activate_call 返回 None 且不注册 closer；_active_loop 为 None 或已关闭时 cancel_active 提前返回且不提交
+      task.cancel/aclose。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 测试结束后释放临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - RunCancellationScope 取消时通过 register_closer 正确触发 cancel_active，在途 asyncio 任务被取消、httpx 连接被关闭，外部 A2A 流式/非流式调用及时释放且不再产出重复回调。
+  - _activate_call/_deactivate_call 正确维护活动 loop/task/token 生命周期，注册与注销成对、无泄漏。
+  - 边界分支（无 cancellation_scope、loop 已关闭）不抛异常、不产生额外副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 482
+  unit_boundary: 外部A2A代理
+  inputs:
+  - '- 无（纯 mock 单元测试：注入 mock RunCancellationScope 与 mock httpx.AsyncClient，不加载本地 fixture/配置）'
+  assertions:
+  - RunCancellationScope 取消时通过 register_closer 正确触发 cancel_active，在途 asyncio 任务被取消、httpx 连接被关闭，外部 A2A 流式/非流式调用及时释放且不再产出重复回调。
+  - _activate_call/_deactivate_call 正确维护活动 loop/task/token 生命周期，注册与注销成对、无泄漏。
+  - 边界分支（无 cancellation_scope、loop 已关闭）不抛异常、不产生额外副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

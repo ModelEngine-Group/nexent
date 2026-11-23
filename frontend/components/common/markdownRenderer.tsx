@@ -1,8 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -12,12 +13,28 @@ import rehypeKatex from "rehype-katex";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 // @ts-ignore
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
-import { resolveS3UrlToDataUrl } from "@/services/storageService";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  getLocalFileDownloadUrl,
+  resolveS3UrlToDataUrl,
+} from "@/services/storageService";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
+import { DirectiveChip } from "../../app/[locale]/newchat/ui/directive-text";
+import {
+  escapeSkillDirectivesForMarkdown,
+  remarkSkillXmlDirectives,
+  skillDirectiveFormatter,
+  skillDirectiveIconMap,
+} from "../../app/[locale]/newchat/ui/skill-directives";
 
 interface MarkdownRendererProps {
   content: string;
@@ -25,6 +42,7 @@ interface MarkdownRendererProps {
   searchResults?: SearchResult[];
   showDiagramToggle?: boolean;
   onCitationHover?: () => void;
+  onCitationClick?: (citationKey: string, citationContext: string) => void;
   enableMultimodal?: boolean;
   /**
    * When true, resolve s3:// media URLs in markdown into data URLs (base64)
@@ -32,6 +50,16 @@ interface MarkdownRendererProps {
    * the original S3 URL is not directly accessible by the browser.
    */
   resolveS3Media?: boolean;
+  /**
+   * Verified image URLs delivered by the backend (for example through a
+   * PICTURE_WEB event). When present, markdown images are ignored because the
+   * verified images are rendered separately.
+   */
+  trustedImageUrls?: string[];
+  /** Render registered skill XML tags as assistant-ui directive chips. */
+  enableSkillDirectives?: boolean;
+  /** Navigate to the skill file referenced by a directive chip. */
+  onSkillDirectiveClick?: (path: string) => void;
 }
 
 export interface MarkdownHeading {
@@ -44,6 +72,12 @@ interface ParsedMarkdownHeading extends MarkdownHeading {
   offset: number;
 }
 
+interface CitationReference {
+  key: string;
+  toolSign: string;
+  sourceIndex: number;
+}
+
 // Simple in-memory cache to avoid refetching the same S3 object multiple times
 const s3MediaCache = new Map<string, string>();
 const mediaObjectUrlCache = new Map<string, string>();
@@ -51,6 +85,9 @@ const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
 const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
 
 const isBrowserEnvironment = typeof window !== "undefined";
+
+const markdownUrlTransform = (url: string): string =>
+  url.startsWith("s3://") ? url : defaultUrlTransform(url);
 
 const flattenTextContent = (value: React.ReactNode): string => {
   if (typeof value === "string" || typeof value === "number") {
@@ -62,7 +99,9 @@ const flattenTextContent = (value: React.ReactNode): string => {
   }
 
   if (React.isValidElement(value)) {
-    return flattenTextContent(value.props?.children);
+    return flattenTextContent(
+      (value.props as { children?: React.ReactNode }).children
+    );
   }
 
   return "";
@@ -163,11 +202,12 @@ const extractFallbackMarkdownHeadings = (
   return headings;
 };
 
-const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[] => {
+const extractParsedMarkdownHeadings = (
+  content: string
+): ParsedMarkdownHeading[] => {
   try {
     const createId = createHeadingIdGenerator();
     const headings: ParsedMarkdownHeading[] = [];
-    const { unified } = require("unified") as { unified: () => any };
     const tree = unified()
       .use(remarkParse)
       .use(remarkGfm)
@@ -175,13 +215,18 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
       .parse(content);
 
     visit(tree, "heading", (node: any) => {
-      const rawText = normalizeMarkdownHeadingText(extractTextFromMarkdownNode(node));
+      const rawText = normalizeMarkdownHeadingText(
+        extractTextFromMarkdownNode(node)
+      );
       if (!rawText) {
         return;
       }
 
       headings.push({
-        offset: typeof node.position?.start?.offset === "number" ? node.position.start.offset : headings.length,
+        offset:
+          typeof node.position?.start?.offset === "number"
+            ? node.position.start.offset
+            : headings.length,
         id: createId(rawText),
         level: typeof node.depth === "number" ? node.depth : 1,
         text: rawText,
@@ -195,7 +240,56 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
 };
 
 export const extractMarkdownHeadings = (content: string): MarkdownHeading[] => {
-  return extractParsedMarkdownHeadings(content).map(({ id, level, text }) => ({ id, level, text }));
+  return extractParsedMarkdownHeadings(content).map(({ id, level, text }) => ({
+    id,
+    level,
+    text,
+  }));
+};
+
+const parseCitationReference = (value: string): CitationReference | null => {
+  const toolSign = value.charAt(0);
+  const sourceIndex = Number.parseInt(value.slice(1), 10);
+
+  if (!toolSign || Number.isNaN(sourceIndex)) {
+    return null;
+  }
+
+  return {
+    key: `${toolSign}${sourceIndex}`,
+    toolSign,
+    sourceIndex,
+  };
+};
+
+const buildCitationDisplayIndexMap = (
+  content: string,
+  searchResults: SearchResult[]
+): Map<string, number> => {
+  const validCitationKeys = new Set(
+    searchResults
+      .filter(
+        (result) => result.tool_sign && typeof result.cite_index === "number"
+      )
+      .map((result) => `${result.tool_sign}${result.cite_index}`)
+  );
+  const displayIndexMap = new Map<string, number>();
+  const citationPattern = /\[\[([^\]]+)\]\]/g;
+
+  for (const match of content.matchAll(citationPattern)) {
+    const reference = parseCitationReference(match[1]);
+    if (
+      !reference ||
+      !validCitationKeys.has(reference.key) ||
+      displayIndexMap.has(reference.key)
+    ) {
+      continue;
+    }
+
+    displayIndexMap.set(reference.key, displayIndexMap.size + 1);
+  }
+
+  return displayIndexMap;
 };
 
 const getSessionCachedValue = (key: string): string | null => {
@@ -308,13 +402,13 @@ const usePrefetchedMediaSource = (
   const shouldPrefetch =
     Boolean(
       options?.enable &&
-        src &&
-        typeof src === "string" &&
-        !src.startsWith("blob:") &&
-        (src.startsWith("s3://") ||
-          src.startsWith("http://") ||
-          src.startsWith("https://") ||
-          src.startsWith("/"))
+      src &&
+      typeof src === "string" &&
+      !src.startsWith("blob:") &&
+      (src.startsWith("s3://") ||
+        src.startsWith("http://") ||
+        src.startsWith("https://") ||
+        src.startsWith("/"))
     ) || false;
 
   const [resolvedSrc, setResolvedSrc] = React.useState<string | null>(() => {
@@ -527,13 +621,19 @@ const getBackgroundColor = (toolSign: string) => {
 // Replace the original LinkIcon component
 const CitationBadge = ({
   toolSign,
-  citeIndex,
+  sourceIndex,
+  displayIndex,
 }: {
   toolSign: string;
-  citeIndex: number;
+  sourceIndex: number;
+  displayIndex: number;
 }) => (
   <span
     className="ds-markdown-cite"
+    data-citation-key={`${toolSign}${sourceIndex}`}
+    data-citation-tool-sign={toolSign}
+    data-citation-source-index={sourceIndex}
+    data-citation-display-index={displayIndex}
     style={{
       verticalAlign: "middle",
       fontVariant: "tabular-nums",
@@ -555,19 +655,74 @@ const CitationBadge = ({
       top: "-2px",
     }}
   >
-    {citeIndex}
+    {displayIndex}
   </span>
 );
+
+/**
+ * A citation belongs to the sentence immediately before it. Consecutive
+ * citation badges share that sentence, while another badge, a newline, or a
+ * sentence-ending punctuation mark starts a new citation scope.
+ */
+const getCitationScopeText = (citationElement: HTMLElement | null) => {
+  if (!citationElement) return "";
+  const citationBadge = citationElement.querySelector(".ds-markdown-cite");
+  const sentenceContainer = citationElement.closest(
+    "p, li, td, th, h1, h2, h3, h4, h5, h6"
+  );
+  if (!citationBadge || !sentenceContainer) return "";
+
+  const citationBadges = Array.from(
+    sentenceContainer.querySelectorAll(".ds-markdown-cite")
+  );
+  let firstBadgeInGroup = citationBadge;
+  let badgeIndex = citationBadges.indexOf(citationBadge);
+  while (badgeIndex > 0) {
+    const previousBadge = citationBadges[badgeIndex - 1];
+    const gap = document.createRange();
+    gap.setStartAfter(previousBadge);
+    gap.setEndBefore(firstBadgeInGroup);
+    if (gap.toString().trim()) break;
+    firstBadgeInGroup = previousBadge;
+    badgeIndex -= 1;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(sentenceContainer);
+  range.setEndBefore(firstBadgeInGroup);
+  const textBeforeCitation = range.toString();
+  let sentenceStart = -1;
+  for (let offset = textBeforeCitation.length - 1; offset >= 0; offset -= 1) {
+    const character = textBeforeCitation[offset];
+    if (character === "\n" || character === "|") {
+      sentenceStart = offset;
+      break;
+    }
+    if ("。！？!?".includes(character)) {
+      sentenceStart = offset;
+      break;
+    }
+    if (character === "." && /\s/.test(textBeforeCitation[offset + 1] || "")) {
+      sentenceStart = offset;
+      break;
+    }
+  }
+  return textBeforeCitation.slice(sentenceStart + 1).trim();
+};
 
 // Modified HoverableText component
 const HoverableText = ({
   text,
+  displayIndex,
   searchResults,
   onCitationHover,
+  onCitationClick,
 }: {
   text: string;
+  displayIndex: number;
   searchResults?: SearchResult[];
   onCitationHover?: () => void;
+  onCitationClick?: (citationKey: string, citationContext: string) => void;
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const containerRef = React.useRef<HTMLSpanElement>(null);
@@ -594,6 +749,25 @@ const HoverableText = ({
   const matchedResult = searchResults?.find(
     (result) => result.tool_sign === toolSign && result.cite_index === citeIndex
   );
+
+  const handleCitationClick = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (matchedResult) {
+      const citationContext = getCitationScopeText(containerRef.current);
+      onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
+    }
+  };
+
+  // Keyboard activation (Enter / Space) keeps the citation marker accessible.
+  const handleCitationKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (matchedResult) {
+      const citationContext = getCitationScopeText(containerRef.current);
+      onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
+    }
+  };
 
   // Handle mouse events
   React.useEffect(() => {
@@ -649,10 +823,17 @@ const HoverableText = ({
       const { x: mouseX, y: mouseY } = mousePositionRef.current;
 
       // Find any visible tooltip popups (antd uses role="tooltip")
-      const tooltipEls = Array.from(document.querySelectorAll('[role="tooltip"]')) as HTMLElement[];
+      const tooltipEls = Array.from(
+        document.querySelectorAll('[role="tooltip"]')
+      ) as HTMLElement[];
       const isMouseOverTooltip = tooltipEls.some((el) => {
         const rect = el.getBoundingClientRect();
-        return mouseX >= rect.left && mouseX <= rect.right && mouseY >= rect.top && mouseY <= rect.bottom;
+        return (
+          mouseX >= rect.left &&
+          mouseX <= rect.right &&
+          mouseY >= rect.top &&
+          mouseY <= rect.bottom
+        );
       });
 
       if (!linkElement && !isMouseOverTooltip) {
@@ -662,7 +843,12 @@ const HoverableText = ({
 
       const linkRect = linkElement?.getBoundingClientRect();
 
-      const isMouseOverLink = !!linkRect && mouseX >= linkRect.left && mouseX <= linkRect.right && mouseY >= linkRect.top && mouseY <= linkRect.bottom;
+      const isMouseOverLink =
+        !!linkRect &&
+        mouseX >= linkRect.left &&
+        mouseX <= linkRect.right &&
+        mouseY >= linkRect.top &&
+        mouseY <= linkRect.bottom;
 
       // Close tooltip if mouse is neither over tooltip nor link icon
       if (!isMouseOverTooltip && !isMouseOverLink) {
@@ -707,28 +893,47 @@ const HoverableText = ({
 
   return (
     <TooltipProvider>
-      <Tooltip
-        styles={{
-          container: { padding: 0, background: "transparent", boxShadow: "none" },
-        }}
-        title={
-          <div
-            className="z-[9999] bg-white px-3 py-2 text-sm border border-gray-200 rounded-md shadow-md max-w-xl overflow-hidden"
-            style={
-              {
-                "--scrollbar-width": "8px",
-                "--scrollbar-height": "8px",
-                "--scrollbar-track-bg": "transparent",
-                "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
-                "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
-                "--scrollbar-thumb-radius": "9999px",
-                boxSizing: "border-box",
-                /* allow larger tooltip but constrain to viewport */
-                maxWidth: "min(720px, 50vw)",
-                width: "min(720px, 50vw)",
-              } as React.CSSProperties
-            }
+      <Tooltip open={isOpen}>
+        <TooltipTrigger asChild>
+          <span
+            ref={containerRef}
+            className="inline-flex items-center relative"
+            style={{ zIndex: isOpen ? 1000 : "auto" }}
           >
+            <button
+              type="button"
+              className="inline-flex cursor-pointer items-center border-0 bg-transparent p-0 transition-colors"
+              style={{ font: "inherit" }}
+              aria-label={`Citation ${toolSign}${citeIndex}`}
+              onClick={handleCitationClick}
+              onKeyDown={handleCitationKeyDown}
+            >
+              <CitationBadge
+                toolSign={toolSign}
+                sourceIndex={citeIndex}
+                displayIndex={displayIndex}
+              />
+            </button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="z-[9999] max-w-xl overflow-hidden bg-white px-3 py-2 text-sm border border-gray-200 rounded-md shadow-md"
+          style={
+            {
+              "--scrollbar-width": "8px",
+              "--scrollbar-height": "8px",
+              "--scrollbar-track-bg": "transparent",
+              "--scrollbar-thumb-bg": "var(--scrollbar-thumb)",
+              "--scrollbar-thumb-hover-bg": "var(--scrollbar-thumb-hover)",
+              "--scrollbar-thumb-radius": "9999px",
+              boxSizing: "border-box",
+              maxWidth: "min(720px, 50vw)",
+              width: "min(720px, 50vw)",
+            } as React.CSSProperties
+          }
+        >
+          <div>
             <div
               ref={tooltipRef}
               className="whitespace-pre-wrap overflow-y-auto"
@@ -760,14 +965,6 @@ const HoverableText = ({
                 div::-webkit-scrollbar-thumb:hover {
                   background: var(--scrollbar-thumb-hover-bg);
                 }
-                @media (prefers-color-scheme: dark) {
-                  div::-webkit-scrollbar-thumb {
-                    background: rgb(55, 65, 81);
-                  }
-                  div::-webkit-scrollbar-thumb:hover {
-                    background: rgb(75, 85, 99);
-                  }
-                }
               `}</style>
               {matchedResult ? (
                 <>
@@ -795,19 +992,7 @@ const HoverableText = ({
               ) : null}
             </div>
           </div>
-        }
-        open={isOpen}
-        placement="top"
-      >
-        <span
-          ref={containerRef}
-          className="inline-flex items-center relative"
-          style={{ zIndex: isOpen ? 1000 : "auto" }}
-        >
-          <span className="inline-flex items-center cursor-pointer transition-colors">
-            <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
-          </span>
-        </span>
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -822,7 +1007,7 @@ const HoverableText = ({
  */
 const convertLatexDelimiters = (content: string): string => {
   // Quick check: only process if LaTeX delimiters are present
-  if (!content.includes('\\(') && !content.includes('\\[')) {
+  if (!content.includes("\\(") && !content.includes("\\[")) {
     return content;
   }
 
@@ -840,14 +1025,17 @@ const convertLatexDelimiters = (content: string): string => {
  * Handles both complete and incomplete tags (for streaming scenarios)
  * - <code>...</code> → ```python ... ```
  * - <code>... (incomplete) → ```python\n (open code fence)
- * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
- * - <DISPLAY:language>... (incomplete) → ```language\n (open code fence)
+ * - <display:language>...</display> → ```language ... ```
+ * - <display:language>... (incomplete) → ```language\n (open code fence)
  */
 const convertCustomCodeTags = (content: string): string => {
-  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
-  content = content.replace(/<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g, (_match, language, code) => {
-    return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
-  });
+  // Step 1: Handle complete <display:language>...</display> blocks
+  content = content.replace(
+    /<display:(\w+)>([\s\S]*?)<\/display>/g,
+    (_match, language, code) => {
+      return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+    }
+  );
 
   // Step 2: Handle complete <code>...</code> blocks
   content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
@@ -855,10 +1043,13 @@ const convertCustomCodeTags = (content: string): string => {
   });
 
   // Step 3: Handle incomplete tags during streaming
-  // <DISPLAY:language> without closing </DISPLAY> → ```language\n
-  content = content.replace(/<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g, (_match, language) => {
-    return `\`\`\`${language}\n`;
-  });
+  // <display:language> without closing </display> → ```language\n
+  content = content.replace(
+    /<display:(\w+)>(?![\s\S]*<\/display>)/g,
+    (_match, language) => {
+      return `\`\`\`${language}\n`;
+    }
+  );
 
   // <code> without closing </code> → ```python\n
   content = content.replace(/<code>(?![\s\S]*<\/code>)/g, () => {
@@ -875,51 +1066,53 @@ interface VideoWithErrorHandlingProps {
   props?: React.VideoHTMLAttributes<HTMLVideoElement>;
 }
 
-const VideoWithErrorHandling: React.FC<VideoWithErrorHandlingProps> = React.memo(({ src, alt, props = {} }) => {
-  const { t } = useTranslation("common");
-  const [hasError, setHasError] = React.useState(false);
+const VideoWithErrorHandling: React.FC<VideoWithErrorHandlingProps> =
+  React.memo(
+    ({ src, alt, props = {} }) => {
+      const { t } = useTranslation("common");
+      const [hasError, setHasError] = React.useState(false);
 
-  if (hasError) {
-    return (
-      <div className="markdown-media-error">
-        <div className="markdown-media-error-message">
-          {t("chatStreamMessage.videoLinkUnavailable", {
-            defaultValue: "This video link is unavailable",
-          })}
-        </div>
-        {alt && (
-          <div className="markdown-media-error-caption">{alt}</div>
-        )}
-      </div>
-    );
-  }
+      if (hasError) {
+        return (
+          <div className="markdown-media-error">
+            <div className="markdown-media-error-message">
+              {t("chatStreamMessage.videoLinkUnavailable", {
+                defaultValue: "This video link is unavailable",
+              })}
+            </div>
+            {alt && <div className="markdown-media-error-caption">{alt}</div>}
+          </div>
+        );
+      }
 
-  return (
-    <figure className="markdown-video-wrapper">
-      <video
-        className="markdown-video"
-        controls
-        preload="metadata"
-        playsInline
-        src={src}
-        onError={() => setHasError(true)}
-        {...props}
-      >
-        {t("chatStreamMessage.videoNotSupported", {
-          defaultValue: "Sorry, your browser does not support embedded videos.",
-        })}
-      </video>
-      {alt ? (
-        <figcaption className="markdown-video-caption">{alt}</figcaption>
-      ) : null}
-    </figure>
+      return (
+        <figure className="markdown-video-wrapper">
+          <video
+            className="markdown-video"
+            controls
+            preload="metadata"
+            playsInline
+            src={src}
+            onError={() => setHasError(true)}
+            {...props}
+          >
+            {t("chatStreamMessage.videoNotSupported", {
+              defaultValue:
+                "Sorry, your browser does not support embedded videos.",
+            })}
+          </video>
+          {alt ? (
+            <figcaption className="markdown-video-caption">{alt}</figcaption>
+          ) : null}
+        </figure>
+      );
+    },
+    (prevProps, nextProps) => {
+      // Custom comparison function to prevent unnecessary re-renders
+      // Only compare src and alt, props object reference may change but content is the same
+      return prevProps.src === nextProps.src && prevProps.alt === nextProps.alt;
+    }
   );
-}, (prevProps, nextProps) => {
-  // Custom comparison function to prevent unnecessary re-renders
-  // Only compare src and alt, props object reference may change but content is the same
-  return prevProps.src === nextProps.src &&
-         prevProps.alt === nextProps.alt;
-});
 
 VideoWithErrorHandling.displayName = "VideoWithErrorHandling";
 
@@ -929,38 +1122,39 @@ interface ImageWithErrorHandlingProps {
   alt?: string | null;
 }
 
-const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> = React.memo(({ src, alt }) => {
-  const { t } = useTranslation("common");
-  const [hasError, setHasError] = React.useState(false);
+const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> =
+  React.memo(
+    ({ src, alt }) => {
+      const { t } = useTranslation("common");
+      const [hasError, setHasError] = React.useState(false);
 
-  if (hasError) {
-    return (
-      <div className="markdown-media-error">
-        <div className="markdown-media-error-message">
-          {t("chatStreamMessage.imageLinkUnavailable", {
-            defaultValue: "This image link is unavailable",
-          })}
-        </div>
-        {alt && (
-          <div className="markdown-media-error-caption">{alt}</div>
-        )}
-      </div>
-    );
-  }
+      if (hasError) {
+        return (
+          <div className="markdown-media-error">
+            <div className="markdown-media-error-message">
+              {t("chatStreamMessage.imageLinkUnavailable", {
+                defaultValue: "This image link is unavailable",
+              })}
+            </div>
+            {alt && <div className="markdown-media-error-caption">{alt}</div>}
+          </div>
+        );
+      }
 
-  return (
-    <img
-      src={src}
-      alt={alt ?? undefined}
-      className="markdown-img"
-      onError={() => setHasError(true)}
-    />
+      return (
+        <img
+          src={src}
+          alt={alt ?? undefined}
+          className="markdown-img"
+          onError={() => setHasError(true)}
+        />
+      );
+    },
+    (prevProps, nextProps) => {
+      // Custom comparison function to prevent unnecessary re-renders
+      return prevProps.src === nextProps.src && prevProps.alt === nextProps.alt;
+    }
   );
-}, (prevProps, nextProps) => {
-  // Custom comparison function to prevent unnecessary re-renders
-  return prevProps.src === nextProps.src &&
-         prevProps.alt === nextProps.alt;
-});
 
 ImageWithErrorHandling.displayName = "ImageWithErrorHandling";
 
@@ -974,7 +1168,7 @@ export const CodeBlock: React.FC<{
 }> = ({ codeContent, language = "python" }) => {
   const { t } = useTranslation("common");
 
-const customStyle = {
+  const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {
       ...oneLight['pre[class*="language-"]'],
@@ -1042,14 +1236,37 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   searchResults = [],
   showDiagramToggle = true,
   onCitationHover,
+  onCitationClick,
   enableMultimodal = true,
   resolveS3Media = false,
+  trustedImageUrls = [],
+  enableSkillDirectives = false,
+  onSkillDirectiveClick,
 }) => {
   const { t } = useTranslation("common");
 
   // Preprocess content: convert LaTeX delimiters and custom code tags
-  const processedContent = convertCustomCodeTags(convertLatexDelimiters(content));
-  const extractedHeadings = React.useMemo(() => extractParsedMarkdownHeadings(content), [content]);
+  const convertedContent = convertCustomCodeTags(
+    convertLatexDelimiters(content)
+  );
+  const processedContent = enableSkillDirectives
+    ? escapeSkillDirectivesForMarkdown(convertedContent)
+    : convertedContent;
+  const extractedHeadings = React.useMemo(
+    () => extractParsedMarkdownHeadings(content),
+    [content]
+  );
+  const citationDisplayIndexMap = React.useMemo(
+    () => buildCitationDisplayIndexMap(processedContent, searchResults),
+    [processedContent, searchResults]
+  );
+  const citationIndexMapAttribute = React.useMemo(() => {
+    if (citationDisplayIndexMap.size === 0) {
+      return undefined;
+    }
+
+    return JSON.stringify(Object.fromEntries(citationDisplayIndexMap));
+  }, [citationDisplayIndexMap]);
   let renderedHeadingIndex = 0;
 
   const renderCodeFallback = (text: string, key?: React.Key) => (
@@ -1096,7 +1313,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       return renderMediaFallback(src, alt);
     }
 
-    return <VideoWithErrorHandling key={src} src={src} alt={alt} props={props} />;
+    return (
+      <VideoWithErrorHandling key={src} src={src} alt={alt} props={props} />
+    );
   };
 
   const ImageResolver: React.FC<{ src?: string; alt?: string | null }> = ({
@@ -1107,6 +1326,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       typeof src === "string" ? src : undefined,
       resolveS3Media
     );
+
+    if (trustedImageUrls.length > 0) {
+      return null;
+    }
 
     if (!enableMultimodal) {
       return renderMediaFallback(src, alt);
@@ -1120,7 +1343,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       return renderVideoElement({ src: resolvedSrc, alt });
     }
 
-    return <ImageWithErrorHandling key={resolvedSrc} src={resolvedSrc} alt={alt} />;
+    return (
+      <ImageWithErrorHandling key={resolvedSrc} src={resolvedSrc} alt={alt} />
+    );
   };
 
   // Modified processText function logic
@@ -1134,22 +1359,21 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           const match = part.match(/^\[\[([^\]]+)\]\]$/);
           if (match) {
             const innerText = match[1];
-
-            const toolSign = innerText.charAt(0);
-            const citeIndex = parseInt(innerText.slice(1));
-            const hasMatch = searchResults?.some(
-              (result) =>
-                result.tool_sign === toolSign && result.cite_index === citeIndex
-            );
+            const reference = parseCitationReference(innerText);
+            const displayIndex = reference
+              ? citationDisplayIndexMap.get(reference.key)
+              : undefined;
 
             // Only show citation icon when matching search result is found
-            if (hasMatch) {
+            if (displayIndex !== undefined) {
               return (
                 <HoverableText
                   key={index}
                   text={innerText}
+                  displayIndex={displayIndex}
                   searchResults={searchResults}
                   onCitationHover={onCitationHover}
+                  onCitationClick={onCitationClick}
                 />
               );
             } else {
@@ -1164,14 +1388,16 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             if (!enableMultimodal) {
               return renderCodeFallback(code, `mmd-placeholder-${index}`);
             }
-            return <Diagram key={`mmd-${index}`} code={code} className="my-4" />;
+            return (
+              <Diagram key={`mmd-${index}`} code={code} className="my-4" />
+            );
           }
           // Handle line breaks in text content
-          if (part.includes('\n')) {
-            return part.split('\n').map((line, lineIndex) => (
+          if (part.includes("\n")) {
+            return part.split("\n").map((line, lineIndex) => (
               <React.Fragment key={`${index}-${lineIndex}`}>
                 {line}
-                {lineIndex < part.split('\n').length - 1 && <br />}
+                {lineIndex < part.split("\n").length - 1 && <br />}
               </React.Fragment>
             ));
           }
@@ -1181,10 +1407,36 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
   };
 
+  const processTextWithDirectives = (text: string) => {
+    if (!enableSkillDirectives) return processText(text);
+    const segments = skillDirectiveFormatter.parse(text);
+    if (segments.length === 1 && segments[0]?.kind === "text") {
+      return processText(text);
+    }
+    return segments.map((segment, index) =>
+      segment.kind === "text" ? (
+        <React.Fragment key={`text-${index}`}>
+          {processText(segment.text)}
+        </React.Fragment>
+      ) : (
+        <DirectiveChip
+          key={`${segment.type}-${segment.id}-${index}`}
+          segment={segment}
+          iconMap={skillDirectiveIconMap}
+          onClick={
+            onSkillDirectiveClick
+              ? (clickedSegment) => onSkillDirectiveClick(clickedSegment.id)
+              : undefined
+          }
+        />
+      )
+    );
+  };
+
   // Create wrapper component to handle different types of child elements
   const TextWrapper = ({ children }: { children: any }) => {
     if (typeof children === "string") {
-      return processText(children);
+      return processTextWithDirectives(children);
     }
     if (Array.isArray(children)) {
       return (
@@ -1193,7 +1445,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             if (typeof child === "string") {
               return (
                 <React.Fragment key={index}>
-                  {processText(child)}
+                  {processTextWithDirectives(child)}
                 </React.Fragment>
               );
             }
@@ -1205,16 +1457,25 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     return children;
   };
 
-  const renderHeading = (level: 1 | 2 | 3 | 4 | 5 | 6, children: React.ReactNode, node?: any) => {
+  const renderHeading = (
+    level: 1 | 2 | 3 | 4 | 5 | 6,
+    children: React.ReactNode,
+    node?: any
+  ) => {
     const headingIndex = renderedHeadingIndex;
-    const headingText = normalizeMarkdownHeadingText(flattenTextContent(children));
-    const headingOffset = typeof node?.position?.start?.offset === "number"
-      ? node.position.start.offset
-      : extractedHeadings[headingIndex]?.offset ?? headingIndex;
-    const matchedHeading = extractedHeadings.find((heading) => heading.offset === headingOffset);
+    const headingText = normalizeMarkdownHeadingText(
+      flattenTextContent(children)
+    );
+    const headingOffset =
+      typeof node?.position?.start?.offset === "number"
+        ? node.position.start.offset
+        : (extractedHeadings[headingIndex]?.offset ?? headingIndex);
+    const matchedHeading = extractedHeadings.find(
+      (heading) => heading.offset === headingOffset
+    );
     const headingId = matchedHeading?.id ?? slugifyHeadingText(headingText);
     renderedHeadingIndex += 1;
-    const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
+    const HeadingTag = `h${level}` as React.ElementType;
 
     return (
       <HeadingTag
@@ -1255,10 +1516,20 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
   return (
     <>
-      <div className={`markdown-body ${className || ""}`}>
+      <div
+        className={`markdown-body ${className || ""}`}
+        data-citation-index-map={citationIndexMapAttribute}
+      >
         <MarkdownErrorBoundary rawContent={processedContent}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath] as any}
+            urlTransform={markdownUrlTransform}
+            remarkPlugins={
+              [
+                remarkGfm,
+                remarkMath,
+                ...(enableSkillDirectives ? [remarkSkillXmlDirectives] : []),
+              ] as any
+            }
             rehypePlugins={
               [
                 rehypeUnwrapMedia,
@@ -1289,20 +1560,14 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 </p>
               ),
               // Horizontal rule
-              hr: () => (
-                <hr className="markdown-hr" />
-              ),
+              hr: () => <hr className="markdown-hr" />,
               // Ordered list
               ol: ({ children }: any) => (
-                <ol className="markdown-ol">
-                  {children}
-                </ol>
+                <ol className="markdown-ol">{children}</ol>
               ),
               // Unordered list
               ul: ({ children }: any) => (
-                <ul className="markdown-ul">
-                  {children}
-                </ul>
+                <ul className="markdown-ul">{children}</ul>
               ),
               // List item
               li: ({ children }: any) => (
@@ -1346,52 +1611,67 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               ),
               // Link
               a: ({ href, children, ...props }: any) => {
+                const resolvedHref = getLocalFileDownloadUrl(href) || href;
                 return (
-                  <a href={href} className="markdown-link" {...props}>
+                  <a href={resolvedHref} className="markdown-link" {...props}>
                     <TextWrapper>{children}</TextWrapper>
                   </a>
                 );
               },
               pre: ({ children }: any) => <>{children}</>,
               // Code blocks and inline code
-              code({ node, inline, className, children, ...props }: any) {
+              code({ node, className, children, ...props }: any) {
                 try {
-                  const match = /language-(\w+)/.exec(className || "");
+                  const match = /language-([\w-]+)/.exec(className || "");
                   const raw = Array.isArray(children)
                     ? children.join("")
-                    : children ?? "";
+                    : (children ?? "");
                   const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
-                  if (match && match[1]) {
-                    // Check if it's a Mermaid diagram
+                  const isCodeBlock =
+                    node?.position?.start?.line !== node?.position?.end?.line;
+
+                  if (match?.[1] && isCodeBlock) {
                     if (match[1] === "mermaid") {
                       if (!enableMultimodal) {
-                      return renderCodeFallback(codeContent);
+                        return renderCodeFallback(codeContent);
                       }
-                      return <Diagram code={codeContent} className="my-4" showToggle={showDiagramToggle} />;
+                      return (
+                        <Diagram
+                          code={codeContent}
+                          className="my-4"
+                          showToggle={showDiagramToggle}
+                        />
+                      );
                     }
-                    if (!inline) {
-                      return <CodeBlock codeContent={codeContent} language={match[1]} />;
-                    }
+                    return (
+                      <CodeBlock
+                        codeContent={codeContent}
+                        language={match[1]}
+                      />
+                    );
                   }
-                } catch (error) {
-                  // Handle error silently
+                } catch {
+                  // Fall back to the default code renderer.
                 }
                 return (
-                  <code className="markdown-code" {...props}>
-                    <TextWrapper>{children}</TextWrapper>
+                  <code
+                    className={`markdown-code ${className || ""}`}
+                    {...props}
+                  >
+                    {children}
                   </code>
                 );
               },
               // Image
-              img: ({ src, alt }: any) => (
-                <ImageResolver src={src} alt={alt} />
-              ),
+              img: ({ src, alt }: any) => <ImageResolver src={src} alt={alt} />,
               // Video
               video: ({ children, ...props }: any) => {
                 const directSrc = props?.src;
                 const childSource = React.Children.toArray(children)
                   .map((child) =>
-                    React.isValidElement(child) ? child.props?.src : undefined
+                    React.isValidElement(child)
+                      ? (child.props as { src?: string }).src
+                      : undefined
                   )
                   .find(Boolean);
                 const videoSrc = directSrc ?? childSource;

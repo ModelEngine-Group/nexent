@@ -1,0 +1,10 @@
+schema_version: "1.0"
+changes:
+  - change_id: AGENT-GUIDE-REQ-001
+    change_type: requirement
+    requirement_id: AGENT-GUIDE-REQ-001
+    title: Add measured first-creation guide to Agent editor
+    description: Add four-step explanatory overlay after new creation with measured source styling and browser-local identity-scoped completion.
+    feature_contract_changed: true
+    affected_features: {existing: [AGENT-CONFIG-LAYOUT], added: [AGENT-CREATION-GUIDE], modified: [], retired: []}
+    affected_cases: {existing: [AGENT-CONFIG-D1-001], added: [AGENT-GUIDE-D1-001, AGENT-GUIDE-D4-001], modified: [], retired: []}

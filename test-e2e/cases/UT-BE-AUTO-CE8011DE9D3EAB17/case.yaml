@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-CE8011DE9D3EAB17
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: knowledge_base listing 合并 asset-owner 与租户结果（READ_ONLY 投影、稳定排序、facets 聚合）｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: knowledge_base listing 合并 asset-owner 与租户结果（READ_ONLY 投影、稳定排序、facets 聚合）｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测对象为 backend/management/services/knowledge_base/listing.py 中的纯函数（merge_indices_results、apply_read_only_to_asset_indices_info
+    等），仅依赖 consts.const.PERMISSION_READ，无需数据库/向量库/模型或外部服务。
+  test_data:
+    legacy_asset_declaration: '- 无（纯函数单元测试，仅本地代码与内存 fixture）'
+  steps:
+  - order: 1
+    action: 定位被测模块 backend/management/services/knowledge_base/listing.py，导入 apply_read_only_to_asset_indices_info、merge_indices_results、merge_list_indices_results、merge_paginated_list_indices_results、_merge_ordered_info、_sort_key。
+    expected: apply_read_only_to_asset_indices_info：result 不含 indices_info 或为空列表时原样返回且不新增键；含非空 indices_info 时返回新 dict，每个 info
+      的 permission 覆盖为 PERMISSION_READ，其余字段保留，且不修改原输入。
+  - order: 2
+    action: 构造纯函数输入 fixture（primary/asset_owner 的 indices、indices_info、total/count、facets），不依赖数据库或外部服务。
+    expected: 非分页合并：返回 indices 为 primary.indices + asset_owner.indices，count 为合并后长度；indices_info 为 primary + asset_owner 顺序拼接，asset
+      部分 permission 为 PERMISSION_READ。
+  - order: 3
+    action: 对 apply_read_only_to_asset_indices_info 分别验证无 indices_info、空列表、非空列表三种输入：断言 permission 被覆盖为 PERMISSION_READ、其余字段保留、原输入
+      dict 不被原地修改。
+    expected: 分页合并：indices_info 按 (update_time, knowledge_id 补零 20 位, name) 稳定降序合并并切片；total 为两侧 total/count 之和；next_offset
+      = offset + 本页条数，若 >= total 则为 None。
+  - order: 4
+    action: 对 merge_indices_results 以 offset=None/limit=None 验证非分页合并：indices 为 primary.indices + asset_owner.indices 顺序拼接，count
+      等于拼接后长度，indices_info 为 primary + asset_owner 顺序拼接且 asset 部分 permission 为 PERMISSION_READ。
+    expected: facets：sources、models 分别对 primary 与 asset_owner 的值去重并排序。
+  - order: 5
+    action: 对 merge_indices_results 传入 offset/limit 验证分页：indices_info 按 (update_time, knowledge_id 补零 20 位, name) 稳定降序合并后切片
+      [offset, offset+limit)；total 为 primary 与 asset_owner 的 total（缺省取 count）之和；next_offset 在 >= total 时为 None。
+    expected: indices 页由合并后 indices_info 的 name 组成；无 indices_info 时回退为对 combined_indices 切片。
+  - order: 6
+    action: 验证 facets.sources/facets.models 对 primary 与 asset_owner 的去重排序；验证无 indices_info 时 indices 页回退为对 combined_indices
+      切片。
+    expected: merge_list_indices_results / merge_paginated_list_indices_results 与 merge_indices_results 结果一致。
+  - order: 7
+    action: 验证两个包装函数 merge_list_indices_results / merge_paginated_list_indices_results 的输出与 merge_indices_results 等价。
+    expected: 测试过程无未处理异常，日志与输出不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 断言日志与输入 fixture 中不出现 API Key/Token/密码等敏感信息；测试结束释放临时对象，可重复执行。
+    expected: 测试过程无未处理异常，日志与输出不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - apply_read_only_to_asset_indices_info：result 不含 indices_info 或为空列表时原样返回且不新增键；含非空 indices_info 时返回新 dict，每个 info 的 permission
+    覆盖为 PERMISSION_READ，其余字段保留，且不修改原输入。
+  - 非分页合并：返回 indices 为 primary.indices + asset_owner.indices，count 为合并后长度；indices_info 为 primary + asset_owner 顺序拼接，asset
+    部分 permission 为 PERMISSION_READ。
+  - 分页合并：indices_info 按 (update_time, knowledge_id 补零 20 位, name) 稳定降序合并并切片；total 为两侧 total/count 之和；next_offset = offset
+    + 本页条数，若 >= total 则为 None。
+  - facets：sources、models 分别对 primary 与 asset_owner 的值去重并排序。
+  - indices 页由合并后 indices_info 的 name 组成；无 indices_info 时回退为对 combined_indices 切片。
+  - merge_list_indices_results / merge_paginated_list_indices_results 与 merge_indices_results 结果一致。
+  - 测试过程无未处理异常，日志与输出不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 417
+  unit_boundary: 列表检索合并
+  inputs:
+  - '- 无（纯函数单元测试，仅本地代码与内存 fixture）'
+  assertions:
+  - apply_read_only_to_asset_indices_info：result 不含 indices_info 或为空列表时原样返回且不新增键；含非空 indices_info 时返回新 dict，每个 info 的 permission
+    覆盖为 PERMISSION_READ，其余字段保留，且不修改原输入。
+  - 非分页合并：返回 indices 为 primary.indices + asset_owner.indices，count 为合并后长度；indices_info 为 primary + asset_owner 顺序拼接，asset
+    部分 permission 为 PERMISSION_READ。
+  - 分页合并：indices_info 按 (update_time, knowledge_id 补零 20 位, name) 稳定降序合并并切片；total 为两侧 total/count 之和；next_offset = offset
+    + 本页条数，若 >= total 则为 None。
+  - facets：sources、models 分别对 primary 与 asset_owner 的值去重并排序。
+  - indices 页由合并后 indices_info 的 name 组成；无 indices_info 时回退为对 combined_indices 切片。
+  - merge_list_indices_results / merge_paginated_list_indices_results 与 merge_indices_results 结果一致。
+  - 测试过程无未处理异常，日志与输出不出现明文 API Key/Token/Password/模型密钥。

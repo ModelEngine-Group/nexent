@@ -4,13 +4,13 @@
 
 This development container configuration sets up a complete Nexent development environment, including the following components:
 
-- Main development container (`nexent-dev`): Based on nexent/nexent image with development tools
-- Service containers:
+- Main development container (`nexent-data-process`): Based on the nexent/nexent-data-process image, with the repository code mounted into the container's `/opt` directory and a Python development environment pre-installed
+- Service containers (infrastructure and application services deployed via `bash deploy.sh docker`):
   - Elasticsearch (`nexent-elasticsearch`)
   - PostgreSQL (`nexent-postgresql`)
   - MinIO (`nexent-minio`)
-  - Nexent backend (`nexent`)
-  - Nexent frontend (`nexent-web`)
+  - Backend Config service (`nexent-config`)
+  - Web frontend (`nexent-web`)
   - Data processing service (`nexent-data-process`)
 
 ## 2. Usage Steps
@@ -18,7 +18,7 @@ This development container configuration sets up a complete Nexent development e
 ### 2.1 Prerequisites
 
 1. Install Cursor/VS Code
-2. Install Dev Containers extension (`anysphere.remote-containers` and `anysphere.remote-sshRemote`)
+2. Install Dev Containers extension (`anysphere.remote-containers`)
 3. Ensure Docker and Docker Compose are installed and running
 
 ### 2.2 Starting Project with Dev Container
@@ -26,7 +26,7 @@ This development container configuration sets up a complete Nexent development e
 1. Clone the project locally
 2. Open project folder in Cursor/VS Code
 3. Run `bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development` from the repository root to start base containers
-4. Enter `nexent-minio` and `nexent-elasticsearch` containers, copy `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `ELASTICSEARCH_API_KEY` environment variables to corresponding positions in `deploy/docker/compose/docker-compose.dev.yml`
+4. The deploy script writes generated variables such as `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `ELASTICSEARCH_API_KEY` back to `deploy/env/.env`. Services in `deploy/docker/compose/docker-compose.dev.yml` load these settings automatically via `env_file`, so no manual copying is needed
 5. Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Reopen in Container ...`
 6. Cursor will start the development container based on configuration in `.devcontainer` directory
 
@@ -39,15 +39,12 @@ This development container configuration sets up a complete Nexent development e
 
 ## 3. Port Mapping
 
-The following ports are mapped in devcontainer.json:
+The following ports are forwarded via `forwardPorts` in `.devcontainer/devcontainer.json`:
 
 - 3000: Nexent Web interface
-- 5010: Nexent backend service
 - 5012: Data processing service
-- 9010: MinIO API
-- 9011: MinIO console
-- 9210: Elasticsearch API
-- 5434: PostgreSQL
+
+Other service ports (Backend Config service 5010, PostgreSQL 5434, MinIO API 9010, MinIO console 9011, Elasticsearch API 9210, etc.) are published directly on the host by Docker Compose under the development port policy and can be accessed directly from the host machine.
 
 ## 4. Customizing Development Environment
 
@@ -67,5 +64,5 @@ sudo chown -R $(id -u):$(id -g) /opt
 If container startup fails, try:
 
 1. Rebuild container: Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Rebuild Container`
-2. Check Docker logs: `docker logs nexent-dev`
+2. Check Docker logs: `docker logs nexent-data-process`
 3. Check if configuration in `.env` file is correct

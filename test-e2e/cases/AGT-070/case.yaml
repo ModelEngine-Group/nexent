@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-070
+  feature_id: F-148
+  business_rule_ids:
+  - F-148-RULE-01
+  title: Northbound 请求覆盖 DB、未知映射被忽略、per-agent/tool 结构｜异常/边界/越权
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Northbound 请求覆盖 DB、未知映射被忽略、per-agent/tool 结构｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/northbound.yaml
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/northbound.yaml'
+  steps:
+  - order: 1
+    action: 从本地 Northbound 配置和 secrets.env 取得测试 API Key，并使用本批次已创建 Agent 名称。
+    expected: Northbound 未知 tool_params 映射不导致 4xx，流式运行到达终态。
+  - order: 2
+    action: 调用 /nb/v1/health 确认服务与鉴权有效。
+    expected: 固定标记 NB_UNKNOWN_MAPPING_IGNORED 可见。
+  - order: 3
+    action: 向真实 Northbound Chat Run 发送 tool_params，其中包含不存在的工具名和未知参数映射。
+    expected: 未知映射不写入 Agent 配置、不创建额外工具绑定或跨租户数据。
+  - order: 4
+    action: 保存状态码、request_id/run_id 和脱敏 SSE 事件。
+    expected: API Key、Token 和模型密钥不出现在响应、日志和报告中。
+  - order: 5
+    action: 断言请求不会因未知映射返回 4xx；当前产品忽略未知映射并继续执行。
+    expected: API Key、Token 和模型密钥不出现在响应、日志和报告中。
+  - order: 6
+    action: 等待终态并断言固定标记 NB_UNKNOWN_MAPPING_IGNORED。
+    expected: API Key、Token 和模型密钥不出现在响应、日志和报告中。
+  - order: 7
+    action: 查询 Agent 配置与会话，确认未知映射未持久化、未创建额外绑定；清理临时会话。
+    expected: API Key、Token 和模型密钥不出现在响应、日志和报告中。
+  expected_results:
+  - Northbound 未知 tool_params 映射不导致 4xx，流式运行到达终态。
+  - 固定标记 NB_UNKNOWN_MAPPING_IGNORED 可见。
+  - 未知映射不写入 Agent 配置、不创建额外工具绑定或跨租户数据。
+  - API Key、Token 和模型密钥不出现在响应、日志和报告中。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 287
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - Northbound 未知 tool_params 映射不导致 4xx，流式运行到达终态。
+  - 固定标记 NB_UNKNOWN_MAPPING_IGNORED 可见。
+  - 未知映射不写入 Agent 配置、不创建额外工具绑定或跨租户数据。
+  - API Key、Token 和模型密钥不出现在响应、日志和报告中。
+  cleanup:
+  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

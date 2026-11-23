@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-3B69B045EA9A318F
+  feature_id: F-156
+  business_rule_ids: [F-156-RULE-01]
+  title: 系统提示通过 SDK prompt bundle 注入静态 Nexent 身份及 platform authority
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证上下文构建重构后保留静态平台身份、租户身份隔离和安全日志契约。
+  preconditions:
+  - 本地 backend/SDK 依赖可导入，不要求外部模型在线。
+  test_data:
+    prompt_bundle: SDK 自带 manager 的 zh/en 模板，不含租户身份或凭据。
+  steps:
+  - order: 1
+    action: 检查 build_context_inputs 公共参数，不依赖已删除的私有 header 函数。
+    expected: 参数不含 app_name、app_description、user_id。
+  - order: 2
+    action: 分别加载 zh/en 的 AgentPromptBundle，通过 backend build_context_inputs 生成上下文。
+    expected: 两种语言均包含静态 Nexent 身份、开源平台描述、平台身份标题和使用用户消息时间标记的指引。
+  - order: 3
+    action: 检查 system:header 的唯一性、类型、优先级、来源及 authority。
+    expected: 唯一 SYSTEM header，priority=100、source=agent_prompt:header、authority=platform，不存在 tenant header。
+  - order: 4
+    action: 检查 header 不含租户身份注入参数，检查构建日志。
+    expected: header 不含 app_name、app_description、user_id，日志不出现凭据。
+  expected_results:
+  - 公共上下文构建入口不接受租户身份参数。
+  - zh/en 静态身份和用户消息时间指引存在，时间不依赖 header 中动态生成。
+  - system:header 唯一，平台 authority、类型、优先级及来源正确。
+  - header 无租户身份注入，日志不输出密钥。
+  forbidden_side_effects: []
+  unit_boundary: Backend 上下文入口与 SDK prompt composer 的真实协作
+  inputs: [SDK 自带 zh/en manager prompt bundle]
+  assertions:
+  - 静态平台身份和上下文权限边界不因内部函数重构丢失。
+  acceptance:
+  - id: AC-01
+    description: SDK prompt bundle 经 backend 入口生成平台身份，拒绝租户身份注入并保留日志安全。
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2, 3, 4]
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 394

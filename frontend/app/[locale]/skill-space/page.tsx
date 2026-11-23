@@ -1,91 +1,159 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import React from "react";
+import { useEffect, useState } from "react";
+import { ConfigProvider } from "antd";
 import { motion } from "framer-motion";
+import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { Sparkles } from "lucide-react";
-
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import {
+  useMyEditableSkillCounts,
+  useSkillRepositoryListings,
+} from "@/hooks/skillRepository/useSkillRepositoryListings";
+import { CountBadge } from "./components/SkillRepositoryControls";
+import { SkillSpace } from "./skill-space";
+import { MySkill } from "./my-skill";
+import { ReviewCenter } from "./review-center";
 
-export default function SkillSpaceContent({}) {
+enum SkillRepositoryTab {
+  REPOSITORY = "repository",
+  MINE = "mine",
+  REVIEW = "review",
+}
+
+const skillRepositoryTheme = {
+  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
+};
+
+export default function SkillRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
+  const searchParams = useSearchParams();
+  const { user } = useAuthorizationContext();
+  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const [tab, setTab] = useState<SkillRepositoryTab>(
+    SkillRepositoryTab.REPOSITORY
+  );
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    /* eslint-disable react-hooks/set-state-in-effect -- URL changes select the requested tab. */
+    if (tabParam === SkillRepositoryTab.MINE) {
+      setTab(SkillRepositoryTab.MINE);
+    } else if (tabParam === SkillRepositoryTab.REPOSITORY) {
+      setTab(SkillRepositoryTab.REPOSITORY);
+    } else if (tabParam === SkillRepositoryTab.REVIEW && isAdmin) {
+      setTab(SkillRepositoryTab.REVIEW);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [searchParams, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin && tab === SkillRepositoryTab.REVIEW) {
+      /* eslint-disable react-hooks/set-state-in-effect -- Remove the admin tab when access changes. */
+      setTab(SkillRepositoryTab.REPOSITORY);
+      /* eslint-enable react-hooks/set-state-in-effect */
+    }
+  }, [isAdmin, tab]);
+
+  const { data: repositoryCountData } = useSkillRepositoryListings(
+    { status: "shared", page: 1, page_size: 1 },
+    true
+  );
+  const { data: mineCountData } = useMyEditableSkillCounts();
+  const { data: reviewCountData } = useSkillRepositoryListings(
+    { status: "pending_review", page: 1, page_size: 1 },
+    isAdmin
+  );
+  const repositoryTabCount = repositoryCountData?.pagination?.total ?? 0;
+  const mineTabCount = mineCountData?.counts?.all ?? 0;
+  const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
+  const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
+  const isMineTab = tab === SkillRepositoryTab.MINE;
+  const isReviewTab = tab === SkillRepositoryTab.REVIEW;
+
   return (
-    <>
-      <div className="w-full h-full">
-        <motion.div
-          initial="initial"
-          animate="in"
-          exit="out"
-          variants={pageVariants}
-          transition={pageTransition}
-          className="w-full h-full flex items-center justify-center"
-        >
-          <div className="flex flex-col items-center justify-center space-y-6 p-8 max-w-md text-center">
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="w-24 h-24 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg"
-            >
-              <Sparkles className="h-12 w-12 text-white" />
-            </motion.div>
+    <ConfigProvider theme={skillRepositoryTheme}>
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <motion.div
+            initial="initial"
+            animate="in"
+            exit="out"
+            variants={pageVariants}
+            transition={pageTransition}
+            className="flex h-full min-h-0 w-full flex-col px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
+          >
+            <div className="flex min-h-0 flex-1 flex-col gap-6">
+              <section className="flex shrink-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                    <Zap className="size-7" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
+                      {t("skillRepository.page.title")}
+                    </h1>
+                    <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                      {t("skillRepository.page.subtitle")}
+                    </p>
+                  </div>
+                </div>
+              </section>
 
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="text-3xl font-bold text-slate-800 dark:text-slate-100"
-            >
-              {t("skillSpace.comingSoon.title")}
-            </motion.h1>
+              <Tabs
+                value={tab}
+                onValueChange={(value) => setTab(value as SkillRepositoryTab)}
+                className="w-full shrink-0"
+              >
+                <TabsList className="flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
+                  <TabsTrigger
+                    value={SkillRepositoryTab.REPOSITORY}
+                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
+                  >
+                    <Inbox className="size-4" aria-hidden />
+                    {t("repository.page.tab.repository")}
+                    <CountBadge count={repositoryTabCount} />
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value={SkillRepositoryTab.MINE}
+                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
+                  >
+                    <User className="size-4" aria-hidden />
+                    {t("skillRepository.page.tab.mine")}
+                    <CountBadge count={mineTabCount} />
+                  </TabsTrigger>
+                  {isAdmin ? (
+                    <TabsTrigger
+                      value={SkillRepositoryTab.REVIEW}
+                      className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
+                    >
+                      <ShieldCheck className="size-4" aria-hidden />
+                      {t("repository.page.tab.review")}
+                      <CountBadge count={pendingReviewCount} strong />
+                    </TabsTrigger>
+                  ) : null}
+                </TabsList>
+              </Tabs>
 
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="text-lg text-slate-600 dark:text-slate-400"
-            >
-              {t("skillSpace.comingSoon.description")}
-            </motion.p>
-
-            <motion.ul
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="text-left space-y-2 w-full"
-            >
-              <li className="flex items-start space-x-2">
-                <span className="text-violet-500 mt-1">✓</span>
-                <span className="text-slate-600 dark:text-slate-400">
-                  {t("skillSpace.comingSoon.feature1")}
-                </span>
-              </li>
-              <li className="flex items-start space-x-2">
-                <span className="text-violet-500 mt-1">✓</span>
-                <span className="text-slate-600 dark:text-slate-400">
-                  {t("skillSpace.comingSoon.feature2")}
-                </span>
-              </li>
-              <li className="flex items-start space-x-2">
-                <span className="text-violet-500 mt-1">✓</span>
-                <span className="text-slate-600 dark:text-slate-400">
-                  {t("skillSpace.comingSoon.feature3")}
-                </span>
-              </li>
-            </motion.ul>
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.6 }}
-              className="px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-full text-sm font-medium shadow-md"
-            >
-              {t("skillSpace.comingSoon.badge")}
-            </motion.div>
-          </div>
-        </motion.div>
+              <div
+                data-testid="repository-tab-content"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-px pb-1 [scrollbar-gutter:stable]"
+              >
+                <SkillSpace active={isRepositoryTab} />
+                <MySkill active={isMineTab} />
+                {isAdmin ? <ReviewCenter active={isReviewTab} /> : null}
+              </div>
+            </div>
+          </motion.div>
+        </div>
       </div>
-    </>
+    </ConfigProvider>
   );
 }

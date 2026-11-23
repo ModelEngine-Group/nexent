@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-TAG-ENTRY-CLEANUP-20261021
+  change_type: refactor
+  title: Remove unreachable resource-picker tag management paths
+  description: Address PR 4155 review by removing the unused management props, local dialog state and render branches from Knowledge, Skill and Tool drawers and their shared shell; remove the resulting orphan assignment-list modal and test the reachable assignment editor directly.
+  affected_features:
+    existing:
+    - RESOURCE-TAG-MANAGEMENT
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: The centralized-entry Feature contract already removes these picker entries. No formal Case references these obsolete props or wrapper; metadata assignment and management remain available through existing product editors and the centralized tab. Existing formal Cases are preserved.
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/resourceDrawer.test.tsx
+    - frontend/tests/component/knowledgeDrawer.test.tsx
+    - frontend/tests/component/skillDrawer.test.tsx
+    - frontend/tests/component/toolDrawer.test.tsx
+    - frontend/tests/component/resourceTagManagement.test.tsx
+    - frontend/tests/component/tagLibraryManagement.test.tsx
+    behaviors:
+    - Resource drawers do not expose tag management while retaining filters, selection drafts, refresh and independent resource configuration.
+    - Existing reachable ResourceTagAssignmentModal saves editable resource assignments and disables tag inputs in readonly mode; backend permission contracts remain unchanged.
+    - The centralized tag library panel and original management modal retain their existing operations.
+    reason: Replace obsolete callback-enabled test branches with current product-path assertions, retaining useful assignment and configuration coverage. No backend, API or runtime contract changes; no additional D1 duplicates component UT, and no formal Case is retired.
+  notes: >-
+    Review: https://github.com/ModelEngine-Group/nexent/pull/4155#discussion_r4332288420.
+    Repository-wide caller inspection found no product caller of onOpenManageLabels, onOpenManageTags, enableTagManagement or onOpenTagManagement.
+    ResourceDrawer.tagManagement is only forwarded by those drawers and its old UT; ResourceTagManagementModal has only those drawers and its UT as consumers.
+    The remaining generic listHeaderExtra slot, resource tag filters/chips, skill/tool configuration and actual ResourceTagAssignmentModal consumers are retained.
+    No external SPEC is available in the missing sibling nexent-doc; no unrelated baseline is reconstructed. Existing RESOURCE-DRAWER-20261016 is historical and its optional-manager behavior is superseded by RESOURCE-TAG-TAB-20261020.
+    Verification: six selected component files passed all 33 tests with no unhandled errors. Tool refresh uses its real mutation/cache invalidation with a controlled discovery service response and a real AntD App provider.
+    Design and implementation asset validation passed with --require-ut-change RESOURCE-TAG-ENTRY-CLEANUP-20261021. Modified tests passed ESLint; formatting, copyright and diff whitespace checks passed. Baseline comparison of all four modified production drawers found zero new lint diagnostics (existing error counts remain 2/0/3/3).
+    Type checking remains blocked only by the pre-existing .next/types/validator.ts:249 reference to the missing space/evaluators page. No API, backend, screenshots or gitignore changes are included.

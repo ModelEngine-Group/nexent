@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Group management API endpoints
 """
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -13,15 +14,22 @@ from consts.model import (
     GroupUserRequest, GroupListRequest, SetDefaultGroupRequest,
     GroupMembersUpdateRequest
 )
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from services.group_service import (
+from consts.exceptions import (
+    NotFoundException,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    ValidationError,
+    tenant_resource_limit_error_payload,
+)
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.groups import (
     create_group, get_group_info, update_group, delete_group,
     add_user_to_single_group, remove_user_from_single_group, get_group_users,
     add_user_to_groups, get_tenant_default_group_id, set_tenant_default_group_id,
     get_groups_by_tenant, update_group_members
 )
-from services.tenant_service import get_tenant_info
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.tenants import get_tenant_info
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])
@@ -30,6 +38,7 @@ router = APIRouter(prefix="/groups", tags=["groups"])
 @router.post("", response_model=None)
 async def create_group_endpoint(
     request: GroupCreateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -44,7 +53,7 @@ async def create_group_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Create group
         group_info = create_group(
@@ -56,6 +65,10 @@ async def create_group_endpoint(
 
         logger.info(f"Created group '{request.group_name}' in tenant {request.tenant_id} by user {user_id}")
 
+        record_security_event("group_create", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"tenant_id": request.tenant_id,
+                                       "group_name": request.group_name})
         return JSONResponse(
             status_code=HTTPStatus.CREATED,
             content={
@@ -69,6 +82,12 @@ async def create_group_endpoint(
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
+        )
+    except TenantResourceLimitError as exc:
+        logger.warning("Group creation rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
         )
     except ValidationError as exc:
         logger.warning(f"Group creation validation error: {str(exc)}")
@@ -143,13 +162,16 @@ async def get_groups_endpoint(
         # Validate tenant exists
         get_tenant_info(request.tenant_id)
         # Get groups under given tenant with pagination and sorting
-        result = get_groups_by_tenant(
-            tenant_id=request.tenant_id,
-            page=request.page,
-            page_size=request.page_size,
-            sort_by=request.sort_by,
-            sort_order=request.sort_order
-        )
+        group_kwargs = {
+            "tenant_id": request.tenant_id,
+            "page": request.page,
+            "page_size": request.page_size,
+            "sort_by": request.sort_by,
+            "sort_order": request.sort_order,
+        }
+        if request.search:
+            group_kwargs["search"] = request.search
+        result = get_groups_by_tenant(**group_kwargs)
 
         # Build response content
         content = {
@@ -190,6 +212,7 @@ async def get_groups_endpoint(
 async def update_group_endpoint(
     group_id: int,
     request: GroupUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -205,7 +228,7 @@ async def update_group_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Prepare updates dict
         updates = {}
@@ -229,6 +252,10 @@ async def update_group_endpoint(
 
         logger.info(f"Updated group {group_id} by user {user_id}")
 
+        record_security_event("group_update", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"group_id": group_id,
+                                       "updated_fields": sorted(updates)})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -265,6 +292,7 @@ async def update_group_endpoint(
 @router.delete("/{group_id}")
 async def delete_group_endpoint(
     group_id: int,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -279,7 +307,7 @@ async def delete_group_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Delete group
         success = delete_group(
@@ -292,6 +320,9 @@ async def delete_group_endpoint(
 
         logger.info(f"Deleted group {group_id} by user {user_id}")
 
+        record_security_event("group_delete", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"group_id": group_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -329,6 +360,7 @@ async def delete_group_endpoint(
 async def add_user_to_group_endpoint(
     group_id: int,
     request: GroupUserRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -348,7 +380,7 @@ async def add_user_to_group_endpoint(
             raise ValidationError("group_ids should not be provided for single group operation")
 
         # Get current user ID from token
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Add user to group
         result = add_user_to_single_group(
@@ -359,6 +391,10 @@ async def add_user_to_group_endpoint(
 
         logger.info(f"Added user {request.user_id} to group {group_id} by user {current_user_id}")
 
+        record_security_event("group_member_add", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"target_user_id": request.user_id,
+                                       "group_id": group_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -397,6 +433,7 @@ async def add_user_to_group_endpoint(
 async def remove_user_from_group_endpoint(
     group_id: int,
     user_id: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -412,7 +449,7 @@ async def remove_user_from_group_endpoint(
     """
     try:
         # Get current user ID from token
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Remove user from group
         success = remove_user_from_single_group(
@@ -426,6 +463,10 @@ async def remove_user_from_group_endpoint(
 
         logger.info(f"Removed user {user_id} from group {group_id} by user {current_user_id}")
 
+        record_security_event("group_member_remove", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"target_user_id": user_id,
+                                       "group_id": group_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -501,6 +542,7 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
 async def update_group_members_endpoint(
     group_id: int,
     request: GroupMembersUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -516,7 +558,7 @@ async def update_group_members_endpoint(
     """
     try:
         # Get current user ID from token
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Update group members
         result = update_group_members(
@@ -527,6 +569,11 @@ async def update_group_members_endpoint(
 
         logger.info(f"Updated group {group_id} members by user {current_user_id}: {result}")
 
+        record_security_event("group_member_update", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"group_id": group_id,
+                                       "user_count": len(request.user_ids),
+                                       "user_ids": request.user_ids[:20]})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -564,6 +611,7 @@ async def update_group_members_endpoint(
 @router.post("/members/batch")
 async def add_user_to_groups_endpoint(
     request: GroupUserRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -582,7 +630,7 @@ async def add_user_to_groups_endpoint(
             raise ValidationError("group_ids is required for batch operations")
 
         # Get current user ID from token
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Add user to multiple groups
         results = add_user_to_groups(
@@ -593,6 +641,11 @@ async def add_user_to_groups_endpoint(
 
         logger.info(f"Batch added user {request.user_id} to {len(request.group_ids)} groups by user {current_user_id}")
 
+        record_security_event("group_member_batch_add", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"target_user_id": request.user_id,
+                                       "group_count": len(request.group_ids),
+                                       "group_ids": request.group_ids[:20]})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -660,6 +713,7 @@ async def get_tenant_default_group_endpoint(tenant_id: str) -> JSONResponse:
 async def set_tenant_default_group_endpoint(
     tenant_id: str,
     request: SetDefaultGroupRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -675,7 +729,7 @@ async def set_tenant_default_group_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Set default group ID
         success = set_tenant_default_group_id(
@@ -689,6 +743,10 @@ async def set_tenant_default_group_endpoint(
 
         logger.info(f"Set default group {request.default_group_id} for tenant {tenant_id} by user {user_id}")
 
+        record_security_event("group_default_set", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"tenant_id": tenant_id,
+                                       "default_group_id": request.default_group_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

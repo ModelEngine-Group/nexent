@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-CC79D2BB8D78E346
+  feature_id: F-054
+  business_rule_ids:
+  - F-054-RULE-01
+  title: Agent 不可用原因告警与手动刷新：告警/刷新入口展示、刷新成功替换快照、刷新失败保留快照并提示错误｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent 不可用原因告警与手动刷新：告警/刷新入口展示、刷新成功替换快照、刷新失败保留快照并提示错误｜核心流程
+  preconditions:
+  - 组件测试环境可运行，不要求外部模型服务在线。
+  - 挂载 AgentConfig 组件，注入 i18n 翻译与 antd App.useApp（message）上下文。
+  - 注入 agentStore：agentId 为固定有效值；editedAgent 存在且其 unavailable_reasons 为非空数组（触发告警）；serverSnapshotRevision 已设置。
+  - mock @/services/agentConfigService.searchAgentInfo 与 agentStore.replaceServerSnapshot，以便断言调用参数与次数。
+  test_data:
+    legacy_asset_declaration: '- 无外部资产；使用组件测试夹具注入 mock agentStore（agentId、editedAgent.unavailable_reasons、serverSnapshotRevision、replaceServerSnapshot）与
+      searchAgentInfo。'
+  steps:
+  - order: 1
+    action: 在组件测试环境挂载 AgentConfig 组件，注入 agentId 固定值、editedAgent（含非空 unavailable_reasons）与 serverSnapshotRevision，并 mock searchAgentInfo、replaceServerSnapshot。
+    expected: editedAgent.unavailable_reasons 非空时渲染 warning 告警与刷新入口，文案包含各不可用原因；为空时不渲染该告警。
+  - order: 2
+    action: 首次渲染后，断言页面出现 type=warning 且 showIcon 的 Alert，展示由 unavailableReasonLabels 拼接的不可用原因文案，并存在“刷新”按钮（RefreshCw 图标）。
+    expected: 点击刷新后 searchAgentInfo(agentId) 恰好调用一次；成功时 replaceServerSnapshot(agentId, data) 恰好调用一次，快照被更新为最新服务端数据。
+  - order: 3
+    action: 使 searchAgentInfo mock 返回 {success:true, data:固定数据}，使用真实用户事件点击刷新按钮，断言 searchAgentInfo 以当前 agentId 调用一次、replaceServerSnapshot
+      以 (agentId, data) 调用一次。
+    expected: 刷新失败（success=false 或抛出异常）时 replaceServerSnapshot 不被调用，当前快照保持不变，message.error 输出对应错误文案。
+  - order: 4
+    action: 使 searchAgentInfo mock 返回 {success:false, message:具体错误文案}，再次点击刷新按钮，断言 replaceServerSnapshot 不被调用，且 message.error
+      提示该错误文案。
+    expected: 刷新进行中按钮处于 loading 且 disabled，结束后恢复，无未处理异常。
+  - order: 5
+    action: 使 searchAgentInfo mock 抛出异常，再次点击刷新按钮，断言 replaceServerSnapshot 不被调用，且 message.error 提示刷新失败文案（agent.config.refreshAvailabilityFailed）。
+    expected: 刷新进行中按钮处于 loading 且 disabled，结束后恢复，无未处理异常。
+  - order: 6
+    action: 在点击刷新后、请求结束前，断言刷新按钮进入 loading 且 disabled；请求结束后恢复可点击。
+    expected: 刷新进行中按钮处于 loading 且 disabled，结束后恢复，无未处理异常。
+  - order: 7
+    action: 将 editedAgent.unavailable_reasons 置为空数组并重渲染，断言告警 Alert 与刷新按钮不渲染。
+    expected: 刷新进行中按钮处于 loading 且 disabled，结束后恢复，无未处理异常。
+  expected_results:
+  - editedAgent.unavailable_reasons 非空时渲染 warning 告警与刷新入口，文案包含各不可用原因；为空时不渲染该告警。
+  - 点击刷新后 searchAgentInfo(agentId) 恰好调用一次；成功时 replaceServerSnapshot(agentId, data) 恰好调用一次，快照被更新为最新服务端数据。
+  - 刷新失败（success=false 或抛出异常）时 replaceServerSnapshot 不被调用，当前快照保持不变，message.error 输出对应错误文案。
+  - 刷新进行中按钮处于 loading 且 disabled，结束后恢复，无未处理异常。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 454
+  unit_boundary: 配置前端
+  inputs:
+  - '- 无外部资产；使用组件测试夹具注入 mock agentStore（agentId、editedAgent.unavailable_reasons、serverSnapshotRevision、replaceServerSnapshot）与
+    searchAgentInfo。'
+  assertions:
+  - editedAgent.unavailable_reasons 非空时渲染 warning 告警与刷新入口，文案包含各不可用原因；为空时不渲染该告警。
+  - 点击刷新后 searchAgentInfo(agentId) 恰好调用一次；成功时 replaceServerSnapshot(agentId, data) 恰好调用一次，快照被更新为最新服务端数据。
+  - 刷新失败（success=false 或抛出异常）时 replaceServerSnapshot 不被调用，当前快照保持不变，message.error 输出对应错误文案。
+  - 刷新进行中按钮处于 loading 且 disabled，结束后恢复，无未处理异常。

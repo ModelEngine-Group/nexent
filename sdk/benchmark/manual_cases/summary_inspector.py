@@ -8,7 +8,7 @@ resulting summary retains key information. No agent runs needed — just
 one LLM call per inspection + text-based checks.
 
 Use case:
-  - Iterate on summary prompt / schema in summary_config.py
+  - Iterate on summary prompt / schema in context/config.py
   - Verify that key facts survive compression without running full agent loops
   - Compare different ContextManagerConfig settings side-by-side
 
@@ -41,7 +41,7 @@ import paths  # noqa: F401 — side-effect: adds sdk/, backend/ to sys.path
 from dotenv import load_dotenv
 load_dotenv()
 
-from nexent.core.agents.agent_context import compress_history_offline, ContextManagerConfig
+from nexent.core.agents.context import ContextManagerConfig, compress_history_offline
 from nexent.core.agents.agent_model import ModelConfig
 from nexent.core.models.openai_llm import OpenAIModel
 

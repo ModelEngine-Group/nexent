@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-BE-025
+  name: memory scope/filter/token budget policy；external_search_hook 透明代理、内容 SHA-256 去重与 MMR 候选池上限
+  status: active
+  description: memory scope/filter/token budget policy；external_search_hook 透明代理、内容 SHA-256 去重与 MMR 候选池上限
+  business_rules:
+  - rule_id: V5-UT-BE-025-RULE-01
+    description: memory scope/filter/token budget policy；external_search_hook 透明代理、内容 SHA-256 去重与 MMR 候选池上限
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

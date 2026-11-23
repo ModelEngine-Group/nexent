@@ -1,0 +1,5 @@
+# CHAT-CLARIFICATION-HISTORY 关联用例
+
+此页由结构化用例生成，不手工编辑。
+
+- D4 [CHAT-CLARIFICATION-HISTORY-D4-001](../../cases/CHAT-CLARIFICATION-HISTORY-D4-001/case.yaml) · active

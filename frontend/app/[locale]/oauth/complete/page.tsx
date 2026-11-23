@@ -48,7 +48,7 @@ export default function OAuthCompletePage() {
           <Alert
             type="warning"
             showIcon
-            message={t("auth.oauthPendingExpired")}
+            title={t("auth.oauthPendingExpired")}
           />
           <Button className="mt-6 w-full" type="primary" href={`/${locale}`}>
             {t("auth.oauthBackHome")}

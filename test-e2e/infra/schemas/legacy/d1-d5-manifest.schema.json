@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexent.dev/schemas/d1-d5-manifest.schema.json",
+  "title": "Nexent D1-D5 automation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cases"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "cases": {"type": "array", "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"},
+    "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["framework", "file", "selector"],
+      "properties": {
+        "framework": {"enum": ["pytest", "vitest", "playwright", "shell", "k6", "custom"]},
+        "file": {"type": "string", "pattern": "^test/automation/d[1-5]/[^\\\\]+$"},
+        "selector": {"type": "string", "minLength": 1},
+        "profiles": {"type": "array", "items": {"enum": ["mock", "real_smoke"]}, "uniqueItems": true}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "stage", "status", "contract_hash", "implementation_hash", "implementation"],
+      "properties": {
+        "case_id": {"$ref": "#/$defs/identifier"},
+        "stage": {"enum": ["D1", "D2", "D3", "D4", "D5"]},
+        "status": {"enum": ["implemented", "manual", "blocked", "retired", "skipped_by_policy"]},
+        "contract_hash": {"$ref": "#/$defs/hash"},
+        "implementation_hash": {"$ref": "#/$defs/hash"},
+        "implementation": {"type": "array", "items": {"$ref": "#/$defs/implementation"}},
+        "required_assets": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "required_mock_services": {
+          "type": "array",
+          "items": {"enum": ["model-provider", "mcp-server", "knowledge-provider", "memory-provider", "a2a-agent", "http-fixture"]},
+          "uniqueItems": true
+        },
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "implemented"}}}, "then": {"properties": {"implementation": {"minItems": 1}}}},
+        {"if": {"properties": {"status": {"enum": ["manual", "blocked", "retired", "skipped_by_policy"]}}}, "then": {"properties": {"implementation": {"maxItems": 0}}}}
+      ]
+    }
+  }
+}

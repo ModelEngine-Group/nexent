@@ -1,0 +1,111 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-D78B50240E78970B
+  feature_id: V5-REL-AUTO-D78B50240E78970B
+  business_rule_ids:
+  - V5-REL-AUTO-D78B50240E78970B-RULE-01
+  title: KnowledgeFileLifecycle 中断上传的服务重启恢复（fail_interrupted_uploads/schedule_interrupted_upload_cleanup）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 进程重启后，中断上传会残留 UPLOADING 生命周期记录与部分 MinIO 对象，若不收敛将导致用户重新上传时状态冲突、存储泄漏或跨服务误删。本专项验证 startup_recovery_service 按 upload_owner_service=CONFIG_SERVICE_NAME
+    与 create_time 宽限期，将旧 UPLOADING 记录精确收敛为 FAILED(CONTAINER_RESTARTED)并删除部分对象，同时避免波及宽限期内记录与其它服务记录。
+  preconditions:
+  - '- 测试数据库 knowledge_file_lifecycle_t（含 v2.5.1 迁移新增 upload_owner_service 列及部分索引 idx_knowledge_file_lifecycle_upload_recovery）
+
+    - MinIO 测试桶与测试对象
+
+    - 本地测试环境配置（数据库/MinIO 连接，经 NEXENT_TEST_HOME 下 secrets.env / environment.yaml 注入，不读取生产凭据）
+
+    - 测试 fixture：构造不同 create_time / upload_owner_service / bucket+object 组合的生命周期记录'
+  test_data:
+    legacy_asset_declaration: '- 测试数据库 knowledge_file_lifecycle_t（含 v2.5.1 迁移新增 upload_owner_service 列及部分索引 idx_knowledge_file_lifecycle_upload_recovery）
+
+      - MinIO 测试桶与测试对象
+
+      - 本地测试环境配置（数据库/MinIO 连接，经 NEXENT_TEST_HOME 下 secrets.env / environment.yaml 注入，不读取生产凭据）
+
+      - 测试 fixture：构造不同 create_time / upload_owner_service / bucket+object 组合的生命周期记录'
+  steps:
+  - order: 1
+    action: 在测试数据库通过 create_file_record 或直接插入，构造归属 CONFIG_SERVICE_NAME 的记录：记录A(create_time 早于 startup_time-30min，status=UPLOADING,
+      stage=UPLOAD，含 object_name/bucket_name)、记录B(create_time 在宽限期内即 startup_time-10min，status=UPLOADING)；并在 MinIO 测试桶写入记录A对应部分对象。另构造记录C(create_time
+      同样早于 30min 但 upload_owner_service 为其它服务)作为隔离对照组。
+    expected: 宽限期前、归属 CONFIG_SERVICE_NAME 的 UPLOADING 记录被收敛为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED、failed_at
+      非空且 version 递增，fail_interrupted_uploads 返回计数与实际收敛记录数一致。
+  - order: 2
+    action: 异步调用 schedule_interrupted_upload_cleanup(upload_owner_service=CONFIG_SERVICE_NAME)，等待立即清理完成。
+    expected: 被收敛记录对应的 MinIO 部分对象被删除，无孤儿对象残留。
+  - order: 3
+    action: 查询生命周期表，断言记录A被置 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED、failed_at 非空、version 递增，且 fail_interrupted_uploads
+      返回计数与实际收敛记录数一致。
+    expected: 宽限期内的本服务记录与归属其它服务的旧记录未被误收敛，均保持 UPLOADING，验证按 upload_owner_service+create_time 边界隔离。
+  - order: 4
+    action: 查询 MinIO，断言记录A对应部分对象已被删除，不再残留孤儿对象。
+    expected: 对象删除失败时记录落为 stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED，不出现伪成功，也不使启动恢复流程崩溃。
+  - order: 5
+    action: 断言记录B仍为 UPLOADING（宽限期内未被立即清理误杀），记录C仍为 UPLOADING（跨服务隔离）。
+    expected: list_uploading_files_created_before 在 upload_owner_service 为空时抛出 ValueError。
+  - order: 6
+    action: 等待 UPLOAD_RECOVERY_GRACE_SECONDS(30分钟)后延迟清理触发，断言记录B(create_time < startup_time)被收敛为 FAILED，记录C仍保持 UPLOADING。
+    expected: 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  - order: 7
+    action: 构造对象删除失败场景（delete_file 返回 success=False 且对象仍存在），断言该记录被置 stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED，异常被记录而不使整个启动恢复流程崩溃。
+    expected: 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  - order: 8
+    action: 断言 list_uploading_files_created_before 在 upload_owner_service 为空时抛出 ValueError，防误扩为全量收敛。
+    expected: 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  - order: 9
+    action: 测试结束后清理测试记录与对象，确保可重复执行。
+    expected: 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  expected_results:
+  - 宽限期前、归属 CONFIG_SERVICE_NAME 的 UPLOADING 记录被收敛为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED、failed_at 非空且
+    version 递增，fail_interrupted_uploads 返回计数与实际收敛记录数一致。
+  - 被收敛记录对应的 MinIO 部分对象被删除，无孤儿对象残留。
+  - 宽限期内的本服务记录与归属其它服务的旧记录未被误收敛，均保持 UPLOADING，验证按 upload_owner_service+create_time 边界隔离。
+  - 对象删除失败时记录落为 stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED，不出现伪成功，也不使启动恢复流程崩溃。
+  - list_uploading_files_created_before 在 upload_owner_service 为空时抛出 ValueError。
+  - 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 61
+  risk_type: RELIABILITY
+  risk: 进程重启后，中断上传会残留 UPLOADING 生命周期记录与部分 MinIO 对象，若不收敛将导致用户重新上传时状态冲突、存储泄漏或跨服务误删。本专项验证 startup_recovery_service 按 upload_owner_service=CONFIG_SERVICE_NAME
+    与 create_time 宽限期，将旧 UPLOADING 记录精确收敛为 FAILED(CONTAINER_RESTARTED)并删除部分对象，同时避免波及宽限期内记录与其它服务记录。
+  condition:
+  - '- 测试数据库 knowledge_file_lifecycle_t（含 v2.5.1 迁移新增 upload_owner_service 列及部分索引 idx_knowledge_file_lifecycle_upload_recovery）
+
+    - MinIO 测试桶与测试对象
+
+    - 本地测试环境配置（数据库/MinIO 连接，经 NEXENT_TEST_HOME 下 secrets.env / environment.yaml 注入，不读取生产凭据）
+
+    - 测试 fixture：构造不同 create_time / upload_owner_service / bucket+object 组合的生命周期记录'
+  metrics:
+  - 宽限期前、归属 CONFIG_SERVICE_NAME 的 UPLOADING 记录被收敛为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED、failed_at 非空且
+    version 递增，fail_interrupted_uploads 返回计数与实际收敛记录数一致。
+  - 被收敛记录对应的 MinIO 部分对象被删除，无孤儿对象残留。
+  - 宽限期内的本服务记录与归属其它服务的旧记录未被误收敛，均保持 UPLOADING，验证按 upload_owner_service+create_time 边界隔离。
+  - 对象删除失败时记录落为 stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED，不出现伪成功，也不使启动恢复流程崩溃。
+  - list_uploading_files_created_before 在 upload_owner_service 为空时抛出 ValueError。
+  - 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  thresholds:
+  - 宽限期前、归属 CONFIG_SERVICE_NAME 的 UPLOADING 记录被收敛为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED、failed_at 非空且
+    version 递增，fail_interrupted_uploads 返回计数与实际收敛记录数一致。
+  - 被收敛记录对应的 MinIO 部分对象被删除，无孤儿对象残留。
+  - 宽限期内的本服务记录与归属其它服务的旧记录未被误收敛，均保持 UPLOADING，验证按 upload_owner_service+create_time 边界隔离。
+  - 对象删除失败时记录落为 stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED，不出现伪成功，也不使启动恢复流程崩溃。
+  - list_uploading_files_created_before 在 upload_owner_service 为空时抛出 ValueError。
+  - 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。
+  recovery_expectations:
+  - 宽限期前、归属 CONFIG_SERVICE_NAME 的 UPLOADING 记录被收敛为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED、failed_at 非空且
+    version 递增，fail_interrupted_uploads 返回计数与实际收敛记录数一致。
+  - 被收敛记录对应的 MinIO 部分对象被删除，无孤儿对象残留。
+  - 宽限期内的本服务记录与归属其它服务的旧记录未被误收敛，均保持 UPLOADING，验证按 upload_owner_service+create_time 边界隔离。
+  - 对象删除失败时记录落为 stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED，不出现伪成功，也不使启动恢复流程崩溃。
+  - list_uploading_files_created_before 在 upload_owner_service 为空时抛出 ValueError。
+  - 测试过程无未处理异常，测试数据与对象结束后清理干净，可重复执行。

@@ -7,15 +7,15 @@ Supports images from S3, HTTP, and HTTPS URLs.
 
 import logging
 from io import BytesIO
-from typing import List
+from typing import Any, List
 
 from jinja2 import Template, StrictUndefined
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.models import OpenAIVLModel
+from ...core.gateway.modality import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
-from ...core.utils.prompt_template_utils import get_prompt_template
+from ..prompts import load_prompt
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
 from ...storage import MinIOStorageClient
 from ...multi_modal.load_save_object import LoadSaveObjectManager
@@ -76,7 +76,7 @@ class AnalyzeImageTool(Tool):
                 description="Message observer",
                 default=None,
                 exclude=True),
-            vlm_model: OpenAIVLModel = Field(
+            vlm_model: Any = Field(
                 description="The image understanding model to use",
                 default=None,
                 exclude=True),
@@ -115,9 +115,6 @@ class AnalyzeImageTool(Tool):
         self.forward = self.mm.load_object(
             input_names=["image_urls_list"])(self._forward_impl)
 
-        self.running_prompt_zh = "正在分析图片..."
-        self.running_prompt_en = "Analyzing image..."
-
     def _forward_impl(self, image_urls_list: List[bytes], query: str) -> List[str]:
         """
         Analyze images identified by S3 URL, HTTP URL, or HTTPS URL and return the identified text.
@@ -145,10 +142,9 @@ class AnalyzeImageTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-        # Send tool run message
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self._is_chinese else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. This tool does not emit a card.
 
         if image_urls_list is None:
             raise ValueError("image_urls cannot be None")
@@ -161,8 +157,7 @@ class AnalyzeImageTool(Tool):
 
         # Load prompts from yaml file
         language = self.observer.lang if self.observer else "en"
-        prompts = get_prompt_template(
-            template_type='analyze_image', language=language)
+        prompts = load_prompt(language, "tool/analyze_image")
         system_prompt = Template(
             prompts['system_prompt'], undefined=StrictUndefined).render({'query': query})
 
@@ -172,9 +167,12 @@ class AnalyzeImageTool(Tool):
                 logger.info(f"Extracting image #{index}, query: {query}")
                 image_stream = BytesIO(image_bytes)
                 try:
-                    response = self.vlm_model.analyze_image(
-                        image_input=image_stream,
-                        system_prompt=system_prompt
+                    response = self.vlm_model.invoke_sync(
+                        VLMRequest(
+                            media_type="image",
+                            media_input=image_stream,
+                            prompt=system_prompt,
+                        )
                     )
                 except Exception as e:
                     error_msg_zh = f"图片{index}分析失败: {str(e)}。请检查图片理解模型配置是否正确。"

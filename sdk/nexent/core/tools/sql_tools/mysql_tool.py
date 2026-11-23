@@ -65,9 +65,12 @@ class MySqlTool(SqlDatabaseBaseTool):
         },
         "max_rows": {
             "type": "integer",
-            "description": "Maximum number of rows to return. Default is 100.",
-            "description_zh": "最多返回的行数，默认100。",
-            "default": 100,
+            "description": (
+                "Maximum number of rows to return. Default is 0 (unlimited); "
+                "non-positive or null means unlimited."
+            ),
+            "description_zh": "最多返回的行数，默认0（不限制）；非正数或空值表示不限制。",
+            "default": 0,
             "nullable": True,
         },
         "timeout": {
@@ -133,15 +136,12 @@ class MySqlTool(SqlDatabaseBaseTool):
 
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-            if max_rows > 0:
-                sql = self._add_limit_clause(sql, max_rows)
-
             if parameters:
                 cursor.execute(sql, parameters)
             else:
                 cursor.execute(sql)
 
-            rows = cursor.fetchall()
+            rows = cursor.fetchmany(max_rows) if max_rows > 0 else cursor.fetchall()
             columns = list(rows[0].keys()) if rows else []
             rows_data = self._format_rows(rows, columns)
 
@@ -155,7 +155,7 @@ class MySqlTool(SqlDatabaseBaseTool):
         self,
         sql: str,
         parameters: Optional[List[Any]] = None,
-        max_rows: Optional[int] = 100,
+        max_rows: Optional[int] = 0,
         timeout: Optional[int] = 10,
     ) -> str:
         """
@@ -164,7 +164,7 @@ class MySqlTool(SqlDatabaseBaseTool):
         Args:
             sql: SQL query to execute
             parameters: Optional list of parameter values for parameterized queries
-            max_rows: Maximum number of rows to return (default 100)
+            max_rows: Maximum number of rows to return (default 0; non-positive or None means unlimited)
             timeout: Query timeout in seconds (default 10)
 
         Returns:

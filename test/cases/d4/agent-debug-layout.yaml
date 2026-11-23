@@ -1,0 +1,38 @@
+schema_version: "1.0"
+stage: D4
+module: AGENT-EDITOR
+cases:
+  - case_id: AGENT-DEBUG-D4-001
+    feature_id: AGENT-DEBUG-LAYOUT
+    requirement_ids: [AGENT-DEBUG-REQ-001]
+    business_rule_ids: [AGENT-DEBUG-RULE-001, AGENT-DEBUG-RULE-002, AGENT-DEBUG-RULE-003]
+    title: Debug a draft in measured layout through preserved runtime and panel controls
+    type: E2E
+    priority: P1
+    status: active
+    automation: automated
+    objective: Prove browser geometry and a complete deterministic question/send/stop/clear/layout journey without real writes or providers.
+    preconditions: [Local frontend running; all API requests intercepted by deterministic draft/model/chat fixtures.]
+    test_data: {draft: {asset_ref: debug_agent_draft}, viewport: {width: 1920, height: 1080}, constrained_viewport: {width: 1280, height: 800}, geometry_tolerance_px: 1, profile: mock}
+    steps:
+      - order: 1
+        action: Open a valid draft and invoke its guarded debug workflow.
+        expected: Common tabs and identity remain above both panes; debug width488, padding24, gap10 and card-aligned top with measured header/welcome/question/composer styles.
+      - order: 2
+        action: Select a question and send it through the mocked debug stream, then stop an active run.
+        expected: Selection fills exact composer text without a request; send uses existing debug run payload and stop is reachable through existing cancel behavior.
+      - order: 3
+        action: Maximize and restore, clear conversation, toggle comparison and close/reopen debug.
+        expected: Layout changes retain existing conversation; clear restores welcome; comparison stays reachable; reopen retains mounted local state.
+      - order: 4
+        action: Resize to constrained viewport and inspect default-chat presentation separately with deterministic fixtures.
+        expected: No horizontal page overflow, internal welcome/messages scrolling and controls reachable; default chat has no debug geometry or disclaimer.
+    expected_results: [Measured desktop geometry within1px; deterministic chat and local controls work; responsive layout retains controls; default presentation unaffected.]
+    forbidden_side_effects: [No real provider/backend call; no configuration writes from selection or panel controls; no new endpoint; no bypass of existing guarded debug entry.]
+    actor: Agent editor user
+    journey: [Open draft, invoke debug, select and send question, stop run, change pane layout, clear, compare and resize]
+    final_business_result: [User can debug the current draft in measured presentation while preserving runtime and configuration state.]
+    failure_evidence: [Failure screenshot and trace, violated geometry or runtime assertion, unexpected HTTP writes]
+    execution:
+      profiles: [{name: mock, required_services: [http-fixture]}]
+      timeout_seconds: 120

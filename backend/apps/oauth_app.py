@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -7,11 +8,18 @@ from typing import Optional
 
 from pydantic import ValidationError as PydanticValidationError
 
+from consts.const import JWT_EXPIRY_SECONDS
 from consts.model import OAuthCompleteRequest
-from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
+from consts.exceptions import (
+    OAuthLinkError,
+    OAuthProviderError,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    tenant_resource_limit_error_payload,
+)
 from consts.oauth_providers import get_all_provider_definitions
 from database.oauth_account_db import get_oauth_account_by_provider
-from services.oauth_service import (
+from management.services.permission.identity.oauth import (
     complete_pending_oauth_account,
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
@@ -20,21 +28,31 @@ from services.oauth_service import (
     generate_pending_oauth_token,
     get_authorize_url,
     get_enabled_providers,
+    get_oauth_config,
     get_pending_oauth_info,
     get_provider_user_info,
     list_linked_accounts,
     parse_state,
     unlink_account,
 )
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     calculate_expires_at,
     generate_session_jwt,
     get_current_user_id,
     get_supabase_admin_client,
 )
+from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])
+
+
+@router.get("/config")
+async def get_config():
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={"message": "success", "data": get_oauth_config()},
+    )
 
 
 @router.get("/providers")
@@ -84,6 +102,7 @@ async def link(provider: str, authorization: Optional[str] = Header(None)):
 
 @router.get("/callback")
 async def callback(
+    http_request: Request,
     provider: str,
     code: str = "",
     state: str = "",
@@ -193,10 +212,15 @@ async def callback(
             username=username,
         )
 
-        expiry_seconds = 3600
-        jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+        jwt_token = generate_session_jwt(
+            supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+        )
+        expiry_seconds = JWT_EXPIRY_SECONDS
         expires_at = calculate_expires_at(jwt_token)
 
+        record_security_event("oauth_login", request=http_request,
+                              user_id=supabase_user_id, user_email=email,
+                              details={"provider": provider, "linked": bool(link_user_id)})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -216,6 +240,12 @@ async def callback(
             },
         )
 
+    except TenantResourceLimitError as e:
+        logger.warning(f"OAuth callback rejected by tenant resource limit for provider={provider}: {e}")
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(e),
+        )
     except OAuthLinkError as e:
         logger.warning(f"OAuth callback link failed for provider={provider}: {e}")
         return JSONResponse(
@@ -277,6 +307,10 @@ async def complete(
             password=request_data.password,
             invite_code=request_data.invite_code,
         )
+        completed_user = (result or {}).get("user") or {}
+        record_security_event("oauth_signup", request=request,
+                              user_id=completed_user.get("id"),
+                              user_email=completed_user.get("email"))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "OAuth account completed", "data": result},
@@ -288,6 +322,11 @@ async def complete(
             else HTTPStatus.BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=str(e))
+    except TenantResourceLimitError as e:
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(e),
+        )
     except PydanticValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -326,13 +365,16 @@ async def get_accounts(authorization: Optional[str] = Header(None)):
 
 
 @router.delete("/accounts/{provider}")
-async def delete_account(provider: str, authorization: Optional[str] = Header(None)):
+async def delete_account(provider: str, http_request: Request, authorization: Optional[str] = Header(None)):
     if not authorization:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
 
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         unlink_account(user_id, provider)
+        record_security_event("oauth_unlink", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

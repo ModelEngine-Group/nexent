@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.agent_model module.
 
@@ -22,6 +24,7 @@ from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 TEST_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = TEST_ROOT.parent
@@ -53,7 +56,6 @@ def _create_mock_smolagents():
     setattr(mock_smolagents, "agents", agents_mod)
 
     local_python_mod = ModuleType("smolagents.local_python_executor")
-    setattr(local_python_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     setattr(mock_smolagents, "local_python_executor", local_python_mod)
 
     memory_mod = ModuleType("smolagents.memory")
@@ -242,6 +244,29 @@ def _load_agent_model_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    models_package = ModuleType("sdk.nexent.core.models")
+    models_package.__path__ = []
+    capacity_budget = ModuleType("sdk.nexent.core.models.capacity_budget")
+    class ContextBudgetSnapshot(BaseModel):
+        fingerprint: str = "budget"
+    capacity_budget.ContextBudgetSnapshot = ContextBudgetSnapshot
+    sys.modules["sdk.nexent.core.models"] = models_package
+    sampling_spec = importlib.util.spec_from_file_location(
+        "sdk.nexent.core.models.sampling",
+        os.path.join(project_root, "sdk", "nexent", "core", "models", "sampling.py"),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["sdk.nexent.core.models.sampling"] = sampling_module
+    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget
+    context_package = ModuleType("sdk.nexent.core.agents.context")
+    context_package.__path__ = []
+    context_models = ModuleType("sdk.nexent.core.agents.context.models")
+    class ContextItemInput(BaseModel):
+        id: str = "item"
+    context_models.ContextItemInput = ContextItemInput
+    sys.modules["sdk.nexent.core.agents.context"] = context_package
+    sys.modules["sdk.nexent.core.agents.context.models"] = context_models
 
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.agent_model", agent_model_path)
     module = importlib.util.module_from_spec(spec)
@@ -330,8 +355,8 @@ class TestModelConfig:
         )
         assert config.cite_name == "gpt-4"
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
         assert config.extra_body is None
@@ -347,8 +372,8 @@ class TestModelConfig:
             url="https://example.com"
         )
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
 
@@ -620,7 +645,6 @@ class TestMemoryContext:
         )
         context = agent_model_module.MemoryContext(
             user_config=user_config,
-            memory_config={"type": "chroma"},
             tenant_id="tenant-123",
             user_id="user-456",
             agent_id="agent-789"
@@ -629,7 +653,6 @@ class TestMemoryContext:
         assert context.user_id == "user-456"
         assert context.agent_id == "agent-789"
         assert context.user_config == user_config
-        assert context.memory_config == {"type": "chroma"}
 
     def test_memory_context_str_method(self):
         """Test MemoryContext __str__ method returns JSON string."""
@@ -657,6 +680,9 @@ class TestMemoryContext:
 
 class TestAgentRunInfo:
     """Tests for AgentRunInfo Pydantic model."""
+
+    def test_agent_run_info_does_not_own_context_manager(self):
+        assert "context_manager" not in agent_model_module.AgentRunInfo.model_fields
 
     def test_agent_run_info_creation(self):
         """Test AgentRunInfo creation with all fields."""
@@ -805,9 +831,82 @@ class TestAgentRunInfo:
         assert run_info.mcp_host is None
 
 
+class TestAgentRunInfoPlanning:
+    """Tests for the v1.4 planing fields on AgentRunInfo."""
+
+    @staticmethod
+    def _make_run_info(**overrides):
+        observer = MessageObserver()
+        stop_event = Event()
+        model_config = agent_model_module.ModelConfig(
+            cite_name="gpt-4",
+            model_name="gpt-4",
+            url="https://api.openai.com/v1",
+        )
+        defaults = dict(
+            query="q",
+            model_config_list=[model_config],
+            observer=observer,
+            agent_config=agent_model_module.AgentConfig(
+                name="test_agent",
+                description="A test agent",
+                tools=[],
+                model_name="gpt-4",
+            ),
+            stop_event=stop_event,
+        )
+        defaults.update(overrides)
+        return agent_model_module.AgentRunInfo(**defaults)
+
+    def test_enable_planning_defaults_to_false(self):
+        run_info = self._make_run_info()
+        assert run_info.enable_planning is False
+
+    def test_enable_planning_can_be_true(self):
+        run_info = self._make_run_info(enable_planning=True)
+        assert run_info.enable_planning is True
+
+    def test_run_identity_defaults_to_none(self):
+        run_info = self._make_run_info()
+        assert run_info.conversation_id is None
+        assert run_info.user_id is None
+
+    def test_run_identity_can_be_set(self):
+        run_info = self._make_run_info(conversation_id=273, user_id="user-1")
+        assert run_info.conversation_id == 273
+        assert run_info.user_id == "user-1"
+
+    def test_redis_client_defaults_to_none(self):
+        run_info = self._make_run_info()
+        assert run_info.redis_client is None
+
+    def test_redis_client_can_be_set(self):
+        fake_redis = object()
+        run_info = self._make_run_info(redis_client=fake_redis)
+        assert run_info.redis_client is fake_redis
+
+    def test_planning_fields_serialize_round_trip(self):
+        """Both planning fields must survive model_dump / model_validate round trips."""
+        run_info = self._make_run_info(enable_planning=True, redis_client="redis-conn")
+        round_tripped = agent_model_module.AgentRunInfo.model_validate(run_info.model_dump())
+        assert round_tripped.enable_planning is True
+        # redis_client is typed as Any; the round-trip preserves it as-is.
+        assert round_tripped.redis_client == "redis-conn"
+
+
 # ----------------------------------------------------------------------------
 # Tests for ExternalA2AAgentConfig
 # ----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+def test_certificate_preference_reaches_proxy(preference):
+    config = agent_model_module.ExternalA2AAgentConfig(
+        agent_id="peer", name="Peer", url="https://peer", **preference)
+    config.to_a2a_agent_info()
+    proxy_info = _module_mocks["sdk.nexent.core.agents.a2a_agent_proxy"].A2AAgentInfo
+    assert proxy_info.call_args.kwargs["ssl_verify"] is preference.get("ssl_verify", True)
+    proxy_info.reset_mock()
+
 
 class TestExternalA2AAgentConfig:
     """Tests for ExternalA2AAgentConfig Pydantic model."""
@@ -828,7 +927,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
         assert config.raw_card is None
 
     def test_external_a2a_agent_config_with_all_fields(self):
@@ -864,7 +963,23 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
+
+    def test_external_a2a_agent_config_custom_headers_default(self):
+        """Test custom_headers defaults to None."""
+        config = agent_model_module.ExternalA2AAgentConfig(
+            agent_id="test", name="Test", description="", url="https://test.com"
+        )
+        assert config.custom_headers is None
+
+    def test_external_a2a_agent_config_with_custom_headers(self):
+        """Test custom_headers can be set."""
+        config = agent_model_module.ExternalA2AAgentConfig(
+            agent_id="test", name="Test", description="", url="https://test.com",
+            custom_headers={"X-Custom": "val", "Authorization": "Bearer tok"}
+        )
+        assert config.custom_headers == {"X-Custom": "val", "Authorization": "Bearer tok"}
+
 
     def test_external_a2a_agent_config_with_raw_card_skills(self):
         """Test ExternalA2AAgentConfig auto-enhances description from raw_card skills."""
@@ -945,7 +1060,8 @@ class TestExternalA2AAgentConfig:
             protocol_version="1.5",
             protocol_type=agent_model_module.PROTOCOL_HTTP_JSON,
             timeout=450.0,
-            raw_card={"test": "data"}
+            raw_card={"test": "data"},
+            custom_headers={"X-Token": "secret"}
         )
 
         agent_info = config.to_a2a_agent_info()
@@ -963,6 +1079,7 @@ class TestExternalA2AAgentConfig:
         assert call_kwargs["protocol_type"] == agent_model_module.PROTOCOL_HTTP_JSON
         assert call_kwargs["timeout"] == 450.0
         assert call_kwargs["raw_card"] == {"test": "data"}
+        assert call_kwargs.get("custom_headers") == {"X-Token": "secret"}
 
     def test_external_a2a_agent_config_multiple_skills_examples(self):
         """Test ExternalA2AAgentConfig handles multiple skills with many examples."""
@@ -1135,7 +1252,7 @@ class TestAgentConfig:
             model_name="gpt-4",
             provide_run_summary=True,
             instructions="Additional instructions",
-            managed_agents=[],
+            worker_agents=[],
             external_a2a_agents=[]
         )
         assert config.name == "test_agent"
@@ -1157,9 +1274,11 @@ class TestAgentConfig:
         )
         assert config.prompt_templates is None
         assert config.max_steps == 15
+        assert config.output_protocol == "code_action"
+        assert config.enable_protocol_repair_retry is False
         assert config.provide_run_summary is False
         assert config.instructions is None
-        assert config.managed_agents == []
+        assert config.worker_agents == []
         assert config.external_a2a_agents == []
 
     def test_agent_config_with_tools(self):
@@ -1182,8 +1301,8 @@ class TestAgentConfig:
         assert len(config.tools) == 1
         assert config.tools[0].class_name == "TavilySearchTool"
 
-    def test_agent_config_with_managed_agents(self):
-        """Test AgentConfig with nested managed agents."""
+    def test_agent_config_with_worker_agents(self):
+        """Test AgentConfig with nested worker agents."""
         sub_agent = agent_model_module.AgentConfig(
             name="sub_agent",
             description="A sub agent",
@@ -1195,10 +1314,11 @@ class TestAgentConfig:
             description="Parent agent with sub-agents",
             tools=[],
             model_name="parent-model",
-            managed_agents=[sub_agent]
+            worker_agents=[sub_agent]
         )
-        assert len(config.managed_agents) == 1
-        assert config.managed_agents[0].name == "sub_agent"
+        assert len(config.worker_agents) == 1
+        assert config.worker_agents[0].name == "sub_agent"
+        assert "managed_agents" not in config.model_dump()
 
     def test_agent_config_with_external_a2a_agents(self):
         """Test AgentConfig with external A2A agents."""
@@ -1238,17 +1358,8 @@ class TestAgentConfig:
         )
         assert config_max.max_steps == 30
 
-    def test_agent_config_max_steps_rejects_out_of_bounds(self):
-        """Test AgentConfig rejects max_steps values outside 1-30 range."""
-        with pytest.raises(Exception):
-            agent_model_module.AgentConfig(
-                name="too_high",
-                description="Too high steps",
-                tools=[],
-                model_name="test",
-                max_steps=31
-            )
-
+    def test_agent_config_max_steps_rejects_below_lower_bound(self):
+        """Test AgentConfig rejects max_steps values below the lower bound (1)."""
         with pytest.raises(Exception):
             agent_model_module.AgentConfig(
                 name="too_low",
@@ -1258,14 +1369,30 @@ class TestAgentConfig:
                 max_steps=0
             )
 
+    def test_agent_config_max_steps_accepts_above_design_max(self):
+        """Test AgentConfig accepts max_steps values above the design-maximum (30).
+
+        The model enforces ge=1 (lower bound) but does not enforce an upper bound.
+        Values above 30 are silently accepted; callers are responsible for enforcing
+        application-level limits if needed.
+        """
+        config = agent_model_module.AgentConfig(
+            name="above_design_max",
+            description="Steps above 30",
+            tools=[],
+            model_name="test",
+            max_steps=31
+        )
+        assert config.max_steps == 31
+
 
 class TestAgentVerificationConfig:
     """Tests for layered ReAct verification configuration."""
 
-    def test_default_verification_config_is_enabled(self):
+    def test_default_verification_config_is_disabled_by_default(self):
         config = agent_model_module.AgentVerificationConfig()
 
-        assert config.enabled is True
+        assert config.enabled is False
         assert config.step_verification_enabled is True
         assert config.final_verification_enabled is True
         assert config.max_final_rounds == 2
@@ -1279,7 +1406,7 @@ class TestAgentVerificationConfig:
             model_name="test",
         )
 
-        assert config.verification_config.enabled is True
+        assert config.verification_config.enabled is False
         assert config.verification_config.strictness == "balanced"
 
     def test_verification_config_rejects_invalid_rounds(self):

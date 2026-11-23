@@ -9,6 +9,7 @@
 import { ApiError, fetchWithErrorHandling } from "@/services/api";
 import { generateAvatarUrl as generateAvatar } from "@/lib/avatar";
 import { USER_ROLES } from "@/const/auth";
+import { withoutBasePath } from "@/lib/basePath";
 import { STATUS_CODES } from "@/const/auth";
 import {
   checkSessionValid,
@@ -83,6 +84,8 @@ export const getAuthHeaders = () => {
   return {
     "Content-Type": "application/json",
     "User-Agent": "AgentFrontEnd/1.0",
+    "X-User-Timezone":
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   };
 };
 
@@ -90,7 +93,7 @@ export const getAuthHeaders = () => {
  * Remove locale prefix from pathname to get effective route
  */
 export function getEffectiveRoutePath(pathname: string): string {
-  const segments = pathname.split("/").filter(Boolean);
+  const segments = withoutBasePath(pathname).split("/").filter(Boolean);
   if (segments.length > 0 && (segments[0] === "zh" || segments[0] === "en")) {
     segments.shift();
   }

@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-045
+  feature_id: F-029
+  business_rule_ids:
+  - F-029-RULE-01
+  title: 用户聚合列表/排序/搜索、KB明细、summary｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 用户聚合列表/排序/搜索、KB明细、summary｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 准备 SU、TenantA Admin、TenantB 普通用户，所有测试资源使用 RunID 前缀，记录 run_id。
+    expected: GET /capacity/personal/summary 返回 200：total_bytes 等于各 KB source_size_bytes 之和（源文件账本口径），total_es_physical_bytes/total_es_physical_readable
+      为独立的 ES 物理容量观测值。
+  - order: 2
+    action: 以 TenantA Admin 调用 GET /capacity/personal/users（sort_by=total_bytes&sort_order=desc、keyword、page/page_size），记录每个用户的
+      total_bytes、total_readable、es_physical_bytes、es_physical_readable、usage_rate、quota_source。
+    expected: GET /capacity/personal/users/{user_id}/kbs 返回 200：每条 KB 含 source_size/source_size_bytes、es_physical_size/es_physical_size_bytes、total_size/total_size_bytes；total_size
+      与 source_size 相等（别名），es_physical_size 与 store_size 相等。
+  - order: 3
+    action: 对同一列表分别以 sort_by=user_name、kb_count、quota_limit_bytes、usage_rate 排序，并验证 sort_by、sort_order 非法值分别返回 400。
+    expected: GET /capacity/personal/users 返回 200：每条用户含 total_bytes（源文件口径）与 es_physical_bytes/es_physical_readable；sort_by=total_bytes
+      按源文件口径正确排序，keyword 搜索用户名/邮箱正常。
+  - order: 4
+    action: 调用 GET /capacity/personal/users/{user_id}/kbs，检查每条 KB 的 source_size/source_size_bytes、es_physical_size/es_physical_size_bytes、total_size/total_size_bytes、store_size
+      字段。
+    expected: sort_by 非法值返回 400（detail 含允许字段清单），sort_order 非法值返回 400。
+  - order: 5
+    action: 调用 GET /capacity/personal/summary，检查 total_bytes/total_readable、total_es_physical_bytes/total_es_physical_readable、user_count、kb_count、allocated_quota_bytes、default_quota_bytes。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 6
+    action: 断言 total_bytes/total_size 仅等于源文件持久账本口径（各 KB source_size_bytes 之和），ES 物理容量仅出现在 es_physical_* 字段，二者互不混用；total_size
+      为 source_size 的别名，es_physical_size 与 store_size 一致。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 断言 sort_by=total_bytes 按源文件口径降序正确，keyword 按用户名/邮箱过滤不因字段变更破坏。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 清理当次创建的租户/用户/配额配置。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - GET /capacity/personal/summary 返回 200：total_bytes 等于各 KB source_size_bytes 之和（源文件账本口径），total_es_physical_bytes/total_es_physical_readable
+    为独立的 ES 物理容量观测值。
+  - GET /capacity/personal/users/{user_id}/kbs 返回 200：每条 KB 含 source_size/source_size_bytes、es_physical_size/es_physical_size_bytes、total_size/total_size_bytes；total_size
+    与 source_size 相等（别名），es_physical_size 与 store_size 相等。
+  - GET /capacity/personal/users 返回 200：每条用户含 total_bytes（源文件口径）与 es_physical_bytes/es_physical_readable；sort_by=total_bytes
+    按源文件口径正确排序，keyword 搜索用户名/邮箱正常。
+  - sort_by 非法值返回 400（detail 含允许字段清单），sort_order 非法值返回 400。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 53
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 准备 SU、TenantA Admin、TenantB 普通用户，所有测试资源使用 RunID 前缀，记录 run_id。
+    - 以 TenantA Admin 调用 GET /capacity/personal/users（sort_by=total_bytes&sort_order=desc、keyword、page/page_size），记录每个用户的
+      total_bytes、total_readable、es_physical_bytes、es_physical_readable、usage_rate、quota_source。
+    - 对同一列表分别以 sort_by=user_name、kb_count、quota_limit_bytes、usage_rate 排序，并验证 sort_by、sort_order 非法值分别返回 400。
+    - 调用 GET /capacity/personal/users/{user_id}/kbs，检查每条 KB 的 source_size/source_size_bytes、es_physical_size/es_physical_size_bytes、total_size/total_size_bytes、store_size
+      字段。
+    - 调用 GET /capacity/personal/summary，检查 total_bytes/total_readable、total_es_physical_bytes/total_es_physical_readable、user_count、kb_count、allocated_quota_bytes、default_quota_bytes。
+    - 断言 total_bytes/total_size 仅等于源文件持久账本口径（各 KB source_size_bytes 之和），ES 物理容量仅出现在 es_physical_* 字段，二者互不混用；total_size 为 source_size
+      的别名，es_physical_size 与 store_size 一致。
+    - 断言 sort_by=total_bytes 按源文件口径降序正确，keyword 按用户名/邮箱过滤不因字段变更破坏。
+    - 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    - 清理当次创建的租户/用户/配额配置。
+    response_expectations:
+    - GET /capacity/personal/summary 返回 200：total_bytes 等于各 KB source_size_bytes 之和（源文件账本口径），total_es_physical_bytes/total_es_physical_readable
+      为独立的 ES 物理容量观测值。
+    - GET /capacity/personal/users/{user_id}/kbs 返回 200：每条 KB 含 source_size/source_size_bytes、es_physical_size/es_physical_size_bytes、total_size/total_size_bytes；total_size
+      与 source_size 相等（别名），es_physical_size 与 store_size 相等。
+    - GET /capacity/personal/users 返回 200：每条用户含 total_bytes（源文件口径）与 es_physical_bytes/es_physical_readable；sort_by=total_bytes
+      按源文件口径正确排序，keyword 搜索用户名/邮箱正常。
+    - sort_by 非法值返回 400（detail 含允许字段清单），sort_order 非法值返回 400。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

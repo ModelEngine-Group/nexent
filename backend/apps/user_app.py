@@ -1,21 +1,31 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 User management API endpoints
 """
 import logging
+from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
-from http import HTTPStatus
+from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 
 from consts.model import (
     UserListRequest, UserUpdateRequest
 )
-from services.user_service import (
-    get_users, update_user, delete_user_and_cleanup
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    tenant_resource_limit_error_payload,
+)
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.users import (
+    delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("user_app")
 router = APIRouter(prefix="/users", tags=["users"])
@@ -24,6 +34,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.post("/list")
 async def get_users_endpoint(
     request: UserListRequest,
+    authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """
     Get users belonging to a specific tenant with pagination
@@ -36,9 +47,25 @@ async def get_users_endpoint(
         JSONResponse: List of users in the tenant (paginated or all)
     """
     try:
-        # Get tenant users with pagination and sorting
-        result = get_users(request.tenant_id, request.page, request.page_size,
-                          request.sort_by, request.sort_order)
+        _, requester_tenant_id, requester_role = get_current_user_context(authorization)
+        filter_kwargs = {
+            "search": request.search,
+            "roles": request.roles,
+            "group_ids": request.group_ids,
+        }
+        filter_kwargs = {key: value for key, value in filter_kwargs.items() if value}
+        if request.search and request.search.strip() and extract_session_id_from_authorization(authorization):
+            filter_kwargs["search_cas_username"] = True
+        result = get_users_for_requester(
+            request.tenant_id,
+            request.page,
+            request.page_size,
+            request.sort_by,
+            request.sort_order,
+            **filter_kwargs,
+            requester_tenant_id=requester_tenant_id,
+            requester_role=requester_role,
+        )
 
         # Build response content
         content = {
@@ -60,6 +87,10 @@ async def get_users_endpoint(
             status_code=HTTPStatus.OK,
             content=content
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except Exception as exc:
         logger.error(f"Unexpected error retrieving users for tenant {request.tenant_id}: {str(exc)}")
         # Include the actual error message for debugging
@@ -73,6 +104,7 @@ async def get_users_endpoint(
 async def update_user_endpoint(
     user_id: str,
     request: UserUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -88,13 +120,24 @@ async def update_user_endpoint(
     """
     try:
         # Get current user ID from token for access control
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, requester_tenant_id, requester_role = get_current_user_context(authorization)
 
         # Update user
-        updated_user = await update_user(user_id, request.model_dump(), current_user_id)
+        updated_user = await update_user_for_requester(
+            user_id,
+            request.model_dump(),
+            updated_by=current_user_id,
+            requester_tenant_id=requester_tenant_id,
+            requester_role=requester_role,
+        )
 
         logger.info(f"Updated user {user_id} by user {current_user_id}")
 
+        record_security_event("user_update", request=http_request,
+                              user_id=current_user_id, tenant_id=requester_tenant_id,
+                              details={"target_user_id": user_id,
+                                       "changes": {key: value for key, value in request.model_dump().items()
+                                                   if value is not None}})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -103,6 +146,18 @@ async def update_user_endpoint(
             }
         )
 
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
+    except NotFoundException as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except TenantResourceLimitError as exc:
+        logger.warning("User update rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
     except ValueError as exc:
         logger.warning(f"User update validation error for user {user_id}: {str(exc)}")
         raise HTTPException(
@@ -121,6 +176,7 @@ async def update_user_endpoint(
 @router.delete("/{user_id}")
 async def delete_user_endpoint(
     user_id: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -141,7 +197,7 @@ async def delete_user_endpoint(
     """
     try:
         # Get current user ID from token for access control
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Get user tenant ID for cleanup operations
         user_tenant = get_user_tenant_by_user_id(user_id)
@@ -155,6 +211,10 @@ async def delete_user_endpoint(
 
         logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
 
+        record_security_event("user_delete", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"target_user_id": user_id,
+                                       "target_tenant_id": tenant_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -175,4 +235,3 @@ async def delete_user_endpoint(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(exc)}"
         )
-

@@ -1,0 +1,248 @@
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  src: url("/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Regular.ttf")
+    format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  src: url("/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Bold.ttf")
+    format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  font-family: "HarmonyOS Sans SC", sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.body > * {
+  flex-shrink: 0;
+}
+
+.dialog[data-config-variant="tool"] .body {
+  max-height: min(508px, calc(100vh - 224px));
+}
+
+.dialog :global(.ant-input),
+.dialog :global(.ant-input-number),
+.dialog :global(.ant-select),
+.dialog :global(.ant-form) {
+  font-family: inherit !important;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.dialog :global(input.ant-input) {
+  height: 28px !important;
+  padding: 0 12px !important;
+  border-radius: 2px !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+}
+
+.dialog :global(.ant-input:not(.ant-input-status-error)),
+.dialog :global(.ant-input-number:not(.ant-input-number-status-error)) {
+  border-color: #c9c9c9 !important;
+}
+
+.dialog :global(.ant-input-number) {
+  height: 28px;
+  border-radius: 2px;
+}
+
+.dialog :global(.ant-input-number-input) {
+  height: 26px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.dialog :global(.ant-form-item-label) {
+  padding-bottom: 8px !important;
+}
+
+.dialog :global(.ant-form-item-label > label) {
+  height: auto;
+}
+
+.dialog :global(.ant-form-item:last-child) {
+  margin-bottom: 0 !important;
+}
+
+.dialog [data-config-part="test-result"] :global(textarea.ant-input) {
+  height: 99px !important;
+  min-height: 99px !important;
+  border-radius: 4px;
+  background: #efefef !important;
+}
+
+.cancelButton,
+.confirmButton {
+  width: 96px !important;
+  height: 32px !important;
+  padding: 5px 16px !important;
+  border-radius: 4px !important;
+  font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+  letter-spacing: 0;
+  box-shadow: none !important;
+}
+
+.cancelButton {
+  border: 1px solid #c9c9c9 !important;
+  background: #fff !important;
+  color: #191919 !important;
+}
+
+.confirmButton {
+  border: 0 !important;
+  background: #2673e5 !important;
+  color: #fff !important;
+}
+
+.confirmButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Tool descriptions use the design's two-line preview. */
+.dialog[data-config-variant="tool"] [data-config-part="description"] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Align label text to controls and place required marks in the left gutter. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  [data-config-label] {
+  padding-left: 0;
+  font-weight: 400;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  [data-config-required] {
+  position: absolute;
+  left: -10px;
+  top: 0;
+}
+.dialog[data-config-variant="tool"]
+  [data-config-part="test-panel"]
+  [data-config-part="test-run"] {
+  margin-top: 16px;
+  font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif;
+}
+
+/* Keep the required-mark gutter inside the scroll viewport. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  .body {
+  margin-left: -10px;
+  padding-left: 10px;
+}
+
+/* Apply one horizontal text inset, including nested password inputs. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(textarea.ant-input) {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-affix-wrapper) {
+  padding: 0 12px !important;
+  min-height: 28px;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-affix-wrapper input.ant-input) {
+  padding: 0 !important;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-number-input) {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+
+/* Required marks occupy the gutter outside AntD's label text box. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-form-item-label),
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-form-item-label > label) {
+  overflow: visible !important;
+}
+
+/* AntD number controls must not add a second text inset. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-number) {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.dialog[data-config-variant="publish"] :global(.ant-form-item) {
+  margin-bottom: 16px;
+}
+.dialog[data-config-variant="publish"] :global(textarea.ant-input) {
+  min-height: 88px;
+  border-radius: 2px;
+  padding: 8px 12px !important;
+  resize: vertical;
+}

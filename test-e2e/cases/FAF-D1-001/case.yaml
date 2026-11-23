@@ -1,0 +1,55 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-MESSAGE
+case:
+  case_id: FAF-D1-001
+  feature_id: FAF-001
+  requirement_ids:
+  - FAF-001
+  business_rule_ids:
+  - FAF-RULE-001
+  title: Final answer classification and display
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the approved final answer display contract at the declared stage.
+  preconditions:
+  - Controlled final-answer events.
+  test_data:
+    profile: mock
+    sequences:
+    - mixed step
+    - pure final-answer step
+    - subagent
+    - untagged legacy final
+    - rollback
+  steps:
+  - order: 1
+    action: Run mixed reasoning and final-answer envelope output.
+    expected: Thinking prefix remains; final answer occurs once outside reasoning.
+  - order: 2
+    action: Run a step beginning with the final-answer opening tag.
+    expected: No reasoning card and no persisted step marker.
+  - order: 3
+    action: Run a subagent final answer and reload persisted history.
+    expected: Answer remains once in its owning result area; sibling reasoning remains
+      intact.
+  expected_results:
+  - Tag-free unique answer outside reasoning.
+  - Pure answer step has no empty reasoning card.
+  - Sibling and attempt attribution preserved.
+  forbidden_side_effects:
+  - No duplicate answer.
+  - No sibling deletion.
+  - No failed answer persisted.
+  unit_boundary: SDK observer classification and backend persistence projection
+  inputs:
+  - typed chunks
+  - invocation ids
+  - attempt ids
+  assertions:
+  - Exact answer once.
+  - Original prefix type.
+  - No empty terminal marker.
+  - No sibling mutation.

@@ -51,4 +51,4 @@ class TestBuiltinLabelMap:
         import consts.tool_labels
         doc = consts.tool_labels.__doc__
         assert doc is not None
-        assert "deploy/sql/migrations/v2.3.0_0624_add_labels_to_ag_tool_info.sql" in doc
+        assert "deploy/sql/migrations/v2.3_merged_migrations.sql" in doc

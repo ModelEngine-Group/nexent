@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: PROMPT-BLANK-20261009
+  change_type: bugfix
+  bug_id: PROMPT-BLANK-20261009
+  title: Reject blank prompt generation before SSE creation
+  description: Align backend input validation with the existing UI and verify the draft remains unchanged.
+  observed_behavior: Empty descriptions pass request validation and start an HTTP 200 SSE stream.
+  expected_behavior: Empty or whitespace-only descriptions return 422 before generation; valid input retains its original content.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing coverage accepts unrelated 404 and does not check whitespace-only input or draft immutability.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified: [F-046]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [AGT-006]
+    modified: [AGT-007]
+    added: []
+    retired: []
+  notes: Lightweight design is maintained in nexent-doc/docs/Developing/dev-prompt-blank-input-validation/design.md. No new configuration keys.

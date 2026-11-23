@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
+  change_type: requirement
+  requirement_id: CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
+  title: 工作台同排搜索与配置缺省思考等级恢复
+  description: Place primary new-conversation and a search icon on one header row; reveal a search input on demand. Preserve
+    automatic reasoning when no Agent/model effort is configured instead of using catalog capability defaults.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    - CHAT-MODEL-CONTROLS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS-D4-001
+    - WB-CONTROLS-D4-003
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/workbench/AgentModels.test.ts
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    behaviors:
+    - Saved Agent effort wins over saved model effort; absent or invalid efforts resolve to auto regardless of catalog capability
+      default.
+    - Workbench initialization, model switching and off/on use the same defaults while existing sampling/output fields remain
+      unchanged.
+    - Shared off/on restores configured defaults rather than remembered temporary effort; existing budget and session tests
+      retained.
+    reason: Existing unit and browser owners cover shared default resolution and header interaction; no new D1 quota or backend
+      changes. D4 checks actual filtering, focus, close/reset, same-row geometry and outgoing controls.
+  notes: Existing SPEC R-002 and UI-05 covered explicit configured defaults but missed the absence variant. Model configuration
+    UI currently displays auto for the user model with no saved reasoning effort; capability default high was incorrectly
+    substituted by modelOptions. Strengthen existing Cases without adding IDs. No backend/provider wiring changes.

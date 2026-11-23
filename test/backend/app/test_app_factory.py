@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for app_factory module.
 
 Tests the create_app function and register_exception_handlers function
 for FastAPI application factory with common configurations and exception handlers.
 """
-import sys
 import os
+import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -101,6 +103,15 @@ class TestCreateApp:
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+
+    def test_create_app_uses_lifespan_context(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = create_app(lifespan=lifespan)
+
+        assert app.router.lifespan_context is lifespan
 
 
 class TestRegisterExceptionHandlers:
@@ -504,7 +515,7 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch.dict('sys.modules', {'utils.monitoring': None}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
@@ -540,7 +551,7 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch.dict('sys.modules', {'utils.monitoring': mock_module}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': mock_module}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
@@ -699,3 +710,233 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 "AppException:" in str(call) for call in mock_logger.error.call_args_list
             )
             assert app_exception_logged, "AppException should be logged by app_exception_handler"
+
+
+class TestQuotaExceededErrorHandler:
+    """Test class for QuotaExceededError handler (lines 98-110)."""
+
+    def test_quota_exceeded_error_returns_413(self):
+        """Test QuotaExceededError returns 413 with correct body."""
+        from consts.exceptions import QuotaExceededError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-quota")
+        def raise_quota():
+            raise QuotaExceededError(
+                "Storage full",
+                usage_bytes=1024,
+                hard_limit_bytes=512,
+                exceeded_by_bytes=512,
+            )
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-quota")
+
+        assert response.status_code == 413
+        body = response.json()
+        assert body["error"] == "TenantStorageFull"
+        assert body["message"] == "Storage full"
+        assert body["usage_bytes"] == 1024
+        assert body["hard_limit_bytes"] == 512
+        assert body["exceeded_by_bytes"] == 512
+
+
+class TestAidpExceptionHandlers:
+    """Test class for AIDP permission subsystem exception handlers (lines 117-173)."""
+
+    def test_aidp_kb_not_found_returns_404(self):
+        """Test AidpKbNotFoundError returns 404 with kb_id."""
+        from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-aidp-not-found")
+        def raise_not_found():
+            raise AidpKbNotFoundError(kb_id="kb-42", tenant_id="t-1")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-aidp-not-found")
+
+        assert response.status_code == 404
+        body = response.json()
+        assert body["code"] == "AIDP_KB_NOT_FOUND"
+        assert body["kb_id"] == "kb-42"
+        assert "kb-42" in body["message"]
+
+    def test_aidp_permission_denied_returns_403(self):
+        """Test AidpKbPermissionDeniedError returns 403 with user/kb/required."""
+        from ext_components.aidp.consts.aidp_exceptions import AidpKbPermissionDeniedError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-aidp-perm")
+        def raise_perm():
+            raise AidpKbPermissionDeniedError(
+                kb_id="kb-7", user_id="user-1", required="write"
+            )
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-aidp-perm")
+
+        assert response.status_code == 403
+        body = response.json()
+        assert body["code"] == "AIDP_PERMISSION_DENIED"
+        assert body["kb_id"] == "kb-7"
+        assert body["required"] == "write"
+
+    def test_aidp_conflict_returns_409(self):
+        """Test AidpKbConflictError returns 409 with kb_id."""
+        from ext_components.aidp.consts.aidp_exceptions import AidpKbConflictError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-aidp-conflict")
+        def raise_conflict():
+            raise AidpKbConflictError(kb_id="kb-3", tenant_id="t-2")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-aidp-conflict")
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["code"] == "AIDP_KB_CONFLICT"
+        assert body["kb_id"] == "kb-3"
+
+    def test_aidp_sync_error_returns_502(self):
+        """Test AidpKbSyncError returns 502 with operation."""
+        from ext_components.aidp.consts.aidp_exceptions import AidpKbSyncError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-aidp-sync")
+        def raise_sync():
+            raise AidpKbSyncError(operation="create", kb_id="kb-99")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-aidp-sync")
+
+        assert response.status_code == 502
+        body = response.json()
+        assert body["code"] == "AIDP_SYNC_ERROR"
+        assert body["operation"] == "create"
+
+    def test_aidp_group_validation_returns_400(self):
+        """Test AidpGroupValidationError returns 400 with invalid_ids."""
+        from ext_components.aidp.consts.aidp_exceptions import AidpGroupValidationError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-aidp-group")
+        def raise_group():
+            raise AidpGroupValidationError(invalid_ids=[10, 20], tenant_id="t-5")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-aidp-group")
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["code"] == "AIDP_GROUP_VALIDATION"
+        assert body["invalid_ids"] == [10, 20]
+        assert "t-5" in body["message"]
+
+
+class TestAidpImportErrorBranch:
+    """Test class for ImportError fallback when AIDP is unavailable (lines 174-176)."""
+
+    def test_register_skips_aidp_handlers_on_import_error(self):
+        """Test that register_exception_handlers works when AIDP module is absent."""
+        from unittest.mock import patch
+
+        app = FastAPI()
+
+        # Force an ImportError for the AIDP import by intercepting the built-in import
+        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+
+        def patched_import(name, *args, **kwargs):
+            if "aidp_exceptions" in name:
+                raise ImportError(f"Simulated absence of {name}")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=patched_import):
+            # re-register on a fresh app so the ImportError path runs
+            fresh_app = FastAPI()
+            register_exception_handlers(fresh_app)
+
+        # Verify AIDP exception classes are NOT in the handler map
+        from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
+        assert AidpKbNotFoundError not in fresh_app.exception_handlers
+
+
+class TestNexentCapabilityErrorInGenericHandler:
+    """Test class for NexentCapabilityError path in generic handler (lines 184-192)."""
+
+    def test_nexent_capability_error_returns_400(self):
+        """Test NexentCapabilityError returns 400 via the generic handler."""
+        from adapters.exception import NexentCapabilityError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-nexent-cap")
+        def raise_cap():
+            raise NexentCapabilityError("Feature X not supported in nexent mode")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-nexent-cap")
+
+        assert response.status_code == 400
+        body = response.json()
+        assert "Feature X not supported" in body["message"]
+
+
+class TestGenericHandlerAppExceptionDelegation:
+    """Test class for the isinstance(exc, AppException) delegation in generic handler (line 182)."""
+
+    def test_generic_handler_delegates_app_exception(self):
+        """Test generic handler delegates AppException to app_exception_handler."""
+        import asyncio
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        # Get a reference to the registered generic exception handler
+        generic_handler = app.exception_handlers[Exception]
+
+        # Create a request-like object and an AppException
+        exc = AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Delegated error")
+
+        response = asyncio.get_event_loop().run_until_complete(
+            generic_handler(None, exc)
+        )
+
+        assert response.status_code == 400
+        body = __import__("json").loads(response.body)
+        assert body["message"] == "Delegated error"
+        assert body["code"] == ErrorCode.COMMON_VALIDATION_ERROR.value
+
+    def test_token_expired_exception_handler(self):
+        """Test TokenExpiredError handler returns 401 with TOKEN_EXPIRED code."""
+        from consts.exceptions import TokenExpiredError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-token-expired")
+        def raise_token_expired():
+            raise TokenExpiredError("expired")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-token-expired")
+
+        assert response.status_code == 401
+        assert response.json() == {
+            "message": "Session expired, please log in again",
+            "code": "TOKEN_EXPIRED",
+        }

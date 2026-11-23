@@ -608,6 +608,55 @@ class TestMinIOStorageClientGetFileSize:
 
         assert size == 0
 
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_size_strict_distinguishes_missing_from_operational_error(
+        self, mock_boto3
+    ):
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket",
+        )
+
+        mock_client.head_object.return_value = {"ContentLength": 123}
+        assert client.get_file_size_strict("test.txt") == 123
+
+        mock_client.head_object.side_effect = ClientError(
+            {
+                "Error": {"Code": "NoSuchKey", "Message": "Not Found"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            },
+            "HeadObject",
+        )
+        assert client.get_file_size_strict("missing.txt") is None
+
+        permission_error = ClientError(
+            {
+                "Error": {"Code": "AccessDenied", "Message": "Forbidden"},
+                "ResponseMetadata": {"HTTPStatusCode": 403},
+            },
+            "HeadObject",
+        )
+        mock_client.head_object.side_effect = permission_error
+        with pytest.raises(ClientError):
+            client.get_file_size_strict("private.txt")
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_size_strict_requires_bucket(self, mock_boto3):
+        mock_boto3.client.return_value = MagicMock()
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+        )
+
+        with pytest.raises(ValueError, match="Bucket name"):
+            client.get_file_size_strict("test.txt")
+
 
 class TestMinIOStorageClientListFiles:
     """Test cases for list_files method"""

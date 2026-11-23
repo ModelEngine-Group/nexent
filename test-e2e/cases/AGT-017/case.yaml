@@ -1,0 +1,54 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-017
+  feature_id: F-056
+  business_rule_ids:
+  - F-056-RULE-01
+  title: resume 参数：tab 切换/断连后从运行状态恢复｜异常/边界/越权
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: resume 参数：tab 切换/断连后从运行状态恢复｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 使用 is_debug=false 构造不存在或当前用户不可访问的 conversation_id。
+    expected: 不存在或无权访问的持久化会话恢复请求返回 403/404。
+  - order: 2
+    action: 调用 /agent/run?resume=true，不创建任何调试态旁路。
+    expected: 不返回 200 空 SSE，不创建会话/消息，不泄露资源存在性。
+  - order: 3
+    action: 断言接口返回 403 或 404；不得以 200 建立空流，也不得泄露会话是否属于其他用户。
+    expected: 重试结果稳定且无副作用。
+  - order: 4
+    action: 对同一 ID 重试一次，确认无新会话、消息或运行状态副作用。
+    expected: 重试结果稳定且无副作用。
+  expected_results:
+  - 不存在或无权访问的持久化会话恢复请求返回 403/404。
+  - 不返回 200 空 SSE，不创建会话/消息，不泄露资源存在性。
+  - 重试结果稳定且无副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 107
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 不存在或无权访问的持久化会话恢复请求返回 403/404。
+  - 不返回 200 空 SSE，不创建会话/消息，不泄露资源存在性。
+  - 重试结果稳定且无副作用。
+  cleanup:
+  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

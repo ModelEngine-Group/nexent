@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import html
 import logging
 from http import HTTPStatus
@@ -7,7 +8,12 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from services.cas_service import (
+from consts.exceptions import (
+    TenantResourceLimitError,
+    tenant_resource_limit_error_payload,
+)
+
+from management.services.permission.identity.cas import (
     CAS_SERVER_URL,
     CasAuthenticationError,
     build_login_url,
@@ -17,6 +23,7 @@ from services.cas_service import (
     renew_with_ticket,
     revoke_from_logout_request,
 )
+from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/cas", tags=["cas"])
@@ -41,9 +48,13 @@ async def login(redirect: str = Query("/", description="URL to return to after l
 
 
 @router.get("/callback")
-async def callback(ticket: str = "", redirect: str = "/"):
+async def callback(http_request: Request, ticket: str = "", redirect: str = "/"):
     try:
         result = await login_with_ticket(ticket, redirect)
+        result_user = (result or {}).get("user") or {}
+        record_security_event("cas_login", request=http_request,
+                              user_id=result_user.get("id"),
+                              user_email=result_user.get("email"))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "CAS login successful", "data": result},
@@ -51,6 +62,12 @@ async def callback(ticket: str = "", redirect: str = "/"):
     except CasAuthenticationError as exc:
         logger.warning("CAS callback rejected: %s", exc)
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="CAS authentication failed")
+    except TenantResourceLimitError as exc:
+        logger.warning("CAS callback rejected by tenant resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
     except Exception as exc:
         logger.error(f"CAS callback failed: {exc}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="CAS login failed")
@@ -107,6 +124,11 @@ async def _handle_logout_request(
     )
     result = revoke_from_logout_request(logout_request)
     logger.info("CAS SLO %s revoke result: %s", endpoint, result)
+    record_security_event("cas_logout", request=request,
+                          details={"endpoint": endpoint,
+                                   "revoked": (result or {}).get("revoked"),
+                                   "cas_user_id": (result or {}).get("cas_user_id", ""),
+                                   "session_index": (result or {}).get("session_index", "")})
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"message": "success", "data": result},

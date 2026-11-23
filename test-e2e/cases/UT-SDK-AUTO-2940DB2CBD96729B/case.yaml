@@ -1,0 +1,74 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-2940DB2CBD96729B
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: ThreadManager drain/shutdown 取消在途任务、上报 stuck_execution_ids 与状态机转换｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ThreadManager drain/shutdown 取消在途任务、上报 stuck_execution_ids 与状态机转换｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 可直接导入 sdk/nexent/core/concurrency 的 ThreadManager/LanePolicy/ManagedTaskSpec/ManagerState/ExecutionState，无需外部本地资产文件。
+  test_data:
+    legacy_asset_declaration: '- 无固定本地资产：直接构造 LanePolicy 与 ThreadManager 对象，不使用真实模型与外部服务。'
+  steps:
+  - order: 1
+    action: 构造单一 lane 的 LanePolicy(name="model-tool-io", max_workers=1, max_queue_size=2, queue_timeout_seconds=0, cancel_grace_seconds=0.1)，创建
+      ThreadManager(service_name, lane_policies) 并调用 start()。
+    expected: 状态机按 RUNNING→DRAINING→CLOSED/CLOSED_WITH_STUCK 迁移：start 后 RUNNING，drain 后 DRAINING，shutdown 后无 stuck 时为 CLOSED、有
+      stuck 时为 CLOSED_WITH_STUCK。
+  - order: 2
+    action: 断言启动后 manager.state == ManagerState.RUNNING。
+    expected: 存在不响应取消的在途任务时最终 state==CLOSED_WITH_STUCK，且 stuck_execution_ids 精确等于该在途任务 execution_id。
+  - order: 3
+    action: 通过 submit 依次提交两个任务：在途任务 A 阻塞且不响应取消（忽略 cancel_event，阻塞时长超过 drain 超时），排队任务 B 正常等待执行；记录两者 execution_id。
+    expected: 排队任务被取消并进入终态 CANCELLED，不出现在 stuck_execution_ids 与 active_execution_ids。
+  - order: 4
+    action: 调用 await manager.drain(timeout=0.05)，断言在途任务 A 被标记 STUCK、排队任务 B 被取消为 CANCELLED，且返回 DrainResult.stuck_execution_ids
+      仅含 A 的 execution_id。
+    expected: 关闭为幂等：重复 shutdown/drain 返回同样 stuck ids，不抛异常。
+  - order: 5
+    action: 继续调用 await manager.shutdown(timeout=0.05)，断言 manager.state == ManagerState.CLOSED_WITH_STUCK（存在 stuck 时），且返回 stuck_execution_ids
+      与 drain 结果一致。
+    expected: 关闭后提交工作抛 ThreadManagerNotRunning，draining 期间提交工作抛 ThreadManagerDraining。
+  - order: 6
+    action: 对已关闭 manager 再次调用 shutdown/drain，断言幂等返回相同 stuck ids 且不抛异常。
+    expected: 测试过程无未处理异常，日志不输出 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 断言关闭后 submit/register_service 抛 ThreadManagerNotRunning，快照 active_execution_ids 不再包含已取消的 B。
+    expected: 测试过程无未处理异常，日志不输出 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 测试结束释放阻塞任务所用 event，确保工作线程退出、可重复执行。
+    expected: 测试过程无未处理异常，日志不输出 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 状态机按 RUNNING→DRAINING→CLOSED/CLOSED_WITH_STUCK 迁移：start 后 RUNNING，drain 后 DRAINING，shutdown 后无 stuck 时为 CLOSED、有 stuck
+    时为 CLOSED_WITH_STUCK。
+  - 存在不响应取消的在途任务时最终 state==CLOSED_WITH_STUCK，且 stuck_execution_ids 精确等于该在途任务 execution_id。
+  - 排队任务被取消并进入终态 CANCELLED，不出现在 stuck_execution_ids 与 active_execution_ids。
+  - 关闭为幂等：重复 shutdown/drain 返回同样 stuck ids，不抛异常。
+  - 关闭后提交工作抛 ThreadManagerNotRunning，draining 期间提交工作抛 ThreadManagerDraining。
+  - 测试过程无未处理异常，日志不输出 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 459
+  unit_boundary: 并发调度
+  inputs:
+  - '- 无固定本地资产：直接构造 LanePolicy 与 ThreadManager 对象，不使用真实模型与外部服务。'
+  assertions:
+  - 状态机按 RUNNING→DRAINING→CLOSED/CLOSED_WITH_STUCK 迁移：start 后 RUNNING，drain 后 DRAINING，shutdown 后无 stuck 时为 CLOSED、有 stuck
+    时为 CLOSED_WITH_STUCK。
+  - 存在不响应取消的在途任务时最终 state==CLOSED_WITH_STUCK，且 stuck_execution_ids 精确等于该在途任务 execution_id。
+  - 排队任务被取消并进入终态 CANCELLED，不出现在 stuck_execution_ids 与 active_execution_ids。
+  - 关闭为幂等：重复 shutdown/drain 返回同样 stuck ids，不抛异常。
+  - 关闭后提交工作抛 ThreadManagerNotRunning，draining 期间提交工作抛 ThreadManagerDraining。
+  - 测试过程无未处理异常，日志不输出 API Key/Token/Password/模型密钥。

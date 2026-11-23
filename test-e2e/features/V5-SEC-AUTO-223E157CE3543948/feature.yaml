@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-AUTO-223E157CE3543948
+  name: 沙箱策略解析与安全降级（build_sandbox_policy / get_sandbox_minio_client）
+  status: active
+  description: 威胁/风险：沙箱策略解析错误或降级失败可能扩大 Agent 执行边界（如 local 级别误组装 docker 策略、网络禁用或命令策略被放宽/丢失），或 MinIO 未配置时抛异常导致 Agent 运行中断。目标：验证
+    build_sandbox_policy 依据 NEXENT_SANDBOX_* 严格组装策略，local 级别安全返回 None 不暴露过宽策略，docker 级别字段完整一致；MinIO 未配置或依赖缺失时 get_sandbox_minio_client
+    安全返回 None 不抛异常。
+  business_rules:
+  - rule_id: V5-SEC-AUTO-223E157CE3543948-RULE-01
+    description: 沙箱策略解析与安全降级（build_sandbox_policy / get_sandbox_minio_client）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

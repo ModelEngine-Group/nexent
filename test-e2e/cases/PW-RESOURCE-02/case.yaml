@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-RESOURCE-02
+  feature_id: V5-PW-RESOURCE-02
+  business_rule_ids:
+  - V5-PW-RESOURCE-02-RULE-01
+  title: Tenant Admin用户组→邀请码→注册成员→角色/成员管理
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 覆盖同一租户用户组、邀请、成员管理主链。
+  preconditions:
+  - Tenant Admin storageState
+  - 未注册run_id邮箱
+  - 无同名Group
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 选择测试租户→Groups Tab，创建run_id组。
+    expected: 组/邀请码/用户关系刷新后存在。
+  - order: 2
+    action: 打开组并设置当前可编辑成员/默认属性。
+    expected: 角色/组变更影响用户可见操作。
+  - order: 3
+    action: 切Invitations创建run_id邀请码。
+    expected: 邀请用户进入目标租户。
+  - order: 4
+    action: 独立Context用邀请码注册新用户并登录。
+    expected: 邀请用户进入目标租户。
+  - order: 5
+    action: 管理员切Users Tab搜索新用户。
+    expected: 邀请用户进入目标租户。
+  - order: 6
+    action: 通过当前入口把用户加入组或调整角色。
+    expected: 邀请用户进入目标租户。
+  - order: 7
+    action: 新用户Context刷新，确认权限/UI变化。
+    expected: 邀请用户进入目标租户。
+  - order: 8
+    action: 管理员移除成员/删除Group/撤销剩余邀请码。
+    expected: 邀请用户进入目标租户。
+  expected_results:
+  - 组/邀请码/用户关系刷新后存在。
+  - 角色/组变更影响用户可见操作。
+  - 邀请用户进入目标租户。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 8
+  actor: Nexent browser user
+  journey:
+  - 选择测试租户→Groups Tab，创建run_id组。
+  - 打开组并设置当前可编辑成员/默认属性。
+  - 切Invitations创建run_id邀请码。
+  - 独立Context用邀请码注册新用户并登录。
+  - 管理员切Users Tab搜索新用户。
+  - 通过当前入口把用户加入组或调整角色。
+  - 新用户Context刷新，确认权限/UI变化。
+  - 管理员移除成员/删除Group/撤销剩余邀请码。
+  final_business_result:
+  - 组/邀请码/用户关系刷新后存在。
+  - 角色/组变更影响用户可见操作。
+  - 邀请用户进入目标租户。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-RESOURCE-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

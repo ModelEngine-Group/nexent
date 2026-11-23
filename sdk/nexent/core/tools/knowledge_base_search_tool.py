@@ -4,42 +4,30 @@ import os
 from typing import List, Optional
 
 from pydantic import Field
-from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
-from ..models.embedding_model import BaseEmbedding
-from ..models.rerank_model import BaseRerank
+from ..gateway.modality import EmbeddingAdapter
+from ..gateway.modality import RerankAdapter
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import (
     SearchResultTextMessage,
     ToolCategory,
     ToolSign,
+    build_knowledge_search_response,
+    resolve_knowledge_search_scope,
 )
 
 logger = logging.getLogger("knowledge_base_search_tool")
-
-
-def _unwrap_field_info(value):
-    """Resolve a value that may be wrapped in a Pydantic FieldInfo.
-
-    Parameters declared with `Field(...)` and `exclude=True` are not expanded by
-    smolagents' Tool wrapper, so they arrive at `__init__` as raw FieldInfo
-    instances instead of their declared defaults. This helper extracts the
-    concrete value so callers can safely treat the result as plain data.
-    """
-    if isinstance(value, FieldInfo):
-        if value.default_factory is not None:
-            return value.default_factory()
-        return value.default
-    return value
 
 
 class KnowledgeBaseSearchTool(Tool):
     """Knowledge base search tool"""
 
     name = "knowledge_base_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a local knowledge base search based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in the local knowledge base. "
@@ -85,7 +73,7 @@ class KnowledgeBaseSearchTool(Tool):
     def __init__(
         self,
         top_k: int = Field(
-            description="Maximum number of search results", default=3
+            description="Maximum number of search results", default=3, ge=1, le=100
         ),
         index_names: List[str] = Field(
             description="The list of index names to search"
@@ -104,10 +92,10 @@ class KnowledgeBaseSearchTool(Tool):
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        embedding_model: BaseEmbedding = Field(
+        embedding_model: EmbeddingAdapter = Field(
             description="The embedding model to use", default=None, exclude=True
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True
         ),
         vdb_core: VectorDatabaseCore = Field(
@@ -118,6 +106,12 @@ class KnowledgeBaseSearchTool(Tool):
         # Internal parameter: not exposed to LLM, only settable via tool_params from /chat/run.
         document_paths: Optional[List[str]] = Field(
             description="Internal: restrict results to documents with these path_or_urls", default=None, exclude=True
+        ),
+        # Defense-in-depth whitelist populated by the backend when it builds the ToolConfig.
+        # If set, forward() will silently drop any index_name not in this list so that even
+        # a fabricated LLM argument cannot reach a KB the chatting user is not allowed to read.
+        allowed_index_names: Optional[List[str]] = Field(
+            description="Internal: read-permission whitelist for index_names", default=None, exclude=True,
         ),
     ):
         """Initialize the KBSearchTool.
@@ -133,7 +127,7 @@ class KnowledgeBaseSearchTool(Tool):
             ValueError: If language is not supported
         """
         super().__init__()
-        self.top_k = top_k
+        self.top_k = max(1, min(int(unwrap_field_info(top_k) or 3), 100))
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
@@ -147,11 +141,14 @@ class KnowledgeBaseSearchTool(Tool):
         # `document_paths` is declared with `exclude=True` so smolagents passes the
         # raw FieldInfo default when no value is supplied. Unwrap it here so the
         # internal filter is always a concrete list (or None), never a FieldInfo.
-        self._internal_document_paths = _unwrap_field_info(document_paths)
+        self._internal_document_paths = unwrap_field_info(document_paths)
+        # `allowed_index_names` is `exclude=True`; unwrap in case smolagents passed FieldInfo.
+        raw_allowed = unwrap_field_info(allowed_index_names)
+        self._allowed_index_names: Optional[set] = (
+            set(raw_allowed) if isinstance(raw_allowed, list) else None
+        )
 
         self.record_ops = 1
-        self.running_prompt_zh = "知识库检索中..."
-        self.running_prompt_en = "Searching the knowledge base..."
 
     def set_document_paths(self, document_paths: Optional[List[str]]) -> None:
         """Set the internal document_paths filter for access control.
@@ -162,7 +159,17 @@ class KnowledgeBaseSearchTool(Tool):
         Args:
             document_paths: List of allowed document path_or_urls. If None, no filtering is applied.
         """
-        self._internal_document_paths = _unwrap_field_info(document_paths)
+        self._internal_document_paths = unwrap_field_info(document_paths)
+
+    def set_allowed_index_names(self, index_names: Optional[List[str]]) -> None:
+        """Install the backend-computed execution whitelist.
+
+        ``None`` preserves legacy SDK-only behavior. An empty list is an
+        installed deny-all whitelist and must not be treated as unset.
+        """
+        self._allowed_index_names = (
+            None if index_names is None else {str(name) for name in index_names}
+        )
 
     def _convert_to_index_names(self, names: List[str]) -> List[str]:
         """Convert display names (knowledge_name) to index names if necessary.
@@ -176,12 +183,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             List of actual index_names for ES queries
         """
-        display_map = self.display_name_to_index_map
-        if isinstance(display_map, FieldInfo):
-            if display_map.default_factory is not None:
-                display_map = display_map.default_factory()
-            else:
-                display_map = display_map.default
+        display_map = self._get_display_name_to_index_map()
         if not display_map:
             return names
 
@@ -192,6 +194,67 @@ class KnowledgeBaseSearchTool(Tool):
             else:
                 converted_names.append(name)
         return converted_names
+
+    def _get_display_name_to_index_map(self) -> dict:
+        display_map = unwrap_field_info(self.display_name_to_index_map)
+        return display_map if isinstance(display_map, dict) else {}
+
+    def _convert_to_display_names(self, index_names: List[str]) -> List[str]:
+        """Convert internal index names to display names for response metadata."""
+        display_map = self._get_display_name_to_index_map()
+        if not display_map:
+            return list(index_names)
+
+        index_to_display = {
+            str(index_name): str(display_name)
+            for display_name, index_name in display_map.items()
+        }
+        return [
+            index_to_display.get(str(index_name), str(index_name))
+            for index_name in index_names
+        ]
+
+    def _build_scope_response(
+        self,
+        results: List[dict],
+        used_scope: List[str],
+        permission_denied_scope: List[str],
+        unavailable_scope: List[str],
+        fallback_to_all: bool,
+        scope_was_specified: bool,
+    ) -> str:
+        """Serialize search results with display names in the model-facing notice."""
+        return build_knowledge_search_response(
+            results,
+            self._convert_to_display_names(used_scope),
+            self._convert_to_display_names(permission_denied_scope),
+            self._convert_to_display_names(unavailable_scope),
+            fallback_to_all,
+            scope_was_specified,
+        )
+
+    def _resolve_search_scope(
+        self, index_names: Optional[List[str]]
+    ):
+        configured_scope = self._convert_to_index_names(list(self.index_names))
+        if self._allowed_index_names is not None:
+            available_scope = [
+                name for name in configured_scope if name in self._allowed_index_names
+            ]
+        else:
+            available_scope = configured_scope
+
+        requested_scope = (
+            None
+            if index_names is None or len(index_names) == 0
+            else self._convert_to_index_names(list(index_names))
+        )
+        return resolve_knowledge_search_scope(
+            configured_scope=configured_scope,
+            available_scope=available_scope,
+            requested_scope=requested_scope,
+            permission_tracking_enabled=self._allowed_index_names is not None,
+        )
 
     def _filter_by_document_paths(self, results: List[dict]) -> List[dict]:
         """Filter search results by allowed document paths for access control.
@@ -206,7 +269,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             Filtered list containing only results with allowed document paths
         """
-        allowed_paths = _unwrap_field_info(self._internal_document_paths)
+        allowed_paths = unwrap_field_info(self._internal_document_paths)
         if not allowed_paths:
             return results
 
@@ -224,11 +287,26 @@ class KnowledgeBaseSearchTool(Tool):
         return filtered
 
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
-        # Parse index_names from string (always required)
-        search_index_names = index_names if index_names is not None else self.index_names
+        scope = self._resolve_search_scope(index_names)
+        search_index_names = scope.used_scope
 
-        # Convert display names to index names if necessary
-        search_index_names = self._convert_to_index_names(search_index_names)
+        # Guard: if no knowledge bases are accessible after permission filtering,
+        # return a clear denial message so the LLM can inform the user instead of
+        # retrying against a non-existent tool.
+        if not search_index_names:
+            logger.warning(
+                "KnowledgeBaseSearchTool called with query '%s' but no accessible "
+                "knowledge bases after permission filtering",
+                query,
+            )
+            return self._build_scope_response(
+                [],
+                search_index_names,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
+            )
 
         # Use the instance search_mode
         search_mode = self.search_mode
@@ -245,23 +323,10 @@ class KnowledgeBaseSearchTool(Tool):
         # Compute effective top_k for initial search:
         # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
         # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
-        effective_top_k = self.top_k
-        is_rerank = self.rerank
-        if isinstance(effective_top_k, FieldInfo):
-            if effective_top_k.default_factory is not None:
-                effective_top_k = effective_top_k.default_factory()
-            else:
-                effective_top_k = effective_top_k.default
-        if isinstance(is_rerank, FieldInfo):
-            if is_rerank.default_factory is not None:
-                is_rerank = is_rerank.default_factory()
-            else:
-                is_rerank = is_rerank.default
+        effective_top_k = unwrap_field_info(self.top_k)
+        is_rerank = unwrap_field_info(self.rerank)
         if is_rerank:
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
-
-        if len(search_index_names) == 0:
-            return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
         kb_search_data = self._run_search(
             query=query,
@@ -275,7 +340,19 @@ class KnowledgeBaseSearchTool(Tool):
         kb_search_results = self._filter_by_document_paths(kb_search_results)
 
         if not kb_search_results:
-            raise Exception("No results found! Try a less restrictive/shorter query.")
+            logger.info(
+                "Knowledge base search returned no results for query '%s' in indexes %s",
+                query,
+                search_index_names,
+            )
+            return self._build_scope_response(
+                [],
+                search_index_names,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
+            )
 
         if self.rerank and self.rerank_model and kb_search_results:
             kb_search_results = self._apply_rerank(
@@ -298,17 +375,18 @@ class KnowledgeBaseSearchTool(Tool):
             query=query,
         )
 
-        return json.dumps(search_results_return, ensure_ascii=False)
+        return self._build_scope_response(
+            search_results_return,
+            search_index_names,
+            scope.permission_denied_scope,
+            scope.unavailable_scope,
+            scope.fallback_to_all,
+            scope.scope_was_specified,
+        )
 
     def _notify_search_start(self, query: str) -> None:
         if not self.observer:
             return
-        running_prompt = (
-            self.running_prompt_zh
-            if self.observer.lang == "zh"
-            else self.running_prompt_en
-        )
-        self.observer.add_message("", ProcessType.TOOL, running_prompt)
         card_content = [{"icon": "search", "text": query}]
         self.observer.add_message(
             "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)
@@ -452,6 +530,28 @@ class KnowledgeBaseSearchTool(Tool):
                 "", ProcessType.PICTURE_WEB, search_images_list_json
             )
 
+    @staticmethod
+    def _format_search_results(results: list, include_scores: bool) -> list:
+        """Format raw vector search results for tool output.
+
+        Copies each document before mutation, attaches score/index, and merges
+        score details plus retrieval highlight terms into ``score_details``.
+        """
+        formatted_results = []
+        for result in results:
+            doc = dict(result["document"])
+            doc["score"] = result["score"]
+            doc["index"] = result["index"]
+            score_details = dict(doc.get("score_details") or {})
+            if include_scores and result.get("scores"):
+                score_details.update(result["scores"])
+            if result.get("highlight_terms"):
+                score_details["retrieval_highlight_terms"] = result["highlight_terms"]
+            if score_details:
+                doc["score_details"] = score_details
+            formatted_results.append(doc)
+        return formatted_results
+
     def search_hybrid(self, query, index_names, top_k):
         try:
             results = self.vdb_core.hybrid_search(
@@ -461,12 +561,9 @@ class KnowledgeBaseSearchTool(Tool):
                 top_k=top_k,
             )
 
-            formatted_results = []
-            for result in results:
-                doc = result["document"]
-                doc["score"] = result["score"]
-                doc["index"] = result["index"]
-                formatted_results.append(doc)
+            formatted_results = self._format_search_results(
+                results, include_scores=True
+            )
 
             return {
                 "results": formatted_results,
@@ -483,12 +580,9 @@ class KnowledgeBaseSearchTool(Tool):
                 top_k=top_k,
             )
 
-            formatted_results = []
-            for result in results:
-                doc = result["document"]
-                doc["score"] = result["score"]
-                doc["index"] = result["index"]
-                formatted_results.append(doc)
+            formatted_results = self._format_search_results(
+                results, include_scores=False
+            )
 
             return {
                 "results": formatted_results,
@@ -506,12 +600,9 @@ class KnowledgeBaseSearchTool(Tool):
                 top_k=top_k,
             )
 
-            formatted_results = []
-            for result in results:
-                doc = result["document"]
-                doc["score"] = result["score"]
-                doc["index"] = result["index"]
-                formatted_results.append(doc)
+            formatted_results = self._format_search_results(
+                results, include_scores=False
+            )
 
             return {
                 "results": formatted_results,
@@ -593,4 +684,3 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Return the final list to the caller
         return final_filtered_images
-

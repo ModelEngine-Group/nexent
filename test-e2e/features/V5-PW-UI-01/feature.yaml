@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-UI-01
+  name: 核心路由导航→zh/en切换→页面状态不串
+  status: active
+  description: 验证真实路由导航和i18n，不把错误边界硬塞进Journey。
+  business_rules:
+  - rule_id: V5-PW-UI-01-RULE-01
+    description: 核心路由导航→zh/en切换→页面状态不串
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

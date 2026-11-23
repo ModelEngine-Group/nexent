@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-INLINE-MESSAGE-EDIT-20261016
+  change_type: bugfix
+  bug_id: CHAT-INLINE-MESSAGE-EDIT-20261016
+  title: Render the user message edit composer inline
+  description: Register the assistant-ui edit composer and show a rounded multiline editor with cancel and send actions at the original message position.
+  observed_behavior: The pencil starts the message edit runtime but the custom message renderer never renders its edit composer.
+  expected_behavior: Editing shows the original text in place; cancellation preserves the message and sending uses the existing edit and branch runtime.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: No focused inline-message-edit assertions were found in the inspected frontend tests and formal Case YAML.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Pencil opens the original text in the message edit composer.
+      - Cancel and Escape leave the original message and answer unchanged.
+      - Send submits once through the existing runtime; empty drafts are disabled and plain Enter inserts a newline.
+    reason: Focused regression coverage is needed for edit rendering and composer interactions.
+    test_selectors:
+      - frontend/tests/workbench/UserMessageEditComposer.test.tsx
+  notes: >-
+    Complete the missing traditional UT proof while preserving the intended edit behavior and formal Case contracts.
+    Existing Composer tests cover the new-message composer and ThreadMessageRenderers tests cover renderer
+    identity; neither executes the registered message edit composer. The focused regression uses the real
+    ThreadMessages registration, assistant-ui local runtime and edit primitives. It covers pencil-to-inline-editor
+    registration, original text, cancel/Escape preserving the question and answer, empty-draft send prevention,
+    multiline Enter, exactly one edit submission, IME Escape and read-only/share restrictions. Only the model
+    adapter and unrelated syntax-highlighting rendering are controlled; no backend/provider or browser-journey
+    acceptance is claimed. The regression exposed duplicate Escape cancellation: the real input already cancels
+    and prevents the event before the outer handler calls an unavailable composer. The outer handler now respects
+    defaultPrevented, avoiding the second cancellation while retaining its fallback for other focused controls.
+    No formal Case or Feature change is needed for this isolated UI/runtime regression backfill.
+    Design and verification: ../nexent-doc/docs/Developing/chat-inline-message-edit/design.md.

@@ -1,7 +1,7 @@
-import base64
 import json
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from elasticsearch import Elasticsearch, exceptions
 
-from ..core.models.embedding_model import BaseEmbedding
+from ..core.gateway.modality import EmbeddingAdapter
 from ..core.nlp.tokenizer import calculate_term_weights
 from .base import VectorDatabaseCore
 from .utils import build_weighted_query, format_size
@@ -32,6 +32,8 @@ class BulkOperation:
 
 SCROLL_TTL = "2m"
 DEFAULT_SCROLL_SIZE = 1000
+_HIGHLIGHT_PRE_TAG = "__nexent_hit_start__"
+_HIGHLIGHT_POST_TAG = "__nexent_hit_end__"
 
 
 class ElasticSearchCore(VectorDatabaseCore):
@@ -337,7 +339,7 @@ class ElasticSearchCore(VectorDatabaseCore):
     def vectorize_documents(
         self,
         index_name: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         documents: List[Dict[str, Any]],
         batch_size: int = 64,
         content_field: str = "content",
@@ -387,6 +389,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 documents=documents,
                 content_field=content_field,
                 embedding_model=embedding_model,
+                embedding_batch_size=embedding_batch_size,
                 progress_callback=progress_callback,
             )
 
@@ -395,31 +398,74 @@ class ElasticSearchCore(VectorDatabaseCore):
         index_name: str,
         documents: List[Dict[str, Any]],
         content_field: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
+        embedding_batch_size: int = 10,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
-        """Small batch insertion: real-time"""
+        """Small batch insertion: real-time, with sub-batched embedding calls.
+
+        Splits documents into ``embedding_batch_size`` sub-batches and retries
+        failed embedding calls so a single transient provider error does not
+        fail the whole insert.
+        """
         try:
             processed_docs = self._preprocess_documents(
                 documents, content_field)
-            
-            # Preprocess documents
-            processed_docs, embeddings = self._prepare_small_batch_embeddings(
-                processed_docs, content_field, embedding_model
-            )
+            if embedding_model.model_type != "multimodal":
+                processed_docs = [
+                    doc
+                    for doc in processed_docs
+                    if doc.get("process_source") != "UniversalImageExtractor"
+                ]
+
+            total_docs = len(processed_docs)
+            if total_docs == 0:
+                logger.info("Small batch insert skipped: no documents to index.")
+                return 0
+
+            sub_batch_max_retries = self.max_retries
+            doc_embedding_pairs = []
+
+            # Sub-batch embeddings to reduce provider pressure and isolate a
+            # single transient failure to a small request instead of the batch.
+            for j in range(0, total_docs, embedding_batch_size):
+                embedding_sub_batch = processed_docs[j: j + embedding_batch_size]
+                for retry_attempt in range(sub_batch_max_retries):
+                    try:
+                        sub_docs, embeddings = self._prepare_small_batch_embeddings(
+                            embedding_sub_batch, content_field, embedding_model
+                        )
+                        doc_embedding_pairs.extend(zip(sub_docs, embeddings))
+                        break  # Success, exit retry loop
+                    except Exception as e:
+                        retry_delay = min(1.0 * (2 ** retry_attempt), 30.0)
+                        if retry_attempt < sub_batch_max_retries - 1:
+                            logger.warning(
+                                f"Embedding API error (attempt {retry_attempt + 1}/{sub_batch_max_retries}): "
+                                f"{e}, sub-batch start: {j}, size: {len(embedding_sub_batch)}. Retrying in {retry_delay}s..."
+                            )
+                            time.sleep(retry_delay)
+                        else:
+                            logger.error(
+                                f"Embedding API error after {sub_batch_max_retries} attempts: {e}, "
+                                f"sub-batch start: {j}, size: {len(embedding_sub_batch)}"
+                            )
+                            # Escalate to upper layer retry instead of returning partial success.
+                            raise
+
+            if not doc_embedding_pairs:
+                logger.info("Small batch insert skipped: no documents to index.")
+                return 0
+
+            indexed_count = len(doc_embedding_pairs)
 
             # Prepare bulk operations
             operations = self._build_bulk_operations(
                 index_name=index_name,
-                processed_docs=processed_docs,
-                embeddings=embeddings,
+                processed_docs=[doc for doc, _ in doc_embedding_pairs],
+                embeddings=[emb for _, emb in doc_embedding_pairs],
                 embedding_model=embedding_model,
             )
-
-            indexed_count = len(processed_docs)
-            if indexed_count == 0:
-                logger.info("Small batch insert skipped: no documents to index.")
-                return 0
 
             # Execute bulk insertion, wait for refresh to complete
             response = self.client.bulk(
@@ -447,22 +493,22 @@ class ElasticSearchCore(VectorDatabaseCore):
         self,
         processed_docs: List[Dict[str, Any]],
         content_field: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
     ):
         if embedding_model.model_type == "multimodal":
             inputs = []
+            embeddable_docs = []
             for doc in processed_docs:
                 if doc.get("process_source") == "UniversalImageExtractor":
                     img_bytes = doc.pop("image_bytes", "")
                     if len(img_bytes) > 0:
-                        image_base64_str = base64.b64encode(
-                            img_bytes).decode("utf-8")
-                        data = f"data:image/jpeg;base64,{image_base64_str}"
-                        inputs.append({"image": data})
+                        inputs.append({"image": img_bytes})
+                        embeddable_docs.append(doc)
                 else:
                     inputs.append({"text": doc[content_field]})
+                    embeddable_docs.append(doc)
             embeddings = embedding_model.get_multimodal_embeddings(inputs)
-            return processed_docs, embeddings
+            return embeddable_docs, embeddings
         else:
             filtered_docs = [
                 doc
@@ -474,11 +520,18 @@ class ElasticSearchCore(VectorDatabaseCore):
             return filtered_docs, embeddings
 
     @staticmethod
+    def _normalize_embedding_vector(embedding: Any) -> Any:
+        """Convert numeric vector values to floats for Elasticsearch dense vectors."""
+        if not isinstance(embedding, list):
+            return embedding
+        return [float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else value for value in embedding]
+
+    @staticmethod
     def _build_bulk_operations(
         index_name: str,
         processed_docs: List[Dict[str, Any]],
         embeddings: List[Any],
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
     ) -> List[Dict[str, Any]]:
         operations = []
         for doc, embedding in zip(processed_docs, embeddings):
@@ -488,7 +541,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if doc.get("process_source") == "UniversalImageExtractor"
                 else "embedding"
             )
-            doc[embedding_field] = embedding
+            doc[embedding_field] = ElasticSearchCore._normalize_embedding_vector(embedding)
             if "embedding_model_name" not in doc:
                 doc["embedding_model_name"] = embedding_model.embedding_model_name
             operations.append(doc)
@@ -500,7 +553,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         documents: List[Dict[str, Any]],
         batch_size: int,
         content_field: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         embedding_batch_size: int = 10,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
@@ -551,10 +604,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                                 if doc.get("process_source") == "UniversalImageExtractor":
                                     img_bytes = doc.pop("image_bytes", "")
                                     if len(img_bytes) > 0:
-                                        image_base64_str = base64.b64encode(
-                                            img_bytes).decode('utf-8')
-                                        data = f"data:image/jpeg;base64,{image_base64_str}"
-                                        inputs.append({"image": data})
+                                        inputs.append({"image": img_bytes})
                                         docs_for_embeddings.append(doc)
                                 else:
                                     inputs.append({"text": doc[content_field]})
@@ -609,7 +659,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             for doc, embedding in doc_embedding_pairs:
                 operations.append({"index": {"_index": index_name}})
                 doc["multi_embedding" if doc["process_source"]
-                        == "UniversalImageExtractor" else "embedding"] = embedding
+                        == "UniversalImageExtractor" else "embedding"] = self._normalize_embedding_vector(embedding)
                 if "embedding_model_name" not in doc:
                     doc["embedding_model_name"] = getattr(
                         embedding_model, "embedding_model_name", "unknown")
@@ -702,8 +752,18 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if cause_reason:
                     reason_text = f"{reason_text}; caused by: {cause_reason}"
 
-                # Derive a precise error code without chaining through es_bulk_failed
-                if "dense_vector" in reason_text and "different number of dimensions" in reason_text:
+                # Keep storage-protection failures distinguishable from generic bulk errors.
+                normalized_reason = reason_text.lower()
+                if any(marker in normalized_reason for marker in (
+                    "cluster_block_exception",
+                    "disk watermark",
+                    "flood-stage watermark",
+                    "flood stage watermark",
+                    "read-only-allow-delete",
+                    "read_only_allow_delete",
+                )):
+                    error_code = "es_disk_watermark"
+                elif "dense_vector" in reason_text and "different number of dimensions" in reason_text:
                     error_code = "es_dim_mismatch"
                 else:
                     error_code = "es_bulk_failed"
@@ -996,7 +1056,13 @@ class ElasticSearchCore(VectorDatabaseCore):
 
     # ---- SEARCH OPERATIONS ----
 
-    def accurate_search(self, index_names: List[str], query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def accurate_search(
+        self,
+        index_names: List[str],
+        query_text: str,
+        top_k: int = 5,
+        filter: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Search for documents using fuzzy text matching across multiple indices.
 
@@ -1004,6 +1070,10 @@ class ElasticSearchCore(VectorDatabaseCore):
             index_names: Name of the index to search in
             query_text: The text query to search for
             top_k: Number of results to return
+            filter: Optional Elasticsearch filter clause (e.g. ``{"bool": {"must": [...]}}``).
+                When ``None`` (the default), no extra filter is applied and the
+                legacy behaviour is preserved. When supplied, it is AND-ed with
+                the score-bearing query as an extra ``bool.filter`` clause.
 
         Returns:
             List of search results with scores and document content
@@ -1017,7 +1087,32 @@ class ElasticSearchCore(VectorDatabaseCore):
         search_query = build_weighted_query(query_text, weights) | {
             "size": top_k,
             "_source": {"excludes": ["embedding"]},
+            # Ask Elasticsearch to retain the exact text that satisfied the
+            # lexical branch. This is part of the existing request, not a
+            # second search, and is later used only to explain result cards.
+            "highlight": {
+                "pre_tags": [_HIGHLIGHT_PRE_TAG],
+                "post_tags": [_HIGHLIGHT_POST_TAG],
+                "fields": {
+                    "title": {"number_of_fragments": 0},
+                    "content": {
+                        "fragment_size": 256,
+                        "number_of_fragments": 3,
+                    },
+                },
+            },
         }
+
+        # Inject an additional AND-filter (memory index isolation, etc.).
+        # When ``filter`` is None we keep the original behaviour bit-for-bit.
+        if filter is not None:
+            extra_filter = filter if isinstance(filter, list) else [filter]
+            search_query["query"] = {
+                "bool": {
+                    "must": [search_query["query"]],
+                    "filter": extra_filter,
+                }
+            }
 
         # Execute the search across multiple indices
         raw_results = self.exec_query(index_pattern, search_query)
@@ -1029,17 +1124,42 @@ class ElasticSearchCore(VectorDatabaseCore):
         # Process and return results
         results = []
         for hit in response["hits"]["hits"]:
+            highlight_terms = self._extract_highlight_terms(hit.get("highlight", {}))
             results.append(
                 {
                     "score": hit["_score"],
                     "document": hit["_source"],
                     "index": hit["_index"],  # Include source index in results
+                    "highlight_terms": highlight_terms,
                 }
             )
         return results
 
+    @staticmethod
+    def _extract_highlight_terms(highlights: Dict[str, List[str]]) -> List[str]:
+        """Extract plain matched terms from Elasticsearch's trusted markers."""
+        terms: List[str] = []
+        pattern = re.compile(
+            re.escape(_HIGHLIGHT_PRE_TAG)
+            + r"(.*?)"
+            + re.escape(_HIGHLIGHT_POST_TAG),
+            re.DOTALL,
+        )
+        for fragments in highlights.values():
+            for fragment in fragments:
+                for match in pattern.findall(fragment):
+                    term = match.strip()
+                    if term and term not in terms:
+                        terms.append(term)
+        return terms
+
     def semantic_search(
-        self, index_names: List[str], query_text: str, embedding_model: BaseEmbedding, top_k: int = 5
+        self,
+        index_names: List[str],
+        query_text: str,
+        embedding_model: EmbeddingAdapter,
+        top_k: int = 5,
+        filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for similar documents using vector similarity across multiple indices.
@@ -1049,6 +1169,9 @@ class ElasticSearchCore(VectorDatabaseCore):
             query_text: The text query to search for
             embedding_model: The embedding model to use
             top_k: Number of results to return
+            filter: Optional Elasticsearch filter clause applied during kNN
+                candidate selection. When ``None`` (the default), no extra
+                filter is applied and the legacy behaviour is preserved.
 
         Returns:
             List of search results with scores and document content
@@ -1060,6 +1183,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_embedding = embedding_model.get_embeddings(query_text)[0]
 
         # Prepare the search query
+        knn_filter = filter if isinstance(filter, dict) else None
         if embedding_model.model_type == "multimodal":
             search_text_query = {
                 "knn": {
@@ -1067,6 +1191,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "query_vector": query_embedding,
                     "k": top_k,
                     "num_candidates": top_k * 2,
+                    **({"filter": knn_filter} if knn_filter else {}),
                 },
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
@@ -1077,6 +1202,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         "query_vector": query_embedding,
                         "k": top_k,
                         "num_candidates": top_k * 2,
+                        **({"filter": knn_filter} if knn_filter else {}),
                     },
                 "size": top_k,
                 "_source": {"excludes": ["multi_embedding"]},
@@ -1089,21 +1215,23 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "query_vector": query_embedding,
                     "k": top_k,
                     "num_candidates": top_k * 2,
+                    **({"filter": knn_filter} if knn_filter else {}),
                 },
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
             }
             raw_results = self.exec_query(index_pattern, search_query)
- 
+
         return raw_results
 
     def hybrid_search(
         self,
         index_names: List[str],
         query_text: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         top_k: int = 5,
-        weight_accurate: float = 0.3,
+        weight_accurate: Optional[float] = None,
+        filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search method, combining accurate matching and semantic search results across multiple indices.
@@ -1113,16 +1241,30 @@ class ElasticSearchCore(VectorDatabaseCore):
             query_text: The text query to search for
             embedding_model: The embedding model to use
             top_k: Number of results to return
-            weight_accurate: The weight of the accurate matching score (0-1), the semantic search weight is 1-weight_accurate
+            weight_accurate: The weight of the accurate matching score (0-1),
+                with semantic weight ``1 - weight_accurate``. When omitted,
+                queries containing digits prefer accurate matching (0.7);
+                all other queries retain the SDK default (0.3).
+            filter: Optional Elasticsearch filter clause applied to both the
+                accurate and semantic sub-queries. When ``None`` (the default),
+                no extra filter is applied and legacy behaviour is preserved.
 
         Returns:
             List of search results sorted by combined score
         """
+        if weight_accurate is None:
+            # Identifiers such as alert numbers and IPs are poorly served by a
+            # semantic-heavy ranking. Keep the existing retrieval requests and
+            # only adjust their fusion weight when no caller preference exists.
+            weight_accurate = (
+                0.7 if any(char.isdigit() for char in query_text) else 0.3
+            )
+
         # Get results from both searches
         accurate_results = self.accurate_search(
-            index_names, query_text, top_k=top_k)
+            index_names, query_text, top_k=top_k, filter=filter)
         semantic_results = self.semantic_search(
-            index_names, query_text, embedding_model=embedding_model, top_k=top_k)
+            index_names, query_text, embedding_model=embedding_model, top_k=top_k, filter=filter)
 
         # Create a mapping from document ID to results
         combined_results = {}
@@ -1136,6 +1278,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "accurate_score": result.get("score", 0),
                     "semantic_score": 0,
                     "index": result["index"],  # Keep track of source index
+                    "highlight_terms": result.get("highlight_terms", []),
                 }
             except KeyError as e:
                 logger.warning(
@@ -1155,84 +1298,12 @@ class ElasticSearchCore(VectorDatabaseCore):
                         "accurate_score": 0,
                         "semantic_score": result.get("score", 0),
                         "index": result["index"],  # Keep track of source index
+                        "highlight_terms": [],
                     }
             except KeyError as e:
                 logger.warning(
                     f"Warning: Missing required field in semantic result: {e}")
                 continue
-
-        # FIX: For chunks that are in accurate results but not in semantic results,
-        # generate embeddings and store them in ES, then re-execute semantic search
-        # This handles chunks that were manually added without going through normal embedding pipeline
-        accurate_doc_ids = set(r.get("document", {}).get("id") for r in accurate_results)
-        semantic_doc_ids = set(r.get("document", {}).get("id") for r in semantic_results)
-        missing_embedding_doc_ids = accurate_doc_ids - semantic_doc_ids
-
-        if missing_embedding_doc_ids:
-            logger.info(
-                f"Found {len(missing_embedding_doc_ids)} chunks without stored embeddings, "
-                f"generating and storing embeddings in ES: {missing_embedding_doc_ids}")
-
-            # Process each chunk with missing embedding
-            for doc_id in missing_embedding_doc_ids:
-                if doc_id in combined_results:
-                    chunk_doc = combined_results[doc_id]
-                    chunk_content = chunk_doc["document"].get("content", "")
-                    index_name = chunk_doc.get("index", "")
-
-                    if chunk_content and index_name:
-                        # Generate embedding for chunk content
-                        chunk_embedding = embedding_model.get_embeddings(chunk_content)
-                        if chunk_embedding and len(chunk_embedding) > 0:
-                            # Update the document in ES with the embedding
-                            update_doc = chunk_doc["document"].copy()
-                            update_doc["embedding"] = chunk_embedding[0]
-                            if "embedding_model_name" not in update_doc:
-                                update_doc["embedding_model_name"] = embedding_model.embedding_model_name
-
-                            try:
-                                # Use create_chunk to store the chunk with embedding
-                                self.client.index(
-                                    index=index_name,
-                                    id=doc_id,
-                                    document=update_doc,
-                                    refresh="wait_for"
-                                )
-                                logger.debug(
-                                    f"Stored embedding for chunk {doc_id} in index {index_name}")
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to store embedding for chunk {doc_id}: {e}")
-                                continue
-
-            # Re-execute semantic search now that ES has the new embeddings
-            logger.debug("Re-executing semantic search with updated embeddings")
-            semantic_results = self.semantic_search(
-                index_names, query_text, embedding_model=embedding_model, top_k=top_k)
-
-            # Clear and re-process semantic results with the new embeddings
-            # Remove old entries that came from accurate results
-            for doc_id in list(combined_results.keys()):
-                if doc_id in accurate_doc_ids:
-                    combined_results[doc_id]["semantic_score"] = 0
-
-            # Process updated semantic results
-            for result in semantic_results:
-                try:
-                    doc_id = result["document"]["id"]
-                    if doc_id in combined_results:
-                        combined_results[doc_id]["semantic_score"] = result.get("score", 0)
-                    else:
-                        combined_results[doc_id] = {
-                            "document": result["document"],
-                            "accurate_score": 0,
-                            "semantic_score": result.get("score", 0),
-                            "index": result["index"],
-                        }
-                except KeyError as e:
-                    logger.warning(
-                        f"Warning: Missing required field in semantic result: {e}")
-                    continue
 
         # Calculate maximum scores
         max_accurate = max([r.get("score", 0)
@@ -1273,6 +1344,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         # Include source index in results
                         "index": result["index"],
                         "scores": {"accurate": normalized_accurate, "semantic": normalized_semantic},
+                        "highlight_terms": result.get("highlight_terms", []),
                     }
                 )
             except KeyError as e:

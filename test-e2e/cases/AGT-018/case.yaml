@@ -1,0 +1,61 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-018
+  feature_id: F-057
+  business_rule_ids: [F-057-RULE-01]
+  title: "活动会话及 Debug 运行的幂等 Stop 与运行收口"
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: "活动会话及 Debug 运行的幂等 Stop 与运行收口"
+  preconditions:
+  - Nexent 本地全栈及配置中真实 LLM 可用，当前提交及模型快照由执行器记录。
+  - 使用已有配置 helper、资产注册表、隔离资产工厂和本地 test-home，不固定资源 ID 或密钥。
+  test_data:
+    logical_assets: [configured_llm, owned_agent_or_conversation]
+  observations:
+  - 记录当前产品提交、脱敏协议事件及独占资源前后状态。
+  cleanup:
+  - 使用已有资产工厂和资产登记清理独占资源，清理失败保留单独证据。
+  steps:
+  - order: 1
+    action: "使用已配置真实模型和批次资产注册表中的并行 Agent，创建独占会话。"
+    expected: "资产前置可用，目标运行和用户身份均明确。"
+  - order: 2
+    action: "启动实际 SSE，读取至少三个事件，并在 Stop 前确认该目标 runtime:run 状态为 running。"
+    expected: "确实停止活动运行，而不是一个已结束的任务。"
+  - order: 3
+    action: "请求 Stop，完整排空流，最多等待 60 秒确认目标运行状态 stopped；检查持久化 assistant 消息状态。"
+    expected: "Stop 返回 200 success 和非空 message；流在有界时间内结束，运行及持久化消息收口为 stopped。"
+  - order: 4
+    action: "重复 Stop，并再次观测目标的终态、流长度和最后事件 ID；持续稳定观测至少一秒。"
+    expected: "重复请求返回 200 success，already_stopped 是可选字段而非强制；终态不变，无新增流事件。"
+  - order: 5
+    action: "对 Debug 运行使用响应提供的 debug-* run_id 重复相同 Stop 与收口检查，并核对会话计数及独占 canary。"
+    expected: "Debug 不绑定 conversation_id，不增加持久化会话且不改变 canary。"
+  - order: 6
+    action: "保存脱敏确认响应和运行状态观测，清理独占会话。"
+    expected: "清理失败独立登记，不将确认响应等同线程已释放，也不宣称已证明所有工作线程回到基线。"
+  expected_results:
+  - "持久化及 Debug 两种活动目标被实际停止，运行状态 stopped 且流不再增长。"
+  - "重复取消按当前产品确认契约返回成功，不依赖 already_stopped 必须存在。"
+  - "持久化 assistant 消息为 stopped；Debug 未新增会话且独占 canary 不变。"
+  - "独占资产清理，脱敏证据保存在本地；底层线程完全释放不由本用例确认响应证明。"
+  forbidden_side_effects:
+  - 不修改共享产品配置、其他用户资源或 Redis 状态；不得将未完成的运行视为通过。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 108
+    notes: "当前 Redis 可成功登记取消信号，重复请求仍可能返回普通成功；验收判断以真实终态和流稳定性为准。Redis 只读观测必须与当前 Runtime 使用的端点匹配，否则显式阻断。"
+  integration_boundary:
+  - 通过实际配置和运行 API 以及真实模型验证；只读观测不替代产品执行。
+  acceptance:
+  - id: AC-01
+    description: "活动会话及 Debug 运行的幂等 Stop 与运行收口；所有前置、操作、终态及独占资源清理均按上述定义验证。"
+    steps: [1, 2, 3, 4, 5, 6]
+    expected_results: [1, 2, 3, 4]
+    forbidden_side_effects: [1]

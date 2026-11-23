@@ -1,0 +1,113 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-KB-AIDP-01
+  feature_id: V5-PW-KB-AIDP-01
+  business_rule_ids:
+  - V5-PW-KB-AIDP-01-RULE-01
+  title: AIDP Knowledge页面→资源验证→Agent绑定→真实召回/作用域
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 独立验证AIDP分支，禁止同脚本locator猜Local/AIDP；知识召回通过真实Agent工具链证明。
+  preconditions:
+  - AIDP 服务由 suite 自动启动的 ext mock 提供（knowledge-provider）；准备阶段通过 Nexent API 创建私有知识库及租户权限，再在该专属 Mock 知识库装载 aidp-kb-product 的召回 oracle。知识库 ID/名称由资产注册表解析，结束时清理，不修改共享种子的权限；无需机器本地 YAML、identity 或锁配置。
+  - 已登录租户管理员账号。
+  - /knowledges呈现AIDP分支，Local个人容量控件不出现。
+  - run-owned Agent（d4_llm_agent）已READY且模型可用。
+  test_data:
+    legacy_asset_declaration: config/environment.yaml；agents/d4_llm_agent
+  steps:
+  - order: 1
+    action: 在AIDP列表选择指定测试知识库并进入文件管理，验证所选资源。
+    expected: 进入的文件管理属于所选KB；当前AIDP列表没有召回输入框，不以名称筛选冒充检索。
+  - order: 2
+    action: 打开run-owned Agent配置页并选择该Agent，通过AddKnowledgeDrawer绑定该AIDP知识库并等待真实autosave。
+    expected: 绑定autosave（POST /api/tool/update 工具配置请求）携带aidp_search工具身份（以工具列表id证明）与所选KB的kds ID。
+  - order: 3
+    action: 进入Agent Debug发送固定问题，通过产品真实AIDP工具召回。
+    expected: 回答包含预置oracle稳定文本片段。
+  - order: 4
+    action: 检查Debug回答文本包含oracle稳定片段。
+    expected: 召回确实经过产品AIDP工具链而非名称筛选。
+  - order: 5
+    action: 检查Debug引用（citation）来源文档。
+    expected: 引用包含oracle来源文档标题。
+  - order: 6
+    action: 刷新整页后重新进入run-owned Agent编辑器（不经侧栏会话恢复），复核AIDP知识绑定持久化。
+    expected: 绑定的KB在知识库管理区块中仍可见。
+  - order: 7
+    action: 通过真实发布动作释放含绑定编辑的新Agent版本，随后新开会话向同一Agent发送固定问题，验证知识作用域。
+    expected: 发布成功且新会话回答同样包含oracle文本片段。
+  acceptance:
+  - id: AC-01
+    description: The AIDP branch is proven mode-exclusive (its own markers present, Local
+      personal quota controls absent) and the controlled knowledge base is selected into
+      its file management with the selected resource verified.
+    steps:
+    - 1
+    expected_results: []
+    forbidden_side_effects: []
+  - id: AC-02
+    description: The real AddKnowledgeDrawer binding autosaves the aidp_search tool
+      configuration carrying the selected KB kds id, with the tool identity proven
+      against the product tool list.
+    steps:
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects: []
+  - id: AC-03
+    description: Agent Debug recall runs through the real AIDP tool chain; the answer
+      contains the oracle text fragment and the rendered citation names the oracle source
+      document.
+    steps:
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 2
+    forbidden_side_effects: []
+  - id: AC-04
+    description: A full refresh retains the released knowledge binding and, after the real
+      release action, a brand-new conversation recalls the same Mock oracle; the run also
+      records the successful Mock attach evidence (runtime/ext-knowledge-attach.json).
+    steps:
+    - 6
+    - 7
+    expected_results:
+    - 3
+    - 4
+    forbidden_side_effects: []
+  expected_results:
+  - 绑定autosave（工具配置请求）携带aidp_search工具身份与所选KB的kds ID。
+  - Debug回答包含oracle稳定文本片段（ext mock 的 AIDP 工具召回）。
+  - 新会话回答同样包含oracle文本片段（知识作用域成立）。
+  - 运行证据记录 ext mock 附着（runtime/ext-knowledge-attach.json）。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 36
+  actor: Nexent browser user
+  journey:
+  - 选择指定AIDP知识库并进入文件管理验证资源。
+  - run-owned Agent配置页通过真实drawer绑定AIDP知识库并验证autosave工具/KB ID。
+  - Debug发送固定问题，真实AIDP工具召回并验证oracle文本。
+  - 验证回答文本含稳定oracle片段。
+  - 验证citation来源文档。
+  - 刷新整页后重进Agent编辑器复核绑定持久化。
+  - 发布新版本后新会话验证知识作用域。
+  final_business_result:
+  - AIDP分支与Local互斥且无quota控件泄漏。
+  - 真实AIDP召回与Agent绑定/作用域全部成立。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-KB-AIDP-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

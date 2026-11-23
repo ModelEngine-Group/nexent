@@ -26,3 +26,8 @@ TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
 
 # ModelEngine
 # Base URL and API key are loaded from environment variables at runtime
+# URL path segment identifying ModelEngine northbound endpoints
+# (e.g. https://host:port/open/router/v1). Endpoints behind this marker
+# serve self-signed certificates, so their records must keep
+# ssl_verify=False on both the create and update paths.
+MODEL_ENGINE_URL_MARKER = "open/router"

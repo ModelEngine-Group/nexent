@@ -1,35 +1,52 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 A2A Client API endpoints.
 
 These endpoints allow users to discover and manage external A2A agents.
 Used internally for configuring A2A sub-agents.
 """
+import asyncio
 import logging
 import uuid
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from services.a2a_client_service import (
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
+from consts.exceptions import (
+    AgentNotFoundError,
+    AppException,
+    ForbiddenError,
+    RuntimeMetadataValidationError,
+)
+from infrastructure.http.a2a import AGENT_CARD_TIMEOUT
+
+from management.services.agent.a2a.catalog import (
     a2a_client_service,
     AgentCallError,
     AgentDiscoveryError,
 )
-from services.a2a_server_service import a2a_server_service
+from management.services.agent.a2a.service import a2a_server_service
 from database import a2a_agent_db
-from utils.auth_utils import get_current_user_info
+from management.services.agent.authorization import require_external_relation_edit
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from infrastructure.serialization.runtime_metadata import (
+    validate_runtime_metadata,
+)
 
 router = APIRouter(prefix="/a2a/client", tags=["A2A Client"])
 logger = logging.getLogger("a2a_client_app")
 
 
 class DiscoverFromUrlRequest(BaseModel):
-    """Request to discover external A2A agent from URL."""
+    """Request to discover an external A2A agent from an Agent Card URL."""
     url: str
     name: Optional[str] = None
+    custom_headers: Optional[Dict[str, str]] = None
+    ssl_verify: bool = True
 
 
 class DiscoverFromNacosRequest(BaseModel):
@@ -44,6 +61,12 @@ class UpdateAgentProtocolRequest(BaseModel):
     protocol_type: str = Field(
         description="Protocol type to use: JSONRPC, HTTP+JSON, or GRPC"
     )
+
+
+class UpdateExternalAgentSecurityCredentialsRequest(BaseModel):
+    """Request to configure credentials required by an Agent Card."""
+    security_credentials: Dict[str, str] = Field(default_factory=dict)
+    selected_security_requirement_index: Optional[int] = Field(default=None, ge=0)
 
 
 class TestNacosConnectionRequest(BaseModel):
@@ -71,10 +94,15 @@ async def discover_from_url(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        result = await a2a_client_service.discover_from_url(
-            url=request.url,
-            tenant_id=tenant_id,
-            user_id=user_id
+        result = await asyncio.wait_for(
+            a2a_client_service.discover_from_url(
+                url=request.url,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                custom_headers=request.custom_headers,
+                ssl_verify=request.ssl_verify,
+            ),
+            timeout=AGENT_CARD_TIMEOUT
         )
 
         return JSONResponse(
@@ -82,6 +110,12 @@ async def discover_from_url(
             content={"status": "success", "data": result}
         )
 
+    except asyncio.TimeoutError as e:
+        logger.warning("URL Agent discovery timed out")
+        raise HTTPException(
+            status_code=HTTPStatus.GATEWAY_TIMEOUT,
+            detail="Agent discovery timed out after 10 seconds. Check the Agent address and connectivity, then retry."
+        ) from e
     except AgentDiscoveryError as e:
         logger.error(f"Agent discovery failed: {e}")
         raise HTTPException(
@@ -109,12 +143,15 @@ async def discover_from_nacos(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        results = await a2a_client_service.discover_from_nacos(
-            nacos_config_id=request.nacos_config_id,
-            agent_names=[name.strip() for name in request.agent_names],
-            tenant_id=tenant_id,
-            user_id=user_id,
-            namespace=request.namespace
+        results = await asyncio.wait_for(
+            a2a_client_service.discover_from_nacos(
+                nacos_config_id=request.nacos_config_id,
+                agent_names=[name.strip() for name in request.agent_names],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                namespace=request.namespace
+            ),
+            timeout=AGENT_CARD_TIMEOUT
         )
 
         return JSONResponse(
@@ -122,6 +159,12 @@ async def discover_from_nacos(
             content={"status": "success", "data": results}
         )
 
+    except asyncio.TimeoutError as e:
+        logger.warning("Nacos Agent discovery timed out")
+        raise HTTPException(
+            status_code=HTTPStatus.GATEWAY_TIMEOUT,
+            detail="Agent discovery timed out after 10 seconds. Check Nacos and Agent connectivity, then retry."
+        ) from e
     except AgentDiscoveryError as e:
         logger.error(f"Nacos discovery failed: {e}")
         raise HTTPException(
@@ -200,6 +243,91 @@ async def get_external_agent(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to get agent"
+        )
+
+
+@router.put("/agents/{external_agent_id}/security-credentials")
+async def update_external_agent_security_credentials(
+    external_agent_id: int,
+    request: UpdateExternalAgentSecurityCredentialsRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None,
+):
+    """Save the credential values required to call an external A2A agent."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        if not request.security_credentials and request.selected_security_requirement_index is None:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="At least one security credential or a security requirement selection is required"
+            )
+        if any(not scheme_id or not value for scheme_id, value in request.security_credentials.items()):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Security credential names and values must be non-empty"
+            )
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_security_credentials=True,
+        )
+        if not agent:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Agent {external_agent_id} not found"
+            )
+        supported_scheme_ids = set((agent.get("security_schemes") or {}).keys())
+        if not set(request.security_credentials).issubset(supported_scheme_ids):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Security credentials must use scheme names declared by the Agent Card"
+            )
+        requirements = agent.get("security_requirements") or []
+        if request.selected_security_requirement_index is not None:
+            selected_index = request.selected_security_requirement_index
+            if selected_index >= len(requirements):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail="Selected security requirement does not exist"
+                )
+            selected_schemes = (requirements[selected_index] or {}).get("schemes", {})
+            configured_credentials = dict(agent.get("security_credentials") or {})
+            configured_credentials.update(request.security_credentials)
+            if not selected_schemes or not set(selected_schemes).issubset(set(configured_credentials)):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail="Credentials must satisfy the selected security requirement"
+                )
+        result = a2a_agent_db.update_external_agent_security_credentials(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            security_credentials=request.security_credentials,
+            selected_security_requirement_index=request.selected_security_requirement_index,
+        )
+        if not result:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Agent {external_agent_id} not found"
+            )
+        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "status": "success",
+                "data": {
+                    "configured_security_scheme_ids": agent["configured_security_scheme_ids"],
+                    "selected_security_requirement_index": agent.get("selected_security_requirement_index"),
+                },
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update agent security credentials failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update agent security credentials"
         )
 
 
@@ -354,6 +482,7 @@ async def add_external_agent_relation(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
+        require_external_relation_edit(request_body.local_agent_id, tenant_id, user_id)
         result = a2a_agent_db.add_external_agent_relation(
             local_agent_id=request_body.local_agent_id,
             external_agent_id=request_body.external_agent_id,
@@ -366,6 +495,10 @@ async def add_external_agent_relation(
             content={"status": "success", "data": result}
         )
 
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found") from e
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except ValueError as e:
         logger.error(f"Add relation failed: {e}")
         raise HTTPException(
@@ -389,8 +522,9 @@ async def remove_external_agent_relation(
 ):
     """Remove a relation between a local agent and an external A2A agent."""
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
+        require_external_relation_edit(local_agent_id, tenant_id, user_id)
         result = a2a_agent_db.remove_external_agent_relation(
             local_agent_id=local_agent_id,
             external_agent_id=external_agent_id,
@@ -408,6 +542,10 @@ async def remove_external_agent_relation(
             content={"status": "success", "message": "Relation removed"}
         )
 
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found") from e
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -682,7 +820,7 @@ async def test_nacos_connection(
     http_request: Request = None
 ):
     """Test connectivity to Nacos server without saving the configuration."""
-    from utils.nacos_client import NacosClient, NacosConnectionError
+    from infrastructure.discovery.nacos import NacosClient, NacosConnectionError
 
     try:
         get_current_user_info(authorization, http_request)
@@ -738,13 +876,14 @@ async def test_nacos_connection(
 class ChatRequest(BaseModel):
     """Request to send a chat message to an external A2A agent."""
     message: str = Field(..., description="The chat message to send")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional runtime metadata sent as A2A Message.metadata",
+    )
     include_metadata: bool = Field(
         default=False,
-        description="Whether to include user_id and tenant_id in metadata sent to the agent. "
-                    "Defaults to False to prevent leaking sensitive information to third-party agents. "
-                    "Only set to True for trusted internal agents."
+        description="Deprecated compatibility field. Internal identity is never sent as runtime metadata.",
     )
-
 
 @router.post("/agents/{external_agent_id}/chat")
 async def chat_with_external_agent(
@@ -767,6 +906,20 @@ async def chat_with_external_agent(
                 detail="Message cannot be empty"
             )
 
+        if request_body.metadata is not None:
+            try:
+                validate_runtime_metadata(request_body.metadata)
+            except RuntimeMetadataValidationError as exc:
+                error_code = (
+                    ErrorCode.CHAT_METADATA_TOO_LARGE
+                    if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                    else ErrorCode.CHAT_METADATA_INVALID
+                )
+                raise AppException(
+                    error_code,
+                    details={"reason": exc.code.value},
+                ) from exc
+
         # Build A2A message format following A2A protocol with parts array
         a2a_message = {
             "message_id": f"msg_{uuid.uuid4().hex}",
@@ -778,16 +931,8 @@ async def chat_with_external_agent(
             ],
         }
 
-        # Only include metadata if explicitly requested by the caller
-        # This prevents leaking user_id and tenant_id to untrusted external agents
-        if request_body.include_metadata:
-            a2a_message["metadata"] = {
-                "user_id": user_id,
-                "tenant_id": tenant_id,
-            }
-            logger.debug(f"Including user metadata for external agent {external_agent_id}")
-        else:
-            logger.debug(f"Skipping user metadata for external agent {external_agent_id} (include_metadata=False)")
+        if request_body.metadata is not None:
+            a2a_message["metadata"] = request_body.metadata
 
         # Call the external agent
         result = await a2a_client_service.call_agent(
@@ -813,7 +958,7 @@ async def chat_with_external_agent(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
-    except HTTPException:
+    except (AppException, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Chat with external agent failed: {e}", exc_info=True)

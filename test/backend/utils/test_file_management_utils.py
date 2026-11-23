@@ -1,3 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+
+from test.backend.management.import_patching import set_import_attribute
 import sys
 import types
 from pathlib import Path
@@ -7,22 +11,21 @@ import pytest
 
 
 class _ProcessParams:
-    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str], model_id: Optional[int] = 42,
+    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str],
         tenant_id: Optional[str] = "tenant-1"):
         self.authorization = authorization
         self.source_type = source_type
         self.chunking_strategy = chunking_strategy
         self.index_name = index_name
-        self.model_id = model_id  
         self.tenant_id = tenant_id
 
 
 @pytest.fixture(autouse=True)
-def stub_project_modules(monkeypatch):
+def stub_project_modules(monkeypatch, tmp_path):
     # consts.const
     const_mod = types.ModuleType("consts.const")
     setattr(const_mod, "DATA_PROCESS_SERVICE", "http://data-process")
-    setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(Path.cwd() / ".test-lo-profile"))
+    setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(tmp_path / "lo-profile"))
     sys.modules["consts.const"] = const_mod
 
     # consts.model
@@ -35,32 +38,48 @@ def stub_project_modules(monkeypatch):
     setattr(attach_mod, "get_file_size_from_minio", lambda object_name, bucket=None: 777)
     sys.modules["database.attachment_db"] = attach_mod
 
+    # database.knowledge_db
+    knowledge_mod = types.ModuleType("database.knowledge_db")
+    setattr(
+        knowledge_mod,
+        "get_knowledge_record",
+        lambda query=None: {"embedding_model_id": 42, "index_name": (query or {}).get("index_name")},
+    )
+    sys.modules["database.knowledge_db"] = knowledge_mod
+
     # Ensure parent package exists
     if "database" not in sys.modules:
         pkg = types.ModuleType("database")
         setattr(pkg, "__path__", [])
         sys.modules["database"] = pkg
     setattr(sys.modules["database"], "attachment_db", attach_mod)
+    setattr(sys.modules["database"], "knowledge_db", knowledge_mod)
 
-    # utils.auth_utils
-    auth_mod = types.ModuleType("utils.auth_utils")
+    # management.services.permission.identity.authentication_helpers
+    auth_mod = types.ModuleType("management.services.permission.identity.authentication_helpers")
     setattr(auth_mod, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
-    sys.modules["utils.auth_utils"] = auth_mod
+    sys.modules["management.services.permission.identity.authentication_helpers"] = auth_mod
 
-    # utils.config_utils
-    cfg_mod = types.ModuleType("utils.config_utils")
+    # management.services.configuration.tenant.settings
+    cfg_mod = types.ModuleType("management.services.configuration.tenant.settings")
     cfg_mgr = types.SimpleNamespace(load_config=lambda tenant_id: {"EMBEDDING_ID": "42"})
     setattr(cfg_mod, "tenant_config_manager", cfg_mgr)
-    sys.modules["utils.config_utils"] = cfg_mod
+    sys.modules["management.services.configuration.tenant.settings"] = cfg_mod
 
     # Yield to tests
     yield
 
 
 @pytest.fixture()
-def fmu(monkeypatch):
+def fmu(monkeypatch, request):
     # Import after stubbing collaborators
-    from backend.utils import file_management_utils as fmu
+    names = request.function.__code__.co_names
+    if "trigger_data_process" in names or "_data_process_error_result" in names:
+        from backend.management.services.knowledge_base import ingestion as fmu
+    elif "get_all_files_status" in names or "_convert_to_custom_state_local" in names:
+        from backend.management.services.knowledge_base import status as fmu
+    else:
+        from management.services.file import upload as fmu
     return fmu
 
 
@@ -91,7 +110,7 @@ async def test_save_upload_file_success(tmp_path, fmu, monkeypatch):
             return False
 
     fake_aiofiles = types.SimpleNamespace(open=_FakeAIOOpen)
-    monkeypatch.setattr(fmu, "aiofiles", fake_aiofiles)
+    set_import_attribute(monkeypatch, fmu, "aiofiles", fake_aiofiles)
 
     ok = await fmu.save_upload_file(_FakeFile(), tmp_path / "x.bin")
     assert ok is True
@@ -110,7 +129,7 @@ async def test_save_upload_file_error(tmp_path, fmu, monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr(fmu, "aiofiles", types.SimpleNamespace(open=_ErrOpen))
+    set_import_attribute(monkeypatch, fmu, "aiofiles", types.SimpleNamespace(open=_ErrOpen))
 
     class _FakeFile:
         filename = "x.bin"
@@ -119,6 +138,24 @@ async def test_save_upload_file_error(tmp_path, fmu, monkeypatch):
 
     ok = await fmu.save_upload_file(_FakeFile(), tmp_path / "x.bin")
     assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_continues_when_tenant_lookup_fails(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "get_current_user_id", lambda authorization: (_ for _ in ()).throw(ValueError("bad token")))
+    set_import_attribute(monkeypatch, fmu, "inject_trace_context", lambda: {"traceparent": "00-test"})
+
+    result = await fmu.trigger_data_process(
+        [{"path_or_url": "/data/a.txt", "filename": "a.txt"}],
+        _ProcessParams("tok", "local", "basic", "idx"),
+    )
+
+    assert result == {"task_id": "t1"}
+    assert fake_client.last_post["headers"]["traceparent"] == "00-test"
+    assert fake_client.last_post["json"]["tenant_id"] is None
 
 
 # -------------------- trigger_data_process --------------------
@@ -132,6 +169,11 @@ class _Resp:
 
     def json(self):
         return self._body
+
+
+class _InvalidJsonResp(_Resp):
+    def json(self):
+        raise ValueError("not json")
 
 
 class _FakeRequestError(Exception):
@@ -174,7 +216,12 @@ async def test_trigger_data_process_empty_files_returns_none(fmu):
 async def test_trigger_data_process_single_success_with_embedding(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
     fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch,
+        fmu,
+        "get_knowledge_record",
+        lambda query=None: {"embedding_model_id": 42, "index_name": "idx"},
+    )
 
     params = _ProcessParams("tok", "local", "basic", "idx")
     files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
@@ -187,10 +234,100 @@ async def test_trigger_data_process_single_success_with_embedding(fmu, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_trigger_data_process_propagates_file_id(fmu, monkeypatch):
+    """New clients must carry the durable lifecycle ID into the task request."""
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t-file"}))
+    fake_httpx = types.SimpleNamespace(
+        AsyncClient=lambda: fake_client,
+        RequestError=_FakeRequestError,
+    )
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "get_knowledge_record", lambda query=None: {})
+
+    params = _ProcessParams("tok", "minio", "basic", "idx")
+    result = await fmu.trigger_data_process(
+        [{"path_or_url": "knowledge_base/a.txt", "filename": "a.txt", "file_id": "fid-1"}],
+        params,
+    )
+
+    assert result == {"task_id": "t-file"}
+    assert fake_client.last_post["json"]["file_id"] == "fid-1"
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_queries_knowledge_record_by_index(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+
+    captured_query: Dict[str, Any] = {}
+
+    def _fake_get_knowledge_record(query=None):
+        captured_query.update(query or {})
+        return {"embedding_model_id": 77, "index_name": "idx"}
+
+    set_import_attribute(monkeypatch, fmu, "get_knowledge_record", _fake_get_knowledge_record)
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
+    out = await fmu.trigger_data_process(files, params)
+    assert out == {"task_id": "t1"}
+    assert captured_query.get("index_name") == "idx"
+    assert captured_query.get("tenant_id") == "tenant-1"
+    assert fake_client.last_post["json"]["embedding_model_id"] == 77
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_missing_embedding_model_id_sends_none(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "get_knowledge_record", lambda query=None: {})
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
+    out = await fmu.trigger_data_process(files, params)
+    assert out == {"task_id": "t1"}
+    assert fake_client.last_post["json"]["embedding_model_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_knowledge_record_none_sends_none(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "get_knowledge_record", lambda query=None: None)
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
+    out = await fmu.trigger_data_process(files, params)
+    assert out == {"task_id": "t1"}
+    assert fake_client.last_post["json"]["embedding_model_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_knowledge_record_raises_sends_none(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+
+    def _raise_get_knowledge_record(query=None):
+        raise RuntimeError("db unavailable")
+
+    set_import_attribute(monkeypatch, fmu, "get_knowledge_record", _raise_get_knowledge_record)
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
+    out = await fmu.trigger_data_process(files, params)
+    assert out == {"task_id": "t1"}
+    assert fake_client.last_post["json"]["embedding_model_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_trigger_data_process_single_non201_error(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_Resp(400, None, text="boom"))
     fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
 
     params = _ProcessParams("tok", "local", "basic", "idx")
     files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
@@ -202,7 +339,7 @@ async def test_trigger_data_process_single_non201_error(fmu, monkeypatch):
 async def test_trigger_data_process_single_request_error(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_FakeRequestError("net"))
     fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
 
     params = _ProcessParams("tok", "local", "basic", "idx")
     files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
@@ -214,7 +351,12 @@ async def test_trigger_data_process_single_request_error(fmu, monkeypatch):
 async def test_trigger_data_process_batch_success(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_Resp(201, {"task_ids": ["t1", "t2"]}))
     fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx)
+    set_import_attribute(monkeypatch,
+        fmu,
+        "get_knowledge_record",
+        lambda query=None: {"embedding_model_id": 42, "index_name": "idx"},
+    )
 
     params = _ProcessParams("tok", "minio", "basic", "idx")
     files = [
@@ -225,14 +367,14 @@ async def test_trigger_data_process_batch_success(fmu, monkeypatch):
     assert out == {"task_ids": ["t1", "t2"]}
     assert fake_client.last_post["url"].endswith("/tasks/batch")
     assert len(fake_client.last_post["json"]["sources"]) == 2
-
+    assert all(s["embedding_model_id"] == 42 for s in fake_client.last_post["json"]["sources"])
 
 @pytest.mark.asyncio
 async def test_trigger_data_process_batch_non201_and_request_error(fmu, monkeypatch):
     # non-201
     fake_client1 = _FakeAsyncClient(_Resp(500, None, text="bad"))
     fake_httpx1 = types.SimpleNamespace(AsyncClient=lambda: fake_client1, RequestError=_FakeRequestError)
-    monkeypatch.setattr(fmu, "httpx", fake_httpx1)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx1)
     params = _ProcessParams("tok", "minio", "basic", "idx")
     files = [
         {"path_or_url": "/a", "filename": "a"},
@@ -244,9 +386,70 @@ async def test_trigger_data_process_batch_non201_and_request_error(fmu, monkeypa
     # request error
     fake_client2 = _FakeAsyncClient(_FakeRequestError("down"))
     fake_httpx2 = types.SimpleNamespace(AsyncClient=lambda: fake_client2, RequestError=_FakeRequestError)
-    monkeypatch.setattr(fmu, "httpx", fake_httpx2)
+    set_import_attribute(monkeypatch, fmu, "httpx", fake_httpx2)
     out2 = await fmu.trigger_data_process(files, params)
     assert out2["status"] == "error" and out2["code"] == "CONNECTION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_non201_with_invalid_json_uses_response_text(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_InvalidJsonResp(502, text="gateway unavailable"))
+    set_import_attribute(monkeypatch,
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError),
+    )
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    out = await fmu.trigger_data_process(
+        [{"path_or_url": "/data/a.txt", "filename": "a.txt"}], params
+    )
+
+    assert out["status"] == "error"
+    assert out["code"] == 502
+    assert out["error_code"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_batch_non201_with_invalid_json_uses_response_text(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_InvalidJsonResp(503, text="service unavailable"))
+    set_import_attribute(monkeypatch,
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError),
+    )
+
+    params = _ProcessParams("tok", "minio", "basic", "idx")
+    out = await fmu.trigger_data_process(
+        [
+            {"path_or_url": "/data/a.txt", "filename": "a.txt"},
+            {"path_or_url": "/data/b.txt", "filename": "b.txt"},
+        ],
+        params,
+    )
+
+    assert out["status"] == "error"
+    assert out["code"] == 503
+    assert out["error_code"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_unexpected_client_error_uses_internal_code(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(RuntimeError("unexpected client failure"))
+    set_import_attribute(monkeypatch,
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError),
+    )
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    out = await fmu.trigger_data_process(
+        [{"path_or_url": "/data/a.txt", "filename": "a.txt"}], params
+    )
+
+    assert out["status"] == "error"
+    assert out["code"] == "INTERNAL_ERROR"
+    assert out["error_code"]
 
 
 # -------------------- get_all_files_status --------------------
@@ -277,10 +480,10 @@ async def test_get_all_files_status_success_and_convert(fmu, monkeypatch):
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(process_celery_state, forward_celery_state):
         return "COMPLETED"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     out = await fmu.get_all_files_status("idx")
     assert "/p1" in out
@@ -294,13 +497,13 @@ async def test_get_all_files_status_success_and_convert(fmu, monkeypatch):
 async def test_get_all_files_status_connect_error_and_non200(fmu, monkeypatch):
     # connect error
     fake_client_err = _FakeAsyncClient(Exception("down"))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client_err))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client_err))
     out1 = await fmu.get_all_files_status("idx")
     assert out1 == {}
 
     # non-200
     fake_client = _FakeAsyncClient(_Resp(500, None, text="bad"))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     out2 = await fmu.get_all_files_status("idx")
     assert out2 == {}
 
@@ -308,7 +511,7 @@ async def test_get_all_files_status_connect_error_and_non200(fmu, monkeypatch):
 @pytest.mark.asyncio
 async def test_get_all_files_status_no_tasks_returns_empty(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_Resp(200, []))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
 
     out = await fmu.get_all_files_status("idx-empty")
     assert out == {}
@@ -339,23 +542,23 @@ async def test_get_all_files_status_forward_updates_and_redis_progress(fmu, monk
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "FORWARDING"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     # Stub redis_service with batch progress info
     services_pkg = types.ModuleType("services")
     services_pkg.__path__ = []
     sys.modules["services"] = services_pkg
-    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod = types.ModuleType("management.services.knowledge_base.task_state")
     # Use batch_get_progress_info instead of get_progress_info
     redis_mod.get_redis_service = lambda: types.SimpleNamespace(
         batch_get_progress_info=lambda task_ids: {
             "20": {"processed_chunks": 7, "total_chunks": 9}
         }
     )
-    sys.modules["services.redis_service"] = redis_mod
+    sys.modules["management.services.knowledge_base.task_state"] = redis_mod
 
     out = await fmu.get_all_files_status("idx")
     assert out["/p2"]["state"] == "FORWARDING"
@@ -379,20 +582,20 @@ async def test_get_all_files_status_redis_progress_exception(fmu, monkeypatch):
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "FORWARDING"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     # Redis service raising exception to hit exception path
     services_pkg = types.ModuleType("services")
     services_pkg.__path__ = []
     sys.modules["services"] = services_pkg
-    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod = types.ModuleType("management.services.knowledge_base.task_state")
     def _boom(task_ids):
         raise RuntimeError("redis down")
     redis_mod.get_redis_service = lambda: types.SimpleNamespace(batch_get_progress_info=_boom)
-    sys.modules["services.redis_service"] = redis_mod
+    sys.modules["management.services.knowledge_base.task_state"] = redis_mod
 
     out = await fmu.get_all_files_status("idx")
     assert out["/p3"]["state"] == "FORWARDING"
@@ -415,12 +618,12 @@ async def test_get_all_files_status_outer_exception_returns_empty(fmu, monkeypat
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
 
     # Mock _convert_to_custom_state_local to return COMPLETED
     def _fake_convert(*a, **k):
         return "COMPLETED"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     out = await fmu.get_all_files_status("idx")
     assert len(out) == 1
@@ -462,28 +665,28 @@ def test_get_file_size_minio_ok_and_request_error(fmu, monkeypatch):
         pass
 
     fake_requests = types.SimpleNamespace(exceptions=types.SimpleNamespace(RequestException=_ReqExc))
-    monkeypatch.setattr(fmu, "requests", fake_requests)
+    set_import_attribute(monkeypatch, fmu, "requests", fake_requests)
 
     def raise_req(*a, **k):
         raise _ReqExc("x")
 
-    monkeypatch.setattr(fmu, "get_file_size_from_minio", raise_req)
+    set_import_attribute(monkeypatch, fmu, "get_file_size_from_minio", raise_req)
     assert fmu.get_file_size("minio", "obj") == 0
 
 
 def test_get_file_size_local_exists_missing_and_error(fmu, monkeypatch):
-    monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-    monkeypatch.setattr(fmu.os.path, "getsize", lambda p: 1234)
+    set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
+    set_import_attribute(monkeypatch, fmu.os.path, "getsize", lambda p: 1234)
     assert fmu.get_file_size("local", "/tmp/x") == 1234
 
-    monkeypatch.setattr(fmu.os.path, "exists", lambda p: False)
+    set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: False)
     assert fmu.get_file_size("local", "/tmp/x") == 0
 
     def boom(p):
         raise RuntimeError("e")
 
-    monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-    monkeypatch.setattr(fmu.os.path, "getsize", boom)
+    set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
+    set_import_attribute(monkeypatch, fmu.os.path, "getsize", boom)
     assert fmu.get_file_size("local", "/tmp/x") == 0
 
 
@@ -521,10 +724,10 @@ async def test_get_all_files_status_forward_created_at_not_greater(fmu, monkeypa
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "FORWARDING"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     out = await fmu.get_all_files_status("idx")
     # Should use the first forward task (id=20) as latest since it has higher created_at
@@ -547,16 +750,16 @@ async def test_get_all_files_status_empty_task_id(fmu, monkeypatch):
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "COMPLETED"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     # Stub redis_service to ensure it's not called
     services_pkg = types.ModuleType("services")
     services_pkg.__path__ = []
     sys.modules["services"] = services_pkg
-    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod = types.ModuleType("management.services.knowledge_base.task_state")
     redis_called = {"called": False}
     def _track_call(task_ids):
         redis_called["called"] = True
@@ -564,7 +767,7 @@ async def test_get_all_files_status_empty_task_id(fmu, monkeypatch):
     redis_mod.get_redis_service = lambda: types.SimpleNamespace(
         batch_get_progress_info=_track_call
     )
-    sys.modules["services.redis_service"] = redis_mod
+    sys.modules["management.services.knowledge_base.task_state"] = redis_mod
 
     out = await fmu.get_all_files_status("idx")
     assert out["/p6"]["latest_task_id"] == ""
@@ -590,20 +793,20 @@ async def test_get_all_files_status_redis_progress_info_none(fmu, monkeypatch):
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "FORWARDING"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     # Redis service returning None (batch API)
     services_pkg = types.ModuleType("services")
     services_pkg.__path__ = []
     sys.modules["services"] = services_pkg
-    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod = types.ModuleType("management.services.knowledge_base.task_state")
     redis_mod.get_redis_service = lambda: types.SimpleNamespace(
         batch_get_progress_info=lambda task_ids: None  # Returns None to trigger else branch
     )
-    sys.modules["services.redis_service"] = redis_mod
+    sys.modules["management.services.knowledge_base.task_state"] = redis_mod
 
     out = await fmu.get_all_files_status("idx")
     assert out["/p7"]["state"] == "FORWARDING"
@@ -631,16 +834,16 @@ async def test_get_all_files_status_redis_processed_chunks_none(fmu, monkeypatch
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "FORWARDING"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     # Redis service returning progress_info with processed_chunks as None (batch API)
     services_pkg = types.ModuleType("services")
     services_pkg.__path__ = []
     sys.modules["services"] = services_pkg
-    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod = types.ModuleType("management.services.knowledge_base.task_state")
     redis_mod.get_redis_service = lambda: types.SimpleNamespace(
         batch_get_progress_info=lambda task_ids: {
             "60": {
@@ -649,7 +852,7 @@ async def test_get_all_files_status_redis_processed_chunks_none(fmu, monkeypatch
             }
         }
     )
-    sys.modules["services.redis_service"] = redis_mod
+    sys.modules["management.services.knowledge_base.task_state"] = redis_mod
 
     out = await fmu.get_all_files_status("idx")
     assert out["/p8"]["state"] == "FORWARDING"
@@ -677,16 +880,16 @@ async def test_get_all_files_status_redis_total_chunks_none(fmu, monkeypatch):
         },
     ]
     fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
-    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    set_import_attribute(monkeypatch, fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
     def _fake_convert(*a, **k):
         return "FORWARDING"
-    monkeypatch.setattr(fmu, "_convert_to_custom_state_local", _fake_convert)
+    set_import_attribute(monkeypatch, fmu, "_convert_to_custom_state_local", _fake_convert)
 
     # Redis service returning progress_info with total_chunks as None (batch API)
     services_pkg = types.ModuleType("services")
     services_pkg.__path__ = []
     sys.modules["services"] = services_pkg
-    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod = types.ModuleType("management.services.knowledge_base.task_state")
     redis_mod.get_redis_service = lambda: types.SimpleNamespace(
         batch_get_progress_info=lambda task_ids: {
             "70": {
@@ -695,7 +898,7 @@ async def test_get_all_files_status_redis_total_chunks_none(fmu, monkeypatch):
             }
         }
     )
-    sys.modules["services.redis_service"] = redis_mod
+    sys.modules["management.services.knowledge_base.task_state"] = redis_mod
 
     out = await fmu.get_all_files_status("idx")
     assert out["/p9"]["state"] == "FORWARDING"
@@ -722,11 +925,11 @@ class TestConvertOfficeToPdf:
             captured_cmd["cmd"] = cmd
             return mock_result
 
-        monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-        monkeypatch.setattr(fmu.os.path, "basename", lambda p: "document.docx")
-        monkeypatch.setattr(fmu, "LIBREOFFICE_PROFILE_DIR", str(profile_dir))
-        monkeypatch.setattr(fmu.os, "chmod", lambda path, mode: chmod_calls.append((Path(path), mode)))
-        monkeypatch.setattr(fmu.subprocess, "run", fake_run)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
+        set_import_attribute(monkeypatch, fmu.os.path, "basename", lambda p: "document.docx")
+        set_import_attribute(monkeypatch, fmu, "LIBREOFFICE_PROFILE_DIR", str(profile_dir))
+        set_import_attribute(monkeypatch, fmu.os, "chmod", lambda path, mode: chmod_calls.append((Path(path), mode)))
+        set_import_attribute(monkeypatch, fmu.subprocess, "run", fake_run)
 
         result = await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
 
@@ -746,9 +949,9 @@ class TestConvertOfficeToPdf:
         input_path = tmp_path / "document.docx"
         output_dir = tmp_path / "output"
 
-        monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-        monkeypatch.setattr(fmu.os.path, "basename", lambda p: "document.docx")
-        monkeypatch.setattr(fmu.subprocess, "run", lambda *a, **k: mock_result)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
+        set_import_attribute(monkeypatch, fmu.os.path, "basename", lambda p: "document.docx")
+        set_import_attribute(monkeypatch, fmu.subprocess, "run", lambda *a, **k: mock_result)
 
         result = await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
 
@@ -759,7 +962,7 @@ class TestConvertOfficeToPdf:
         """Test conversion failure when input file does not exist"""
         input_path = tmp_path / "nonexistent.docx"
         output_dir = tmp_path / "output"
-        monkeypatch.setattr(fmu.os.path, "exists", lambda p: False)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: False)
 
         with pytest.raises(FileNotFoundError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
@@ -773,8 +976,8 @@ class TestConvertOfficeToPdf:
         input_path = tmp_path / "document.docx"
         output_dir = tmp_path / "output"
 
-        monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-        monkeypatch.setattr(fmu.subprocess, "run", lambda *a, **k: mock_result)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
+        set_import_attribute(monkeypatch, fmu.subprocess, "run", lambda *a, **k: mock_result)
 
         with pytest.raises(RuntimeError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
@@ -788,12 +991,12 @@ class TestConvertOfficeToPdf:
 
         input_path = tmp_path / "document.docx"
         output_dir = tmp_path / "output"
-        monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
 
         def raise_timeout(*a, **k):
             raise subprocess.TimeoutExpired(cmd='libreoffice', timeout=30)
 
-        monkeypatch.setattr(fmu.subprocess, "run", raise_timeout)
+        set_import_attribute(monkeypatch, fmu.subprocess, "run", raise_timeout)
 
         with pytest.raises(TimeoutError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir), timeout=30)
@@ -805,12 +1008,12 @@ class TestConvertOfficeToPdf:
         """Test conversion failure when LibreOffice is not installed"""
         input_path = tmp_path / "document.docx"
         output_dir = tmp_path / "output"
-        monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
 
         def raise_file_not_found(*a, **k):
             raise FileNotFoundError("[Errno 2] No such file or directory: 'libreoffice'")
 
-        monkeypatch.setattr(fmu.subprocess, "run", raise_file_not_found)
+        set_import_attribute(monkeypatch, fmu.subprocess, "run", raise_file_not_found)
 
         with pytest.raises(FileNotFoundError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
@@ -831,9 +1034,9 @@ class TestConvertOfficeToPdf:
                 return True
             return False
 
-        monkeypatch.setattr(fmu.os.path, "exists", exists_side_effect)
-        monkeypatch.setattr(fmu.os.path, "basename", lambda p: "document.docx")
-        monkeypatch.setattr(fmu.subprocess, "run", lambda *a, **k: mock_result)
+        set_import_attribute(monkeypatch, fmu.os.path, "exists", exists_side_effect)
+        set_import_attribute(monkeypatch, fmu.os.path, "basename", lambda p: "document.docx")
+        set_import_attribute(monkeypatch, fmu.subprocess, "run", lambda *a, **k: mock_result)
 
         with pytest.raises(RuntimeError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))

@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: WB-NEW-CONVERSATION-STYLE-20261015
+  change_type: requirement
+  requirement_id: WB-NEW-CONVERSATION-STYLE-20261015
+  title: 工作台新会话按钮白底黑字
+  description: Change the Workbench new-conversation label to 新对话 with white background and black text; use SquarePen and retain callback,
+    and same-row layout.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS-D4-001
+    retired: []
+  traditional_ut:
+    decision: exempt
+    test_selectors: []
+    behaviors:
+    - Presentation-only color and localized label; existing click/search/collapse handlers unchanged.
+    reason: Non-behavior style/copy adjustment; do not create CSS mirror unit tests. Existing D4 verifies computed styles,
+      localized accessible name and layout/search behavior.
+  notes: Only Workbench label changes; leave the shared chat.sidebar.newConversation translation intact for other screens.

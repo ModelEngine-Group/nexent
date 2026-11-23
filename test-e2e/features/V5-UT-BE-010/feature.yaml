@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-BE-010
+  name: Content-Disposition 中文/控制字符/引号/反斜杠 sanitize
+  status: active
+  description: Content-Disposition 中文/控制字符/引号/反斜杠 sanitize
+  business_rules:
+  - rule_id: V5-UT-BE-010-RULE-01
+    description: Content-Disposition 中文/控制字符/引号/反斜杠 sanitize
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

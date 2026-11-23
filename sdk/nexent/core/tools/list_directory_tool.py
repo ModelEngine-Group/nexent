@@ -14,12 +14,9 @@ logger = logging.getLogger("list_directory_tool")
 class ListDirectoryTool(Tool):
     """Directory listing tool for displaying directory contents in tree structure"""
     name = "list_directory"
-    description = "List contents of a directory in tree structure format. " \
-                  "Path should be relative to the workspace (e.g., 'documents' or '.' for current workspace). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "Returns a hierarchical tree view of files and directories with metadata."
+    description = "List workspace directory contents as a tree with file metadata."
 
-    description_zh = "以树形结构格式列出目录下所有内容。路径需为工作区相对路径（例如，'documents'或'.'表示当前工作空间），出于安全考虑，不支持绝对路径。"
+    description_zh = "以树形结构列出工作区目录内容及文件元数据。"
 
     inputs = {
         "directory_path": {
@@ -80,8 +77,6 @@ class ListDirectoryTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
-        self.running_prompt_zh = "正在列出目录内容..."
-        self.running_prompt_en = "Listing directory contents..."
 
     def _validate_path(self, directory_path: str) -> str:
         """Validate and resolve directory path within the workspace.
@@ -275,10 +270,9 @@ class ListDirectoryTool(Tool):
     def forward(self, directory_path: str = ".", max_depth: int = 3,
                show_hidden: bool = False, show_size: bool = True) -> str:
         try:
-            # Send tool run message if observer is available
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the listing card from inside the tool.
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "folder-tree", "text": f"Listing directory {directory_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

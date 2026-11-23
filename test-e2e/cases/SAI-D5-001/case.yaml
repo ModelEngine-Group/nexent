@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SANDBOX
+case:
+  case_id: SAI-D5-001
+  feature_id: SAI-001
+  business_rule_ids:
+  - SAI-001-R1
+  - SAI-001-R2
+  title: Built verification image sustains repeated parallel calls in session and
+    system scopes
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the delivered image SDK and Gateway under repeated overlapping
+    calls.
+  preconditions:
+  - A verification Runtime image built with the full current worktree SDK and a compatible
+    Sandbox image are available.
+  test_data:
+    batches_per_scope: 10
+    calls_per_batch: 2
+    scopes:
+    - session
+    - system
+  steps:
+  - order: 1
+    action: Record Runtime and Sandbox image IDs and changed-source fingerprints.
+    expected: Running SDK fingerprints match source.
+  - order: 2
+    action: Inject one terminal model timeout after allocating a child kernel, inspect
+      root-only kernel baseline, then invoke the same definition again.
+    expected: The failed child is released without marking the lease unhealthy; subsequent
+      parallel calls succeed.
+  - order: 3
+    action: Run ten batches of two same-definition invocations in each scope with
+      controlled markers.
+    expected: All forty results match and every batch actually overlaps.
+  - order: 4
+    action: Inspect lease state and Gateway connection replacement events.
+    expected: Zero unhealthy, replacement or duplicate-session connection replacements.
+  - order: 5
+    action: Release root resources and inspect Docker inventory.
+    expected: No owned kernels or test containers remain.
+  expected_results:
+  - All forty invocations succeed.
+  - A failed invocation releases its own kernel and subsequent calls to the same definition
+    recover.
+  forbidden_side_effects:
+  - No registry push
+  - No unrelated container deletion
+  - No business code replay
+  risk_type: RELIABILITY
+  risk: Repeated calls to one definition share channel identity and destabilize execution.
+  condition:
+  - Two concurrent calls per batch in one parent tree using delivered images in both
+    session and isolated system scopes.
+  metrics:
+  - Successful invocations
+  - Unique kernel IDs
+  - Peak active calls
+  - Unhealthy
+  - Replacements
+  - Owned leftovers
+  - Controlled failed invocation recovery
+  thresholds:
+  - Forty successful results
+  - Two active calls per batch
+  - All failure and leftover counts zero
+  - One failed invocation per scope releases its kernel before subsequent parallel
+    calls
+  recovery_expectations:
+  - Failed calls clean only owned resources; the next call builds a fresh instance.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 600
+  acceptance:
+  - id: AC-01
+    description: Verify the delivered image SDK and Gateway under repeated overlapping
+      calls.
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3

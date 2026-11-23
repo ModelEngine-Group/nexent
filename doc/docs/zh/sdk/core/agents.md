@@ -32,6 +32,18 @@ CoreAgent 实现了ReAct框架的思考-行动-观察循环：
 3. **观察**: 收集执行结果和日志
 4. **重复**: 根据观察结果继续思考和执行，直到任务完成
 
+### 🧩 上下文管理
+通过 `AgentConfig.context_manager_config`（对应 `ContextManagerConfig`，见 core/agents/context/config.py）开启上下文管理与压缩，NexentAgent 据此构建 `ContextManager` 与 `ManagedContextRuntime`，长对话自动压缩历史并记录指标；上下文运行时基于 ContextItems 支持自适应压缩，压缩产物为 Markdown 摘要且拒绝可执行输出。
+
+### 🗺️ Planning Agent
+支持先规划后执行：通过 CreatePlanTool / UpdatePlanStepTool 生成与维护计划待办列表（plan_repo.py），配合 ParallelExecutorTool 并发调度多个子智能体。
+
+### 📦 沙箱
+代码执行默认使用本地 LocalPythonExecutor（不启用沙箱）。通过 `AgentConfig.sandbox_policy` / `AgentRunInfo.sandbox_config` 配置 `SandboxConfig`（core/agents/sandbox.py）后，可启用 Docker/WASM 级别的沙箱隔离；`scope` 支持 `session`（默认，每次运行一个容器，运行结束销毁）与 `system`（系统级共享持久容器，每个运行使用独立内核）。
+
+### 🛡️ Guardrail 安全筛查
+内置输入/输出内容安全检查点（guardrail checkpoints），敏感内容可拦截。
+
 ### 📡 MessageObserver - 流式消息处理
 消息观察者模式的核心实现，用于处理 Agent 的流式输出：
 
@@ -40,7 +52,7 @@ CoreAgent 实现了ReAct框架的思考-行动-观察循环：
 - **多语言支持**: 支持中英文输出格式
 - **统一接口**: 为不同来源的消息提供统一处理方式
 
-ProcessType枚举定义了以下处理阶段：
+ProcessType枚举的常用处理阶段包括（完整定义见 `nexent.core.utils.observer.ProcessType`）：
 - `STEP_COUNT`: 当前执行步骤
 - `MODEL_OUTPUT_THINKING`: 模型思考过程输出
 - `MODEL_OUTPUT_CODE`: 模型代码生成输出
@@ -55,6 +67,39 @@ ProcessType枚举定义了以下处理阶段：
 
 具体的代码示例已集中到 [基本使用](../basic-usage#使用-agent_run推荐的流式运行方式)，其中包含 `CoreAgent.run` 与流式的 `agent_run`。本页仅保留模块层面的概念和能力描述。
 
+### Agent 运行流程图
+
+下图展示 `agent_run` 的真实调用链（基于 core/agents/run_agent.py、nexent_agent.py、core_agent.py）：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant AR as agent_run 异步生成器
+    participant TH as agent_run_thread 线程
+    participant NA as NexentAgent
+    participant CA as CoreAgent
+    participant LLM as OpenAIModel
+    participant TL as 工具
+    participant OB as MessageObserver
+
+    U->>AR: 传入 AgentRunInfo
+    AR->>TH: 启动后台线程
+    TH->>NA: create_single_agent 构建 CoreAgent
+    TH->>NA: agent_run_with_observer 开始执行
+    NA->>CA: run 流式逐步执行
+    loop 每个 ReAct 步骤
+        CA->>LLM: generate 生成思考与代码
+        LLM-->>OB: MODEL_OUTPUT_THINKING 与 MODEL_OUTPUT_CODE
+        CA->>CA: 解析代码并发送 PARSE
+        CA->>TL: 执行 python_interpreter 或真实工具
+        TL-->>OB: EXECUTION_LOGS 与 SEARCH_CONTENT 等
+        CA->>CA: 观察结果并决定下一步
+    end
+    CA-->>OB: 输出 FINAL_ANSWER
+    OB-->>AR: 缓存消息 JSON 字符串
+    AR-->>U: 逐条 yield 事件流
+```
+
 ## 🛠️ 工具集成
 
 ### 自定义工具开发
@@ -62,7 +107,7 @@ ProcessType枚举定义了以下处理阶段：
 Nexent 基于 [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol/python-sdk) 实现工具系统。
 
 #### 开发新工具:
-1. 在 `backend/mcp_service/local_mcp_service.py` 实现逻辑
+1. 在 `backend/tool_collection/mcp/local_mcp_service.py` 实现逻辑
 2. 用 `@mcp.tool()` 装饰器注册
 3. 重启 MCP 服务
 

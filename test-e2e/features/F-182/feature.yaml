@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-182
+  name: Docker/Kubernetes 持久化数据备份、空间预检、目录冲突防护、非交互执行与升级回滚资产校验
+  status: active
+  description: '平台运维能力 / 备份升级回滚: Docker/Kubernetes 持久化数据备份、空间预检、目录冲突防护、非交互执行与升级回滚资产校验'
+  business_rules:
+  - rule_id: F-182-RULE-01
+    description: Docker/Kubernetes 持久化数据备份、空间预检、目录冲突防护、非交互执行与升级回滚资产校验
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

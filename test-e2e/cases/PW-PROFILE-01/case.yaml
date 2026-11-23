@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-PROFILE-01
+  feature_id: V5-PW-PROFILE-01
+  business_rule_ids:
+  - V5-PW-PROFILE-01-RULE-01
+  title: 个人安全设置：修改密码→AK/SK生成/复制/重生成/删除
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 覆盖/users真实安全操作，修正v4把Token管理混在注册场景。
+  preconditions:
+  - 可修改密码的普通用户
+  - 记录原密码用于恢复
+  - clipboard permission可用或检查复制反馈
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 打开/users，确认Account Info与Security加载。
+    expected: 旧密码失效、新密码有效。
+  - order: 2
+    action: 点击【修改密码】，填写当前密码、新密码和确认并提交。
+    expected: secret仅创建/重生成时完整展示。
+  - order: 3
+    action: 退出后用新密码重新登录；测试末恢复原密码。
+    expected: 重生成/删除后UI状态正确。
+  - order: 4
+    action: 回/users点击【Generate Access Token/生成访问令牌】。
+    expected: AK/SK真实鉴权由CONTRACT验证。
+  - order: 5
+    action: 首次结果确认AK/SK/secret只在本次结果区域完整展示，并点击复制。
+    expected: AK/SK真实鉴权由CONTRACT验证。
+  - order: 6
+    action: 刷新，确认完整secret不再展示。
+    expected: AK/SK真实鉴权由CONTRACT验证。
+  - order: 7
+    action: 点击重新生成并确认覆盖提示。
+    expected: AK/SK真实鉴权由CONTRACT验证。
+  - order: 8
+    action: 点击删除/撤销Access Token并确认，刷新后回到未生成状态。
+    expected: AK/SK真实鉴权由CONTRACT验证。
+  expected_results:
+  - 旧密码失效、新密码有效。
+  - secret仅创建/重生成时完整展示。
+  - 重生成/删除后UI状态正确。
+  - AK/SK真实鉴权由CONTRACT验证。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 6
+  actor: Nexent browser user
+  journey:
+  - 打开/users，确认Account Info与Security加载。
+  - 点击【修改密码】，填写当前密码、新密码和确认并提交。
+  - 退出后用新密码重新登录；测试末恢复原密码。
+  - 回/users点击【Generate Access Token/生成访问令牌】。
+  - 首次结果确认AK/SK/secret只在本次结果区域完整展示，并点击复制。
+  - 刷新，确认完整secret不再展示。
+  - 点击重新生成并确认覆盖提示。
+  - 点击删除/撤销Access Token并确认，刷新后回到未生成状态。
+  final_business_result:
+  - 旧密码失效、新密码有效。
+  - secret仅创建/重生成时完整展示。
+  - 重生成/删除后UI状态正确。
+  - AK/SK真实鉴权由CONTRACT验证。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-PROFILE-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

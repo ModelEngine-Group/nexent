@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-077
+  feature_id: F-073
+  business_rule_ids:
+  - F-073-RULE-01
+  title: 安装 official ZIP、JSON create、SKILL.md/ZIP upload｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 安装 official ZIP、JSON create、SKILL.md/ZIP upload｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/skills/
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/skills/'
+  steps:
+  - order: 1
+    action: 从 assets/skills/ 读取固定 Skill 包/SKILL.md，使用唯一名称避免与已有 Skill 冲突。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 按“安装 official ZIP、JSON create、SKILL.md/ZIP upload｜核心流程”通过实际 Skill API 执行上传、解析、编辑、同步、仓库发布/安装或 NL2Skill。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 检查文件树、元数据、入口文件、版本/状态与对象存储/本地工作区一致。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 需要生成的 Skill 使用真实 LLM，断言生成结果可保存且 SKILL.md 结构可被 loader 解析。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 将 Skill 绑定到测试 Agent，执行一次真实 Chat，确认 Skill 被按需加载并影响 Agent 上下文/工具。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 恶意 ZIP/路径场景使用本地安全资产，确认不会写出允许目录。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 市场发布/安装后用另一测试租户验证可见性和隔离。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 删除临时 Skill、市场记录和 Agent 绑定。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 143
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 assets/skills/ 读取固定 Skill 包/SKILL.md，使用唯一名称避免与已有 Skill 冲突。
+    - 按“安装 official ZIP、JSON create、SKILL.md/ZIP upload｜核心流程”通过实际 Skill API 执行上传、解析、编辑、同步、仓库发布/安装或 NL2Skill。
+    - 检查文件树、元数据、入口文件、版本/状态与对象存储/本地工作区一致。
+    - 需要生成的 Skill 使用真实 LLM，断言生成结果可保存且 SKILL.md 结构可被 loader 解析。
+    - 将 Skill 绑定到测试 Agent，执行一次真实 Chat，确认 Skill 被按需加载并影响 Agent 上下文/工具。
+    - 恶意 ZIP/路径场景使用本地安全资产，确认不会写出允许目录。
+    - 市场发布/安装后用另一测试租户验证可见性和隔离。
+    - 删除临时 Skill、市场记录和 Agent 绑定。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

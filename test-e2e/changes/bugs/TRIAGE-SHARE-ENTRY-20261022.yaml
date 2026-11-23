@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: TRIAGE-SHARE-ENTRY-20261022
+  change_type: bugfix
+  bug_id: TRIAGE-SHARE-ENTRY-20261022
+  title: Restore ordinary Agent chat share entry
+  description: Recorded during the October 22 owner-specific triage. Product implementation is intentionally pending.
+  observed_behavior: Completed ordinary Agent chat has no share entry because its sole trigger is inside an excluded
+    header.
+  expected_behavior: Users can enter sharing from ordinary Agent chat and complete the existing public snapshot journey.
+  escaped_stage: D4
+  coverage_gap:
+    type: no_gap
+    description: The existing formal Case detects the behavior once its unrelated setup failure is removed.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - V5-PW-SHARE-01
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - PW-SHARE-01
+    added: []
+    modified: []
+    retired: []
+  notes: Record only; no product fix or acceptance PASS is claimed. Reproduction, evidence, scope limits and future verification
+    are recorded in docs/handoffs/2026-10-22-pyh-agent-test-triage.md. Assess traditional UT and SPEC impact when implementing
+    the product repair.

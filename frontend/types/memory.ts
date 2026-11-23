@@ -31,7 +31,10 @@ export interface MemoryManageModalProps {
 export const pageSize = 4
 
 // Label with icon function type
-export type LabelWithIconFunction = (Icon: React.ElementType, text: string) => JSX.Element;
+export type LabelWithIconFunction = (
+  Icon: React.ElementType,
+  text: string
+) => React.JSX.Element;
 
 // Use memory hook options interface
 export interface UseMemoryOptions {

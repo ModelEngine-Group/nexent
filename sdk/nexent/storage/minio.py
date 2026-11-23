@@ -341,6 +341,28 @@ class MinIOStorageClient(StorageClient):
                 logger.error(f"Failed to get file size for {object_name}: {e}")
             return 0
 
+    def get_file_size_strict(
+        self,
+        object_name: str,
+        bucket: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return authoritative size without hiding permission or service failures."""
+        bucket = bucket or self.default_bucket
+        if bucket is None:
+            raise ValueError("Bucket name is required")
+
+        try:
+            response = self.client.head_object(Bucket=bucket, Key=object_name)
+            return int(response["ContentLength"])
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            error_code = str(error.get("Code", ""))
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if error_code in {"404", "NoSuchKey", "NotFound"} or status_code == 404:
+                logger.debug("File not found when getting strict size: %s", object_name)
+                return None
+            raise
+
     def list_files(
         self,
         prefix: str = "",

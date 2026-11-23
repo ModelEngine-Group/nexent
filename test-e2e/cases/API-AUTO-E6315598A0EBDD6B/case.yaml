@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-E6315598A0EBDD6B
+  feature_id: F-168
+  business_rule_ids:
+  - F-168-RULE-01
+  title: delete_index 级联清理知识库资源与文档标签分配｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: delete_index 级联清理知识库资源与文档标签分配｜核心流程
+  preconditions:
+  - 每日 API 集成测试环境可用：后端服务、Elasticsearch、Redis、PostgreSQL 已启动并可访问。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 以具有知识库编辑权限的隔离账号登录，获取 Authorization token 与 tenant_id。
+    expected: DELETE /indices/{kb_name} 返回成功（2xx），返回 full_delete_knowledge_base 结果，无未处理异常。
+  - order: 2
+    action: 创建测试知识库：调用 POST /indices/{kb_name}（kb_name 携带 run_id），记录创建结果。
+    expected: 删除后 GET /tag-libraries/assignments/knowledge_base/{kb_name} 返回 assignment_count == 0（或资源已删除导致 404 resource not
+      found），证明 cleanup_resource_assignments 已清理该知识库资源标签分配。
+  - order: 3
+    action: 准备标签库：调用 GET /tag-libraries 获取或新建 bucket；若缺少标签定义与值，通过 POST /tag-libraries/{bucket_id}/definitions 与 POST /tag-libraries/{bucket_id}/definitions/{definition_id}/values
+      创建并记录 value_id。
+    expected: 该知识库（provider=local）的文档标签分配与文档投影 ledger 已清理，不存在残留活动分配。
+  - order: 4
+    action: 分配标签到知识库资源：调用 PUT /tag-libraries/assignments/knowledge_base/{kb_name}（body 传 value_ids），并调用 GET /tag-libraries/assignments/knowledge_base/{kb_name}
+      确认 assignment_count > 0。
+    expected: 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  - order: 5
+    action: 删除知识库：调用 DELETE /indices/{kb_name}，记录响应状态码与响应体（full_delete_knowledge_base 结果）。
+    expected: 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  - order: 6
+    action: 验证资源标签清理：再次调用 GET /tag-libraries/assignments/knowledge_base/{kb_name}，记录 assignment_count 或状态码。
+    expected: 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  - order: 7
+    action: 验证文档标签清理：确认该知识库下文档标签分配已随 cleanup_document_assignments_for_knowledge_base 软删除、文档投影 ledger 已 best-effort 清理（通过 documents/batch-status
+      或后续读取无残留活动分配）。
+    expected: 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  - order: 8
+    action: 测试结束后清理自建标签定义/值，释放临时资源，确保可重复执行。
+    expected: 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  expected_results:
+  - DELETE /indices/{kb_name} 返回成功（2xx），返回 full_delete_knowledge_base 结果，无未处理异常。
+  - 删除后 GET /tag-libraries/assignments/knowledge_base/{kb_name} 返回 assignment_count == 0（或资源已删除导致 404 resource not found），证明
+    cleanup_resource_assignments 已清理该知识库资源标签分配。
+  - 该知识库（provider=local）的文档标签分配与文档投影 ledger 已清理，不存在残留活动分配。
+  - 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 533
+  integration_boundary:
+  - LOCAL_ASSET_REQUIRED：使用每日 API 集成测试环境（Elasticsearch/Redis/PostgreSQL 等基础组件）与本地固定配置、隔离账号、嵌入模型配置；不访问公网模型或第三方外部服务。
+  observations:
+  - DELETE /indices/{kb_name} 返回成功（2xx），返回 full_delete_knowledge_base 结果，无未处理异常。
+  - 删除后 GET /tag-libraries/assignments/knowledge_base/{kb_name} 返回 assignment_count == 0（或资源已删除导致 404 resource not found），证明
+    cleanup_resource_assignments 已清理该知识库资源标签分配。
+  - 该知识库（provider=local）的文档标签分配与文档投影 ledger 已清理，不存在残留活动分配。
+  - 关键状态在 API 返回与后续读取中保持一致，不出现跨租户泄露；日志不输出明文 Token/密钥。
+  cleanup:
+  - pytest JUnit/XML、API 请求与响应日志、stdout/stderr、失败堆栈、覆盖率片段。

@@ -1,16 +1,28 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
+import { withBasePath } from "@/lib/basePath";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
   AgentRepositoryListingListParams,
   MyEditableAgentListParams,
 } from "@/types/agentRepository";
+import type {
+  MyEditableSkillListParams,
+  SkillRepositoryListingListParams,
+} from "@/types/skillRepository";
 import type { MarketAgentListParams } from "@/types/market";
+import type { NotificationListParams } from "@/types/notification";
 
-const API_BASE_URL = "/api";
+export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
+  knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
+  agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
+  toolTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/tool/batch_read`,
   user: {
     signup: `${API_BASE_URL}/user/signup`,
     signin: `${API_BASE_URL}/user/signin`,
@@ -26,6 +38,7 @@ export const API_ENDPOINTS = {
     updatePassword: `${API_BASE_URL}/user/password`,
   },
   oauth: {
+    config: `${API_BASE_URL}/user/oauth/config`,
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
     link: `${API_BASE_URL}/user/oauth/link`,
@@ -42,11 +55,24 @@ export const API_ENDPOINTS = {
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
+    agentGroups: `${API_BASE_URL}/conversation/agent_groups`,
+    agentGroupConversations: (groupKey: string) =>
+      `${API_BASE_URL}/conversation/agent_groups/${encodeURIComponent(groupKey)}/conversations`,
+    agentGroupConversationIds: (agentId: number) =>
+      `${API_BASE_URL}/conversation/agent_groups/${agentId}/conversation_ids`,
+    workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
+    workbenchPin: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench_pin`,
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    knowledgeScope: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+    workbenchConfig: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench-config`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    batchDelete: `${API_BASE_URL}/conversation/batch-delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
     // TODO: Remove this endpoint
     sources: `${API_BASE_URL}/conversation/sources`,
@@ -72,24 +98,33 @@ export const API_ENDPOINTS = {
   },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
+    nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    listPage: `${API_BASE_URL}/agent/list/page`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
-    getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
-    stop: (conversationId: number) =>
-      `${API_BASE_URL}/agent/stop/${conversationId}`,
+    stop: (runId: string | number) =>
+      `${API_BASE_URL}/agent/stop/${encodeURIComponent(String(runId))}`,
     export: `${API_BASE_URL}/agent/export`,
     import: `${API_BASE_URL}/agent/import`,
+    checkSkills: `${API_BASE_URL}/agent/check_skills`,
     checkNameBatch: `${API_BASE_URL}/agent/check_name`,
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
     byName: (agentName: string) =>
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
+    knowledgeCapabilities: (agentId: number) =>
+      `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
+    workbenchBootstrap: `${API_BASE_URL}/agent/workbench/bootstrap`,
+    workbenchPreview: `${API_BASE_URL}/agent/workbench/capabilities/preview`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
+    icon: (agentId: number, revision?: string | null) =>
+      `${API_BASE_URL}/agent/${agentId}/icon${revision ? `?v=${encodeURIComponent(revision)}` : ""}`,
     versions: {
       version: (agentId: number, versionNo: number) =>
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
@@ -108,6 +143,30 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
+  agentAutomation: {
+    list: `${API_BASE_URL}/agent/automations`,
+    detail: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    update: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    delete: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    pause: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/pause`,
+    resume: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/resume`,
+    run: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}/run`,
+    runs: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/runs`,
+    cancelRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}/cancel`,
+    deleteRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}`,
+    proposals: `${API_BASE_URL}/agent/automations/proposals`,
+    updateProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}`,
+    confirmProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}/confirm`,
+    conversation: (conversationId: number) =>
+      `${API_BASE_URL}/conversation/${conversationId}/automation`,
+  },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
     update: `${API_BASE_URL}/tool/update`,
@@ -122,26 +181,45 @@ export const API_ENDPOINTS = {
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
+    updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
-    generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
+    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
-  promptTemplates: {
-    list: `${API_BASE_URL}/prompt_templates`,
-    detail: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-    create: `${API_BASE_URL}/prompt_templates`,
-    update: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-    delete: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
+  evaluationSets: {
+    list: `${API_BASE_URL}/evaluation-sets`,
+    config: `${API_BASE_URL}/evaluation-sets/config`,
+    detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
+    upload: `${API_BASE_URL}/evaluation-sets/upload`,
+    template: `${API_BASE_URL}/evaluation-sets/template`,
+    export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
+    delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+  },
+  evaluators: {
+    list: `${API_BASE_URL}/evaluators`,
+    create: `${API_BASE_URL}/evaluators`,
+    detail: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    delete: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    publish: (id: number) => `${API_BASE_URL}/evaluators/${id}/publish`,
+    export: `${API_BASE_URL}/evaluators/export`,
+    import: `${API_BASE_URL}/evaluators/import`,
+    generate: `${API_BASE_URL}/evaluators/generate`,
+  },
+  agentEvaluations: {
+    create: `${API_BASE_URL}/agent-evaluations`,
+    list: `${API_BASE_URL}/agent-evaluations`,
+    detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
+    delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
-    ws: `/api/voice/stt/ws`,
+    ws: `${API_BASE_URL}/voice/stt/ws`,
   },
   tts: {
-    ws: `/api/voice/tts/ws`,
+    ws: `${API_BASE_URL}/voice/tts/ws`,
   },
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
@@ -195,6 +273,7 @@ export const API_ENDPOINTS = {
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,
+    customModelBackfillDefaults: `${API_BASE_URL}/model/backfill_defaults`,
     getProviderSelectedModalList: `${API_BASE_URL}/model/provider/list`,
     customModelDelete: (displayName: string) =>
       `${API_BASE_URL}/model/delete?display_name=${encodeURIComponent(
@@ -223,12 +302,28 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
     manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
     manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
+    // Preset Model Catalog (预置模型目录)
+    catalogAll: `${API_BASE_URL}/model/catalog/all`,
+    catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
+    catalogProviderModels: (provider: string, modelType?: string) => {
+      const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
+      return modelType
+        ? `${base}?model_type=${encodeURIComponent(modelType)}`
+        : base;
+    },
+    catalogModelProfile: (provider: string, modelName: string) =>
+      `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelName)}`,
+    // v2.6.0: fixed inference field specs by model type (advanced settings)
+    catalogInferenceFieldSpecs: `${API_BASE_URL}/model/catalog/inference_field_specs`,
   },
   knowledgeBase: {
     // Elasticsearch service
     health: `${API_BASE_URL}/indices/health`,
+    summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
+    boundAgents: (indexName: string) =>
+      `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/bound_agents`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
@@ -266,6 +361,9 @@ export const API_ENDPOINTS = {
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
   },
+  ragflow: {
+    datasets: `${API_BASE_URL}/ragflow/datasets`,
+  },
   idata: {
     knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,
     datasets: `${API_BASE_URL}/idata/datasets`,
@@ -284,10 +382,44 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
+  independentAidp: {
+    knowledgeBases: `${API_BASE_URL}/ind-aidp/knowledge-bases/list`,
+  },
+  aidpMgmt: {
+    boundAgents: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
+    knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
+    kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
+    kbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    kbFiles: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    kbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
+    retryKbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks/retry`,
+    removeKbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
+    downloadKbDocument: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
+    /** GET endpoint that streams one AIDP document for preview. AIDP serves
+     *  the original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for
+     *  every other format, and reports the served name in `X-File-Name`. */
+    previewKbDocument: (id: string, fileUuid: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/preview`,
+    models: `${API_BASE_URL}/aidp-mgmt/models`,
+    graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
+    /** PATCH endpoint for the per-KB in-group permission. */
+    kbPermission: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+  },
   config: {
+    frontend: `${API_BASE_URL}/frontend-config`,
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
+    projectConfig: `${API_BASE_URL}/config/project-config`,
   },
   tenantConfig: {
     loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
@@ -302,17 +434,21 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
+    addFromConfigStream: `${API_BASE_URL}/mcp/add-from-config/stream`,
     uploadImage: `${API_BASE_URL}/mcp/upload-image`,
+    uploadImageStream: `${API_BASE_URL}/mcp/upload-image/stream`,
     containers: `${API_BASE_URL}/mcp/containers`,
     containerLogs: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}/logs`,
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+    refreshTools: `${API_BASE_URL}/mcp/refresh-tools`,
     portCheck: `${API_BASE_URL}/mcp/port/check`,
     portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
     enable: `${API_BASE_URL}/mcp/enable`,
     disable: `${API_BASE_URL}/mcp/disable`,
+    testConnection: `${API_BASE_URL}/mcp/test-connection`,
   },
   // A2A Client endpoints
   a2a: {
@@ -326,6 +462,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
     agentProtocol: (agentId: string) =>
       `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    agentSecurityCredentials: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/security-credentials`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
     relation: (localAgentId: number, externalAgentId: number) =>
@@ -357,7 +495,9 @@ export const API_ENDPOINTS = {
     official: `${API_BASE_URL}/skills/official`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    getById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     updateUpload: (skillName: string) =>
       `${API_BASE_URL}/skills/${skillName}/upload`,
     delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -370,24 +510,28 @@ export const API_ENDPOINTS = {
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
     scan: `${API_BASE_URL}/skills/scan_skill`,
     create: `${API_BASE_URL}/skills`,
-    createStream: `${API_BASE_URL}/skills/create`,
-    stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
+    nl2skillRun: `${API_BASE_URL}/skills/nl2skill/run`,
     install: `${API_BASE_URL}/skills/install`,
   },
   mcpTools: {
-    // Community and Registry endpoints remain under /mcp-tools prefix
-    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    // Community endpoints remain under /mcp-tools prefix
     communityList: `${API_BASE_URL}/mcp-tools/community/list`,
     communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
+    communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
+    communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
+    communityDownload: (marketId: number) =>
+      `${API_BASE_URL}/mcp-tools/community/${marketId}/download`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
+      embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>
@@ -395,6 +539,26 @@ export const API_ENDPOINTS = {
       disableUserAgentAdd: `${API_BASE_URL}/memory/config/disable_useragent`,
       disableUserAgentRemove: (agentId: string | number) =>
         `${API_BASE_URL}/memory/config/disable_useragent/${agentId}`,
+    },
+
+    // ---------------- Memory record management ----------------
+    records: {
+      list: `${API_BASE_URL}/memory/records`,
+      create: `${API_BASE_URL}/memory/records`,
+      update: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+      delete: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+    },
+    longTerm: {
+      active: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}`,
+      versions: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions`,
+      detail: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}`,
+      activate: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}/activate`,
     },
 
     // ---------------- Memory CRUD ----------------
@@ -406,6 +570,12 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/memory/delete/${memoryId}`,
       clear: `${API_BASE_URL}/memory/clear`,
     },
+    dreaming: {
+      parameters: `${API_BASE_URL}/memory/dreaming/parameters`,
+      schedule: `${API_BASE_URL}/memory/dreaming/schedule`,
+      run: `${API_BASE_URL}/memory/dreaming/run`,
+      audits: `${API_BASE_URL}/memory/dreaming/audit`,
+    },
   },
   agentRepository: {
     listings: (params?: AgentRepositoryListingListParams) => {
@@ -413,9 +583,6 @@ export const API_ENDPOINTS = {
       if (params?.status) queryParams.append("status", params.status);
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
-      }
-      if (params?.category_id != null) {
-        queryParams.append("category_id", String(params.category_id));
       }
       if (params?.page != null) {
         queryParams.append("page", String(params.page));
@@ -425,6 +592,22 @@ export const API_ENDPOINTS = {
       }
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
+      }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
@@ -446,11 +629,32 @@ export const API_ENDPOINTS = {
       if (params?.new_agent_padding) {
         queryParams.append("new_agent_padding", "true");
       }
+      if (params?.agent_id != null) {
+        queryParams.append("agent_id", String(params.agent_id));
+      }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    official: `${API_BASE_URL}/repository/agent/official`,
+    officialInstall: `${API_BASE_URL}/repository/agent/official/install`,
+    officialManagement: `${API_BASE_URL}/repository/agent/official/management`,
+    officialManagementItem: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/official/management/${agentRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
@@ -459,6 +663,77 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+    icon: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
+  },
+  skillRepository: {
+    listings: (params?: SkillRepositoryListingListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.status) queryParams.append("status", params.status);
+      if (params?.skill_id != null) {
+        queryParams.append("skill_id", String(params.skill_id));
+      }
+      if (params?.category_id != null) {
+        queryParams.append("category_id", String(params.category_id));
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/skill${queryString ? `?${queryString}` : ""}`;
+    },
+    mineSkills: (params?: MyEditableSkillListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.ownership) {
+        queryParams.append("ownership", params.ownership);
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.new_skill_padding) {
+        queryParams.append("new_skill_padding", "true");
+      }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
+    },
+    mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
+    detail: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/skill/tags`,
+    install: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}/install`,
+    updateStatus: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}/status`,
+    createListing: (skillId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillId}`,
   },
   market: {
     agents: (params?: MarketAgentListParams) => {
@@ -488,11 +763,37 @@ export const API_ENDPOINTS = {
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
   },
+  // Quota management endpoints
+  quota: {
+    // Tenant-level quota
+    config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
+    usage: (tenantId: string) =>
+      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    // Platform-level quota (SU/ASSET_OWNER/SPEED only)
+    platformOverview: `${API_BASE_URL}/platform/quota/overview`,
+    platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
+    platformTenantQuota: (tenantId: string) =>
+      `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    // Personal KB capacity (ADMIN/SU)
+    personalUsers: `${API_BASE_URL}/capacity/personal/users`,
+    personalUserKbs: (userId: string) =>
+      `${API_BASE_URL}/capacity/personal/users/${userId}/kbs`,
+    personalUserQuota: (userId: string) =>
+      `${API_BASE_URL}/capacity/personal/users/${userId}/quota`,
+    personalDefaultQuota: `${API_BASE_URL}/capacity/personal/default-quota`,
+    personalSummary: `${API_BASE_URL}/capacity/personal/summary`,
+    personalSelf: `${API_BASE_URL}/capacity/personal/me`,
+  },
   users: {
     list: `${API_BASE_URL}/users/list`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     delete: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+  },
+  apiKeys: {
+    list: `${API_BASE_URL}/api-keys`,
+    refresh: `${API_BASE_URL}/api-keys/refresh`,
+    revoke: `${API_BASE_URL}/api-keys`,
   },
   groups: {
     create: `${API_BASE_URL}/groups`,
@@ -522,18 +823,46 @@ export const API_ENDPOINTS = {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
+  notifications: {
+    list: (params?: NotificationListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.only_unread) {
+        queryParams.append("only_unread", "true");
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/notifications${queryString ? `?${queryString}` : ""}`;
+    },
+    markRead: `${API_BASE_URL}/notifications/read`,
+  },
 };
 
 // Common error handling
 export class ApiError extends Error {
   constructor(
     public code: string | number,
-    message: string
+    message: string,
+    public details?: Record<string, unknown> | null
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
+
+export const toApiError = (
+  error: unknown,
+  fallbackMessage = "Request failed"
+): ApiError => {
+  if (error instanceof ApiError) return error;
+  if (error instanceof Error)
+    return new ApiError("request_failed", error.message);
+  return new ApiError("request_failed", fallbackMessage);
+};
 
 // API request interceptor
 export const fetchWithErrorHandling = async (
@@ -548,15 +877,37 @@ export const fetchWithErrorHandling = async (
       // Try to parse JSON response for business error code first
       let errorCode = response.status;
       let errorMessage = `Request failed: ${response.status}`;
+      let errorDetails: Record<string, unknown> | null | undefined;
       const errorText = await response.text();
 
-      let parsedErrorData = null;
       try {
         const errorData = JSON.parse(errorText);
-        if (errorData && errorData.code) {
-          parsedErrorData = errorData;
-          errorCode = errorData.code;
-          errorMessage = errorData.message || errorMessage;
+        const errorDetail =
+          errorData?.detail && typeof errorData.detail === "object"
+            ? errorData.detail
+            : errorData?.message && typeof errorData.message === "object"
+              ? errorData.message
+              : errorData;
+        if (errorDetail?.code) {
+          errorCode = errorDetail.code;
+          errorMessage = errorDetail.message || errorMessage;
+          errorDetails = errorDetail.details;
+        } else if (Array.isArray(errorData?.detail)) {
+          errorMessage = "Validation failed";
+          errorDetails = {
+            field_errors: errorData.detail.map(
+              (item: { loc?: unknown[]; msg?: string }) => ({
+                field: Array.isArray(item.loc)
+                  ? String(item.loc.at(-1) ?? "")
+                  : "",
+                message: item.msg || "Invalid value",
+              })
+            ),
+          };
+        } else if (typeof errorData?.detail === "string") {
+          errorMessage = errorData.detail;
+        } else if (typeof errorData?.message === "string") {
+          errorMessage = errorData.message;
         } else {
           errorMessage = errorText || errorMessage;
         }
@@ -573,13 +924,13 @@ export const fetchWithErrorHandling = async (
         errorCodeStr === ErrorCode.TOKEN_INVALID
       ) {
         handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
+        throw new ApiError(errorCode, errorMessage, errorDetails);
       }
 
       // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
       if (response.status === 401) {
         handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
+        throw new ApiError(errorCode, errorMessage, errorDetails);
       }
 
       // Handle custom 499 error code (client closed connection)
@@ -591,15 +942,33 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      // Handle request entity too large error (413)
+      // Preserve the tenant storage quota error so upload callers can present
+      // the correct recovery action instead of treating it as a per-file limit.
       if (response.status === 413) {
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData?.error === "TenantStorageFull") {
+            throw new ApiError(
+              413,
+              errorData.message || "Tenant storage limit reached",
+              errorData
+            );
+          }
+        } catch (error) {
+          if (error instanceof ApiError) {
+            throw error;
+          }
+        }
+        // Preserve structured FILE_TOO_LARGE responses so upload callers can
+        // display the configured limit from details.limit_mb.
         throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          errorCode,
+          errorMessage || "File size exceeds limit.",
+          errorDetails
         );
       }
 
-      throw new ApiError(errorCode, errorMessage);
+      throw new ApiError(errorCode, errorMessage, errorDetails);
     }
 
     return response;

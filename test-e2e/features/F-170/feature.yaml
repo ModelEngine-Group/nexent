@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-170
+  name: 对象序列化/加载、media type、异常输入
+  status: active
+  description: 'SDK与基础设施 / Multi-modal: 对象序列化/加载、media type、异常输入'
+  business_rules:
+  - rule_id: F-170-RULE-01
+    description: 对象序列化/加载、media type、异常输入
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

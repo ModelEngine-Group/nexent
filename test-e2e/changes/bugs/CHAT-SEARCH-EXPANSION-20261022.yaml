@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SEARCH-EXPANSION-20261022
+  change_type: bugfix
+  bug_id: CHAT-SEARCH-EXPANSION-20261022
+  title: Reveal matching Agent conversations during history search
+  description: Derive Agent-group expansion from conversation-title matches; Agent-name-only matches and clearing search retain manual expansion.
+  observed_behavior: Search filters conversations correctly but matching conversations remain hidden under collapsed Agent groups.
+  expected_behavior: Conversation-title matches expand their Agent group; Agent-name-only matches and clearing the query retain manual expansion. No conversation data is written.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing visibility unit tests prove collapsed and expanded primitives, but the sidebar component Case did not assert the collaboration between search filtering and group expansion.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR-D1-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors:
+      - frontend/tests/component/thread-list-visibility.test.mjs
+    behaviors:
+      - Expanded groups expose their matching entries and collapsed inactive groups hide them.
+      - Active persisted or running conversations retain their existing visibility; unsent drafts remain hidden.
+    reason: Visibility primitives are unchanged and their existing Node unit assertions remain applicable. Strengthen the existing formal component Case to detect the search and expansion composition defect rather than duplicating it in another unit suite. Python, API, runtime and deployment behavior do not change.
+  notes: Design and evidence at ../nexent-doc/docs/Developing/chat-search-expansion/design.md. Existing sidebar D4 Cases concern Workbench search or other journeys and remain unchanged. Direct browser inspection complements the focused component regression; no new formal Case is added.

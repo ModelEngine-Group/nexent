@@ -1,55 +1,84 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { I18nextProvider } from "react-i18next";
 
-import i18n from "@/app/i18n";
+import i18n, { loadLocaleMessages } from "@/app/i18n";
+import { getBrowserTabLogo, getBrowserTabTitle } from "@/lib/projectBranding";
+import {
+  useGlobalConfigStore,
+  useGlobalConfigStoreAllLanguage,
+} from "@/stores/global";
 
 interface I18nProviderWrapperProps {
   children: ReactNode;
   locale?: string;
 }
 
+const TRANSPARENT_TAB_ICON =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
+  );
+
 export default function I18nProviderWrapper({
   children,
   locale: initialLocale,
 }: I18nProviderWrapperProps) {
-  const [mounted, setMounted] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [tabIcon, setTabIcon] = useState(TRANSPARENT_TAB_ICON);
   const pathname = usePathname();
+  const { config, setConfig } = useGlobalConfigStore();
+  const { setAllConfig } = useGlobalConfigStoreAllLanguage();
+  const targetLocale =
+    initialLocale || pathname.split("/").filter(Boolean)[0] || "zh";
 
   useEffect(() => {
-    setMounted(true);
+    const icon = getBrowserTabLogo();
+    const image = new Image();
+    image.onload = () => setTabIcon(icon);
+    image.src = icon;
+    return () => {
+      image.onload = null;
+    };
   }, []);
 
-  // Initialize i18n language from props or URL
   useEffect(() => {
-    if (!mounted) return;
+    let isCurrentEffect = true;
 
-    // If locale is provided via props, use it
-    if (initialLocale && (initialLocale === "zh" || initialLocale === "en")) {
-      if (i18n.language !== initialLocale) {
-        i18n.changeLanguage(initialLocale);
-      }
-      document.cookie = `NEXT_LOCALE=${initialLocale}; path=/; max-age=31536000`;
-      return;
-    }
+    const initI18n = async () => {
+      const { resourcesCustom } = await loadLocaleMessages(targetLocale);
+      if (!isCurrentEffect) return;
 
-    // Fallback: synchronize i18n language according to the URL
-    const segments = pathname.split("/").filter(Boolean);
-    const urlLocale = segments[0];
+      const localeKey = targetLocale.toLowerCase().startsWith("zh")
+        ? "zh"
+        : "en";
+      setConfig(resourcesCustom[localeKey].custom);
+      setAllConfig(resourcesCustom);
+      await i18n.changeLanguage(localeKey);
+      if (!isCurrentEffect) return;
 
-    if (urlLocale === "zh" || urlLocale === "en") {
-      if (i18n.language !== urlLocale) {
-        i18n.changeLanguage(urlLocale);
-      }
-      document.cookie = `NEXT_LOCALE=${urlLocale}; path=/; max-age=31536000`;
-    }
-  }, [initialLocale, pathname, mounted]);
+      document.cookie = `NEXT_LOCALE=${targetLocale}; path=/; max-age=31536000`;
+      setLoaded(true);
+    };
 
-  if (!mounted) {
-    return null;
-  }
+    void initI18n();
 
-  return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
+    return () => {
+      isCurrentEffect = false;
+    };
+  }, [targetLocale, setAllConfig, setConfig]);
+
+  return (
+    <>
+      <title>{getBrowserTabTitle(config)}</title>
+      <link rel="icon" href={tabIcon} />
+      <link rel="shortcut icon" href={tabIcon} />
+      <link rel="apple-touch-icon" href={tabIcon} />
+      {loaded && <I18nextProvider i18n={i18n}>{children}</I18nextProvider>}
+    </>
+  );
 }

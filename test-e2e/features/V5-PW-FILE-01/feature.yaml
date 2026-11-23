@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-FILE-01
+  name: Chat附件上传→删除/重试→预览/下载→刷新追问
+  status: active
+  description: 验证真实FileChooser/下载/预览附件生命周期。
+  business_rules:
+  - rule_id: V5-PW-FILE-01-RULE-01
+    description: Chat附件上传→删除/重试→预览/下载→刷新追问
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

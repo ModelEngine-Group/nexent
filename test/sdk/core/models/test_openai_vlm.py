@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -51,6 +52,7 @@ with patch.dict("sys.modules", module_mocks):
 
     # Import after patching so dependencies are satisfied
     from sdk.nexent.core.models.openai_vlm import OpenAIVLModel as ImportedOpenAIVLModel
+    openai_vlm_module = sys.modules[ImportedOpenAIVLModel.__module__]
 
 
     # -----------------------------------------------------------------------
@@ -99,8 +101,8 @@ async def test_check_connectivity_success(vl_model_instance):
     """check_connectivity should return True when no exception is raised."""
 
     with patch.object(
-        asyncio,
-        "to_thread",
+        openai_vlm_module,
+        "run_blocking",
         new_callable=AsyncMock,
         return_value=None,
     ) as mock_to_thread:
@@ -115,8 +117,8 @@ async def test_check_connectivity_failure(vl_model_instance):
     """check_connectivity should return False when an exception is raised inside to_thread."""
 
     with patch.object(
-        asyncio,
-        "to_thread",
+        openai_vlm_module,
+        "run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ):
@@ -135,7 +137,7 @@ async def test_check_connectivity_uses_fallback_url(vl_model_instance):
         return None
 
     with patch.object(vl_model_instance, "encode_image", return_value=""), \
-         patch.object(asyncio, "to_thread", new_callable=AsyncMock, side_effect=mock_to_thread_func):
+         patch.object(openai_vlm_module, "run_blocking", new_callable=AsyncMock, side_effect=mock_to_thread_func):
         # Directly test the fallback branch by passing a non-existent file path
         # The method constructs the path using __file__, so we need to mock os.path.exists
         import sys
@@ -176,7 +178,7 @@ async def test_check_connectivity_jpg_to_jpeg_conversion(vl_model_instance):
     with patch.object(os.path, "exists", side_effect=mock_exists), \
          patch.object(os.path, "splitext", side_effect=mock_splitext), \
          patch.object(vl_model_instance, "encode_image", return_value="fakebase64"), \
-         patch.object(asyncio, "to_thread", new_callable=AsyncMock, side_effect=mock_to_thread_func):
+         patch.object(openai_vlm_module, "run_blocking", new_callable=AsyncMock, side_effect=mock_to_thread_func):
         result = await vl_model_instance.check_connectivity()
 
         assert result is True

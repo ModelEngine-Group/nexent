@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: D3-OWNED-PREREQUISITES-20261010
+  change_type: test-fix
+  title: Restore scoped Prompt failures, complete-draft setup and voice credential rotation
+  description: >-
+    AGT-012 injects actual Provider 503 and response timeout against a valid
+    owned model, verifies wire counts and unchanged draft, then uses a real LLM
+    for recovery. Local NL2Agent tasks start from an API-created, read-back
+    complete draft rather than depending on unrelated full generation; all
+    local-save and resource boundaries remain. Voice probes always use current
+    local credentials, rotate only the exact configured voice record and do
+    not change Rerank credentials. Delete-fence assertions expose a stale
+    deployed worker's missing file identity/cancellation instead of weakening
+    cleanup checks. Existing CTR-038 timeout contract correction is retained.
+    The Prompt fault variants run inside a single collected Case item, as
+    required by the formal runner. Delete-fence Redis-fallback checks call
+    data_process.utils.is_document_delete_requested and patch its actual Redis
+    supplier after the product's helper extraction, preserving PG fallback
+    and failed-lookup assertions. A successful saved voice healthcheck does
+    not bypass or satisfy the separate /voice/connectivity endpoint assertion.
+    No product code, workflow, global provider default or raw credential is
+    added to Git. Execution results remain separate from static validation.
+  affected_features:
+    existing: [F-048, F-040, F-045, F-131, F-092]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CTR-038]
+    added: []
+    modified: [AGT-012, API-054, API-AUTO-2B3A078E3CD1B151, AGT-AUTO-6A6BC7594487E771]
+    retired: []

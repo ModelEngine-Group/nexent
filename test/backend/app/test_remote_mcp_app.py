@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/apps/remote_mcp_app.py
 
@@ -18,9 +19,28 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
+elasticsearch_module = types.ModuleType("elasticsearch")
+elasticsearch_module.Elasticsearch = MagicMock()
+elasticsearch_module.__spec__ = importlib.machinery.ModuleSpec("elasticsearch", loader=None)
+sys.modules['elasticsearch'] = elasticsearch_module
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
+import services as _services_mod
+import types as _types
+_mcp_container_svc_stub = _types.ModuleType('management.services.mcp.containers')
+_mcp_container_svc_stub.create_container_client_from_config = MagicMock()
+_mcp_container_svc_stub.DockerContainerConfig = MagicMock()
+_mcp_container_svc_stub.MCPContainerManager = MagicMock()
+_services_mod.mcp_container_service = _mcp_container_svc_stub
+sys.modules['management.services.mcp.containers'] = _mcp_container_svc_stub
+
+# Pre-register stubs for service modules that remote_mcp_app.py imports at module
+# level but whose full import chain pulls in unavailable third-party packages
+# (docker SDK, jieba, mcpadapt, …).
+sys.modules['management.services.tool.configuration'] = MagicMock()
+sys.modules['management.services.file.service'] = MagicMock()
+sys.modules['management.services.knowledge_base.service'] = MagicMock()
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
@@ -33,18 +53,20 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
-patch('services.mcp_container_service.create_container_client_from_config').start()
-patch('services.mcp_container_service.DockerContainerConfig').start()
+patch('management.services.mcp.containers.create_container_client_from_config').start()
+patch('management.services.mcp.containers.DockerContainerConfig').start()
 
 from backend.consts.exceptions import (
     MCPConnectionError, MCPNameIllegal, MCPContainerError,
     McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError,
+    UnauthorizedError, TenantResourceLimitError,
 )
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
 from apps.remote_mcp_app import router
+from apps.app_factory import register_exception_handlers
 
 import apps.remote_mcp_app as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
@@ -54,6 +76,8 @@ remote_app.McpNotFoundError = McpNotFoundError
 remote_app.McpValidationError = McpValidationError
 remote_app.McpNameConflictError = McpNameConflictError
 remote_app.McpPortConflictError = McpPortConflictError
+remote_app.UnauthorizedError = UnauthorizedError
+remote_app.TenantResourceLimitError = TenantResourceLimitError
 
 app = FastAPI()
 app.include_router(router)
@@ -143,6 +167,68 @@ class TestAddMcpService:
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_connection_error_returns_normalized_detail(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = MCPConnectionError("MCP connection timeout")
+        resp = client.post("/mcp/add", json={
+            "name": "x", "source": "local", "server_url": "http://srv",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert resp.json()["detail"] == "MCP connection timeout"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_tenant_limit_returns_standard_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = TenantResourceLimitError(
+            "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+            resource="mcp_services",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+        limited_app = FastAPI()
+        register_exception_handlers(limited_app)
+        limited_app.include_router(router)
+
+        resp = TestClient(limited_app).post("/mcp/add", json={
+            "name": "over-limit", "source": "local", "server_url": "http://srv",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert resp.json()["code"] == "120104"
+        assert resp.json()["details"] == {
+            "resource": "mcp_services",
+            "scope": "tenant",
+            "limit": 1000,
+            "current_count": 1000,
+        }
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_tenant_limit_returns_standard_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = TenantResourceLimitError(
+            "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+            resource="mcp_services",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+        limited_app = FastAPI()
+        register_exception_handlers(limited_app)
+        limited_app.include_router(router)
+
+        resp = TestClient(limited_app).post("/mcp/add-from-config", json={
+            "name": "over-limit", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert resp.json()["code"] == "120104"
+        assert resp.json()["details"]["limit"] == 1000
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
     def test_add_with_custom_headers(self, mock_add, mock_auth):
         """Test that custom_headers is passed to add_mcp_service (line 125)."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -172,6 +258,35 @@ class TestAddMcpService:
         assert resp.status_code == HTTPStatus.OK
         call_kwargs = mock_add.call_args[1]
         assert call_kwargs["custom_headers"] == {}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_skip_health_check(self, mock_add, mock_auth):
+        """skip_health_check=True is passed to add_mcp_service."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "community",
+            "server_url": "http://localhost:8080/mcp",
+            "market_id": 1,
+            "skip_health_check": True,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["skip_health_check"] is True
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_container_port(self, mock_add, mock_auth):
+        """container_port is passed to add_mcp_service."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "community",
+            "server_url": "http://localhost:8080/mcp",
+            "container_port": 8080,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["container_port"] == 8080
 
 
 # ============================================================================
@@ -208,6 +323,136 @@ class TestAddFromConfig:
             "mcp_config": {"mcpServers": {"dup": {"command": "echo"}}},
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.CONFLICT
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_connection_error_returns_normalized_detail(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = MCPConnectionError("MCP protocol or endpoint invalid")
+        resp = client.post("/mcp/add-from-config", json={
+            "name": "svc", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert resp.json()["detail"] == "MCP protocol or endpoint invalid"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_does_not_expose_exception_detail(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = RuntimeError("secret database connection details")
+
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "svc", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert "secret database connection details" not in resp.text
+        assert '"detail": "Failed to add container MCP service"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_emits_started_and_success(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        container_info = {"container_id": "cid", "mcp_url": "http://localhost:8080/mcp"}
+        result = {"mcp_id": 1, "container_id": "cid"}
+
+        async def deploy(**kwargs):
+            await kwargs["on_container_started"](container_info)
+            return result
+
+        mock_add.side_effect = deploy
+
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "svc", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "container_started"' in resp.text
+        assert '"status": "success"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_emits_tenant_limit_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        async def reject(**_kwargs):
+            raise TenantResourceLimitError(
+                "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+                resource="mcp_services",
+                scope="tenant",
+                limit=1000,
+                current_count=1000,
+            )
+
+        mock_add.side_effect = reject
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "over-limit", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "error"' in resp.text
+        assert '"code": "120104"' in resp.text
+        assert '"limit": 1000' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    def test_upload_image_stream_emits_started_and_success(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        container_info = {"container_id": "cid", "mcp_url": "http://localhost:8080/mcp"}
+
+        async def upload(**kwargs):
+            await kwargs["on_container_started"](container_info)
+            return {"status": "success", "container_id": "cid"}
+
+        mock_upload.side_effect = upload
+        resp = client.post(
+            "/mcp/upload-image/stream",
+            files={"file": ("test.tar", b"tar-data", "application/x-tar")},
+            data={"port": "8080", "service_name": "svc"},
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "container_started"' in resp.text
+        assert '"status": "success"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    def test_upload_image_stream_returns_generic_error(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        mock_upload.side_effect = RuntimeError("internal upload details")
+
+        resp = client.post(
+            "/mcp/upload-image/stream",
+            files={"file": ("test.tar", b"tar-data", "application/x-tar")},
+            data={"port": "8080", "service_name": "svc"},
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert "internal upload details" not in resp.text
+        assert '"detail": "Failed to upload and start MCP container"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    def test_upload_image_stream_returns_name_conflict(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        mock_upload.side_effect = MCPNameIllegal("MCP service name already exists")
+
+        resp = client.post(
+            "/mcp/upload-image/stream",
+            files={"file": ("test.tar", b"tar-data", "application/x-tar")},
+            data={"port": "8080", "service_name": "svc"},
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "error"' in resp.text
+        assert '"detail": "MCP service name already exists"' in resp.text
 
 
 # ============================================================================
@@ -262,6 +507,17 @@ class TestUpdateMcpService:
         assert resp.status_code == HTTPStatus.OK
         call_kwargs = mock_update.call_args[1]
         assert call_kwargs["custom_headers"] == {}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service')
+    def test_update_name_conflict(self, mock_update, mock_auth):
+        """McpNameConflictError should return 409 CONFLICT."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNameConflictError("MCP name already exists")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "existing-name", "server_url": "http://url",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.CONFLICT
 
 
 # ============================================================================
@@ -352,6 +608,103 @@ class TestGetMcpList:
         mock_list.return_value = []
         resp = client.get("/mcp/list?tenant_id=explicit_tid", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    def test_list_unauthorized(self, mock_auth):
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+
+# ============================================================================
+# POST /mcp/refresh-tools
+# ============================================================================
+
+class TestRefreshTools:
+    """Test POST /mcp/refresh-tools"""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_success(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_not_found(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = McpNotFoundError("not found")
+        resp = client.post("/mcp/refresh-tools?mcp_id=999", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_validation_error(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = McpValidationError("invalid")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_connection_error(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = MCPConnectionError("connection failed")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_server_error(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = RuntimeError("unexpected")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# POST /mcp/test-connection
+# ============================================================================
+
+class TestMcpConnection:
+    """Test POST /mcp/test-connection"""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.test_mcp_connection')
+    def test_connection_success(self, mock_test, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.return_value = True
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["success"] is True
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.test_mcp_connection')
+    def test_connection_failure(self, mock_test, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.return_value = False
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["success"] is False
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.test_mcp_connection')
+    def test_connection_exception(self, mock_test, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.side_effect = RuntimeError("connection timeout")
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        # test-connection catches all exceptions and returns 200 with success=False
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["success"] is False
+        assert "connection timeout" in resp.json()["error"]
 
 
 # ============================================================================
@@ -604,6 +957,76 @@ class TestGetContainerLogs:
         mock_mgr_cls.side_effect = MCPContainerError("Docker unavailable")
         resp = client.get("/mcp/container/cid/logs", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestMcpAuditEntries:
+    """Security audit entries emitted by MCP service management endpoints."""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service', new_callable=AsyncMock)
+    def test_add_emits_audit_entry_without_credentials(self, mock_add, mock_auth, caplog):
+        """Successful add records name/source/server_url, never credentials."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.post("/mcp/add", headers=AUTH_HEADER, json={
+                "name": "external-mcp",
+                "server_url": "https://external.example.com/sse",
+                "authorization_token": "sk-secret-token",
+                "custom_headers": {"X-Api-Key": "header-secret"},
+            })
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_add" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=uid" in messages[0]
+        assert '"name":"external-mcp"' in messages[0]
+        assert '"server_url":"https://external.example.com/sse"' in messages[0]
+        assert "sk-secret-token" not in messages[0]
+        assert "header-secret" not in messages[0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.delete_mcp_service', new_callable=AsyncMock)
+    def test_delete_emits_audit_entry(self, mock_delete, mock_auth, caplog):
+        """Successful delete records the removed mcp_id."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.delete("/mcp/9", headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_delete" in messages[0]
+        assert "user_id=uid" in messages[0]
+        assert '"mcp_id":9' in messages[0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service_enabled', new_callable=AsyncMock)
+    def test_disable_emits_audit_entry(self, mock_update, mock_auth, caplog):
+        """Successful disable records the toggled mcp_id."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.post("/mcp/disable", headers=AUTH_HEADER, json={"mcp_id": 4})
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_disable" in messages[0]
+        assert '"mcp_id":4' in messages[0]
 
 
 if __name__ == "__main__":

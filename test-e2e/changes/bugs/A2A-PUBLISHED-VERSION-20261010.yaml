@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-PUBLISHED-VERSION-20261010
+  change_type: bugfix
+  bug_id: A2A-PUBLISHED-VERSION-20261010
+  title: Execute the version recorded by the last A2A publication
+  description: Forward the existing A2A registration version explicitly while retaining ephemeral debug execution.
+  observed_behavior: A2A requests omit version_no and therefore execute the draft because is_debug is true.
+  expected_behavior: A2A publication updates the registration version; ordinary publication preserves it; both message methods execute that version without creating chat history.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Unit message tests assert debug execution but not the published version. F-068 has no associated formal Case; existing publish smoke is being edited independently and does not prove version selection.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-068]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Both message methods forward the recorded positive published version with is_debug true and no conversation ID.
+      - Missing or malformed publication versions reject execution without falling back to the draft.
+      - A2A publication refreshes the recorded version and ordinary publication leaves it unchanged.
+    reason: Isolated request construction and existing publication orchestration tests prove the changed service contract; live runtime verification remains separate.
+    test_selectors:
+      - test/backend/services/test_a2a_published_version.py
+      - test/backend/services/test_agent_version_a2a_publication.py
+      - test/backend/services/test_a2a_server_service_message.py
+      - test/backend/services/test_agent_service.py::test_stream_agent_chunks_debug_run_skips_conversation_persistence
+  notes: 'Design: nexent-doc/docs/Developing/dev-agent-a2a-published-version/design.md. No schema migration or new version field. Preserve independent PW-A2A-PUBLISH-01 changes. Full-stack runtime verification requires a running authorized stack and model assets.'

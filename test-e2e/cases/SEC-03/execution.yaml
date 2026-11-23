@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: SEC-03
+implementations:
+- framework: pytest
+  file: test.py
+  selector: SEC-03
+- framework: pytest
+  file: test-e2e/infra/automation/d5/scenarios/scenario_security_special.py
+  selector: SEC-03
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - share_assets
+  anchors: true
+  special_assets: false
+  d4_groups: []

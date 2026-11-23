@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: FAF-D5-001
+  feature_id: FAF-001
+  requirement_ids:
+  - FAF-001
+  business_rule_ids:
+  - FAF-RULE-001
+  title: Repeated SSE rollback preserves sibling answer ownership
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the approved final answer display contract at the declared stage.
+  preconditions:
+  - Real stream generator loaded with controlled source and persistence boundary captures.
+  test_data:
+    profile: mock
+    iterations: 4
+    rejected_fragments_per_invocation: 8
+  steps:
+  - order: 1
+    action: Open two sibling scopes and interleave rejected answer fragments.
+    expected: Every fragment retains its invocation and attempt.
+  - order: 2
+    action: Rollback both failed attempts and complete accepted sibling answers.
+    expected: Only one accepted answer remains per invocation; no failed body or pure-answer
+      marker persists.
+  - order: 3
+    action: Repeat four times and inspect captured persisted units for replay.
+    expected: Zero failed or duplicate answers, and complete sibling ownership in
+      every repetition.
+  expected_results:
+  - Tag-free unique answer outside reasoning.
+  - Pure answer step has no empty reasoning card.
+  - Sibling and attempt attribution preserved.
+  forbidden_side_effects:
+  - No duplicate answer.
+  - No sibling deletion.
+  - No failed answer persisted.
+  risk_type: RELIABILITY
+  risk: Failed answer fragments or sibling output corrupt display.
+  condition:
+  - Repeated interleaved failed and successful attempts.
+  metrics:
+  - Failed answer count.
+  - Duplicate answer count.
+  - Sibling content integrity.
+  thresholds:
+  - Zero failed and duplicate answers.
+  - All sibling content retained.
+  recovery_expectations:
+  - Captured persisted units contain exactly the accepted answer for each sibling
+    and can be replayed without failed fragments.

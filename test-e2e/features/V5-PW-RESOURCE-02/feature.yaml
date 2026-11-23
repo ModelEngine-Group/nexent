@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-RESOURCE-02
+  name: Tenant Admin用户组→邀请码→注册成员→角色/成员管理
+  status: active
+  description: 覆盖同一租户用户组、邀请、成员管理主链。
+  business_rules:
+  - rule_id: V5-PW-RESOURCE-02-RULE-01
+    description: Tenant Admin用户组→邀请码→注册成员→角色/成员管理
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

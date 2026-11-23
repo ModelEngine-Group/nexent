@@ -65,6 +65,7 @@ def _target_paths(project_root: Path) -> list[Path]:
     return [
         project_root / "test" / "backend",
         project_root / "test" / "sdk",
+        project_root / "test" / "ext_components",
     ]
 
 
@@ -135,6 +136,8 @@ def _run_test_file(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             timeout=timeout_seconds or None,
         )
@@ -282,7 +285,15 @@ def _combine_coverage(current_dir: Path, project_root: Path) -> bool:
         str(current_dir),
     )
     coverage_env = _coverage_env(project_root)
-    combine = subprocess.run(combine_cmd, cwd=project_root, env=coverage_env, text=True, capture_output=True)
+    combine = subprocess.run(
+        combine_cmd,
+        cwd=project_root,
+        env=coverage_env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     if combine.returncode != 0:
         logger.error("Coverage combine failed:\n%s\n%s", combine.stdout, combine.stderr)
         return False

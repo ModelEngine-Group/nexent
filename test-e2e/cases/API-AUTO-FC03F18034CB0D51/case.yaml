@@ -1,0 +1,97 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-FC03F18034CB0D51
+  feature_id: F-168
+  business_rule_ids:
+  - F-168-RULE-01
+  title: 文档删除 Redis 清理下沉：删除服务返回 redis_cleanup/deletion_pending 时 app 层不重复清理，保持 Cleaned up/Redis cleanup error 消息契约
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 文档删除 Redis 清理下沉：删除服务返回 redis_cleanup/deletion_pending 时 app 层不重复清理，保持 Cleaned up/Redis cleanup error 消息契约
+  preconditions:
+  - 本地 API 集成测试环境可运行，Elasticsearch/Redis/PostgreSQL/MinIO 等本地基础设施组件就绪；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/；${NEXENT_TEST_HOME}/assets/knowledge/。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  - 具备对删除服务（ElasticSearchService.delete_document_by_scope）打桩/埋点的能力，用于区分 app 层是否重复执行 Redis 清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/'
+  steps:
+  - order: 1
+    action: 配置本地 API 集成测试环境并读取固定 fixture：backend 服务已启动，Elasticsearch/Redis/PostgreSQL/MinIO 组件就绪；读取 ${NEXENT_TEST_HOME}/config/users.yaml
+      与 ${NEXENT_TEST_HOME}/config/secrets.env，测试代码不得读取生产凭据。
+    expected: 主路径 HTTP 200：响应体 redis_cleanup 由删除服务提供，message 包含“Cleaned up ... Redis records”，Redis 记录仅被清理一次，app 层无重复 Redis
+      删除调用。
+  - order: 2
+    action: 以隔离账号（如 Admin）携带有效 Token 创建知识库索引，通过现有上传/索引接口向索引内写入一个带 lifecycle 记录（file_id）的文档，记录索引名、path_or_url 与 file_id，并在
+      Redis 中确认存在该文档对应的任务/缓存键。
+    expected: deletion_pending 分支：message 保留重试语义、不追加“Cleaned up”，app 层不触发 Redis 清理，无重复副作用。
+  - order: 3
+    action: 调用 DELETE /indices/{index_name}/documents?scope=full&file_id={file_id}（删除服务实现已返回 redis_cleanup 的版本），记录 HTTP 状态码与完整响应体（含
+      message、redis_cleanup、deletion_pending 字段）。
+    expected: '旧实现兜底：app 层执行一次 Redis 清理并追加“Cleaned up N Redis records”；Redis 清理异常时 message 追加“Redis cleanup encountered an
+      error: <原因>”，不吞异常返回伪成功。'
+  - order: 4
+    action: 断言响应体包含删除服务返回的 redis_cleanup 字段，message 形如“...Cleaned up N Redis records (X tasks, Y cache keys)”，并通过 Redis 键计数与删除服务打桩调用计数证明
+      app 层未再次执行 delete_document_records（无重复删除）。
+    expected: 参数/权限错误码正确（400/403），无半写入、无跨租户影响。
+  - order: 5
+    action: 构造删除服务返回 deletion_pending=true 的 pending 终态分支（打桩删除服务），再次调用该接口，断言响应 message 保留原有重试语义、不追加“Cleaned up”，且 app 层未触发
+      Redis 清理。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/密钥。
+  - order: 6
+    action: '构造删除服务既不返回 redis_cleanup 也不返回 deletion_pending 的旧实现兜底分支，调用后断言 app 层执行一次 Redis 清理并追加“Cleaned up N Redis records”；再将
+      Redis 清理注入异常，断言 message 追加“Redis cleanup encountered an error: <原因>”。'
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/密钥。
+  - order: 7
+    action: 校验错误契约：缺失 file_id 与 path_or_url 时返回 400；对无编辑权限账号返回 403；对无存储对象且 scope≠full 的 file_id 返回 400。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/密钥。
+  - order: 8
+    action: 确认日志/Trace 中不输出明文 Token/密钥；测试结束后释放临时索引、文档与临时打桩，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/密钥。
+  expected_results:
+  - 主路径 HTTP 200：响应体 redis_cleanup 由删除服务提供，message 包含“Cleaned up ... Redis records”，Redis 记录仅被清理一次，app 层无重复 Redis 删除调用。
+  - deletion_pending 分支：message 保留重试语义、不追加“Cleaned up”，app 层不触发 Redis 清理，无重复副作用。
+  - '旧实现兜底：app 层执行一次 Redis 清理并追加“Cleaned up N Redis records”；Redis 清理异常时 message 追加“Redis cleanup encountered an error: <原因>”，不吞异常返回伪成功。'
+  - 参数/权限错误码正确（400/403），无半写入、无跨租户影响。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 516
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 配置本地 API 集成测试环境并读取固定 fixture：backend 服务已启动，Elasticsearch/Redis/PostgreSQL/MinIO 组件就绪；读取 ${NEXENT_TEST_HOME}/config/users.yaml
+      与 ${NEXENT_TEST_HOME}/config/secrets.env，测试代码不得读取生产凭据。
+    - 以隔离账号（如 Admin）携带有效 Token 创建知识库索引，通过现有上传/索引接口向索引内写入一个带 lifecycle 记录（file_id）的文档，记录索引名、path_or_url 与 file_id，并在 Redis
+      中确认存在该文档对应的任务/缓存键。
+    - 调用 DELETE /indices/{index_name}/documents?scope=full&file_id={file_id}（删除服务实现已返回 redis_cleanup 的版本），记录 HTTP 状态码与完整响应体（含
+      message、redis_cleanup、deletion_pending 字段）。
+    - 断言响应体包含删除服务返回的 redis_cleanup 字段，message 形如“...Cleaned up N Redis records (X tasks, Y cache keys)”，并通过 Redis 键计数与删除服务打桩调用计数证明
+      app 层未再次执行 delete_document_records（无重复删除）。
+    - 构造删除服务返回 deletion_pending=true 的 pending 终态分支（打桩删除服务），再次调用该接口，断言响应 message 保留原有重试语义、不追加“Cleaned up”，且 app 层未触发 Redis
+      清理。
+    - '构造删除服务既不返回 redis_cleanup 也不返回 deletion_pending 的旧实现兜底分支，调用后断言 app 层执行一次 Redis 清理并追加“Cleaned up N Redis records”；再将
+      Redis 清理注入异常，断言 message 追加“Redis cleanup encountered an error: <原因>”。'
+    - 校验错误契约：缺失 file_id 与 path_or_url 时返回 400；对无编辑权限账号返回 403；对无存储对象且 scope≠full 的 file_id 返回 400。
+    - 确认日志/Trace 中不输出明文 Token/密钥；测试结束后释放临时索引、文档与临时打桩，确保可重复执行。
+    response_expectations:
+    - 主路径 HTTP 200：响应体 redis_cleanup 由删除服务提供，message 包含“Cleaned up ... Redis records”，Redis 记录仅被清理一次，app 层无重复 Redis 删除调用。
+    - deletion_pending 分支：message 保留重试语义、不追加“Cleaned up”，app 层不触发 Redis 清理，无重复副作用。
+    - '旧实现兜底：app 层执行一次 Redis 清理并追加“Cleaned up N Redis records”；Redis 清理异常时 message 追加“Redis cleanup encountered an error:
+      <原因>”，不吞异常返回伪成功。'
+    - 参数/权限错误码正确（400/403），无半写入、无跨租户影响。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/密钥。

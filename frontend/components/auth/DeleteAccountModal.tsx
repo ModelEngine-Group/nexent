@@ -52,7 +52,7 @@ export function DeleteAccountModal({
         type="error"
         showIcon
         className="mb-4"
-        message={t("profile.deleteWarningTitle") || "This action cannot be undone!"}
+        title={t("profile.deleteWarningTitle") || "This action cannot be undone!"}
         description={
           <ul className="list-disc pl-4 mt-2 space-y-1">
             <li>{t("profile.deleteWarning1") || "Your account will be permanently deleted"}</li>

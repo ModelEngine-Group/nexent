@@ -23,6 +23,8 @@ from database.client import minio_client
 Multimodal = LoadSaveObjectManager(storage_client=minio_client)
 ```
 
+此外还可以传入可选参数 `validate_url_access`：一个接收 URL 列表的回调函数，用于校验 URL 访问权限，校验不通过时应抛出 `PermissionError`。
+
 存储客户端也可以通过`sdk.nexent.storage.storage_client_base`中的`StorageClient`基类，实现自己的存储客户端。存储客户端需要实现以下方法：
 - `get_file_stream(object_name, bucket)`: 从存储中获取文件流（用于下载）
 - `upload_fileobj(file_obj, object_name, bucket)`: 上传文件对象到存储（用于保存）
@@ -41,8 +43,8 @@ Multimodal = LoadSaveObjectManager(storage_client=minio_client)
 
 ### 参数说明
 
-- `input_names` (List[str]): : 需要处理的函数参数名称列表
-- `input_data_transformer` (Optional[List[Callable[[Any], bytes]]]): 可选的数据转换器列表，用于将下载的字节数据转换为所需格式
+- `input_names` (List[str]): 需要处理的函数参数名称列表
+- `input_data_transformer` (Optional[List[Callable[[bytes], Any]]]): 可选的数据转换器列表，用于将下载的字节数据转换为所需格式
 
 ### 支持的URL格式
 
@@ -72,7 +74,7 @@ def process_image(image_url: bytes):
     print(f"文件大小: {len(image_url)} bytes")
     return image_url
 
-# 调用process_file方法
+# 调用process_image方法
 result = process_image(image_url=f"http://example/pic.PNG")
 ```
 
@@ -99,7 +101,7 @@ def process_image(image_url: Image.Image):
     resized = image_url.resize((800, 600))
     return resized
 
-# 调用process_file方法
+# 调用process_image方法
 result = process_image(image_url=f"http://example/pic.PNG")
 ```
 
@@ -117,7 +119,7 @@ def process_two_images(image_url1: Image.Image, image_url2: Image.Image):
     combined.paste(image_url2, (800, 0))
     return combined
 
-# 调用process_file方法
+# 调用process_two_images方法
 result = process_two_images(image_url1=f"http://example/pic1.PNG", image_url2=f"http://example/pic2.PNG")
 ```
 
@@ -135,7 +137,7 @@ def process_image_list(image_urls: List[Image.Image]):
         results.append(img.resize((200, 200)))
     return results
 
-# 调用process_file方法
+# 调用process_image_list方法
 result = process_image_list(image_urls=["http://example/pic1.PNG", "http://example/pic2.PNG"])
 ```
 
@@ -264,7 +266,7 @@ def process_two_images(img1: Image.Image, img2: Image.Image) -> Tuple[Image.Imag
 from PIL import Image, ImageFilter
 from typing import Union, List
 from database.client import minio_client
-from multi_modal.load_save_object import LoadSaveObjectManager
+from nexent.multi_modal.load_save_object import LoadSaveObjectManager
 
 Multimodal = LoadSaveObjectManager(storage_client=minio_client)
 
@@ -310,3 +312,5 @@ result_url = blur_image_tool(
 )
 # result_url 是 "s3://nexent/attachments/xxx.png"
 ```
+
+> VLM 的图片/视频/音频理解统一经 Gateway 适配器接入（core/gateway/），支持 OpenAI VLM、ModelEngine（vlm4 槽位音频）、DashScope VLM 音频适配等；多模态分析工具（AnalyzeImageTool/AnalyzeAudioTool/AnalyzeVideoTool）支持用户选择模型。

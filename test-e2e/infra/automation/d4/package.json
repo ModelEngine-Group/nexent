@@ -1,0 +1,7 @@
+{
+  "name": "nexent-d4-fixed-playwright",
+  "private": true,
+  "scripts": {"test": "playwright test --config playwright.config.ts"},
+  "engines": {"node": ">=22"},
+  "devDependencies": {"playwright": "1.63.0-alpha-2026-08-05"}
+}

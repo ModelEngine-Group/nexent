@@ -12,6 +12,12 @@ from typing import List
 
 class FileSplitter:
 
+    @staticmethod
+    def _resolve_max_size(file_data, max_size=None, target_parts=None):
+        if target_parts is not None:
+            return max(1, math.ceil(len(file_data) / max(1, int(target_parts))))
+        return max(1, int(max_size or 5 * 1024 * 1024))
+
     def split_csv_by_size(self, csv_bytes, max_size, encoding="utf-8"):
         text = csv_bytes.decode(encoding)
         reader = list(csv.reader(StringIO(text)))
@@ -349,6 +355,30 @@ class FileSplitter:
 
         return result
 
+    def split_pdf_by_parts(self, pdf_bytes, target_parts):
+        from pypdf import PdfReader, PdfWriter
+
+        reader = PdfReader(BytesIO(pdf_bytes))
+        total_pages = len(reader.pages)
+        if total_pages == 0:
+            return []
+
+        group_count = min(max(1, int(target_parts)), total_pages)
+        base_pages, extra_pages = divmod(total_pages, group_count)
+        result = []
+        start = 0
+        for group_index in range(group_count):
+            page_count = base_pages + (1 if group_index < extra_pages else 0)
+            end = start + page_count
+            writer = PdfWriter()
+            for page_index in range(start, end):
+                writer.add_page(reader.pages[page_index])
+            buffer = BytesIO()
+            writer.write(buffer)
+            result.append(BytesIO(buffer.getvalue()))
+            start = end
+        return result
+
 
     def split_txt_by_size(self, txt_bytes, max_size, encoding="utf-8"):
         buffer = BytesIO(txt_bytes)
@@ -456,7 +486,9 @@ class FileSplitter:
             with open(output_path, "rb") as f:
                 return f.read()
 
-    def file_process(self, file_data, filename, max_size, **kwargs) -> List[BytesIO]:
+    def file_process(
+        self, file_data, filename, max_size=None, target_parts=None, **kwargs
+    ) -> List[BytesIO]:
         ext = os.path.splitext(filename)[1].lower()
 
         if ext in {".doc", ".docx"}:
@@ -464,7 +496,13 @@ class FileSplitter:
             pdf_bytes = self._convert_bytes_with_libreoffice(
                 file_data, ext, ".pdf", libreoffice_path=libreoffice_path
             )
-            pdf_parts = self.split_pdf_by_size(pdf_bytes, max_size=max_size)
+            if target_parts is not None:
+                pdf_parts = self.split_pdf_by_parts(pdf_bytes, target_parts)
+            else:
+                pdf_parts = self.split_pdf_by_size(
+                    pdf_bytes,
+                    max_size=self._resolve_max_size(pdf_bytes, max_size=max_size),
+                )
 
             # If no actual split happened, keep original Word bytes as-is.
             if not pdf_parts or len(pdf_parts) == 1:
@@ -474,36 +512,41 @@ class FileSplitter:
             # while filenames remain as Word (handled by caller).
             return pdf_parts
 
+        effective_max_size = self._resolve_max_size(
+            file_data, max_size=max_size, target_parts=target_parts)
+
         if ext == ".csv":
             return self.split_csv_by_size(
                 file_data,
-                max_size=max_size,
+                max_size=effective_max_size,
                 encoding=kwargs.get("encoding", "utf-8"),
             )
 
         if ext == ".epub":
-            return self.split_epub_by_size(file_data, max_size=max_size)
+            return self.split_epub_by_size(file_data, max_size=effective_max_size)
 
         if ext in {".xlsx", ".xls"}:
-            return self.split_excel(file_data, max_size=max_size)
+            return self.split_excel(file_data, max_size=effective_max_size)
 
         if ext == ".json":
-            return self.split_json_stream(file_data, max_size=max_size)
+            return self.split_json_stream(file_data, max_size=effective_max_size)
 
         if ext == ".md":
-            return self.split_markdown(file_data, max_size=max_size)
+            return self.split_markdown(file_data, max_size=effective_max_size)
 
         if ext == ".pdf":
-            return self.split_pdf_by_size(file_data, max_size=max_size)
+            if target_parts is not None:
+                return self.split_pdf_by_parts(file_data, target_parts)
+            return self.split_pdf_by_size(file_data, max_size=effective_max_size)
 
         if ext == ".txt":
             return self.split_txt_by_size(
                 file_data,
-                max_size=max_size,
+                max_size=effective_max_size,
                 encoding=kwargs.get("encoding", "utf-8"),
             )
 
         if ext == ".xml":
-            return self.split_xml_by_size(file_data, max_size=max_size)
+            return self.split_xml_by_size(file_data, max_size=effective_max_size)
 
         raise ValueError(f"Unsupported file extension: {ext}")

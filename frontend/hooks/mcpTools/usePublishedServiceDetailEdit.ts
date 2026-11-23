@@ -18,6 +18,9 @@ export interface PublishedServiceEditDraft {
   description: string;
   version: string;
   tags: string[];
+  groupIds?: string;
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 const draftFromItem = (
@@ -30,6 +33,9 @@ const draftFromItem = (
     description: item.description || "",
     version: item.version || "",
     tags: item.tags || [],
+    groupIds: item.groupIds,
+    ingroupPermission: item.ingroupPermission,
+    sharedFields: item.sharedFields,
   };
 };
 
@@ -49,7 +55,6 @@ export function usePublishedServiceDetailEdit(
   const draftRef = useRef<PublishedServiceEditDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [tagSaving, setTagSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !service?.communityId) {
@@ -62,64 +67,16 @@ export function usePublishedServiceDetailEdit(
     draftRef.current = newDraft;
   }, [open, service]);
 
-  const updateDraft = useCallback((patch: Partial<PublishedServiceEditDraft>) => {
-    setDraft((prev) => {
-      const updated = prev ? { ...prev, ...patch } : prev;
-      draftRef.current = updated;
-      return updated;
-    });
-  }, []);
-
-  const updateTagsToServer = useCallback(async (newTags: string[]) => {
-    const currentDraft = draftRef.current;
-    if (!currentDraft) return;
-    setTagSaving(true);
-    try {
-      await updateCommunityMcpTool({
-        community_id: currentDraft.communityId,
-        name: currentDraft.name.trim(),
-        description: currentDraft.description.trim(),
-        version: currentDraft.version.trim(),
-        tags: newTags,
-      });
-      // Update local state
+  const updateDraft = useCallback(
+    (patch: Partial<PublishedServiceEditDraft>) => {
       setDraft((prev) => {
-        const updated = prev ? { ...prev, tags: newTags } : prev;
+        const updated = prev ? { ...prev, ...patch } : prev;
         draftRef.current = updated;
         return updated;
       });
-      queryClient.invalidateQueries({
-        queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity,
-      });
-    } catch (error) {
-      log.error("[usePublishedServiceDetailEdit] Update tags failed", { error });
-      message.error(t("mcpTools.service.saveFailed"));
-      // Revert local state on error
-      setDraft((prev) => {
-        const reverted = prev ? { ...prev, tags: currentDraft.tags } : prev;
-        draftRef.current = reverted;
-        return reverted;
-      });
-    } finally {
-      setTagSaving(false);
-    }
-  }, [message, queryClient, t]);
-
-  const addDraftTag = useCallback((tag: string) => {
-    const next = tag.trim();
-    if (!next) return;
-    const currentDraft = draftRef.current;
-    if (!currentDraft) return;
-    if (currentDraft.tags.includes(next)) return;
-    updateTagsToServer([...currentDraft.tags, next]);
-  }, [updateTagsToServer]);
-
-  const removeDraftTag = useCallback((index: number) => {
-    const currentDraft = draftRef.current;
-    if (!currentDraft) return;
-    const newTags = currentDraft.tags.filter((_, idx) => idx !== index);
-    updateTagsToServer(newTags);
-  }, [updateTagsToServer]);
+    },
+    []
+  );
 
   const save = useCallback(async () => {
     const currentDraft = draftRef.current;
@@ -127,11 +84,15 @@ export function usePublishedServiceDetailEdit(
     setSaving(true);
     try {
       await updateCommunityMcpTool({
-        community_id: currentDraft.communityId,
+        market_id: currentDraft.communityId,
         name: currentDraft.name.trim(),
         description: currentDraft.description.trim(),
         version: currentDraft.version.trim(),
-        tags: currentDraft.tags,
+        group_ids: currentDraft.groupIds
+          ? currentDraft.groupIds.split(",").map(Number).filter(Boolean)
+          : undefined,
+        ingroup_permission: currentDraft.ingroupPermission,
+        shared_fields: currentDraft.sharedFields ?? undefined,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       queryClient.invalidateQueries({
@@ -172,10 +133,7 @@ export function usePublishedServiceDetailEdit(
     draft,
     saving,
     deleting,
-    tagSaving,
     updateDraft,
-    addDraftTag,
-    removeDraftTag,
     save,
     remove,
   };

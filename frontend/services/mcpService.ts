@@ -1,5 +1,6 @@
 import i18n from 'i18next';
 
+import { ErrorCode } from '@/const/errorCode';
 import { API_ENDPOINTS } from './api';
 import log from "@/lib/logger";
 
@@ -7,6 +8,17 @@ import log from "@/lib/logger";
 const t = (key: string, options?: any): string => {
   return i18n.t(key, options) as string;
 };
+
+const TENANT_RESOURCE_EXCEEDED_CODE = ErrorCode.TENANT_RESOURCE_EXCEEDED;
+
+const isMcpTenantLimitError = (response: Response, data: any): boolean =>
+  String(data?.code ?? '') === TENANT_RESOURCE_EXCEEDED_CODE ||
+  (response.status === 429 && data?.details?.resource === 'mcp_services');
+
+const getMcpTenantLimitMessage = (data: any): string =>
+  t('mcpService.message.tenantLimitReached', {
+    limit: data?.details?.limit ?? 1000,
+  });
 
 const getAuthHeaders = () => {
   return {
@@ -45,6 +57,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           enabled: server.enabled,
           source: server.source,
           update_time: server.update_time,
+          create_time: server.create_time,
           tags: server.tags || [],
           container_port: server.container_port,
           registry_json: server.registry_json,
@@ -52,6 +65,12 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           container_status: server.container_status,
           authorization_token: server.authorization_token,
           custom_headers: server.custom_headers,
+          version: server.version,
+          market_id: server.market_id,
+          is_listed_in_repository: server.is_listed_in_repository,
+          group_ids: server.group_ids,
+          ingroup_permission: server.ingroup_permission,
+          shared_fields: server.shared_fields,
         };
       });
 
@@ -129,7 +148,9 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string, authoriz
       // Handle specific error status codes and error information
       let errorMessage = data.detail || data.message || t('mcpService.message.addServerFailed');
 
-      if (response.status === 409) {
+      if (isMcpTenantLimitError(response, data)) {
+        errorMessage = getMcpTenantLimitMessage(data);
+      } else if (response.status === 409) {
         errorMessage = t('mcpService.message.nameAlreadyUsed');
       } else if (response.status === 503) {
         errorMessage = t('mcpService.message.cannotConnectToServer');
@@ -448,7 +469,9 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
       let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
       let messageKey: string | undefined;
 
-      if (response.status === 400) {
+      if (isMcpTenantLimitError(response, data)) {
+        errorMessage = getMcpTenantLimitMessage(data);
+      } else if (response.status === 400) {
         const rawError = data.detail || data.message || '';
         // Check if error is related to image not found
         const errorLower = rawError.toLowerCase();
@@ -479,6 +502,82 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
       data: null,
       message: t('mcpService.message.networkError'),
       messageKey: 'mcpService.message.networkError'
+    };
+  }
+};
+
+/**
+ * Add a container MCP through an SSE response. The callback receives the
+ * container metadata as soon as it has been created; the promise resolves
+ * only after the MCP is ready and its tools have been scanned.
+ */
+export const addMcpFromConfigStream = async (
+  mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> },
+  tenantId: string | null | undefined,
+  onContainerStarted: (container: { container_id: string; container_name?: string; host_port?: number; mcp_url?: string }) => void,
+) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.addFromConfigStream}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.addFromConfigStream;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(mcpConfig),
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      const limitMessage = isMcpTenantLimitError(response, data)
+        ? getMcpTenantLimitMessage(data)
+        : null;
+      return {
+        success: false,
+        data: null,
+        message: limitMessage || data.detail || data.message || t("mcpService.message.addFromConfigFailed"),
+      };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const message = JSON.parse(event.slice(6));
+          if (message.status === "container_started") {
+            onContainerStarted(message.data);
+          } else if (message.status === "success") {
+            return { success: true, data: message.data };
+          } else if (message.status === "error") {
+            const limitMessage =
+              String(message.code ?? "") === TENANT_RESOURCE_EXCEEDED_CODE
+                ? getMcpTenantLimitMessage(message)
+                : null;
+            return {
+              success: false,
+              data: null,
+              message: limitMessage || message.detail || message.message,
+            };
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return { success: false, data: null, message: t("mcpService.message.addFromConfigFailed") };
+  } catch (error) {
+    log.error(t("mcpService.debug.addFromConfigFailed"), error);
+    return {
+      success: false,
+      data: null,
+      message: t("mcpService.message.networkError"),
+      messageKey: "mcpService.message.networkError",
     };
   }
 };
@@ -589,7 +688,8 @@ export const streamMcpContainerLogs = async (
   onData?: (logLine: string) => void,
   onError?: (error: any) => void,
   onComplete?: () => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onConnected?: () => void
 ): Promise<AbortController> => {
   const abortController = new AbortController();
   const signal = abortSignal || abortController.signal;
@@ -615,6 +715,8 @@ export const streamMcpContainerLogs = async (
       if (!response.body) {
         throw new Error('No response body');
       }
+
+      onConnected?.();
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
@@ -685,7 +787,7 @@ export const streamMcpContainerLogs = async (
 /**
  * Upload MCP image and start container
  */
-export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null) => {
+export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null, groupIds?: string, ingroupPermission?: string, sharedFields?: string) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -695,6 +797,15 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
     }
     if (envVars) {
       formData.append('env_vars', envVars);
+    }
+    if (groupIds) {
+      formData.append('group_ids', groupIds);
+    }
+    if (ingroupPermission) {
+      formData.append('ingroup_permission', ingroupPermission);
+    }
+    if (sharedFields) {
+      formData.append('shared_fields', sharedFields);
     }
     if (tenantId) {
       formData.append('tenant_id', tenantId);
@@ -742,6 +853,71 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
       data: null,
       message: t('mcpService.message.networkError')
     };
+  }
+};
+
+export const uploadMcpImageStream = async (
+  file: File,
+  port: number,
+  serviceName: string | undefined,
+  envVars: string | undefined,
+  tenantId: string | null | undefined,
+  groupIds: string | undefined,
+  ingroupPermission: string | undefined,
+  sharedFields: string | undefined,
+  onContainerStarted: (containerId: string) => void,
+) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("port", port.toString());
+    if (serviceName) formData.append("service_name", serviceName);
+    if (envVars) formData.append("env_vars", envVars);
+    if (tenantId) formData.append("tenant_id", tenantId);
+    if (groupIds) formData.append("group_ids", groupIds);
+    if (ingroupPermission) formData.append("ingroup_permission", ingroupPermission);
+    if (sharedFields) formData.append("shared_fields", sharedFields);
+
+    const { "Content-Type": _, ...headers } = getAuthHeaders();
+    const response = await fetch(API_ENDPOINTS.mcp.uploadImageStream, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      return { success: false, data: null, message: data.detail || data.message };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const message = JSON.parse(event.slice(6));
+          if (message.status === "container_started" && message.data?.container_id) {
+            onContainerStarted(message.data.container_id);
+          } else if (message.status === "success") {
+            return { success: true, data: message.data };
+          } else if (message.status === "error") {
+            return { success: false, data: null, message: message.detail };
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return { success: false, data: null, message: t("mcpService.message.uploadImageFailed") };
+  } catch (error) {
+    log.error(t("mcpService.debug.uploadImageFailed"), error);
+    return { success: false, data: null, message: t("mcpService.message.networkError") };
   }
 };
 
@@ -839,4 +1015,60 @@ export const getMcpRecord = async (mcpId: number, tenantId?: string | null) => {
       message: t('mcpService.message.networkError')
     };
   }
+};
+
+export interface OpenApiServiceInput {
+  service_name: string;
+  server_url: string;
+  openapi_json: Record<string, unknown>;
+  headers_template?: Record<string, unknown> | null;
+}
+
+export const getOpenApiServices = async () => {
+  const response = await fetch(API_ENDPOINTS.tool.openapiServices, {
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to load OpenAPI services");
+  }
+  return result.data || [];
+};
+
+export const importOpenApiService = async (input: OpenApiServiceInput) => {
+  const response = await fetch(API_ENDPOINTS.tool.openapiService, {
+    method: "POST",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to import OpenAPI service");
+  }
+  return result;
+};
+
+export const deleteOpenApiService = async (serviceName: string) => {
+  const response = await fetch(API_ENDPOINTS.tool.deleteOpenapiService(serviceName), {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to delete OpenAPI service");
+  }
+  return result;
+};
+
+export const updateToolLabels = async (toolId: string, labels: string[]) => {
+  const response = await fetch(API_ENDPOINTS.tool.updateLabels, {
+    method: "PUT",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ tool_id: parseInt(toolId, 10), labels }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail || result.message || "Failed to update tool labels");
+  }
+  return response.json();
 };

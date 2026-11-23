@@ -1,13 +1,17 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
-from nexent.core.agents.agent_context import ContextManager
-from nexent.core.agents.agent_model import (
-    KnowledgeBaseComponent,
-    MemoryComponent,
-    SystemPromptComponent,
+from html import unescape
+
+import pytest
+from nexent.core.agents.context import (
+    ContextItemInput,
+    ContextManager,
+    ContextManagerConfig,
 )
-from nexent.core.agents.summary_config import ContextManagerConfig
+from smolagents.memory import ActionStep, TaskStep, ToolCall
+from smolagents.monitoring import Timing
 
 
 def _message_text(message):
@@ -18,6 +22,23 @@ def _message_text(message):
             part.get("text", "") for part in content if isinstance(part, dict)
         )
     return content
+
+
+def _text_item(item_id, text, role="system"):
+    item_type = "system" if role == "system" else "knowledge_base"
+    return ContextItemInput(id=item_id, type=item_type, content={"text": text, "role": role})
+
+
+@pytest.fixture(autouse=True)
+def _system_prompt_step(monkeypatch):
+    class SystemPromptStep:
+        def __init__(self, system_prompt):
+            self.system_prompt = system_prompt
+
+        def to_messages(self):
+            return [{"role": "system", "content": [{"type": "text", "text": self.system_prompt}]}]
+
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", SystemPromptStep)
 
 
 class _Memory:
@@ -36,19 +57,22 @@ class _Step:
 
 
 def test_context_manager_assembles_stable_dynamic_and_history_messages():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
-    manager.register_component(MemoryComponent(formatted_content="memory fact"))
-    manager.register_component(KnowledgeBaseComponent(summary="kb fact"))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    manager.register_item(_text_item("history:memory", "memory fact", "user"))
+    manager.register_item(ContextItemInput(
+        id="kb:fact", type="knowledge_base", content={"text": "kb fact", "role": "user"}
+    ))
     memory = _Memory()
 
-    manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
-    memory.steps.append(_Step("user", "current task"))
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
+    memory.steps.append(TaskStep(task="current task"))
     final = manager.assemble_final_context(
         model=None,
         memory=memory,
         current_run_start_idx=0,
         tools=[{"name": "z"}, {"name": "a"}],
+        run_context=run_context,
     )
 
     assert [_message_text(message) for message in final.messages] == [
@@ -60,17 +84,112 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.evidence.stable_message_count == 1
     assert final.evidence.dynamic_message_count == 3
     assert final.evidence.stable_prefix_fingerprint
+    assert final.evidence.purpose == "step"
+    assert final.evidence.messages_fingerprint
+    assert final.evidence.tools_fingerprint
+    assert final.evidence.system_messages_fingerprint
+    assert final.evidence.history_messages_fingerprint
+    assert final.evidence.message_roles == ("system", "user", "user", "user")
+    assert final.evidence.history_message_roles == ("user", "user", "user")
     assert final.tools == [{"name": "a"}, {"name": "z"}]
 
 
-def test_context_manager_owns_final_answer_assembly():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
-    manager.register_component(MemoryComponent(formatted_content="memory fact"))
+def test_oc_013_oc_023_request_only_messages_are_budgeted_and_not_saved():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="")
+    memory.steps.append(TaskStep(task="current task"))
+    system_reminder = {"role": "system", "content": [{"type": "text", "text": "format contract"}]}
+    tail_reminder = {"role": "user", "content": [{"type": "text", "text": "format contract"}]}
+    continuation = {"role": "user", "content": [{"type": "text", "text": "continue with action"}]}
+    kwargs = {"model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context}
+    baseline = manager.assemble_final_context(**kwargs)
+    first = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder], request_tail_messages=[tail_reminder]
+    )
+    continued = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder],
+        request_tail_messages=[tail_reminder, continuation], force_compaction=True,
+    )
+
+    assert [_message_text(message) for message in first.messages] == [
+        "stable policy", "format contract", "current task", "format contract"
+    ]
+    assert [_message_text(message) for message in continued.messages][-2:] == [
+        "format contract", "continue with action"
+    ]
+    assert [_message_text(message) for message in continued.memory_messages] == [
+        "stable policy", "current task"
+    ]
+    assert first.evidence.final_token_estimate > baseline.evidence.final_token_estimate
+    assert continued.evidence.final_token_estimate > first.evidence.final_token_estimate
+    assert len(memory.steps) == 1
+    with pytest.raises(ValueError):
+        manager.assemble_final_context(
+            **kwargs, purpose="final_answer", request_tail_messages=[continuation]
+        )
+
+
+def test_context_fingerprint_bounds_cycles_and_excessive_depth():
+    manager = ContextManager()
+    cyclic = {}
+    cyclic["self"] = cyclic
+    deeply_nested = current = {}
+    for _ in range(40):
+        child = {}
+        current["child"] = child
+        current = child
+
+    normalized_cycle = manager._normalize(cyclic)
+    normalized_depth = manager._normalize(deeply_nested)
+
+    assert normalized_cycle["self"]["__cycle__"] == "builtins.dict"
+    assert "__max_depth__" in str(normalized_depth)
+    assert len(manager._fingerprint(cyclic)) == 64
+
+
+def test_context_fingerprint_degrades_when_normalization_fails():
+    class BrokenDump:
+        def model_dump(self):
+            raise RuntimeError("broken observational payload")
+
+    fingerprint = ContextManager()._fingerprint([BrokenDump()])
+
+    assert len(fingerprint) == 64
+
+
+def test_prepare_run_projects_fallback_system_prompt_without_mutating_memory():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
     memory = _Memory()
 
-    manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
-    memory.steps.append(_Step("assistant", "work trace"))
+    run_context = manager.prepare_run_context(
+        memory=memory,
+        fallback_system_prompt="runtime fallback",
+    )
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    assert memory.system_prompt is None
+    assert [_message_text(message) for message in final.messages] == ["runtime fallback"]
+    assert run_context.items[0].id == "system:fallback"
+
+
+def test_context_manager_owns_final_answer_assembly():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    manager.register_item(_text_item("history:memory", "memory fact", "user"))
+    memory = _Memory()
+
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
+    memory.steps.append(ActionStep(
+        step_number=1, timing=Timing(start_time=0), action_output="work trace",
+        model_output="work trace",
+    ))
     final = manager.assemble_final_context(
         model=None,
         memory=memory,
@@ -83,30 +202,108 @@ def test_context_manager_owns_final_answer_assembly():
                 "post_messages": "answer task: {{ task }}",
             }
         },
+        run_context=run_context,
     )
 
     assert [message["role"] for message in final.messages] == [
         "system",
         "system",
         "user",
-        "user",
         "assistant",
+        "user",
     ]
-    assert [_message_text(message) for message in final.messages[:4]] == [
+    assert [_message_text(message) for message in final.messages[:3]] == [
         "stable policy",
         "final instruction",
         "memory fact",
-        "answer task: original task",
     ]
+    action_history = _message_text(final.messages[3])
+    assert '<completed_action>' in action_history
+    assert "recorded_result:\nwork trace" in action_history
+    assert "Calling tools:" not in action_history
+    assert "Observation:" not in action_history
+    assert final.evidence.purpose == "final_answer"
+    assert final.evidence.final_answer_prompt_fingerprint
+    assert _message_text(final.messages[-1]) == "answer task: original task"
     assert final.evidence.stable_message_count == 2
     assert "context_purpose" in final.evidence.prefix_change_reasons or (
         final.evidence.prefix_change_reasons == ("initial_request",)
     )
 
 
+def test_current_run_keeps_only_task_as_user_message():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="policy")
+    memory.steps.extend([
+        TaskStep(task="search once and answer"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), action_output="first result"),
+        ActionStep(step_number=2, timing=Timing(start_time=1), action_output="second result"),
+    ])
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    assert [message["role"] for message in final.messages] == [
+        "system",
+        "user",
+        "assistant",
+        "assistant",
+    ]
+    assert sum(message["role"] == "user" for message in final.messages) == 1
+
+
+def test_completed_skill_read_is_available_to_the_next_model_step():
+    """A successful skill read remains evidence; the model need not read it again."""
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(
+        memory=memory, fallback_system_prompt="policy"
+    )
+    memory.steps.extend(
+        [
+            TaskStep(task="use the matching skill"),
+            ActionStep(
+                step_number=1,
+                timing=Timing(start_time=0),
+                tool_calls=[
+                    ToolCall(
+                        name="python_interpreter",
+                        arguments='skill_content = read_skill_md("demo-skill")',
+                        id="call_1",
+                    )
+                ],
+                observations="Execution logs:\nSKILL_CONTENT_SENTINEL: follow the guide",
+                action_output="SKILL_CONTENT_SENTINEL: follow the guide",
+            ),
+        ]
+    )
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    action_history = next(
+        _message_text(message)
+        for message in final.messages
+        if '<completed_action>' in _message_text(message)
+    )
+    assert "read_skill_md" in str(final.messages)
+    assert 'tool: python_interpreter\ninput:\nskill_content = read_skill_md("demo-skill")' in unescape(action_history)
+    assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
+    assert "Do not copy this record's format as your next response." in action_history
+
+
 def test_context_manager_attributes_tool_schema_change():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
     memory = _Memory()
 
     manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
@@ -128,8 +325,8 @@ def test_context_manager_attributes_tool_schema_change():
 
 
 def test_context_manager_reports_multiple_stable_change_reasons():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
     memory = _Memory()
 
     run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
@@ -141,8 +338,8 @@ def test_context_manager_reports_multiple_stable_change_reasons():
         run_context=run_context,
     )
 
-    manager.clear_components()
-    manager.register_component(SystemPromptComponent(content="new stable policy"))
+    manager.clear_items()
+    manager.register_item(_text_item("system:policy", "new stable policy"))
     new_run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
     second = manager.assemble_final_context(
         model=None,
@@ -154,3 +351,35 @@ def test_context_manager_reports_multiple_stable_change_reasons():
 
     assert "tool_schema_version" in second.evidence.prefix_change_reasons
     assert "system_prompt_version" in second.evidence.prefix_change_reasons
+
+
+@pytest.mark.parametrize("purpose", ["step", "final_answer"])
+def test_current_run_preserves_action_clarification_and_guidance_order(purpose):
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="stable policy")
+    memory.steps = [
+        TaskStep(task="Draft a notice"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), observations="Asked for missing intent"),
+        TaskStep(task="Clarification: formal tone"),
+        ActionStep(step_number=2, timing=Timing(start_time=0), observations="Created formal draft"),
+        TaskStep(task="Guidance: friendly tone instead"),
+        ActionStep(step_number=3, timing=Timing(start_time=0), observations="Revised draft successfully"),
+    ]
+    kwargs = {
+        "model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context,
+        "purpose": purpose, "task": "Draft a notice", "final_answer_templates": {
+            "final_answer": {"pre_messages": "Finalize", "post_messages": "Finish {{ task }}"},
+        },
+    }
+    expected = ["Draft a notice", "Asked for missing intent", "Clarification: formal tone",
+                "Created formal draft", "Guidance: friendly tone instead", "Revised draft successfully"]
+    # Reassembly exercises the projection cache, including a newly appended task.
+    for _ in range(2):
+        final = manager.assemble_final_context(**kwargs)
+        texts = [_message_text(message) for message in final.messages]
+        positions = [next(index for index, text in enumerate(texts) if marker in text) for marker in expected]
+        assert positions == sorted(positions)
+        if len(expected) == 6:
+            memory.steps.append(TaskStep(task="Guidance: include the date"))
+            expected.append("Guidance: include the date")

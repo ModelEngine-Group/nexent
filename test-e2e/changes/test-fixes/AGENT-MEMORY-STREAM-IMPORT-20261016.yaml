@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-MEMORY-STREAM-IMPORT-20261016
+  change_type: test-fix
+  title: Correct memory stream test module ownership after Agent refactor
+  description: >-
+    Use distinct aliases for Agent request orchestration and stream execution.
+    Patch collaborators at their actual lookup sites and remove an unused title
+    generation mock. Preserve memory event and structured tool persistence assertions.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: >-
+    This repair changes traditional Python unit test imports and mocks only.
+    Product behavior, formal Case scripts and acceptance contracts are unchanged.
+  notes: >-
+    GitHub Actions run 38839223301 job 116775204270 reported two AttributeErrors
+    in test/backend/services/test_memory_stream_no_presearch.py. Both failures
+    were reproduced before the repair and both original tests passed afterward.
+    Related stream regression suites are run with the existing per-file UT runner.

@@ -1,0 +1,79 @@
+{
+  "agent_id": 4192,
+  "agent_info": {
+    "4192": {
+      "agent_id": 4192,
+      "tenant_id": "36984215-00ab-49cd-b3bb-7984e8e81fff",
+      "name": "performance_assistant",
+      "display_name": "【人力资源】绩效管理助手",
+      "description": "我是绩效管理助手，负责整合绩效考核结果与组织基础数据，覆盖目标制定、绩效跟踪、评估诊断与改进反馈等绩效管理环节，为 HR、管理者和员工提供绩效报告、趋势分析与可执行的改进建议。",
+      "author": "mlh@dev.com",
+      "max_steps": 15,
+      "requested_output_tokens": null,
+      "is_main_agent": true,
+      "provide_run_summary": false,
+      "allow_chat_metadata": false,
+      "enable_protocol_repair_retry": false,
+      "verification_config": null,
+      "context_policy": null,
+      "duty_prompt": "我是绩效管理助手，负责整合绩效考核结果与组织基础数据，覆盖目标制定、绩效跟踪、评估诊断与改进反馈等绩效管理环节。我能够生成绩效报告、分析趋势，并结合组织架构信息，为 HR、管理者和员工输出可执行的改进建议。",
+      "constraint_prompt": "1. 当需要展示组织架构时，只能调用已绑定的生成组织架构图工具，并使用其声明支持的输入字段。\n2. 组织架构图的数据必须来自用户提供或已确认的组织基础数据，不得编造人员、层级或部门关系。\n3. 涉及绩效结果时应基于用户提供的绩效考核数据进行分析，不得虚构或篡改绩效评分。\n4. 需要生成绩效报告文档或发送绩效相关邮件时，应基于已绑定的绩效管理技能能力完成，不得虚构未绑定的处理方式。",
+      "few_shots_prompt": "任务：分析各部门绩效分布，并生成组织架构图。\n\n思考：用户需要我结合绩效考核结果与组织基础数据，先梳理各部门绩效分布，再展示组织架构以便直观查看团队层级关系。我可以调用已绑定的组织架构图生成工具完成展示。\n\n代码：\n<code>\nresult = generate_organization_chart(\n    data=org_data,\n    orient=\"TB\",\n    theme=\"default\",\n)\nprint(result)\n</code>\n# 系统在后续上下文中提供工具结果：...",
+      "enabled": true,
+      "tools": [
+        {
+          "class_name": "generate_organization_chart",
+          "name": "generate_organization_chart",
+          "description": "Generate an organization chart to visualize the hierarchical structure of an organization, such as, a diagram showing the relationship between a CEO and their direct reports.",
+          "inputs": "{'data': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'description': {'type': 'string'}, 'children': {'type': 'array', 'items': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'description': {'type': 'string'}, 'children': {'type': 'array', 'items': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'description': {'type': 'string'}, 'children': {'type': 'array', 'items': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'description': {'type': 'string'}}, 'required': ['name']}}}, 'required': ['name']}}}, 'required': ['name']}}}, 'required': ['name'], 'description': \"Data for organization chart which is a hierarchical structure, such as, { name: 'CEO', description: 'Chief Executive Officer', children: [{ name: 'CTO', description: 'Chief Technology Officer', children: [{ name: 'Dev Manager', description: 'Development Manager' }] }] }, and the maximum depth is 3.\"}, 'orient': {'type': 'string', 'enum': ['horizontal', 'vertical'], 'default': 'vertical', 'description': 'Orientation of the organization chart, either horizontal or vertical. Default is vertical, when the level of the chart is more than 3, it is recommended to use horizontal orientation.'}, 'style': {'type': 'object', 'properties': {'texture': {'type': 'string', 'enum': ['default', 'rough'], 'default': 'default', 'description': \"Set the texture for the chart, optional, default is 'default'. 'rough' refers to hand-drawn style.\"}}, 'description': 'Custom style configuration for the chart.'}, 'theme': {'type': 'string', 'enum': ['default', 'academy', 'dark'], 'default': 'default', 'description': \"Set the theme for the chart, optional, default is 'default'.\"}, 'width': {'type': 'number', 'default': 600, 'description': 'Set the width of chart, default is 600.'}, 'height': {'type': 'number', 'default': 400, 'description': 'Set the height of chart, default is 400.'}}",
+          "output_type": "object",
+          "params": {},
+          "source": "mcp",
+          "usage": "vis",
+          "metadata": null,
+          "labels": null
+        }
+      ],
+      "managed_agents": [],
+      "model_ids": [
+        7789
+      ],
+      "model_names": [
+        "deepseek-v4-flash"
+      ],
+      "business_logic_model_id": null,
+      "business_logic_model_name": null,
+      "skill_names": [
+        "performance-manager"
+      ],
+      "prompt_template_id": null,
+      "prompt_template_name": null,
+      "model_params_override": {
+        "7789": {
+          "extra_params": {
+            "enable_thinking": false
+          }
+        }
+      },
+      "greeting_message": "你好！我是绩效管理助手，可以帮你制定 KPI/OKR 目标、跟踪绩效过程、开展评估诊断，并结合组织架构图分析绩效分布，生成改进建议与面谈提纲。",
+      "example_questions": [
+        "制定本季度团队 KPI 目标并生成绩效跟踪计划",
+        "汇总各部门绩效考核结果并生成评估诊断报告",
+        "结合组织架构图分析各团队绩效分布情况",
+        "为某部门经理生成绩效面谈提纲",
+        "对比近两个季度绩效数据，找出变化最大的团队并给出改进建议"
+      ]
+    }
+  },
+  "mcp_info": [
+    {
+      "mcp_server_name": "vis",
+      "mcp_url": "https://mcp.api-inference.modelscope.net/02d25af142d74b/sse"
+    }
+  ],
+  "name": "performance_assistant",
+  "display_name": "【人力资源】绩效管理助手",
+  "icon": "🤖",
+  "tags": [],
+  "version_label": "V1"
+}

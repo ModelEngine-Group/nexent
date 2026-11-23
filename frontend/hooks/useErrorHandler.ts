@@ -85,6 +85,23 @@ export const useErrorHandler = () => {
           handleSessionExpired();
         }
 
+        // Handle quota exceeded (HTTP 413) with user-friendly message
+        if (error.code === 413) {
+          const quotaMessage = error.message || "Tenant storage limit reached";
+          log.error(`Quota Exceeded [${error.code}]: ${quotaMessage}`, error);
+          if (showMessage) {
+            message.error(quotaMessage);
+          }
+          if (onError) {
+            onError(error);
+          }
+          return {
+            code: error.code,
+            message: quotaMessage,
+            originalError: error,
+          };
+        }
+
         // Get localized message
         const errorMessage = getI18nErrorMessage(error.code);
 

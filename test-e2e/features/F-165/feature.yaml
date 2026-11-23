@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-165
+  name: Mermaid 流式渲染、源码切换、缩放、下载、XSS
+  status: active
+  description: '前端与全局UI / 图表/Markdown: Mermaid 流式渲染、源码切换、缩放、下载、XSS'
+  business_rules:
+  - rule_id: F-165-RULE-01
+    description: Mermaid 流式渲染、源码切换、缩放、下载、XSS
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

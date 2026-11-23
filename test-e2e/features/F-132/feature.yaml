@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-132
+  name: list/create empty、name/数量限制
+  status: active
+  description: '评估 / 评估集: list/create empty、name/数量限制'
+  business_rules:
+  - rule_id: F-132-RULE-01
+    description: list/create empty、name/数量限制
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

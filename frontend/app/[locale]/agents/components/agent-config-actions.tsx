@@ -1,0 +1,530 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import { useState } from "react";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { useTranslation } from "react-i18next";
+import { App, Button, Dropdown, Modal, Tooltip } from "antd";
+import type { MenuProps } from "antd";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Copy,
+  FileOutput,
+  Globe,
+  GitBranch,
+  MoreHorizontal,
+  Network,
+  Send,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+
+import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
+import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
+import { a2aClientService } from "@/services/a2aService";
+import {
+  deleteAgent,
+  exportAgent,
+  generateUniqueCopyName,
+  searchAgentInfo,
+  updateAgentInfo,
+  updateToolConfig,
+} from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
+
+export default function AgentConfigActions({
+  agentId: agentIdProp,
+  agentName: agentNameProp,
+  readOnly,
+  variant = "buttons",
+  onConfigure,
+  onPublish,
+  onManageVersions,
+}: {
+  agentId?: number | null;
+  agentName?: string;
+  readOnly?: boolean;
+  variant?: "buttons" | "menu" | "table";
+  onConfigure?: (agentId: number) => void;
+  onPublish?: (agentId: number) => void;
+  onManageVersions?: (agentId: number) => void;
+}) {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { agentId: routeAgentId } = useParams<{ agentId?: string }>();
+  const storeAgentId = useAgentStore((state) => state.agentId);
+  const agentId = agentIdProp ?? storeAgentId;
+  const editedAgent = useAgentStore((state) => state.editedAgent);
+  const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = readOnly ?? storeIsReadOnly;
+  const reset = useAgentStore((state) => state.reset);
+  const agentName =
+    agentNameProp || editedAgent?.display_name || editedAgent?.name || "agent";
+  const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
+  const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
+  const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
+  const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
+    queryKey: ["a2aServerSettings", agentId],
+    queryFn: () => a2aClientService.getServerSettings(agentId!),
+    enabled: isA2ASettingsVisible && agentId !== null,
+  });
+
+  const updateAgentMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => updateAgentInfo(payload),
+  });
+  const deleteAgentMutation = useMutation({
+    mutationFn: (id: number) => deleteAgent(id),
+  });
+
+  const handleExport = async () => {
+    if (agentId === null) return;
+
+    try {
+      const result = await exportAgent(agentId);
+      if (!result.success) {
+        message.error(
+          result.message || t("businessLogic.config.error.agentExportFailed")
+        );
+        return;
+      }
+
+      if (result.data) {
+        const blob = new Blob([JSON.stringify(result.data, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${agentName || "agent"}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+
+      message.success(t("businessLogic.config.message.agentExportSuccess"));
+    } catch (error) {
+      log.error("Failed to export agent:", error);
+      message.error(t("businessLogic.config.error.agentExportFailed"));
+    }
+  };
+
+  const handleCopy = async () => {
+    if (agentId === null) return;
+
+    try {
+      const detailResult = await searchAgentInfo(agentId);
+      if (!detailResult.success || !detailResult.data) {
+        message.error(detailResult.message);
+        return;
+      }
+      const detail = detailResult.data;
+      const tools = Array.isArray(detail.tools) ? detail.tools : [];
+      const unavailableTools = tools.filter(
+        (tool: any) => tool && tool.is_available === false
+      );
+      const unavailableToolNames = unavailableTools
+        .map(
+          (tool: any) =>
+            tool?.display_name || tool?.name || tool?.tool_name || ""
+        )
+        .filter((name: string) => Boolean(name));
+      const enabledToolIds = tools
+        .filter((tool: any) => tool && tool.is_available !== false)
+        .map((tool: any) => Number(tool.id))
+        .filter((id: number) => Number.isFinite(id));
+      const subAgentIds = (
+        Array.isArray(detail.sub_agent_id_list) ? detail.sub_agent_id_list : []
+      )
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+      const modelIdsForCopy = (() => {
+        if (detail.model_ids && detail.model_ids.length > 0) {
+          return detail.model_ids;
+        }
+        const legacySingleId = (detail as { model_id?: number }).model_id;
+        return legacySingleId ? [legacySingleId] : undefined;
+      })();
+
+      const baseCopyName = `${detail.name || "agent"}_copy`;
+      const baseCopyDisplayName = `${
+        detail.display_name || t("agentConfig.agents.defaultDisplayName")
+      }${t("agent.copySuffix")}`;
+      const copyNames = await generateUniqueCopyName(
+        baseCopyName,
+        baseCopyDisplayName
+      );
+
+      // Build skill_instances from source agent. Only carry config_values
+      // (which may hold secrets such as API keys) when the caller has EDIT
+      // permission on the source agent; read-only copies fall back to skill
+      // defaults so secrets are not persisted into the new agent.
+      const canEditSource = detail.permission === "EDIT";
+      const skillInstancesFromSource = (
+        Array.isArray(detail.skills) ? detail.skills : []
+      )
+        .map((skill: any) => ({
+          skill_id: Number(skill.skill_id ?? skill.id),
+          enabled: true,
+          config_values: canEditSource
+            ? (skill.config_values ?? undefined)
+            : undefined,
+        }))
+        .filter((inst) => Number.isFinite(inst.skill_id));
+
+      const createResult = await updateAgentMutation.mutateAsync({
+        agent_id: undefined,
+        name: copyNames.name,
+        display_name: copyNames.display_name,
+        description: detail.description,
+        author: detail.author,
+        model_ids: modelIdsForCopy,
+        max_steps: detail.max_step,
+        requested_output_tokens: detail.requested_output_tokens ?? null,
+        is_main_agent: detail.is_main_agent ?? true,
+        provide_run_summary: detail.provide_run_summary,
+        enable_protocol_repair_retry:
+          detail.enable_protocol_repair_retry ?? false,
+        enabled: detail.enabled,
+        business_description: detail.business_description,
+        prompt: detail.prompt,
+        business_logic_model_name:
+          detail.business_logic_model_name ?? undefined,
+        business_logic_model_id: detail.business_logic_model_id ?? undefined,
+        enabled_tool_ids: enabledToolIds,
+        skill_instances: skillInstancesFromSource,
+        related_agent_ids: subAgentIds,
+      });
+
+      if (!createResult.success || !createResult.data?.agent_id) {
+        message.error(
+          getTenantResourceLimitMessage(createResult.error, t) ||
+            createResult.message ||
+            t("agentConfig.agents.copyFailed")
+        );
+        return;
+      }
+      const newAgentId = Number(createResult.data.agent_id);
+
+      for (const tool of tools) {
+        if (!tool || tool.is_available === false) continue;
+        const params =
+          tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
+            acc[param.name] = param.value;
+            return acc;
+          }, {}) || {};
+        try {
+          await updateToolConfig(Number(tool.id), newAgentId, params, true);
+        } catch (error) {
+          log.error("Failed to copy tool configuration:", error);
+          message.error(t("agentConfig.agents.copyFailed"));
+          return;
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      message.success(t("agentConfig.agents.copySuccess"));
+
+      if (!canEditSource && skillInstancesFromSource.length > 0) {
+        message.info(t("agentConfig.agents.copySkillConfigsSkipped"));
+      }
+
+      if (unavailableTools.length > 0) {
+        const names =
+          unavailableToolNames.join(", ") ||
+          unavailableTools
+            .map((tool: any) => Number(tool?.id))
+            .filter((id: number) => !Number.isNaN(id))
+            .join(", ");
+        message.warning(
+          t("agentConfig.agents.copyUnavailableTools", {
+            count: unavailableTools.length,
+            names,
+          })
+        );
+      }
+    } catch (error) {
+      log.error("Failed to copy agent:", error);
+      message.error(t("agentConfig.agents.copyFailed"));
+    }
+  };
+
+  const handleDelete = () => {
+    if (agentId === null) return;
+
+    deleteAgentMutation.mutate(agentId, {
+      onSuccess: () => {
+        message.success(
+          t("businessLogic.config.error.agentDeleteSuccess", {
+            name: agentName,
+          })
+        );
+        const routeAgentIdNumber = Number(routeAgentId);
+        const agentsPath =
+          Number.isInteger(routeAgentIdNumber) && routeAgentIdNumber > 0
+            ? pathname.replace(/\/[^/]+$/, "")
+            : pathname;
+        router.replace(agentsPath);
+        reset();
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
+      },
+      onError: () => {
+        message.error(t("businessLogic.config.error.agentDeleteFailed"));
+      },
+    });
+  };
+
+  const disabled = agentId === null;
+  const menuItems: NonNullable<MenuProps["items"]> = [];
+  if (onConfigure) {
+    menuItems.push({
+      key: "configure",
+      icon: <Settings2 className="size-3.5" />,
+      label: t("agentConfig.list.configure"),
+      disabled,
+      onClick: () => {
+        if (agentId !== null) onConfigure(agentId);
+      },
+    });
+  }
+  if (onPublish) {
+    menuItems.push({
+      key: "publish",
+      icon: <Send className="size-3.5" />,
+      label: t("agentConfig.list.publish"),
+      disabled: disabled || isReadOnly,
+      onClick: () => {
+        if (agentId !== null) onPublish(agentId);
+      },
+    });
+  }
+  if (onConfigure || onPublish) menuItems.push({ type: "divider" });
+  menuItems.push(
+    {
+      key: "copy",
+      icon: <Copy className="size-3.5" />,
+      label: t("agent.contextMenu.copy"),
+      disabled,
+      onClick: () =>
+        confirm.confirm({
+          title: t("agentConfig.agents.copyConfirmTitle"),
+          content: t("agentConfig.agents.copyConfirmContent", {
+            name: agentName,
+          }),
+          onOk: handleCopy,
+        }),
+    },
+    {
+      key: "relationship",
+      icon: <Network className="size-3.5" />,
+      label: t("agent.action.viewCallRelationship"),
+      disabled,
+      onClick: () => setIsRelationshipVisible(true),
+    },
+    {
+      key: "versions",
+      icon: <GitBranch className="size-3.5" />,
+      label: t("agent.version.manage"),
+      disabled,
+      onClick: () => {
+        if (agentId !== null) onManageVersions?.(agentId);
+      },
+    },
+    {
+      key: "export",
+      icon: <FileOutput className="size-3.5" />,
+      label: t("agent.contextMenu.export"),
+      disabled,
+      onClick: handleExport,
+    },
+    { type: "divider" },
+    {
+      key: "delete",
+      danger: true,
+      icon: <Trash2 className="size-3.5" />,
+      label: t("agent.contextMenu.delete"),
+      disabled: disabled || isReadOnly,
+      onClick: () =>
+        confirm.confirm({
+          title: t("businessLogic.config.modal.deleteTitle"),
+          content: t("businessLogic.config.modal.deleteContent", {
+            name: agentName,
+          }),
+          onOk: handleDelete,
+        }),
+    }
+  );
+
+  const handleDeleteAction = () =>
+    confirm.confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", {
+        name: agentName,
+      }),
+      onOk: handleDelete,
+    });
+
+  return (
+    <>
+      {variant === "table" ? (
+        <>
+          <button
+            type="button"
+            className="text-[#0067d1] hover:text-[#0052a8] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled || isReadOnly}
+            onClick={handleDeleteAction}
+          >
+            {t("agent.contextMenu.delete")}
+          </button>
+          <Dropdown
+            menu={{
+              items: menuItems?.filter(
+                (item) => item && (!("key" in item) || item.key !== "delete")
+              ),
+            }}
+            trigger={["click"]}
+          >
+            <Button
+              type="text"
+              size="small"
+              className="size-6 text-slate-400 hover:text-slate-600"
+              icon={<MoreHorizontal className="size-4" />}
+              aria-label={t("agentRepository.mine.menu.more")}
+            />
+          </Dropdown>
+        </>
+      ) : variant === "menu" ? (
+        <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+          <Button
+            type="text"
+            size="small"
+            className="!size-8 !p-0 !text-[#191919]"
+            icon={<MoreHorizontal className="size-3" />}
+            aria-label={t("agentRepository.mine.menu.more")}
+          />
+        </Dropdown>
+      ) : (
+        <div className="flex items-center gap-1">
+          {(agentInfo as { is_a2a?: boolean } | null)?.is_a2a && (
+            <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+              <Button
+                type="text"
+                size="small"
+                icon={<Globe className="h-4 w-4" />}
+                disabled={disabled}
+                className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+                onClick={() => setIsA2ASettingsVisible(true)}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title={t("agent.contextMenu.copy")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<Copy className="h-4 w-4" />}
+              disabled={disabled}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={() =>
+                confirm.confirm({
+                  title: t("agentConfig.agents.copyConfirmTitle"),
+                  content: t("agentConfig.agents.copyConfirmContent", {
+                    name: agentName,
+                  }),
+                  onOk: handleCopy,
+                })
+              }
+            />
+          </Tooltip>
+          <Tooltip title={t("agent.action.viewCallRelationship")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<Network className="h-4 w-4" />}
+              disabled={disabled}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={() => setIsRelationshipVisible(true)}
+            />
+          </Tooltip>
+          <Tooltip title={t("agent.contextMenu.export")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<FileOutput className="h-4 w-4" />}
+              disabled={disabled}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={handleExport}
+            />
+          </Tooltip>
+          <Tooltip
+            title={
+              isReadOnly
+                ? t("agent.noEditPermission")
+                : t("agent.contextMenu.delete")
+            }
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<Trash2 className="h-4 w-4" />}
+              disabled={disabled || isReadOnly}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={() =>
+                confirm.confirm({
+                  title: t("businessLogic.config.modal.deleteTitle"),
+                  content: t("businessLogic.config.modal.deleteContent", {
+                    name: agentName,
+                  }),
+                  onOk: handleDelete,
+                })
+              }
+            />
+          </Tooltip>
+        </div>
+      )}
+      {agentId !== null && (
+        <AgentCallRelationshipModal
+          visible={isRelationshipVisible}
+          onClose={() => setIsRelationshipVisible(false)}
+          agentId={agentId}
+          agentName={agentName}
+        />
+      )}
+      <Modal
+        centered
+        width={640}
+        title={t("a2a.server.previewTitle")}
+        open={isA2ASettingsVisible}
+        onCancel={() => setIsA2ASettingsVisible(false)}
+        loading={isLoadingA2ASettings}
+        footer={null}
+        zIndex={1050}
+      >
+        {a2aSettingsData?.data ? (
+          <A2AServerSettingsPanel
+            endpointId={a2aSettingsData.data.endpoint_id}
+            supportedInterfaces={a2aSettingsData.data.supported_interfaces}
+          />
+        ) : (
+          <div
+            style={{ textAlign: "center", padding: "40px 0", color: "#999" }}
+          >
+            {t(
+              "a2a.service.getServerSettingsFailed",
+              "Failed to load A2A settings"
+            )}
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}

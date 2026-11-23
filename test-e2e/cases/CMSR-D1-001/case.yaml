@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-MESSAGE
+case:
+  case_id: CMSR-D1-001
+  feature_id: CMSR-005
+  requirement_ids:
+  - CMSR-005
+  business_rule_ids:
+  - CMSR-RULE-013
+  - CMSR-RULE-014
+  title: Observer emits safe content before stream completion
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify bounded marker lookahead and attempt state reset.
+  preconditions:
+  - Create an isolated observer and a controlled chunk sequence.
+  test_data:
+    profile: mock
+    sequence: failed partial, rollback, successful split code and think markers
+  steps:
+  - order: 1
+    action: Feed a safe prefix and pause the source.
+    expected: The prefix is emitted before flush or commit.
+  - order: 2
+    action: Roll back the first attempt and feed split markers in the second.
+    expected: The second output is ordered and contains no first-attempt residue.
+  expected_results:
+  - The earliest safe content is observable before completion.
+  - Split markers retain their original semantics.
+  forbidden_side_effects:
+  - No stale fragment crosses attempts.
+  - No code is executed by the observer.
+  unit_boundary: Observer.add_model_new_token and attempt lifecycle
+  inputs:
+  - normal content
+  - split <think> and </think>
+  - raw <code> content
+  assertions:
+  - Safe prefix emitted before flush.
+  - Raw code tag retained.
+  - No failed-attempt residue.

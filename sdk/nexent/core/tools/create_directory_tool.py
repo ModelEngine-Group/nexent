@@ -13,13 +13,9 @@ logger = logging.getLogger("create_directory_tool")
 class CreateDirectoryTool(Tool):
     """Directory creation tool for creating directories"""
     name = "create_directory"
-    description = "Create a directory at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/subfolder'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "Will create parent directories if they don't exist. " \
-                  "If the target directory already exists, the operation will still succeed without error."
+    description = "Create a workspace directory; an existing directory is left unchanged."
 
-    description_zh = "在指定路径创建目录，路径需为工作区相对路径（例如，'documents/subfolder'），出于安全考虑，不支持绝对路径，父目录不存在时将自动创建。若目标目录已存在，操作仍将完成且不会报错。"
+    description_zh = "在工作区创建目录；目标目录已存在时保持原状。"
 
     inputs = {
         "directory_path": {
@@ -64,8 +60,6 @@ class CreateDirectoryTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
-        self.running_prompt_zh = "正在创建文件夹..."
-        self.running_prompt_en = "Creating directory..."
 
     def _validate_path(self, directory_path: str) -> str:
         """Validate and resolve directory path within the workspace.
@@ -99,10 +93,10 @@ class CreateDirectoryTool(Tool):
 
     def forward(self, directory_path: str, permissions: str = "755") -> str:
         try:
-            # Send tool run message if observer is available
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the create-directory card from
+            # inside the tool.
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "folder-plus", "text": f"Creating directory {directory_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

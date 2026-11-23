@@ -6,14 +6,17 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import yaml
+from .text_codec import decode_skill_text
 
 logger = logging.getLogger(__name__)
+
 
 _ALLOWED_SKILL_META_KEYS = frozenset([
     "name",
     "description",
     "allowed-tools",
     "tags",
+    "script_outputs",
 ])
 
 
@@ -29,7 +32,7 @@ class SkillLoader:
         if not file_path.exists():
             raise FileNotFoundError(f"Skill file not found: {path}")
 
-        content = file_path.read_text(encoding="utf-8")
+        content = str(decode_skill_text(file_path.read_bytes()))
         return cls.parse(content, source_path=str(file_path))
 
     @classmethod
@@ -40,12 +43,12 @@ class SkillLoader:
         if not frontmatter:
             raise ValueError("SKILL.md must have YAML frontmatter")
 
-        # Try to parse with yaml.safe_load first
+        # Preserve the existing scalar compatibility behavior. Structured
+        # fields such as tags are left untouched by _fix_yaml_frontmatter.
         meta = None
         try:
-            # Fix YAML parsing to handle special characters in values
-            frontmatter = cls._fix_yaml_frontmatter(frontmatter)
-            meta = yaml.safe_load(frontmatter)
+            fixed_frontmatter = cls._fix_yaml_frontmatter(frontmatter)
+            meta = yaml.safe_load(fixed_frontmatter)
         except yaml.YAMLError as e:
             logger.warning(f"YAML parse error, falling back to regex extraction: {e}")
 
@@ -65,10 +68,18 @@ class SkillLoader:
             "name": filtered_meta.get("name"),
             "description": filtered_meta.get("description", ""),
             "allowed_tools": filtered_meta.get("allowed-tools", []),
-            "tags": filtered_meta.get("tags", []),
+            "tags": cls._normalize_tags(filtered_meta.get("tags")),
+            "script_outputs": filtered_meta.get("script_outputs", {}),
             "content": body.strip(),
             "source_path": source_path
         }
+
+    @staticmethod
+    def _normalize_tags(tags: Any) -> list[str]:
+        """Return only non-empty string tags from parsed frontmatter."""
+        if not isinstance(tags, list):
+            return []
+        return [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
 
     @classmethod
     def _fix_yaml_frontmatter(cls, frontmatter: str) -> str:
@@ -109,6 +120,11 @@ class SkillLoader:
 
                 # Skip YAML list items (lines starting with '-')
                 if key == '' or line.strip().startswith('-'):
+                    fixed_lines.append(line)
+                    continue
+
+                # Do not turn structured metadata into quoted scalars.
+                if key in {"tags", "allowed-tools"}:
                     fixed_lines.append(line)
                     continue
 
@@ -206,6 +222,8 @@ class SkillLoader:
             frontmatter["allowed-tools"] = skill_dict["allowed-tools"]
         if skill_dict.get("tags"):
             frontmatter["tags"] = skill_dict["tags"]
+        if skill_dict.get("script_outputs"):
+            frontmatter["script_outputs"] = skill_dict["script_outputs"]
 
         # Use default_flow_style=False for block style
         # Use width=float("inf") to prevent line wrapping

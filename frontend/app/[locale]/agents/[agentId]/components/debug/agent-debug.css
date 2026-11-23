@@ -1,0 +1,47 @@
+.agent-debug-panel {
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 24px;
+  border-radius: 8px;
+  color: #191919;
+  font-family: "HarmonyOS Sans SC", "Huawei Sans", sans-serif;
+  background:
+    radial-gradient(ellipse at 0% 100%, #66ebff1a, transparent 48%),
+    radial-gradient(ellipse at 100% 100%, #7a66ff12, transparent 48%),
+    radial-gradient(ellipse at 80% 85%, #669fff0f, transparent 48%), #fff;
+}
+.agent-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  flex-shrink: 0;
+}
+.agent-debug-header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+  cursor: pointer;
+}
+.agent-debug-header-actions {
+  display: flex;
+  gap: 16px;
+}
+.agent-debug-disclaimer {
+  margin: 0;
+  padding-bottom: 16px;
+  font-family: "HarmonyHeiTi", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-align: center;
+  color: #1919194d;
+}

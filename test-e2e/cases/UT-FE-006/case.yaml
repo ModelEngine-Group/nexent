@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-006
+  feature_id: F-161
+  business_rule_ids:
+  - F-161-RULE-01
+  title: stores/contexts 在 tab/refresh/login change 下的清理与恢复｜核心流程
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: stores/contexts 在 tab/refresh/login change 下的清理与恢复｜核心流程
+  preconditions:
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
+  test_data:
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
+  steps:
+  - order: 1
+    action: 保存 A、重新挂载读取，再初始化 B
+    expected: A 保存结果可读取；B 使用自己的快照，不继承 A 草稿。
+  - order: 2
+    action: 延迟 A 的保存响应，在返回前切换 B
+    expected: 旧响应和错误 Agent 快照不能覆盖 B。
+  - order: 3
+    action: 保存失败，再 reset 清理
+    expected: 草稿回滚，错误可见；未提交草稿不持久化，清理后无旧状态。
+  - order: 4
+    action: 在只读 Agent 请求保存
+    expected: 不调用持久化 API。
+  - order: 5
+    action: 切换 Nl2 session 后发送旧 Agent completion
+    expected: 旧 completion 被忽略，sessionGeneration 更新，reset 清空 session。
+  expected_results:
+  - A 保存结果可读取；B 使用自己的快照，不继承 A 草稿。
+  - 旧响应和错误 Agent 快照不能覆盖 B。
+  - 草稿回滚，错误可见；未提交草稿不持久化，清理后无旧状态。
+  - 不调用持久化 API。
+  - 旧 completion 被忽略，sessionGeneration 更新，reset 清空 session。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 303
+    notes: D1 store/context boundary only; component remount does not establish full browser refresh or login-change integration
+      acceptance.
+  unit_boundary: 真实 useAgentStore 和 Nl2AgentFlowProvider，service 为受控边界
+  inputs: *id001
+  assertions:
+  - A 保存结果可读取；B 使用自己的快照，不继承 A 草稿。
+  - 旧响应和错误 Agent 快照不能覆盖 B。
+  - 草稿回滚，错误可见；未提交草稿不持久化，清理后无旧状态。
+  - 不调用持久化 API。
+  - 旧 completion 被忽略，sessionGeneration 更新，reset 清空 session。

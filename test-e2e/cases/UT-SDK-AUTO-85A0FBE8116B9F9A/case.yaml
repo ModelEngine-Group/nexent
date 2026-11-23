@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-85A0FBE8116B9F9A
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: Provider上下文溢出后 recover_step/recover_final_answer 源级重建、安全闸与重试耗尽｜核心与异常
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Provider上下文溢出后 recover_step/recover_final_answer 源级重建、安全闸与重试耗尽｜核心与异常
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 不加载真实模型 Key；provider 上下文溢出通过注入伪造 client 抛出的上下文溢出异常模拟，不访问公网。
+  test_data:
+    legacy_asset_declaration: '- 无外部资产；使用进程内伪造 provider client（抛出上下文溢出异常）、可控 memory（ActionStep.tool_calls）与 context_runtime
+      stub。'
+  steps:
+  - order: 1
+    action: 导入被测单元 sdk/nexent/core/models/openai_llm.py 的 OpenAIModel 与 sdk/nexent/core/agents/core_agent.py 的 CoreAgent._provider_overflow_recovery_safe，注入伪造
+      chat.completions.create 客户端与内存对象，隔离真实 provider 与网络；不调用真实模型。
+    expected: 恢复调度：provider 上下文溢出且未收到首 token、context_rebuild 非空时，模型调用 context_rebuild() 一次并以 rebuilt.messages 重新 dispatch；recover_step/recover_final_answer
+      返回的 FinalContext.messages 成为下一次调用入参，第二次 dispatch 成功返回最终消息。
+  - order: 2
+    action: 【步骤路径源级重建】使伪造 provider 首次 dispatch 抛 provider 上下文溢出异常（is_provider_context_overflow 判定为真、未收到首 token），并传入 context_rebuild
+      回调；回调内部调用 context_runtime.recover_step(...) 返回 FinalContext。断言恢复触发：回调被调用一次，模型以 rebuilt.messages 重新进入 __call__，第二次 dispatch
+      成功后返回 ChatMessage（openai_llm.py:699-737）。
+    expected: 安全闸：当前 run 内存在任一含 tool_calls 的 step 时 _provider_overflow_recovery_safe() 为 False，context_rebuild 传 None；溢出即抛
+      ProviderContextOverflowRetryUnsafe，不执行重建。
+  - order: 3
+    action: 【最终答案路径源级重建】构造 CoreAgent 并触发 _handle_max_steps_reached（recover_final_answer），同样伪造溢出一次后成功；断言 rebuild_final_after_provider_overflow
+      调用 context_runtime.recover_final_answer(...) 并以其返回的 messages 重发模型调用（core_agent.py:1611-1633）。
+    expected: 重试耗尽：恢复调度已发生两次（_overflow_recovery_ordinal >= 2）后再次溢出，抛 ProviderContextOverflowRetryExhausted，且不再继续 rebuild。
+  - order: 4
+    action: 【安全闸真分支】当前 run 的 memory.steps[self._history_step_count:] 内步骤均无 tool_calls 时，断言 _provider_overflow_recovery_safe()
+      返回 True，且 _step_stream 向模型传入非空的 context_rebuild 回调（core_agent.py:810-815、890-897）。
+    expected: 失败路径明确：Unsafe/Exhausted 领域异常按契约向上传播，不出现半写入、重复副作用或伪成功。
+  - order: 5
+    action: 【安全闸假分支】在该区间放置一个含 tool_calls 的 ActionStep 后，断言 _provider_overflow_recovery_safe() 返回 False，模型调用注入的 context_rebuild
+      为 None；此时再遇溢出应直接抛 ProviderContextOverflowRetryUnsafe。
+    expected: 无凭据泄露；恢复重入前释放 concurrency_permit，无 permit 泄漏。
+  - order: 6
+    action: 【重试耗尽】在 context_rebuild 存在且每次恢复后 provider 仍抛溢出时，断言第二次恢复调度后（_overflow_recovery_ordinal >= 2）抛出 ProviderContextOverflowRetryExhausted，且不再发起第三次
+      rebuild。
+    expected: 无凭据泄露；恢复重入前释放 concurrency_permit，无 permit 泄漏。
+  - order: 7
+    action: 断言异常均向上传播为领域异常（Unsafe/Exhausted），适配层不吞异常返回伪成功；恢复重入前释放 concurrency_permit，避免 permit 泄漏（openai_llm.py:724-726）。
+    expected: 无凭据泄露；恢复重入前释放 concurrency_permit，无 permit 泄漏。
+  - order: 8
+    action: 检查日志/observer 含可观测证据（provider_context_overflow 事件与 recovery_dispatch 序号），不输出明文 API Key/Token/Password；清理伪造对象确保可重复执行。
+    expected: 无凭据泄露；恢复重入前释放 concurrency_permit，无 permit 泄漏。
+  expected_results:
+  - 恢复调度：provider 上下文溢出且未收到首 token、context_rebuild 非空时，模型调用 context_rebuild() 一次并以 rebuilt.messages 重新 dispatch；recover_step/recover_final_answer
+    返回的 FinalContext.messages 成为下一次调用入参，第二次 dispatch 成功返回最终消息。
+  - 安全闸：当前 run 内存在任一含 tool_calls 的 step 时 _provider_overflow_recovery_safe() 为 False，context_rebuild 传 None；溢出即抛 ProviderContextOverflowRetryUnsafe，不执行重建。
+  - 重试耗尽：恢复调度已发生两次（_overflow_recovery_ordinal >= 2）后再次溢出，抛 ProviderContextOverflowRetryExhausted，且不再继续 rebuild。
+  - 失败路径明确：Unsafe/Exhausted 领域异常按契约向上传播，不出现半写入、重复副作用或伪成功。
+  - 无凭据泄露；恢复重入前释放 concurrency_permit，无 permit 泄漏。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 472
+  unit_boundary: Provider上下文溢出恢复
+  inputs:
+  - '- 无外部资产；使用进程内伪造 provider client（抛出上下文溢出异常）、可控 memory（ActionStep.tool_calls）与 context_runtime stub。'
+  assertions:
+  - 恢复调度：provider 上下文溢出且未收到首 token、context_rebuild 非空时，模型调用 context_rebuild() 一次并以 rebuilt.messages 重新 dispatch；recover_step/recover_final_answer
+    返回的 FinalContext.messages 成为下一次调用入参，第二次 dispatch 成功返回最终消息。
+  - 安全闸：当前 run 内存在任一含 tool_calls 的 step 时 _provider_overflow_recovery_safe() 为 False，context_rebuild 传 None；溢出即抛 ProviderContextOverflowRetryUnsafe，不执行重建。
+  - 重试耗尽：恢复调度已发生两次（_overflow_recovery_ordinal >= 2）后再次溢出，抛 ProviderContextOverflowRetryExhausted，且不再继续 rebuild。
+  - 失败路径明确：Unsafe/Exhausted 领域异常按契约向上传播，不出现半写入、重复副作用或伪成功。
+  - 无凭据泄露；恢复重入前释放 concurrency_permit，无 permit 泄漏。

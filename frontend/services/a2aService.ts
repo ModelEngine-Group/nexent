@@ -1,16 +1,48 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18n from 'i18next';
 import log from '@/lib/logger';
-import { API_ENDPOINTS, fetchWithErrorHandling } from './api';
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from './api';
 
 const t = (key: string, options?: any): string => {
   return i18n.t(key, options) as string;
 };
+
+function discoveryErrorMessage(error: unknown, fallbackKey: string): string {
+  if (error instanceof ApiError && error.message) {
+    if (Number(error.code) === 504) {
+      return t('a2a.service.discoveryTimeout');
+    }
+    if (error.message.includes('A2A Agent name must not contain spaces or other whitespace')) {
+      return t('a2a.service.nameWhitespace');
+    }
+    return error.message;
+  }
+  return t(fallbackKey);
+}
+
+async function fetchDiscovery<T>(url: string, request: unknown): Promise<{
+  success: boolean;
+  data?: T;
+  message?: string;
+}> {
+  const response = await fetchWithErrorHandling(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  const data = await response.json();
+  return data.status === 'success'
+    ? { success: true, data: data.data as T }
+    : { success: false, message: data.detail || t('a2a.service.discoverFailed') };
+}
 
 // =============================================================================
 // Types
 // =============================================================================
 
 export interface A2AExternalAgent {
+  ssl_verify?: boolean;
   id: number;
   name: string;
   description?: string;
@@ -18,6 +50,10 @@ export interface A2AExternalAgent {
   version?: string;
   streaming?: boolean;
   supported_interfaces?: Record<string, any>[];
+  security_schemes?: Record<string, any>;
+  security_requirements?: Record<string, any>[];
+  configured_security_scheme_ids?: string[];
+  selected_security_requirement_index?: number | null;
   source_type: 'url' | 'nacos';
   source_url?: string;
   nacos_config_id?: string;
@@ -74,8 +110,10 @@ export interface A2AServerAgent {
 }
 
 export interface DiscoverFromUrlRequest {
+  ssl_verify?: boolean;
   url: string;
   name?: string;
+  custom_headers?: Record<string, string>;
 }
 
 export interface DiscoverFromNacosRequest {
@@ -118,21 +156,10 @@ export const a2aClientService = {
     message?: string;
   }> {
     try {
-      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.discoverUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const data = await response.json();
-
-      if (response.ok && data.status === 'success') {
-        return { success: true, data: data.data };
-      }
-
-      return { success: false, message: data.detail || t('a2a.service.discoverFailed') };
+      return await fetchDiscovery<A2AExternalAgent>(API_ENDPOINTS.a2a.discoverUrl, request);
     } catch (error) {
       log.error('Failed to discover from URL:', error);
-      return { success: false, message: t('a2a.service.discoverFailed') };
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.discoverFailed') };
     }
   },
 
@@ -145,21 +172,10 @@ export const a2aClientService = {
     message?: string;
   }> {
     try {
-      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.discoverNacos, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const data = await response.json();
-
-      if (response.ok && data.status === 'success') {
-        return { success: true, data: data.data };
-      }
-
-      return { success: false, message: data.detail || t('a2a.service.discoverFailed') };
+      return await fetchDiscovery<A2AExternalAgent[]>(API_ENDPOINTS.a2a.discoverNacos, request);
     } catch (error) {
       log.error('Failed to discover from Nacos:', error);
-      return { success: false, message: t('a2a.service.discoverFailed') };
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.discoverFailed') };
     }
   },
 
@@ -245,7 +261,7 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.refreshFailed') };
     } catch (error) {
       log.error('Failed to refresh agent:', error);
-      return { success: false, message: t('a2a.service.refreshFailed') };
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.refreshFailed') };
     }
   },
 
@@ -297,6 +313,41 @@ export const a2aClientService = {
     } catch (error) {
       log.error('Failed to update agent protocol:', error);
       return { success: false, message: t('a2a.service.updateProtocolFailed') };
+    }
+  },
+
+  async updateAgentSecurityCredentials(
+    agentId: string,
+    securityCredentials: Record<string, string>,
+    selectedSecurityRequirementIndex?: number,
+  ): Promise<{
+    success: boolean;
+    data?: {
+      configured_security_scheme_ids: string[];
+      selected_security_requirement_index?: number | null;
+    };
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.a2a.agentSecurityCredentials(agentId),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            security_credentials: securityCredentials,
+            selected_security_requirement_index: selectedSecurityRequirementIndex,
+          }),
+        },
+      );
+      const data = await response.json();
+      if (response.ok && data.status === 'success') {
+        return { success: true, data: data.data };
+      }
+      return { success: false, message: data.detail || t('a2a.security.saveFailed') };
+    } catch (error) {
+      log.error('Failed to update agent security credentials:', error);
+      return { success: false, message: t('a2a.security.saveFailed') };
     }
   },
 
@@ -532,9 +583,14 @@ export const a2aClientService = {
       const data = await response.json();
 
       if (response.ok && data.status === 'success') {
+        const testResult = data.data;
         return {
-          success: true,
-          message: data.data?.message || t('a2a.service.testConnectionSuccess')
+          success: testResult?.success === true,
+          message: testResult?.message || (
+            testResult?.success === true
+              ? t('a2a.service.testConnectionSuccess')
+              : t('a2a.service.testConnectionFailed')
+          )
         };
       }
 
@@ -613,6 +669,7 @@ export const a2aClientService = {
     success: boolean;
     data?: A2AServerAgent;
     message?: string;
+    statusCode?: number;
   }> {
     try {
       const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.serverAgentSettings(agentId));
@@ -625,7 +682,11 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.getServerSettingsFailed') };
     } catch (error) {
       log.error('Failed to get server settings:', error);
-      return { success: false, message: t('a2a.service.getServerSettingsFailed') };
+      return {
+        success: false,
+        message: t('a2a.service.getServerSettingsFailed'),
+        statusCode: error instanceof ApiError && typeof error.code === 'number' ? error.code : undefined,
+      };
     }
   },
 
@@ -691,7 +752,8 @@ export const a2aClientService = {
    */
   async sendChatMessage(
     agentId: string,
-    message: string
+    message: string,
+    metadata?: Record<string, unknown>
   ): Promise<{
     success: boolean;
     data?: any;
@@ -701,7 +763,7 @@ export const a2aClientService = {
       const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.agentChat(agentId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, ...(metadata !== undefined ? { metadata } : {}) }),
       });
       const data = await response.json();
 

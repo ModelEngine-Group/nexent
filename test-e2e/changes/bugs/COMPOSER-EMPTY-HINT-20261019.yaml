@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: COMPOSER-EMPTY-HINT-20261019
+  change_type: bugfix
+  bug_id: COMPOSER-EMPTY-HINT-20261019
+  title: Remove unsupported slash guidance from shared conversation inputs
+  description: All shared Composer inputs stay visually empty while retaining accessibility and existing interaction logic.
+  observed_behavior: Plain and Lexical inputs advertise slash invocation although only skill-file @ mentions are registered.
+  expected_behavior: Empty inputs show no hint across chat, Workbench, creation and debug layouts; existing runtime behavior is preserved.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing Composer render tests cover shell and controls but do not assert empty placeholders across both input branches.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-002]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Empty placeholder and neutral localized label across plain and Lexical inputs in all shared entry layouts.
+    - Draft editing, disabled/send/model/resource behavior and Lexical formatter/submit properties remain intact.
+    test_selectors:
+    - frontend/tests/workbench/Composer.test.tsx
+    reason: Render tests directly prove the copy/prop correction; reuse existing controls coverage without duplicate D1. Backend behavior is unchanged.
+  notes: 'Design: ../nexent-doc/docs/Developing/chat-composer-empty-hint/design.md. D4-002 is unchanged regression. ChatPage helper selectors are maintained without altering historical business assertions. Ordinary-chat local skill draft forwarding remains a separately reported integration gap.'

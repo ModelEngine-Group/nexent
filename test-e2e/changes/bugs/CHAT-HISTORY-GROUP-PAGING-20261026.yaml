@@ -1,0 +1,56 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-HISTORY-GROUP-PAGING-20261026
+  change_type: bugfix
+  bug_id: CHAT-HISTORY-GROUP-PAGING-20261026
+  title: Paginate Agent history by group and conversation
+  description: Replace global Agent-chat history sampling with independent Agent-group and per-group conversation cursors while preserving pins, active threads, search and batch selection.
+  observed_behavior: The sidebar groups only the globally loaded recent conversation page; a busy Agent can hide other Agents, and selecting an Agent cannot retrieve its older history independently.
+  expected_behavior: Agent groups and each group's conversations page independently by activity; current and pinned items remain reachable outside ordinary pages, search is applied before paging, and selecting an Agent resolves its entire active history.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_case
+    description: Existing D1 selection tests use global conversation pages and existing D3/D4 sidebar cases cover pins/collapse, not independent Agent-group and per-group paging or 101 sessions.
+  feature_contract_changed: true
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - CHAT-SIDEBAR-D3-002
+    - CHAT-SIDEBAR-D4-003
+    modified:
+    - CHAT-SIDEBAR-D1-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Independently page Agent groups and conversations inside a selected group with stable search-bound cursors.
+    - Keep pins and the active conversation reachable, deduplicate rows, and resolve all IDs for one Agent without selecting another Agent's history.
+    - Render animated skeleton rows without visible loading copy; expose error/retry and retain the active row on history failure.
+    - Validate authenticated endpoint routing, query limits, owner scope and malformed group/cursor behavior.
+    - Cover missing identity, HTTP error preservation, private-error sanitization, included groups, terminal pages, cursor boundaries and UTC pin serialization.
+    - Preserve Workbench detail payloads, activity metadata and keyset pagination while isolating Agent-chat styles and history changes.
+    - Recompute overflow shadows after expansion or viewport resizing so a fitting two-conversation group has no stale shadow; use the same page-scoped native scrollbar styling for Agent groups and conversations.
+    - Load subsequent Agent groups near the outer viewport bottom, keep inner conversation scrolling independent, retain groups on errors with explicit retry, and stop pagination requests when exhausted with a localized transient end message.
+    - Keep the recently-used and management controls outside the Agent group scroller, reflect real outer overflow with shadows at either end, and hide the outer scrollbar while the inner conversation scroller is hovered.
+    - Keep inner history width within the outer viewport when native scrollbars reserve space, without horizontal scrolling or clipping the inner scrollbar; retain native scrollbar gutters instead of adding a custom overlay implementation.
+    test_selectors:
+    - test/backend/database/test_conversation_agent_history_db.py
+    - test/backend/services/test_conversation_agent_history.py
+    - test/backend/app/test_conversation_agent_history_errors.py
+    - test/backend/app/test_conversation_management_app.py::test_agent_history_static_routes_forward_scoped_queries
+    - test/backend/app/test_conversation_management_app.py::test_agent_history_routes_reject_invalid_scope_and_expired_identity
+    - frontend/tests/workbench/AgentHistoryList.test.tsx
+    - frontend/tests/workbench/ConversationActivityAdapter.test.ts
+    - frontend/tests/workbench/ConversationActivitySync.test.tsx
+    reason: Existing route/database and component unit coverage did not cover the new query boundaries; isolated UT detects cursor, owner-scope, skeleton, retry and over-100 pagination regressions while D3/D4 separately prove integration and browser behavior.
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-agent-history-pagination/design.md. Rule CHAT-SIDEBAR-RULE-011 owns the two-level Agent history contract.
+    Changes are scoped to Agent chat; shared navigation and global CSS are unchanged, and the existing legacy Agent-group implementation is retained at the user's request.
+    Additional indexes are deferred after the performance review, so no SQL migration is included; already-created local indexes were not dropped.
+    Browser focus outlines were diagnosed independently and temporary outline overrides were removed. Markdown navigation files are excluded from delivery at the user's request.
+    Traditional UT and formal D1/D3/D4 results are recorded separately; generated test views and machine-local evidence are not product configuration.

@@ -16,6 +16,10 @@ interface DeploymentContextType {
   isDeploymentReady: boolean;
   appVersion: string;
   deploymentVersion: string;
+  enableAidpKnowledge: boolean;
+  enableAgentWorkbench: boolean;
+  hideHomePage: boolean;
+  aidpEnabled: boolean;
 }
 
 const DeploymentContext = createContext<DeploymentContextType>({
@@ -23,11 +27,18 @@ const DeploymentContext = createContext<DeploymentContextType>({
   isDeploymentReady: false,
   appVersion: APP_VERSION,
   deploymentVersion: "",
+  enableAidpKnowledge: false,
+  enableAgentWorkbench: false,
+  hideHomePage: false,
+  aidpEnabled: false,
 });
 
 interface DeploymentVersionResponse {
   deployment_version: string;
   app_version: string;
+  enable_aidp_knowledge?: boolean;
+  enable_agent_workbench?: boolean;
+  hide_home_page?: boolean;
   status: string;
 }
 
@@ -36,6 +47,9 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   const [isDeploymentReady, setIsDeploymentReady] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const [deploymentVersion, setDeploymentVersion] = useState("");
+  const [enableAidpKnowledge, setEnableAidpKnowledge] = useState(false);
+  const [enableAgentWorkbench, setEnableAgentWorkbench] = useState(false);
+  const [hideHomePage, setHideHomePage] = useState(false);
 
   useEffect(() => {
     const fetchDeploymentInfo = async () => {
@@ -46,6 +60,9 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         const data: DeploymentVersionResponse = await response.json();
         setDeploymentVersion(data.deployment_version);
         setIsSpeedMode(data.deployment_version === "speed");
+        setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
+        setEnableAgentWorkbench(data.enable_agent_workbench ?? false);
+        setHideHomePage(data.hide_home_page ?? false);
         if (data.app_version) {
           setAppVersion(data.app_version);
         }
@@ -62,7 +79,16 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
 
   return (
     <DeploymentContext.Provider
-      value={{ isSpeedMode, isDeploymentReady, appVersion, deploymentVersion }}
+      value={{
+        isSpeedMode,
+        isDeploymentReady,
+        appVersion,
+        deploymentVersion,
+        enableAidpKnowledge,
+        enableAgentWorkbench,
+        hideHomePage,
+        aidpEnabled: enableAidpKnowledge,
+      }}
     >
       {children}
     </DeploymentContext.Provider>

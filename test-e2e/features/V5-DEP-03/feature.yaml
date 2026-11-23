@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-03
+  name: Kubernetes/Helm 基础设施与应用双 Release install+rolling restart
+  status: active
+  description: 生产形态部署
+  business_rules:
+  - rule_id: V5-DEP-03-RULE-01
+    description: Kubernetes/Helm 基础设施与应用双 Release install+rolling restart
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-D78B50240E78970B
+  name: KnowledgeFileLifecycle 中断上传的服务重启恢复（fail_interrupted_uploads/schedule_interrupted_upload_cleanup）
+  status: active
+  description: 进程重启后，中断上传会残留 UPLOADING 生命周期记录与部分 MinIO 对象，若不收敛将导致用户重新上传时状态冲突、存储泄漏或跨服务误删。本专项验证 startup_recovery_service 按 upload_owner_service=CONFIG_SERVICE_NAME
+    与 create_time 宽限期，将旧 UPLOADING 记录精确收敛为 FAILED(CONTAINER_RESTARTED)并删除部分对象，同时避免波及宽限期内记录与其它服务记录。
+  business_rules:
+  - rule_id: V5-REL-AUTO-D78B50240E78970B-RULE-01
+    description: KnowledgeFileLifecycle 中断上传的服务重启恢复（fail_interrupted_uploads/schedule_interrupted_upload_cleanup）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

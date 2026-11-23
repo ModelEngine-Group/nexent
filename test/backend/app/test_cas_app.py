@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 import unittest
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from consts.exceptions import TenantResourceLimitError
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -16,7 +18,7 @@ class _CasAuthenticationError(Exception):
     pass
 
 
-_MODULES_TO_RESTORE = ["services.cas_service"]
+_MODULES_TO_RESTORE = ["management.services.permission.identity.cas"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
 cas_service_mock = MagicMock()
@@ -26,6 +28,9 @@ cas_service_mock.get_cas_config = MagicMock(
     return_value={
         "enabled": True,
         "login_mode": "button",
+        "heartbeat_url": "https://cas.example.com/heartbeat",
+        "heartbeat_interval_seconds": 300,
+        "heartbeat_cookie_name": "AUTH_TOKEN",
         "renew_before_seconds": 300,
         "renew_timeout_seconds": 10,
         "display_name": "CAS",
@@ -51,7 +56,7 @@ cas_service_mock.renew_with_ticket = AsyncMock(
 cas_service_mock.revoke_from_logout_request = MagicMock(
     return_value={"revoked": 1, "cas_user_id": "cas-user-1", "session_index": "ST-1"}
 )
-sys.modules["services.cas_service"] = cas_service_mock
+sys.modules["management.services.permission.identity.cas"] = cas_service_mock
 
 from apps.cas_app import router  # noqa: E402
 
@@ -83,6 +88,9 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(data["message"], "success")
         self.assertTrue(data["data"]["enabled"])
         self.assertEqual(data["data"]["login_mode"], "button")
+        self.assertEqual(data["data"]["heartbeat_url"], "https://cas.example.com/heartbeat")
+        self.assertEqual(data["data"]["heartbeat_interval_seconds"], 300)
+        self.assertEqual(data["data"]["heartbeat_cookie_name"], "AUTH_TOKEN")
 
     def test_login_redirects_to_cas_server(self):
         response = client.get("/user/cas/login?redirect=/chat", follow_redirects=False)
@@ -125,6 +133,20 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(response.json()["detail"], "CAS authentication failed")
         self.assertNotIn("bad ticket", response.text)
+
+    def test_callback_returns_429_for_tenant_resource_limit(self):
+        cas_service_mock.login_with_ticket.side_effect = TenantResourceLimitError(
+            "Tenant user limit reached: maximum 10000 users per tenant",
+            resource="users",
+            scope="tenant",
+            limit=10000,
+            current_count=10000,
+        )
+
+        response = client.get("/user/cas/callback?ticket=limit")
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["details"]["limit"], 10000)
 
     def test_renew_does_not_expose_cas_configuration_exception(self):
         cas_service_mock.build_renew_url.side_effect = _CasAuthenticationError("internal CAS config path")

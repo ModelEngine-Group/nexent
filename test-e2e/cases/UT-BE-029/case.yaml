@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-029
+  feature_id: F-181
+  business_rule_ids:
+  - F-181-RULE-01
+  title: 分类日志路由、时间+大小轮转、保留数与脱敏
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 分类日志路由、时间+大小轮转、保留数与脱敏
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 在 tmp_path 初始化分类 handler。
+    expected: 日志进入正确文件。
+  - order: 2
+    action: 写入普通/访问/错误日志并验证文件归类。
+    expected: 轮转文件名唯一且保留数正确。
+  - order: 3
+    action: 通过小 maxBytes 与受控时间触发两类轮转。
+    expected: 并发写不丢整行。
+  - order: 4
+    action: 验证 backupCount、并发写和敏感字段过滤。
+    expected: API Key/Token/Password 不以明文出现。
+  expected_results:
+  - 日志进入正确文件。
+  - 轮转文件名唯一且保留数正确。
+  - 并发写不丢整行。
+  - API Key/Token/Password 不以明文出现。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 376
+  unit_boundary: 日志
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 日志进入正确文件。
+  - 轮转文件名唯一且保留数正确。
+  - 并发写不丢整行。
+  - API Key/Token/Password 不以明文出现。

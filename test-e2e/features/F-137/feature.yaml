@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-137
+  name: 创建/执行/取消/状态/Agent version binding；服务重启后的 stale RUNNING 收割(含 case 同步失败)、无集 PENDING 失败、持久 PENDING 重派发、中断生成恢复与 no-set
+    虚拟集原子物化
+  status: active
+  description: '评估 / Evaluation Run: 创建/执行/取消/状态/Agent version binding；服务重启后的 stale RUNNING 收割(含 case 同步失败)、无集 PENDING 失败、持久
+    PENDING 重派发、中断生成恢复与 no-set 虚拟集原子物化'
+  business_rules:
+  - rule_id: F-137-RULE-01
+    description: 创建/执行/取消/状态/Agent version binding；服务重启后的 stale RUNNING 收割(含 case 同步失败)、无集 PENDING 失败、持久 PENDING 重派发、中断生成恢复与
+      no-set 虚拟集原子物化
+  required_test_stages:
+  - D1
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

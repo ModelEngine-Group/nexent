@@ -1,0 +1,70 @@
+schema_version: '1.0'
+change:
+  change_id: PW-KB-AIDP-01-IMPLEMENTATION-20261013
+  change_type: test-fix
+  title: Implement the missing PW-KB-AIDP-01 journey (case-local spec, AIDP page object, explicit profile selection)
+  description: >-
+    PW-KB-AIDP-01 was blocked with no execution.yaml or script. Add the
+    case-local Playwright spec, a dedicated AidpKnowledgePage (AIDP branch
+    only; never shared locators with the Local KnowledgePage), and a
+    machine-local aidp-journey profile configuration with schema and
+    example. The journey proves the AIDP branch by its own page markers
+    with the Local personal capacity bar absent, selects the oracle
+    knowledge base and enters its file management, binds it to a run-owned
+    agent through the real AddKnowledgeDrawer with the autosave request
+    verified to carry aidp_search and the selected kds ID, recalls through
+    the product's real AIDP tool chain in Agent Debug with the citation
+    naming the oracle source, verifies binding persistence after a full
+    refresh, and verifies the knowledge scope in a brand-new conversation.
+    The old contract step "query the fixed marker through the knowledge
+    page retrieval input" no longer matches the product (the AIDP list has
+    no retrieval input): retrieval is now proven through the real agent
+    tool chain, and name filtering is never impersonated as retrieval. The
+    profile is selected by config/aidp-journey.yaml through the new
+    profile_selection execution field, resolved by the suite worker before
+    any preparation: mock requires the knowledge-provider logical service
+    (the ext-knowledge instance; the seed aidp-kb-product oracle text,
+    source document and KB ID are fixed by the seed contract), real_smoke
+    requires the explicitly configured real AIDP oracle and attaches no
+    mock. The selected profile is recorded into the case evidence and
+    participates in the machine-config fingerprint, so a resume cannot
+    reuse results across profiles; mock results never count as real_smoke
+    and a missing profile selection or incomplete real_smoke oracle
+    dependency-blocks the case with a concrete reason.
+  affected_features:
+    existing: [V5-PW-KB-AIDP-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-KB-AIDP-01]
+    retired: []
+  notes: >-
+    Case-ID unchanged; status moves from blocked to active because the
+    script and bindings now exist and are collectable. Local and AIDP
+    execution groups remain mutually exclusive deployment configurations;
+    executing either group (and the mock profile's ext attach against a
+    deployed instance) requires the separately authorized test deployment.
+    First real execution against the dockerized deployment (mock profile)
+    corrected four evidence points: (1) the AIDP branch marker uses the
+    AIDP-only guide text "什么是知识库？" because "知识库列表"/"搜索知识库名称"
+    render in both branches; (2) the knowledge binding persists through
+    POST /api/tool/update (tool params index_names/kds_list), not through
+    the agent/update payload, and the tool identity is proven against
+    GET /api/tool/list instead of a literal tool name in the request;
+    (3) citation evidence reads the rendered [data-citation-marker] chips
+    (accessible name carries the resolved source title) instead of the
+    citation-index-map attribute; (4) the draft edit only reaches a
+    brand-new conversation after the real 发布 action, so the journey
+    releases a version before the new-conversation step. Mock-profile
+    environment requirement: the controlled KB must be registered for the
+    journey's tenant (an ACTIVE nexent.aidp_kb_permission_t row with the
+    tenant admin as owner) because the product intersects the AIDP catalog
+    with local permission rows and exposes no HTTP flow to register an
+    existing remote KB; the deployment preparation must seed it once.
+    Post-review re-run (2026-10-14, review-fix code on a fresh one-off
+    deployment): the full mock-profile journey passed again (4
+    preconditions / 7 steps / 4 assertions, clean cleanup) with the
+    acceptance obligations bound in this change.

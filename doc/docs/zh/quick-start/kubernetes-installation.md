@@ -10,11 +10,16 @@
 | **架构** | x86_64 / ARM64 |
 | **软件** | Kubernetes 1.24+, Helm 3+, kubectl 已配置 | Kubernetes 1.28+ |
 
-> **💡 注意**：推荐的 **8 核 64 GiB 内存** 配置可确保生产环境下的最佳性能。
+> **💡 注意**：推荐配置适合完整部署。实际资源需求还取决于副本数、知识库规模和并发智能体数量，生产环境应根据压测结果设置 requests 与 limits。
 
 ## 🚀 快速开始
 
-### 1. 准备 Kubernetes 集群
+- [在线部署](#在线部署)
+- [离线部署](#离线部署)
+
+### 在线部署
+
+#### 1. 准备 Kubernetes 集群
 
 确保 Kubernetes 集群正常运行，且 kubectl 已配置好集群访问权限：
 
@@ -23,20 +28,30 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
-### 2. 克隆并进入目录
+#### 2. 克隆并进入目录
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-### 3. 部署
+#### 3. 部署
 
 运行部署脚本：
 
 ```bash
 bash deploy.sh k8s
 ```
+
+默认流程使用两个独立 Helm release：先安装 `nexent-infrastructure`（Elasticsearch、PostgreSQL、Redis、MinIO），等待四个组件就绪并初始化 Elasticsearch API Key 后，再首次安装应用侧 `nexent`。因此应用 Pod 不会因补写 API Key 再次滚动。可使用 `--release-scope all|infrastructure|nexent` 选择完整流程或单独操作一侧：
+
+```bash
+bash deploy.sh k8s --release-scope all
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+```
+
+仅部署 `nexent` 时，脚本会先确认基础 release 存在且四个组件均已就绪；仅卸载基础 release 时，如果 `nexent` 仍存在则拒绝执行。检测到旧版单一 `nexent` release 仍管理基础组件时，脚本会直接报错；当前版本只支持全新双 release 部署，不执行自动迁移。
 
 执行此命令后，系统会通过 Bash TUI 选择配置选项。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
 
@@ -48,6 +63,8 @@ bash deploy.sh k8s
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
+`application` 还会准备智能体沙箱镜像信息。Runtime 使用共享工作区处理上传文件和生成文件；需要保留的产物会同步到 MinIO。
+
 **端口策略:**
 - **development（默认）**: 使用 NodePort 暴露 Web 和调试/内部服务
 - **production**: 内部服务使用 ClusterIP，仅暴露生产入口
@@ -57,15 +74,17 @@ bash deploy.sh k8s
 - **mainland**: 使用中国大陆镜像源
 - **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
 
-Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。每次部署前，脚本会保留已有值、注释和旧版变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板；部署时必须存在可读的 `.env.example`。
+
+使用 `bash deploy.sh k8s --defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。
 
 部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
-### ⚠️ 重要提示
+#### ⚠️ 重要提示
 
-1️⃣ **首次部署 v1.8.0 及以上版本时**，部署过程中系统会提示您设置 `suadmin` 超级管理员账号的密码。该账号为系统最高权限账户，请输入您想要的密码并**妥善保存**——密码创建后无法再次找回。
+1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时，部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 
-2️⃣ 忘记记录 `suadmin` 账号密码？请按照以下步骤操作：
+2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 
 ```bash
 # Step 1: 在 Supabase 数据库中删除 su 账号记录
@@ -81,13 +100,58 @@ kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
 kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
-# Step 3: 重新部署并记录 su 账号密码
+# Step 3: 重新部署；非交互模式将使用配置值或默认密码
 bash deploy.sh k8s
 ```
 
-### 4. 访问您的安装
+### 离线部署
+
+目标集群无法访问公网镜像仓库时，可从 GitHub Actions 获取已经打包好的离线部署包：
+
+1. 登录 GitHub，打开 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)。
+2. 选择目标版本对应的成功运行记录，在 **Artifacts** 中下载与集群节点架构匹配的 `nexent-<version>-<platform>.zip`。
+3. 将压缩包复制到可以访问目标集群的管理节点并解压。工作流产物默认保留 30 天；产物过期时，可联系维护者重新运行工作流。
+
+解压离线部署包：
+
+```bash
+unzip nexent-<version>-amd64.zip -d nexent
+cd nexent
+```
+
+单节点且以 Docker 作为容器运行时的集群可直接加载并部署：
+
+```bash
+bash deploy.sh --load-images k8s
+```
+
+如果管理节点上保留了此前已部署的离线包，可通过 `--reuse-from` 复用其中的环境配置和 Kubernetes 部署选项：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  k8s
+```
+
+指定目录必须是已解压的旧部署包根目录，并包含 `deploy/env/.env`。该参数会导入旧 `.env`、保留其已有值，并立即追加当前包 `.env.example` 新增的变量。存在 `monitoring.env` 和 Kubernetes `deploy.options` 时也会复用；Helm generated values 由新版本脚本重新生成。`--reuse-from` 可与 `--config`、`--defaults` 或 `--push-images` 组合使用。
+
+其他单节点集群和多节点集群应将镜像推送到集群可访问的内部仓库，或使用对应容器运行时的工具，将镜像导入所有可能运行 Nexent Pod 的节点：
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  k8s
+```
+
+离线包默认安装 Nexent 全部组件。添加 `--config` 可重新选择部署配置；首次创建超级管理员时，该模式会要求手动输入并确认密码，且不会显示或保存输入值。非交互部署使用 `NEXENT_SUPER_ADMIN_PASSWORD`，默认值为 `Nexent@123`，创建成功后会在终端显示实际密码。
+
+### 访问您的安装
 
 部署成功完成后：
+
+> **获取管理员密码**：超级管理员账号为 `suadmin@nexent.com`。首次非交互创建成功时，终端会显示实际使用的密码；未额外配置时，默认密码为 `Nexent@123`。离线部署使用 `--config` 时，手动输入的密码不会保存或显示。如果密码已忘记，请按本文前面的“重建 `suadmin` 账号”步骤重建账号。
 
 | 服务 | 默认地址 |
 |---------|-----------------|
@@ -108,9 +172,9 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 **应用服务:**
 | 服务 | 描述 | 默认端口 |
 |---------|-------------|--------------|
-| nexent-config | 配置服务 | 5010 |
-| nexent-runtime | 运行时服务 | 5014 |
-| nexent-mcp | MCP 容器服务 | 5011 |
+| nexent-config | 配置与管理 API | 5010 |
+| nexent-runtime | 智能体运行时 API | 5014 |
+| nexent-mcp | MCP 管理与工具服务 | 5011 |
 | nexent-northbound | 北向 API 服务 | 5013 |
 | nexent-web | Web 前端 | 3000 |
 | nexent-data-process | 数据处理服务 | 5012 |
@@ -120,7 +184,7 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 |---------|-------------|
 | nexent-elasticsearch | 搜索引擎和索引服务 |
 | nexent-postgresql | 关系型数据库 |
-| nexent-redis | 缓存层 |
+| nexent-redis | 缓存、分布式锁和任务消息代理 |
 | nexent-minio | S3 兼容对象存储 |
 
 **Supabase 服务（选择 `supabase` 组件时）:**
@@ -135,6 +199,8 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 |---------|-------------|
 | nexent-openssh-server | AI 智能体 SSH 终端 |
 | nexent-monitoring | 可选观测组件 |
+
+沙箱不是常驻的业务 Pod。Runtime 会根据部署配置创建隔离执行环境，用于运行模型生成的代码和 Skill 脚本。
 
 ## 🔌 端口映射
 
@@ -160,6 +226,8 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 | 共享工作区 | nexent-workspace-pv | `/var/lib/nexent` |
 | 共享技能目录 | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
+`nexent-workspace` 默认申请 10 GiB、`ReadWriteMany` 存储，用于应用服务之间传递本次运行的输入与输出。使用自定义 StorageClass 时，应确认其支持配置的访问模式；多副本部署尤其需要所有相关 Pod 能访问同一工作区。
+
 卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `bash uninstall.sh k8s --delete-local-data true` 删除 `/var/lib/nexent`、`/var/lib/nexent-data/skills` 和 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
 
 ### 卸载 Kubernetes 部署
@@ -167,8 +235,14 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 请在仓库根目录使用统一卸载入口：
 
 ```bash
-# 删除 Helm release；交互模式会询问是否删除 namespace 和本地数据
+# 依次删除 nexent 和 nexent-infrastructure；交互模式会询问是否删除 namespace 和本地数据
 bash uninstall.sh k8s
+
+# 仅卸载应用 release
+bash uninstall.sh k8s --release-scope nexent --keep-namespace
+
+# 仅卸载基础 release（要求应用 release 已不存在）
+bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
 
 # 仅清理 Helm release 状态，适合修复卡住的发布
 bash uninstall.sh k8s clean
@@ -185,35 +259,15 @@ bash uninstall.sh k8s delete-all
 
 `--delete-data` 和 `--delete-volumes` 是兼容 Helm 管理资源的参数；本地盘数据请使用 `--delete-local-data` 或 `--keep-local-data` 控制。`delete-all --keep-local-data` 会删除 namespace，但保留本地卷内容。
 
-### 离线镜像包
-
-可在仓库根目录构建 Kubernetes 离线包：
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target k8s \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`manifest.yaml` 和 `checksums.txt`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
-
-```bash
-cd offline-package
-bash deploy.sh --load-images k8s
-```
-
-多节点集群需要在每个可能运行 Nexent Pod 的节点上加载镜像，或将镜像推送到集群可访问的内部镜像仓库，再使用匹配的镜像参数部署。
-
 ## 🔧 部署命令
 
 ```bash
 # 交互式部署
 bash deploy.sh k8s
+
+# 仅升级基础或应用 release
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
 
 # 非交互式部署默认组件
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
@@ -253,7 +307,7 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 ### 监控配置
 
-Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会生成运行时 Helm values，设置 `global.monitoring.enabled`、`global.monitoring.provider`、`global.monitoring.dashboardUrl`，并启用 `nexent-monitoring` 子 Chart。
+Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会在 `deploy/env/monitoring.env` 中同步 provider 配置，生成 `global.monitoring.*` 和 `nexent-monitoring.*` 运行时 Helm values，并启用 `nexent-monitoring` 子 Chart。
 
 ```bash
 cd nexent
@@ -273,9 +327,9 @@ bash deploy.sh k8s
 | `grafana` | 本地 Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | 本地 Zipkin | `http://localhost:30011` |
 
-选择 `langsmith` provider 前，请先在 `deploy/deploy/k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
+选择 `langsmith` provider 前，请先在 `deploy/env/monitoring.env` 中配置 `LANGSMITH_API_KEY`，必要时配置 `LANGSMITH_PROJECT`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，请调整 `deploy/env/monitoring.env` 中对应的 `K8S_*_NODE_PORT` 或服务变量，再通过部署脚本重新配置并手动选择 `monitoring`。
 
-常用 Helm values：
+常用生成的 Helm values：
 
 | Values | 说明 |
 |--------|------|
@@ -283,10 +337,19 @@ bash deploy.sh k8s
 | `global.monitoring.provider` | 后端 provider 标识：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
 | `global.monitoring.otlpEndpoint` | 后端 OTLP HTTP 上报地址，默认 `http://nexent-otel-collector:4318` |
 | `global.monitoring.dashboardUrl` | 前端监控入口地址，留空则隐藏入口 |
+| `global.monitoring.dashboardAllowedRoles` | 可看到入口的角色，使用逗号分隔，默认 `SU,SPEED` |
 | `global.monitoring.traceContentMode` | Trace 内容采集模式：`summary`、`metrics`、`full` |
 | `nexent-monitoring.<provider>.service.nodePort` | 调整各 Dashboard 的 NodePort |
 | `nexent-monitoring.langfuse.init.*` | 本地 Langfuse 初始组织、项目和管理员账号 |
 | `nexent-monitoring.grafana.adminUser` / `adminPassword` | 本地 Grafana 管理员账号 |
+
+常用 `deploy/env/monitoring.env` 变量：
+
+| 变量 | 说明 |
+|------|------|
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith 转发配置 |
+| `K8S_PHOENIX_NODE_PORT` / `K8S_LANGFUSE_NODE_PORT` / `K8S_GRAFANA_NODE_PORT` / `K8S_ZIPKIN_NODE_PORT` | 本地 Dashboard 的 NodePort 覆盖值 |
+| `K8S_LANGFUSE_NEXTAUTH_URL` | K8s Langfuse 栈使用的浏览器可访问地址 |
 
 查看监控组件状态：
 
@@ -316,7 +379,8 @@ helm upgrade --install nexent nexent \
   --set nexent-supabase-db.enabled=true \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
-  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret
+  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
+  --set nexent-common.config.oauth.loginMode=force
 ```
 
 可配置的 OAuth values：
@@ -334,6 +398,9 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.oauth.wechatClientSecret` | `WECHAT_OAUTH_APP_SECRET` | WeChat App Secret |
 | `nexent-common.config.oauth.sslVerify` | `OAUTH_SSL_VERIFY` | 访问 OAuth provider 时是否校验证书 |
 | `nexent-common.config.oauth.caBundle` | `OAUTH_CA_BUNDLE` | 自定义 CA bundle 路径 |
+| `nexent-common.config.oauth.loginMode` | `OAUTH_LOGIN_MODE` | `disabled`、`button` 或 `force` |
+
+`loginMode` 默认为 `button`。`force` 模式下，没有可用 Provider 时禁用 OAuth，同时启用多个 Provider 时回退到登录按钮；CAS `force` 模式优先于 OAuth 自动登录。
 
 Provider 回调地址：
 
@@ -373,16 +440,23 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | 用户标识属性。为空时使用 `<cas:user>` |
 | `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | 邮箱属性 |
 | `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | 角色属性 |
+| `nexent-common.config.cas.defaultRole` | `CAS_DEFAULT_ROLE` | CAS 角色缺失、为空或不受支持时使用的 Nexent 默认角色，默认 `USER` |
 | `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | 租户属性 |
+| `nexent-common.config.cas.defaultTenantId` | `CAS_DEFAULT_TENANT_ID` | CAS 未返回租户属性或属性为空时使用的默认租户 |
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | CAS 角色到 Nexent 角色的 JSON 映射 |
 | `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | CAS 本地会话最长有效期 |
 | `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent 本地会话有效期 |
+| `nexent-common.config.cas.heartbeatUrl` | `CAS_HEARTBEAT_URL` | 用户活动触发的 CAS Server 心跳 GET 地址；为空时禁用 |
+| `nexent-common.config.cas.heartbeatIntervalSeconds` | `CAS_HEARTBEAT_INTERVAL_SECONDS` | CAS 活跃用户最小心跳间隔，默认 300 秒 |
+| `nexent-common.config.cas.heartbeatCookieName` | `CAS_HEARTBEAT_COOKIE_NAME` | 复制到心跳 `X-Auth-Token` Header 的前端可读 Cookie 名称 |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | 距离过期多少秒内触发无感续期 |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | 无感续期等待超时时间 |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | CAS 未返回邮箱时生成邮箱使用的域名 |
 | `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS 登出地址。为空时 Nexent 主动退出不调用 CAS Server 登出接口 |
 | `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | 访问 CAS Server 时是否校验证书 |
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | 自定义 CA bundle 路径 |
+
+CAS 心跳仅在 CAS 用户本地会话有效、页面可见且发生用户活动时运行。首次活动立即发送 GET，之后所有浏览器标签页共享配置的最小间隔。配置的 Cookie 可读取时，请求携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送请求但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳失败不会退出用户，也不会刷新本地 JWT。
 
 常用 CAS 地址：
 
@@ -428,10 +502,15 @@ nexent-common:
       userAttribute: "userName"
       emailAttribute: "email"
       roleAttribute: "userType"
+      defaultRole: "USER"
       tenantAttribute: "tenant_id"
+      defaultTenantId: "tenant_id"
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'
       sessionMaxAgeSeconds: 3600
       localSessionMaxAgeSeconds: 3600
+      heartbeatUrl: "https://<ModelEngine IP>:5443/<heartbeat-path>"
+      heartbeatIntervalSeconds: 300
+      heartbeatCookieName: "<cookie-name>"
       renewBeforeSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"

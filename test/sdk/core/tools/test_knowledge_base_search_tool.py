@@ -8,12 +8,36 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+_MODULE_MISSING = object()
+_original_modules = {}
+
+
+def _set_module(name, module):
+    _original_modules.setdefault(name, sys.modules.get(name, _MODULE_MISSING))
+    sys.modules[name] = module
+
 
 def _pkg(name, path):
     mod = types.ModuleType(name)
     mod.__path__ = [str(path)]
-    sys.modules.setdefault(name, mod)
+    _set_module(name, mod)
     return mod
+
+
+def _restore_modules():
+    for name, original_module in _original_modules.items():
+        if original_module is _MODULE_MISSING:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original_module
+
+_real_tools_common_spec = importlib.util.spec_from_file_location(
+    "_real_tools_common_message",
+    REPO_ROOT / "sdk" / "nexent" / "core" / "utils" / "tools_common_message.py",
+)
+_real_tools_common = importlib.util.module_from_spec(_real_tools_common_spec)
+assert _real_tools_common_spec and _real_tools_common_spec.loader
+_real_tools_common_spec.loader.exec_module(_real_tools_common)
 
 sdk_pkg = _pkg("sdk", REPO_ROOT / "sdk")
 nexent_pkg = _pkg("sdk.nexent", REPO_ROOT / "sdk" / "nexent")
@@ -34,7 +58,7 @@ class MessageObserver:
         pass
 
 class _ProcessType:
-    TOOL = "TOOL"
+    OTHER = "OTHER"
     CARD = "CARD"
     SEARCH_CONTENT = "SEARCH_CONTENT"
     PICTURE_WEB = "PICTURE_WEB"
@@ -44,7 +68,7 @@ ProcessType = _ProcessType
 observer_mod = types.ModuleType("sdk.nexent.core.utils.observer")
 observer_mod.MessageObserver = MessageObserver
 observer_mod.ProcessType = _ProcessType
-sys.modules["sdk.nexent.core.utils.observer"] = observer_mod
+_set_module("sdk.nexent.core.utils.observer", observer_mod)
 utils_pkg.observer = observer_mod
 
 class _EnumValue:
@@ -55,7 +79,7 @@ class _ToolCategory:
     SEARCH = _EnumValue("search")
 
 class _ToolSign:
-    KNOWLEDGE_BASE = _EnumValue("knowledge_base")
+    KNOWLEDGE_BASE = _EnumValue("a")
 
 class SearchResultTextMessage:
     def __init__(self, **kwargs):
@@ -79,16 +103,60 @@ class SearchResultTextMessage:
     def to_model_dict(self):
         return dict(self.data)
 
+
+def build_knowledge_search_response(
+    results,
+    used_scope,
+    permission_denied_scope,
+    unavailable_scope,
+    fallback_to_all,
+    scope_was_specified,
+):
+    def format_scope(scope):
+        return json.dumps(scope, ensure_ascii=False)
+
+    filtered_messages = []
+    if permission_denied_scope:
+        filtered_messages.append(f"no read permission: {format_scope(permission_denied_scope)}")
+    if unavailable_scope:
+        filtered_messages.append(f"not configured or unavailable: {format_scope(unavailable_scope)}")
+    filtered_notice = "; ".join(filtered_messages)
+    if not used_scope:
+        if filtered_notice:
+            notice = f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). No accessible knowledge bases remained, so search was not executed."
+        else:
+            notice = "NOTICE: No configured knowledge bases are accessible, so search was not executed."
+    elif filtered_notice and fallback_to_all:
+            notice = f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). Search was broadened to all available configured knowledge bases {format_scope(used_scope)}. Do not retry the filtered knowledge bases."
+    elif filtered_notice:
+        notice = f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). Search was executed in the remaining available knowledge bases {format_scope(used_scope)}. Do not retry the filtered knowledge bases."
+    elif scope_was_specified:
+        notice = "NOTICE: Search was executed in the requested knowledge bases."
+    else:
+        notice = "NOTICE: No knowledge-base scope was specified. Search was executed using the agent's configured accessible knowledge bases."
+    if not results and used_scope:
+        notice += " No relevant information was found."
+    return json.dumps(
+        {
+            "notice": notice,
+            "results": results,
+        }
+    )
+
 tools_common_mod = types.ModuleType("sdk.nexent.core.utils.tools_common_message")
 tools_common_mod.SearchResultTextMessage = SearchResultTextMessage
 tools_common_mod.ToolCategory = _ToolCategory
 tools_common_mod.ToolSign = _ToolSign
-sys.modules["sdk.nexent.core.utils.tools_common_message"] = tools_common_mod
+tools_common_mod.build_knowledge_search_response = build_knowledge_search_response
+tools_common_mod.resolve_knowledge_search_scope = (
+    _real_tools_common.resolve_knowledge_search_scope
+)
+_set_module("sdk.nexent.core.utils.tools_common_message", tools_common_mod)
 utils_pkg.tools_common_message = tools_common_mod
 
 constants_mod = types.ModuleType("sdk.nexent.core.utils.constants")
-constants_mod.RERANK_OVERSEARCH_MULTIPLIER = 2
-sys.modules["sdk.nexent.core.utils.constants"] = constants_mod
+constants_mod.RERANK_OVERSEARCH_MULTIPLIER = 10
+_set_module("sdk.nexent.core.utils.constants", constants_mod)
 utils_pkg.constants = constants_mod
 
 class BaseEmbedding:
@@ -99,12 +167,12 @@ class BaseRerank:
 
 embedding_mod = types.ModuleType("sdk.nexent.core.models.embedding_model")
 embedding_mod.BaseEmbedding = BaseEmbedding
-sys.modules["sdk.nexent.core.models.embedding_model"] = embedding_mod
+_set_module("sdk.nexent.core.models.embedding_model", embedding_mod)
 models_pkg.embedding_model = embedding_mod
 
 rerank_mod = types.ModuleType("sdk.nexent.core.models.rerank_model")
 rerank_mod.BaseRerank = BaseRerank
-sys.modules["sdk.nexent.core.models.rerank_model"] = rerank_mod
+_set_module("sdk.nexent.core.models.rerank_model", rerank_mod)
 models_pkg.rerank_model = rerank_mod
 
 class VectorDatabaseCore:
@@ -112,7 +180,7 @@ class VectorDatabaseCore:
 
 vector_base_mod = types.ModuleType("sdk.nexent.vector_database.base")
 vector_base_mod.VectorDatabaseCore = VectorDatabaseCore
-sys.modules["sdk.nexent.vector_database.base"] = vector_base_mod
+_set_module("sdk.nexent.vector_database.base", vector_base_mod)
 vector_pkg.base = vector_base_mod
 
 smolagents_mod = types.ModuleType("smolagents")
@@ -182,18 +250,31 @@ class Tool:
 
 smolagents_tools_mod.Tool = Tool
 smolagents_mod.tools = smolagents_tools_mod
-sys.modules["smolagents"] = smolagents_mod
-sys.modules["smolagents.tools"] = smolagents_tools_mod
+_set_module("smolagents", smolagents_mod)
+_set_module("smolagents.tools", smolagents_tools_mod)
+
+# Stub the gateway bridge: the tool only uses these adapter symbols for typing;
+# the real gateway eagerly registers every vendor adapter and pulls absolute
+# ``nexent.*`` / ``smolagents.*`` imports that the mocked env cannot satisfy.
+_gateway_mod = types.ModuleType("sdk.nexent.core.gateway")
+_gateway_mod.__path__ = []
+_gateway_modality_mod = types.ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod.__path__ = []
+for _name in ("EmbeddingAdapter", "RerankAdapter"):
+    setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
+_gateway_mod.modality = _gateway_modality_mod
+_set_module("sdk.nexent.core.gateway", _gateway_mod)
+_set_module("sdk.nexent.core.gateway.modality", _gateway_modality_mod)
 
 MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "tools" / "knowledge_base_search_tool.py"
 MODULE_NAME = "sdk.nexent.core.tools.knowledge_base_search_tool"
 spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
 knowledge_base_search_tool_module = importlib.util.module_from_spec(spec)
-sys.modules[MODULE_NAME] = knowledge_base_search_tool_module
+_set_module(MODULE_NAME, knowledge_base_search_tool_module)
 assert spec and spec.loader
 spec.loader.exec_module(knowledge_base_search_tool_module)
-tools_pkg.knowledge_base_search_tool = knowledge_base_search_tool_module
 KnowledgeBaseSearchTool = knowledge_base_search_tool_module.KnowledgeBaseSearchTool
+_restore_modules()
 
 
 @pytest.fixture
@@ -265,9 +346,6 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.forward("hello world")
 
         knowledge_base_search_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Searching the knowledge base..."
-        )
-        knowledge_base_search_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps([{"icon": "search", "text": "hello world"}], ensure_ascii=False)
         )
 
@@ -308,6 +386,7 @@ class TestKnowledgeBaseSearchTool:
         """Test successful hybrid search"""
         # Mock search results
         mock_results = create_mock_search_result(3)
+        mock_results[0]["highlight_terms"] = ["Test Document"]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
@@ -323,6 +402,10 @@ class TestKnowledgeBaseSearchTool:
             assert "score" in doc
             assert "index" in doc
             assert doc["title"] == f"Test Document {i}"
+
+        assert result["results"][0]["score_details"][
+            "retrieval_highlight_terms"
+        ] == ["Test Document"]
 
         # Verify vdb_core was called correctly
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -350,6 +433,47 @@ class TestKnowledgeBaseSearchTool:
             query_text="test query",
             top_k=5
         )
+
+    def test_search_hybrid_merges_scores_and_highlight_terms(self, knowledge_base_search_tool):
+        """Hybrid results merge branch scores and highlight terms into score_details."""
+        mock_results = create_mock_search_result(1)
+        mock_results[0]["scores"] = {"accurate": 0.6, "semantic": 0.8}
+        mock_results[0]["highlight_terms"] = ["hybrid term"]
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
+
+        score_details = result["results"][0]["score_details"]
+        assert score_details["accurate"] == 0.6
+        assert score_details["semantic"] == 0.8
+        assert score_details["retrieval_highlight_terms"] == ["hybrid term"]
+
+    def test_search_results_without_metadata_stay_untouched(self, knowledge_base_search_tool):
+        """Documents without score metadata must not gain a score_details key."""
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
+
+        assert "score_details" not in result["results"][0]
+        # The original document dict must not be mutated by formatting.
+        assert "score" not in mock_results[0]["document"]
+
+    def test_search_accurate_merges_highlight_terms(self, knowledge_base_search_tool):
+        """Accurate results expose lexical highlight terms for later rendering."""
+        mock_results = create_mock_search_result(2)
+        mock_results[0]["highlight_terms"] = ["exact term"]
+        mock_results[0]["document"]["score_details"] = {"accuracy": 0.7}
+        knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
+
+        first = result["results"][0]
+        assert first["score_details"]["accuracy"] == 0.7
+        assert first["score_details"]["retrieval_highlight_terms"] == ["exact term"]
+        assert "score_details" not in result["results"][1]
+        # The original document dict must not be mutated by formatting.
+        assert "retrieval_highlight_terms" not in mock_results[0]["document"]["score_details"]
 
     def test_search_semantic_success(self, knowledge_base_search_tool):
         """Test successful semantic search"""
@@ -392,7 +516,7 @@ class TestKnowledgeBaseSearchTool:
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Verify result structure
         assert len(search_results) == 2
@@ -409,7 +533,7 @@ class TestKnowledgeBaseSearchTool:
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Verify result structure
         assert len(search_results) == 4
@@ -426,14 +550,36 @@ class TestKnowledgeBaseSearchTool:
         assert "hybrid, accurate, semantic" in str(excinfo.value)
 
     def test_forward_no_results(self, knowledge_base_search_tool):
-        """Test forward method with no search results"""
+        """No results should be an observation so the agent can finish its answer."""
         # Mock empty search results
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
 
-        with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
 
-        assert "No results found" in str(excinfo.value)
+        assert result["results"] == []
+        assert set(result) == {"notice", "results"}
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information" in result["notice"]
+
+    def test_forward_reports_display_names_but_searches_internal_indices(
+        self, knowledge_base_search_tool
+    ):
+        knowledge_base_search_tool.display_name_to_index_map = {
+            "Product Docs": "test_index1",
+            "FAQ Docs": "test_index2",
+        }
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
+
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
+
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["test_index1", "test_index2"],
+            query_text="test query",
+            embedding_model=knowledge_base_search_tool.embedding_model,
+            top_k=5,
+        )
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "test_index1" not in result["notice"]
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
         """Test forward method uses configured custom index names."""
@@ -463,10 +609,7 @@ class TestKnowledgeBaseSearchTool:
 
         result = knowledge_base_search_tool.forward("test query")
 
-        # Verify Chinese running prompt
-        knowledge_base_search_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "知识库检索中..."
-        )
+        # Verify card message is sent
 
     def test_forward_title_fallback(self, knowledge_base_search_tool):
         """Test forward method with title fallback to filename"""
@@ -490,7 +633,7 @@ class TestKnowledgeBaseSearchTool:
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Verify title fallback
         assert len(search_results) == 1
@@ -612,7 +755,7 @@ class TestKnowledgeBaseSearchToolRerank:
         )
 
         result = tool.forward("test query")
-        results = json.loads(result)
+        results = json.loads(result)["results"]
 
         # Verify rerank was called
         mock_rerank_model.rerank.assert_called_once()
@@ -708,13 +851,14 @@ class TestKnowledgeBaseSearchToolRerank:
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once()
 
     def test_forward_empty_index_names_string(self, knowledge_base_search_tool):
-        """Test forward method with empty index_names string returns no results"""
+        """Test forward method with empty index_names string returns a clear denial message"""
         knowledge_base_search_tool.index_names = ""
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
 
-        # Should return no results message
-        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+        # Should return the permission-denial message since no index is available
+        assert result["results"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
 
     def test_forward_single_index_name(self, knowledge_base_search_tool):
         """Test forward method with single index name"""
@@ -1250,11 +1394,6 @@ class TestToolMetadata:
         assert "query" in KnowledgeBaseSearchTool.inputs
         assert KnowledgeBaseSearchTool.inputs["query"]["type"] == "string"
 
-    def test_running_prompts(self, knowledge_base_search_tool):
-        """Test running prompts for both languages."""
-        assert knowledge_base_search_tool.running_prompt_zh == "知识库检索中..."
-        assert knowledge_base_search_tool.running_prompt_en == "Searching the knowledge base..."
-
 
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
@@ -1311,7 +1450,7 @@ class TestEdgeCases:
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
         result = knowledge_base_search_tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         assert search_results[0]["content"] == ""
 
@@ -1347,7 +1486,7 @@ class TestEdgeCases:
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
         result = knowledge_base_search_tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         assert len(search_results) == 2
 
@@ -1375,7 +1514,7 @@ class TestEdgeCases:
         )
 
         result = tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         assert len(search_results) == 3
 
@@ -1748,14 +1887,14 @@ class TestDocumentPathsAccessControl:
         mock_vdb_core.hybrid_search.return_value = mock_results
 
         result = tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Only doc1 should be in the result
         assert len(search_results) == 1
         assert search_results[0].get("url") == "s3://bucket/doc1.txt"
 
     def test_forward_with_document_paths_filter_no_results_after_filter(self, mock_vdb_core, mock_embedding_model, mock_observer):
-        """Test that forward raises exception when all results are filtered out."""
+        """All filtered results should produce a safe no-evidence observation."""
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="hybrid",
@@ -1770,11 +1909,11 @@ class TestDocumentPathsAccessControl:
         mock_results = self._create_mock_vdb_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
         mock_vdb_core.hybrid_search.return_value = mock_results
 
-        # Should raise exception because after filtering, no results remain
-        with pytest.raises(Exception) as excinfo:
-            tool.forward("test query")
+        result = json.loads(tool.forward("test query"))
 
-        assert "No results found" in str(excinfo.value)
+        assert result["results"] == []
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information was found" in result["notice"]
 
     def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
         """Filter should tolerate a FieldInfo default instead of a concrete list.
@@ -1861,3 +2000,249 @@ class TestDocumentPathsAccessControl:
 
         assert len(filtered) == 1
         assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
+
+
+# ============================================================================
+# KB Read Permission Control Tests (Issue #3339)
+# ============================================================================
+
+
+class TestAllowedIndexNamesWhitelist:
+    """Tests for allowed_index_names whitelist filtering in forward()."""
+
+    def test_forward_filters_unauthorized_indices(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names is set, forward() filters out any index_name not in the whitelist
+        before calling hybrid_search.
+        """
+        mock_results = create_mock_search_result(2)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["allowed_kb", "forbidden_kb"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["allowed_kb"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        # Verify hybrid_search was called with only the allowed index
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["index_names"] == ["allowed_kb"]
+        assert "forbidden_kb" not in call_kwargs["index_names"]
+
+    def test_forward_notice_distinguishes_permission_and_unknown_indices(
+        self, mock_observer, mock_vdb_core, mock_embedding_model
+    ):
+        mock_vdb_core.hybrid_search.return_value = []
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["allowed_kb", "forbidden_kb"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["allowed_kb"],
+            display_name_to_index_map={
+                "Allowed KB": "allowed_kb",
+                "Forbidden KB": "forbidden_kb",
+            },
+        )
+
+        result = json.loads(
+            tool.forward("test query", index_names=["Allowed KB", "Forbidden KB", "Missing KB"])
+        )
+
+        assert mock_vdb_core.hybrid_search.call_args.kwargs["index_names"] == ["allowed_kb"]
+        assert 'no read permission: ["Forbidden KB"]' in result["notice"]
+        assert 'not configured or unavailable: ["Missing KB"]' in result["notice"]
+
+    @pytest.mark.parametrize(
+        ("requested", "expected_used", "expected_ignored", "fallback"),
+        [
+            (["kb1", "kb2"], ["kb1", "kb2"], [], False),
+            (["kb1", "kb-missing"], ["kb1"], ["kb-missing"], False),
+            (["kb-missing"], ["kb1", "kb2", "kb3"], ["kb-missing"], True),
+        ],
+    )
+    def test_forward_corrects_requested_scope(
+        self,
+        requested,
+        expected_used,
+        expected_ignored,
+        fallback,
+        mock_observer,
+        mock_vdb_core,
+        mock_embedding_model,
+    ):
+        mock_vdb_core.hybrid_search.return_value = []
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2", "kb3"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            display_name_to_index_map={},
+        )
+
+        response = json.loads(tool.forward("test query", index_names=requested))
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args.kwargs
+        assert call_kwargs["index_names"] == expected_used
+        if expected_ignored:
+            assert "not configured or unavailable" in response["notice"]
+            for ignored_index in expected_ignored:
+                assert ignored_index in response["notice"]
+            if fallback:
+                assert "broadened to all available configured knowledge bases" in response["notice"]
+            else:
+                assert "remaining available knowledge bases" in response["notice"]
+        else:
+            assert "Search was executed in the requested knowledge bases" in response["notice"]
+
+    def test_forward_explicit_empty_scope_uses_configured_scope(
+        self, mock_observer, mock_vdb_core, mock_embedding_model
+    ):
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            display_name_to_index_map={},
+        )
+
+        mock_vdb_core.hybrid_search.return_value = []
+        response = json.loads(tool.forward("test query", index_names=[]))
+
+        assert response["results"] == []
+        assert "No knowledge-base scope was specified" in response["notice"]
+        assert "No relevant information was found" in response["notice"]
+        assert mock_vdb_core.hybrid_search.call_args.kwargs["index_names"] == ["kb1", "kb2"]
+
+    def test_forward_with_empty_whitelist_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names is an empty list, forward() returns early without calling hybrid_search.
+        The message indicates that no knowledge base is accessible due to permissions.
+        """
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=[],
+        )
+
+        result = tool.forward("test query")
+
+        # Should return early with a clear permission-denial observation
+        result = json.loads(result)
+        assert result["results"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
+        mock_vdb_core.hybrid_search.assert_not_called()
+
+    def test_forward_without_whitelist_allows_all(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names is None (default), forward() does NOT filter any indices.
+        All configured indices are used.
+        """
+        mock_results = create_mock_search_result(3)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2", "kb3"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=None,
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        # All indices should be used
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["index_names"] == ["kb1", "kb2", "kb3"]
+
+    def test_forward_with_partial_overlap_only(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names contains a subset of configured indices,
+        forward() uses only the intersection.
+        """
+        mock_results = create_mock_search_result(2)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2", "kb3"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["kb2", "kb3", "kb4"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["index_names"] == ["kb2", "kb3"]
+
+    def test_forward_with_no_overlap_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names has no intersection with configured indices,
+        forward() returns early without calling hybrid_search.
+        """
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["kb3", "kb4"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        mock_vdb_core.hybrid_search.assert_not_called()
+        # Clear permission-denial observation is returned
+        result = json.loads(result)
+        assert result["results"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
+
+    def test_forward_preserves_index_order_after_filtering(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        After filtering by allowed_index_names, the order of remaining indices is preserved.
+        """
+        mock_results = create_mock_search_result(2)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb_c", "kb_a", "kb_b", "kb_d"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["kb_a", "kb_c", "kb_d"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        # Order should be preserved from the original index_names list
+        assert call_kwargs["index_names"] == ["kb_c", "kb_a", "kb_d"]

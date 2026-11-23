@@ -9,6 +9,8 @@ import Image from "next/image";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGlobalConfigStore } from "@/stores/global";
+import { publicAsset } from "@/lib/publicAsset";
 
 /**
  * Authentication dialogs component
@@ -16,11 +18,13 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
  */
 export function AuthDialogs() {
   const { t } = useTranslation("common");
+  const { config } = useGlobalConfigStore();
 
   const {
     isAuthPromptModalOpen,
     isSessionExpiredModalOpen,
     closeSessionExpiredModal,
+    openLoginModalAfterSessionExpired,
     closeAuthPromptModal,
     openLoginModal,
     openRegisterModal,
@@ -46,7 +50,7 @@ export function AuthDialogs() {
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <Image
-              src="/modelengine-logo.png"
+              src={publicAsset("/modelengine-logo.png")}
               alt="ModelEngine Logo"
               width={80}
               height={80}
@@ -61,9 +65,7 @@ export function AuthDialogs() {
 
           {/* Subtitle */}
           <p className="text-center text-gray-500 mb-8 mt-4 ml-10 mr-10 text-sm">
-            {t(
-              "A powerful AI agent platform for intelligent conversations and automation"
-            )}
+            {t("page.loginPrompt.slogan")}
           </p>
 
           {/* Action buttons */}
@@ -98,17 +100,19 @@ export function AuthDialogs() {
           </div>
 
           {/* GitHub support */}
-          <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
-            <GithubOutlined className="text-base" />
-            <a
-              href="https://github.com/ModelEngine-Group/nexent"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t("page.loginPrompt.githubSupport")}
-            </a>
-            <span></span>
-          </div>
+          { config.aboutConfig === 'open' && (
+            <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
+              <GithubOutlined className="text-base" />
+              <a
+                href="https://github.com/ModelEngine-Group/nexent"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("page.loginPrompt.githubSupport")}
+              </a>
+              <span></span>
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -137,10 +141,7 @@ export function AuthDialogs() {
       <Modal
         title={t("login.expired.title")}
         open={isSessionExpiredModalOpen}
-        onOk={() => {
-          closeSessionExpiredModal();
-          openLoginModal();
-        }}
+        onOk={openLoginModalAfterSessionExpired}
         onCancel={closeSessionExpiredModal}
         okText={t("login.expired.okText")}
         cancelText={t("login.expired.cancelText")}

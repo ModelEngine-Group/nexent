@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Disposable deployed TFP fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runtime_container", "workspace_mount_id", "skill_id", "skill_name", "config", "langfuse"],
+  "properties": {
+    "runtime_container": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]+$"},
+    "workspace_mount_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "skill_id": {"type": "integer", "minimum": 1},
+    "skill_name": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
+    "config": {
+      "type": "object", "additionalProperties": false, "required": ["marker", "value"],
+      "properties": {
+        "marker": {"type": "string", "pattern": "^TFP_[A-Z0-9_]+$"},
+        "value": {"type": "integer", "minimum": 1, "maximum": 1000}
+      }
+    },
+    "langfuse": {
+      "type": "object", "additionalProperties": false,
+      "required": ["url", "public_key_env", "secret_key_env"],
+      "properties": {
+        "api_version": {"type": "string", "enum": ["v1", "v2"], "default": "v1"},
+        "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "public_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+        "secret_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"}
+      }
+    }
+  }
+}

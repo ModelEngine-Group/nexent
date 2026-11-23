@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-061
+  name: 真正并发、max_workers、部分失败、聚合、取消
+  status: active
+  description: '智能体运行时与对话 / 并行多Agent: 真正并发、max_workers、部分失败、聚合、取消'
+  business_rules:
+  - rule_id: F-061-RULE-01
+    description: 真正并发、max_workers、部分失败、聚合、取消
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

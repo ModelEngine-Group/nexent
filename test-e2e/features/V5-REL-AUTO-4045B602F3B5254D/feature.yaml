@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-4045B602F3B5254D
+  name: 中断上传清理删除部分对象失败时的降级与状态机收尾
+  status: active
+  description: 风险：服务重启清理中断上传时，若 MinIO 删除部分对象失败（delete_file 返回 success=false 且对象仍存在）而清理逻辑未正确降级，生命周期记录会残留 UPLOADING 状态，后续每次重启都会重复选中该记录反复删除失败，形成悬空上传记录并持续重试。目标：删除失败时记录转入
+    FAILED/UPLOAD_RECOVERY 阶段并置 error_code=UPLOAD_RECOVERY_FAILED，不再残留 UPLOADING 状态，且该记录可被后续处理（列表查询不再命中 UPLOADING，状态为终态 FAILED）。
+  business_rules:
+  - rule_id: V5-REL-AUTO-4045B602F3B5254D-RULE-01
+    description: 中断上传清理删除部分对象失败时的降级与状态机收尾
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

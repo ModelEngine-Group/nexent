@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, desc, func, insert, select, update
 
 from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from consts.model import filter_extra_params
 from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
@@ -35,6 +36,13 @@ def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str
         # Add tenant_id to cleaned_data
         if tenant_id is not None:
             cleaned_data["tenant_id"] = tenant_id
+
+        # v2.6.0: filter extra_params to only allowed keys for this model type.
+        # temperature and top_p flow through as dedicated columns (like W1 fields).
+        extra_params = cleaned_data.get("extra_params")
+        if extra_params is not None:
+            model_type = cleaned_data.get("model_type")
+            cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
 
         # Build the insert statement
         stmt = insert(ModelRecord).values(cleaned_data)
@@ -76,6 +84,19 @@ def update_model_record(
         if tenant_id is not None:
             cleaned_data["tenant_id"] = tenant_id
 
+        # v2.6.0: filter extra_params to only allowed keys for this model type.
+        # When model_type is not part of the update payload, look it up from the
+        # existing record so filtering still applies.
+        extra_params = cleaned_data.get("extra_params")
+        if extra_params is not None:
+            model_type = cleaned_data.get("model_type")
+            if model_type is None:
+                model_type = session.scalars(
+                    select(ModelRecord.model_type).where(
+                        ModelRecord.model_id == model_id)
+                ).first()
+            cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
+
         # Build the update statement
         stmt = update(ModelRecord).where(
             ModelRecord.model_id == model_id
@@ -85,6 +106,23 @@ def update_model_record(
         result = session.execute(stmt)
 
         return result.rowcount > 0
+
+
+def fail_detecting_models_on_startup() -> int:
+    """Finish connectivity checks interrupted by a config-service restart."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(ModelRecord)
+            .where(
+                ModelRecord.connect_status == "detecting",
+                ModelRecord.delete_flag == "N",
+            )
+            .values(
+                connect_status="unavailable",
+                update_time=func.current_timestamp(),
+            )
+        )
+        return int(result.rowcount or 0)
 
 
 def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
@@ -182,11 +220,13 @@ def get_model_by_display_name(display_name: str, tenant_id: str, model_type: str
         tenant_id:
     """
     filters = {'display_name': display_name}
-    
-    if model_type in ["multiEmbedding", "multi_embedding"]:
-        filters['model_type'] = "multi_embedding"
-    elif model_type == "embedding":
-        filters['model_type'] = "embedding"
+
+    if model_type:
+        filters['model_type'] = (
+            "multi_embedding"
+            if model_type in ["multiEmbedding", "multi_embedding"]
+            else model_type
+        )
 
     records = get_model_records(filters, tenant_id)
     if not records:
@@ -216,7 +256,7 @@ def get_model_id_by_display_name(display_name: str, tenant_id: str, model_type: 
     Get a model ID by display name
 
     Args:
-        display_name: Model display name 
+        display_name: Model display name
         tenant_id: tenant_id
 
     Returns:
@@ -228,7 +268,7 @@ def get_model_id_by_display_name(display_name: str, tenant_id: str, model_type: 
 
 def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Get a model record using native SQLAlchemy query
+    Get a model record using native SQLAlchemy query.
 
     Args:
         model_id (int): Model ID
@@ -269,6 +309,37 @@ def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Opt
         return result_dict
 
 
+def get_model_by_model_id_ignore_delete(model_id: int, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get a model record without filtering by delete_flag.
+
+    Used when checking whether a previously selected model has been deleted
+    (e.g., for tools that store a selected_model_id in their params).
+
+    Args:
+        model_id (int): Model ID
+        tenant_id (Optional[str]): Tenant ID, optional
+
+    Returns:
+        Optional[Dict[str, Any]]: Model record as a dictionary, or None if not found
+    """
+    with get_db_session() as session:
+        stmt = select(ModelRecord).where(ModelRecord.model_id == model_id)
+        if tenant_id:
+            stmt = stmt.where(ModelRecord.tenant_id == tenant_id)
+        result = session.scalars(stmt).first()
+        if result is None:
+            return None
+        result_dict = {key: value for key,
+                       value in result.__dict__.items() if not key.startswith('_')}
+        if result_dict.get("model_type") in ["embedding", "multi_embedding"]:
+            if result_dict.get("expected_chunk_size") is None:
+                result_dict["expected_chunk_size"] = DEFAULT_EXPECTED_CHUNK_SIZE
+            if result_dict.get("maximum_chunk_size") is None:
+                result_dict["maximum_chunk_size"] = DEFAULT_MAXIMUM_CHUNK_SIZE
+        return result_dict
+
+
 def get_models_by_tenant_factory_type(tenant_id: str, model_factory: str, model_type: str) -> List[Dict[str, Any]]:
     """
     Get all model database records matching tenant_id, model_factory, and model_type.
@@ -280,15 +351,44 @@ def get_models_by_tenant_factory_type(tenant_id: str, model_factory: str, model_
     return get_model_records(filters, tenant_id)
 
 
+def get_valid_model_ids(model_ids: List[int], tenant_id: str) -> List[int]:
+    """
+    Filter model IDs to only include those that are not soft-deleted (delete_flag='N').
+
+    When a model is deleted from model management, its delete_flag is set to 'Y'.
+    This function ensures that only valid (non-deleted) model IDs are returned,
+    preserving the order of the input model_ids.
+
+    Args:
+        model_ids: List of model IDs to filter
+        tenant_id: Tenant ID for filtering
+
+    Returns:
+        List[int]: Filtered list of valid model IDs in original order
+    """
+    if not model_ids:
+        return []
+
+    with get_db_session() as session:
+        stmt = select(ModelRecord.model_id).where(
+            ModelRecord.model_id.in_(model_ids),
+            ModelRecord.delete_flag == 'N'
+        )
+        valid_ids = session.scalars(stmt).all()
+        valid_ids_set = set(valid_ids)
+
+        return [mid for mid in model_ids if mid in valid_ids_set]
+
+
 def get_model_by_name_factory(model_name: str, model_factory: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     """
     Get a model record by model_name and model_factory for deduplication.
-    
+
     Args:
         model_name: Model name (e.g., "deepseek-r1-distill-qwen-14b")
         model_factory: Model factory (e.g., "ModelEngine")
         tenant_id: Tenant ID
-        
+
     Returns:
         Optional[Dict[str, Any]]: Model record if found, None otherwise
     """
@@ -298,5 +398,3 @@ def get_model_by_name_factory(model_name: str, model_factory: str, tenant_id: st
     }
     records = get_model_records(filters, tenant_id)
     return records[0] if records else None
-
-

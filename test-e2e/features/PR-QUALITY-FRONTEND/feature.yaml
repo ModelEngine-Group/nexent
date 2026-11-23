@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: PR-QUALITY
+  name: Frontend quality repair
+feature:
+  feature_id: PR-QUALITY-FRONTEND
+  name: Preserved frontend interactions during quality repair
+  status: active
+  description: Accessible parameter input and unchanged model dialog lifecycle.
+  business_rules:
+  - rule_id: PR-QUALITY-RULE-001
+    description: Keyboard/mouse parameter values clamp to 0–100; absent callbacks
+      perform no mutation.
+  - rule_id: PR-QUALITY-RULE-002
+    description: Dialog reset and warning callbacks preserve existing selection behavior.
+  required_test_stages:
+  - D1
+  source:
+    requirement_ids:
+    - PR-QUALITY-REQ-001
+    spec_path: ../nexent-doc/docs/Developing/agt-editor-empty-configuration-layout/changes/agt-quality-gate-repair/proposal.md

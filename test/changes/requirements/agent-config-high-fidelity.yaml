@@ -1,0 +1,52 @@
+schema_version: "1.0"
+changes:
+  - change_id: AGENT-CONFIG-REQ-001
+    change_type: requirement
+    requirement_id: AGENT-CONFIG-REQ-001
+    title: Align Agent configuration panel with the high-fidelity reference
+    description: Replace the outer configuration tabs with the continuous shared-reference layout while preserving all current Agent editing, validation, save, focus, unlock, debug, and publish behavior.
+    feature_contract_changed: true
+    affected_features:
+      existing: []
+      added: [AGENT-CONFIG-LAYOUT]
+      modified: []
+      retired: []
+    affected_cases:
+      existing: []
+      added: [AGENT-CONFIG-D1-001]
+      modified: []
+      retired: []
+  - change_id: AGENT-CONFIG-REQ-002
+    change_type: requirement
+    requirement_id: AGENT-CONFIG-REQ-002
+    title: Implement the measured empty-draft four-card Agent editor
+    description: Apply the2026-10-09 contiguous editor geometry, identity/workflow row, four grouped white cards,48px resource add entries, measured typography and five-question addition limit while retaining legacy data and existing save/permission/model/resource/guardrail contracts.
+    feature_contract_changed: true
+    affected_features:
+      existing: []
+      added: []
+      modified: [AGENT-CONFIG-LAYOUT]
+      retired: []
+    affected_cases:
+      existing: []
+      added: [AGENT-CONFIG-D1-002, AGENT-CONFIG-D1-003, AGENT-CONFIG-D1-004, AGENT-CONFIG-D4-001]
+      modified: [AGENT-CONFIG-D1-001]
+      retired: []
+    notes: Supersedes the historical ten-card/bottom-action presentation contract without deleting its evidence. The user authorized the high-fidelity five-question rule; legacy arrays longer than five are preserved. Formal SPEC is in the sibling document repository; exact font glyph parity requires unavailable local assets.
+
+  - change_id: AGENT-CONFIG-REQ-003
+    change_type: requirement
+    requirement_id: AGENT-CONFIG-REQ-003
+    title: Reuse resource-picker drawers in Agent configuration
+    description: Replace five association popup presentations with the existing shared right drawer while preserving all selection, configuration, permission and persistence behavior.
+    feature_contract_changed: true
+    affected_features:
+      existing: []
+      added: []
+      modified: [AGENT-CONFIG-LAYOUT]
+      retired: []
+    affected_cases:
+      existing: [AGENT-CONFIG-D1-003, AGENT-CONFIG-D1-004]
+      added: [AGENT-CONFIG-D1-005]
+      modified: [AGENT-CONFIG-D4-001]
+      retired: []

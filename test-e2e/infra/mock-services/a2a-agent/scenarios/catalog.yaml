@@ -1,0 +1,49 @@
+version: 1
+
+scenarios:
+  happy-jsonrpc:
+    description: Normal Agent Card discovery and deterministic invocation.
+
+  delayed-response:
+    description: Delay every Agent Card and invocation response.
+    fault:
+      delay_ms: 35000
+
+  unauthorized:
+    description: Return an injected authentication failure before protocol handling.
+    fault:
+      status: 401
+      message: Injected authorization failure
+
+  invocation-timeout:
+    description: Exceed the product's 300 second invocation deadline (serial long test).
+    fault:
+      delay_ms: 305000
+
+  forbidden:
+    description: Return an injected authorization-policy failure.
+    fault:
+      status: 403
+      message: Injected forbidden response
+
+  rate-limited:
+    description: Return an injected rate-limit response.
+    fault:
+      status: 429
+      message: Injected rate limit
+
+  server-error:
+    description: Return an injected upstream server failure.
+    fault:
+      status: 500
+      message: Injected A2A server error
+
+  malformed-card:
+    description: Return invalid JSON from Agent Card discovery.
+    fault:
+      malformed_card: true
+
+  transport-disconnect:
+    description: Reserved for the Toxiproxy connection-reset profile.
+    proxy:
+      toxic: reset_peer

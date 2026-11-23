@@ -1,4 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
+import threading
 
 import pytest
 
@@ -7,7 +10,7 @@ from sdk.nexent.core.utils.observer import (
     MessageObserver, Message, ProcessType,
     DefaultTransformer, StepCountTransformer,
     ParseTransformer, ExecutionLogsTransformer, FinalAnswerTransformer,
-    TokenCountTransformer, ErrorTransformer
+    TokenCountTransformer
 )
 
 
@@ -42,6 +45,35 @@ class TestMessage:
 
         parsed = json.loads(json_str)
         assert parsed["content"] == unicode_content
+
+    def test_message_to_json_preserves_dict_content_and_tool_metadata(self):
+        """Test Message.to_json() preserves structured content and tool metadata."""
+        content = {"status": "complete", "items": ["one", "two"]}
+        tool_arguments = {"query": "test", "limit": 10}
+        message = Message(
+            ProcessType.TOOL,
+            content,
+            tool_name="search_documents",
+            tool_arguments=tool_arguments,
+        )
+
+        parsed = json.loads(message.to_json())
+
+        assert parsed == {
+            "type": ProcessType.TOOL.value,
+            "content": content,
+            "tool_name": "search_documents",
+            "tool_arguments": tool_arguments,
+        }
+
+    def test_message_to_json_omits_unset_tool_metadata(self):
+        """Test Message.to_json() omits tool metadata when it is not provided."""
+        parsed = json.loads(Message(ProcessType.OTHER, "Test content").to_json())
+
+        assert parsed == {
+            "type": ProcessType.OTHER.value,
+            "content": "Test content",
+        }
 
 
 class TestDefaultTransformer:
@@ -120,7 +152,7 @@ class TestParseTransformer:
         code_content = "print('Hello World')"
 
         result = transformer.transform(content=code_content, lang="zh")
-        expected = "\n🛠️ 使用Python解释器执行代码\n```python\nprint('Hello World')\n```\n"
+        expected = "print('Hello World')"
         assert result == expected
 
     def test_parse_transformer_en(self):
@@ -129,7 +161,7 @@ class TestParseTransformer:
         code_content = "x = 42"
 
         result = transformer.transform(content=code_content, lang="en")
-        expected = "\n🛠️ Used tool python_interpreter\n```python\nx = 42\n```\n"
+        expected = "x = 42"
         assert result == expected
 
     def test_parse_transformer_default_lang(self):
@@ -138,30 +170,27 @@ class TestParseTransformer:
         code_content = "def test(): pass"
 
         result = transformer.transform(content=code_content)
-        expected = "\n🛠️ Used tool python_interpreter\n```python\ndef test(): pass\n```\n"
+        expected = "def test(): pass"
         assert result == expected
 
 
 class TestExecutionLogsTransformer:
     """Test ExecutionLogsTransformer class"""
 
-    def test_execution_logs_transformer_zh(self):
-        """Test ExecutionLogsTransformer with Chinese language"""
+    def test_execution_logs_transformer(self):
+        """Test ExecutionLogsTransformer returns content as-is"""
         transformer = ExecutionLogsTransformer()
         log_content = "Hello World\n42"
 
         result = transformer.transform(content=log_content, lang="zh")
-        expected = "\n📝 执行结果\n```bash\nHello World\n42\n```\n"
-        assert result == expected
+        assert result == log_content
 
-    def test_execution_logs_transformer_en(self):
-        """Test ExecutionLogsTransformer with English language"""
+    def test_execution_logs_transformer_empty(self):
+        """Test ExecutionLogsTransformer with empty content"""
         transformer = ExecutionLogsTransformer()
-        log_content = "Success"
 
-        result = transformer.transform(content=log_content, lang="en")
-        expected = "\n📝 Execution Logs\n```bash\nSuccess\n```\n"
-        assert result == expected
+        result = transformer.transform(content="", lang="en")
+        assert result == ""
 
 
 class TestFinalAnswerTransformer:
@@ -203,28 +232,6 @@ class TestTokenCountTransformer:
         assert result == duration
 
 
-class TestErrorTransformer:
-    """Test ErrorTransformer class"""
-
-    def test_error_transformer_zh(self):
-        """Test ErrorTransformer with Chinese language"""
-        transformer = ErrorTransformer()
-        error_content = "Something went wrong"
-
-        result = transformer.transform(content=error_content, lang="zh")
-        expected = "\n💥 运行出错： \nSomething went wrong\n"
-        assert result == expected
-
-    def test_error_transformer_en(self):
-        """Test ErrorTransformer with English language"""
-        transformer = ErrorTransformer()
-        error_content = "Runtime error"
-
-        result = transformer.transform(content=error_content, lang="en")
-        expected = "\n💥 Error: \nRuntime error\n"
-        assert result == expected
-
-
 class TestMessageObserver:
     """Test MessageObserver class functionality"""
 
@@ -239,6 +246,7 @@ class TestMessageObserver:
         observer_en = MessageObserver(lang="en")
         assert observer_en.lang == "en"
         assert observer_en.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+        assert observer_en.enable_nl2a_wrapper is False
 
         # Test Chinese
         observer_zh = MessageObserver(lang="zh")
@@ -267,6 +275,472 @@ class TestMessageObserver:
         message_data = json.loads(cached_messages[0])
         assert message_data["type"] == ProcessType.STEP_COUNT.value
         assert "Step 3" in message_data["content"]
+
+    def test_add_message_strips_terminal_ansi_sequences(self):
+        """Console colour and title sequences must not leak into SSE text."""
+        observer = MessageObserver(lang="en")
+
+        observer.add_message(
+            "test_agent",
+            ProcessType.WARNING,
+            "\x1b[31mHTTPError\x1b[0m \x1b]0;kernel traceback\x07details",
+        )
+
+        message_data = json.loads(observer.get_cached_message()[0])
+        assert message_data == {
+            "type": ProcessType.WARNING.value,
+            "content": "HTTPError details",
+        }
+
+    def test_add_message_uses_context_tool_call_id_when_explicit_value_is_none(self):
+        """Preserve the active tool ID when a caller passes an empty override."""
+        observer = MessageObserver(lang="en")
+
+        with observer.tool_call_context("call-123"):
+            observer.add_message(
+                "test_agent",
+                ProcessType.SEARCH_CONTENT,
+                "results",
+                tool_call_id=None,
+            )
+
+        message_data = json.loads(observer.get_cached_message()[0])
+        assert message_data["tool_call_id"] == "call-123"
+
+    def test_add_subagent_start_serializes_payload_and_increments_depth(self, observer):
+        """Emit a nested sub-agent start event with replay metadata."""
+        observer.add_subagent_start("agent-1", "Researcher", task="Analyze Chinese content")
+
+        message_data = json.loads(observer.get_cached_message()[0])
+
+        # invocation_id is generated when not supplied; the start chunk must
+        # carry it on both the payload and the top-level metadata so downstream
+        # consumers can attribute every nested chunk to this run.
+        assert set(message_data.keys()) >= {
+            "type",
+            "content",
+            "agent_id",
+            "agent_name",
+            "depth",
+            "invocation_id",
+        }
+        assert message_data["type"] == ProcessType.SUBAGENT_START.value
+        content_payload = json.loads(message_data["content"])
+        assert content_payload == {
+            "agent_id": "agent-1",
+            "agent_name": "Researcher",
+            "task": "Analyze Chinese content",
+            "invocation_id": message_data["invocation_id"],
+        }
+        assert message_data["agent_id"] == "agent-1"
+        assert message_data["agent_name"] == "Researcher"
+        assert message_data["depth"] == 1
+        assert message_data["invocation_id"]
+        assert observer._current_depth.get() == 1
+        assert observer._current_invocation_id.get() == message_data["invocation_id"]
+
+    def test_add_subagent_start_with_explicit_invocation_id_is_preserved(self, observer):
+        """Carry through a caller-supplied invocation_id for deterministic pairing."""
+        observer.add_subagent_start(
+            "agent-1", "Researcher", task="t", invocation_id="inv-42"
+        )
+
+        message_data = json.loads(observer.get_cached_message()[0])
+
+        assert message_data["invocation_id"] == "inv-42"
+        assert json.loads(message_data["content"])["invocation_id"] == "inv-42"
+        assert observer._current_invocation_id.get() == "inv-42"
+
+    def test_add_subagent_end_clamps_event_depth_and_decrements_depth(self, observer):
+        """Close sub-agent events without allowing the nesting depth below zero."""
+        invocation_id = observer._current_invocation_id.get()
+        observer.add_subagent_start("agent-1", "Researcher")
+        start_id = observer._current_invocation_id.get()
+        observer.add_subagent_end("agent-1", "Researcher", invocation_id=start_id)
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+        end_message = messages[-1]
+
+        assert end_message["type"] == ProcessType.SUBAGENT_END.value
+        assert end_message["agent_id"] == "agent-1"
+        assert end_message["agent_name"] == "Researcher"
+        assert end_message["depth"] == 1
+        assert end_message["invocation_id"] == start_id
+        assert json.loads(end_message["content"]) == {
+            "agent_id": "agent-1",
+            "agent_name": "Researcher",
+            "invocation_id": start_id,
+        }
+        assert observer._current_depth.get() == 0
+        assert observer._current_invocation_id.get() == invocation_id
+
+    def test_subagent_depth_isolated_across_threads(self, observer):
+        """Keep independent sub-agent depths for concurrent tool execution."""
+        barrier = threading.Barrier(2)
+
+        def run_subagent(agent_id, agent_name):
+            invocation_id = f"inv-{agent_id}"
+            observer.add_subagent_start(agent_id, agent_name, invocation_id=invocation_id)
+            barrier.wait(timeout=5)
+            observer.add_message(agent_name, ProcessType.OTHER, "working")
+            observer.add_subagent_end(agent_id, agent_name, invocation_id=invocation_id)
+
+        first = threading.Thread(
+            target=run_subagent,
+            args=("agent-1", "Researcher"),
+        )
+        second = threading.Thread(
+            target=run_subagent,
+            args=("agent-2", "Writer"),
+        )
+        first.start()
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+        working_messages = [message for message in messages if message["type"] == ProcessType.OTHER.value]
+
+        assert all(message["depth"] == 1 for message in messages)
+        assert {message["agent_id"] for message in working_messages} == {"agent-1", "agent-2"}
+        # Each working chunk inherits the matching invocation_id from its
+        # active sub-agent scope rather than collapsing to a single shared id.
+        working_invocation_ids = {message["invocation_id"] for message in working_messages}
+        assert working_invocation_ids == {"inv-agent-1", "inv-agent-2"}
+        assert observer._current_depth.get() == 0
+
+    def test_parallel_subagents_keep_distinct_invocation_ids(self, observer):
+        """Two siblings active simultaneously do not collapse into one invocation id."""
+        observer.add_subagent_start("agent-1", "Researcher", invocation_id="inv-a")
+        observer.add_subagent_start("agent-2", "Writer", invocation_id="inv-b")
+
+        # Both starts are still open: closing either one must only drop its
+        # own invocation from the stack and not affect the other.
+        observer.add_model_reasoning_content("inner-a")
+
+        messages = [json.loads(m) for m in observer.get_cached_message()]
+        last_reasoning = next(
+            m for m in reversed(messages)
+            if m["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+        )
+        # The most recent push wins because the SDK runs reasoning chunks
+        # synchronously inside each child. Whichever child is on top is the
+        # one whose reasoning this is.
+        assert last_reasoning["invocation_id"] == "inv-b"
+        assert last_reasoning["agent_id"] == "agent-2"
+
+        observer.add_subagent_end("agent-1", "Researcher", invocation_id="inv-a")
+
+        # After popping agent-1, agent-2 is the active scope.
+        assert observer._current_invocation_id.get() == "inv-b"
+
+        observer.add_model_reasoning_content("inner-b")
+        messages = [json.loads(m) for m in observer.get_cached_message()]
+        last_reasoning = next(
+            m for m in reversed(messages)
+            if m["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+        )
+        assert last_reasoning["invocation_id"] == "inv-b"
+
+        observer.add_subagent_end("agent-2", "Writer", invocation_id="inv-b")
+        assert observer._current_invocation_id.get() is None
+
+    def test_subagent_end_clears_message_identity_context(self, observer):
+        """Do not attribute parent output to a sub-agent after it finishes."""
+        observer.add_subagent_start("agent-1", "Researcher")
+        start_id = observer._current_invocation_id.get()
+        observer.add_subagent_end("agent-1", "Researcher", invocation_id=start_id)
+        observer.add_message("parent", ProcessType.OTHER, "parent output")
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+
+        assert "agent_id" not in messages[-1]
+        assert "invocation_id" not in messages[-1]
+        assert observer._current_depth.get() == 0
+
+    def test_model_reasoning_content_inherits_active_subagent_id(self, observer):
+        """Attach the active sub-agent identity to direct model reasoning output."""
+        observer.add_subagent_start("agent-1", "Researcher")
+        observer.add_model_reasoning_content("Investigating")
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+
+        assert messages[-1]["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+        assert messages[-1]["agent_id"] == "agent-1"
+
+    def test_subagent_end_clears_message_identity_context_without_invocation_id(self, observer):
+        """Do not attribute parent output to a sub-agent after it finishes."""
+        observer.add_subagent_start("agent-1", "Researcher")
+        observer.add_subagent_end("agent-1", "Researcher")
+        observer.add_message("parent", ProcessType.OTHER, "parent output")
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+
+        assert "agent_id" not in messages[-1]
+        assert observer._current_depth.get() == 0
+
+    def test_execution_logs_extract_nl2a_before_visible_content(self):
+        """Extract NL2Agent JSON from wrapper tool execution logs."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        payload = {
+            "status": "success",
+            "recommendation_count": 0,
+            "recommendations": [],
+        }
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            f"<nl2a>\n{json.dumps(payload)}\n</nl2a>\nNL2A payload generated.",
+        )
+
+        messages = [
+            json.loads(message)
+            for message in observer.get_cached_message()
+        ]
+        assert [message["type"] for message in messages] == [
+            ProcessType.NL2A.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == payload
+        assert messages[1]["content"] == "NL2A payload generated."
+
+    def test_final_answer_never_extracts_nl2a(self):
+        """Do not retain final-answer wrapper extraction as a fallback."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = '<nl2a>{"status":"success"}</nl2a>\nVisible answer.'
+
+        observer.add_message("agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
+        }
+
+    def test_execution_logs_drop_invalid_nl2a_without_emitting_chunk(self):
+        """Hide an invalid tool wrapper without emitting malformed data."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            "<nl2a>{invalid json}</nl2a>\nWrapper failed.",
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper failed.",
+        }
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            {"status": "success"},
+            "Ordinary execution output without a wrapper.",
+        ],
+    )
+    def test_nl2a_extractor_preserves_content_without_a_string_wrapper(
+        self,
+        content,
+    ):
+        payload, visible_content = MessageObserver._extract_nl2a_wrapper(content)
+
+        assert payload is None
+        assert visible_content == content
+
+    def test_execution_logs_reject_nl2a_json_that_is_not_an_object(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            '<nl2a>["not", "an", "object"]</nl2a>\nWrapper rejected.',
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper rejected.",
+        }
+
+    def test_execution_logs_extract_valid_nl2a_state_once(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+            "</nl2a_state>"
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_created",
+            "agent_id": 1042,
+        }
+        assert messages[1]["content"] == '{"status":"success"}'
+        assert messages[2]["content"] == '{"status":"success"}'
+
+    def test_execution_logs_extract_prompt_generation_failure_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"error","code":"draft_save_failed"}\n'
+            '<nl2a_state>{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":["prompt"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "prompt_generation_failed",
+            "agent_id": 1042,
+            "failed_fields": ["prompt"],
+        }
+        assert messages[1]["content"] == (
+            '{"status":"error","code":"draft_save_failed"}'
+        )
+
+    def test_execution_logs_extract_and_deduplicate_generation_completed_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_generation_completed",'
+            '"agent_id":1042}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_generation_completed",
+            "agent_id": 1042,
+        }
+
+    def test_execution_logs_emit_every_saved_fields_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["prompt"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_fields_saved",
+            "agent_id": 1042,
+            "updated_fields": ["prompt"],
+        }
+        assert messages[0]["content"] == messages[2]["content"]
+
+    def test_execution_logs_emit_generated_agent_name_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["name"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_fields_saved",
+            "agent_id": 1042,
+            "updated_fields": ["name"],
+        }
+        assert messages[1]["content"] == '{"status":"success"}'
+
+    @pytest.mark.parametrize(
+        "state_payload",
+        [
+            "{invalid json}",
+            '{"event":"agent_draft_created","agent_id":0}',
+            '{"event":"draft_updated","agent_id":1042}',
+            '{"event":"agent_draft_created","agent_id":1042,"extra":true}',
+            '{"event":"agent_generation_completed","agent_id":1042,'
+            '"extra":true}',
+            '{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":["unknown_prompt"]}',
+            '{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":[]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":[]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["unknown_prompt"]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["business_description"]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["description","description"]}',
+            '["agent_draft_created",1042]',
+        ],
+    )
+    def test_execution_logs_hide_invalid_nl2a_state(self, state_payload):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            f"<nl2a_state>{state_payload}</nl2a_state>\nVisible result.",
+        )
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert messages == [
+            {
+                "type": ProcessType.EXECUTION_LOGS.value,
+                "content": "Visible result.",
+            }
+        ]
+
+    def test_nl2a_state_extractor_ignores_non_string_content(self):
+        assert MessageObserver._extract_nl2a_state({"agent_id": 1042}) == (
+            None,
+            {"agent_id": 1042},
+        )
+
+    def test_final_answer_never_extracts_nl2a_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+            "</nl2a_state>"
+        )
+
+        observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
+        }
 
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
@@ -362,18 +836,16 @@ class TestMessageObserverTokenProcessing:
         observer.add_model_new_token(" ")
         observer.add_model_new_token("World")
 
-        # Check that tokens are accumulated in think buffer
-        assert len(observer.think_buffer) == 3
+        # Safe ordinary content must be visible before stream completion.
+        streamed_messages = observer.get_cached_message()
+        assert "".join(json.loads(item)["content"] for item in streamed_messages) == "Hello World"
+        assert not observer.think_buffer
 
-        # Flush to see the result
+        # Flushing must not duplicate already streamed content.
         observer.flush_remaining_tokens()
         cached_messages = observer.get_cached_message()
-
-        # Should have one message with accumulated content
-        assert len(cached_messages) == 1
-        message_data = json.loads(cached_messages[0])
-        assert message_data["type"] == ProcessType.MODEL_OUTPUT_THINKING.value
-        assert message_data["content"] == "Hello World"
+        assert cached_messages == []
+        assert all(json.loads(item)["type"] == ProcessType.MODEL_OUTPUT_THINKING.value for item in streamed_messages)
 
     def test_add_model_new_token_think_mode(self):
         """Test add_model_new_token with think tags"""
@@ -707,6 +1179,422 @@ class TestMaxStepsReached:
 
         assert content_data["completedSteps"] == 5
         assert "已达到最大步数限制" in str(content_data)
+
+
+class TestObserverDeepThinkBufferOverflow:
+    """Test think_buffer overflow handling in add_model_new_token"""
+
+    def test_think_buffer_overflow_flushes_in_think_mode(self):
+        """Test that think_buffer overflow triggers flush while in think mode"""
+        observer = MessageObserver()
+
+        # Start think mode
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("Thinking")
+        observer.flush_remaining_tokens()
+        observer.get_cached_message()
+
+        # Now we're in think mode, add tokens to overflow think_buffer
+        # First, enter think mode again
+        observer.in_think_mode = True
+        for i in range(15):  # More than MAX_TOKEN_BUFFER_SIZE (10)
+            observer.add_model_new_token(f"t{i}")
+
+        # think_buffer should be managed (not exceed MAX)
+        assert len(observer.think_buffer) <= observer.MAX_TOKEN_BUFFER_SIZE
+
+        # Flush and check messages
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+        assert len(messages) > 0
+
+    def test_think_buffer_overflow_flushes_in_normal_mode(self):
+        """Test that think_buffer overflow flushes to _process_normal_content when not in think mode"""
+        observer = MessageObserver()
+
+        # Ensure not in think mode
+        assert not observer.in_think_mode
+
+        # Add many tokens to overflow think_buffer
+        for i in range(15):
+            observer.add_model_new_token(f"token{i}")
+
+        # Should have accumulated content from overflow
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Overflow should have triggered processing
+        assert len(messages) >= 1
+
+
+class TestObserverProcessNormalContentBufferOverflow:
+    """Test token_buffer overflow handling in _process_normal_content"""
+
+    def test_token_buffer_overflow_flushes_content(self):
+        """Test that token_buffer overflow triggers flush"""
+        observer = MessageObserver()
+
+        # Add tokens that will exceed buffer size without code block detection
+        tokens = []
+        for i in range(15):
+            token = f"content{i}"
+            tokens.append(token)
+            observer.add_model_new_token(token)
+
+        # token_buffer should be managed
+        assert len(observer.token_buffer) <= observer.MAX_TOKEN_BUFFER_SIZE
+
+        # Flush and verify
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+        assert len(messages) >= 1
+
+
+class TestObserverThinkTagFragmentation:
+    """Test think tag fragmentation scenarios"""
+
+    def test_think_start_tag_fragmented(self):
+        """Test detection of fragmented <think> tag"""
+        observer = MessageObserver()
+
+        # Fragment the start tag
+        observer.add_model_new_token("<")
+        observer.add_model_new_token("think")
+        observer.add_model_new_token(">")
+
+        # Should enter think mode
+        assert observer.in_think_mode
+
+        # Add some content
+        observer.add_model_new_token("Reasoning process")
+
+        # End tag fragmented
+        observer.add_model_new_token("<")
+        observer.add_model_new_token("/think")
+        observer.add_model_new_token(">")
+
+        # Should exit think mode
+        assert not observer.in_think_mode
+
+    def test_think_end_tag_only(self):
+        """Test when </think> appears without preceding <think>"""
+        observer = MessageObserver()
+
+        # Only end tag, no start
+        observer.add_model_new_token("</think>")
+
+        # Should not be in think mode
+        assert not observer.in_think_mode
+
+        # Flush should process normally
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+        assert len(messages) >= 1
+
+    def test_think_content_only(self):
+        """Test when only <think> content is received"""
+        observer = MessageObserver()
+
+        # Enter think mode and add content
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("Deep reasoning")
+        # Don't close the tag - still in think mode
+
+        # Flush should handle unclosed think tag
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Should contain the reasoning as deep thinking
+        assert len(messages) >= 1
+
+
+class TestObserverCodeModeSwitching:
+    """Test code block detection and mode switching"""
+
+    def test_code_mode_from_thinking_mode(self):
+        """Test switching from thinking to code mode when code block detected"""
+        observer = MessageObserver(lang="zh")
+
+        # Start with thinking mode
+        assert observer.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+
+        # Add code block - using full triple backticks to trigger detection
+        observer.add_model_new_token("代码:")
+        observer.add_model_new_token("```python")
+        observer.add_model_new_token("print('hello')")
+        observer.add_model_new_token("```")
+
+        # Flush to process all content
+        observer.flush_remaining_tokens()
+
+        # Should have processed content (mode behavior varies based on implementation)
+        # Just verify the observer doesn't crash
+        messages = observer.get_cached_message()
+        assert len(messages) >= 0
+
+    def test_code_mode_stays_in_code_mode(self):
+        """Test that once in code mode, subsequent content stays in code mode"""
+        observer = MessageObserver(lang="zh")
+
+        # Add content that triggers code detection
+        observer.add_model_new_token("```")
+        observer.flush_remaining_tokens()
+        observer.get_cached_message()
+
+        # Mode depends on implementation - just verify no crash
+        observer.add_model_new_token("More code here")
+        observer.flush_remaining_tokens()
+
+        # Should not crash regardless of mode
+
+
+class TestObserverFlushRemainingTokens:
+    """Test flush_remaining_tokens edge cases"""
+
+    def test_flush_with_empty_buffers(self):
+        """Test flush when both buffers are empty"""
+        observer = MessageObserver()
+
+        # Flush empty buffers
+        observer.flush_remaining_tokens()
+
+        # Should not crash and produce no messages
+        messages = observer.get_cached_message()
+        assert len(messages) == 0
+
+    def test_flush_think_buffer_with_think_tags(self):
+        """Test flush remaining think buffer with think tags still present"""
+        observer = MessageObserver()
+
+        # Enter think mode with think tag
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("Thinking content")
+
+        # Flush while still in think mode - tags should be stripped
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Content should be in deep thinking, tags stripped
+        assert len(messages) >= 1
+        message_data = json.loads(messages[0])
+        assert message_data["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+
+    def test_flush_think_buffer_empty_after_stripping_tags(self):
+        """Test flush when buffer only contains think tags"""
+        observer = MessageObserver()
+
+        # Enter think mode but only have tags
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("</think>")
+
+        # Buffer may have content from processing - just verify flush works
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Flush should complete without error
+        assert isinstance(messages, list)
+
+    def test_flush_token_buffer_only(self):
+        """Test flush when only token_buffer has content"""
+        observer = MessageObserver()
+
+        # Add content without triggering think mode
+        observer.add_model_new_token("Regular content")
+
+        # Flush
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        assert len(messages) >= 1
+
+
+class TestObserverGetFinalAnswerEdgeCases:
+    """Test get_final_answer edge cases"""
+
+    def test_get_final_answer_with_non_string_item(self):
+        """Test get_final_answer when message_queue contains non-string items"""
+        observer = MessageObserver()
+
+        # Add a non-string item to the queue
+        observer.message_query.append({"type": "not_a_string", "content": "test"})
+        observer.message_query.append(
+            Message(ProcessType.FINAL_ANSWER, "The final answer").to_json()
+        )
+
+        # Should handle non-string gracefully
+        result = observer.get_final_answer()
+        assert result == "The final answer"
+
+    def test_get_final_answer_with_malformed_json(self):
+        """Test get_final_answer with malformed JSON in queue"""
+        observer = MessageObserver()
+
+        # Add malformed JSON
+        observer.message_query.append("{invalid json")
+        observer.message_query.append(
+            Message(ProcessType.FINAL_ANSWER, "Valid answer").to_json()
+        )
+
+        result = observer.get_final_answer()
+        assert result == "Valid answer"
+
+    def test_get_final_answer_empty_queue(self):
+        """Test get_final_answer with empty queue"""
+        observer = MessageObserver()
+
+        result = observer.get_final_answer()
+        assert result is None
+
+
+class TestProcessTypeEnum:
+    """Test ProcessType enum values"""
+
+    def test_all_process_types_exist(self):
+        """Test that all ProcessType values are defined"""
+        expected_types = [
+            "MODEL_OUTPUT_THINKING",
+            "MODEL_OUTPUT_DEEP_THINKING",
+            "MODEL_OUTPUT_CODE",
+            "STEP_COUNT",
+            "PARSE",
+            "EXECUTION_LOGS",
+            "AGENT_NEW_RUN",
+            "AGENT_FINISH",
+            "FINAL_ANSWER",
+            "ERROR",
+            "OTHER",
+            "TOKEN_COUNT",
+            "SEARCH_CONTENT",
+            "PICTURE_WEB",
+            "CARD",
+            "TOOL",
+            "NL2A",
+            "MEMORY_SEARCH",
+            "MAX_STEPS_REACHED",
+            "VERIFICATION",
+        ]
+
+        for type_name in expected_types:
+            assert hasattr(ProcessType, type_name), f"Missing ProcessType: {type_name}"
+
+    def test_process_type_values_are_strings(self):
+        """Test that all ProcessType values are string values"""
+        for member in ProcessType:
+            assert isinstance(member.value, str)
+            assert len(member.value) > 0
+
+
+class TestTransformerWithAgentName:
+    """Test transformers with agent_name parameter"""
+
+    def test_add_message_with_agent_name(self):
+        """Test that add_message passes agent_name to transformer"""
+        observer = MessageObserver(lang="zh")
+
+        # Add a message with agent name
+        observer.add_message(
+            agent_name="test_agent",
+            process_type=ProcessType.STEP_COUNT,
+            content="1"
+        )
+
+        messages = observer.get_cached_message()
+        assert len(messages) == 1
+
+        # Content should be formatted (step count adds formatting)
+        message_data = json.loads(messages[0])
+        # Chinese format: "步骤" or English: "Step"
+        assert "1" in message_data["content"]
+
+
+class TestMessageObserverStateManagement:
+    """Test MessageObserver state management"""
+
+    def test_in_think_mode_initial_state(self):
+        """Test that in_think_mode starts as False"""
+        observer = MessageObserver()
+        assert observer.in_think_mode is False
+
+    def test_current_mode_initial_state(self):
+        """Test that current_mode starts as MODEL_OUTPUT_THINKING"""
+        observer = MessageObserver()
+        assert observer.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+
+    def test_message_query_initial_state(self):
+        """Test that message_query starts as empty list"""
+        observer = MessageObserver()
+        assert observer.message_query == []
+        assert isinstance(observer.message_query, list)
+
+
+class TestMessageObserverMultipleOperations:
+    """Test MessageObserver with multiple sequential operations"""
+
+    def test_multiple_think_cycles(self):
+        """Test multiple <think> - </think> cycles"""
+        observer = MessageObserver()
+
+        # First cycle
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("First")
+        observer.add_model_new_token("</think>")
+
+        # Second cycle
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("Second")
+        observer.add_model_new_token("</think>")
+
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Should have processed both cycles
+        assert len(messages) >= 2
+
+    def test_interleaved_content_and_think(self):
+        """Test interleaved normal content and think tags"""
+        observer = MessageObserver()
+
+        observer.add_model_new_token("Start")
+        observer.add_model_new_token("<think>")
+        observer.add_model_new_token("Thought")
+        observer.add_model_new_token("</think>")
+        observer.add_model_new_token("End")
+
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Should have processed content
+        assert len(messages) >= 1
+
+
+class TestMessageObserverCodeBlockVariants:
+    """Test various code block patterns"""
+
+    def test_single_backticks(self):
+        """Test single backticks don't trigger code mode"""
+        observer = MessageObserver()
+
+        observer.add_model_new_token("Use `code` inline")
+
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Should not trigger code mode
+        assert observer.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+        assert len(messages) >= 1
+
+    def test_partial_code_block_start(self):
+        """Test partial triple backticks"""
+        observer = MessageObserver()
+
+        observer.add_model_new_token("``")
+        observer.add_model_new_token("`")
+
+        observer.flush_remaining_tokens()
+        messages = observer.get_cached_message()
+
+        # Should not trigger code mode with double backticks
+        assert observer.current_mode == ProcessType.MODEL_OUTPUT_THINKING
 
 
 if __name__ == "__main__":

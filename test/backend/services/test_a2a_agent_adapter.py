@@ -1,13 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Agent Adapter.
 
-Tests the A2AAgentAdapter class in backend/services/a2a_agent_adapter.py.
+Tests the A2AAgentAdapter class in backend/management/services/agent/a2a/adapter.py.
 """
 import pytest
 from unittest.mock import MagicMock, patch
 import json
 
-from backend.services.a2a_agent_adapter import (
+from management.services.agent.a2a.adapter import (
     A2AAgentAdapter,
     A2AExecutionContext,
     a2a_agent_adapter,
@@ -162,6 +163,22 @@ class TestBuildAgentRequest:
         result = adapter.build_agent_request(a2a_message, context, agent_id=1)
         assert result["correlation_id"] == "corr-789"
         assert result["metadata"] == {"source": "test"}
+
+    def test_extract_runtime_metadata_uses_message_level_only(self):
+        adapter = A2AAgentAdapter()
+        payload = {
+            "metadata": {"request_level": "ignored"},
+            "message": {"metadata": {"message_level": "accepted"}},
+        }
+
+        assert adapter.extract_runtime_metadata(payload) == {
+            "message_level": "accepted"
+        }
+
+    def test_extract_runtime_metadata_defaults_to_empty_object(self):
+        adapter = A2AAgentAdapter()
+
+        assert adapter.extract_runtime_metadata({"message": {}}) == {}
 
 
 class TestParseA2AMessage:
@@ -417,6 +434,8 @@ class TestBuildA2ATaskEvent:
 
         assert "artifactUpdate" in result
         assert "artifact" in result["artifactUpdate"]
+        assert result["artifactUpdate"]["artifact"]["lastChunk"] is False
+        assert result["artifactUpdate"]["lastChunk"] is False
 
     def test_task_event_with_context_id(self):
         """Test task event with context ID."""

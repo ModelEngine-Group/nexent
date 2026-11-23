@@ -1,23 +1,35 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 // Unified encapsulation of knowledge base related API calls
 
 import i18n from "i18next";
 
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
+import { ErrorCode } from "@/const/errorCode";
+import {
+  FILE_TYPES,
+  EXTENSION_TO_TYPE_MAP,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+} from "@/const/knowledgeBase";
 import {
   Document,
   KnowledgeBase,
   KnowledgeBaseCreateParams,
   KnowledgeBasesWithDataMateStatus,
+  KnowledgeBaseListQuery,
   DataMateSyncError,
 } from "@/types/knowledgeBase";
 import type {
   AidpKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse,
 } from "@/types/agentConfig";
+import type { QuotaStatusResponse } from "@/types/quota";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { emitQuotaUsageChanged } from "@/lib/quotaEvents";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -39,6 +51,26 @@ const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
 
 // Knowledge base service class
 class KnowledgeBaseService {
+  async previewBoundAgents(
+    indexName: string,
+    tenantId?: string | null
+  ): Promise<KnowledgeBaseDeletionPreview | null> {
+    try {
+      const endpoint = API_ENDPOINTS.knowledgeBase.boundAgents(indexName);
+      const query = tenantId
+        ? `?${new URLSearchParams({ tenant_id: tenantId })}`
+        : "";
+      const response = await fetchWithErrorHandling(`${endpoint}${query}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      return await response.json();
+    } catch (error) {
+      log.warn("Knowledge base deletion preview unavailable:", error);
+      return null;
+    }
+  }
+
   // Check Elasticsearch health (force refresh, no caching for setup page)
   async checkHealth(): Promise<boolean> {
     try {
@@ -148,6 +180,69 @@ class KnowledgeBaseService {
       return difyKnowledgeBases;
     } catch (error) {
       log.error("Failed to get Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get RAGFlow knowledge bases as KnowledgeBase array
+  async getRagflowKnowledgeBases(
+    ragflowApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const url = new URL(
+        API_ENDPOINTS.ragflow.datasets,
+        globalThis.location.origin
+      );
+      url.searchParams.set("ragflow_api_base", ragflowApiBase);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch RAGFlow datasets";
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      const datasets: KnowledgeBase[] = (result.data || []).map((ds: any) => {
+        const stats = ds.stats || {};
+        return {
+          id: ds.id || ds.dataset_id || "",
+          name: ds.name || ds.dataset_name || "Unnamed",
+          display_name: ds.name || ds.dataset_name || "Unnamed",
+          description: ds.description || "",
+          documentCount: stats.doc_count || ds.doc_count || 0,
+          chunkCount: stats.chunk_count || ds.chunk_count || 0,
+          createdAt: ds.create_time || ds.create_date || null,
+          updatedAt: ds.update_time || ds.update_date || null,
+          embeddingModel: ds.embedding_model || "unknown",
+          knowledge_sources: "ragflow",
+          ingroup_permission: "",
+          group_ids: [],
+          store_size: "",
+          process_source: "RAGFlow",
+          avatar: "",
+          chunkNum: 0,
+          language: "",
+          nickname: "",
+          parserId: "",
+          permission: "",
+          tokenNum: 0,
+          source: "ragflow",
+          tenant_id: "",
+        };
+      });
+
+      return datasets;
+    } catch (error) {
+      log.error("Failed to get RAGFlow knowledge bases:", error);
       throw error;
     }
   }
@@ -442,34 +537,72 @@ class KnowledgeBaseService {
     }
   }
 
-  async getAidpKnowledgeBasesAll(
-    serverUrl: string,
-    apiKey: string
-  ): Promise<AidpKnowledgeBaseListResponse> {
+  async getAidpKnowledgeBasesAll(): Promise<AidpKnowledgeBaseListResponse> {
+    // Loop through pages until has_more is false, accumulating all items.
+    // The mgmt endpoint caps page_size at 100 (backend performance guard),
+    // so we paginate at the maximum allowed size to minimize requests.
+    // Safety cap: we never fetch more than 2000 KBs to prevent runaway
+    // loop in case of a bug (e.g. has_more not being cleared).
+    const AIDP_LIST_PAGE_MAX = 100;
+    const AIDP_LIST_ITEM_CAP = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let totalFromServer = 0;
+    let totalReliableFromServer = true;
+    let hasMore = true;
+
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBasesAll, globalThis.location.origin);
-      url.searchParams.set("server_url", serverUrl);
-      url.searchParams.set("api_key", apiKey);
+      while (hasMore && allItems.length < AIDP_LIST_ITEM_CAP) {
+        const url = new URL(
+          API_ENDPOINTS.aidpMgmt.knowledgeBases,
+          globalThis.location.origin
+        );
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("page_size", String(AIDP_LIST_PAGE_MAX));
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: getAuthHeaders(),
+        });
+        const pageResult = await response.json();
 
-      if (result.code !== undefined && result.code !== 0) {
-        const errorCode = result.code || response.status;
-        const errorMessage =
-          result.message || "Failed to fetch all AIDP knowledge bases";
-        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
-        throw new ApiError(errorCode, errorMessage);
+        if (pageResult.code !== undefined && pageResult.code !== 0) {
+          const errorCode = pageResult.code || response.status;
+          const errorMessage =
+            pageResult.message || "Failed to fetch all AIDP knowledge bases";
+          log.error("AIDP API error:", {
+            code: errorCode,
+            message: errorMessage,
+          });
+          throw new ApiError(errorCode, errorMessage);
+        }
+
+        const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(
+          pageResult.value
+        )
+          ? pageResult.value
+          : [];
+        allItems.push(...pageItems);
+
+        // total_count from the server represents ALL KBs the user can access
+        // (not just the current page), so use it from the first response.
+        if (page === 1 && typeof pageResult.total_count === "number") {
+          totalFromServer = pageResult.total_count;
+        }
+        if (page === 1 && typeof pageResult.total_reliable === "boolean") {
+          totalReliableFromServer = pageResult.total_reliable;
+        }
+
+        hasMore = !!pageResult.has_more && pageItems.length > 0;
+        page += 1;
       }
 
       return {
-        value: Array.isArray(result.value) ? result.value : [],
-        total_count:
-          typeof result.total_count === "number" ? result.total_count : undefined,
-        next_link: typeof result.next_link === "string" ? result.next_link : null,
+        value: allItems,
+        total_count: totalFromServer || allItems.length,
+        next_link: null,
+        has_more: allItems.length >= AIDP_LIST_ITEM_CAP,
+        total_reliable: totalReliableFromServer,
       };
     } catch (error) {
       log.error("Failed to fetch all AIDP knowledge bases:", error);
@@ -477,16 +610,71 @@ class KnowledgeBaseService {
     }
   }
 
-  async getAidpKnowledgeBases(
+  async getIndependentAidpKnowledgeBasesAll(
     serverUrl: string,
     apiKey: string,
+    tenantId: string = "aidp"
+  ): Promise<KnowledgeBase[]> {
+    const itemCap = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && allItems.length < itemCap) {
+      const response = await fetch(
+        API_ENDPOINTS.independentAidp.knowledgeBases,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            server_url: serverUrl,
+            api_key: apiKey,
+            tenant_id: tenantId || "aidp",
+            page,
+            page_size: 100,
+          }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          result?.detail || "Failed to fetch independent AIDP knowledge bases"
+        );
+      }
+
+      const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(result?.value)
+        ? result.value
+        : [];
+      allItems.push(...pageItems);
+      hasMore = Boolean(result?.has_more) && pageItems.length > 0;
+      page += 1;
+    }
+
+    return this.mapAidpKnowledgeBasesToKnowledgeBases(allItems).map((kb) => ({
+      ...kb,
+      source: "ind-aidp",
+      knowledge_sources: "ind-aidp",
+      process_source: "Independent AIDP",
+    }));
+  }
+
+  async getAidpKnowledgeBases(
     page: number = 1,
     pageSize: number = 20
   ): Promise<AidpKnowledgeBaseListResponse> {
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
-      url.searchParams.set("server_url", serverUrl);
-      url.searchParams.set("api_key", apiKey);
+      // Use the permission-filtered mgmt endpoint instead of the legacy
+      // `/aidp/knowledge-bases` proxy. The mgmt endpoint applies the current
+      // user's role / group intersection, ensuring the agent config KB picker
+      // only shows KBs the user has access to.
+      const url = new URL(
+        API_ENDPOINTS.aidpMgmt.knowledgeBases,
+        globalThis.location.origin
+      );
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", String(pageSize));
 
@@ -500,15 +688,27 @@ class KnowledgeBaseService {
         const errorCode = result.code || response.status;
         const errorMessage =
           result.message || "Failed to fetch AIDP knowledge bases";
-        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+        log.error("AIDP API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
         throw new ApiError(errorCode, errorMessage);
       }
 
       return {
         value: Array.isArray(result.value) ? result.value : [],
         total_count:
-          typeof result.total_count === "number" ? result.total_count : undefined,
-        next_link: typeof result.next_link === "string" ? result.next_link : null,
+          typeof result.total_count === "number"
+            ? result.total_count
+            : undefined,
+        next_link:
+          typeof result.next_link === "string" ? result.next_link : null,
+        has_more:
+          typeof result.has_more === "boolean" ? result.has_more : undefined,
+        total_reliable:
+          typeof result.total_reliable === "boolean"
+            ? result.total_reliable
+            : undefined,
       };
     } catch (error) {
       log.error("Failed to fetch AIDP knowledge bases:", error);
@@ -519,19 +719,24 @@ class KnowledgeBaseService {
   mapAidpKnowledgeBasesToKnowledgeBases(
     items: AidpKnowledgeBaseItem[]
   ): KnowledgeBase[] {
+    // Map the mgmt-endpoint item shape (which already carries
+    // ``permission``, ``ingroup_permission``, ``group_ids`` and the
+    // AIDP-normalized ``created_at`` / ``updated_at`` / ``embedding_model``
+    // fields) onto the ``KnowledgeBase`` shape shared across all tool types.
     return items.map((item) => ({
       id: String(item.kds_id),
       name: item.kds_name || String(item.kds_id),
       display_name: item.kds_name || String(item.kds_id),
-      description: item.description || "AIDP knowledge base",
+      description: item.description || null,
       documentCount: item.document_count || 0,
       chunkCount: item.chunk_count || 0,
-      createdAt: null,
-      updatedAt: null,
-      embeddingModel: "unknown",
+      createdAt: item.created_at || null,
+      updatedAt: item.updated_at || null,
+      embeddingModel: item.embedding_model || "unknown",
+      is_multimodal: item.is_multimodal === true,
       knowledge_sources: "aidp",
-      ingroup_permission: "",
-      group_ids: [],
+      ingroup_permission: item.ingroup_permission || "",
+      group_ids: item.group_ids || [],
       store_size: "",
       process_source: "AIDP",
       avatar: "",
@@ -539,7 +744,7 @@ class KnowledgeBaseService {
       language: "",
       nickname: "",
       parserId: "",
-      permission: "",
+      permission: item.permission || "",
       tokenNum: 0,
       source: "aidp",
       tenant_id: "",
@@ -623,113 +828,169 @@ class KnowledgeBaseService {
     skipHealthCheck = false,
     includeDataMateSync = true,
     tenantId: string | null = null,
-    datamateUrl: string | null = null
+    datamateUrl: string | null = null,
+    query?: KnowledgeBaseListQuery,
+    options?: { strict?: boolean }
   ): Promise<KnowledgeBasesWithDataMateStatus> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
       let dataMateSyncError: string | undefined;
+      let paginationData: Omit<
+        KnowledgeBasesWithDataMateStatus,
+        "knowledgeBases"
+      > = {};
 
       // Get knowledge bases from Elasticsearch
       try {
-        // First check Elasticsearch health (unless skipped)
-        if (!skipHealthCheck) {
-          const isElasticsearchHealthy = await this.checkHealth();
-          if (!isElasticsearchHealthy) {
-            log.warn("Elasticsearch service unavailable");
-          } else {
-            // Build URL with tenant_id parameter for filtering
-            const url = new URL(
-              `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
-              window.location.origin
-            );
-            if (tenantId) {
-              url.searchParams.set("tenant_id", tenantId);
-            }
-            const response = await fetch(url.toString(), {
-              headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-
-            log.log("Elasticsearch indices response:", data);
-
-            if (data.indices && data.indices_info) {
-              log.log(
-                "Processing indices_info:",
-                data.indices_info.length,
-                "items"
-              );
-              // Convert Elasticsearch indices to knowledge base format
-              const esKnowledgeBases = data.indices_info.map(
-                (indexInfo: any) => {
-                  const stats = indexInfo.stats?.base_info || {};
-                  // Backend returns:
-                  // - name: internal index_name
-                  // - display_name: user-facing knowledge_name (fallback to index_name)
-                  // - update_time: timestamp from database for sorting
-                  const kbId = indexInfo.name;
-                  const kbName = indexInfo.display_name || indexInfo.name;
-
-                  return {
-                    id: kbId,
-                    name: kbName,
-                    index_name: kbId, // Internal index_name for API calls
-                    display_name: indexInfo.display_name || indexInfo.name,
-                    description: "Elasticsearch index",
-                    documentCount: stats.doc_count || 0,
-                    chunkCount: stats.chunk_count || 0,
-                    createdAt: stats.creation_date || null,
-                    // Use update_time from database for sorting, fallback to ES update_date
-                    updatedAt:
-                      indexInfo.update_time ||
-                      stats.update_date ||
-                      stats.creation_date ||
-                      null,
-                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
-                    // Use embedding_model_name (display_name) from backend, fallback to ES stats
-                    embeddingModel:
-                      indexInfo.embedding_model_name ||
-                      stats.embedding_model ||
-                      "unknown",
-                    summaryFrequency: indexInfo.summary_frequency || null,
-                    lastSummaryTime: indexInfo.last_summary_time || null,
-                    knowledge_sources:
-                      indexInfo.knowledge_sources || "elasticsearch",
-                    ingroup_permission: indexInfo.ingroup_permission || "",
-                    group_ids: indexInfo.group_ids || [],
-                    store_size: stats.store_size || "",
-                    process_source: stats.process_source || "",
-                    avatar: "",
-                    chunkNum: 0,
-                    language: "",
-                    nickname: "",
-                    parserId: "",
-                    permission: indexInfo.permission || "",
-                    tokenNum: 0,
-                    source: "nexent",
-                    tenant_id: indexInfo.tenant_id,
-                    preserve_source_file: indexInfo.preserve_source_file ?? true,
-                  };
+        // Skip only the health probe, never the actual list request.
+        const isElasticsearchHealthy =
+          skipHealthCheck || (await this.checkHealth());
+        if (!isElasticsearchHealthy) {
+          if (options?.strict)
+            throw new Error("Knowledge base service unavailable");
+          log.warn("Elasticsearch service unavailable");
+        } else {
+          // Build URL with tenant_id parameter for filtering
+          const url = new URL(
+            `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
+            window.location.origin
+          );
+          if (tenantId) {
+            url.searchParams.set("tenant_id", tenantId);
+          }
+          if (query?.offset !== undefined) {
+            url.searchParams.set("offset", String(query.offset));
+          }
+          if (query?.limit !== undefined) {
+            url.searchParams.set("limit", String(query.limit));
+          }
+          if (query?.keyword?.trim()) {
+            url.searchParams.set("keyword", query.keyword.trim());
+          }
+          query?.sources?.forEach((source) =>
+            url.searchParams.append(
+              "sources",
+              source === "nexent" ? "elasticsearch" : source
+            )
+          );
+          query?.models?.forEach((model) =>
+            url.searchParams.append("models", model)
+          );
+          const response = await fetch(url.toString(), {
+            headers: getAuthHeaders(),
+          });
+          if (options?.strict && !response.ok)
+            throw new Error("Knowledge base catalog unavailable");
+          const data = await response.json();
+          if (
+            options?.strict &&
+            (!Array.isArray(data.indices) ||
+              (data.indices.length > 0 && !Array.isArray(data.indices_info)))
+          ) {
+            throw new Error("Invalid knowledge base catalog response");
+          }
+          const hasMore =
+            typeof data.next_offset === "number" &&
+            typeof data.total === "number" &&
+            data.next_offset < data.total;
+          paginationData = {
+            total: data.total,
+            pageCount: data.count,
+            hasMore,
+            nextOffset: data.next_offset,
+            facets: data.facets
+              ? {
+                  sources: data.facets.sources.map((source: string) =>
+                    source === "elasticsearch" ? "nexent" : source
+                  ),
+                  models: data.facets.models,
                 }
-              );
-              log.log("Converted knowledge bases:", esKnowledgeBases);
-              knowledgeBases.push(...esKnowledgeBases);
-            } else {
-              log.log(
-                "Skipping indices processing:",
-                "indices exists:",
-                !!data.indices,
-                "indices_info exists:",
-                !!data.indices_info,
-                "indices length:",
-                data.indices?.length,
-                "indices_info length:",
-                data.indices_info?.length
-              );
-            }
+              : undefined,
+            estimatedRowHeight: data.estimated_row_height,
+            estimatedItemHeights: data.estimated_item_heights,
+          };
+
+          log.log("Elasticsearch indices response:", data);
+
+          if (data.indices && data.indices_info) {
+            log.log(
+              "Processing indices_info:",
+              data.indices_info.length,
+              "items"
+            );
+            // Convert Elasticsearch indices to knowledge base format
+            const esKnowledgeBases = data.indices_info.map((indexInfo: any) => {
+              const stats = indexInfo.stats?.base_info || {};
+              // Backend returns:
+              // - name: internal index_name
+              // - display_name: user-facing knowledge_name (fallback to index_name)
+              // - update_time: timestamp from database for sorting
+              const kbId = indexInfo.name;
+              const kbName = indexInfo.display_name || indexInfo.name;
+
+              return {
+                id: kbId,
+                knowledge_id: indexInfo.knowledge_id,
+                tags: Array.isArray(indexInfo.tags) ? indexInfo.tags : [],
+                name: kbName,
+                index_name: kbId, // Internal index_name for API calls
+                display_name: indexInfo.display_name || indexInfo.name,
+                description: "Elasticsearch index",
+                documentCount: stats.doc_count || 0,
+                chunkCount: stats.chunk_count || 0,
+                createdAt: stats.creation_date || null,
+                // Use update_time from database for sorting, fallback to ES update_date
+                updatedAt:
+                  indexInfo.update_time ||
+                  stats.update_date ||
+                  stats.creation_date ||
+                  null,
+                is_multimodal: resolveIsMultimodal(indexInfo, stats),
+                // Use embedding_model_name (display_name) from backend, fallback to ES stats
+                embeddingModel:
+                  indexInfo.embedding_model_name ||
+                  stats.embedding_model ||
+                  "unknown",
+                embeddingModelId: indexInfo.embedding_model_id ?? null,
+                summaryFrequency: indexInfo.summary_frequency || null,
+                lastSummaryTime: indexInfo.last_summary_time || null,
+                knowledge_sources:
+                  indexInfo.knowledge_sources || "elasticsearch",
+                ingroup_permission: indexInfo.ingroup_permission || "",
+                group_ids: indexInfo.group_ids || [],
+                store_size: stats.store_size || "",
+                process_source: stats.process_source || "",
+                avatar: "",
+                chunkNum: 0,
+                language: "",
+                nickname: "",
+                parserId: "",
+                permission: indexInfo.permission || "",
+                tokenNum: 0,
+                source: "nexent",
+                tenant_id: indexInfo.tenant_id,
+                preserve_source_file: indexInfo.preserve_source_file ?? true,
+              };
+            });
+            log.log("Converted knowledge bases:", esKnowledgeBases);
+            knowledgeBases.push(...esKnowledgeBases);
+          } else {
+            log.log(
+              "Skipping indices processing:",
+              "indices exists:",
+              !!data.indices,
+              "indices_info exists:",
+              !!data.indices_info,
+              "indices length:",
+              data.indices?.length,
+              "indices_info length:",
+              data.indices_info?.length
+            );
           }
         }
       } catch (error) {
         log.error("Failed to get Elasticsearch indices:", error);
+        if (options?.strict) throw error;
       }
 
       // Sync DataMate knowledge bases and get the synced data (only if enabled and URL is configured)
@@ -793,6 +1054,7 @@ class KnowledgeBaseService {
       return {
         knowledgeBases,
         dataMateSyncError,
+        ...paginationData,
       };
     } catch (error) {
       log.error("Failed to get knowledge base list:", error);
@@ -830,11 +1092,14 @@ class KnowledgeBaseService {
     }
   }
 
-  // Check whether the knowledge base name already exists in Elasticsearch
+  // Check whether the knowledge base name already exists in the current tenant
   async checkKnowledgeBaseNameExists(name: string): Promise<boolean> {
     try {
-      const knowledgeBases = await this.getKnowledgeBases(true);
-      return knowledgeBases.includes(name);
+      const result = await this.checkKnowledgeBaseName(name);
+      if (result.status === NAME_CHECK_STATUS.CHECK_FAILED) {
+        throw new Error("Failed to check knowledge base name availability");
+      }
+      return result.status !== NAME_CHECK_STATUS.AVAILABLE;
     } catch (error) {
       log.error("Failed to check knowledge base name existence:", error);
       throw error;
@@ -883,16 +1148,15 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embeddingModel?: string;
+        embedding_model_id: number;
         ingroup_permission?: string;
         group_ids?: number[];
-        is_multimodal?: boolean;
         preserve_source_file?: boolean;
+        quota_limit_bytes?: number | null;
       } = {
         name: params.name,
         description: params.description || "",
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
+        embedding_model_id: params.embeddingModelId,
       };
 
       // Include group permission and user groups if provided
@@ -905,6 +1169,9 @@ class KnowledgeBaseService {
       if (params.preserve_source_file !== undefined) {
         requestBody.preserve_source_file = params.preserve_source_file;
       }
+      if (params.quota_limit_bytes !== undefined) {
+        requestBody.quota_limit_bytes = params.quota_limit_bytes;
+      }
 
       const response = await fetch(
         API_ENDPOINTS.knowledgeBase.indexDetail(params.name),
@@ -916,7 +1183,12 @@ class KnowledgeBaseService {
       );
 
       const result = await response.json();
-      // Modify judgment logic, backend returns status field instead of success field
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          result.detail || result.message || "Failed to create knowledge base"
+        );
+      }
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to create knowledge base");
       }
@@ -929,8 +1201,9 @@ class KnowledgeBaseService {
         documentCount: 0,
         chunkCount: 0,
         createdAt: new Date().toISOString(),
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
+        embeddingModel: result.embedding_model_name || "",
+        embeddingModelId: params.embeddingModelId,
+        is_multimodal: result.model_type === "multi_embedding",
         avatar: "",
         chunkNum: 0,
         language: "",
@@ -962,6 +1235,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete knowledge base");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete knowledge base:", error);
       throw error;
@@ -998,7 +1272,10 @@ class KnowledgeBaseService {
       }
 
       return result.files.map((file: any) => ({
-        id: file.path_or_url,
+        // Keep the legacy path identity for existing list/delete callers;
+        // expose the durable ID separately for new APIs.
+        id: file.path_or_url || file.file_id,
+        file_id: file.file_id || undefined,
         kb_id: kbId,
         name: file.file,
         type: this.getFileTypeFromName(file.file || file.path_or_url),
@@ -1008,7 +1285,10 @@ class KnowledgeBaseService {
         token_num: 0,
         status: file.status || "UNKNOWN",
         latest_task_id: file.latest_task_id || "",
+        error_code: file.error_code,
         error_reason: file.error_reason,
+        error_stage: file.error_stage,
+        failed_at: file.failed_at,
         // Optional ingestion progress metrics (only present for in-progress files)
         processed_chunk_num:
           typeof file.processed_chunk_num === "number"
@@ -1018,6 +1298,7 @@ class KnowledgeBaseService {
           typeof file.total_chunk_num === "number"
             ? file.total_chunk_num
             : null,
+        tags: Array.isArray(file.tags) ? file.tags : [],
       }));
     } catch (error) {
       log.error("Failed to get all files:", error);
@@ -1040,10 +1321,23 @@ class KnowledgeBaseService {
   async uploadDocuments(
     kbId: string,
     files: File[],
-    chunkingStrategy?: string,
-    modelId?: number
-  ): Promise<void> {
+    chunkingStrategy?: string
+  ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
+      if (
+        files.some((file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES)
+      ) {
+        throw new ApiError(
+          ErrorCode.FILE_TOO_LARGE,
+          "Knowledge base file exceeds the maximum size",
+          {
+            resource: "knowledge_file",
+            limit_bytes: KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+            limit_mb: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+          }
+        );
+      }
+
       // Create FormData object
       const formData = new FormData();
       formData.append("index_name", kbId);
@@ -1071,12 +1365,23 @@ class KnowledgeBaseService {
       const uploadResult = await uploadResponse.json();
 
       if (!uploadResponse.ok) {
-        if (uploadResponse.status === 400) {
-          throw new Error(
-            uploadResult.error || "File upload validation failed"
-          );
-        }
-        throw new Error("File upload failed");
+        const detail =
+          uploadResult.detail && typeof uploadResult.detail === "object"
+            ? uploadResult.detail
+            : null;
+        throw new ApiError(
+          uploadResult.code ||
+            uploadResult.error ||
+            detail?.code ||
+            uploadResponse.status,
+          uploadResult.message ||
+            detail?.message ||
+            uploadResult.error ||
+            (uploadResponse.status === 400
+              ? "File upload validation failed"
+              : "File upload failed"),
+          uploadResult.details || detail?.details || null
+        );
       }
 
       if (
@@ -1092,6 +1397,9 @@ class KnowledgeBaseService {
         (filePath: string, index: number) => ({
           path_or_url: filePath,
           filename: uploadResult.uploaded_filenames[index],
+          file_id: (uploadResult.file_records || []).find(
+            (record: any) => record.object_name === filePath
+          )?.file_id,
         })
       );
 
@@ -1103,7 +1411,6 @@ class KnowledgeBaseService {
           files: filesToProcess,
           chunking_strategy: chunkingStrategy,
           destination: "minio",
-          model_id: modelId,
         }),
       });
 
@@ -1112,33 +1419,45 @@ class KnowledgeBaseService {
         // Handle 500 error (data processing service failure)
         if (processResponse.status === 500) {
           const errorMessage = `Data processing service failed: ${
-            processResult.error
-          }. Files: ${processResult.files.join(", ")}`;
+            processResult.detail ||
+            processResult.error ||
+            processResult.message ||
+            "unknown error"
+          }`;
           throw new Error(errorMessage);
         }
-        throw new Error(processResult.error || "Data processing failed");
+        throw new Error(
+          processResult.detail ||
+            processResult.error ||
+            processResult.message ||
+            "Data processing failed"
+        );
       }
 
       // Handle successful response (201)
       if (processResponse.status === 201) {
-        return;
+        emitQuotaUsageChanged();
+        return { quota_status: uploadResult?.quota_status };
       }
 
       throw new Error("Unknown response status during processing");
     } catch (error) {
-      log.error("Failed to upload and process files:", error);
       throw error;
     }
   }
 
   // Delete a document from a knowledge base
-  async deleteDocument(docId: string, kbId: string): Promise<void> {
+  async deleteDocument(
+    docId: string,
+    kbId: string,
+    fileId?: string
+  ): Promise<void> {
     try {
       // Use REST-style DELETE request to delete document, requires knowledge base ID and document path
+      const query = new URLSearchParams({ path_or_url: docId });
+      if (fileId) query.set("file_id", fileId);
       const response = await fetch(
-        `${API_ENDPOINTS.knowledgeBase.indexDetail(
-          kbId
-        )}/documents?path_or_url=${encodeURIComponent(docId)}`,
+        `${API_ENDPOINTS.knowledgeBase.indexDetail(kbId)}/documents?${query.toString()}`,
         {
           method: "DELETE",
           headers: getAuthHeaders(),
@@ -1149,6 +1468,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete document");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete document:", error);
       throw error;
@@ -1278,6 +1598,37 @@ class KnowledgeBaseService {
         throw error;
       }
       throw new Error("Failed to change summary");
+    }
+  }
+
+  async fetchSummaryFrequencyOptions(): Promise<
+    { value: string; label: string }[]
+  > {
+    const response = await fetch(
+      API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    const data = await response.json();
+    return data.options || [];
+  }
+
+  async updateKnowledgeBaseQuota(
+    indexName: string,
+    limitBytes: number | null
+  ): Promise<void> {
+    const response = await fetch(
+      API_ENDPOINTS.knowledgeBase.updateIndex(indexName),
+      {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ quota_limit_bytes: limitBytes }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || data.message || "Failed to update quota");
     }
   }
 
@@ -1556,7 +1907,9 @@ class KnowledgeBaseService {
           query,
           index_names: [indexName],
           top_k: options?.topK ?? 10,
-          weight_accurate: options?.weightAccurate ?? 0.5,
+          ...(options?.weightAccurate !== undefined
+            ? { weight_accurate: options.weightAccurate }
+            : {}),
         }),
       });
 
@@ -1625,13 +1978,19 @@ class KnowledgeBaseService {
   // Get document error information for a document
   async getDocumentErrorInfo(
     kbId: string,
-    docId: string
+    docId: string,
+    fileId?: string
   ): Promise<{
     errorCode: string | null;
+    errorReason: string | null;
+    errorStage: string | null;
+    failedAt: string | null;
   }> {
     try {
       const response = await fetch(
-        API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId),
+        `${API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId)}${
+          fileId ? `?file_id=${encodeURIComponent(fileId)}` : ""
+        }`,
         {
           headers: getAuthHeaders(),
         }
@@ -1647,9 +2006,16 @@ class KnowledgeBaseService {
       }
 
       const errorCode = (data.error_code && String(data.error_code)) || null;
+      const errorReason =
+        (data.error_message && String(data.error_message)) || null;
+      const errorStage = (data.error_stage && String(data.error_stage)) || null;
+      const failedAt = (data.failed_at && String(data.failed_at)) || null;
 
       return {
         errorCode,
+        errorReason,
+        errorStage,
+        failedAt,
       };
     } catch (error) {
       log.error("Failed to get document error info:", error);

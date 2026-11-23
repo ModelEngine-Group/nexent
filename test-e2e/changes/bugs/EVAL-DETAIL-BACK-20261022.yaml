@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: EVAL-DETAIL-BACK-20261022
+  change_type: bugfix
+  bug_id: EVAL-DETAIL-BACK-20261022
+  title: Add evaluation detail return icon
+  description: Provide localized list navigation during detail loading, success and failure.
+  observed_behavior: Only successful detail loads show a filtered breadcrumb; no return icon exists.
+  expected_behavior: An accessible return icon navigates directly to the current locale evaluation list in every detail state.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: The existing evaluation journey inspects results but does not assert detail return navigation; the user explicitly requested no additional test cases for this fix.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-EVAL-RUN-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: exempt
+    behaviors:
+    - Accessible return icon navigates to the current locale list during loading, failed loading and successful loading
+    - Existing retry and breadcrumb remain available
+    test_selectors: []
+    reason: User explicitly requested no new tests for this fix; the previously added regression test was removed.
+  notes: >-
+    Design: nexent-doc/docs/Developing/evaluation-detail-navigation/design.md.
+    Inspected PW-EVAL-RUN-01 case and binding: real-model creation/results journey is unaffected and not selected.
+    No duplicate formal D1 or additional browser journey is needed for the local navigation handler.

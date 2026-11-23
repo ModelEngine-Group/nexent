@@ -46,6 +46,7 @@ def test_create_conversation_share_endpoint_success(mocker):
             "mode": "selected",
             "selected_user_message_ids": [11, 13],
             "expire_time": "2030-01-01T00:00:00",
+            "render_version": "newchat",
         },
         headers={"Authorization": "Bearer token"},
     )
@@ -62,6 +63,23 @@ def test_create_conversation_share_endpoint_success(mocker):
     assert create_kwargs["mode"] == "selected"
     assert create_kwargs["selected_user_message_ids"] == [11, 13]
     assert create_kwargs["expire_time"].year == 2030
+    assert create_kwargs["render_version"] == "newchat"
+
+
+def test_create_conversation_share_endpoint_defaults_to_legacy_renderer(mocker):
+    mocker.patch(
+        "apps.conversation_share_app.get_current_user_id",
+        return_value=("user_1", "tenant_1"),
+    )
+    mock_create = mocker.patch(
+        "apps.conversation_share_app.create_share_snapshot_service",
+        return_value={"share_id": "share_token"},
+    )
+
+    response = client.post("/share/conversation/7", json={"mode": "all"})
+
+    assert response.status_code == HTTPStatus.OK
+    assert mock_create.call_args.kwargs["render_version"] == "legacy"
 
 
 def test_create_conversation_share_endpoint_value_error(mocker):
@@ -253,3 +271,18 @@ def test_preview_share_asset_endpoint_resolve_file_error(mocker):
 
     assert response.status_code == HTTPStatus.BAD_REQUEST
     assert response.json()["detail"] == "unsupported"
+
+def test_create_conversation_share_endpoint_token_expired(mocker):
+    """Expired token maps to 401 instead of falling through to 500."""
+    from consts.exceptions import TokenExpiredError
+
+    mocker.patch(
+        "apps.conversation_share_app.get_current_user_id",
+        side_effect=TokenExpiredError("expired"),
+    )
+
+    response = client.post("/share/conversation/7", json={"mode": "all"})
+
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert "expired" in response.json()["detail"]
+

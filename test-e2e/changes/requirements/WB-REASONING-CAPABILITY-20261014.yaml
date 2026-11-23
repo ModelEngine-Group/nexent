@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: WB-REASONING-CAPABILITY-20261014
+  change_type: requirement
+  requirement_id: WB-REASONING-CAPABILITY-20261014
+  title: Unify capability-driven reasoning choices and complete effort forwarding
+  description: Workbench and Agent chat use the selected model's supported reasoning controls independent of thinking enablement, and forward every supported effort through existing run/config paths.
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-002]
+    added: [WB-CONTROLS-D4-003]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [frontend/tests/workbench/AgentModels.test.ts, frontend/tests/workbench/ModelSelectorThinking.test.tsx, frontend/tests/workbench/Composer.test.tsx, test/backend/agents/test_workbench_generation_overlay.py]
+    behaviors:
+      - Both scopes expose identical supported controls despite disabled saved thinking, preserving allowed models and valid defaults.
+      - Unsupported or unknown capabilities do not fabricate low/medium/high, and stale defaults resolve to supported values.
+      - Every existing effort enum reaches callbacks, model context, Workbench schema and root overlay without changing other generation fields or child models.
+      - Disabling thinking removes active effort and unsupported enum values remain rejected.
+    reason: Extend existing unit suites for option derivation, UI callback, validation and overlay; a browser journey proves real adapter request serialization for both routes.
+  notes: Existing chat-workbench-resource-controls SPEC owns this change. Add one D4 journey for intentional mocked runs and capability parity; keep D4-002's no-generation journey unchanged. No new D1, D2/D3/D5 or real-provider claims. Sampling remains frontend-only; budget handling and other request fields retain existing paths.

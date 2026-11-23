@@ -1,0 +1,26 @@
+schema_version: "1.0"
+module:
+  id: AGENT-LIST
+  name: Agent list views
+  description: Grid and table presentations for the existing agent list.
+features:
+  - feature_id: AGENT-LIST-VIEWS
+    name: Agent list grid and table views
+    status: active
+    description: Switch between the existing agent cards and a data-backed table without changing page-level content or agent operations.
+    business_rules:
+      - rule_id: AGENT-LIST-RULE-001
+        description: Switching list presentation changes only the view and preserves the existing agent data, search, pagination, and actions.
+      - rule_id: AGENT-LIST-RULE-002
+        description: The table shows name, type, description, status, creator, update time, and row actions in the specified order.
+      - rule_id: AGENT-LIST-RULE-003
+        description: The table update time is sourced only from update_time and is not inferred from create_time.
+      - rule_id: AGENT-LIST-RULE-004
+        description: The table is rendered with Ant Design Table through the reusable StandardTable component and follows the documented typography, background, 40px row height, #f0f0f0 body row dividers, and 14px centered #c9c9c9 separators between header columns, without an outer border.
+      - rule_id: AGENT-LIST-RULE-005
+        description: The table height follows its rendered header and rows up to 500px; it shrinks to the available list area when needed, and overflow scrolls inside the table while pagination remains below it.
+    required_test_stages: [D1, D4]
+    source:
+      requirement_ids: [AGENT-LIST-REQ-001, AGENT-LIST-REQ-002]
+      spec_path: docs/handoffs/2026-10-08-agent-list-high-fidelity.md
+      notes: User request and same-page WeMeeting high-fidelity reference; no Edge window inspected.

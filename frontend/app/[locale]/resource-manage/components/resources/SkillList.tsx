@@ -10,10 +10,11 @@ import {
   App,
   Modal,
   Input,
+  Select,
   Form,
   Switch,
   InputNumber,
-  Tooltip
+  Tooltip,
 } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Download } from "lucide-react";
@@ -551,6 +552,8 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
   const [editingSkill, setEditingSkill] = useState<SkillListItem | null>(null);
   const [savingParams, setSavingParams] = useState(false);
   const [installModalOpen, setInstallModalOpen] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [sourceFilters, setSourceFilters] = useState<string[]>([]);
 
   const snapshotRef = useRef<Record<string, unknown>>({});
   const metaRef = useRef<Map<string, string>>(new Map());
@@ -586,6 +589,19 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
     enabled: Boolean(tenantId),
     retry: 1,
   });
+
+  const filteredSkills = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return skills.filter((skill) => {
+      const matchesName =
+        !normalizedKeyword ||
+        (skill.name || "").toLowerCase().includes(normalizedKeyword);
+      const matchesSource =
+        sourceFilters.length === 0 ||
+        sourceFilters.includes(skill.source || "");
+      return matchesName && matchesSource;
+    });
+  }, [keyword, skills, sourceFilters]);
 
   useEffect(() => {
     if (!paramsEditorState) return;
@@ -730,7 +746,32 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex justify-end mb-2 flex-shrink-0">
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Input.Search
+            allowClear
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder={t("tenantResources.skills.searchPlaceholder")}
+            className="w-56"
+          />
+          <Select
+            mode="multiple"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            value={sourceFilters}
+            onChange={setSourceFilters}
+            options={Array.from(
+              new Set(skills.map((skill) => skill.source).filter(Boolean))
+            ).map((source) => ({
+              label: source,
+              value: source,
+            }))}
+            placeholder={t("tenantResources.skills.filterSource")}
+            className="w-40"
+          />
+        </div>
         <Button
           type="primary"
           icon={<Download className="h-4 w-4" />}
@@ -741,7 +782,7 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
       </div>
       <Table<SkillListItem>
         columns={columns}
-        dataSource={skills}
+        dataSource={filteredSkills}
         rowKey={(row) => String(row.skill_id)}
         loading={isLoading}
         size="small"

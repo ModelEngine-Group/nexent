@@ -28,6 +28,7 @@ Taking the administrator account as an example, the left sidebar exposes every m
 - **Agent Space** – Manage all existing agents.
 - **Agent Market** – Discover and install published agents.
 - **Agent Development** – Create and configure agents.
+- **Agent Evaluation** – Validate agent behavior with evaluation sets and evaluators.
 - **Knowledge Base** – Upload documents and materials to help agents understand your exclusive knowledge.
 - **MCP Tools** – Connect servers, sync tools, and view status at a glance (coming soon).
 - **Monitoring & Operations** – Monitor agent runtime status in real time (coming soon).
@@ -37,12 +38,23 @@ Taking the administrator account as an example, the left sidebar exposes every m
 
 Use the language switcher in the top-right corner to toggle between Simplified Chinese and English. The lower-left corner shows the running Nexent version to simplify troubleshooting when asking for help.
 
-## 🚀 Quick Start
+## � Account Setup (First Use)
+
+When using Nexent for the first time, you need to create a tenant administrator account before you can integrate models, create agents, and interact via Q&A:
+
+1. Log in with the super administrator account `suadmin@nexent.com` (see the [Installation Guide](../quick-start/installation.md) for the default password);
+2. Go to **Tenant Resources**, create a tenant and a tenant administrator account;
+3. Log out of the super administrator account;
+4. Log in with the newly created tenant administrator account.
+
+Once these steps are complete, you can proceed with configuration and usage. For role and permission details, see [Resource Management](./resource-management.md).
+
+## �🚀 Quick Start
 
 We recommend configuring the platform in this order:
 
-1. Set up **[Model Management](./model-management)** to define app details and connect AI models.
-2. Create your **[Knowledge Base](./knowledge-base)** and upload documents.
+1. Set up **[Model Management](./agent-development/model-configuration.md)** to define app details and connect AI models.
+2. Create your **[Knowledge Base](./agent-development/knowledge-configuration.md)** and upload documents.
 3. Conduct **[Agent Development](./agent-development)** on top of the models and knowledge base.
 4. When everything is ready, chat with your agents via **[Start Chat](./start-chat)**.
 
@@ -50,4 +62,4 @@ Alternatively, you can click the "Quick Setup" button on the homepage or in the 
 
 ## 💡 Get Help
 
-Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

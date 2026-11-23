@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PARAMS-TOOLTIPS-20261022
+  change_type: bugfix
+  bug_id: MODEL-PARAMS-TOOLTIPS-20261022
+  title: Restore model override sampling help tooltips
+  description: Attach localized help to the Temperature and Top P question icons in ModelParamsModal.
+  observed_behavior: Both question icons render without Tooltip wrappers, so hovering provides no explanation.
+  expected_behavior: Hovering or focusing either icon shows the matching localized explanation without changing parameters or invoking dialog actions, including readonly mode.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing resource picker localization tests check translated keys but do not interact with sampling help icons.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/resourcePickerLocalization.test.tsx
+    behaviors:
+    - Real model parameter dialog shows matching Chinese and English sampling help on hover and focus.
+    - Reading help in editable and readonly mode never changes values or saves or closes the dialog.
+    reason: Extend existing frontend localization component UT with real AntD Tooltip interaction. No backend changes, external I/O or new runtime boundary; a duplicate formal D1 adds no evidence.
+  notes: >-
+    Callers include Agent prompt configuration and ModelOverrideModal; only presentation changes.
+    PR-QUALITY-D1-001 covers ParamSlider values and PR-QUALITY-D1-002 covers knowledge model mismatch lifecycle; neither exercises ModelParamsModal sampling help, so both remain unchanged and are outside this execution selection.
+    Existing Feature and Case assets are preserved. No new D1-D5 quota or unrelated model runtime verification is introduced.
+    Sibling nexent-doc and authoritative sibling UI document are absent; no external SPEC is copied into the product repository.

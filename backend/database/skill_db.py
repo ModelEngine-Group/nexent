@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill instance and skill info database operations."""
 
 import json
@@ -5,13 +7,30 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import update as sa_update
+from sqlalchemy import or_, update as sa_update
 
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
-from utils.skill_params_utils import strip_params_comments_for_db
+from consts.const import MAX_SKILLS_PER_TENANT
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
+from management.db.skill_params import strip_params_comments_for_db
+from management.db.serialization import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)
+
+SKILL_DESCRIPTION_MAX_LENGTH = 1000
+
+
+def _normalize_skill_description(value: Any) -> str:
+    """Normalize a skill description to the database column limit."""
+    description = "" if value is None else str(value)
+    if len(description) > SKILL_DESCRIPTION_MAX_LENGTH:
+        logger.warning(
+            "Skill description exceeds %s characters and will be truncated",
+            SKILL_DESCRIPTION_MAX_LENGTH,
+        )
+    return description[:SKILL_DESCRIPTION_MAX_LENGTH]
 
 
 def _params_value_for_db(raw: Any) -> Any:
@@ -21,7 +40,37 @@ def _params_value_for_db(raw: Any) -> Any:
     return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
 
 
-def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: str, version_no: int = 0):
+def _raise_if_skill_limit_reached(session, tenant_id: str, additional_count: int = 1) -> None:
+    """Reject tenant-owned Skill creation when the hard quota would be exceeded."""
+    if tenant_id is None or additional_count <= 0:
+        return
+
+    current_count = session.query(SkillInfo).filter(
+        SkillInfo.tenant_id == tenant_id,
+        SkillInfo.delete_flag != "Y",
+    ).count()
+    # Lightweight test doubles may not implement count(); production SQLAlchemy
+    # sessions always return an integer.
+    if isinstance(current_count, int) and current_count + additional_count > MAX_SKILLS_PER_TENANT:
+        raise AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            f"Tenant skill limit reached: maximum {MAX_SKILLS_PER_TENANT} skills per tenant",
+            details={
+                "resource": "skills",
+                "scope": "tenant",
+                "limit": MAX_SKILLS_PER_TENANT,
+                "current_count": current_count,
+            },
+        )
+
+
+def create_or_update_skill_by_skill_info(
+    skill_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Create or update a SkillInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -35,8 +84,16 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     Returns:
         Created or updated SkillInstance object
     """
-    skill_info_dict = skill_info.__dict__ if hasattr(skill_info, '__dict__') else skill_info
+    from .agent_db import is_system_agent
+
+    skill_info_dict = skill_info.__dict__ if hasattr(
+        skill_info, '__dict__') else skill_info
     skill_info_dict = skill_info_dict.copy()
+    if (
+        not allow_system
+        and is_system_agent(skill_info_dict.get("agent_id"), tenant_id) is True
+    ):
+        raise ValueError("System Agent is managed by the platform")
     skill_info_dict.setdefault("tenant_id", tenant_id)
     skill_info_dict.setdefault("user_id", user_id)
     skill_info_dict.setdefault("version_no", version_no)
@@ -77,6 +134,34 @@ def query_skill_instances_by_agent_id(agent_id: int, tenant_id: str, version_no:
             SkillInstance.delete_flag != 'Y')
         skill_instances = query.all()
         return [as_dict(skill_instance) for skill_instance in skill_instances]
+
+
+def get_valid_skill_ids(tenant_id: str, skill_ids: List[int]) -> set:
+    """Return skill IDs that still exist in ag_skill_info_t and are not soft-deleted.
+
+    Checks both tenant-scoped skills and global (tenant_id IS NULL) skills.
+
+    Used as a fallback check when skill instances may reference deleted skills.
+
+    Args:
+        tenant_id: Tenant ID for filtering tenant-scoped skills.
+        skill_ids: Candidate skill IDs to validate.
+
+    Returns:
+        Set of valid (non-deleted) skill IDs.
+    """
+    if not skill_ids:
+        return set()
+    with get_db_session() as session:
+        rows = session.query(SkillInfo.skill_id).filter(
+            SkillInfo.skill_id.in_(skill_ids),
+            SkillInfo.delete_flag != 'Y',
+            or_(
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.tenant_id.is_(None),
+            ),
+        ).all()
+        return {row[0] for row in rows}
 
 
 def query_enabled_skill_instances(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -123,8 +208,18 @@ def search_skills_for_agent(agent_id: int, tenant_id: str, version_no: int = 0):
         return [as_dict(skill_instance) for skill_instance in skill_instances]
 
 
-def delete_skills_by_agent_id(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
+def delete_skills_by_agent_id(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """Delete all skill instances for an agent."""
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
     with get_db_session() as session:
         session.query(SkillInstance).filter(
             SkillInstance.agent_id == agent_id,
@@ -178,7 +273,6 @@ def delete_skill_instances_by_tenant(tenant_id: str, user_id: str) -> int:
         return count
 
 
-
 # ============== SkillInfo Repository Functions ==============
 
 
@@ -190,6 +284,56 @@ def _get_tool_ids(session, skill_id: int) -> List[int]:
     return [r.tool_id for r in relations]
 
 
+def _build_skill_update_values(
+    skill_data: Dict[str, Any],
+    updated_by: Optional[str],
+) -> Dict[str, Any]:
+    row_values: Dict[str, Any] = {"update_time": datetime.now()}
+    if updated_by:
+        row_values["updated_by"] = updated_by
+
+    field_mapping = {
+        "description": "skill_description",
+        "content": "skill_content",
+        "tags": "skill_tags",
+        "source": "source",
+        "ingroup_permission": "ingroup_permission",
+    }
+    for input_field, model_field in field_mapping.items():
+        if input_field in skill_data:
+            row_values[model_field] = skill_data[input_field]
+    if "group_ids" in skill_data:
+        group_ids = skill_data["group_ids"]
+        row_values["group_ids"] = (
+            convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids
+        )
+
+    for field in ("config_schemas", "config_values"):
+        if field in skill_data:
+            row_values[field] = _params_value_for_db(skill_data[field])
+    return row_values
+
+
+def _replace_skill_tool_relations(
+    session,
+    skill_id: int,
+    tool_ids: List[int],
+    updated_by: Optional[str] = None,
+) -> None:
+    session.query(SkillToolRelation).filter(
+        SkillToolRelation.skill_id == skill_id
+    ).delete()
+    for tool_id in tool_ids:
+        session.add(SkillToolRelation(
+            skill_id=skill_id,
+            tool_id=tool_id,
+            created_by=updated_by,
+            create_time=datetime.now(),
+            updated_by=updated_by,
+            update_time=datetime.now(),
+        ))
+
+
 def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
     """Convert SkillInfo to dict."""
     return {
@@ -197,16 +341,29 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "name": skill.skill_name,
         "tenant_id": skill.tenant_id,
         "description": skill.skill_description,
-        "tags": skill.skill_tags or [],
+        "tags": _normalize_skill_tags(skill.skill_tags),
         "content": skill.skill_content or "",
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
         "source": skill.source,
+        "group_ids": convert_string_to_list(skill.group_ids),
+        "ingroup_permission": skill.ingroup_permission,
         "created_by": skill.created_by,
         "create_time": skill.create_time.isoformat() if skill.create_time else None,
         "updated_by": skill.updated_by,
         "update_time": skill.update_time.isoformat() if skill.update_time else None,
     }
+
+
+def _normalize_skill_tags(tags: Any) -> List[str]:
+    """Return skill tags as a string list, tolerating malformed persisted values."""
+    if isinstance(tags, list):
+        return [
+            tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()
+        ]
+    if isinstance(tags, str) and tags.strip():
+        return [tags.strip()]
+    return []
 
 
 def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
@@ -219,6 +376,9 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
         skills = session.query(SkillInfo).filter(
             SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
+        ).order_by(
+            SkillInfo.create_time.desc(),
+            SkillInfo.skill_id.desc(),
         ).all()
         results = []
         for s in skills:
@@ -226,6 +386,29 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
             result["tool_ids"] = _get_tool_ids(session, s.skill_id)
             results.append(result)
         return results
+
+
+def list_skill_permission_summaries(tenant_id: str) -> List[Dict[str, Any]]:
+    """List only the fields required to resolve skill visibility and ownership."""
+    with get_db_session() as session:
+        rows = session.query(
+            SkillInfo.skill_id,
+            SkillInfo.created_by,
+            SkillInfo.group_ids,
+            SkillInfo.ingroup_permission,
+        ).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+        ).all()
+        return [
+            {
+                "skill_id": row.skill_id,
+                "created_by": row.created_by,
+                "group_ids": convert_string_to_list(row.group_ids),
+                "ingroup_permission": row.ingroup_permission,
+            }
+            for row in rows
+        ]
 
 
 def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -246,6 +429,19 @@ def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any
             result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
             return result
         return None
+
+
+def get_skills_for_tag_read(tenant_id: str, skill_ids: list[int]) -> list[dict]:
+    """Read tenant skill visibility metadata without per-skill tool relations."""
+    if not skill_ids:
+        return []
+    with get_db_session() as session:
+        records = session.query(SkillInfo).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+            SkillInfo.skill_id.in_(skill_ids),
+        ).all()
+        return [_to_dict(record) for record in records]
 
 
 def get_skill_by_id(skill_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -317,15 +513,25 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         tenant_id: Tenant ID for the skill
     """
     with get_db_session() as session:
+        _raise_if_skill_limit_reached(session, tenant_id)
+
         skill = SkillInfo(
             skill_name=skill_data["name"],
             tenant_id=tenant_id,
-            skill_description=skill_data.get("description", ""),
+            skill_description=_normalize_skill_description(skill_data.get("description", "")),
             skill_tags=skill_data.get("tags", []),
             skill_content=skill_data.get("content", ""),
-            config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
-            config_values=_params_value_for_db(skill_data.get("config_values")),
+            config_schemas=_params_value_for_db(
+                skill_data.get("config_schemas")),
+            config_values=_params_value_for_db(
+                skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
+            group_ids=(
+                convert_list_to_string(skill_data.get("group_ids"))
+                if isinstance(skill_data.get("group_ids"), list)
+                else skill_data.get("group_ids")
+            ),
+            ingroup_permission=skill_data.get("ingroup_permission"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
             updated_by=skill_data.get("updated_by"),
@@ -338,11 +544,16 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
 
         tool_ids = skill_data.get("tool_ids", [])
         if tool_ids:
+            relation_created_by = skill_data.get("created_by") or skill_data.get("updated_by")
+            relation_updated_by = skill_data.get("updated_by") or relation_created_by
             for tool_id in tool_ids:
                 rel = SkillToolRelation(
                     skill_id=skill_id,
                     tool_id=tool_id,
-                    create_time=datetime.now()
+                    created_by=relation_created_by,
+                    create_time=datetime.now(),
+                    updated_by=relation_updated_by,
+                    update_time=datetime.now(),
                 )
                 session.add(rel)
 
@@ -383,23 +594,7 @@ def update_skill(
             raise ValueError(f"Skill not found: {skill_name}")
 
         skill_id = skill.skill_id
-        now = datetime.now()
-        row_values: Dict[str, Any] = {"update_time": now}
-        if updated_by:
-            row_values["updated_by"] = updated_by
-
-        if "description" in skill_data:
-            row_values["skill_description"] = skill_data["description"]
-        if "content" in skill_data:
-            row_values["skill_content"] = skill_data["content"]
-        if "tags" in skill_data:
-            row_values["skill_tags"] = skill_data["tags"]
-        if "source" in skill_data:
-            row_values["source"] = skill_data["source"]
-        if "config_schemas" in skill_data:
-            row_values["config_schemas"] = _params_value_for_db(skill_data["config_schemas"])
-        if "config_values" in skill_data:
-            row_values["config_values"] = _params_value_for_db(skill_data["config_values"])
+        row_values = _build_skill_update_values(skill_data, updated_by)
 
         session.execute(
             sa_update(SkillInfo)
@@ -411,17 +606,12 @@ def update_skill(
         )
 
         if "tool_ids" in skill_data:
-            session.query(SkillToolRelation).filter(
-                SkillToolRelation.skill_id == skill_id
-            ).delete()
-
-            for tool_id in skill_data["tool_ids"]:
-                rel = SkillToolRelation(
-                    skill_id=skill_id,
-                    tool_id=tool_id,
-                    create_time=datetime.now()
-                )
-                session.add(rel)
+            _replace_skill_tool_relations(
+                session,
+                skill_id,
+                skill_data["tool_ids"],
+                updated_by=updated_by,
+            )
 
         session.commit()
 
@@ -432,6 +622,75 @@ def update_skill(
         ).first()
         if not refreshed:
             raise ValueError(f"Skill not found after update: {skill_name}")
+
+        result = _to_dict(refreshed)
+        result["tool_ids"] = skill_data.get(
+            "tool_ids",
+            _get_tool_ids(session, skill_id),
+        )
+        return result
+
+
+def update_skill_by_id(
+    skill_id: int,
+    skill_data: Dict[str, Any],
+    tenant_id: str,
+    updated_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update an existing skill by ID for a tenant."""
+    with get_db_session() as session:
+        skill = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != "Y",
+        ).first()
+
+        if not skill:
+            raise ValueError(f"Skill not found: {skill_id}")
+
+        row_values = _build_skill_update_values(skill_data, updated_by)
+
+        if "name" in skill_data:
+            new_name = str(skill_data["name"] or "").strip()
+            if not new_name:
+                raise ValueError("Skill name is required")
+            if new_name != skill.skill_name:
+                duplicate = session.query(SkillInfo).filter(
+                    SkillInfo.skill_name == new_name,
+                    SkillInfo.tenant_id == tenant_id,
+                    SkillInfo.skill_id != skill_id,
+                    SkillInfo.delete_flag != "Y",
+                ).first()
+                if duplicate:
+                    raise ValueError(f"Skill '{new_name}' already exists")
+                row_values["skill_name"] = new_name
+        session.execute(
+            sa_update(SkillInfo)
+            .where(
+                SkillInfo.skill_id == skill_id,
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.delete_flag != "Y",
+            )
+            .values(**row_values)
+        )
+
+        if "tool_ids" in skill_data:
+            _replace_skill_tool_relations(
+                session,
+                skill_id,
+                skill_data["tool_ids"],
+                updated_by=updated_by,
+            )
+
+        session.commit()
+
+        refreshed = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != "Y",
+        ).first()
+        if not refreshed:
+            raise ValueError(f"Skill not found after update: {skill_id}")
 
         result = _to_dict(refreshed)
         result["tool_ids"] = skill_data.get(
@@ -589,6 +848,14 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
         ).all()
         existing_dict = {s.skill_name: s for s in existing_skills}
 
+        new_skill_names = {
+            skill_data.get("name")
+            for skill_data in skills
+            if skill_data.get("name") and skill_data.get("name") not in existing_dict
+        }
+        new_skill_count = len(new_skill_names)
+        _raise_if_skill_limit_reached(session, tenant_id, new_skill_count)
+
         for skill_data in skills:
             skill_name = skill_data.get("name")
             if not skill_name:
@@ -597,21 +864,25 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
             if skill_name in existing_dict:
                 existing = existing_dict[skill_name]
                 # Unconditionally overwrite all fields on every scan (same as tools)
-                existing.skill_description = skill_data.get("description", "")
+                existing.skill_description = _normalize_skill_description(skill_data.get("description", ""))
                 existing.skill_tags = skill_data.get("tags", [])
                 existing.skill_content = skill_data.get("content", "")
-                existing.config_schemas = _params_value_for_db(skill_data.get("config_schemas"))
-                existing.config_values = _params_value_for_db(skill_data.get("config_values"))
+                existing.config_schemas = _params_value_for_db(
+                    skill_data.get("config_schemas"))
+                existing.config_values = _params_value_for_db(
+                    skill_data.get("config_values"))
                 existing.updated_by = user_id
             else:
                 new_skill = SkillInfo(
                     skill_name=skill_name,
                     tenant_id=tenant_id,
-                    skill_description=skill_data.get("description", ""),
+                    skill_description=_normalize_skill_description(skill_data.get("description", "")),
                     skill_tags=skill_data.get("tags", []),
                     skill_content=skill_data.get("content", ""),
-                    config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
-                    config_values=_params_value_for_db(skill_data.get("config_values")),
+                    config_schemas=_params_value_for_db(
+                        skill_data.get("config_schemas")),
+                    config_values=_params_value_for_db(
+                        skill_data.get("config_values")),
                     source=skill_data.get("source", "official"),
                     created_by=user_id,
                     updated_by=user_id,

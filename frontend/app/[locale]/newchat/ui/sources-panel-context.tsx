@@ -1,0 +1,100 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import {
+  createContext,
+  useContext,
+  useMemo,
+  type FC,
+  type ReactNode,
+} from "react";
+import type { PanelSourceItem } from "./sources-panel";
+
+/**
+ * State describing which source group is currently driving the panel.
+ *
+ * - `null` means no panel is mounted and any click should open a fresh one.
+ * - Otherwise the panel belongs to a specific `(messageId, groupId)` pair and
+ *   a tab; toggling the same pair closes the panel, opening a different pair
+ *   replaces it.
+ *
+ * Carrying the raw source/image arrays in context (instead of recomputing them
+ * from the assistant-ui store) avoids another selector subscription that
+ * would otherwise re-render every `group-source` instance on each token.
+ */
+export interface SourcesPanelSelection {
+  messageId: string;
+  groupId: string;
+  sources: PanelSourceItem[];
+  images: PanelSourceItem[];
+  /** Stable key built from tool_sign + cite_index, for example "a1". */
+  selectedCitationKey?: string;
+  /** The cited answer section used to identify the relevant text in a Chunk. */
+  citationContext?: string;
+}
+
+export interface SourcesPanelContextValue {
+  selection: SourcesPanelSelection | null;
+  isOpen: boolean;
+  open: (payload: SourcesPanelSelection) => void;
+  toggle: (payload: SourcesPanelSelection) => void;
+  close: () => void;
+}
+
+const SourcesPanelContext = createContext<SourcesPanelContextValue | null>(
+  null
+);
+type SourcesPanelActions = Pick<
+  SourcesPanelContextValue,
+  "open" | "toggle" | "close"
+>;
+const SourcesPanelActionsContext = createContext<SourcesPanelActions | null>(
+  null
+);
+
+export interface SourcesPanelProviderProps {
+  value: SourcesPanelContextValue;
+  children: ReactNode;
+}
+
+export const SourcesPanelProvider: FC<SourcesPanelProviderProps> = ({
+  value,
+  children,
+}) => {
+  const { open, toggle, close } = value;
+  const actions = useMemo(
+    () => ({ open, toggle, close }),
+    [open, toggle, close]
+  );
+  return (
+    <SourcesPanelActionsContext.Provider value={actions}>
+      <SourcesPanelContext.Provider value={value}>
+        {children}
+      </SourcesPanelContext.Provider>
+    </SourcesPanelActionsContext.Provider>
+  );
+};
+
+export function useSourcesPanelActions(): SourcesPanelActions {
+  const actions = useContext(SourcesPanelActionsContext);
+  if (!actions)
+    throw new Error(
+      "useSourcesPanelActions must be used inside <SourcesPanelProvider>."
+    );
+  return actions;
+}
+
+/**
+ * Hook used by child components (currently the `group-source` block) to read
+ * and mutate the panel state owned by the surrounding `Thread` component.
+ */
+export const useSourcesPanel = (): SourcesPanelContextValue => {
+  const ctx = useContext(SourcesPanelContext);
+  if (!ctx) {
+    throw new Error(
+      "useSourcesPanel must be used inside <SourcesPanelProvider>."
+    );
+  }
+  return ctx;
+};

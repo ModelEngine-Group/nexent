@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-DISCOVERY-LIFECYCLE-20261009
+  change_type: test-fix
+  title: Implement owned URL discovery and external Agent lifecycle bindings
+  description: >-
+    Replace copied cross-Journey boilerplate with each existing Case title's
+    proof boundary. Discovery verifies actual custom-header wire transport
+    and refresh persistence; lifecycle verifies source/availability filters,
+    detail, refresh, deletion; isolation proves foreign reads and mutations
+    cannot affect the owner. Invocation, credentials and publishing remain
+    assigned to their other Cases, not claimed by these three selectors.
+    Keep source IDs, use schema-backed machine-local configuration, unique
+    source URLs, dynamic IDs, owned cleanup and redacted wire evidence.
+  affected_features:
+    existing: [F-089, F-091]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-031, API-092, API-093]
+    retired: []

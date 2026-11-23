@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-TASK-01
+  name: Agent Tasks→Create in Chat→提案→Run/History/Edit/Pause/Resume/Delete
+  status: active
+  description: 按/agent-tasks真实入口设计完整Journey。
+  business_rules:
+  - rule_id: V5-PW-TASK-01-RULE-01
+    description: Agent Tasks→Create in Chat→提案→Run/History/Edit/Pause/Resume/Delete
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

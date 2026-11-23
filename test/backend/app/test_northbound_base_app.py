@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for northbound_base_app module.
 
 Tests cover FastAPI application configuration, CORS middleware, router inclusion,
 and basic A2A endpoint routing and error handling.
 """
+import asyncio
 import os
 import sys
 import types
@@ -13,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -43,16 +47,16 @@ northbound_service_module = types.ModuleType("services.northbound_service")
 northbound_service_module.NorthboundContext = NorthboundContext
 sys.modules['services.northbound_service'] = northbound_service_module
 
-# services.a2a_server_service - stub with a2a_server_service object and exceptions
+# management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
 from unittest.mock import AsyncMock, MagicMock
 
-a2a_service_module = types.ModuleType("services.a2a_server_service")
+a2a_service_module = types.ModuleType("management.services.agent.a2a.service")
 a2a_service_module.EndpointNotFoundError = type("EndpointNotFoundError", (Exception,), {})
 a2a_service_module.AgentNotEnabledError = type("AgentNotEnabledError", (Exception,), {})
 a2a_service_module.TaskNotFoundError = type("TaskNotFoundError", (Exception,), {})
 a2a_service_module.UnsupportedOperationError = type("UnsupportedOperationError", (Exception,), {})
 a2a_service_module.A2AServerServiceError = type("A2AServerServiceError", (Exception,), {})
-sys.modules['services.a2a_server_service'] = a2a_service_module
+sys.modules['management.services.agent.a2a.service'] = a2a_service_module
 
 # Create a proper mock service instance with all methods
 a2a_server_service_mock = MagicMock()
@@ -62,8 +66,8 @@ a2a_server_service_mock.get_agent_card = MagicMock()
 a2a_server_service_mock.get_task = MagicMock()
 a2a_service_module.a2a_server_service = a2a_server_service_mock
 
-# services.file_management_service - stub used by northbound_knowledge_app
-file_mgmt_module = types.ModuleType("services.file_management_service")
+# management.services.file.service - stub used by northbound_knowledge_app
+file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_to_minio = AsyncMock()
 file_mgmt_module.upload_files_impl = AsyncMock()
 file_mgmt_module.get_file_url_impl = AsyncMock()
@@ -75,15 +79,23 @@ file_mgmt_module.check_file_access_batch = MagicMock(return_value={})
 file_mgmt_module.resolve_preview_file = AsyncMock()
 file_mgmt_module.get_preview_stream = MagicMock()
 file_mgmt_module.resolve_minio_upload_folder = MagicMock(return_value="attachments")
-sys.modules["services.file_management_service"] = file_mgmt_module
+sys.modules["management.services.file.service"] = file_mgmt_module
 
-# services.redis_service - stub to avoid importing redis dependency
-redis_service_module = types.ModuleType("services.redis_service")
+# management.services.knowledge_base.task_state - stub to avoid importing redis dependency
+redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
 redis_service_module.get_redis_service = MagicMock()
-sys.modules["services.redis_service"] = redis_service_module
+sys.modules["management.services.knowledge_base.task_state"] = redis_service_module
 
-# services.vectordatabase_service - stub to avoid heavy SDK imports
-vectordb_service_module = types.ModuleType("services.vectordatabase_service")
+# management.services.knowledge_base.service - stub to avoid heavy SDK imports
+vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
+
+class KnowledgeBaseNeedsModelConfigError(Exception):
+    def __init__(self, index_name: str, message: str = None):
+        self.index_name = index_name
+        self.message = message or (
+            f"Knowledge base '{index_name}' needs an embedding model to be configured"
+        )
+        super().__init__(self.message)
 
 class _ElasticSearchServiceStub:
     @staticmethod
@@ -91,8 +103,20 @@ class _ElasticSearchServiceStub:
         return {"indices": []}
 
 vectordb_service_module.ElasticSearchService = _ElasticSearchServiceStub
+vectordb_service_module.KnowledgeBaseNeedsModelConfigError = KnowledgeBaseNeedsModelConfigError
 vectordb_service_module.get_vector_db_core = MagicMock()
-sys.modules["services.vectordatabase_service"] = vectordb_service_module
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_module
+
+# database.knowledge_db - stub used by northbound_knowledge_app
+database_pkg = types.ModuleType("database")
+database_pkg.__path__ = [os.path.join(backend_dir, "database")]
+sys.modules["database"] = database_pkg
+
+knowledge_db_module = types.ModuleType("database.knowledge_db")
+knowledge_db_module.get_index_name_by_knowledge_name = MagicMock(
+    side_effect=lambda name, tenant_id: f"resolved_{name}"
+)
+sys.modules["database.knowledge_db"] = knowledge_db_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 2: Mock minimal consts modules needed by apps layer
@@ -102,12 +126,19 @@ consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules['consts'] = consts_module
 
 # consts.model - only exceptions and AgentRequest needed by apps
+class HybridSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    index_names: list = Field(..., min_length=1)
+    top_k: int = Field(10, ge=1, le=100)
+    weight_accurate: float = Field(0.5, ge=0.0, le=1.0)
+
 consts_model_module = types.ModuleType("consts.model")
 consts_model_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_model_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 consts_model_module.SignatureValidationError = type("SignatureValidationError", (Exception,), {})
 consts_model_module.AgentRequest = type("AgentRequest", (), {})
 consts_model_module.ProcessParams = type("ProcessParams", (), {})
+consts_model_module.HybridSearchRequest = HybridSearchRequest
 consts_module.model = consts_model_module
 sys.modules['consts.model'] = consts_model_module
 
@@ -124,6 +155,65 @@ consts_exceptions_module.UnsupportedFileTypeException = type("UnsupportedFileTyp
 consts_exceptions_module.FileTooLargeException = type("FileTooLargeException", (Exception,), {})
 consts_module.exceptions = consts_exceptions_module
 sys.modules['consts.exceptions'] = consts_exceptions_module
+
+# consts.const - stub used by northbound_knowledge_app
+consts_const_module = types.ModuleType("consts.const")
+consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+consts_const_module.NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = 1
+
+class VectorDatabaseType:
+    ELASTICSEARCH = "elasticsearch"
+
+consts_const_module.VectorDatabaseType = VectorDatabaseType
+sys.modules["consts.const"] = consts_const_module
+
+
+class _ManagerState:
+    CREATED = "created"
+    RUNNING = "running"
+    CLOSED = "closed"
+
+
+class _ManagedTaskSpec:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _NorthboundThreadManager:
+    def __init__(self):
+        self.state = _ManagerState.CREATED
+
+    def start(self):
+        self.state = _ManagerState.RUNNING
+
+    async def run(self, _lane, _spec, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    async def shutdown(self, timeout):
+        self.state = _ManagerState.CLOSED
+
+    def snapshot(self):
+        return {
+            "service_name": "northbound",
+            "active_count": 0,
+            "queued_count": 0,
+        }
+
+
+concurrency_module = types.ModuleType("nexent.core.concurrency")
+concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+concurrency_module.ManagerState = _ManagerState
+concurrency_module.set_default_thread_manager = MagicMock()
+concurrency_module.clear_default_thread_manager = MagicMock()
+sys.modules["nexent.core.concurrency"] = concurrency_module
+
+thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
+thread_lifecycle_module.northbound_thread_manager = _NorthboundThreadManager()
+sys.modules["infrastructure.concurrency"] = thread_lifecycle_module
+
+runtime_state_module = types.ModuleType("management.services.agent.run_state")
+runtime_state_module.runtime_state_service = MagicMock()
+sys.modules["management.services.agent.run_state"] = runtime_state_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
@@ -151,6 +241,13 @@ async def _get_northbound_context_fake(request):
 
 northbound_app_module._get_northbound_context = _get_northbound_context_fake
 sys.modules['apps.northbound_app'] = northbound_app_module
+
+# Mock apps.file_management_app - used by northbound_knowledge_app
+file_management_app_module = types.ModuleType("apps.file_management_app")
+file_management_app_module.build_content_disposition_header = MagicMock(
+    return_value='attachment; filename="file.txt"'
+)
+sys.modules["apps.file_management_app"] = file_management_app_module
 
 # Mock apps.app_factory (imported by northbound_base_app)
 app_factory_module = types.ModuleType("apps.app_factory")
@@ -184,7 +281,8 @@ sys.modules['apps.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
-                     cors_origins=None, cors_methods=None, enable_monitoring=True):
+                     cors_origins=None, cors_methods=None, enable_monitoring=True,
+                     lifespan=None):
     """Minimal implementation of create_app for testing."""
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
@@ -193,7 +291,8 @@ def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
         title=title,
         description=description,
         version=version,
-        root_path=root_path
+        root_path=root_path,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware (simplified)
@@ -217,17 +316,17 @@ database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
 sys.modules['database.a2a_agent_db'] = database_a2a_module
 
-# Mock utils.auth_utils (referenced by northbound_app._get_northbound_context)
-auth_utils_module = types.ModuleType("utils.auth_utils")
+# Mock management.services.permission.identity.authentication_helpers (referenced by northbound_app._get_northbound_context)
+auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
 auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
-sys.modules['utils.auth_utils'] = auth_utils_module
+sys.modules['management.services.permission.identity.authentication_helpers'] = auth_utils_module
 
-# Mock utils.file_management_utils to avoid database/storage imports
-file_management_utils_module = types.ModuleType("utils.file_management_utils")
+# Mock management.services.knowledge_base.ingestion to avoid database/storage imports
+file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")
 file_management_utils_module.trigger_data_process = AsyncMock(return_value=[])
-sys.modules["utils.file_management_utils"] = file_management_utils_module
+sys.modules["management.services.knowledge_base.ingestion"] = file_management_utils_module
 
 # ---------------------------------------------------------------------------
 # Helper to build async iterators without passing keyword args through mock
@@ -241,6 +340,7 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
+import apps.northbound_base_app as northbound_base_app_module  # noqa: E402
 from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -251,6 +351,44 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
     def setUp(self):
         self.client = TestClient(app)
+
+    def test_startup_recovery_runs_a2a_and_upload_cleanup(self):
+        recover_northbound_tasks = MagicMock()
+        schedule_upload_cleanup = AsyncMock()
+        startup_recovery_module = types.ModuleType(
+            "management.recovery"
+        )
+        startup_recovery_module.recover_northbound_tasks = recover_northbound_tasks
+        startup_recovery_module.schedule_interrupted_upload_cleanup = (
+            schedule_upload_cleanup
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"management.recovery": startup_recovery_module},
+        ):
+            asyncio.run(
+                northbound_base_app_module.recover_northbound_tasks_on_startup()
+            )
+
+        recover_northbound_tasks.assert_called_once_with()
+        schedule_upload_cleanup.assert_awaited_once_with("nexent-northbound")
+
+    def test_lifespan_runs_startup_recovery(self):
+        recover_on_startup = AsyncMock()
+
+        async def exercise_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(None):
+                pass
+
+        with patch.object(
+            northbound_base_app_module,
+            "recover_northbound_tasks_on_startup",
+            new=recover_on_startup,
+        ):
+            asyncio.run(exercise_lifespan())
+
+        recover_on_startup.assert_awaited_once_with()
 
     # -------------------------------------------------------------------
     # Application configuration
@@ -276,6 +414,20 @@ class TestNorthboundBaseApp(unittest.TestCase):
         """The main northbound router should be included."""
         paths = app.openapi()["paths"]
         self.assertIn("/dummy", paths)
+
+    def test_thread_capacity_is_process_local_and_hidden_from_openapi(self):
+        response = self.client.get("/internal/thread-capacity")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "service_name": "northbound",
+                "active_count": 0,
+                "queued_count": 0,
+            },
+        )
+        self.assertNotIn("/internal/thread-capacity", app.openapi()["paths"])
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""

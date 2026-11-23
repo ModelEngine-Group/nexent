@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-074
+  name: skill 文件树/内容读取、upload 更新、路径安全
+  status: active
+  description: '技能 / 技能文件: skill 文件树/内容读取、upload 更新、路径安全'
+  business_rules:
+  - rule_id: F-074-RULE-01
+    description: skill 文件树/内容读取、upload 更新、路径安全
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

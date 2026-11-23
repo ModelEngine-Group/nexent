@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: D3-FIXTURE-COMPATIBILITY-20261010
+  change_type: test-fix
+  title: Repair NL2Agent, voice namespace and delete-chain test prerequisites
+  description: >-
+    Preserve existing functional acceptance. Update the NL2Agent query-joining
+    substitute to accept and assert the language argument. Voice bootstrap
+    preserves an occupied display name and uses a deterministic non-secret
+    configuration namespace, with exact matching and saved-model health checks;
+    it neither deletes nor rewrites conflicting model rows. Delete-chain setup
+    applies the existing deployed Redis resolver to canonical constants as well
+    as service aliases before Celery imports, within the case-local monkeypatch
+    lifetime. No new environment variables, product code, deployment or remote
+    batch changes. These fixes address prerequisites and do not turn historical
+    failures into passes or resolve product failures in the remaining cases.
+  affected_features:
+    existing: [F-040, F-045, F-131]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGT-AUTO-01804EF17A1DF51B, API-054, API-AUTO-2B3A078E3CD1B151]
+    retired: []

@@ -1,0 +1,95 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-DAF6A75DB19AEFBC
+  feature_id: V5-REL-AUTO-DAF6A75DB19AEFBC
+  business_rule_ids:
+  - V5-REL-AUTO-DAF6A75DB19AEFBC-RULE-01
+  title: 启动恢复：fail_interrupted_no_set_runs_on_startup 将 no-set(evaluation_set_id==0) 的 PENDING 运行及 case 置 FAILED，且不误伤持久集(>0)
+    PENDING
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 服务(config/runtime)重启后，无持久评测集(no-set, evaluation_set_id==0)的 PENDING 评测运行在进程内存中生成临时 case、无持久续点，若不处理将永久滞留 PENDING，用户无法感知失败；需在启动时将其与关联
+    case 置 FAILED 并给出明确错误信息，同时不得误伤有持久集(evaluation_set_id>0)的 PENDING 运行（其应保留 PENDING 供 evaluation_maintenance 重派发）。
+  preconditions:
+  - '- 本地依赖/组件测试环境可运行，评测测试数据库可写且使用隔离测试租户，测试数据可清理。
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env（仅本地测试数据库连接，不含生产凭据）'
+  test_data:
+    legacy_asset_declaration: '- 本地依赖/组件测试环境可运行，评测测试数据库可写且使用隔离测试租户，测试数据可清理。
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env（仅本地测试数据库连接，不含生产凭据）'
+  steps:
+  - order: 1
+    action: 在隔离测试租户下，向 agent_evaluation 表插入三条 PENDING 记录：A 为 evaluation_set_id==0、delete_flag='N'；B 为 evaluation_set_id==0、delete_flag='D'（软删）；C
+      为 evaluation_set_id>0（持久集）、delete_flag='N'。
+    expected: no-set（evaluation_set_id==0、delete_flag='N'）的 PENDING 运行及其 PENDING case 均被置 FAILED，error_message 为 "Server restarted
+      before evaluation execution started"。
+  - order: 2
+    action: 为 A 与 C 各插入一条 status='PENDING' 的 AgentEvaluationCase。
+    expected: delete_flag='D' 的软删 PENDING 与 evaluation_set_id>0 的持久 PENDING 运行保持原状态，未被误伤。
+  - order: 3
+    action: 直接导入并调用 database/agent_evaluation_db.py 的 fail_interrupted_no_set_runs_on_startup()，记录返回值。
+    expected: list_dispatchable_pending_runs() 仍能返回持久 PENDING 运行（set_id>0），证明其可重派发。
+  - order: 4
+    action: 断言返回值等于被处理的 no-set PENDING 运行数量（1，即 A），且 A 的 AgentEvaluation.status 由 PENDING 变为 FAILED，error_message 为 "Server
+      restarted before evaluation execution started"。
+    expected: 幂等：无待处理 no-set PENDING 时返回 0，不产生重复副作用。
+  - order: 5
+    action: 断言 A 关联的 AgentEvaluationCase.status 由 PENDING 变为 FAILED，且 error_message 与父运行一致。
+    expected: 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  - order: 6
+    action: 断言 B（软删 delete_flag='D'）保持 PENDING 未被改动，C（持久集 set_id>0）保持 PENDING 未被改动。
+    expected: 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  - order: 7
+    action: 调用 list_dispatchable_pending_runs()，断言仍返回 C，证明持久 PENDING 运行可被重派发而非被启动钩子误伤。
+    expected: 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  - order: 8
+    action: 再次调用 fail_interrupted_no_set_runs_on_startup()，断言返回 0，验证无重复副作用（幂等）。
+    expected: 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  - order: 9
+    action: 清理测试数据，确保用例可重复执行。
+    expected: 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  expected_results:
+  - no-set（evaluation_set_id==0、delete_flag='N'）的 PENDING 运行及其 PENDING case 均被置 FAILED，error_message 为 "Server restarted before
+    evaluation execution started"。
+  - delete_flag='D' 的软删 PENDING 与 evaluation_set_id>0 的持久 PENDING 运行保持原状态，未被误伤。
+  - list_dispatchable_pending_runs() 仍能返回持久 PENDING 运行（set_id>0），证明其可重派发。
+  - 幂等：无待处理 no-set PENDING 时返回 0，不产生重复副作用。
+  - 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 65
+  risk_type: RELIABILITY
+  risk: 服务(config/runtime)重启后，无持久评测集(no-set, evaluation_set_id==0)的 PENDING 评测运行在进程内存中生成临时 case、无持久续点，若不处理将永久滞留 PENDING，用户无法感知失败；需在启动时将其与关联
+    case 置 FAILED 并给出明确错误信息，同时不得误伤有持久集(evaluation_set_id>0)的 PENDING 运行（其应保留 PENDING 供 evaluation_maintenance 重派发）。
+  condition:
+  - '- 本地依赖/组件测试环境可运行，评测测试数据库可写且使用隔离测试租户，测试数据可清理。
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env（仅本地测试数据库连接，不含生产凭据）'
+  metrics:
+  - no-set（evaluation_set_id==0、delete_flag='N'）的 PENDING 运行及其 PENDING case 均被置 FAILED，error_message 为 "Server restarted before
+    evaluation execution started"。
+  - delete_flag='D' 的软删 PENDING 与 evaluation_set_id>0 的持久 PENDING 运行保持原状态，未被误伤。
+  - list_dispatchable_pending_runs() 仍能返回持久 PENDING 运行（set_id>0），证明其可重派发。
+  - 幂等：无待处理 no-set PENDING 时返回 0，不产生重复副作用。
+  - 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  thresholds:
+  - no-set（evaluation_set_id==0、delete_flag='N'）的 PENDING 运行及其 PENDING case 均被置 FAILED，error_message 为 "Server restarted before
+    evaluation execution started"。
+  - delete_flag='D' 的软删 PENDING 与 evaluation_set_id>0 的持久 PENDING 运行保持原状态，未被误伤。
+  - list_dispatchable_pending_runs() 仍能返回持久 PENDING 运行（set_id>0），证明其可重派发。
+  - 幂等：无待处理 no-set PENDING 时返回 0，不产生重复副作用。
+  - 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。
+  recovery_expectations:
+  - no-set（evaluation_set_id==0、delete_flag='N'）的 PENDING 运行及其 PENDING case 均被置 FAILED，error_message 为 "Server restarted before
+    evaluation execution started"。
+  - delete_flag='D' 的软删 PENDING 与 evaluation_set_id>0 的持久 PENDING 运行保持原状态，未被误伤。
+  - list_dispatchable_pending_runs() 仍能返回持久 PENDING 运行（set_id>0），证明其可重派发。
+  - 幂等：无待处理 no-set PENDING 时返回 0，不产生重复副作用。
+  - 测试过程无未处理异常，数据库状态与代码契约一致，日志不输出敏感信息。

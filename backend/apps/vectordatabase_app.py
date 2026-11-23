@@ -1,29 +1,45 @@
-import logging
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
+import logging
+import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
-import re
-
-from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
-from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
+from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
-from services.vectordatabase_service import (
-    ElasticSearchService,
-    get_embedding_model_by_id,
-    get_vector_db_core,
-    check_knowledge_base_exist_impl,
-    KnowledgeBaseNeedsModelConfigError,
+
+from apps.permission_utils import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
 )
-from services.file_management_service import check_file_access
-from services.redis_service import get_redis_service
-from utils.auth_utils import get_current_user_id
-from utils.file_management_utils import get_all_files_status
+from consts.const import ASSET_OWNER_TENANT_ID
+from consts.error_code import ErrorCode
+from consts.exceptions import (
+    AppException,
+    DuplicateError,
+    TokenExpiredError,
+)
+from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
+from consts.scheduler import SUMMARY_FREQUENCY_OPTIONS_FOR_API, VALID_SUMMARY_FREQUENCIES
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
+from management.services.knowledge_base.service import (
+    ElasticSearchService,
+    KnowledgeBaseNeedsModelConfigError,
+    check_knowledge_base_exist_impl,
+    get_vector_db_core,
+)
+from management.services.knowledge_base.status import get_all_files_status
+from management.services.model.resolver import get_embedding_model_by_id
+from management.services.monitor.audit import record_security_event
+from management.services.file.service import check_file_access
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
+
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -63,6 +79,9 @@ async def check_knowledge_base_exist(
 
         user_id, tenant_id = get_current_user_id(authorization)
         return check_knowledge_base_exist_impl(knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error checking knowledge base existence for '{knowledge_name}': {str(e)}", exc_info=True)
@@ -72,33 +91,37 @@ async def check_knowledge_base_exist(
 
 @router.post("/{index_name}")
 def create_new_index(
+        http_request: Request,
         index_name: str = Path(..., description="Name of the index to create"),
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
         request: Dict[str, Any] = Body(
-            None, description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"),
+            None, description="Request body containing embedding_model_id and optional knowledge-base settings"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
     """Create a new vector index and store it in the knowledge table"""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id, user_role = get_current_user_context(authorization)
 
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
-        embedding_model_name: Optional[str] = None
-        is_multimodal: Optional[bool] = None
+        embedding_model_id: Optional[int] = None
         preserve_source_file: Optional[bool] = None
+        quota_limit_bytes: Optional[int] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
-            embedding_model_name = request.get("embeddingModel")
-            is_multimodal = request.get("is_multimodal")
+            embedding_model_id = request.get("embedding_model_id")
             preserve_source_file = request.get("preserve_source_file")
+            quota_limit_bytes = request.get("quota_limit_bytes")
+
+        if isinstance(embedding_model_id, bool) or not isinstance(embedding_model_id, int):
+            raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
-        return ElasticSearchService.create_knowledge_base(
+        result = ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
             vdb_core=vdb_core,
@@ -106,17 +129,69 @@ def create_new_index(
             tenant_id=tenant_id,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
-            embedding_model_name=embedding_model_name,
-            is_multimodal=is_multimodal,
+            embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
+            quota_limit_bytes=quota_limit_bytes,
+            user_role=user_role,
         )
+        record_security_event("kb_index_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"knowledge_name": index_name,
+                                       "embedding_model_id": embedding_model_id,
+                                       "quota_limit_bytes": quota_limit_bytes})
+        return result
+    except HTTPException:
+        raise
+    except AppException:
+        # Keep structured knowledge-resource errors (including HTTP 429) intact.
+        raise
+    except DuplicateError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(e),
+        ) from e
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
 
 
+@router.get("/{index_name}/bound_agents")
+async def get_knowledge_base_bound_agents(
+    index_name: str = Path(..., min_length=1, pattern=r".*\S.*"),
+    authorization: Optional[str] = Header(None),
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
+):
+    """List agents bound to this knowledge base for deletion confirmation."""
+    try:
+        user_id, auth_tenant_id, role = get_current_user_context(authorization)
+    except TokenExpiredError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    target_tenant_id = tenant_id or auth_tenant_id
+    if target_tenant_id != auth_tenant_id and role != "SU":
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Not authorized to access this tenant")
+    try:
+        require_knowledge_base_read_permission(index_name, user_id, target_tenant_id)
+    except HTTPException as exc:
+        if exc.status_code != HTTPStatus.NOT_FOUND:
+            raise
+        return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
+    preview = await run_blocking(
+        "preview-kb-deletion", ElasticSearchService.get_bound_agents, [index_name],
+        tenant_id=target_tenant_id,
+        lane="control-io", owner="apps.vectordatabase_app",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=preview)
+
+
 @router.delete("/{index_name}")
 async def delete_index(
+        http_request: Request,
         index_name: str = Path(..., description="Name of the index to delete"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
@@ -125,9 +200,29 @@ async def delete_index(
     logger.debug(f"Received request to delete knowledge base: {index_name}")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
+        from management.services.tag.library import TagManagementService
+
+        TagManagementService.cleanup_resource_assignments(
+            tenant_id, "knowledge_base", index_name, user_id
+        )
+        TagManagementService.cleanup_document_assignments_for_knowledge_base(
+            tenant_id, "local", index_name, user_id
+        )
+        record_security_event("kb_index_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"index_name": index_name})
         return result
+    except AppException:
+        # Preserve the EDS code/details for the common application handler.
+        raise
+    except HTTPException:
+        raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
@@ -144,24 +239,29 @@ async def update_index(
 ):
     """Update knowledge base information (name, group permission, group assignments)."""
     try:
-        user_id, auth_tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, user_role = get_current_user_context(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         tenant_id = request.get("tenant_id") or auth_tenant_id
+        require_knowledge_base_edit_permission(index_name, user_id, auth_tenant_id)
 
         # Extract update fields
         knowledge_name = request.get("knowledge_name")
         ingroup_permission = request.get("ingroup_permission")
         group_ids = request.get("group_ids")
-
         # Call service layer to update knowledge base
-        result = ElasticSearchService.update_knowledge_base(
-            index_name=index_name,
-            knowledge_name=knowledge_name,
-            ingroup_permission=ingroup_permission,
-            group_ids=group_ids,
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
+        update_kwargs = {
+            "index_name": index_name,
+            "knowledge_name": knowledge_name,
+            "ingroup_permission": ingroup_permission,
+            "group_ids": group_ids,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "user_role": user_role,
+        }
+        if "quota_limit_bytes" in request:
+            update_kwargs["quota_limit_bytes"] = request["quota_limit_bytes"]
+
+        result = ElasticSearchService.update_knowledge_base(**update_kwargs)
 
         if result:
             return JSONResponse(
@@ -181,6 +281,9 @@ async def update_index(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating index '{index_name}': {str(exc)}", exc_info=True)
@@ -197,6 +300,7 @@ async def update_summary_frequency_endpoint(
     """Update the auto-summary frequency for a knowledge base."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         summary_frequency = request.get("summary_frequency")
 
         valid_frequencies = VALID_SUMMARY_FREQUENCIES
@@ -227,6 +331,9 @@ async def update_summary_frequency_endpoint(
             )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating summary frequency")
         raise HTTPException(
@@ -250,7 +357,8 @@ def get_embedding_model_status(
     Note: The path parameter is the internal index_name.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
 
         # Get the knowledge base record by index_name
         knowledge_record = get_knowledge_record({
@@ -313,6 +421,9 @@ def get_embedding_model_status(
 
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
@@ -324,6 +435,7 @@ def get_embedding_model_status(
 
 @router.put("/{index_name}/embedding-model")
 def update_embedding_model(
+        http_request: Request,
         index_name: str = Path(
             ..., description="Internal index name of the knowledge base to update"),
         request: Dict[str, Any] = Body(...,
@@ -337,6 +449,7 @@ def update_embedding_model(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
 
         model_id = request.get("model_id")
         if not model_id:
@@ -352,6 +465,11 @@ def update_embedding_model(
             user_id=user_id,
         )
 
+        record_security_event("kb_embedding_model_change", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"index_name": index_name,
+                                       "model_id": model_id})
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content=result
@@ -364,6 +482,9 @@ def update_embedding_model(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
@@ -373,37 +494,6 @@ def update_embedding_model(
         )
 
 
-def _apply_read_only_to_asset_indices_info(asset_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Force READ_ONLY permission on asset-owner indices_info before merge."""
-    indices_info = asset_result.get("indices_info")
-    if not indices_info:
-        return asset_result
-    normalized = dict(asset_result)
-    normalized["indices_info"] = [
-        {**info, "permission": PERMISSION_READ} for info in indices_info
-    ]
-    return normalized
-
-
-def _merge_list_indices_results(
-        primary: Dict[str, Any],
-        asset_owner: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Merge tenant and ASSET_OWNER list_indices responses (concat, no dedup)."""
-    merged_indices = primary.get("indices", []) + \
-        asset_owner.get("indices", [])
-    merged: Dict[str, Any] = {
-        "indices": merged_indices,
-        "count": len(merged_indices),
-    }
-    if "indices_info" in primary or "indices_info" in asset_owner:
-        merged["indices_info"] = (
-            primary.get("indices_info", []) +
-            asset_owner.get("indices_info", [])
-        )
-    return merged
-
-
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
@@ -411,33 +501,98 @@ def get_list_indices(
             False, description="Whether to include index stats"),
         tenant_id: Optional[str] = Query(
             None, description="Tenant ID for filtering (uses auth if not provided)"),
+        offset: int = Query(0, ge=0, description="Number of visible knowledge bases to skip"),
+        limit: Optional[int] = Query(None, ge=1, le=100, description="Maximum knowledge bases to return"),
+        keyword: Optional[str] = Query(None, description="Search knowledge base name and description"),
+        sources: Optional[List[str]] = Query(None, description="Knowledge base sources to include"),
+        models: Optional[List[str]] = Query(None, description="Embedding model names to include"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """List all user indices with optional stats"""
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
+        pagination_enabled = limit is not None
+        pagination_args = {}
+        if limit is not None or keyword or sources or models:
+            pagination_args = {
+                "pagination_enabled": pagination_enabled,
+                "offset": offset,
+                "limit": limit,
+                "keyword": keyword,
+                "sources": sources,
+                "models": models,
+            }
         if tenant_id is None:
+            if limit is not None and auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                prefix_limit = offset + limit
+                result = ElasticSearchService.list_indices(
+                    pattern, include_stats, auth_tenant_id, user_id, vdb_core,
+                    pagination_enabled=True, offset=0, limit=prefix_limit,
+                    keyword=keyword, sources=sources, models=models,
+                )
+                asset_result = ElasticSearchService.list_indices(
+                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core,
+                    pagination_enabled=True, offset=0, limit=prefix_limit,
+                    keyword=keyword, sources=sources, models=models,
+                )
+                return ElasticSearchService.merge_paginated_list_indices_results(
+                    result, asset_result, offset, limit
+                )
             result = ElasticSearchService.list_indices(
-                pattern, include_stats, auth_tenant_id, user_id, vdb_core
+                pattern, include_stats, auth_tenant_id, user_id, vdb_core, **pagination_args
             )
             if auth_tenant_id != ASSET_OWNER_TENANT_ID:
                 asset_result = ElasticSearchService.list_indices(
-                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core
+                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core, **pagination_args
                 )
-                asset_result = _apply_read_only_to_asset_indices_info(
-                    asset_result)
-                return _merge_list_indices_results(result, asset_result)
+                return ElasticSearchService.merge_list_indices_results(
+                    result, asset_result
+                )
             return result
         return ElasticSearchService.list_indices(
-            pattern, include_stats, tenant_id, user_id, vdb_core
+            pattern, include_stats, tenant_id, user_id, vdb_core, **pagination_args
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
 
 
 # Document Operations
+
+
+def _check_personal_kb_quota_before_indexing(
+    data: List[Dict[str, Any]],
+    knowledge_record: Optional[Dict[str, Any]],
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Validate personal quota before indexing documents into a private KB."""
+    if not knowledge_record or knowledge_record.get("ingroup_permission") != "PRIVATE":
+        return
+
+    try:
+        quota_service = QuotaService(tenant_id, user_id)
+        quota_service.check_personal_kb_quota(
+            user_id,
+            quota_service.get_pending_personal_upload_bytes(
+                data, knowledge_record
+            ),
+            kb_record=knowledge_record,
+        )
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.exception("Personal KB quota check failed")
+        raise AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
+            f"Personal KB quota service unavailable: {str(exc)}",
+        ) from exc
+
+
 @router.post("/{index_name}/documents", response_model=IndexingResponse)
 def create_index_documents(
         index_name: str = Path(..., description="Name of the index"),
@@ -456,6 +611,7 @@ def create_index_documents(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
 
         # Get the knowledge base record to retrieve the saved embedding model
         knowledge_record = get_knowledge_record({'index_name': index_name})
@@ -463,6 +619,13 @@ def create_index_documents(
         if knowledge_record:
             saved_embedding_model_id = knowledge_record.get(
                 'embedding_model_id')
+
+        _check_personal_kb_quota_before_indexing(
+            data,
+            knowledge_record,
+            tenant_id,
+            user_id,
+        )
 
         # Use the saved model from knowledge base by model_id
         embedding_model, _ = get_embedding_model_by_id(
@@ -477,6 +640,13 @@ def create_index_documents(
             large_mode=large_mode,
             model_id=saved_embedding_model_id,
         )
+    except AppException:
+        raise
+    except HTTPException:
+        raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -490,16 +660,35 @@ def create_index_documents(
 @router.get("/{index_name}/files")
 async def get_index_files(
         index_name: str = Path(..., description="Name of the index"),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        authorization: Optional[str] = Header(None),
 ):
     """Get all files from an index, including those that are not yet stored in ES"""
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
+        from management.services.tag.projection import (
+            project_authorized_document_tags,
+        )
+
+        # The read permission check above authorized this page; project tags in
+        # one batch so each row never issues its own assignment request.
+        files = project_authorized_document_tags(
+            result.get("files", []),
+            index_name=index_name,
+            tenant_id=tenant_id,
+        )
         # Transform result to match frontend expectations
         return {
             "status": "success",
-            "files": result.get("files", [])
+            "files": files
         }
+    except HTTPException:
+        raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -509,9 +698,12 @@ async def get_index_files(
 
 @router.delete("/{index_name}/documents")
 async def delete_documents(
+        http_request: Request,
         index_name: str = Path(..., description="Name of the index"),
-        path_or_url: str = Query(...,
-                                 description="Path or URL of documents to delete"),
+        path_or_url: Optional[str] = Query(None,
+                                           description="Legacy object path to delete"),
+        file_id: Optional[str] = Query(
+            None, description="Durable lifecycle file ID (preferred for new clients)"),
         scope: str = Query(
             "full",
             description=(
@@ -519,54 +711,128 @@ async def delete_documents(
                 "full: delete ES documents, MinIO source, and Redis task records"
             ),
         ),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        authorization: Optional[str] = Header(None),
 ):
     """Delete a document by scope: source file only or full removal from the index."""
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
+        if file_id:
+            try:
+                from database.knowledge_file_lifecycle_db import get_file_record
+
+                lifecycle_record = get_file_record(
+                    file_id=file_id,
+                    index_name=index_name,
+                    tenant_id=tenant_id,
+                    include_hidden=True,
+                )
+            except Exception as lifecycle_exc:
+                logger.warning("Lifecycle file ID lookup unavailable: %s", lifecycle_exc)
+                lifecycle_record = None
+            if lifecycle_record and lifecycle_record.get("object_name"):
+                path_or_url = lifecycle_record["object_name"]
+            elif lifecycle_record and not lifecycle_record.get("object_name"):
+                if scope != "full":
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_REQUEST,
+                        detail="A file without a storage object can only use full deletion",
+                    )
+                record_security_event("kb_document_delete", request=http_request,
+                                      user_id=user_id, tenant_id=tenant_id,
+                                      details={"index_name": index_name,
+                                               "file_id": file_id,
+                                               "scope": scope})
+                return ElasticSearchService.delete_lifecycle_record_without_object(
+                    lifecycle_record,
+                    requested_by=user_id,
+                )
+        if not path_or_url:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Either path_or_url or file_id is required",
+            )
+        # Pass the durable ID when available so deletion cannot select an older
+        # tombstone that happens to reuse the same object path.  The optional
+        # arguments keep path-only clients on the legacy contract.
+        delete_kwargs = {}
+        if file_id:
+            delete_kwargs = {"file_id": file_id, "requested_by": user_id}
         result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
+            index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
 
         if scope == "full":
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for document %s in index %s: %s",
-                    path_or_url,
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+            from management.services.tag.library import TagManagementService
 
+            TagManagementService.cleanup_document_assignments(
+                tenant_id, "local", index_name, path_or_url, user_id
+            )
+            # The deletion service performs Redis cleanup for new callers. Keep
+            # the legacy fallback only when an older service implementation did
+            # not include that result, and avoid duplicate deletion calls.
+            if "redis_cleanup" not in result and not result.get("deletion_pending"):
+                try:
+                    redis_service = get_redis_service()
+                    redis_cleanup_result = redis_service.delete_document_records(
+                        index_name, path_or_url
+                    )
+                    result["redis_cleanup"] = redis_cleanup_result
+                    if redis_cleanup_result.get("errors"):
+                        result["redis_warnings"] = redis_cleanup_result["errors"]
+                except Exception as redis_error:
+                    logger.warning(
+                        "Redis cleanup failed for document %s in index %s: %s",
+                        path_or_url,
+                        index_name,
+                        redis_error,
+                    )
+                    result["redis_cleanup_error"] = str(redis_error)
+
+            # Preserve the response message contract used by existing clients.
+            # The new deletion service may already provide redis_cleanup, while
+            # the fallback above adds it for older service implementations.
+            # Only terminal responses receive the summary; pending responses
+            # must keep their retry-oriented message.
+            if not result.get("deletion_pending"):
+                original_message = result.get("message", "Documents deleted successfully")
+                if result.get("redis_cleanup_error"):
+                    if "Redis cleanup encountered an error" not in original_message:
+                        result["message"] = (
+                            f"{original_message}, but Redis cleanup encountered an error: "
+                            f"{result['redis_cleanup_error']}"
+                        )
+                elif result.get("redis_cleanup") and "Cleaned up" not in original_message:
+                    redis_cleanup = result["redis_cleanup"]
+                    result["message"] = (
+                        f"{original_message}. "
+                        f"Cleaned up {redis_cleanup.get('total_deleted', 0)} Redis records "
+                        f"({redis_cleanup.get('celery_tasks_deleted', 0)} tasks, "
+                        f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
+                    )
+
+        record_security_event("kb_document_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"index_name": index_name,
+                                       "path_or_url": path_or_url,
+                                       "file_id": file_id,
+                                       "scope": scope})
         return result
 
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
         )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN, detail=str(exc)
+        )
+    except HTTPException:
+        raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -579,14 +845,58 @@ async def get_document_error_info(
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: str = Path(...,
                                 description="Path or URL of the document"),
+        file_id: Optional[str] = Query(None, description="Durable lifecycle file ID"),
         authorization: Optional[str] = Header(None)
 ):
     """Get error information for a document"""
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
+        try:
+            from database.knowledge_file_lifecycle_db import get_file_record
+
+            lifecycle_record = get_file_record(
+                file_id=file_id,
+                index_name=index_name,
+                tenant_id=tenant_id,
+                object_name=None if file_id else path_or_url,
+                include_hidden=True,
+            )
+        except Exception as lifecycle_exc:
+            logger.warning("Lifecycle error lookup unavailable: %s", lifecycle_exc)
+            lifecycle_record = None
+        lifecycle_has_error = bool(
+            lifecycle_record
+            and any(
+                lifecycle_record.get(field)
+                for field in ("error_code", "error_message", "error_stage", "failed_at")
+            )
+        )
+        lifecycle_stage = (
+            (lifecycle_record.get("error_stage") or lifecycle_record.get("stage"))
+            if lifecycle_record
+            else None
+        )
+        if lifecycle_has_error:
+            return {
+                "status": "success",
+                "error_code": lifecycle_record.get("error_code"),
+                "error_message": lifecycle_record.get("error_message"),
+                "error_stage": lifecycle_record.get("error_stage") or lifecycle_record.get("stage"),
+                "failed_at": lifecycle_record.get("failed_at"),
+            }
         celery_task_files = await get_all_files_status(index_name)
         file_status = celery_task_files.get(path_or_url)
 
         if not file_status:
+            if lifecycle_record:
+                return {
+                    "status": "success",
+                    "error_code": None,
+                    "error_message": None,
+                    "error_stage": lifecycle_stage,
+                    "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
+                }
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Document {path_or_url} not found in index {index_name}"
@@ -597,6 +907,9 @@ async def get_document_error_info(
             return {
                 "status": "success",
                 "error_code": None,
+                "error_message": None,
+                "error_stage": lifecycle_stage,
+                "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
             }
 
         redis_service = get_redis_service()
@@ -622,9 +935,15 @@ async def get_document_error_info(
         return {
             "status": "success",
             "error_code": error_code,
+            "error_message": raw_error,
+            "error_stage": file_status.get("stage") or lifecycle_stage,
+            "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting error info for document {path_or_url}: {str(e)}")
@@ -662,6 +981,7 @@ def get_index_chunks(
     """Get chunks from the specified index, with optional pagination support"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
 
         if path_or_url is not None and not check_file_access(
             path_or_url, user_id, tenant_id
@@ -684,6 +1004,11 @@ def get_index_chunks(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         raise HTTPException(
@@ -701,6 +1026,7 @@ def create_chunk(
     """Create a manual chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = ElasticSearchService.create_chunk(
             index_name=index_name,
             chunk_request=payload,
@@ -714,6 +1040,11 @@ def create_chunk(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error creating chunk for index %s: %s", index_name, exc, exc_info=True
@@ -736,6 +1067,7 @@ def update_chunk(
     """Update an existing chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = ElasticSearchService.update_chunk(
             index_name=index_name,
             chunk_id=chunk_id,
@@ -750,6 +1082,11 @@ def update_chunk(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error updating chunk %s for index %s: %s",
@@ -773,7 +1110,8 @@ def delete_chunk(
 ):
     """Delete a chunk."""
     try:
-        get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = ElasticSearchService.delete_chunk(
             index_name=index_name,
             chunk_id=chunk_id,
@@ -785,6 +1123,11 @@ def delete_chunk(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error deleting chunk %s for index %s: %s",
@@ -806,7 +1149,7 @@ async def hybrid_search(
 ):
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         resolved_index_names: List[str] = []
         for requested_name in payload.index_names:
             try:
@@ -815,15 +1158,23 @@ async def hybrid_search(
                 )
             except Exception:
                 resolved_name = requested_name
+            # Enforce per-KB read permission before searching. The permission layer
+            # maps ValueError (KB not found) -> 404 and PermissionError (no access) -> 403.
+            require_knowledge_base_read_permission(
+                index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
+            )
             resolved_index_names.append(resolved_name)
-        result = ElasticSearchService.search_hybrid(
-            index_names=resolved_index_names,
-            query=payload.query,
-            tenant_id=tenant_id,
-            top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate,
-            vdb_core=vdb_core,
-        )
+        search_kwargs = {
+            "index_names": resolved_index_names,
+            "query": payload.query,
+            "tenant_id": tenant_id,
+            "top_k": payload.top_k,
+            "weight_accurate": payload.weight_accurate,
+            "vdb_core": vdb_core,
+        }
+        if payload.tag_predicates:
+            search_kwargs["tag_predicates"] = payload.tag_predicates
+        result = ElasticSearchService.search_hybrid(**search_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog
@@ -839,6 +1190,12 @@ async def hybrid_search(
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
+        raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

@@ -5,7 +5,12 @@ Tests the AppException class and helper functions.
 """
 import pytest
 from backend.consts.error_code import ErrorCode
-from backend.consts.exceptions import AppException, raise_error
+from backend.consts.exceptions import (
+    AppException,
+    TenantResourceLimitError,
+    raise_error,
+    tenant_resource_limit_error_payload,
+)
 
 
 class TestAppException:
@@ -123,6 +128,87 @@ class TestRaiseError:
             raise_error(ErrorCode.DIFY_CONFIG_INVALID, "Error", details)
         except AppException as e:
             assert e.details == details
+
+
+class TestPersonalKbQuotaErrorCodes:
+    """Test personal KB quota errors use the unified AppException contract."""
+
+    def test_quota_exceeded_uses_forbidden_error_code(self):
+        exc = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
+            "quota exceeded",
+        )
+
+        assert isinstance(exc, AppException)
+        assert exc.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
+        assert exc.http_status == 403
+        assert exc.message == "quota exceeded"
+
+    def test_quota_unavailable_uses_service_unavailable_error_code(self):
+        exc = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
+            "es down",
+        )
+
+        assert isinstance(exc, AppException)
+        assert exc.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+        assert exc.http_status == 503
+
+    def test_quota_below_usage_contains_structured_details(self):
+        exc = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE,
+            "Personal KB quota 1 KB is below current usage 2 KB",
+            details={"quota_limit_bytes": 1024, "usage_bytes": 2048},
+        )
+
+        assert isinstance(exc, AppException)
+        assert exc.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE
+        assert exc.http_status == 400
+        assert exc.details == {
+            "quota_limit_bytes": 1024,
+            "usage_bytes": 2048,
+        }
+
+
+class TestTenantResourceLimitError:
+    """Test the structured tenant resource quota error contract."""
+
+    def test_to_detail_preserves_limit_context(self):
+        exc = TenantResourceLimitError(
+            "Tenant group limit reached: maximum 1000 groups per tenant",
+            resource="groups",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+
+        assert exc.code == "120104"
+        assert exc.to_detail() == {
+            "resource": "groups",
+            "scope": "tenant",
+            "limit": 1000,
+            "current_count": 1000,
+        }
+
+    def test_payload_uses_standard_error_code(self):
+        exc = TenantResourceLimitError(
+            "Tenant limit reached: maximum 100 tenants",
+            resource="tenants",
+            scope="platform",
+            limit=100,
+            current_count=100,
+        )
+
+        assert tenant_resource_limit_error_payload(exc) == {
+            "code": "120104",
+            "message": "Tenant limit reached: maximum 100 tenants",
+            "details": {
+                "resource": "tenants",
+                "scope": "platform",
+                "limit": 100,
+                "current_count": 100,
+            },
+        }
 
 
 class TestLegacyExceptions:

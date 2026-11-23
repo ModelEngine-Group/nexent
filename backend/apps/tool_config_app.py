@@ -1,13 +1,16 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from http import HTTPStatus
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Header, HTTPException, Body, Query
+from fastapi import APIRouter, Header, HTTPException, Body, Query, Request
 from fastapi.responses import JSONResponse
+from nexent.core.concurrency import run_blocking
 
-from consts.exceptions import MCPConnectionError, NotFoundException
+from consts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
-from services.tool_configuration_service import (
+from management.services.tool.configuration import (
     search_tool_info_impl,
     update_tool_info_impl,
     update_tool_list,
@@ -19,7 +22,10 @@ from services.tool_configuration_service import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
-from utils.auth_utils import get_current_user_id
+from consts.exceptions import AgentDraftEditError, ResourceBindingError
+from database.user_tenant_db import get_user_email_map
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 router = APIRouter(prefix="/tool")
 logger = logging.getLogger("tool_config_app")
@@ -37,6 +43,9 @@ async def list_tools_api(
         _, tenant_id = get_current_user_id(authorization)
         label_list = [lbl.strip() for lbl in labels.split(",") if lbl.strip()] if labels else None
         return await list_all_tools(tenant_id=tenant_id, labels=label_list)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get tool info, error in: {str(e)}")
         raise HTTPException(
@@ -46,8 +55,17 @@ async def list_tools_api(
 @router.post("/search")
 async def search_tool_info_api(request: ToolInstanceSearchRequest, authorization: Optional[str] = Header(None)):
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        return search_tool_info_impl(request.agent_id, request.tool_id, tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        return await run_blocking(
+            "search-tool-config", search_tool_info_impl,
+            request.agent_id, request.tool_id, tenant_id, user_id,
+            lane="control-io", owner="apps.tool_config_app",
+        )
+    except (HTTPException, AppException):
+        raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to search tool, error in: {str(e)}")
         raise HTTPException(
@@ -55,17 +73,55 @@ async def search_tool_info_api(request: ToolInstanceSearchRequest, authorization
 
 
 @router.post("/update")
-async def update_tool_info_api(request: ToolInstanceInfoRequest, authorization: Optional[str] = Header(None)):
+async def update_tool_info_api(
+    request: ToolInstanceInfoRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     Update an existing tool, create or update tool instance
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        return update_tool_info_impl(request, tenant_id, user_id)
-    except Exception as e:
-        logging.error(f"Failed to update tool, error in: {str(e)}")
+        # Tool params may embed API keys and never reach the log.
+        record_security_event("tool_config_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"tool_id": request.tool_id,
+                                       "agent_id": request.agent_id,
+                                       "enabled": request.enabled})
+        return await run_blocking(
+            "update-tool-config", update_tool_info_impl,
+            request, tenant_id, user_id,
+            lane="control-io", owner="apps.tool_config_app",
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except (AgentDraftEditError, ResourceBindingError) as exc:
+        status_code = (
+            HTTPStatus.FORBIDDEN
+            if exc.code in {"agent_read_only", "agent_deleted"}
+            else HTTPStatus.NOT_FOUND
+            if exc.code in {"agent_not_found", "resource_not_visible"}
+            else HTTPStatus.BAD_REQUEST
+        )
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to update tool, error in: {str(e)}")
+            status_code=status_code,
+            detail={
+                "code": exc.code,
+                "message": "The requested draft resource cannot be updated.",
+            },
+        ) from exc
+    except (HTTPException, AppException):
+        raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.exception("Failed to update tool")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update tool",
+        ) from e
 
 
 @router.get("/scan_tool")
@@ -103,6 +159,9 @@ async def load_last_tool_config(tool_id: int, authorization: Optional[str] = Hea
         logger.error(f"Tool configuration not found for tool ID: {tool_id}")
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail="Tool configuration not found")
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to load tool config: {e}")
         raise HTTPException(
@@ -149,6 +208,7 @@ async def validate_tool(
 
 @router.post("/openapi_service")
 async def import_openapi_service_api(
+    http_request: Request,
     openapi_service_request: Dict[str, Any] = Body(...),
     authorization: Optional[str] = Header(None)
 ):
@@ -204,6 +264,18 @@ async def import_openapi_service_api(
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
         result["mcp_refresh"] = mcp_result
 
+        # The agent configuration page reads the persisted tool list. Refreshing
+        # the MCP runtime alone does not make newly imported tools selectable.
+        await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+
+        # openapi_json/headers_template may embed auth material and never
+        # reach the log; server_url is the endpoint the tools will call.
+        record_security_event("tool_openapi_register", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"service_name": service_name,
+                                       "server_url": server_url,
+                                       "force_update": bool(force_update)})
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -239,6 +311,9 @@ async def list_openapi_services_api(
                 "data": services
             }
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list OpenAPI services: {e}")
         raise HTTPException(
@@ -250,6 +325,7 @@ async def list_openapi_services_api(
 @router.delete("/openapi_service/{service_name}")
 async def delete_openapi_service_api(
     service_name: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -265,6 +341,9 @@ async def delete_openapi_service_api(
             )
         # Refresh MCP service to reflect the deletion
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
+        record_security_event("tool_openapi_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"service_name": service_name})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -301,12 +380,25 @@ async def update_tool_labels_api(
                 status_code=HTTPStatus.NOT_FOUND,
                 detail="Tool not found or access denied"
             )
+        updated_by_name = get_user_email_map([user_id]).get(user_id, "")
+        from management.services.permission.identity.display import load_cas_identities
+
+        cas_identity = load_cas_identities([user_id]).get(user_id, {})
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"message": "Labels updated successfully", "status": "success", "labels": labels}
+            content={
+                "message": "Labels updated successfully",
+                "status": "success",
+                "labels": labels,
+                "updated_by_name": updated_by_name,
+                "updated_by_cas_username": cas_identity.get("cas_username"),
+            },
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.exception(f"Failed to update tool labels: {e}")
         raise HTTPException(

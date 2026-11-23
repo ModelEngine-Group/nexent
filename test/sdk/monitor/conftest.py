@@ -24,6 +24,7 @@ def pytest_configure(config):
     """
     # Create mock modules for OpenTelemetry
     mock_opentelemetry = MagicMock()
+    mock_opentelemetry.context = MagicMock()
     mock_opentelemetry.trace = MagicMock()
     mock_opentelemetry.metrics = MagicMock()
     mock_opentelemetry.trace.status = MagicMock()
@@ -40,6 +41,8 @@ def pytest_configure(config):
     mock_opentelemetry.sdk.metrics = MagicMock()
     mock_opentelemetry.sdk.metrics.export = MagicMock()
     mock_opentelemetry.sdk.trace = MagicMock()
+    # A concrete base is required for the SDK's delegating span processor.
+    mock_opentelemetry.sdk.trace.SpanProcessor = type("SpanProcessor", (), {})
     mock_opentelemetry.sdk.trace.export = MagicMock()
     mock_opentelemetry.sdk.resources = MagicMock()
     mock_opentelemetry.instrumentation = MagicMock()
@@ -49,6 +52,7 @@ def pytest_configure(config):
     # Insert mocks into sys.modules BEFORE any imports
     modules_to_mock = {
         'opentelemetry': mock_opentelemetry,
+        'opentelemetry.context': mock_opentelemetry.context,
         'opentelemetry.trace': mock_opentelemetry.trace,
         'opentelemetry.metrics': mock_opentelemetry.metrics,
         'opentelemetry.trace.status': mock_opentelemetry.trace.status,

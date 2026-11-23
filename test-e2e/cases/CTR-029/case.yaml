@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-029
+  feature_id: F-088
+  business_rule_ids:
+  - F-088-RULE-01
+  title: MCP Agent 未知嵌套工具映射被忽略，已知 schema 继续执行｜异常/边界
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: MCP Agent 未知嵌套工具映射被忽略，已知 schema 继续执行｜异常/边界
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/mcp.yaml；${NEXENT_TEST_HOME}/services/test-mcp/
+  - Test MCP Server 已启动并清空本次 wire log。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/mcp.yaml
+
+      - ${NEXENT_TEST_HOME}/services/test-mcp/'
+  steps:
+  - order: 1
+    action: 启动受控 Test MCP Server 并通过 /healthz，动态分配端口。
+    expected: 未知嵌套 MCP 工具映射不导致 4xx/422，Agent SSE 运行到达终态。
+  - order: 2
+    action: 通过 Nexent API 幂等创建 MCP 服务和绑定 Agent，登记 owner 与反向清理动作。
+    expected: 已知 MCP 工具 schema 保持可用，未知字段不进入实际工具绑定或持久配置。
+  - order: 3
+    action: 向 /agent/run 发送真实请求，在 tool_params.agents.mcp_agent.tools.echo 中加入 unknown 字段。
+    expected: wire log、请求响应和终态事件形成证据；凭据全部脱敏。
+  - order: 4
+    action: 读取完整 SSE 流并保存脱敏请求响应、事件和 MCP wire log。
+    expected: 清理成功且无跨批次脏资源。
+  - order: 5
+    action: 断言入口返回 200 且运行到达终态；未知嵌套映射按当前产品契约被忽略，不期待 4xx/422。
+    expected: 清理成功且无跨批次脏资源。
+  - order: 6
+    action: 断言已知 MCP schema 与服务仍可用，未知字段没有写回 MCP 或 Agent 持久配置。
+    expected: 清理成功且无跨批次脏资源。
+  - order: 7
+    action: 删除临时 Agent 和 MCP 服务，确认端口与资源均释放。
+    expected: 清理成功且无跨批次脏资源。
+  expected_results:
+  - 未知嵌套 MCP 工具映射不导致 4xx/422，Agent SSE 运行到达终态。
+  - 已知 MCP 工具 schema 保持可用，未知字段不进入实际工具绑定或持久配置。
+  - wire log、请求响应和终态事件形成证据；凭据全部脱敏。
+  - 清理成功且无跨批次脏资源。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 172
+  integration_boundary:
+  - LOCAL_REAL_PROTOCOL：连接本地 Test MCP Server，走真实 MCP 网络协议与工具调用；仅故障注入场景使用可控异常端点。
+  observations:
+  - 未知嵌套 MCP 工具映射不导致 4xx/422，Agent SSE 运行到达终态。
+  - 已知 MCP 工具 schema 保持可用，未知字段不进入实际工具绑定或持久配置。
+  - wire log、请求响应和终态事件形成证据；凭据全部脱敏。
+  - 清理成功且无跨批次脏资源。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

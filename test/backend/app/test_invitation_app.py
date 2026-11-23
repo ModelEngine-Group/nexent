@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
+import logging
 from typing import Optional
 
 # Add path for correct imports
@@ -310,6 +311,33 @@ class TestInvitationCreation:
             assert "Invitation code 'ABC123' already exists" in data["detail"]
 
 
+    def test_create_success_records_audit_entry(self, caplog):
+        """Test successful invitation creation records a security audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.create_invitation_code') as mock_create:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_create.return_value = {"invitation_id": 5, "invitation_code": "INVITE-ABC"}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/invitations",
+                    headers={"Authorization": "Bearer token"},
+                    json={"tenant_id": "tenant-1", "code_type": "USER_INVITE",
+                          "capacity": 10, "group_ids": [3, 4]},
+                )
+
+        assert response.status_code == HTTPStatus.CREATED
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert ('details={"invitation_code":"INVITE-ABC","code_type":"USER_INVITE",'
+                '"tenant_id":"tenant-1","capacity":10,"group_ids":[3,4]}') in messages[0]
+
+
 class TestInvitationUpdate:
     """Test invitation update endpoint"""
 
@@ -393,6 +421,32 @@ class TestInvitationUpdate:
             assert response.status_code == HTTPStatus.UNAUTHORIZED
             data = response.json()
             assert "Invalid token" in data["detail"]
+
+
+    def test_update_success_records_audit_entry(self, caplog):
+        """Test successful invitation update records a security audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
+             patch('apps.invitation_app.update_invitation_code') as mock_update:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_get_invitation.return_value = {"invitation_id": 5, "invitation_code": "INVITE-ABC"}
+            mock_update.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/invitations/INVITE-ABC",
+                    headers={"Authorization": "Bearer token"},
+                    json={"capacity": 20},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_update" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"invitation_code":"INVITE-ABC","updates":{"capacity":20}}' in messages[0]
 
 
 class TestInvitationRetrieval:
@@ -586,6 +640,30 @@ class TestInvitationUsage:
             assert "Invalid token" in data["detail"]
 
 
+    def test_use_success_records_audit_entry(self, caplog):
+        """Test successful invitation usage records a security audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.use_invitation_code') as mock_use:
+
+            mock_get_user.return_value = ("user-1", "tenant-1")
+            mock_use.return_value = {"group_ids": [3]}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/invitations/INVITE-ABC/use",
+                    headers={"Authorization": "Bearer token"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_use" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"invitation_code":"INVITE-ABC"}' in messages[0]
+
+
 class TestInvitationStatusUpdate:
     """Test invitation status update endpoint"""
 
@@ -744,3 +822,27 @@ class TestInvitationDeletion:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert "Failed to delete invitation code" in data["detail"]
+
+    def test_delete_success_records_audit_entry(self, caplog):
+        """Test successful invitation deletion records a security audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
+             patch('apps.invitation_app.delete_invitation_code') as mock_delete:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_get_invitation.return_value = {"invitation_id": 5, "invitation_code": "INVITE-ABC"}
+            mock_delete.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete(
+                    "/invitations/INVITE-ABC",
+                    headers={"Authorization": "Bearer token"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_delete" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"invitation_code":"INVITE-ABC"}' in messages[0]

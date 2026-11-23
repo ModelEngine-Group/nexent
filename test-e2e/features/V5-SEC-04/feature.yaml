@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-04
+  name: Token/API key/secret泄露
+  status: active
+  description: API Key、OAuth token、MCP/A2A credential不进入日志/错误/列表
+  business_rules:
+  - rule_id: V5-SEC-04-RULE-01
+    description: Token/API key/secret泄露
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

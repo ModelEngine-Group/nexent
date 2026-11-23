@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: AGT071-RECOVERY-ISOLATION-20261012
+  change_type: test-fix
+  title: Isolate external-memory recovery facts without resetting product state
+  description: >-
+    The dc44d4aba Daily evidence proves the recovered Provider returned external
+    context, but earlier turns were legitimately ingested into the same scope.
+    Generic lexical query terms ranked query echoes and local-memory thinking
+    ahead of the seed. Keep the same Provider, organization, Agent, local memory
+    and fault-removal flow. Ingest a fresh recovery fact through Nexent and query
+    only its independent lookup key. Use distinct local/external/recovery nonces.
+    Require direct external search, a Runtime search-count increase, observed
+    external-memory context, and the real LLM's expected answer; returning local
+    memory still fails. No resets, manufactured answers, status relaxation,
+    product edits, credentials or environment changes. Offline tests reproduce
+    pollution using the actual lexical Mock and reject missing seed, missing
+    Runtime search, falsely internal results, polluted recovery results,
+    unrelated/mixed answers and non-external-context mutations.
+    Offline regression and mutation checks passed. Offline checks alone do not
+    establish live integration acceptance. Windows has no configured external
+    memory fixture settings, so no machine-local config was silently invented.
+    The
+    existing Ubuntu full batch remains pinned and must not be modified in flight.
+  affected_features:
+    existing: [F-178]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGT-071]
+    retired: []

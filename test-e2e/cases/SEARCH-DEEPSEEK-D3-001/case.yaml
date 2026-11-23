@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "SEARCH-WEB",
+  "case": {
+    "case_id": "SEARCH-DEEPSEEK-D3-001",
+    "feature_id": "SEARCH-DEEPSEEK",
+    "requirement_ids": [
+      "SEARCH-DEEPSEEK-20261019"
+    ],
+    "business_rule_ids": [
+      "SEARCH-DEEPSEEK-RULE-001",
+      "SEARCH-DEEPSEEK-RULE-002",
+      "SEARCH-DEEPSEEK-RULE-003"
+    ],
+    "title": "DeepSeek HTTP search and reference integration",
+    "type": "INTEGRATION",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Exercise the actual product boundary with deterministic external protocol fixtures; isolated unit coverage remains separate.",
+    "preconditions": [
+      "Product dependencies are installed; all test credentials are synthetic."
+    ],
+    "test_data": {
+      "profile": "mock",
+      "languages": [
+        "zh",
+        "en"
+      ],
+      "scores": [
+        1.49,
+        2.0,
+        3.0,
+        2.0,
+        1.5
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Configure DeepSeek with default count and quality enabled, execute Chinese then English search through the actual boundary.",
+        "expected": "Count is 10; quality filtering retains 1.5 and above; results use descending rerank_score with stable ties before citation assignment; language follows each request; long text is returned in full with matching model and source references."
+      },
+      {
+        "order": 2,
+        "action": "Disable quality and retry; exercise empty filtered results and protocol failure where applicable.",
+        "expected": "Switch state survives configuration; low-score inclusion follows it; no duplicate sources or credential exposure."
+      }
+    ],
+    "expected_results": [
+      "Actual outgoing requests and returned results match instance quality and run language.",
+      "Configuration and source references remain consistent across repeated runs."
+    ],
+    "forbidden_side_effects": [
+      "No requests to real providers, no real credentials or unrelated persisted writes."
+    ],
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ]
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Actual product boundary preserves configured quality and run language with consistent results.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "integration_boundary": [
+      "Actual SDK Tool -> httpx -> loopback HTTP fixture -> observer/model reference mapping"
+    ],
+    "observations": [
+      "Capture real HTTP bodies, headers, attempt counts and emitted source/model result data."
+    ],
+    "cleanup": [
+      "Close HTTP server, client and worker threads; restore injected endpoint."
+    ]
+  }
+}

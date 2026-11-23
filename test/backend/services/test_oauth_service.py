@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import os
 import unittest
@@ -13,6 +14,8 @@ consts_mock.const.DEFAULT_TENANT_ID = "default-tenant-id"
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.OAUTH_SSL_VERIFY = True
 consts_mock.const.OAUTH_CA_BUNDLE = ""
+consts_mock.const.OAUTH_LOGIN_MODE = "button"
+consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
@@ -256,14 +259,15 @@ oauth_providers_mock.GITHUB_PROVIDER = GITHUB_DEF
 oauth_providers_mock.WECHAT_PROVIDER = WECHAT_DEF
 sys.modules["consts.oauth_providers"] = oauth_providers_mock
 
-import services.oauth_service as oauth_service_module
-from services.oauth_service import (
+import management.services.permission.identity.oauth as oauth_service_module
+from management.services.permission.identity.oauth import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
     exchange_code_for_provider_token,
     find_supabase_user_id_by_email,
     get_authorize_url,
     get_enabled_providers,
+    get_oauth_config,
     get_provider_user_info,
     get_supported_providers,
     list_linked_accounts,
@@ -393,6 +397,81 @@ class TestGetEnabledProviders(unittest.TestCase):
         names = [p["name"] for p in providers]
         self.assertIn("github", names)
         self.assertIn("wechat", names)
+
+
+def test_oauth_config_uses_button_mode_with_single_provider():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "button"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is True
+    assert config["login_mode"] == "button"
+    assert config["auto_login_provider"] is None
+    assert config["providers"] == providers
+
+
+def test_oauth_config_hides_login_entries_in_disabled_mode():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "disabled"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is True
+    assert config["login_mode"] == "disabled"
+    assert config["auto_login_provider"] is None
+    assert config["providers"] == providers
+
+
+def test_oauth_config_uses_force_mode_with_single_provider():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "force"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["login_mode"] == "force"
+    assert config["auto_login_provider"] == "github"
+
+
+def test_oauth_config_disables_force_mode_with_no_provider():
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "force"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=[]
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is False
+    assert config["login_mode"] == "disabled"
+    assert config["auto_login_provider"] is None
+
+
+def test_oauth_config_falls_back_with_multiple_providers():
+    providers = [
+        {"name": "github", "enabled": True},
+        {"name": "wechat", "enabled": True},
+    ]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "force"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["login_mode"] == "force"
+    assert config["auto_login_provider"] is None
+    assert config["providers"] == providers
+
+
+def test_oauth_config_disables_invalid_login_mode():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "invalid"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is True
+    assert config["login_mode"] == "disabled"
+    assert config["providers"] == providers
 
 
 class TestGetAuthorizeUrl(unittest.TestCase):
@@ -735,7 +814,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm):
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             result = svc._http_post_json("https://test.com/token", {"code": "abc"})
             self.assertEqual(result["access_token"], "test_token")
 
@@ -746,7 +825,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm):
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             result = svc._http_get_json("https://test.com/user")
             self.assertEqual(result["id"], "12345")
 
@@ -757,7 +836,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm) as mock_urlopen:
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             svc._http_post_json("https://test.com/token", {"code": "abc"}, headers={"X-Custom": "value"})
             self.assertTrue(mock_urlopen.called)
 
@@ -768,7 +847,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm):
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             result = svc._http_get_json("https://test.com/user", headers={"Authorization": "Bearer token"})
             self.assertEqual(result["result"], "ok")
 

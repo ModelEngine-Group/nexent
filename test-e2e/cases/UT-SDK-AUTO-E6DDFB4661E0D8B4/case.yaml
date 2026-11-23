@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-E6DDFB4661E0D8B4
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: ManagedMCPToolCollection 工具/关闭/连接三类超时、并发关闭与取消作用域注册｜边界/异常
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ManagedMCPToolCollection 工具/关闭/连接三类超时、并发关闭与取消作用域注册｜边界/异常
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部 MCP 服务或模型在线，使用注入的假 ThreadManager/RunCancellationScope/session_context_factory/tool_adapter_factory。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop，执行时另记录实际被测 commit。
+  - 可导入 sdk/nexent/core/agents/managed_mcp.py 的 ManagedMCPToolCollection 及其依赖类型（ManagedExecution/ManagedTaskSpec/RunCancellationScope/ThreadManager）。
+  test_data:
+    legacy_asset_declaration: '- 无固定本地资产；使用内存假对象：fake ThreadManager/ManagedExecution、fake RunCancellationScope、fake tool.forward、fake
+      session。'
+  steps:
+  - order: 1
+    action: 导入 sdk/nexent/core/agents/managed_mcp.py 的 ManagedMCPToolCollection，及 sdk/nexent/core/concurrency 中 ManagedExecution/ManagedTaskSpec/RunCancellationScope/ThreadManager
+      类型。
+    expected: 功能结果与代码契约一致（managed_mcp.py:24-44、143-188、221-259、289-312），测试过程无未处理异常。
+  - order: 2
+    action: 构造最小假对象：fake manager（记录 submit/cancel 调用参数并返回 fake ManagedExecution）、fake cancellation_scope（记录 register_closer/unregister_closer）、带
+      name/forward 的 fake tool 与 fake session；注入 session_context_factory 与 tool_adapter_factory，组装最小 ManagedMCPToolCollection。
+    expected: 三类超时参数 <=0 时构造即抛 ValueError，错误消息与契约文本一致。
+  - order: 3
+    action: 超时参数校验：分别以 tool_timeout_seconds<=0、close_timeout_seconds<=0、connect_timeout_seconds<=0 构造，断言抛 ValueError，消息分别含
+      "MCP tool timeout must be greater than zero"/"MCP close timeout must be greater than zero"/"MCP connect timeout must
+      be greater than zero"（managed_mcp.py:33-38）。
+    expected: 工具/关闭/连接任一超时触发 request_close，manager.cancel 的 mark_stuck_on_timeout 与 reason 参数符合契约。
+  - order: 4
+    action: 工具调用超时：用 _wrap_tools 取得包装后的 tool.forward，令 execution.future.result(timeout=tool_timeout_seconds) 抛 FutureTimeoutError；断言触发
+      request_close 且 manager.cancel 以 mark_stuck_on_timeout=True、reason="MCP tool deadline exceeded" 调用，并重新抛出超时（managed_mcp.py:168-185）。
+    expected: 并发关闭下 _call_tool 抛 RuntimeError("MCP session is closing")，不出现死锁或半关闭。
+  - order: 5
+    action: 关闭超时：令 execution.future.result(timeout=close_timeout_seconds) 抛 FutureTimeoutError 后调用 close()；断言 manager.cancel
+      以 reason="MCP session close timed out"、mark_stuck_on_timeout=True 调用，且 scope_token 被 unregister_closer 解绑（managed_mcp.py:289-312）。
+    expected: register_closer/unregister_closer 成对调用，scope_token 正确绑定与解绑，无资源泄漏。
+  - order: 6
+    action: 并发关闭：调用 request_close() 后断言 _close_requested 置位、_cancel_active_calls 取消在途 call_future；并发调用 _call_tool 断言抛 RuntimeError("MCP
+      session is closing")（managed_mcp.py:75-102）。
+    expected: 日志、Trace、断言不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 启动超时/取消：__enter__ 内不置 _ready，令等待超过 connect_timeout_seconds，断言 close() 被调用并抛 TimeoutError("MCP session startup
+      timed out")；cancellation_scope.cancelled=True 时抛 RuntimeError("MCP session startup cancelled")（managed_mcp.py:239-252）。
+    expected: 日志、Trace、断言不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 取消作用域注册：进入上下文断言 cancellation_scope.register_closer(self.request_close) 被调用并返回 scope_token；close()/__exit__ 断言
+      unregister_closer(scope_token) 被调用（managed_mcp.py:221-237、310-312）。
+    expected: 日志、Trace、断言不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 收尾：释放临时事件循环/假对象，断言全程无未处理异常，日志不输出明文 Key/Token/密码。
+    expected: 日志、Trace、断言不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致（managed_mcp.py:24-44、143-188、221-259、289-312），测试过程无未处理异常。
+  - 三类超时参数 <=0 时构造即抛 ValueError，错误消息与契约文本一致。
+  - 工具/关闭/连接任一超时触发 request_close，manager.cancel 的 mark_stuck_on_timeout 与 reason 参数符合契约。
+  - 并发关闭下 _call_tool 抛 RuntimeError("MCP session is closing")，不出现死锁或半关闭。
+  - register_closer/unregister_closer 成对调用，scope_token 正确绑定与解绑，无资源泄漏。
+  - 日志、Trace、断言不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 481
+  unit_boundary: MCP 受管工具集
+  inputs:
+  - '- 无固定本地资产；使用内存假对象：fake ThreadManager/ManagedExecution、fake RunCancellationScope、fake tool.forward、fake session。'
+  assertions:
+  - 功能结果与代码契约一致（managed_mcp.py:24-44、143-188、221-259、289-312），测试过程无未处理异常。
+  - 三类超时参数 <=0 时构造即抛 ValueError，错误消息与契约文本一致。
+  - 工具/关闭/连接任一超时触发 request_close，manager.cancel 的 mark_stuck_on_timeout 与 reason 参数符合契约。
+  - 并发关闭下 _call_tool 抛 RuntimeError("MCP session is closing")，不出现死锁或半关闭。
+  - register_closer/unregister_closer 成对调用，scope_token 正确绑定与解绑，无资源泄漏。
+  - 日志、Trace、断言不出现明文 API Key/Token/Password/模型密钥。

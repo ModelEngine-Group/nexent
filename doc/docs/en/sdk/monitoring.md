@@ -15,20 +15,8 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ## Quick Start
 
 ```bash
-cd deploy/docker
-[ -f ../../.env ] || cp ../../.env.example ../../.env
-cp assets/monitoring/monitoring.env.example assets/monitoring/monitoring.env
-
-vim ../../.env
-ENABLE_TELEMETRY=true
-MONITORING_PROVIDER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-
-vim assets/monitoring/monitoring.env
-MONITORING_PROVIDER=otlp
-
-./start-monitoring.sh --stack collector
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp
 ```
 
 ## AI Observability Platforms
@@ -82,6 +70,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - User feedback collection
 - Model cost tracking
 
+> Since v2.5.0, context management and prompt cache hit metrics (context/cache metrics) are also exposed, which can be used to evaluate compression effectiveness and caching benefits.
+
 ### LangSmith
 
 LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoint. Nexent can send traces to a local Collector first, and the Collector forwards them to LangSmith.
@@ -89,15 +79,16 @@ LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoin
 **Collector forwarding:**
 
 ```bash
-cd deploy/docker
-vim assets/monitoring/monitoring.env
+cd deploy
+[ -f env/monitoring.env ] || cp env/monitoring.env.example env/monitoring.env
+vim env/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx
 LANGSMITH_PROJECT=nexent
 LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
 
-./start-monitoring.sh --stack langsmith
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith
 ```
 
 Nexent backend configuration when it sends OTLP to the Collector:
@@ -123,13 +114,14 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
-Set `MONITORING_DASHBOARD_URL` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path.
+Set `MONITORING_DASHBOARD_URL` in `deploy/env/monitoring.env` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path. Use `MONITORING_DASHBOARD_ALLOWED_ROLES` to control which roles see the top-bar entry. The default `SU,SPEED` preserves super-administrator access in standard mode and access in speed mode.
 
 ```bash
 MONITORING_DASHBOARD_URL=http://localhost:6006
 MONITORING_DASHBOARD_URL=http://localhost:3001/project/nexent
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
 MONITORING_DASHBOARD_URL=http://localhost:9411
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 ```
 
 ## Environment Variables
@@ -139,6 +131,7 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
 | `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | Comma-separated roles allowed to see the dashboard entry; set an empty value to hide it from every role |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |
@@ -190,7 +183,7 @@ Agent context metrics are emitted from the SDK lifecycle. Each action step recor
 
 ```python
 @monitoring_manager.monitor_llm_call("gpt-4", "chat_completion")
-def call_llm(messages):
+def call_llm(messages, **kwargs):
     return llm_response
 ```
 
@@ -310,7 +303,7 @@ All monitoring methods work without errors when disabled - decorators pass throu
 
 ### No data appearing
 
-1. Check `ENABLE_TELEMETRY=true` in `.env`
+1. Check `ENABLE_TELEMETRY=true` in `deploy/env/monitoring.env`
 2. Verify OTLP endpoint is reachable
 3. Check authentication headers are correct
 

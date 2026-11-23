@@ -1,0 +1,70 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-MODEL-CONTROLS-D3-001
+  feature_id: CHAT-MODEL-CONTROLS
+  requirement_ids: [CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016, CHAT-SAMPLING-DISPLAY-20261019]
+  business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-002, CHAT-MODEL-CONTROLS-RULE-003, CHAT-MODEL-CONTROLS-RULE-004, CHAT-MODEL-CONTROLS-RULE-006]
+  title: 实际运行根模型、思考参数与上下文容量同源
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove real endpoint-to-runtime-to-SDK/provider binding uses the selected model and capacity while preserving all independent model and draft semantics.
+  preconditions:
+    - run actual local HTTP services, model records, resolver, runtime, capacity policy and SDK.
+    - Isolated model A is tenant default; model B has distinct provider wire model, endpoint and capacity; both hold distinctive backend sampling/output/custom parameters.
+    - Test Agent has a configured child and tool-specific model; controlled NL2 output modifies only non-model draft fields.
+    - The case-owned MCP server address is injected into both ordinary Agent and creator preparation consumers; no host deployment address is required.
+  test_data:
+    profile: mock
+    model_roles: [default-A, selected-B, budget-B, child-model, independent-business-model, embedding-model, stt-model, tts-model]
+    paths: [ordinary-workbench, ordinary-agent-chat, nl2agent-direct, nl2agent-workbench, nl2skill-direct, nl2skill-workbench, internal-nl2-adapters]
+    reasoning_variants: [omitted, disabled, automatic-default, automatic-provider-default, none, minimal, low, medium, high, xhigh, max, budget-min, budget-max, budget-zero-auto]
+  steps:
+    - order: 1
+      action: Run each applicable path with explicit selected-B and distinctive backend model parameters; capture actual provider HTTP requests and resolved root/capacity snapshots.
+      expected: Root requests reach B endpoint with B provider model and selected ID; capacity/input/context strategy follows B rather than default-A. Ordinary Agent overrides still apply only in their original scope.
+    - order: 2
+      action: Execute effort variants supported by B and budget variants on budget-B, including omitted controls, explicit off and auto with concrete versus provider-default baselines.
+      expected: Concrete controls reach provider unchanged through its original mapping; absent preserves base config, off disables active reasoning, auto uses selected-model defaults, budget has no conflicting effort and zero is not sent as a zero limit.
+    - order: 3
+      action: Complete controlled NL2Agent draft-field generation and NL2Skill file generation through original SSE and draft synchronization; inspect target Agent, child/tool models and persisted Workbench creation snapshots.
+      expected: Valid structured outputs and normal terminal events remain usable; target Agent model fields and independent models are unchanged when generated payload excludes them; snapshots match the resolved model/controls and original allowed draft writes.
+    - order: 4
+      action: Compare original backend temperature/top_p/custom/output parameters and all independent model identities before and after reasoning overrides and creator execution.
+      expected: Untouched parameters inherit original effective values. Explicit temperature/top_p including zero reach actual provider HTTP unchanged, override Agent defaults only on the root, persist in Workbench snapshots, and do not mutate shared or child models.
+    - order: 5
+      action: Clear model sampling configuration and send omitted, null, partial and explicit-zero sampling through ordinary and creator paths; compare model-list effective metadata and actual provider wire.
+      expected: Null continues inheritance per field through Agent and model to shared SDK defaults 1.0/1.0. The displayed metadata matches model-level runtime defaults; Agent overrides retain priority only in Agent scope. Root reasoning, capacity, custom fields and independent models remain intact; stored global sampling stays null.
+  expected_results:
+    - Actual selected root, provider endpoint/model and capacity source agree for ordinary and creator runtime paths.
+    - All supported reasoning intents preserve exact semantics and existing sampling/output/custom settings.
+    - Existing SSE, generated draft outputs, target Agent models and independent model routes remain intact.
+  forbidden_side_effects:
+    - No silent use of tenant-default A for an explicit B selection or mutation of global model configuration.
+    - No implicit target/child/business/embedding/STT/TTS model replacement or persisted sampling override from inherited defaults.
+  integration_boundary:
+    - Real HTTP endpoint and internal NL2 adapters to tenant model lookup, shared resolver, root overlay, capacity policy, Agent/NL2 runtime, SDK and provider HTTP protocol.
+    - Case-owned authentication identity and catalog capability inputs accompany disposable PostgreSQL records and deterministic external HTTP providers. Resolver, run-info builders, capacity policy, Agent runtime and SDK execute unchanged; observation wrappers call their real implementations.
+  observations: [Sanitized provider wire with model/endpoint/controls, Resolved root identity and input/context capacity snapshot, Before/after independent model and target draft configuration, Original SSE terminal and structured output events, Persisted Workbench model-control snapshot]
+  cleanup: [Delete uniquely created test drafts/conversations/model records and provider fixture resources, Preserve sanitized wire/runtime evidence in the external test-home result directory]
+  execution:
+    profiles: [{name: mock, required_services: [model-provider, http-fixture]}]
+  acceptance:
+    - id: AC-01
+      description: Selected model identity and capacity survive the actual integration chain.
+      steps: [1]
+      expected_results: [1]
+      forbidden_side_effects: [1]
+    - id: AC-02
+      description: Reasoning intent and original independent parameters/model identities are preserved through generation.
+      steps: [2, 3, 4]
+      expected_results: [2, 3]
+      forbidden_side_effects: [2]
+    - id: AC-03
+      description: Null inherits through configured values to unified SDK sampling defaults, consistent with read-only display metadata and provider wire.
+      steps: [5]
+      expected_results: [2, 3]
+      forbidden_side_effects: [1, 2]

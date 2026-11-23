@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: FAF-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_final_answer_runtime
+  profiles:
+  - real_smoke
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

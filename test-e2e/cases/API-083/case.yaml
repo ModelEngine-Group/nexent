@@ -1,0 +1,100 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-083
+  feature_id: F-079
+  business_rule_ids:
+  - F-079-RULE-01
+  title: listing list/search/status/mine/detail 与 tag/tag_predicates 过滤、标签统计/计数｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: listing list/search/status/mine/detail 与 tag/tag_predicates 过滤、标签统计/计数｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/skills/
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/skills/'
+  steps:
+  - order: 1
+    action: 从 assets/skills/ 读取固定 Skill 包/SKILL.md，使用唯一名称避免与已有 Skill 冲突。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 按“listing list/search/status/mine/detail｜核心流程”通过实际 Skill API 执行上传、解析、编辑、同步、仓库发布/安装或 NL2Skill。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 调用 GET /repository/skill 并传入 tag=<精确标签>，断言仅返回 tags 包含该精确标签的 listing；再传入 tag_predicates=<JSON 数组结构化标签谓词>，断言结果按授权
+      skill_ids 集合过滤且不出现跨租户数据。
+    expected: tag 精确过滤仅返回 tags 包含指定标签的 listing；tag_predicates 按结构化谓词过滤后仅返回授权 skill_ids 集合内的 listing，且不出现跨租户结果。
+  - order: 4
+    action: '传入非 JSON 的 tag_predicates（如 {"a": ），断言返回 400 且 detail 提示“tag_predicates must be valid JSON”；传入 JSON 但非数组的值，断言返回
+      400 且 detail 提示“tag_predicates must be a list”。'
+    expected: tag_predicates 非 JSON 或非数组返回 400，detail 说明参数非法，不出现半写入或服务端异常。
+  - order: 5
+    action: 调用 GET /repository/skill/tags，断言返回 {"items":[{"tag","count"}]}，且仅统计本租户 status=shared 的 listing 标签计数。
+    expected: GET /repository/skill/tags 仅返回本租户 status=shared 的标签及其计数，字段为 {tag, count}。
+  - order: 6
+    action: 调用 GET /repository/skill/mine/counts，断言返回 {"counts":{"all","created","others"}}，计数与 /repository/skill/mine 的可见技能归属一致。
+    expected: GET /repository/skill/mine/counts 返回 {all, created, others} 三个归属计数，且与 /repository/skill/mine 可见技能集合一致。
+  - order: 7
+    action: 检查文件树、元数据、入口文件、版本/状态与对象存储/本地工作区一致。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 8
+    action: 需要生成的 Skill 使用真实 LLM，断言生成结果可保存且 SKILL.md 结构可被 loader 解析。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 将 Skill 绑定到测试 Agent，执行一次真实 Chat，确认 Skill 被按需加载并影响 Agent 上下文/工具。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 恶意 ZIP/路径场景使用本地安全资产，确认不会写出允许目录。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 11
+    action: 市场发布/安装后用另一测试租户验证可见性和隔离。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 12
+    action: 删除临时 Skill、市场记录和 Agent 绑定。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - tag 精确过滤仅返回 tags 包含指定标签的 listing；tag_predicates 按结构化谓词过滤后仅返回授权 skill_ids 集合内的 listing，且不出现跨租户结果。
+  - tag_predicates 非 JSON 或非数组返回 400，detail 说明参数非法，不出现半写入或服务端异常。
+  - GET /repository/skill/tags 仅返回本租户 status=shared 的标签及其计数，字段为 {tag, count}。
+  - GET /repository/skill/mine/counts 返回 {all, created, others} 三个归属计数，且与 /repository/skill/mine 可见技能集合一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 154
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 assets/skills/ 读取固定 Skill 包/SKILL.md，使用唯一名称避免与已有 Skill 冲突。
+    - 按“listing list/search/status/mine/detail｜核心流程”通过实际 Skill API 执行上传、解析、编辑、同步、仓库发布/安装或 NL2Skill。
+    - 调用 GET /repository/skill 并传入 tag=<精确标签>，断言仅返回 tags 包含该精确标签的 listing；再传入 tag_predicates=<JSON 数组结构化标签谓词>，断言结果按授权 skill_ids
+      集合过滤且不出现跨租户数据。
+    - '传入非 JSON 的 tag_predicates（如 {"a": ），断言返回 400 且 detail 提示“tag_predicates must be valid JSON”；传入 JSON 但非数组的值，断言返回 400
+      且 detail 提示“tag_predicates must be a list”。'
+    - 调用 GET /repository/skill/tags，断言返回 {"items":[{"tag","count"}]}，且仅统计本租户 status=shared 的 listing 标签计数。
+    - 调用 GET /repository/skill/mine/counts，断言返回 {"counts":{"all","created","others"}}，计数与 /repository/skill/mine 的可见技能归属一致。
+    - 检查文件树、元数据、入口文件、版本/状态与对象存储/本地工作区一致。
+    - 需要生成的 Skill 使用真实 LLM，断言生成结果可保存且 SKILL.md 结构可被 loader 解析。
+    - 将 Skill 绑定到测试 Agent，执行一次真实 Chat，确认 Skill 被按需加载并影响 Agent 上下文/工具。
+    - 恶意 ZIP/路径场景使用本地安全资产，确认不会写出允许目录。
+    - 市场发布/安装后用另一测试租户验证可见性和隔离。
+    - 删除临时 Skill、市场记录和 Agent 绑定。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - tag 精确过滤仅返回 tags 包含指定标签的 listing；tag_predicates 按结构化谓词过滤后仅返回授权 skill_ids 集合内的 listing，且不出现跨租户结果。
+    - tag_predicates 非 JSON 或非数组返回 400，detail 说明参数非法，不出现半写入或服务端异常。
+    - GET /repository/skill/tags 仅返回本租户 status=shared 的标签及其计数，字段为 {tag, count}。
+    - GET /repository/skill/mine/counts 返回 {all, created, others} 三个归属计数，且与 /repository/skill/mine 可见技能集合一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

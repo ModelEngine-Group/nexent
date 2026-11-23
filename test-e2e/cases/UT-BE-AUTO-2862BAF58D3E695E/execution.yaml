@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: UT-BE-AUTO-2862BAF58D3E695E
+implementations:
+- framework: pytest
+  file: test.py
+  selector: UT-BE-AUTO-2862BAF58D3E695E
+acceptance_bindings:
+  AC-01: [test_runtime_state_service_contract]
+  AC-02: [test_runtime_state_service_contract]
+  AC-03: [test_runtime_state_service_contract]
+  AC-04: [test_runtime_state_service_contract]
+notes: Cancellation lifecycle synchronized with product commit e9460044d8b3; mapping is execution traceability, not semantic certification.

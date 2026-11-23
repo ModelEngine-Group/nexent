@@ -1,38 +1,97 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
-import logging
-from abc import ABC, abstractmethod
+from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from threading import Event
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
-logger = logging.getLogger("context_strategy")
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+
+from ..models.capacity_budget import ContextBudgetSnapshot
+from ..models.sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
+from ..utils.observer import MessageObserver
+from .context.models import ContextItemInput
+
+
+if TYPE_CHECKING:
+    from .a2a_agent_proxy import A2AAgentInfo
+
+def copy_invocation_config(config: "AgentConfig") -> "AgentConfig":
+    """Copy configuration data while retaining injected runtime objects."""
+    memo = {}
+    visited = set()
+
+    def preserve_services(value):
+        identity = id(value)
+        if identity in visited:
+            return
+        visited.add(identity)
+        if isinstance(value, BaseModel):
+            children = [vars(value), value.__pydantic_extra__, value.__pydantic_private__]
+        elif isinstance(value, dict):
+            children = [*value.keys(), *value.values()]
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            children = value
+        elif is_dataclass(value) and not isinstance(value, type):
+            children = [getattr(value, field.name) for field in fields(value)]
+        else:
+            memo[identity] = value
+            return
+        for child in children:
+            preserve_services(child)
+
+    preserve_services(config)
+    return deepcopy(config, memo)
+
 
 # Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
-from pydantic import BaseModel, Field, model_validator
-
-from ..utils.observer import MessageObserver
-
-# TYPE_CHECKING to avoid circular import
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from .summary_config import ContextManagerConfig
-
 
 class ModelConfig(BaseModel):
+    diagnostic_chunks_enabled: bool = Field(
+        default=False, description="Capture bounded content-free response chunk structure"
+    )
     cite_name: str = Field(description="Model alias")
     api_key: str = Field(description="API key", default="")
     model_name: str = Field(description="Model call name")
     url: str = Field(description="Model endpoint URL")
-    temperature: Optional[float] = Field(description="Temperature", default=0.1)
-    top_p: Optional[float] = Field(description="Top P", default=0.95)
+    temperature: Optional[float] = Field(description="Temperature", default=DEFAULT_TEMPERATURE)
+    top_p: Optional[float] = Field(description="Top P", default=DEFAULT_TOP_P)
+
+    @field_validator("temperature", "top_p", mode="before")
+    @classmethod
+    def inherit_sampling_default(cls, value: Any, info: ValidationInfo) -> Any:
+        """Database nulls inherit the same SDK defaults as omitted fields."""
+        return resolve_sampling()[info.field_name] if value is None else value
+
+    explicit_sampling: List[Literal["temperature", "top_p"]] = Field(
+        default_factory=list,
+        description="Request-scoped sampling intent that must not be dropped on provider retry",
+    )
+    enable_thinking: bool = Field(
+        description="Whether provider thinking is enabled",
+        default=False,
+    )
+    reasoning_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
+        description="Canonical per-request reasoning effort, when supported",
+        default=None,
+    )
+    reasoning_budget_tokens: Optional[int] = Field(
+        description="Canonical numeric reasoning budget, when supported",
+        default=None,
+    )
+    reasoning_capability: Optional[Dict[str, Any]] = Field(
+        description="Resolved model reasoning capability metadata",
+        default=None,
+    )
     ssl_verify: Optional[bool] = Field(description="Whether to verify SSL certificates", default=True)
     model_factory: Optional[str] = Field(
-        description="Model provider identifier (e.g., openai, modelengine)",
-        default=None
+        description="Model provider identifier (e.g., openai, modelengine)", default=None
     )
     extra_body: Optional[Dict[str, Any]] = Field(
         description=(
@@ -87,8 +146,7 @@ class ModelConfig(BaseModel):
         default=None,
     )
     timeout_seconds: Optional[float] = Field(
-        description="Request timeout in seconds. If None, uses provider default.",
-        default=None
+        description="Request timeout in seconds. If None, uses provider default.", default=None
     )
     concurrency_limit: Optional[int] = Field(
         description="Maximum concurrent requests for this model. If None, no limit.",
@@ -113,10 +171,7 @@ class ModelConfig(BaseModel):
                 self.max_output_tokens = 4096
             else:
                 fallback = self.max_tokens
-                if (
-                    self.context_window_tokens is not None
-                    and fallback > self.context_window_tokens
-                ):
+                if self.context_window_tokens is not None and fallback > self.context_window_tokens:
                     fallback = self.context_window_tokens - 1
                 self.max_output_tokens = max(fallback, 1)
         return self
@@ -125,11 +180,12 @@ class ModelConfig(BaseModel):
 class ToolConfig(BaseModel):
     class_name: str = Field(description="Tool class name")
     name: Optional[str] = Field(description="Tool name")
-    description: Optional[str] = Field(description="Tool description")
-    inputs: Optional[str] = Field(description="Tool inputs")
-    output_type: Optional[str] = Field(description="Tool output type")
-    params: Dict[str, Any] = Field(description="Initialization parameters")
-    source: str = Field(description="Tool source, can be local or mcp")
+    description: Optional[str] = Field(description="Tool description", default=None)
+    description_zh: Optional[str] = Field(description="Chinese tool description", default=None)
+    inputs: Optional[str] = Field(description="Tool inputs", default=None)
+    output_type: Optional[str] = Field(description="Tool output type", default=None)
+    params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
+    source: str = Field(description="Tool source, can be local or mcp", default="local")
     usage: Optional[str] = Field(description="MCP server name", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
     labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
@@ -146,11 +202,63 @@ VerificationEvent = Literal[
 VerificationStrictness = Literal["lenient", "balanced", "strict"]
 VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
 
+GuardrailSeverity = Literal["block", "mask", "pass"]
+
+
+class GuardrailRule(BaseModel):
+    """A single pattern-matching rule for the guardrail engine.
+
+    Each rule compiles to a regex and is matched at every guardrail checkpoint.
+
+    Attributes:
+        name: Human-readable rule identifier, e.g. "cn_id_number".
+        pattern: Regular expression string (Python ``re`` syntax).
+        severity: What to do when the pattern matches.
+        description: Optional free-text explanation shown in the UI.
+    """
+
+    name: str = Field(description="Human-readable rule identifier")
+    pattern: str = Field(description="Regular expression in Python re syntax")
+    severity: GuardrailSeverity = Field(
+        description="Action when pattern matches: block, mask, or pass",
+        default="block",
+    )
+    description: Optional[str] = Field(
+        description="Optional explanation shown in configuration UI",
+        default=None,
+    )
+
+
+class GuardrailConfig(BaseModel):
+    """Configuration container for the guardrail subsystem.
+
+    Stored as a nested object inside ``AgentVerificationConfig.guardrail_config``
+    and persisted to the database as part of the ``verification_config`` JSONB
+    column — no separate database migration is needed.
+
+    Attributes:
+        enabled: Master switch. When False, GuardrailEngine is not created.
+        rules: Ordered list of pattern rules. Evaluated in order; first
+               match wins (later rules for the same text are skipped).
+        default_action: Fallback action when a rule matches but has an
+                        unknown severity value (defensive, should not happen).
+    """
+
+    enabled: bool = Field(description="Whether guardrail screening is active", default=False)
+    rules: List[GuardrailRule] = Field(
+        description="Ordered pattern rules; first match wins",
+        default_factory=list,
+    )
+    default_action: GuardrailSeverity = Field(
+        description="Fallback severity when a rule matches but severity is unset",
+        default="pass",
+    )
+
 
 class AgentVerificationConfig(BaseModel):
     """Configuration for layered ReAct self-verification."""
 
-    enabled: bool = Field(description="Whether self-verification is enabled", default=True)
+    enabled: bool = Field(description="Whether self-verification is enabled", default=False)
     step_verification_enabled: bool = Field(
         description="Whether to verify critical ReAct step events",
         default=True,
@@ -194,94 +302,268 @@ class AgentVerificationConfig(BaseModel):
             "final_answer",
         ],
     )
+    guardrail_config: Optional[GuardrailConfig] = Field(
+        description="Guardrail screening configuration (blacklist/whitelist patterns)",
+        default=None,
+    )
+
 
 class AgentConfig(BaseModel):
+    runtime_ref: Optional[str] = None
+    origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    agent_id: Optional[Union[int, str]] = Field(
+        description="Stable persisted Agent identity used for runtime events",
+        default=None,
+    )
+    version_no: Optional[int] = Field(
+        description="Resolved immutable Agent version used by this run",
+        default=None,
+    )
+    invocation_name: Optional[str] = Field(
+        description="Stable, unique callable name within the resolved Agent tree",
+        default=None,
+    )
     name: str = Field(description="Agent name")
+    display_name: Optional[str] = Field(description="User-facing Agent name", default=None)
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
-    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
+    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1)
     requested_output_tokens: Optional[int] = Field(
-        description=(
-            "Per-agent W2 output reserve override. None means inherit the "
-            "resolved model-level default."
-        ),
+        description=("Per-agent W2 output reserve override. None means inherit the resolved model-level default."),
         default=None,
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
-    provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
-    instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
-    managed_agents: List["AgentConfig"] = Field(
-        description="Internal managed sub-agents created locally",
-        default=[]
+    output_protocol: Literal["code_action", "final_envelope"] = Field(
+        description="Closed model-output protocol used by the Agent runtime",
+        default="code_action",
     )
+    enable_protocol_repair_retry: bool = Field(
+        description="Whether the Agent uses strict output validation and silent protocol repair",
+        default=False,
+    )
+    provide_run_summary: Optional[bool] = Field(
+        description="Whether to provide run summary to upper-level Agent", default=False
+    )
+    allow_chat_metadata: bool = Field(
+        description="Whether Native Chat and Debug users may submit runtime metadata",
+        default=False,
+    )
+    instructions: Optional[str] = Field(
+        description="Additional instructions to prepend to system prompt", default=None
+    )
+    worker_agents: List["AgentConfig"] = Field(description="Internal worker sub-agents created locally", default=[])
     external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
-        description="External A2A agents called via HTTP requests",
-        default=[]
+        description="External A2A agents called via HTTP requests", default=[]
     )
     context_manager_config: Optional[Any] = Field(
-        description="Context manager configuration for conversation-level memory compression",
-        default=None
+        description="Context manager configuration for conversation-level memory compression", default=None
     )
-    context_components: Optional[List[Any]] = Field(
-        description="Pre-built context components for system prompt assembly",
-        default=None
+    context_items: Optional[List[ContextItemInput]] = Field(
+        description="Authorized fine-grained context item inputs for SDK assembly", default=None
+    )
+    prompt_tool_policy_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Immutable versioned tool policy values injected for this Agent run", default=None
+    )
+    pre_run_tool_events: List[Dict[str, Any]] = Field(
+        description=(
+            "Structured tool and result events completed before the model loop "
+            "and emitted through the normal streaming persistence path."
+        ),
+        default_factory=list,
     )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
     verification_config: AgentVerificationConfig = Field(
         description="Layered ReAct self-verification configuration",
         default_factory=AgentVerificationConfig,
     )
+    enable_planning: bool = Field(
+        description="Whether to enable the planning phase before execution",
+        default=False,
+    )
+    sandbox_policy: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Sandbox policy for LLM-generated Python code execution.  Keys: "
+            "level (local/docker/wasm), "
+            "scope (session/system), "
+            "docker_image, memory_limit_mb, cpu_quota, "
+            "network_disabled, timeout_seconds, shell_policy, "
+            "host_tool_timeout_seconds, output_dir, auto_sync_outputs.  "
+            'Example: {"level": "docker", "scope": "session", '
+            '"docker_image": "nexent/nexent-sandbox:latest"}'
+        ),
+        default=None,
+    )
 
 
 class AgentHistory(BaseModel):
     role: str = Field(description="Role, can be user or assistant")
-    content : str = Field(description="Conversation content")
+    content: str = Field(description="Conversation content")
+
+
+class PlanStep(BaseModel):
+    """Single step within an agent plan."""
+
+    id: str = Field(description="Unique step identifier, e.g. 'step-1'")
+    title: str = Field(description="Short step title")
+    description: str = Field(description="Detailed step description")
+    status: Literal["pending", "in_progress", "completed", "skipped"] = Field(
+        description="Current execution status of the step", default="pending"
+    )
+
+
+class AgentPlan(BaseModel):
+    """Structured task plan generated before agent execution."""
+
+    plan_id: str = Field(description="Unique plan identifier")
+    title: str = Field(description="Plan title extracted from the task")
+    steps: List[PlanStep] = Field(description="Ordered list of plan steps")
+    current_step_index: int = Field(description="Index of the currently executing step", default=0)
 
 
 class AgentRunInfo(BaseModel):
+    attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")
     observer: MessageObserver = Field(description="Return data")
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")
     mcp_host: Optional[List[Union[str, Dict[str, Any]]]] = Field(
         description="MCP server address(es). Can be a string (URL) or dict with 'url', 'transport', "
-        "and optionally 'authorization' or 'headers' keys. "
+        "and optionally 'authorization', 'headers', or 'httpx_client_factory' keys. "
         "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
         "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport. "
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
-        default=None
+        default=None,
+    )
+    mcp_request_timeout_seconds: Optional[float] = Field(
+        description=(
+            "Maximum seconds allowed to establish an MCP connection and complete "
+            "the initialization handshake. It does not limit tool execution."
+        ),
+        default=None,
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
-    context_manager: Optional[Any] = Field(
-        description="Conversation-level reusable ContextManager instance. "
-                    "If provided, it will be attached to the CoreAgent instead of creating a new one.",
-        default=None
+    cancellation_scope: Optional[Any] = Field(
+        description="Run-scoped cancellation and active resource registry",
+        default=None,
+        exclude=True,
+    )
+    mcp_tool_timeout_seconds: float = Field(
+        description="Hard timeout for one MCP tool invocation",
+        default=60.0,
+        gt=0,
+    )
+    mcp_close_timeout_seconds: float = Field(
+        description="Maximum wait for an MCP context to close",
+        default=5.0,
+        gt=0,
+    )
+    thread_manager: Optional[Any] = Field(
+        description="Injected process-local thread manager",
+        default=None,
+        exclude=True,
+    )
+    thread_execution_id: Optional[str] = Field(
+        description="Process-local managed execution identifier",
+        default=None,
+        exclude=True,
+    )
+    thread_future: Optional[Any] = Field(
+        description="Process-local managed execution completion handle",
+        default=None,
+        exclude=True,
+    )
+    conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
+    user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    user_context: Optional[Dict[str, Any]] = Field(
+        description="Caller user context (tenant/user/groups) passed through to tools for "
+        "tool-side authorization. Hidden from the model; values come only from the "
+        "authenticated session, never from model output.",
+        default=None,
+        exclude=True,
+    )
+    runtime_metadata: Dict[str, Any] = Field(
+        description="Immutable application-resolved runtime metadata snapshot",
+        default_factory=dict,
+    )
+    runtime_metadata_version: Optional[int] = Field(
+        description="Conversation runtime metadata version used by this run",
+        default=None,
+    )
+    context_input: Optional[Any] = Field(
+        description="Immutable run-scoped context snapshot supplied by the application boundary.",
+        default=None,
     )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
+        default=None,
+    )
+    enable_planning: bool = Field(description="Whether to enable the planning phase before execution", default=False)
+    redis_client: Optional[Any] = Field(
+        description="Redis client for plan persistence. "
+        "If provided, plan_repo will use Redis as primary storage with local fallback.",
+        default=None,
+    )
+    sandbox_config: Optional[Any] = Field(
+        description=(
+            "Resolved SandboxConfig for sandbox isolation.  "
+            "Populated by the backend service layer from AgentConfig.sandbox_policy "
+            "and NEXENT_SANDBOX_* environment variables.  "
+            "When None the SDK uses LocalPythonExecutor (backwards-compatible)."
+        ),
+        default=None,
+    )
+    tool_fastpath_enabled: bool = Field(
+        description="Enable restricted official-tool actions before ordinary Docker initialization.",
+        default=True,
+    )
+    tool_fastpath_allowed_tools: Optional[List[str]] = Field(
+        description="Deployment-approved official implementation IDs for local fast-path actions.",
+        default=None,
+    )
+    minio_client: Optional[Any] = Field(
+        description=(
+            "MinIO client for syncing sandbox output files to object storage.  "
+            "Required when sandbox_config.auto_sync_outputs is True."
+        ),
+        default=None,
+    )
+    workspace_path: Optional[str] = Field(
+        description="Run-scoped local workspace used for uploaded inputs and generated outputs.",
+        default=None,
+    )
+    workspace_run_id: Optional[str] = Field(
+        description="Opaque run identifier used to isolate workspace files and object keys.",
+        default=None,
+    )
+    tenant_id: Optional[str] = Field(
+        description="Tenant id used for run-scoped file isolation.",
+        default=None,
+    )
+    minio_files: Optional[List[Dict[str, Any]]] = Field(
+        description="Authorized files uploaded with the current run request.",
         default=None,
     )
 
     class Config:
         arbitrary_types_allowed = True
 
+
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
-    memory_config: Dict[str, Any] = Field(description="Memory llm/embedder/vectorstore configuration")
     tenant_id: str = Field(description="Tenant id")
     user_id: str = Field(description="User id")
     agent_id: str = Field(description="Agent id")
@@ -295,6 +577,7 @@ class MemoryUserConfig(BaseModel):
     agent_share_option: str = Field(description="Agent share option")
     disable_agent_ids: List[str] = Field(description="Disable agent ids")
     disable_user_agent_ids: List[str] = Field(description="Disable user agent ids")
+    external_provider_top_k: int = Field(default=20, description="Max results per external provider")
 
     def __str__(self) -> str:  # pragma: no cover
         return self.model_dump_json(indent=2, ensure_ascii=False)
@@ -302,24 +585,23 @@ class MemoryUserConfig(BaseModel):
 
 class ExternalA2AAgentConfig(BaseModel):
     """Configuration for an external A2A agent that can be called as sub-agent."""
+
     agent_id: str = Field(description="External agent ID")
     name: str = Field(description="Agent display name")
+    invocation_name: Optional[str] = Field(default=None, description="Resolved runtime callable; original name is preserved")
     description: str = Field(description="Agent description for prompt", default="")
     url: str = Field(description="A2A endpoint URL")
     api_key: Optional[str] = Field(description="API key for authentication", default=None)
-    transport_type: str = Field(
-        description="Transport type: http-streaming or http-polling",
-        default="http-streaming"
-    )
+    transport_type: str = Field(description="Transport type: http-streaming or http-polling", default="http-streaming")
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
-    protocol_type: str = Field(
-        description="Protocol type: JSONRPC, HTTP+JSON, or GRPC",
-        default=PROTOCOL_JSONRPC
-    )
-    timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    protocol_type: str = Field(description="Protocol type: JSONRPC, HTTP+JSON, or GRPC", default=PROTOCOL_JSONRPC)
+    timeout: float = Field(description="Request timeout in seconds", default=900.0)
+    ssl_verify: bool = Field(description="Verify the peer TLS certificate", default=True)
     raw_card: Optional[Dict[str, Any]] = Field(
-        description="Raw Agent Card containing skills and capabilities",
-        default=None
+        description="Raw Agent Card containing skills and capabilities", default=None
+    )
+    custom_headers: Optional[Dict[str, str]] = Field(
+        description="Pre-built auth headers from securitySchemes + credentials", default=None
     )
 
     def model_post_init(self, __context) -> None:
@@ -352,7 +634,7 @@ class ExternalA2AAgentConfig(BaseModel):
         examples_section = ""
         if examples_lines:
             # Shuffle and pick some examples
-            examples_str = ', '.join(f'"{ex}"' for ex in examples_lines[:8])
+            examples_str = ", ".join(f'"{ex}"' for ex in examples_lines[:8])
             examples_section = f"\n  调用示例: {examples_str}"
 
         # Build capability description (without explicit skill IDs)
@@ -364,386 +646,21 @@ class ExternalA2AAgentConfig(BaseModel):
     def to_a2a_agent_info(self) -> "A2AAgentInfo":
         """Convert to A2AAgentInfo for SDK usage."""
         from .a2a_agent_proxy import A2AAgentInfo
+
         return A2AAgentInfo(
             agent_id=self.agent_id,
             name=self.name,
+            invocation_name=self.invocation_name,
             url=self.url,
             api_key=self.api_key,
             transport_type=self.transport_type,
             protocol_version=self.protocol_version,
             protocol_type=self.protocol_type,
             timeout=self.timeout,
-            raw_card=self.raw_card
+            ssl_verify=self.ssl_verify,
+            raw_card=self.raw_card,
+            custom_headers=self.custom_headers,
         )
-
-
-# =============================================================================
-# Context Component System - Building blocks for system prompt assembly
-# =============================================================================
-
-ComponentType = Literal["system_prompt", "tools", "skills", "memory", "knowledge_base", "managed_agents", "external_a2a_agents"]
-
-
-class ContextComponent(BaseModel, ABC):
-    """Abstract base for all context components.
-
-    Each component knows how to convert itself to LLM message format via to_messages().
-    Follows smolagents MemoryStep.to_messages() pattern.
-    """
-    component_type: ComponentType = Field(description="Type identifier for this component")
-    priority: int = Field(description="Selection priority (higher = more important)", default=10)
-    token_estimate: int = Field(description="Estimated token count", default=0)
-    metadata: Dict[str, Any] = Field(description="Additional metadata", default_factory=dict)
-
-    @abstractmethod
-    def to_messages(self) -> List[Dict[str, Any]]:
-        """Convert component content to message format for LLM.
-
-        Returns:
-            List of message dicts with 'role' and 'content' keys.
-        """
-        pass
-
-    @staticmethod
-    def _text_message(role: str, text: str) -> Dict[str, Any]:
-        """Build smolagents-compatible text-part message content."""
-        return {"role": role, "content": [{"type": "text", "text": text}]}
-
-    def estimate_tokens(self, chars_per_token: float = 1.5) -> int:
-        """Estimate token count from content length.
-
-        Args:
-            chars_per_token: Average characters per token ratio.
-
-        Returns:
-            Estimated token count.
-        """
-        total_chars = 0
-        for m in self.to_messages():
-            content = m.get("content", "")
-            if isinstance(content, list):
-                total_chars += sum(
-                    len(part.get("text", ""))
-                    for part in content
-                    if isinstance(part, dict)
-                )
-            else:
-                total_chars += len(str(content))
-        return int(total_chars / chars_per_token)
-
-
-class SystemPromptComponent(ContextComponent):
-    """System prompt component - base instructions for the agent."""
-    component_type: ComponentType = Field(default="system_prompt")
-    content: str = Field(description="Rendered system prompt content")
-    template_name: Optional[str] = Field(description="Source template name", default=None)
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        return [self._text_message("system", self.content)]
-
-
-class ToolsComponent(ContextComponent):
-    """Tool descriptions component - available tools for the agent."""
-    component_type: ComponentType = Field(default="tools")
-    tools: List[Dict[str, Any]] = Field(description="List of tool definitions", default_factory=list)
-    formatted_description: str = Field(description="Pre-formatted tool descriptions text", default="")
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        if self.formatted_description:
-            return [self._text_message("system", self.formatted_description)]
-        return []
-
-    def add_tool(self, name: str, description: str, inputs: str, output_type: str) -> None:
-        """Add a tool definition."""
-        self.tools.append({
-            "name": name,
-            "description": description,
-            "inputs": inputs,
-            "output_type": output_type
-        })
-
-
-class SkillsComponent(ContextComponent):
-    """Skill summaries component - available skills for the agent."""
-    component_type: ComponentType = Field(default="skills")
-    skills: List[Dict[str, Any]] = Field(description="List of skill definitions", default_factory=list)
-    formatted_description: str = Field(description="Pre-formatted skill summaries text", default="")
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        if self.formatted_description:
-            return [self._text_message("system", self.formatted_description)]
-        return []
-
-    def add_skill(self, name: str, description: str) -> None:
-        """Add a skill definition."""
-        self.skills.append({
-            "name": name,
-            "description": description
-        })
-
-
-class MemoryComponent(ContextComponent):
-    """Memory context component - long-term memory (mem0) search results."""
-    component_type: ComponentType = Field(default="memory")
-    memories: List[Dict[str, Any]] = Field(description="Memory search results", default_factory=list)
-    formatted_content: str = Field(description="Pre-formatted memory context text", default="")
-    search_query: Optional[str] = Field(description="Query used to search memory", default=None)
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        if self.formatted_content:
-            # Memory is user/session-specific dynamic context.  Keeping it out
-            # of the authoritative system prefix preserves cross-turn cache
-            # reuse without changing its content or selection semantics.
-            return [self._text_message("user", self.formatted_content)]
-        return []
-
-    def add_memory(self, content: str, memory_type: str = "user", metadata: Dict[str, Any] = None) -> None:
-        """Add a memory entry."""
-        self.memories.append({
-            "content": content,
-            "memory_type": memory_type,
-            "metadata": metadata or {}
-        })
-
-
-class KnowledgeBaseComponent(ContextComponent):
-    """Knowledge base component - KB summary context."""
-    component_type: ComponentType = Field(default="knowledge_base")
-    summary: str = Field(description="Knowledge base summary text", default="")
-    kb_ids: List[str] = Field(description="Knowledge base IDs used", default_factory=list)
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        if self.summary:
-            # Retrieved knowledge is request-dependent evidence, not
-            # authoritative instruction.  Keeping it dynamic protects the
-            # stable cache prefix when retrieval results change between turns.
-            return [self._text_message("user", self.summary)]
-        return []
-
-
-class ManagedAgentsComponent(ContextComponent):
-    """Managed agents component - internal sub-agent definitions."""
-    component_type: ComponentType = Field(default="managed_agents")
-    agents: List[Dict[str, Any]] = Field(description="Managed agent definitions", default_factory=list)
-    formatted_description: str = Field(description="Pre-formatted agent descriptions", default="")
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        if self.formatted_description:
-            return [self._text_message("system", self.formatted_description)]
-        return []
-
-    def add_agent(self, name: str, description: str, tools: List[str] = None) -> None:
-        """Add a managed agent definition."""
-        self.agents.append({
-            "name": name,
-            "description": description,
-            "tools": tools or []
-        })
-
-
-class ExternalAgentsComponent(ContextComponent):
-    """External A2A agents component - external agent definitions."""
-    component_type: ComponentType = Field(default="external_a2a_agents")
-    agents: List[Dict[str, Any]] = Field(description="External A2A agent definitions", default_factory=list)
-    formatted_description: str = Field(description="Pre-formatted agent descriptions", default="")
-
-    def to_messages(self) -> List[Dict[str, Any]]:
-        if self.formatted_description:
-            return [self._text_message("system", self.formatted_description)]
-        return []
-
-    def add_agent(self, agent_id: str, name: str, description: str, url: str) -> None:
-        """Add an external A2A agent definition."""
-        self.agents.append({
-            "agent_id": agent_id,
-            "name": name,
-            "description": description,
-            "url": url
-        })
-
-
-# =============================================================================
-# Context Strategy System - Pluggable component selection algorithms
-# =============================================================================
-
-class ContextStrategy(ABC):
-    """Abstract base for context component selection strategies."""
-
-    @abstractmethod
-    def select_components(
-        self,
-        components: List[ContextComponent],
-        token_budget: int,
-        component_budgets: Dict[str, int]
-    ) -> List[ContextComponent]:
-        """Select components to include within constraints.
-
-        Args:
-            components: All available context components.
-            token_budget: Maximum total tokens allowed.
-            component_budgets: Per-type token limits.
-
-        Returns:
-            Selected components in priority order.
-        """
-        pass
-
-    @abstractmethod
-    def get_strategy_name(self) -> str:
-        """Return strategy identifier."""
-        pass
-
-
-class FullStrategy(ContextStrategy):
-    """Keep all components - for unlimited context models."""
-
-    def select_components(
-        self,
-        components: List[ContextComponent],
-        token_budget: int,
-        component_budgets: Dict[str, int]
-    ) -> List[ContextComponent]:
-        return sorted(components, key=lambda c: c.priority, reverse=True)
-
-    def get_strategy_name(self) -> str:
-        return "full"
-
-
-class TokenBudgetStrategy(ContextStrategy):
-    """Select components within total token budget by priority."""
-
-    def select_components(
-        self,
-        components: List[ContextComponent],
-        token_budget: int,
-        component_budgets: Dict[str, int]
-    ) -> List[ContextComponent]:
-        sorted_components = sorted(components, key=lambda c: c.priority, reverse=True)
-        selected: List[ContextComponent] = []
-        total_tokens = 0
-        type_totals: Dict[str, int] = {}
-
-        for comp in sorted_components:
-            comp_tokens = comp.token_estimate or comp.estimate_tokens()
-            comp_budget = component_budgets.get(comp.component_type, token_budget)
-            current_type_total = type_totals.get(comp.component_type, 0)
-
-            fits_total = total_tokens + comp_tokens <= token_budget
-            fits_type = current_type_total + comp_tokens <= comp_budget
-
-            if fits_total and fits_type:
-                selected.append(comp)
-                total_tokens += comp_tokens
-                type_totals[comp.component_type] = current_type_total + comp_tokens
-            else:
-                # Surface the drop so operators can see when the prompt is
-                # being silently truncated by budget pressure. Identifying
-                # which constraint tripped (global vs per-type) is the most
-                # useful detail when tuning component_budgets.
-                reason = (
-                    "total_budget"
-                    if not fits_total else "type_budget"
-                )
-                logger.warning(
-                    "TokenBudgetStrategy dropped component type=%s priority=%d "
-                    "tokens=%d reason=%s (total %d/%d, type %d/%d)",
-                    comp.component_type, comp.priority, comp_tokens, reason,
-                    total_tokens, token_budget,
-                    current_type_total, comp_budget,
-                )
-
-        return selected
-
-    def get_strategy_name(self) -> str:
-        return "token_budget"
-
-
-class BufferedStrategy(ContextStrategy):
-    """Keep last N components per type."""
-
-    def __init__(self, buffer_size: int = 10):
-        self.buffer_size = buffer_size
-
-    def select_components(
-        self,
-        components: List[ContextComponent],
-        token_budget: int,
-        component_budgets: Dict[str, int]
-    ) -> List[ContextComponent]:
-        type_buckets: Dict[str, List[ContextComponent]] = {}
-
-        for comp in components:
-            type_buckets.setdefault(comp.component_type, []).append(comp)
-
-        selected: List[ContextComponent] = []
-        for comp_type, bucket in type_buckets.items():
-            recent = bucket[-self.buffer_size:]
-            dropped = len(bucket) - len(recent)
-            if dropped > 0:
-                logger.warning(
-                    "BufferedStrategy dropped %d component(s) of type=%s "
-                    "(buffer_size=%d, total=%d)",
-                    dropped, comp_type, self.buffer_size, len(bucket),
-                )
-            selected.extend(recent)
-
-        return sorted(selected, key=lambda c: c.priority, reverse=True)
-
-    def get_strategy_name(self) -> str:
-        return "buffered"
-
-
-class PriorityWeightedStrategy(ContextStrategy):
-    """Select by weighted importance + relevance scores."""
-
-    def __init__(self, relevance_threshold: float = 0.5):
-        self.relevance_threshold = relevance_threshold
-
-    def select_components(
-        self,
-        components: List[ContextComponent],
-        token_budget: int,
-        component_budgets: Dict[str, int]
-    ) -> List[ContextComponent]:
-        scored_components: List[Tuple[ContextComponent, float]] = []
-
-        for comp in components:
-            relevance = comp.metadata.get("relevance_score", 1.0)
-            score = comp.priority * 0.7 + relevance * 0.3 * 100
-            if relevance >= self.relevance_threshold:
-                scored_components.append((comp, score))
-            else:
-                logger.warning(
-                    "PriorityWeightedStrategy dropped component type=%s "
-                    "priority=%d relevance=%.3f<threshold=%.3f",
-                    comp.component_type, comp.priority,
-                    relevance, self.relevance_threshold,
-                )
-
-        sorted_components = sorted(scored_components, key=lambda x: x[1], reverse=True)
-        selected: List[ContextComponent] = []
-        total_tokens = 0
-
-        for comp, score in sorted_components:
-            comp_tokens = comp.token_estimate or comp.estimate_tokens()
-            if total_tokens + comp_tokens <= token_budget:
-                selected.append(comp)
-                total_tokens += comp_tokens
-            else:
-                logger.warning(
-                    "PriorityWeightedStrategy dropped component type=%s "
-                    "priority=%d score=%.2f tokens=%d (total %d/%d)",
-                    comp.component_type, comp.priority, score, comp_tokens,
-                    total_tokens, token_budget,
-                )
-
-        return selected
-
-    def get_strategy_name(self) -> str:
-        return "priority"
-
-
-
 
 
 AgentConfig.model_rebuild()

@@ -1,5 +1,6 @@
 import { usePathname } from "next/navigation";
 import { useTranslation } from "react-i18next";
+import { withBasePath, withoutBasePath } from "@/lib/basePath";
 
 export const useLanguageSwitch = () => {
   const pathname = usePathname();
@@ -9,13 +10,13 @@ export const useLanguageSwitch = () => {
     document.cookie = `NEXT_LOCALE=${newLang}; path=/; max-age=31536000`;
     
     // Compute new path: replace the first segment (locale) with newLang
-    const segments = pathname.split('/').filter(Boolean);
+    const segments = withoutBasePath(pathname).split('/').filter(Boolean);
     if (segments.length > 0 && (segments[0] === 'zh' || segments[0] === 'en')) {
       segments[0] = newLang;
     } else {
       segments.unshift(newLang);
     }
-    const newPath = '/' + segments.join('/');
+    const newPath = withBasePath('/' + segments.join('/'));
     
     // Force a full page reload to ensure proper language switching and component refresh
     window.location.href = newPath;

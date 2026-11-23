@@ -9,7 +9,7 @@ from typing import Any as MockFixture
 
 import httpx
 
-from backend.services.providers.silicon_provider import SiliconModelProvider
+from management.services.model.providers.silicon_provider import SiliconModelProvider
 
 
 class TestSiliconModelProvider:
@@ -38,11 +38,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -86,7 +86,7 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
 
@@ -127,11 +127,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -178,11 +178,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -224,11 +224,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -265,11 +265,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -290,7 +290,7 @@ class TestSiliconModelProvider:
     async def test_get_models_unknown_type(self, mocker: MockFixture):
         """Test unsupported model types are ignored without calling the API."""
         mock_async_client = mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=MagicMock()
         )
 
@@ -321,11 +321,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -354,11 +354,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -372,7 +372,42 @@ class TestSiliconModelProvider:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["_error"] == "connection_failed"
+        assert result[0]["_error"] == "server_error"
+
+    @pytest.mark.asyncio
+    async def test_get_models_401_returns_authentication_failed(self, mocker: MockFixture):
+        """401 from provider surfaces the authentication_failed error code."""
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=MagicMock(status_code=401),
+        )
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
+            "https://api.siliconflow.com/v1/models"
+        )
+
+        provider = SiliconModelProvider()
+        provider_config = {
+            "model_type": "llm",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["_error"] == "authentication_failed"
 
     @pytest.mark.asyncio
     async def test_get_models_connect_error(self, mocker: MockFixture):
@@ -385,11 +420,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -416,11 +451,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -452,11 +487,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/models"
         )
 
@@ -488,11 +523,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/models"
         )
 
@@ -524,11 +559,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/models"
         )
 
@@ -563,15 +598,15 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/models"
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.DEFAULT_LLM_MAX_TOKENS",
+            "management.services.model.providers.silicon_provider.DEFAULT_LLM_MAX_TOKENS",
             4096
         )
 
@@ -606,11 +641,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/v1/models"
         )
 
@@ -643,11 +678,11 @@ class TestSiliconModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            "management.services.model.providers.silicon_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "management.services.model.providers.silicon_provider.SILICON_GET_URL",
             "https://api.siliconflow.com/models"
         )
 

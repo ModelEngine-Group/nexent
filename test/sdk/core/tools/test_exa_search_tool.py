@@ -99,7 +99,6 @@ def test_forward_with_results(exa_search_tool, mock_observer):
     )
 
     # Check observer messages
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "Searching the web...")
     mock_observer.add_message.assert_any_call("", ProcessType.CARD,
                                               json.dumps([{"icon": "search", "text": "test query"}],
                                                          ensure_ascii=False))
@@ -182,9 +181,6 @@ def test_chinese_language_observer(exa_search_tool, mock_observer):
 
         # Call method
         exa_search_tool.forward("测试查询")
-
-    # Check Chinese running prompt
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "网络搜索中...")
 
 
 def test_filter_images_success(exa_search_tool, mock_observer):

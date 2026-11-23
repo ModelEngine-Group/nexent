@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: D4-A2A-PROBE-20261010
+  change_type: test-fix
+  title: Read published A2A final answers from product JSON data parts
+  description: >-
+    The current northbound adapter preserves agent/run events as A2A data parts.
+    Verify final_answer content as well as protocol text parts, joining streamed
+    fragments. Never accept thinking, tool input, user history or a response with
+    a runtime error as proof, including Error-prefixed text wrapped in HTTP 200.
+    Keep task completion and exact response marker
+    assertions. Retain credential-free part counts and event types locally.
+    Controlled regression checks pass; the full published UI journey rerun still
+    fails. The client sends no metadata, but A2A injects an empty metadata object;
+    its private entrypoint marker is lost during runtime proxy model serialization
+    and the runtime applies native metadata permission checks, returning 400.
+    Northbound then wraps that failure in HTTP 200 text. Preserve the failing
+    acceptance rather than enable the owned Agent flag to conceal this chain.
+    No product changes or historical-result rewriting.
+  affected_features:
+    existing: [V5-PW-A2A-PUBLISH-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-A2A-PUBLISH-01]
+    retired: []

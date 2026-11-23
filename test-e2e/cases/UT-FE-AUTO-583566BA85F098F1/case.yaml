@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-583566BA85F098F1
+  feature_id: F-054
+  business_rule_ids:
+  - F-054-RULE-01
+  title: 切换 Agent 期间 shouldFetchVersionDetail=false 跳过旧版本详情加载、切换完成后按当前版本加载｜核心流程
+  type: FE-COMP
+  priority: P2
+  status: active
+  automation: automated
+  objective: 切换 Agent 期间 shouldFetchVersionDetail=false 跳过旧版本详情加载、切换完成后按当前版本加载｜核心流程
+  preconditions:
+  - 本地前端组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 组件测试加载 Agent 配置页 AgentSetupContent（frontend/app/[locale]/agents/[agentId]/page.tsx），注入 agentStore、useAgentInfo/useAgentVersionList/useAgentVersionDetail
+    等 hook 与本地固定测试数据。
+  test_data:
+    legacy_asset_declaration: 无本地资产依赖；组件测试注入本地固定测试数据（当前 Agent A、目标 Agent B 及各自版本列表），不访问真实模型/Agent 服务。
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 Agent 配置页 AgentSetupContent（frontend/app/[locale]/agents/[agentId]/page.tsx），注入 agentStore、useAgentInfo/useAgentVersionList/useAgentVersionDetail
+      等 hook 与本地固定测试数据，令当前 Agent A 已选中（currentAgentId=A 且 路由参数 agentId=A），useAgentVersionList(A) 返回 total>0。
+    expected: 切换期间（isRequestedAgentLoading=true）shouldFetchVersionDetail=false，useAgentVersionDetail 不请求旧 Agent A 的版本详情，界面不闪现旧版本详情。
+  - order: 2
+    action: 切换动态路由至 Agent B（路由参数 agentId=B），此时 requestedAgentId=B 且 != currentAgentId=A，isRequestedAgentLoading
+      置为 true。
+    expected: 切换完成后（isRequestedAgentLoading=false 且 total>0）shouldFetchVersionDetail=true，版本详情按新 Agent B 的当前版本号（agentInfo.current_version_no）加载。
+  - order: 3
+    action: 在切换进行中（isRequestedAgentLoading=true）断言 shouldFetchVersionDetail = !isRequestedAgentLoading && total > 0 计算结果为
+      false，即 useAgentVersionDetail 的第三参 shouldFetchVersionDetail 为 false，不发起 Agent A 的版本详情加载。
+    expected: 切换全过程无未处理异常，无旧版本详情覆盖新 Agent 的版本状态。
+  - order: 4
+    action: 模拟 loadAgent(B) 完成并 initialize(B) 更新 currentAgentId=B，使 isRequestedAgentLoading 恢复为 false。
+    expected: 切换全过程无未处理异常，无旧版本详情覆盖新 Agent 的版本状态。
+  - order: 5
+    action: 断言切换完成后 total>0 且 isRequestedAgentLoading=false，shouldFetchVersionDetail 恢复为 true，useAgentVersionDetail 以 currentAgentId=B
+      与 agentInfo.current_version_no 触发当前版本详情加载。
+    expected: 切换全过程无未处理异常，无旧版本详情覆盖新 Agent 的版本状态。
+  expected_results:
+  - 切换期间（isRequestedAgentLoading=true）shouldFetchVersionDetail=false，useAgentVersionDetail 不请求旧 Agent A 的版本详情，界面不闪现旧版本详情。
+  - 切换完成后（isRequestedAgentLoading=false 且 total>0）shouldFetchVersionDetail=true，版本详情按新 Agent B 的当前版本号（agentInfo.current_version_no）加载。
+  - 切换全过程无未处理异常，无旧版本详情覆盖新 Agent 的版本状态。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 433
+  unit_boundary: 配置前端
+  inputs:
+  - 无本地资产依赖；组件测试注入本地固定测试数据（当前 Agent A、目标 Agent B 及各自版本列表），不访问真实模型/Agent 服务。
+  assertions:
+  - 切换期间（isRequestedAgentLoading=true）shouldFetchVersionDetail=false，useAgentVersionDetail 不请求旧 Agent A 的版本详情，界面不闪现旧版本详情。
+  - 切换完成后（isRequestedAgentLoading=false 且 total>0）shouldFetchVersionDetail=true，版本详情按新 Agent B 的当前版本号（agentInfo.current_version_no）加载。
+  - 切换全过程无未处理异常，无旧版本详情覆盖新 Agent 的版本状态。

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
@@ -8,9 +8,12 @@ import { useTranslation } from "react-i18next";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import {
+  buildAuthenticationReturnPath,
+  isAnonymousConversationSharePath,
+} from "@/lib/agentUsageGuide";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
-import { authFlowState } from "@/lib/authFlow";
-import { casService } from "@/services/casService";
+import { forcedLoginService } from "@/services/forcedLoginService";
 import { AuthenticationUIReturn, RegisterModalOptions } from "@/types/auth";
 
 /**
@@ -35,8 +38,14 @@ export function useAuthenticationUI({
   const { message } = App.useApp();
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
-  const isSharePage = effectivePath.startsWith("/share/");
-  const isRedirectingToCasRef = useRef(false);
+  // Static conversation snapshots remain public while preserving the return path.
+  const isAnonymousConversationSharePage =
+    isAnonymousConversationSharePath(effectivePath);
+  const preservesShareReturnPath = isAnonymousConversationSharePage;
+  const authenticationReturnPath = buildAuthenticationReturnPath(
+    pathname || "/",
+    searchParams.toString()
+  );
 
   // UI state for modals - managed locally within the hook
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -46,10 +55,12 @@ export function useAuthenticationUI({
   const [isAuthPromptModalOpen, setIsAuthPromptModalOpen] = useState(false);
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] =
     useState(false);
+  const [isSessionExpiredLoginInProgress, setIsSessionExpiredLoginInProgress] =
+    useState(false);
 
-  const handleUnauthenticatedModalClose = () => {
+  const handleUnauthenticatedModalClose = useCallback(() => {
     // Only emit back to home event and redirect if user is not authenticated
-    if (!isAuthenticated && !isSpeedMode && !isSharePage) {
+    if (!isAuthenticated && !isSpeedMode && !preservesShareReturnPath) {
       // Emit event to notify SideNavigation to reset selected key
       authEventUtils.emitBackToHome();
       // Redirect to home page if not already there
@@ -57,10 +68,36 @@ export function useAuthenticationUI({
         router.push("/");
       }
     }
-  };
+  }, [
+    effectivePath,
+    isAuthenticated,
+    isOAuthCompletePage,
+    preservesShareReturnPath,
+    isSpeedMode,
+    router,
+  ]);
+
+  const redirectToForcedLogin = useCallback(
+    (redirect?: string): Promise<boolean> =>
+      forcedLoginService.redirectIfNeeded(redirect),
+    []
+  );
 
   // Modal control functions
-  const openLoginModal = useCallback(() => setIsLoginModalOpen(true), []);
+  const openLoginModal = useCallback(() => {
+    if (preservesShareReturnPath) {
+      setIsLoginModalOpen(true);
+      return;
+    }
+
+    redirectToForcedLogin(authenticationReturnPath).then((redirected) => {
+      if (!redirected) setIsLoginModalOpen(true);
+    });
+  }, [
+    authenticationReturnPath,
+    preservesShareReturnPath,
+    redirectToForcedLogin,
+  ]);
 
   const closeLoginModal = useCallback(() => {
     setIsLoginModalOpen(false);
@@ -78,30 +115,20 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  const redirectToCasIfForced = useCallback(
-    async (redirect?: string): Promise<boolean> => {
-      if (isRedirectingToCasRef.current) return true;
-      if (authFlowState.isExplicitLogoutInProgress()) return true;
-
-      const config = await casService.getConfig();
-      if (authFlowState.isExplicitLogoutInProgress()) return true;
-      if (!config.enabled || config.login_mode !== "force") return false;
-
-      isRedirectingToCasRef.current = true;
-      casService.startLogin(redirect);
-      return true;
-    },
-    []
-  );
-
   const openAuthPromptModal = useCallback(
     (redirect?: string) => {
-      if (isSharePage) return;
-      redirectToCasIfForced(redirect || effectivePath).then((redirected) => {
-        if (!redirected) setIsAuthPromptModalOpen(true);
-      });
+      if (isAnonymousConversationSharePage) return;
+      redirectToForcedLogin(redirect || authenticationReturnPath).then(
+        (redirected) => {
+          if (!redirected) setIsAuthPromptModalOpen(true);
+        }
+      );
     },
-    [effectivePath, isSharePage, redirectToCasIfForced]
+    [
+      authenticationReturnPath,
+      isAnonymousConversationSharePage,
+      redirectToForcedLogin,
+    ]
   );
 
   const closeAuthPromptModal = useCallback(() => {
@@ -109,16 +136,38 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  const openSessionExpiredModal = useCallback(
-    () => setIsSessionExpiredModalOpen(true),
-    []
-  );
+  const openSessionExpiredModal = useCallback(() => {
+    if (isAnonymousConversationSharePage) return;
+    redirectToForcedLogin(authenticationReturnPath).then((redirected) => {
+      if (!redirected) setIsSessionExpiredModalOpen(true);
+    });
+  }, [
+    authenticationReturnPath,
+    isAnonymousConversationSharePage,
+    redirectToForcedLogin,
+  ]);
 
   const closeSessionExpiredModal = useCallback(() => {
     clearLocalSession();
     setIsSessionExpiredModalOpen(false);
     handleUnauthenticatedModalClose();
-  }, [handleUnauthenticatedModalClose]);
+  }, [clearLocalSession, handleUnauthenticatedModalClose]);
+
+  const openLoginModalAfterSessionExpired = useCallback(() => {
+    setIsSessionExpiredLoginInProgress(true);
+    setIsSessionExpiredModalOpen(false);
+    setIsAuthPromptModalOpen(false);
+    setIsRegisterModalOpen(false);
+    clearLocalSession();
+
+    redirectToForcedLogin(authenticationReturnPath)
+      .then((redirected) => {
+        if (!redirected) setIsLoginModalOpen(true);
+      })
+      .finally(() => {
+        setIsSessionExpiredLoginInProgress(false);
+      });
+  }, [clearLocalSession, authenticationReturnPath, redirectToForcedLogin]);
 
   const getOAuthErrorMessage = useCallback(
     (error: string) => {
@@ -134,7 +183,7 @@ export function useAuthenticationUI({
 
   useEffect(() => {
     if (isSpeedMode) return;
-    if (isSharePage) return;
+    if (isAnonymousConversationSharePage) return;
 
     const handleSessionExpired = () => {
       // Prevent showing session expired modal when login/register modal is already open.
@@ -143,9 +192,7 @@ export function useAuthenticationUI({
         return;
       }
 
-      redirectToCasIfForced(effectivePath).then((redirected) => {
-        if (!redirected) setIsSessionExpiredModalOpen(true);
-      });
+      openSessionExpiredModal();
     };
 
     const handleRegisterSuccess = () => {
@@ -171,8 +218,8 @@ export function useAuthenticationUI({
   }, [
     effectivePath,
     isSpeedMode,
-    isSharePage,
-    redirectToCasIfForced,
+    isAnonymousConversationSharePage,
+    openSessionExpiredModal,
     isLoginModalOpen,
     isRegisterModalOpen,
   ]);
@@ -181,7 +228,7 @@ export function useAuthenticationUI({
   useEffect(() => {
     if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
-    if (isSharePage) return;
+    if (isAnonymousConversationSharePage) return;
     if (isAuthChecking) return;
     if (isAuthenticated) {
       const oauthError = searchParams.get("oauth_error");
@@ -194,6 +241,7 @@ export function useAuthenticationUI({
 
     const oauthError = searchParams.get("oauth_error");
     if (oauthError && !isLoginModalOpen) {
+      forcedLoginService.suppressOAuthAutoLogin();
       setIsLoginModalOpen(true);
     }
   }, [
@@ -204,7 +252,7 @@ export function useAuthenticationUI({
     isLoginModalOpen,
     router,
     isOAuthCompletePage,
-    isSharePage,
+    isAnonymousConversationSharePage,
     message,
     getOAuthErrorMessage,
   ]);
@@ -220,18 +268,18 @@ export function useAuthenticationUI({
   useEffect(() => {
     if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
-    if (isSharePage) return;
+    if (isAnonymousConversationSharePage) return;
     // Skip while checking auth state
     if (isAuthChecking) return;
     // Skip if user is authenticated
     if (isAuthenticated) return;
-    // Skip if session expired modal is already showing (avoid duplicate modals)
-    if (isSessionExpiredModalOpen) return;
+    // Skip while transitioning from the session-expired dialog to login.
+    if (isSessionExpiredModalOpen || isSessionExpiredLoginInProgress) return;
     if (isLoginModalOpen) return;
     if (isRegisterModalOpen) return;
     let cancelled = false;
 
-    redirectToCasIfForced(effectivePath).then((redirected) => {
+    redirectToForcedLogin(authenticationReturnPath).then((redirected) => {
       if (!cancelled && !redirected) {
         setIsAuthPromptModalOpen(true);
       }
@@ -242,15 +290,17 @@ export function useAuthenticationUI({
     };
   }, [
     effectivePath,
+    authenticationReturnPath,
     isAuthenticated,
     isSpeedMode,
     isAuthChecking,
     isSessionExpiredModalOpen,
+    isSessionExpiredLoginInProgress,
     isLoginModalOpen,
     isRegisterModalOpen,
     isOAuthCompletePage,
-    isSharePage,
-    redirectToCasIfForced,
+    isAnonymousConversationSharePage,
+    redirectToForcedLogin,
   ]);
 
   return {
@@ -272,5 +322,6 @@ export function useAuthenticationUI({
     isSessionExpiredModalOpen,
     openSessionExpiredModal,
     closeSessionExpiredModal,
+    openLoginModalAfterSessionExpired,
   };
 }

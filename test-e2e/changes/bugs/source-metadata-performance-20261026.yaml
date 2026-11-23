@@ -1,0 +1,62 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SOURCE-PERF-20261026
+  change_type: bugfix
+  bug_id: BUG-SOURCE-METADATA-PERF
+  title: Keep source inspection responsive and align AIDP catalog pagination
+  description: >-
+    Simplify two-row source metadata and verify 300-source chat inspection. Continue with shared message
+    source derivation, isolated panel actions, memoized cards, coalesced foreground refresh and 20-item
+    frontend pagination. Default the AIDP catalog to 12 with 12/24/48 options and preserve
+    records, page size and filters across card/table view changes.
+  observed_behavior: >-
+    Every source measures metadata chips repeatedly before paint; closed metadata creates serialized JSON
+    eagerly. Ten-item AIDP catalog pages leave incomplete four-column rows.
+  expected_behavior: >-
+    CSS clips metadata to two rows without a hidden count; hover remains and details are lazy.
+    Sources and images use 20-item pages with correct message-scoped identities. AIDP catalog
+    pages default to 12 and offer 12/24/48; view switching retains records without refetching.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      Existing F-115 citation coverage did not assert source/image page boundaries or repeated
+      citation relocation after manual paging. Existing catalog coverage did not assert page-size
+      policy or same-record/no-request view switching. Performance evidence remains local.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-115, CHAT-SIDEBAR, F-111]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+      - UT-FE-AUTO-A1A182D995AD0FC8
+      - UT-FE-AUTO-82166F602745F6D7
+      - AIDP-FE-LIST-01
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+      - Preserve existing activity reload, pin synchronization, mutation and failure behavior under the changed foreground trigger.
+      - Preserve existing table-header interactions when switching catalog views.
+    test_selectors:
+      - frontend/tests/workbench/ConversationActivitySync.test.tsx
+      - frontend/tests/workbench/ConversationActivityRuntime.test.tsx
+      - frontend/tests/workbench/ServerThreadPins.test.tsx
+      - frontend/tests/workbench/WorkbenchPinHistorySync.test.tsx
+      - frontend/tests/component/aidpResizableTitle.test.tsx
+    reason: User explicitly limits this PR to existing UT adaptation; no new frontend UT. Existing source Case owns pagination checks; performance diagnostics remain local.
+  notes: >-
+    User requested no new frontend UT, Case IDs or Feature changes. Extend only the existing source
+    citation/panel Case for pagination and adapt existing UT triggers broken by foreground policy changes.
+    Keep the 300-source diagnostic scripts and timing evidence local. Do not register cache/render/refresh performance
+    as E2E. Existing numeric citations, source/provider data and ES follow-up scope are unchanged.
+    Existing assertions verify placeholder image identities, historical content/registry image deduplication
+    and message-scoped download state through the existing image/tab and download tests, without new UT or Cases.
+    This single record covers the complete backport of PR 4213 to v2.8.1; unrelated develop commits are excluded.
+    Preserve v2.8.1 Workbench-only activity queries and run-end refresh, without enabling global Agent-chat polling.
+    Other AIDP lists retain their defaults. Real provider/ES runtime acceptance and performance measurements
+    must be reported separately from selected component/UT execution on this hotfix checkout.

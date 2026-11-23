@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from typing import Any, Collection, Dict, List, Optional
 
 from sqlalchemy import and_, case, false, func, or_, true, update
@@ -28,11 +30,10 @@ _UPSERT_SNAPSHOT_FIELDS = frozenset({
     "display_name",
     "description",
     "author",
-    "category_id",
     "tags",
     "tool_count",
     "version_name",
-    "icon",
+    "icon_url",
     "downloads",
     "agent_info_json",
 })
@@ -64,17 +65,7 @@ def insert_agent_repository_record(
         return int(new_record.agent_repository_id)
 
 
-def get_agent_repository_by_id(repository_id: int) -> Optional[dict]:
-    """Fetch a repository listing by primary key."""
-    with get_db_session() as session:
-        record = session.query(AgentRepository).filter(
-            AgentRepository.agent_repository_id == repository_id,
-            AgentRepository.delete_flag != "Y",
-        ).first()
-        return as_dict(record) if record else None
-
-
-def get_agent_repository_by_id_and_publisher(
+def get_agent_repository_by_id(
     repository_id: int,
     publisher_tenant_id: str,
 ) -> Optional[dict]:
@@ -180,7 +171,6 @@ def list_agent_repository_summaries(
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
-    category_id: Optional[int] = None,
 ) -> List[dict]:
     """List active repository summaries for a publisher tenant without heavy JSON blobs."""
     with get_db_session() as session:
@@ -193,12 +183,13 @@ def list_agent_repository_summaries(
             AgentRepository.display_name,
             AgentRepository.description,
             AgentRepository.status,
-            AgentRepository.category_id,
             AgentRepository.tags,
             AgentRepository.tool_count,
             AgentRepository.version_name,
-            AgentRepository.icon,
+            AgentRepository.icon_url,
             AgentRepository.downloads,
+            AgentRepository.content,
+            AgentRepository.create_time,
         ).filter(
             AgentRepository.delete_flag != "Y",
             AgentRepository.publisher_tenant_id == publisher_tenant_id,
@@ -207,8 +198,6 @@ def list_agent_repository_summaries(
             query = query.filter(AgentRepository.status == status)
         if agent_id is not None:
             query = query.filter(AgentRepository.agent_id == agent_id)
-        if category_id is not None:
-            query = query.filter(AgentRepository.category_id == category_id)
         rows = query.order_by(AgentRepository.agent_repository_id.desc()).all()
         return [
             {
@@ -220,12 +209,13 @@ def list_agent_repository_summaries(
                 "display_name": row.display_name,
                 "description": row.description,
                 "status": row.status,
-                "category_id": row.category_id,
                 "tags": row.tags,
                 "tool_count": row.tool_count,
                 "version_name": row.version_name,
-                "icon": row.icon,
+                "icon_url": row.icon_url,
                 "downloads": row.downloads,
+                "content": row.content,
+                "create_time": row.create_time,
             }
             for row in rows
         ]
@@ -241,18 +231,19 @@ def update_agent_repository_by_id(
     """Update a repository listing owned by the publisher tenant. Returns affected row count."""
     allowed_fields = {
         "display_name",
+        "name",
         "description",
         "author",
         "submitted_by",
-        "category_id",
         "tags",
         "tool_count",
         "version_name",
-        "icon",
+        "icon_url",
         "downloads",
         "version_no",
         "agent_info_json",
         "status",
+        "content",
     }
     update_fields = {
         key: value
@@ -286,6 +277,7 @@ def update_agent_repository_status_by_id(
     publisher_tenant_id: Optional[str] = None,
     publisher_user_id: Optional[str] = None,
     submitted_by: Optional[str] = None,
+    content: Optional[str] = None,
 ) -> int:
     """Update repository listing status by primary key. Returns affected row count."""
     update_values: Dict[str, Any] = {
@@ -298,6 +290,8 @@ def update_agent_repository_status_by_id(
         update_values["publisher_user_id"] = publisher_user_id
     if submitted_by is not None:
         update_values["submitted_by"] = submitted_by
+    if content is not None:
+        update_values["content"] = content
 
     with get_db_session() as session:
         where_clauses = [
@@ -339,26 +333,6 @@ def reset_agent_repository_status(
         return int(result.rowcount or 0)
 
 
-def soft_delete_agent_repository_by_id(
-    *,
-    repository_id: int,
-    publisher_tenant_id: str,
-    user_id: str,
-) -> int:
-    """Soft-delete a repository listing owned by the publisher tenant."""
-    with get_db_session() as session:
-        result = session.execute(
-            update(AgentRepository)
-            .where(
-                AgentRepository.agent_repository_id == repository_id,
-                AgentRepository.publisher_tenant_id == publisher_tenant_id,
-                AgentRepository.delete_flag != "Y",
-            )
-            .values(delete_flag="Y", updated_by=user_id)
-        )
-        return int(result.rowcount or 0)
-
-
 def list_agent_repository_by_publisher(
     publisher_tenant_id: str,
     *,
@@ -384,6 +358,7 @@ def list_agent_repository_by_agent_ids(
     *,
     statuses: Collection[str],
     publisher_tenant_id: str,
+    publisher_user_id: Optional[str] = None,
 ) -> List[dict]:
     """List repository rows for the given agents, scoped to publisher tenant and statuses."""
     if not agent_ids:
@@ -391,7 +366,7 @@ def list_agent_repository_by_agent_ids(
 
     status_list = list(statuses)
     with get_db_session() as session:
-        rows = (
+        query = (
             session.query(
                 AgentRepository.agent_repository_id,
                 AgentRepository.agent_id,
@@ -399,6 +374,7 @@ def list_agent_repository_by_agent_ids(
                 AgentRepository.version_no,
                 AgentRepository.version_name,
                 AgentRepository.create_time,
+                AgentRepository.content,
             )
             .filter(
                 AgentRepository.delete_flag != "Y",
@@ -406,7 +382,11 @@ def list_agent_repository_by_agent_ids(
                 AgentRepository.agent_id.in_(agent_ids),
                 AgentRepository.status.in_(status_list),
             )
-            .order_by(
+        )
+        if publisher_user_id is not None:
+            query = query.filter(AgentRepository.publisher_user_id == publisher_user_id)
+        rows = (
+            query.order_by(
                 AgentRepository.agent_id,
                 AgentRepository.create_time.desc(),
             )
@@ -421,6 +401,7 @@ def list_agent_repository_by_agent_ids(
             "version_no": row.version_no,
             "version_name": row.version_name,
             "create_time": row.create_time,
+            "content": row.content,
         }
         for row in rows
     ]
@@ -436,6 +417,26 @@ def increment_agent_repository_downloads(agent_repository_id: int) -> int:
                 AgentRepository.delete_flag != "Y",
             )
             .values(downloads=func.coalesce(AgentRepository.downloads, 0) + 1)
+        )
+        return int(result.rowcount or 0)
+
+
+def soft_delete_agent_repository_record(
+    repository_id: int,
+    *,
+    publisher_tenant_id: str,
+    user_id: str,
+) -> int:
+    """Soft-delete one repository listing scoped to its publisher tenant."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentRepository)
+            .where(
+                AgentRepository.agent_repository_id == repository_id,
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
+                AgentRepository.delete_flag != "Y",
+            )
+            .values(delete_flag="Y", updated_by=user_id)
         )
         return int(result.rowcount or 0)
 
@@ -515,4 +516,3 @@ def fetch_draft_agent_mine_metadata(
         }
         for row in rows
     }
-

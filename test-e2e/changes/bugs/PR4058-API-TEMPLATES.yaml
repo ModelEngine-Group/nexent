@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: PR4058-API-TEMPLATES
+  change_type: bugfix
+  bug_id: PR4058-API-TEMPLATES
+  title: Replace static creation templates with authorized Agent API data
+  description: Remove the hardcoded medical catalog and translations; use the existing
+    Agent list and creation endpoints without backend changes.
+  observed_behavior: Creation modal always displays four fabricated medical templates.
+  expected_behavior: API names, descriptions and optional tags render without static
+    medical templates; empty/error/retry states preserve blank creation and selecting
+    a template sends its description exactly once.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing creation coverage uses static catalog metadata and does
+      not prove API loading, empty/error recovery or description propagation.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - AGENT-EDITOR-WORKFLOWS
+    retired: []
+  affected_cases:
+    existing:
+    - AGENT-EDITOR-D4-001
+    added:
+    - AGENT-EDITOR-D4-006
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Extend CreateAgentModal tests through real query and Form collaboration
+      with controlled HTTP service boundaries.
+    behaviors:
+    - API-only catalog and selected description creation
+    - empty/error/retry states and missing optional fields
+    - blank creation and selection reset on reopen
+    - closed modal does not fetch
+    test_selectors:
+    - frontend/tests/component/createAgentModal.test.tsx
+  notes: 'SPEC: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md;
+    scope is catalog source replacement, retaining description-only creation semantics.
+    D2/D3/D5 do not add necessary evidence; no Python behavior changes.'

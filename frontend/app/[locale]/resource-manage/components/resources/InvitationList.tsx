@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   Select,
-  Popconfirm,
   message,
   Tag,
   Pagination,
@@ -19,9 +18,11 @@ import {
   Progress,
   Tooltip 
 } from "antd";
+import { copyToClipboard } from "@/lib/clipboard";
 import { ColumnsType } from "antd/es/table";
 import { useInvitationList } from "@/hooks/invitation/useInvitationList";
 import { useGroupList } from "@/hooks/group/useGroupList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getTenantDefaultGroupId } from "@/services/groupService";
 import {
   createInvitation,
@@ -59,6 +60,7 @@ export default function InvitationList({
   tenantId: string | null;
   refreshKey?: number;
 }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const userRole = user?.role;
@@ -264,8 +266,8 @@ export default function InvitationList({
               <Button
                 type="text"
                 icon={<Copy className="h-4 w-4" />}
-                onClick={() => {
-                  navigator.clipboard.writeText(code);
+                onClick={async () => {
+                  await copyToClipboard(code);
                   message.success(t("common.copied"));
                 }}
                 aria-label={t("common.copy")}
@@ -366,22 +368,27 @@ export default function InvitationList({
 
           const icon =
             status === "IN_USE" ? (
-              <CheckCircle className="w-3 h-3 mr-1" />
+              <CheckCircle className="w-3 h-3" />
             ) : status === "EXPIRE" ? (
-              <Clock className="w-3 h-3 mr-1" />
+              <Clock className="w-3 h-3" />
             ) : status === "RUN_OUT" ? (
-              <CircleSlash className="w-3.5 h-3 mr-1" />
+              <CircleSlash className="w-3.5 h-3" />
             ) : (
-              <XCircle className="w-3 h-3 mr-1" />
+              <XCircle className="w-3 h-3" />
             );
 
           return (
             <Tag
               color={color}
-              className="inline-flex items-center"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
               variant="solid"
             >
-              {icon}
+              <span className="inline-flex items-center mr-1">{icon}</span>
               {t(`tenantResources.invitation.status.${status}`)}
             </Tag>
           );
@@ -402,24 +409,21 @@ export default function InvitationList({
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("tenantResources.invitation.confirmDeleteInvitation", {
-                code: record.invitation_code,
-              })}
-              description={t("common.cannotBeUndone")}
-              onConfirm={() => handleDelete(record.invitation_code)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() => confirm({
+                  title: t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code }),
+                  content: t("common.cannotBeUndone"),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.invitation_code),
+                })}
+              />
+            </Tooltip>
           </div>
         ),
       },
@@ -638,6 +642,7 @@ export default function InvitationList({
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={t("tenantResources.invitation.groupNames")}
                 options={groups.map((group) => ({
                   label: group.group_name,

@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-166
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: Provider 插件发现、配置 CRUD、测试搜索/写入与密钥掩码
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Provider 插件发现、配置 CRUD、测试搜索/写入与密钥掩码
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  - models.yaml 中所需真实 Provider 通过预检，名称与凭据不得硬编码。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 查询 provider-plugins。
+    expected: 插件元数据稳定。
+  - order: 2
+    action: 用真实测试凭据创建、读取、更新 provider。
+    expected: 配置 CRUD 和连通性测试成功。
+  - order: 3
+    action: 执行 test-search 与 test-ingest。
+    expected: secret 只写不回显。
+  - order: 4
+    action: 校验列表/详情掩码、错误码和软删除。
+    expected: 错误可诊断。
+  - order: 5
+    action: 跨租户重放 ID。
+    expected: 跨租户无读取、修改或 last_error_code 副作用。
+  expected_results:
+  - 插件元数据稳定。
+  - 配置 CRUD 和连通性测试成功。
+  - secret 只写不回显。
+  - 错误可诊断。
+  - 跨租户无读取、修改或 last_error_code 副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 382
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 查询 provider-plugins。
+    - 用真实测试凭据创建、读取、更新 provider。
+    - 执行 test-search 与 test-ingest。
+    - 校验列表/详情掩码、错误码和软删除。
+    - 跨租户重放 ID。
+    response_expectations:
+    - 插件元数据稳定。
+    - 配置 CRUD 和连通性测试成功。
+    - secret 只写不回显。
+    - 错误可诊断。
+    - 跨租户无读取、修改或 last_error_code 副作用。

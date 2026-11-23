@@ -6,9 +6,40 @@ import React from 'react'
 import log from "@/lib/logger";
 import i18n from "@/app/i18n";
 
+// Re-export date utilities for unified timezone handling (dayjs-based).
+// Callers importing { formatDate, formatDateTime } from "@/lib/utils" get
+// the timezone-aware versions without any call-site changes.
+export { formatDate, formatDateTime } from "./date";
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+export const safeStringify = (value: unknown): string | null => {
+  const seen = new WeakSet<object>();
+
+  try {
+    const serialized = JSON.stringify(value, (_key, currentValue: unknown) => {
+      if (typeof currentValue === "bigint") {
+        return `${currentValue}n`;
+      }
+
+      if (typeof currentValue !== "object" || currentValue === null) {
+        return currentValue;
+      }
+
+      if (seen.has(currentValue)) {
+        return "[Circular]";
+      }
+
+      seen.add(currentValue);
+      return currentValue;
+    });
+    return serialized ?? null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Check if current language is Chinese
@@ -102,23 +133,6 @@ export function formatFileSize(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
-
-// Format date
-export function formatDate(dateString: string): string {
-  try {
-    const date = new Date(dateString)
-    if (isNaN(date.getTime())) {
-      return ""
-    }
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    
-    return `${year}-${month}-${day}`;
-  } catch (error) {
-    return ""
-  }
 }
 
 // Format URL display
@@ -404,4 +418,17 @@ export function parseKbIds(value: unknown): string[] {
     return value.split(",").filter(Boolean);
   }
   return [];
+}
+
+/**
+ * Generate a random string ID.
+ * Uses crypto.randomUUID() when available (secure context, e.g. localhost or https).
+ * Falls back to Math.random() for non-secure contexts (e.g. http://).
+ * Not cryptographically secure — suitable for client-side identifiers only.
+ */
+export function safeUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2, 11);
 }

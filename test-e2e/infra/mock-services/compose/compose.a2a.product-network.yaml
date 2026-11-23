@@ -1,0 +1,17 @@
+# Combine with compose.a2a.yaml and compose.a2a-faults.yaml.
+# The product network must already exist; no product container is recreated.
+version: "3.7"
+services:
+  a2a-agent:
+    networks:
+      - product
+  nacos-a2a-test:
+    networks:
+      - product
+  a2a-fault-proxy:
+    networks:
+      - product
+networks:
+  product:
+    external: true
+    name: ${NEXENT_PRODUCT_NETWORK:-nexent_network}

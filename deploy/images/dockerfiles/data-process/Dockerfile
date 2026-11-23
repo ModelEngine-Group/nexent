@@ -5,6 +5,7 @@ ARG MIRROR
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+ENV TZ=Asia/Shanghai
 
 # Set correct permissions as root
 USER root
@@ -25,8 +26,13 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
         done; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends --fix-missing \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
         curl \
+        vim \
+        procps \
+        wget \
+        less \
+        tzdata \
         postgresql-client \
         libmagic1 \
         libmagic-dev \
@@ -139,7 +145,7 @@ RUN --mount=type=cache,id=nexent-data-process-uv-${TARGETARCH},target=/root/.cac
     fi && \
     uv venv .venv && \
     uv pip install --python .venv/bin/python --link-mode copy $mirror_index_args $torch_args ".[data-process]" && \
-    uv pip install --python .venv/bin/python --link-mode copy $mirror_index_args $torch_args "/opt/sdk[data-process]" && \
+    uv pip install --python .venv/bin/python --link-mode copy $mirror_index_args $torch_args "/opt/sdk[data-process,performance]" && \
     if [ "$DATA_PROCESS_DEPENDENCY_VARIANT" = "cpu" ]; then \
         .venv/bin/python -c 'import importlib.metadata as metadata, importlib.util, sys; blocked = sorted(name for name in ((dist.metadata.get("Name") or "").lower() for dist in metadata.distributions()) if name == "triton" or name.startswith("nvidia-") or name.startswith("cuda-")); blocked and sys.exit("CPU data-process image must not install CUDA packages: " + ", ".join(blocked)); spec = importlib.util.find_spec("torch"); torch = __import__("torch") if spec else None; torch is not None and torch.cuda.is_available() and sys.exit("CPU data-process image unexpectedly reports CUDA availability"); print(f"Using CPU PyTorch {torch.__version__}") if torch else None'; \
     fi
@@ -157,19 +163,27 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
     mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
     apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
-        libreoffice \
         fontconfig \
-        fonts-noto-cjk && \
+        fonts-noto-cjk \
+        libreoffice \
+        pandoc \
+        poppler-utils \
+        tesseract-ocr && \
     fc-cache -fv && \
     apt-get autoremove -y && \
     rm -rf /tmp/* /var/tmp/*
 
+# NLTK >= 3.10 refuses a data root that is group/world-writable or not owned by
+# root. cp -a preserves the build-context mode, and on Windows/WSL the
+# model-assets checkout is 777, so normalize the baked copy to match CI builds.
 RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
     mkdir -p /opt/models && \
     cp -a /tmp/model-assets/clip-vit-base-patch32 /opt/models/clip-vit-base-patch32 && \
     cp -a /tmp/model-assets/nltk_data /opt/models/nltk_data && \
     cp -a /tmp/model-assets/table-transformer-structure-recognition /opt/models/table-transformer-structure-recognition && \
-    cp -a /tmp/model-assets/yolox /opt/models/yolox
+    cp -a /tmp/model-assets/yolox /opt/models/yolox && \
+    chown -R root:root /opt/models/nltk_data && \
+    chmod -R u+rwX,go+rX,go-w /opt/models/nltk_data
 
 COPY --from=data-process-deps /opt/backend/.venv /opt/backend/.venv
 COPY --from=data-process-deps /opt/sdk /opt/sdk

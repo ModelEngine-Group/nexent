@@ -92,7 +92,8 @@ export const LAYOUT = {
   // Icons and buttons
   ICON_SIZE: "text-lg", // File icon size
   ICON_MARGIN: "mr-2", // File icon right margin
-  ACTION_TEXT: "text-red-500 hover:text-red-700 font-medium text-xs", // Action button text style
+  ACTION_PREVIEW_TEXT: "text-blue-500 hover:text-blue-700 font-medium text-xs", // Preview action text style
+  ACTION_DELETE_TEXT: "text-red-500 hover:text-red-700 font-medium text-xs", // Destructive action text style
 };
 
 // UI action type constants
@@ -114,36 +115,36 @@ export const NOTIFICATION_TYPES = {
 
 // File extension constants
 export const FILE_EXTENSIONS = {
-  PDF: 'pdf',
-  DOC: 'doc',
-  DOCX: 'docx',
-  XLS: 'xls',
-  XLSX: 'xlsx',
-  PPT: 'ppt',
-  PPTX: 'pptx',
-  TXT: 'txt',
-  MD: 'md',
-  EPUB: 'epub',
-  CSV: 'csv',
-  HTML: 'html',
-  XML: 'xml',
-  JSON: 'json'
+  PDF: "pdf",
+  DOC: "doc",
+  DOCX: "docx",
+  XLS: "xls",
+  XLSX: "xlsx",
+  PPT: "ppt",
+  PPTX: "pptx",
+  TXT: "txt",
+  MD: "md",
+  EPUB: "epub",
+  CSV: "csv",
+  HTML: "html",
+  XML: "xml",
+  JSON: "json",
 } as const;
 
 // File type constants
 export const FILE_TYPES = {
-  PDF: 'PDF',
-  WORD: 'Word',
-  EXCEL: 'Excel',
-  POWERPOINT: 'PowerPoint',
-  TEXT: 'Text',
-  MARKDOWN: 'Markdown',
-  EPUB: 'EPUB',
-  CSV: 'CSV',
-  JSON: 'JSON',
-  HTML: 'HTML',
-  XML: 'XML',
-  UNKNOWN: 'Unknown'
+  PDF: "PDF",
+  WORD: "Word",
+  EXCEL: "Excel",
+  POWERPOINT: "PowerPoint",
+  TEXT: "Text",
+  MARKDOWN: "Markdown",
+  EPUB: "EPUB",
+  CSV: "CSV",
+  JSON: "JSON",
+  HTML: "HTML",
+  XML: "XML",
+  UNKNOWN: "Unknown",
 } as const;
 
 // File extension to type mapping
@@ -161,5 +162,17 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.JSON]: FILE_TYPES.JSON,
   [FILE_EXTENSIONS.HTML]: FILE_TYPES.HTML,
   [FILE_EXTENSIONS.XML]: FILE_TYPES.XML,
-  [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB
+  [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB,
 } as const;
+
+const parsePositiveIntegerEnv = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+export const KNOWLEDGE_BASE_MAX_FILE_SIZE_MB = parsePositiveIntegerEnv(
+  process.env.NEXT_PUBLIC_KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+  100
+);
+export const KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES =
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB * 1024 * 1024;

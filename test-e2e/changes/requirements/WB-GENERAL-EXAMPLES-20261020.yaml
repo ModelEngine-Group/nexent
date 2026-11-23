@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: WB-GENERAL-EXAMPLES-20261020
+  change_type: requirement
+  requirement_id: WB-GENERAL-EXAMPLES-20261020
+  title: General-purpose agent creation examples
+  description: Replace the first and third Agent example copy and prompt content with document organization and event promotion in Chinese and English; preserve the second medical briefing example exactly.
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-002]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors: [frontend/tests/workbench/CreationExamples.test.tsx, frontend/tests/workbench/CreationActions.test.tsx]
+    behaviors:
+      - Both locales display three short Agent cards and fill their complete localized prompts without sending.
+      - Chinese fallback prompts match localized prompts; focus and draft/message visibility guards remain intact.
+      - Skill examples and creation actions remain intact.
+    reason: Copy-only update with no interaction, API or Python behavior changes. Existing UT assertions cover the content wiring; refresh example keys and reuse the D4 journey with its renamed first-card selector. No new formal Case is necessary.
+  notes: Based on WB-MEDICAL-EXAMPLES-20261019. Scope is user-requested content replacement only; existing layout and interaction acceptance contracts remain unchanged. Frontend UT passed (2 files, 12 tests). Medical briefing title, description and prompt match HEAD in both locales and the fallback prompt. TypeScript, targeted ESLint, Prettier, copyright and diff checks passed. Implementation asset validation passed with --generate --require-ut-change WB-GENERAL-EXAMPLES-20261020. Formal D4 execution was blocked before browser launch because the dedicated test Python runtime is missing from the local test home; no browser or real-model execution is claimed. References consulted include nexent-frontend architecture/components-ui, nexent-spec-coding maintenance, nexent-test-assets lifecycle/case-design and nexent-python-tests applicability.

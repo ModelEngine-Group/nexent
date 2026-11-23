@@ -2,7 +2,7 @@
 {{- $shared := default dict $global.sharedStorage }}
 {{- $mode := default "local" $shared.mode }}
 {{- $storageClassName := default "" $shared.storageClassName }}
-{{- $accessModes := default (list "ReadWriteOnce") $shared.accessModes }}
+{{- $accessModes := default (list "ReadWriteMany") $shared.accessModes }}
 {{- $workspace := default dict $shared.workspace }}
 {{- $workspaceSize := default "10Gi" $workspace.size }}
 {{- $workspaceLocalPath := default "/var/lib/nexent" $workspace.localPath }}
@@ -91,6 +91,148 @@ spec:
       storage: {{ $skillsSize }}
   {{- if eq $mode "local" }}
   volumeName: nexent-skills-pv
+  {{- end }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
+  {{- end }}
+---
+{{- end }}
+{{- $logs := default dict $shared.logs }}
+{{- $logsSize := default "5Gi" $logs.size }}
+{{- $logsLocalPath := default "/var/lib/nexent-data/logs" $logs.localPath }}
+{{- if eq $mode "local" }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-logs-pv
+  labels:
+    type: hostpath
+    app: nexent-logs
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ $storageClassName | quote }}
+  capacity:
+    storage: {{ $logsSize }}
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ $logsLocalPath | quote }}
+    type: DirectoryOrCreate
+---
+{{- end }}
+{{- if ne $mode "existing" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-logs
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $logsSize }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-logs-pv
+  {{- end }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
+  {{- end }}
+---
+{{- end }}
+---
+{{- $memoryPlugins := default dict $shared.memoryPlugins }}
+{{- $memoryPluginsSize := default "5Gi" $memoryPlugins.size }}
+{{- $memoryPluginsLocalPath := default "/var/lib/nexent-data/memory-provider-plugins" $memoryPlugins.localPath }}
+{{- if eq $mode "local" }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-memory-plugins-pv
+  labels:
+    type: hostpath
+    app: nexent-memory-plugins
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ $storageClassName | quote }}
+  capacity:
+    storage: {{ $memoryPluginsSize }}
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ $memoryPluginsLocalPath | quote }}
+    type: DirectoryOrCreate
+---
+{{- end }}
+{{- if ne $mode "existing" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-memory-plugins
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $memoryPluginsSize }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-memory-plugins-pv
+  {{- end }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
+  {{- end }}
+---
+{{- end }}
+{{- $projectConfig := default dict $shared.projectConfig }}
+{{- $projectConfigSize := default "1Gi" $projectConfig.size }}
+{{- $projectConfigLocalPath := default "/var/lib/nexent-data/project-config" $projectConfig.localPath }}
+{{- if eq $mode "local" }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-project-config-pv
+  labels:
+    type: hostpath
+    app: nexent-project-config
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ $storageClassName | quote }}
+  capacity:
+    storage: {{ $projectConfigSize }}
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ $projectConfigLocalPath | quote }}
+    type: DirectoryOrCreate
+---
+{{- end }}
+{{- if ne $mode "existing" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-project-config
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $projectConfigSize }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-project-config-pv
   {{- end }}
   {{- if $storageClassName }}
   storageClassName: {{ $storageClassName | quote }}

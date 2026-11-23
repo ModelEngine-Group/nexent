@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-101
+  feature_id: F-099
+  business_rule_ids:
+  - F-099-RULE-01
+  title: local/minio upload、多文件、partial success、quota、lifecycle fields｜核心流程
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: local/minio upload、多文件、partial success、quota、lifecycle fields｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json；${NEXENT_TEST_HOME}/assets/documents/
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 从 ${NEXENT_TEST_HOME}/assets/documents/ 或 assets/knowledge/ 选择本用例固定文件，并从 expected/*.json 读取预期 marker/chunk/状态。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 使用真实测试用户登录本地 Nexent，通过实际 API 创建/选择知识库或文件上下文；不得直接向数据库插入最终结果来绕过业务链路。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 上传固定文件并等待真实对象存储与数据处理任务完成；记录 file_id、object_name、task_id 和处理状态迁移。
+    expected: minio 上传成功的每个文件，其 knowledge_file_lifecycle_t 记录 upload_owner_service 字段等于 CONFIG_SERVICE_NAME，并随 file_id 持久化，可被部分恢复索引
+      idx_knowledge_file_lifecycle_upload_recovery 命中。
+  - order: 4
+    action: 对 minio 上传成功的每个 file_id，查询知识库文件生命周期表 knowledge_file_lifecycle_t 对应记录，核对 upload_owner_service 字段值等于 CONFIG_SERVICE_NAME，且
+      status 由 UPLOADING 迁移至 UPLOADED。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 5
+    action: 若涉及知识库，使用 models.yaml 中真实 Embedding 完成切分和向量入库；涉及 Rerank 时使用真实 Rerank 模型。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 执行“local/minio upload、多文件、partial success、quota、lifecycle fields｜核心流程”对应的下载/预览/检索/摘要/权限/Range/处理操作，保存实际响应与关键头字段。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 7
+    action: 检索类断言以固定 marker、目标 chunk 是否进入 Top-K/Top-N 为主，不要求 LLM 自然语言完全一致。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 8
+    action: 文件类检查 MIME、Content-Length/Content-Range、文件哈希、可解析性以及损坏/空文件时的明确错误。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 9
+    action: 权限类至少再使用另一用户/租户直接请求同一资源ID，确认 401/403/404 且对象存储与DB无越权副作用。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 10
+    action: 清理本用例创建的 KB、文件、向量数据和临时下载文件。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - minio 上传成功的每个文件，其 knowledge_file_lifecycle_t 记录 upload_owner_service 字段等于 CONFIG_SERVICE_NAME，并随 file_id 持久化，可被部分恢复索引
+    idx_knowledge_file_lifecycle_upload_recovery 命中。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 196
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - minio 上传成功的每个文件，其 knowledge_file_lifecycle_t 记录 upload_owner_service 字段等于 CONFIG_SERVICE_NAME，并随 file_id 持久化，可被部分恢复索引
+    idx_knowledge_file_lifecycle_upload_recovery 命中。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

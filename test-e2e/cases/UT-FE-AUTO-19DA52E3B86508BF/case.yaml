@@ -1,0 +1,61 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-19DA52E3B86508BF
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: 标题生成请求 model_id 快照组装与 legacy 省略｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 标题生成请求 model_id 快照组装与 legacy 省略｜核心流程
+  preconditions:
+  - 本地前端单元测试环境可运行（node:test 可执行 TS 单测）；不要求后端或外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测纯函数 frontend/lib/conversationTitle.ts 可被导入，无外部依赖。
+  test_data:
+    legacy_asset_declaration: 无：纯函数单元测试，不依赖本地配置文件或外部模型资产。
+  steps:
+  - order: 1
+    action: 导入 frontend/lib/conversationTitle.ts 的 createConversationTitleRequest 与 GenerateConversationTitleParams，构造最小有效入参
+      conversationId、question、modelId。
+    expected: 'modelId 为非 null（快照=7）时返回 { conversation_id, question, model_id: 7 }，即使 selectedModelId 已改为 9，model_id 仍等于发送瞬间快照值。'
+  - order: 2
+    action: 模拟发送消息瞬间：令 selectedModelId=7，将 modelIdForRun 赋值为 selectedModelId 快照（=7），随后将 selectedModelId 改为 9，再以快照调用 createConversationTitleRequest(42,
+      "Question", modelIdForRun)。
+    expected: modelId 为 null 时返回对象仅含 conversation_id 与 question，不包含 model_id 字段（legacy 默认模型行为）。
+  - order: 3
+    action: 执行正常输入（modelId 为非 null 数字），记录返回对象结构与字段值。
+    expected: conversation_id 与 question 字段原样透传，不被篡改。
+  - order: 4
+    action: 针对边界值执行：modelId 为 null、重复调用，检查 model_id 字段是否出现。
+    expected: 测试过程无未处理异常，重复调用结果一致。
+  - order: 5
+    action: 对照 frontend/app/[locale]/chat/internal/chatInterface.tsx 发送消息处的快照变量 modelIdForRun 同时用于 runAgent 与 generateTitle，确认流式期间切换
+      selectedModelId 不改变本次标题请求。
+    expected: 测试过程无未处理异常，重复调用结果一致。
+  - order: 6
+    action: 测试结束后释放临时对象，确保可重复执行。
+    expected: 测试过程无未处理异常，重复调用结果一致。
+  expected_results:
+  - 'modelId 为非 null（快照=7）时返回 { conversation_id, question, model_id: 7 }，即使 selectedModelId 已改为 9，model_id 仍等于发送瞬间快照值。'
+  - modelId 为 null 时返回对象仅含 conversation_id 与 question，不包含 model_id 字段（legacy 默认模型行为）。
+  - conversation_id 与 question 字段原样透传，不被篡改。
+  - 测试过程无未处理异常，重复调用结果一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 425
+  unit_boundary: 会话标题生成
+  inputs:
+  - 无：纯函数单元测试，不依赖本地配置文件或外部模型资产。
+  assertions:
+  - 'modelId 为非 null（快照=7）时返回 { conversation_id, question, model_id: 7 }，即使 selectedModelId 已改为 9，model_id 仍等于发送瞬间快照值。'
+  - modelId 为 null 时返回对象仅含 conversation_id 与 question，不包含 model_id 字段（legacy 默认模型行为）。
+  - conversation_id 与 question 字段原样透传，不被篡改。
+  - 测试过程无未处理异常，重复调用结果一致。

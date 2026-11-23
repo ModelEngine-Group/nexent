@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-63334E6F5D10C7FD
+  feature_id: F-018
+  business_rule_ids:
+  - F-018-RULE-01
+  title: avatarDropdown 与 TopNavbar 用户区 username 优先、回退 email、两者皆空显示 '-'｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: avatarDropdown 与 TopNavbar 用户区 username 优先、回退 email、两者皆空显示 '-'｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型/外部认证服务(CAS/OAuth)在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 组件渲染所需 i18n、AuthorizationProvider/useAuthorizationContext 通过本地 mock/fixture 注入，不依赖真实登录态。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在组件测试环境分别渲染 frontend/components/auth/avatarDropdown.tsx 的 AvatarDropdown 与 frontend/components/navigation/TopNavbar.tsx
+      的 TopNavbar，注入 mock 的 useAuthorizationContext（user 对象与 isLoading）及 useAuthenticationContext。
+    expected: 登录态下 username 存在（含首尾空格）时，两处用户区均显示 trim 后的 username，首尾空格被去除。
+  - order: 2
+    action: 构造登录态 user.username='alice'、email='alice@example.com'，断言顶栏用户区与头像下拉菜单 'user-info' 项显示 'alice'。
+    expected: username 缺失或为空白时回退显示 trim 后 email；两者皆空时显示 '-'。
+  - order: 3
+    action: 构造 username='  bob  '（带前后空格）、email='bob@example.com'，断言显示 trim 后 'bob'，不出现多余空格。
+    expected: avatarDropdown 菜单与 TopNavbar 用户区展示逻辑一致，无状态不一致。
+  - order: 4
+    action: 构造 username 为 null/undefined/空字符串、email='carol@example.com'，断言回退显示 'carol@example.com'。
+    expected: 未登录态仅显示登录/注册入口，不渲染用户信息区。
+  - order: 5
+    action: 构造 username 与 email 均为 null/空字符串，断言显示 '-'。
+    expected: 测试过程无未处理异常、无 console 报错，DOM 快照与断言语义一致。
+  - order: 6
+    action: 对 AvatarDropdown 点击头像展开菜单，断言菜单内 key='user-info' 块与顶栏用户区显示一致（同为 username/email/'-'）。
+    expected: 测试过程无未处理异常、无 console 报错，DOM 快照与断言语义一致。
+  - order: 7
+    action: 构造 user 为 null（未登录态），断言 AvatarDropdown 显示登录/注册入口，TopNavbar 不渲染用户信息，不出现 '-' 或异常。
+    expected: 测试过程无未处理异常、无 console 报错，DOM 快照与断言语义一致。
+  - order: 8
+    action: 断言渲染过程无未处理异常、无控制台报错，组件卸载后无残留订阅。
+    expected: 测试过程无未处理异常、无 console 报错，DOM 快照与断言语义一致。
+  expected_results:
+  - 登录态下 username 存在（含首尾空格）时，两处用户区均显示 trim 后的 username，首尾空格被去除。
+  - username 缺失或为空白时回退显示 trim 后 email；两者皆空时显示 '-'。
+  - avatarDropdown 菜单与 TopNavbar 用户区展示逻辑一致，无状态不一致。
+  - 未登录态仅显示登录/注册入口，不渲染用户信息区。
+  - 测试过程无未处理异常、无 console 报错，DOM 快照与断言语义一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 435
+  unit_boundary: 顶栏用户信息展示
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - 登录态下 username 存在（含首尾空格）时，两处用户区均显示 trim 后的 username，首尾空格被去除。
+  - username 缺失或为空白时回退显示 trim 后 email；两者皆空时显示 '-'。
+  - avatarDropdown 菜单与 TopNavbar 用户区展示逻辑一致，无状态不一致。
+  - 未登录态仅显示登录/注册入口，不渲染用户信息区。
+  - 测试过程无未处理异常、无 console 报错，DOM 快照与断言语义一致。

@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: API-124
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-124
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - automation_task
+  anchors: true
+  special_assets: false
+  d4_groups: []

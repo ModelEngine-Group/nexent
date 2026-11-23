@@ -6,11 +6,11 @@
 
 - [文件工具](./file-tools)：创建/读取/移动/删除文件与目录，树形列目录。
 - [邮件工具](./email-tools)：收取 IMAP 邮件，发送 HTML 邮件（支持抄送/密送）。
-- [搜索工具](./search-tools)：本地/DataMate/Dify 知识库检索与 Exa/Tavily/Linkup 公网搜索。
+- [搜索工具](./search-tools)：本地/AIDP/DataMate/Dify 知识库检索与 Exa/Tavily/Linkup 公网搜索。
 - [多模态工具](./multimodal-tools)：文本文件与图片的下载、解析、模型分析。
 - [终端工具](./terminal-tool)：持久化 SSH 会话，远程执行命令。
 - [SQL 工具](./sql-tools)：连接 MySQL、PostgreSQL、SQL Server 执行 SQL 查询。
-- [技能（Skills）](../skills)：Nexent内置工具组合或自定义能力包，支持 NL 生成与版本管理。
+- [技能（Skills）](../resource-repository/skill-repository.md)：Nexent内置工具组合或自定义能力包，支持 NL 生成与版本管理。
 
 ## ⚙️ 配置入口
 

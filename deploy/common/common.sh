@@ -8,32 +8,329 @@ DEPLOYMENT_SCHEMA_VERSION="1"
 DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process,supabase"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
+DEPLOYMENT_SANDBOX_MODE_DEFAULT="lightweight"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
+DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT=""
 DEPLOYMENT_MONITORING_PROVIDER_DEFAULT="otlp"
+DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT="Nexent@123"
 
 DEPLOYMENT_COMPONENTS=""
 DEPLOYMENT_PORT_POLICY=""
 DEPLOYMENT_IMAGE_SOURCE=""
+DEPLOYMENT_SANDBOX_MODE=""
 DEPLOYMENT_REGISTRY_PROFILE=""
+DEPLOYMENT_IMAGE_REGISTRY_PREFIX=""
 DEPLOYMENT_APP_VERSION=""
 DEPLOYMENT_MONITORING_PROVIDER=""
-DEPLOYMENT_CONFIG_PATH=""
 DEPLOYMENT_USE_LOCAL_CONFIG="false"
 DEPLOYMENT_RECONFIGURE="false"
 DEPLOYMENT_LOCAL_CONFIG_PATH=""
 DEPLOYMENT_SELECTED_DOCKER_SERVICES=""
 DEPLOYMENT_SELECTED_HELM_CHARTS=""
 DEPLOYMENT_LOADED_SCHEMA_VERSION=""
-DEPLOYMENT_LOADED_APP_VERSION=""
 DEPLOYMENT_CONFIG_FILE_LOADED="false"
 DEPLOYMENT_DOCKER_PORTS=""
 DEPLOYMENT_ROOT_ENV=""
+DEPLOYMENT_LANGUAGE="${DEPLOYMENT_LANGUAGE:-}"
 
 deployment_component_list="infrastructure application data-process supabase terminal monitoring"
+deployment_https_mode_list="disabled self-signed custom"
 deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
+deployment_sandbox_mode_list="disabled lightweight full"
 deployment_registry_profile_list="general mainland"
 deployment_monitoring_provider_list="otlp phoenix langfuse langsmith grafana zipkin"
+
+deployment_locale_value_is_zh() {
+  local value="$1"
+  value="${value%%:*}"
+  value="${value%%.*}"
+  value="${value//-/_}"
+  value="$(printf '%s' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+
+  case "$value" in
+    zh|zh_*|cn|chinese)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+deployment_detect_language() {
+  local explicit="${DEPLOYMENT_LANG:-}"
+  explicit="$(printf '%s' "$explicit" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  case "$explicit" in
+    zh|zh_*|zh-*|cn|chinese)
+      printf 'zh\n'
+      return 0
+      ;;
+    en|en_*|en-*|c|posix)
+      printf 'en\n'
+      return 0
+      ;;
+  esac
+
+  if deployment_locale_value_is_zh "${LC_ALL:-}"; then
+    printf 'zh\n'
+  elif deployment_locale_value_is_zh "${LC_MESSAGES:-}"; then
+    printf 'zh\n'
+  elif deployment_locale_value_is_zh "${LANGUAGE:-}"; then
+    printf 'zh\n'
+  elif deployment_locale_value_is_zh "${LANG:-}"; then
+    printf 'zh\n'
+  else
+    printf 'en\n'
+  fi
+}
+
+deployment_init_language() {
+  if [ -z "${DEPLOYMENT_LANGUAGE:-}" ]; then
+    DEPLOYMENT_LANGUAGE="$(deployment_detect_language)"
+  fi
+
+  case "$DEPLOYMENT_LANGUAGE" in
+    zh|zh_*|zh-*|cn|chinese)
+      DEPLOYMENT_LANGUAGE="zh"
+      ;;
+    *)
+      DEPLOYMENT_LANGUAGE="en"
+      ;;
+  esac
+  export -n DEPLOYMENT_LANGUAGE 2>/dev/null || true
+}
+
+deployment_language() {
+  printf '%s\n' "${DEPLOYMENT_LANGUAGE:-en}"
+}
+
+deployment_init_language
+
+deployment_i18n_format() {
+  local lang="$1"
+  local key="$2"
+
+  if [ "$lang" = "zh" ]; then
+    case "$key" in
+      password.validation) printf '密码至少 8 位，并且包含大写字母、小写字母和数字。' ;;
+      env.created_from_docker) printf '✅ 已从 docker/.env 创建 deploy/env/.env' ;;
+      env.created_from_example) printf '✅ 已从 deploy/env/.env.example 创建 deploy/env/.env' ;;
+      env.example_missing) printf '缺少可读的 deploy/env/.env.example，无法初始化或升级环境配置' ;;
+      env.merge_failed) printf '无法将 deploy/env/.env.example 中的新变量合并到 deploy/env/.env' ;;
+      env.merged) printf '✅ 已将 deploy/env/.env.example 中的新变量追加到 deploy/env/.env' ;;
+      env.root_missing) printf '未找到 deploy/env/.env，且没有可用的 docker/.env 或 deploy/env/.env.example 模板' ;;
+      validation.local_config_schema) printf '%s' '本地配置 schemaVersion %s 与 %s 不兼容。请使用 --reconfigure 重新配置。' ;;
+      validation.unknown_component) printf '%s' '未知部署组件：%s' ;;
+      validation.unsupported_port_policy) printf '%s' '不支持的端口策略：%s。可用值：development 或 production。' ;;
+      validation.unsupported_image_source) printf '%s' '不支持的镜像源：%s。可用值：general、mainland 或 local-latest。' ;;
+      validation.unsupported_sandbox_mode) printf '%s' '不支持的沙箱模式：%s。可用值：disabled、lightweight 或 full。' ;;
+      validation.unsupported_registry_profile) printf '%s' '不支持的 registry profile：%s' ;;
+      validation.unsupported_image_registry_prefix) printf '%s' '不支持的镜像仓库前缀：%s。请使用 registry.example.com/project 格式，不要包含空格。' ;;
+      validation.unsupported_monitoring_provider) printf '%s' '不支持的监控 provider：%s' ;;
+      validation.unsupported_https_mode) printf '%s' '不支持的 HTTPS 模式：%s。可用值：disabled、self-signed 或 custom。' ;;
+      validation.https_cert_missing) printf '%s' 'custom 模式下证书文件不存在或不可读：%s' ;;
+      validation.https_key_missing) printf '%s' 'custom 模式下私钥文件不存在或不可读：%s' ;;
+      validation.https_cert_invalid_pem) printf '%s' '证书文件不是合法的 PEM 格式：%s' ;;
+      validation.https_key_invalid_pem) printf '%s' '私钥文件不是合法的 PEM 格式：%s' ;;
+      validation.https_pair_mismatch) printf '%s' '证书与私钥不匹配（公钥不一致）。' ;;
+      validation.https_passphrase_wrong) printf '%s' '私钥密码错误，无法解密私钥。' ;;
+      validation.https_passphrase_required) printf '%s' '该私钥受密码保护，需要提供私钥密码（NEXENT_HTTPS_KEY_PASSPHRASE 或交互输入）。' ;;
+      validation.https_materialize_failed) printf '%s' '准备 Nginx 证书文件失败（目标目录：%s）。' ;;
+      validation.https_cert_expired) printf '%s' '证书已过期（到期时间：%s）。' ;;
+      validation.https_cert_expiring_soon) printf '%s' '⚠️ 证书将在 30 天内到期（到期时间：%s），建议尽快更换。' ;;
+      validation.nodeport_out_of_range) printf '%s' 'Kubernetes 部署的端口必须在 30000-32767 范围内：%s（变量 %s）。' ;;
+      tui.cancelled) printf '已取消部署配置。' ;;
+      tui.components.title) printf '选择部署组件' ;;
+      tui.components.subtitle) printf '选择要安装的服务组。infrastructure 为必选项，不能禁用。' ;;
+      tui.components.help) printf '使用 Up/Down 或 j/k 移动，空格切换，Enter 确认，q 退出。' ;;
+      tui.component.infrastructure) printf '必需核心依赖：Elasticsearch、PostgreSQL、Redis、MinIO' ;;
+      tui.component.application) printf 'Nexent 应用服务：config、runtime、MCP、northbound API、web UI' ;;
+      tui.component.data_process) printf '后台文件解析、索引和知识处理 Worker' ;;
+      tui.component.supabase) printf '用户、租户、登录、邀请和权限服务' ;;
+      tui.component.terminal) printf '终端工具使用的 OpenSSH 容器' ;;
+      tui.component.monitoring) printf 'OpenTelemetry Collector 和可选链路追踪看板' ;;
+      tui.monitoring.title) printf '选择监控 provider' ;;
+      tui.monitoring.subtitle) printf '仅在选择 monitoring 组件时使用。' ;;
+      tui.monitoring.description) printf 'Provider 决定 OpenTelemetry traces 的存储和查看位置。' ;;
+      tui.radio.help) printf '使用 Up/Down 或 j/k 移动，Enter 确认，b/Backspace 返回，q 退出。' ;;
+      tui.monitoring.otlp) printf '仅 Collector；用于转发到外部 OTLP 后端' ;;
+      tui.monitoring.phoenix) printf '本地 Phoenix UI，用于查看 LLM traces 和 span' ;;
+      tui.monitoring.langfuse) printf '本地自托管 Langfuse；生产环境请替换默认密钥' ;;
+      tui.monitoring.langsmith) printf '转发 traces 到托管 LangSmith；需要 LANGSMITH_API_KEY' ;;
+      tui.monitoring.grafana) printf '本地 Grafana + Tempo traces 看板' ;;
+      tui.monitoring.zipkin) printf '本地 Zipkin trace 浏览 UI' ;;
+      tui.https.title) printf '选择 HTTPS 模式' ;;
+      tui.https.subtitle) printf '启用 HTTPS 后会额外安装一个 Nginx 反向代理容器，在独立端口终结 TLS（Docker %s / K8s %s）；原 HTTP 入口保持不变。端口可通过 NEXENT_WEB_PORT / NEXENT_HTTPS_PORT 修改。' "${NEXENT_HTTPS_PORT:-3100}" "${NEXENT_HTTPS_PORT:-31000}" ;;
+      tui.https.description) printf '自签证书自动生成（SAN 自动探测，无需输入）；custom 模式使用你自己的证书与私钥。' ;;
+      tui.https.disabled) printf '不启用 HTTPS（默认，行为与现状一致）' ;;
+      tui.https.self_signed) printf '自动生成自签证书（99 年有效期，浏览器会显示告警）' ;;
+      tui.https.custom) printf '使用自定义证书与私钥（路径与密码可预填在 .env）' ;;
+      tui.port.title) printf '选择端口策略' ;;
+      tui.port.subtitle) printf '控制哪些服务端口暴露到主机或集群节点。' ;;
+      tui.port.description) printf '本地调试选择 development；更小外部暴露面选择 production。' ;;
+      tui.port.development) printf '暴露 Web 和调试/内部服务端口，便于本地排查' ;;
+      tui.port.production) printf '只暴露生产入口端口，内部服务保持私有' ;;
+      tui.image.title) printf '选择镜像源' ;;
+      tui.image.description) printf '每个选项展示将使用的后端镜像 tag 示例。' ;;
+      tui.sandbox.title) printf '选择沙箱模式' ;;
+      tui.sandbox.description) printf '轻量级为默认选项；full 包含文档、设计、前端和 MCP 技能依赖。' ;;
+      tui.sandbox.disabled) printf '不启用 Docker 沙箱，使用本地执行模式' ;;
+      tui.sandbox.lightweight) printf '启用默认轻量级 Docker 沙箱' ;;
+      tui.sandbox.full) printf '启用包含 Anthropic 技能依赖的完整 Docker 沙箱' ;;
+      image_build.detail.main) printf '后端 API 服务' ;;
+      image_build.detail.web) printf 'Next.js 前端' ;;
+      image_build.detail.data_process) printf '文档解析和向量化 Worker' ;;
+      image_build.detail.mcp) printf 'MCP 代理镜像' ;;
+      image_build.detail.terminal) printf 'OpenSSH 终端工具镜像' ;;
+      image_build.detail.docs) printf 'VitePress 文档站点' ;;
+      local_config.found) printf '%s' '发现已有部署配置：%s' ;;
+      local_config.choose) printf '请选择如何处理已保存的部署选项：' ;;
+      local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源、沙箱模式、镜像仓库前缀和监控 provider。' ;;
+      local_config.reconfigure) printf '  2) 重新配置 - 将已保存的值作为默认值，并显示菜单供修改。' ;;
+      local_config.reconfigure_hint) printf '     启用/禁用监控、切换 provider 或调整部署范围时请选择此项。' ;;
+      prompt.choose_1_2) printf '请选择 [1/2]（默认：1）：' ;;
+      summary.components) printf '%s' '部署组件：%s' ;;
+      summary.port_policy) printf '%s' '端口策略：%s' ;;
+      summary.image_source) printf '%s' '镜像源：%s' ;;
+      summary.sandbox_mode) printf '%s' '沙箱模式：%s' ;;
+      summary.image_registry_prefix) printf '%s' '镜像仓库前缀：%s' ;;
+      summary.monitoring_provider) printf '%s' '监控 provider：%s' ;;
+      summary.https_mode) printf '%s' 'HTTPS 模式：%s' ;;
+      summary.https_entry) printf '%s' 'HTTPS 入口：%s' ;;
+      summary.https_cert_subject) printf '%s' '证书主题：%s' ;;
+      summary.https_cert_expiry) printf '%s' '证书到期：%s' ;;
+      summary.https_self_signed_warning) printf '%s' '⚠️ 自签证书：浏览器会显示安全告警，可手动信任该证书后继续访问。' ;;
+      summary.https_san) printf '%s' '自签证书 SAN：%s' ;;
+      summary.docker_services) printf '%s' 'Docker 服务：%s' ;;
+      summary.docker_ports) printf '%s' 'Docker 暴露端口：%s' ;;
+      summary.helm_charts) printf '%s' 'Helm charts：%s' ;;
+      *) return 1 ;;
+    esac
+  else
+    case "$key" in
+      password.validation) printf 'Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers.' ;;
+      env.created_from_docker) printf '✅ Created deploy/env/.env from docker/.env' ;;
+      env.created_from_example) printf '✅ Created deploy/env/.env from deploy/env/.env.example' ;;
+      env.example_missing) printf 'A readable deploy/env/.env.example is required to initialize or upgrade environment configuration' ;;
+      env.merge_failed) printf 'Failed to merge new variables from deploy/env/.env.example into deploy/env/.env' ;;
+      env.merged) printf '✅ Added new variables from deploy/env/.env.example to deploy/env/.env' ;;
+      env.root_missing) printf 'deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available' ;;
+      validation.local_config_schema) printf '%s' 'Local config schemaVersion %s is incompatible with %s. Re-run with --reconfigure.' ;;
+      validation.unknown_component) printf '%s' 'Unknown deployment component: %s' ;;
+      validation.unsupported_port_policy) printf '%s' 'Unsupported port policy: %s. Use development or production.' ;;
+      validation.unsupported_image_source) printf '%s' 'Unsupported image source: %s. Use general, mainland, or local-latest.' ;;
+      validation.unsupported_sandbox_mode) printf '%s' 'Unsupported sandbox mode: %s. Use disabled, lightweight, or full.' ;;
+      validation.unsupported_registry_profile) printf '%s' 'Unsupported registry profile: %s' ;;
+      validation.unsupported_image_registry_prefix) printf '%s' 'Unsupported image registry prefix: %s. Use registry.example.com/project format without spaces.' ;;
+      validation.unsupported_monitoring_provider) printf '%s' 'Unsupported monitoring provider: %s' ;;
+      validation.unsupported_https_mode) printf '%s' 'Unsupported HTTPS mode: %s. Available values: disabled, self-signed, custom.' ;;
+      validation.https_cert_missing) printf '%s' 'Certificate file does not exist or is not readable (custom HTTPS mode): %s' ;;
+      validation.https_key_missing) printf '%s' 'Private key file does not exist or is not readable (custom HTTPS mode): %s' ;;
+      validation.https_cert_invalid_pem) printf '%s' 'Certificate file is not valid PEM: %s' ;;
+      validation.https_key_invalid_pem) printf '%s' 'Private key file is not valid PEM: %s' ;;
+      validation.https_pair_mismatch) printf '%s' 'Certificate and private key do not match (public keys differ).' ;;
+      validation.https_passphrase_wrong) printf '%s' 'Wrong private key passphrase: decryption failed.' ;;
+      validation.https_passphrase_required) printf '%s' 'The private key is passphrase-protected; provide the passphrase (NEXENT_HTTPS_KEY_PASSPHRASE or interactive input).' ;;
+      validation.https_materialize_failed) printf '%s' 'Failed to prepare the Nginx certificate files (target directory: %s).' ;;
+      validation.https_cert_expired) printf '%s' 'Certificate has expired (notAfter: %s).' ;;
+      validation.https_cert_expiring_soon) printf '%s' '⚠️ Certificate expires within 30 days (notAfter: %s); consider replacing it soon.' ;;
+      validation.nodeport_out_of_range) printf '%s' 'Port for Kubernetes deployment must be within 30000-32767: %s (variable %s).' ;;
+      tui.cancelled) printf 'Deployment configuration cancelled.' ;;
+      tui.components.title) printf 'Select deployment components' ;;
+      tui.components.subtitle) printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.' ;;
+      tui.components.help) printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.' ;;
+      tui.component.infrastructure) printf 'required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO' ;;
+      tui.component.application) printf 'Nexent app services: config, runtime, MCP, northbound API, web UI' ;;
+      tui.component.data_process) printf 'background file parsing, indexing, and knowledge processing workers' ;;
+      tui.component.supabase) printf 'user, tenant, login, invitation, and permission services' ;;
+      tui.component.terminal) printf 'OpenSSH container used by the terminal tool' ;;
+      tui.component.monitoring) printf 'OpenTelemetry collector and optional tracing dashboard' ;;
+      tui.monitoring.title) printf 'Select monitoring provider' ;;
+      tui.monitoring.subtitle) printf 'This is used only when the monitoring component is selected.' ;;
+      tui.monitoring.description) printf 'Provider controls where OpenTelemetry traces are stored and viewed.' ;;
+      tui.radio.help) printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.' ;;
+      tui.monitoring.otlp) printf 'collector only; use this when forwarding to an external OTLP backend' ;;
+      tui.monitoring.phoenix) printf 'local Phoenix UI for LLM traces and span inspection' ;;
+      tui.monitoring.langfuse) printf 'local self-hosted Langfuse stack; replace default secrets for production' ;;
+      tui.monitoring.langsmith) printf 'forward traces to hosted LangSmith; requires LANGSMITH_API_KEY' ;;
+      tui.monitoring.grafana) printf 'local Grafana + Tempo dashboard for traces' ;;
+      tui.monitoring.zipkin) printf 'local Zipkin UI for trace browsing' ;;
+      tui.https.title) printf 'Select HTTPS mode' ;;
+      tui.https.subtitle) printf 'Enabling HTTPS installs an extra Nginx reverse-proxy container that terminates TLS on a dedicated port (Docker %s / K8s %s); the plain HTTP entry stays unchanged. Ports can be changed via NEXENT_WEB_PORT / NEXENT_HTTPS_PORT.' "${NEXENT_HTTPS_PORT:-3100}" "${NEXENT_HTTPS_PORT:-31000}" ;;
+      tui.https.description) printf 'Self-signed certificates are generated automatically (SAN auto-detected, no input needed); custom mode uses your own certificate and key.' ;;
+      tui.https.disabled) printf 'Keep HTTP only (default, same as before)' ;;
+      tui.https.self_signed) printf 'Generate a self-signed certificate (99-year validity; browsers will warn)' ;;
+      tui.https.custom) printf 'Use a custom certificate and key (paths and passphrase can be preset in .env)' ;;
+      tui.port.title) printf 'Select port policy' ;;
+      tui.port.subtitle) printf 'This controls which service ports are exposed on the host or cluster node.' ;;
+      tui.port.description) printf 'Choose development for local debugging; choose production for a smaller external surface.' ;;
+      tui.port.development) printf 'publish web plus debug/internal service ports for local troubleshooting' ;;
+      tui.port.production) printf 'publish only production entry ports; keep internal services private' ;;
+      tui.image.title) printf 'Select image source' ;;
+      tui.image.description) printf 'Each option shows the backend image tag pattern that will be used.' ;;
+      tui.sandbox.title) printf 'Select sandbox mode' ;;
+      tui.sandbox.description) printf 'Lightweight is the default; full includes document, design, frontend, and MCP skill dependencies.' ;;
+      tui.sandbox.disabled) printf 'disable the Docker sandbox and use local execution mode' ;;
+      tui.sandbox.lightweight) printf 'enable the default lightweight Docker sandbox' ;;
+      tui.sandbox.full) printf 'enable the full Docker sandbox with Anthropic skill dependencies' ;;
+      image_build.detail.main) printf 'backend API service' ;;
+      image_build.detail.web) printf 'Next.js frontend' ;;
+      image_build.detail.data_process) printf 'document parsing and vectorization worker' ;;
+      image_build.detail.mcp) printf 'MCP proxy image' ;;
+      image_build.detail.terminal) printf 'OpenSSH terminal tool image' ;;
+      image_build.detail.docs) printf 'VitePress documentation site' ;;
+      local_config.found) printf '%s' 'Existing deployment config found: %s' ;;
+      local_config.choose) printf 'Choose how to handle saved deployment options:' ;;
+      local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, sandbox mode, image registry prefix, and monitoring provider.' ;;
+      local_config.reconfigure) printf '  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them.' ;;
+      local_config.reconfigure_hint) printf '     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope.' ;;
+      prompt.choose_1_2) printf 'Choose [1/2] (default: 1): ' ;;
+      summary.components) printf '%s' 'Deployment components: %s' ;;
+      summary.port_policy) printf '%s' 'Port policy: %s' ;;
+      summary.image_source) printf '%s' 'Image source: %s' ;;
+      summary.sandbox_mode) printf '%s' 'Sandbox mode: %s' ;;
+      summary.image_registry_prefix) printf '%s' 'Image registry prefix: %s' ;;
+      summary.monitoring_provider) printf '%s' 'Monitoring provider: %s' ;;
+      summary.https_mode) printf '%s' 'HTTPS mode: %s' ;;
+      summary.https_entry) printf '%s' 'HTTPS entry: %s' ;;
+      summary.https_cert_subject) printf '%s' 'Certificate subject: %s' ;;
+      summary.https_cert_expiry) printf '%s' 'Certificate expiry: %s' ;;
+      summary.https_self_signed_warning) printf '%s' '⚠️ Self-signed certificate: browsers will show a security warning; trust it manually to continue.' ;;
+      summary.https_san) printf '%s' 'Self-signed certificate SAN: %s' ;;
+      summary.docker_services) printf '%s' 'Docker services: %s' ;;
+      summary.docker_ports) printf '%s' 'Docker published ports: %s' ;;
+      summary.helm_charts) printf '%s' 'Helm charts: %s' ;;
+      *) return 1 ;;
+    esac
+  fi
+}
+
+deployment_i18n() {
+  local key="$1"
+  shift || true
+  local lang
+  local format
+  lang="${DEPLOYMENT_LANGUAGE:-en}"
+  format="$(deployment_i18n_format "$lang" "$key" || true)"
+  if [ -z "$format" ]; then
+    printf '%s\n' "$key"
+    return 0
+  fi
+  printf "$format\n" "$@"
+}
+
+deployment_prompt() {
+  local key="$1"
+  shift || true
+  local lang
+  local format
+  lang="${DEPLOYMENT_LANGUAGE:-en}"
+  format="$(deployment_i18n_format "$lang" "$key" || true)"
+  if [ -z "$format" ]; then
+    printf '%s' "$key"
+    return 0
+  fi
+  printf "$format" "$@"
+}
 
 deployment_log() {
   printf '%s\n' "$*"
@@ -45,6 +342,25 @@ deployment_warn() {
 
 deployment_error() {
   printf '❌ %s\n' "$*" >&2
+}
+
+deployment_validate_nodeport_range() {
+  local port="$1"
+  local variable_name="$2"
+  if [ -z "$port" ]; then
+    return 0
+  fi
+  case "$port" in
+    ''|*[!0-9]*)
+      deployment_error "$(deployment_i18n validation.nodeport_out_of_range "$port" "$variable_name")"
+      return 1
+      ;;
+  esac
+  if [ "$port" -lt 30000 ] || [ "$port" -gt 32767 ]; then
+    deployment_error "$(deployment_i18n validation.nodeport_out_of_range "$port" "$variable_name")"
+    return 1
+  fi
+  return 0
 }
 
 deployment_csv_contains() {
@@ -82,7 +398,93 @@ deployment_validate_password() {
 }
 
 deployment_password_validation_message() {
-  printf '%s\n' "Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers."
+  deployment_i18n password.validation
+}
+
+deployment_super_admin_password() {
+  printf '%s' "${NEXENT_SUPER_ADMIN_PASSWORD:-$DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT}"
+}
+
+deployment_should_prompt_super_admin_password() {
+  [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" = "true" ] &&
+    [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
+}
+
+deployment_should_prompt_root_dir() {
+  [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" != "true" ] ||
+    [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
+}
+
+deployment_require_env_example() {
+  local example_file="$1"
+  if [ ! -f "$example_file" ] || [ ! -r "$example_file" ]; then
+    deployment_error "$(deployment_i18n env.example_missing)"
+    return 1
+  fi
+}
+
+deployment_merge_env_from_example() {
+  local env_file="$1"
+  local example_file="$2"
+  local missing_assignments
+  local last_byte
+
+  deployment_require_env_example "$example_file" || return 1
+
+  if [ ! -f "$env_file" ] || [ ! -r "$env_file" ]; then
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  fi
+
+  missing_assignments="$(awk '
+    function assignment_key(line, normalized) {
+      normalized = line
+      sub(/^[[:space:]]*/, "", normalized)
+      sub(/^export[[:space:]]+/, "", normalized)
+      if (normalized !~ /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/) {
+        return ""
+      }
+      sub(/[[:space:]]*=.*/, "", normalized)
+      return normalized
+    }
+    FILENAME == ARGV[1] {
+      key = assignment_key($0)
+      if (key != "") {
+        existing[key] = 1
+      }
+      next
+    }
+    {
+      key = assignment_key($0)
+      if (key != "" && !(key in existing)) {
+        print $0
+      }
+    }
+  ' "$env_file" "$example_file")" || {
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  }
+
+  if [ -z "$missing_assignments" ]; then
+    return 0
+  fi
+
+  if [ -s "$env_file" ]; then
+    last_byte="$(tail -c 1 "$env_file" 2>/dev/null || true)"
+  fi
+  {
+    if [ -s "$env_file" ]; then
+      if [ -n "$last_byte" ]; then
+        printf '\n'
+      fi
+      printf '\n'
+    fi
+    printf '# Added automatically from the current deploy/env/.env.example\n%s\n' "$missing_assignments"
+  } >> "$env_file" || {
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  }
+  deployment_log "$(deployment_i18n env.merged)"
 }
 
 deployment_ensure_root_env() {
@@ -93,28 +495,27 @@ deployment_ensure_root_env() {
   local root_example="$env_dir/.env.example"
   local docker_env="$docker_dir/.env"
 
-  mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
   export DEPLOYMENT_ROOT_ENV
 
+  deployment_require_env_example "$root_example" || return 1
+
+  mkdir -p "$env_dir"
+
   if [ -f "$root_env" ]; then
-    return 0
+    deployment_merge_env_from_example "$root_env" "$root_example"
+    return $?
   fi
 
   if [ -f "$docker_env" ]; then
     cp "$docker_env" "$root_env"
-    deployment_log "✅ Created deploy/env/.env from docker/.env"
-    return 0
-  fi
-
-  if [ -f "$root_example" ]; then
+    deployment_log "$(deployment_i18n env.created_from_docker)"
+  else
     cp "$root_example" "$root_env"
-    deployment_log "✅ Created deploy/env/.env from deploy/env/.env.example"
-    return 0
+    deployment_log "$(deployment_i18n env.created_from_example)"
   fi
 
-  deployment_error "deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available"
-  return 1
+  deployment_merge_env_from_example "$root_env" "$root_example"
 }
 
 deployment_source_root_env() {
@@ -127,6 +528,85 @@ deployment_source_root_env() {
   # shellcheck source=/dev/null
   source "$DEPLOYMENT_ROOT_ENV"
   set +a
+}
+
+deployment_env_dir() {
+  if [ -n "${DEPLOYMENT_ROOT_ENV:-}" ]; then
+    dirname "$DEPLOYMENT_ROOT_ENV"
+    return 0
+  fi
+
+  local common_dir
+  common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf '%s\n' "$(cd "$common_dir/../env" && pwd)"
+}
+
+deployment_monitoring_env_example_file() {
+  printf '%s/monitoring.env.example\n' "$(deployment_env_dir)"
+}
+
+deployment_monitoring_env_file() {
+  printf '%s/monitoring.env\n' "$(deployment_env_dir)"
+}
+
+deployment_legacy_monitoring_env_file() {
+  printf '%s/../docker/assets/monitoring/monitoring.env\n' "$(deployment_env_dir)"
+}
+
+deployment_source_env_file() {
+  local env_file="$1"
+  [ -f "$env_file" ] || return 0
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
+}
+
+deployment_env_values_payload() {
+  local env_file="${DEPLOYMENT_ROOT_ENV:-}"
+  local monitoring_env_file
+  local files=()
+
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    files+=("$env_file")
+  else
+    deployment_warn "deploy/env/.env is not available; environment rollout checksum will use available env files only."
+  fi
+
+  monitoring_env_file="$(deployment_monitoring_env_file)"
+  if [ -f "$monitoring_env_file" ]; then
+    files+=("$monitoring_env_file")
+  fi
+
+  [ "${#files[@]}" -gt 0 ] || return 0
+
+  awk '
+    /^[[:space:]]*($|#)/ { next }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      sub(/^[[:space:]]*/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
+      if (line !~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        next
+      }
+      key = line
+      sub(/=.*/, "", key)
+      value = line
+      sub(/^[^=]*=/, "", value)
+      values[key] = key "=" value
+    }
+    END {
+      for (key in values) {
+        print values[key]
+      }
+    }
+  ' "${files[@]}" | LC_ALL=C sort -t '=' -k1,1
+}
+
+deployment_env_values_checksum() {
+  deployment_sha256_string "$(deployment_env_values_payload)"
 }
 
 deployment_update_env_var_file() {
@@ -173,6 +653,183 @@ deployment_get_env_var_file() {
     value="${value%\'}"
   fi
   printf '%s' "$value"
+}
+
+deployment_sync_env_defaults() {
+  local example_file="$1"
+  local env_file="$2"
+  local line key value env_value
+
+  if [ ! -f "$example_file" ]; then
+    deployment_error "Monitoring env example not found: $example_file"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="$(deployment_trim "$line")"
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+    key="${line%%=*}"
+    if grep -q "^${key}=" "$env_file"; then
+      continue
+    fi
+
+    value="${line#*=}"
+    env_value="$(printenv "$key" 2>/dev/null || true)"
+    if [ -n "$env_value" ]; then
+      value="$env_value"
+    fi
+    deployment_update_env_var_file "$env_file" "$key" "$value"
+  done < "$example_file"
+}
+
+deployment_monitoring_env_value() {
+  local key="$1"
+  local default_value="${2:-}"
+  local env_file
+  local value
+
+  env_file="$(deployment_monitoring_env_file)"
+  if value="$(deployment_get_env_var_file "$env_file" "$key" 2>/dev/null)"; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if [ "${!key+x}" = "x" ]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  printf '%s' "$default_value"
+}
+
+deployment_update_monitoring_env_var() {
+  local key="$1"
+  local value="$2"
+  deployment_update_env_var_file "$(deployment_monitoring_env_file)" "$key" "$value"
+}
+
+deployment_monitoring_collector_config_file() {
+  local target="${1:-docker}"
+  local provider="${2:-${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}}"
+  local config_name
+
+  case "$provider" in
+    phoenix)
+      config_name="otel-collector-phoenix-config.yml"
+      ;;
+    langfuse)
+      config_name="otel-collector-langfuse-config.yml"
+      ;;
+    langsmith)
+      config_name="otel-collector-langsmith-config.yml"
+      ;;
+    grafana)
+      config_name="otel-collector-grafana-config.yml"
+      ;;
+    zipkin)
+      config_name="otel-collector-zipkin-config.yml"
+      ;;
+    otlp|*)
+      config_name="otel-collector-config.yml"
+      ;;
+  esac
+
+  case "$target" in
+    docker)
+      printf '../assets/monitoring/%s' "$config_name"
+      ;;
+    k8s|helm)
+      printf '%s' "$config_name"
+      ;;
+    *)
+      printf '%s' "$config_name"
+      ;;
+  esac
+}
+
+deployment_prepare_monitoring_env() {
+  local target="${1:-docker}"
+  local env_file
+  local example_file
+  local legacy_file
+  local telemetry_enabled
+  local dashboard_url
+  local existing_dashboard_url
+  local provider
+  local collector_config_file
+  local otlp_endpoint
+  local langfuse_public_key
+  local langfuse_secret_key
+  local langfuse_auth_header
+  local langsmith_api_key
+
+  env_file="$(deployment_monitoring_env_file)"
+  example_file="$(deployment_monitoring_env_example_file)"
+  legacy_file="$(deployment_legacy_monitoring_env_file)"
+
+  if [ ! -f "$env_file" ] && [ -f "$legacy_file" ]; then
+    mkdir -p "$(dirname "$env_file")"
+    cp "$legacy_file" "$env_file"
+    deployment_log "✅ Migrated monitoring.env to $env_file"
+  fi
+
+  deployment_sync_env_defaults "$example_file" "$env_file" || return 1
+  deployment_source_env_file "$env_file"
+
+  telemetry_enabled="$(deployment_monitoring_enabled)"
+  provider="$DEPLOYMENT_MONITORING_PROVIDER"
+
+  deployment_update_monitoring_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
+  deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
+
+  deployment_source_env_file "$env_file"
+  existing_dashboard_url="$(deployment_get_env_var_file "$env_file" "MONITORING_DASHBOARD_URL" 2>/dev/null || true)"
+  if [ "$telemetry_enabled" != "true" ]; then
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" ""
+  elif [ -z "$existing_dashboard_url" ]; then
+    dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+  fi
+
+  case "$target" in
+    k8s|helm)
+      otlp_endpoint="http://nexent-otel-collector:4318"
+      ;;
+    docker|*)
+      otlp_endpoint="http://otel-collector:4318"
+      ;;
+  esac
+  deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$otlp_endpoint"
+  deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_PROTOCOL" "http"
+
+  collector_config_file="$(deployment_monitoring_collector_config_file "$target" "$provider")"
+  deployment_update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"
+
+  if [ "$provider" = "langfuse" ]; then
+    langfuse_public_key="$(deployment_monitoring_env_value "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-lf-nexent-local")"
+    langfuse_secret_key="$(deployment_monitoring_env_value "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-lf-nexent-local")"
+    langfuse_auth_header="Basic $(printf "%s:%s" "$langfuse_public_key" "$langfuse_secret_key" | base64 | tr -d '\n')"
+    deployment_update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$langfuse_auth_header"
+  fi
+
+  if [ "$provider" = "langsmith" ]; then
+    langsmith_api_key="$(deployment_monitoring_env_value "LANGSMITH_API_KEY" "")"
+    deployment_update_monitoring_env_var "LANGSMITH_API_KEY" "$langsmith_api_key"
+    deployment_update_monitoring_env_var "LANGSMITH_PROJECT" "$(deployment_monitoring_env_value "LANGSMITH_PROJECT" "nexent")"
+    deployment_update_monitoring_env_var "LANGSMITH_OTLP_TRACES_ENDPOINT" "$(deployment_monitoring_env_value "LANGSMITH_OTLP_TRACES_ENDPOINT" "https://api.smith.langchain.com/otel/v1/traces")"
+  fi
+
+  deployment_source_env_file "$env_file"
+  DEPLOYMENT_MONITORING_PROVIDER="${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}"
+  export DEPLOYMENT_MONITORING_PROVIDER
 }
 
 deployment_sha256_string() {
@@ -223,22 +880,31 @@ deployment_init_defaults() {
   DEPLOYMENT_COMPONENTS="$DEPLOYMENT_COMPONENTS_DEFAULT"
   DEPLOYMENT_PORT_POLICY="$DEPLOYMENT_PORT_POLICY_DEFAULT"
   DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_IMAGE_SOURCE_DEFAULT"
+  DEPLOYMENT_SANDBOX_MODE="$DEPLOYMENT_SANDBOX_MODE_DEFAULT"
   DEPLOYMENT_REGISTRY_PROFILE="$DEPLOYMENT_REGISTRY_PROFILE_DEFAULT"
+  DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
   DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
-  DEPLOYMENT_CONFIG_PATH=""
+  # Seed from .env (sourced earlier) so pre-configured values are honored;
+  # CLI flags and saved deploy.options override these in deployment_prepare_config.
+  DEPLOYMENT_HTTPS_MODE="${NEXENT_HTTPS_MODE:-disabled}"
+  DEPLOYMENT_HTTPS_CERT_FILE="${NEXENT_HTTPS_CERT_FILE:-}"
+  DEPLOYMENT_HTTPS_KEY_FILE="${NEXENT_HTTPS_KEY_FILE:-}"
+  DEPLOYMENT_HTTPS_KEY_PASSPHRASE="${NEXENT_HTTPS_KEY_PASSPHRASE:-}"
+  DEPLOYMENT_HTTPS_SAN="${NEXENT_HTTPS_SAN:-}"
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
   DEPLOYMENT_RECONFIGURE="false"
   DEPLOYMENT_ROTATE_SECRETS="false"
   DEPLOYMENT_REFRESH_ES_KEY="false"
   DEPLOYMENT_LOCAL_CONFIG_PATH="$(deployment_default_local_config_path)"
   DEPLOYMENT_LOADED_SCHEMA_VERSION=""
-  DEPLOYMENT_LOADED_APP_VERSION=""
   DEPLOYMENT_CONFIG_FILE_LOADED="false"
   DEPLOYMENT_CONFIG_VALUES_LOADED="false"
   DEPLOYMENT_DOCKER_PORTS=""
   unset DEPLOYMENT_COMPONENTS_EXPLICIT DEPLOYMENT_PORT_POLICY_EXPLICIT DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT
-  unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
+  unset DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT
+  unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_SANDBOX_MODE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
+  unset DEPLOYMENT_HTTPS_MODE_EXPLICIT DEPLOYMENT_HTTPS_CERT_FILE_EXPLICIT DEPLOYMENT_HTTPS_KEY_FILE_EXPLICIT DEPLOYMENT_HTTPS_KEY_PASSPHRASE_EXPLICIT DEPLOYMENT_HTTPS_SAN_EXPLICIT
 }
 
 deployment_parse_common_args() {
@@ -256,8 +922,16 @@ deployment_parse_common_args() {
         DEPLOYMENT_IMAGE_SOURCE="$2"
         shift 2
         ;;
+      --sandbox-mode)
+        DEPLOYMENT_SANDBOX_MODE="$2"
+        shift 2
+        ;;
       --registry-profile)
         DEPLOYMENT_REGISTRY_PROFILE="$2"
+        shift 2
+        ;;
+      --image-registry-prefix|--registry-prefix|--image-registry)
+        DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$2"
         shift 2
         ;;
       --app-version|--version)
@@ -268,12 +942,38 @@ deployment_parse_common_args() {
         DEPLOYMENT_MONITORING_PROVIDER="$2"
         shift 2
         ;;
+      --https-mode)
+        DEPLOYMENT_HTTPS_MODE="$2"
+        shift 2
+        ;;
+      --https-cert-file)
+        DEPLOYMENT_HTTPS_CERT_FILE="$2"
+        shift 2
+        ;;
+      --https-key-file)
+        DEPLOYMENT_HTTPS_KEY_FILE="$2"
+        shift 2
+        ;;
+      --https-key-passphrase)
+        DEPLOYMENT_HTTPS_KEY_PASSPHRASE="$2"
+        shift 2
+        ;;
+      --https-san)
+        DEPLOYMENT_HTTPS_SAN="$2"
+        shift 2
+        ;;
       --use-local-config)
         DEPLOYMENT_USE_LOCAL_CONFIG="true"
         shift
         ;;
       --reconfigure)
+        NEXENT_DEPLOY_CONFIG_MODE="tui"
         DEPLOYMENT_RECONFIGURE="true"
+        shift
+        ;;
+      --defaults)
+        NEXENT_DEPLOY_CONFIG_MODE="defaults"
+        DEPLOYMENT_RECONFIGURE="false"
         shift
         ;;
       --rotate-secrets)
@@ -285,8 +985,9 @@ deployment_parse_common_args() {
         shift
         ;;
       --config)
-        DEPLOYMENT_CONFIG_PATH="$2"
-        shift 2
+        NEXENT_DEPLOY_CONFIG_MODE="tui"
+        DEPLOYMENT_RECONFIGURE="true"
+        shift
         ;;
       --local-config)
         DEPLOYMENT_LOCAL_CONFIG_PATH="$2"
@@ -348,17 +1049,36 @@ deployment_load_config_file() {
           DEPLOYMENT_IMAGE_SOURCE="$value"
           loaded_config_value="true"
           ;;
+        sandboxMode)
+          DEPLOYMENT_SANDBOX_MODE="$value"
+          loaded_config_value="true"
+          ;;
         registryProfile)
           DEPLOYMENT_REGISTRY_PROFILE="$value"
           loaded_config_value="true"
           ;;
-        appVersion)
-          DEPLOYMENT_APP_VERSION="$value"
-          [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_APP_VERSION="$value"
+        imageRegistryPrefix)
+          DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$value"
           loaded_config_value="true"
           ;;
         monitoringProvider)
           DEPLOYMENT_MONITORING_PROVIDER="$value"
+          loaded_config_value="true"
+          ;;
+        httpsMode)
+          DEPLOYMENT_HTTPS_MODE="$value"
+          loaded_config_value="true"
+          ;;
+        httpsCertFile)
+          DEPLOYMENT_HTTPS_CERT_FILE="$value"
+          loaded_config_value="true"
+          ;;
+        httpsKeyFile)
+          DEPLOYMENT_HTTPS_KEY_FILE="$value"
+          loaded_config_value="true"
+          ;;
+        httpsSan)
+          DEPLOYMENT_HTTPS_SAN="$value"
           loaded_config_value="true"
           ;;
       esac
@@ -442,6 +1162,40 @@ deployment_normalize_image_source() {
   esac
 }
 
+deployment_normalize_image_registry_prefix_value() {
+  local prefix="$1"
+  prefix="$(deployment_trim "$prefix")"
+  prefix="${prefix#http://}"
+  prefix="${prefix#https://}"
+  while [[ "$prefix" == */ ]]; do
+    prefix="${prefix%/}"
+  done
+  printf '%s' "$prefix"
+}
+
+deployment_normalize_image_registry_prefix() {
+  DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$(deployment_normalize_image_registry_prefix_value "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
+}
+
+deployment_add_image_registry_prefix() {
+  local image="$1"
+  local prefix="${2:-$DEPLOYMENT_IMAGE_REGISTRY_PREFIX}"
+  prefix="$(deployment_normalize_image_registry_prefix_value "$prefix")"
+
+  if [ -z "$prefix" ]; then
+    printf '%s' "$image"
+    return 0
+  fi
+  case "$image" in
+    "$prefix"/*)
+      printf '%s' "$image"
+      ;;
+    *)
+      printf '%s/%s' "$prefix" "$image"
+      ;;
+  esac
+}
+
 deployment_ensure_required_components() {
   local source_components="$DEPLOYMENT_COMPONENTS"
   local normalized=""
@@ -475,7 +1229,7 @@ deployment_is_valid_value() {
 
 deployment_validate() {
   if [ -n "$DEPLOYMENT_LOADED_SCHEMA_VERSION" ] && [ "$DEPLOYMENT_LOADED_SCHEMA_VERSION" != "$DEPLOYMENT_SCHEMA_VERSION" ]; then
-    deployment_error "Local config schemaVersion $DEPLOYMENT_LOADED_SCHEMA_VERSION is incompatible with $DEPLOYMENT_SCHEMA_VERSION. Re-run with --reconfigure."
+    deployment_error "$(deployment_i18n validation.local_config_schema "$DEPLOYMENT_LOADED_SCHEMA_VERSION" "$DEPLOYMENT_SCHEMA_VERSION")"
     return 1
   fi
   local old_ifs="$IFS"
@@ -485,7 +1239,7 @@ deployment_validate() {
     component="$(deployment_trim "$component")"
     IFS="$old_ifs"
     deployment_is_valid_value "$component" $deployment_component_list || {
-      deployment_error "Unknown deployment component: $component"
+      deployment_error "$(deployment_i18n validation.unknown_component "$component")"
       return 1
     }
     IFS=','
@@ -493,27 +1247,126 @@ deployment_validate() {
   IFS="$old_ifs"
 
   deployment_is_valid_value "$DEPLOYMENT_PORT_POLICY" $deployment_port_policy_list || {
-    deployment_error "Unsupported port policy: $DEPLOYMENT_PORT_POLICY. Use development or production."
+    deployment_error "$(deployment_i18n validation.unsupported_port_policy "$DEPLOYMENT_PORT_POLICY")"
     return 1
   }
   deployment_is_valid_value "$DEPLOYMENT_IMAGE_SOURCE" $deployment_image_source_list || {
-    deployment_error "Unsupported image source: $DEPLOYMENT_IMAGE_SOURCE. Use general, mainland, or local-latest."
+    deployment_error "$(deployment_i18n validation.unsupported_image_source "$DEPLOYMENT_IMAGE_SOURCE")"
+    return 1
+  }
+  deployment_is_valid_value "$DEPLOYMENT_SANDBOX_MODE" $deployment_sandbox_mode_list || {
+    deployment_error "$(deployment_i18n validation.unsupported_sandbox_mode "$DEPLOYMENT_SANDBOX_MODE")"
     return 1
   }
   deployment_is_valid_value "$DEPLOYMENT_REGISTRY_PROFILE" $deployment_registry_profile_list || {
-    deployment_error "Unsupported registry profile: $DEPLOYMENT_REGISTRY_PROFILE"
+    deployment_error "$(deployment_i18n validation.unsupported_registry_profile "$DEPLOYMENT_REGISTRY_PROFILE")"
     return 1
   }
+  if [[ "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" == *[[:space:]]* ]]; then
+    deployment_error "$(deployment_i18n validation.unsupported_image_registry_prefix "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
+    return 1
+  fi
   deployment_is_valid_value "$DEPLOYMENT_MONITORING_PROVIDER" $deployment_monitoring_provider_list || {
-    deployment_error "Unsupported monitoring provider: $DEPLOYMENT_MONITORING_PROVIDER"
+    deployment_error "$(deployment_i18n validation.unsupported_monitoring_provider "$DEPLOYMENT_MONITORING_PROVIDER")"
     return 1
   }
+  deployment_is_valid_value "$DEPLOYMENT_HTTPS_MODE" $deployment_https_mode_list || {
+    deployment_error "$(deployment_i18n validation.unsupported_https_mode "$DEPLOYMENT_HTTPS_MODE")"
+    return 1
+  }
+  if [ "$DEPLOYMENT_HTTPS_MODE" = "custom" ]; then
+    if [ ! -r "$DEPLOYMENT_HTTPS_CERT_FILE" ]; then
+      deployment_error "$(deployment_i18n validation.https_cert_missing "$DEPLOYMENT_HTTPS_CERT_FILE")"
+      return 1
+    fi
+    if [ ! -r "$DEPLOYMENT_HTTPS_KEY_FILE" ]; then
+      deployment_error "$(deployment_i18n validation.https_key_missing "$DEPLOYMENT_HTTPS_KEY_FILE")"
+      return 1
+    fi
+  fi
+}
+
+deployment_https_key_check() {
+  # Bash 3.2-safe key check for any key type (RSA, EC, Ed25519...): builds
+  # -passin args only when a passphrase exists. Uses -check when available
+  # (OpenSSL; validates the key itself) and falls back to plain parsing on
+  # LibreSSL, where -check is unsupported for non-RSA keys.
+  local key_file="$1"
+  local passphrase="$2"
+  if [ -n "$passphrase" ]; then
+    openssl pkey -in "$key_file" -check -noout -passin "pass:$passphrase" >/dev/null 2>&1 \
+      || openssl pkey -in "$key_file" -noout -passin "pass:$passphrase" >/dev/null 2>&1
+  else
+    openssl pkey -in "$key_file" -check -noout >/dev/null 2>&1 \
+      || openssl pkey -in "$key_file" -noout >/dev/null 2>&1
+  fi
+}
+
+deployment_https_key_pubkey() {
+  local key_file="$1"
+  local passphrase="$2"
+  if [ -n "$passphrase" ]; then
+    openssl pkey -in "$key_file" -pubout -passin "pass:$passphrase" 2>/dev/null
+  else
+    openssl pkey -in "$key_file" -pubout 2>/dev/null
+  fi
+}
+
+deployment_https_validate_cert_pair() {
+  # Validate a certificate/private-key pair before deployment.
+  # Uses DEPLOYMENT_HTTPS_CERT_FILE / DEPLOYMENT_HTTPS_KEY_FILE /
+  # DEPLOYMENT_HTTPS_KEY_PASSPHRASE. Returns non-zero on failure.
+  local cert_file="$DEPLOYMENT_HTTPS_CERT_FILE"
+  local key_file="$DEPLOYMENT_HTTPS_KEY_FILE"
+  local passphrase="${DEPLOYMENT_HTTPS_KEY_PASSPHRASE:-}"
+
+  if ! openssl x509 -in "$cert_file" -noout >/dev/null 2>&1; then
+    deployment_error "$(deployment_i18n validation.https_cert_invalid_pem "$cert_file")"
+    return 1
+  fi
+
+  if ! deployment_https_key_check "$key_file" "$passphrase"; then
+    if [ -n "$passphrase" ]; then
+      deployment_error "$(deployment_i18n validation.https_passphrase_wrong)"
+    else
+      # A key that fails without a passphrase may be passphrase-protected.
+      if deployment_https_key_check "$key_file" "" >/dev/null 2>&1; then
+        deployment_error "$(deployment_i18n validation.https_passphrase_required)"
+      else
+        deployment_error "$(deployment_i18n validation.https_key_invalid_pem "$key_file")"
+      fi
+    fi
+    return 1
+  fi
+
+  local cert_pubkey key_pubkey
+  cert_pubkey="$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null || true)"
+  key_pubkey="$(deployment_https_key_pubkey "$key_file" "$passphrase" | openssl sha256 2>/dev/null || true)"
+  if [ -z "$cert_pubkey" ] || [ -z "$key_pubkey" ] || [ "$cert_pubkey" != "$key_pubkey" ]; then
+    deployment_error "$(deployment_i18n validation.https_pair_mismatch)"
+    return 1
+  fi
+
+  local end_date epoch_now epoch_end
+  end_date="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)"
+  epoch_end="$(date -j -f '%b %e %H:%M:%S %Y GMT' "$end_date" +%s 2>/dev/null || date -d "$end_date" +%s 2>/dev/null || true)"
+  if [ -n "$epoch_end" ]; then
+    epoch_now="$(date +%s)"
+    if [ "$epoch_end" -le "$epoch_now" ]; then
+      deployment_error "$(deployment_i18n validation.https_cert_expired "$end_date")"
+      return 1
+    fi
+    if [ $((epoch_end - epoch_now)) -lt $((30 * 24 * 3600)) ]; then
+      deployment_warn "$(deployment_i18n validation.https_cert_expiring_soon "$end_date")"
+    fi
+  fi
+  return 0
 }
 
 deployment_tui_cancel() {
   printf '\033[?25h'
   printf '\033[2J\033[H'
-  deployment_warn "Deployment configuration cancelled."
+  deployment_warn "$(deployment_i18n tui.cancelled)"
   return 130
 }
 
@@ -539,12 +1392,12 @@ deployment_tui_multiselect_components() {
 
   local components=(infrastructure application data-process supabase terminal monitoring)
   local details=(
-    "required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO"
-    "Nexent app services: config, runtime, MCP, northbound API, web UI"
-    "background file parsing, indexing, and knowledge processing workers"
-    "user, tenant, login, invitation, and permission services"
-    "OpenSSH container used by the terminal tool"
-    "OpenTelemetry collector and optional tracing dashboard"
+    "$(deployment_i18n tui.component.infrastructure)"
+    "$(deployment_i18n tui.component.application)"
+    "$(deployment_i18n tui.component.data_process)"
+    "$(deployment_i18n tui.component.supabase)"
+    "$(deployment_i18n tui.component.terminal)"
+    "$(deployment_i18n tui.component.monitoring)"
   )
   local selected=(0 0 0 0 0 0)
   local cursor=0
@@ -558,9 +1411,9 @@ deployment_tui_multiselect_components() {
 
   deployment_tui_render_components() {
     printf '\033[2J\033[H'
-    printf 'Select deployment components\n'
-    printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.\n'
-    printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.components.title)"
+    printf '%s\n' "$(deployment_i18n tui.components.subtitle)"
+    printf '%s\n\n' "$(deployment_i18n tui.components.help)"
     local row marker check
     for row in "${!components[@]}"; do
       marker=" "
@@ -590,7 +1443,7 @@ deployment_tui_multiselect_components() {
     fi
 
     if [ "$key" = $'\033' ]; then
-      IFS= read -rsn2 -t 0.1 key_tail || key_tail=""
+      IFS= read -rsn2 -t 1 key_tail || key_tail=""
       key="${key}${key_tail}"
     fi
 
@@ -635,12 +1488,12 @@ deployment_tui_select_monitoring_provider() {
 
   local providers=(otlp phoenix langfuse langsmith grafana zipkin)
   local details=(
-    "collector only; use this when forwarding to an external OTLP backend"
-    "local Phoenix UI for LLM traces and span inspection"
-    "local self-hosted Langfuse stack; replace default secrets for production"
-    "forward traces to hosted LangSmith; requires LANGSMITH_API_KEY"
-    "local Grafana + Tempo dashboard for traces"
-    "local Zipkin UI for trace browsing"
+    "$(deployment_i18n tui.monitoring.otlp)"
+    "$(deployment_i18n tui.monitoring.phoenix)"
+    "$(deployment_i18n tui.monitoring.langfuse)"
+    "$(deployment_i18n tui.monitoring.langsmith)"
+    "$(deployment_i18n tui.monitoring.grafana)"
+    "$(deployment_i18n tui.monitoring.zipkin)"
   )
   local cursor=0
   local i key key_tail
@@ -654,10 +1507,10 @@ deployment_tui_select_monitoring_provider() {
 
   deployment_tui_render_monitoring_provider() {
     printf '\033[2J\033[H'
-    printf 'Select monitoring provider\n'
-    printf 'This is used only when the monitoring component is selected.\n'
-    printf 'Provider controls where OpenTelemetry traces are stored and viewed.\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.monitoring.title)"
+    printf '%s\n' "$(deployment_i18n tui.monitoring.subtitle)"
+    printf '%s\n' "$(deployment_i18n tui.monitoring.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
     local row marker radio
     for row in "${!providers[@]}"; do
       marker=" "
@@ -678,7 +1531,7 @@ deployment_tui_select_monitoring_provider() {
     fi
 
     if [ "$key" = $'\033' ]; then
-      IFS= read -rsn2 -t 0.1 key_tail || key_tail=""
+      IFS= read -rsn2 -t 1 key_tail || key_tail=""
       key="${key}${key_tail}"
     fi
 
@@ -707,6 +1560,80 @@ deployment_tui_select_monitoring_provider() {
   printf '\033[2J\033[H'
 }
 
+deployment_tui_select_https_mode() {
+  [ -t 0 ] || return 0
+  [ -n "${DEPLOYMENT_HTTPS_MODE_EXPLICIT:-}" ] && return 0
+  [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
+
+  local modes=(disabled self-signed custom)
+  local details=(
+    "$(deployment_i18n tui.https.disabled)"
+    "$(deployment_i18n tui.https.self_signed)"
+    "$(deployment_i18n tui.https.custom)"
+  )
+  local cursor=0
+  local i key key_tail
+  for i in "${!modes[@]}"; do
+    if [ "${modes[$i]}" = "$DEPLOYMENT_HTTPS_MODE" ]; then
+      cursor="$i"
+    fi
+  done
+
+  deployment_tui_render_https_mode() {
+    printf '\033[2J\033[H'
+    printf '%s\n' "$(deployment_i18n tui.https.title)"
+    printf '%s\n' "$(deployment_i18n tui.https.subtitle)"
+    printf '%s\n' "$(deployment_i18n tui.https.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
+    local row marker radio
+    for row in "${!modes[@]}"; do
+      marker=" "
+      [ "$row" -eq "$cursor" ] && marker=">"
+      radio=" "
+      [ "$row" -eq "$cursor" ] && radio="*"
+      printf '%s (%s) %s - %s\n' "$marker" "$radio" "${modes[$row]}" "${details[$row]}"
+    done
+  }
+
+  printf '\033[?25l'
+  while true; do
+    deployment_tui_render_https_mode
+    IFS= read -rsn1 key || key=""
+    if [ -z "$key" ]; then
+      DEPLOYMENT_HTTPS_MODE="${modes[$cursor]}"
+      break
+    fi
+
+    if [ "$key" = $'\033' ]; then
+      IFS= read -rsn2 -t 1 key_tail || key_tail=""
+      key="${key}${key_tail}"
+    fi
+
+    case "$key" in
+      $'\033[A'|k|K)
+        cursor=$((cursor - 1))
+        [ "$cursor" -lt 0 ] && cursor=$((${#modes[@]} - 1))
+        ;;
+      $'\033[B'|j|J)
+        cursor=$((cursor + 1))
+        [ "$cursor" -ge "${#modes[@]}" ] && cursor=0
+        ;;
+      q|Q)
+        deployment_tui_cancel
+        return $?
+        ;;
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          deployment_tui_back
+          return $?
+        fi
+        ;;
+    esac
+  done
+  printf '\033[?25h'
+  printf '\033[2J\033[H'
+}
+
 deployment_tui_select_port_policy() {
   [ -t 0 ] || return 0
   [ -n "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && return 0
@@ -714,8 +1641,8 @@ deployment_tui_select_port_policy() {
 
   local policies=(development production)
   local details=(
-    "publish web plus debug/internal service ports for local troubleshooting"
-    "publish only production entry ports; keep internal services private"
+    "$(deployment_i18n tui.port.development)"
+    "$(deployment_i18n tui.port.production)"
   )
   local cursor=0
   local i key key_tail
@@ -729,10 +1656,10 @@ deployment_tui_select_port_policy() {
 
   deployment_tui_render_port_policy() {
     printf '\033[2J\033[H'
-    printf 'Select port policy\n'
-    printf 'This controls which service ports are exposed on the host or cluster node.\n'
-    printf 'Choose development for local debugging; choose production for a smaller external surface.\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.port.title)"
+    printf '%s\n' "$(deployment_i18n tui.port.subtitle)"
+    printf '%s\n' "$(deployment_i18n tui.port.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
     local row marker radio
     for row in "${!policies[@]}"; do
       marker=" "
@@ -753,7 +1680,7 @@ deployment_tui_select_port_policy() {
     fi
 
     if [ "$key" = $'\033' ]; then
-      IFS= read -rsn2 -t 0.1 key_tail || key_tail=""
+      IFS= read -rsn2 -t 1 key_tail || key_tail=""
       key="${key}${key_tail}"
     fi
 
@@ -782,6 +1709,23 @@ deployment_tui_select_port_policy() {
   printf '\033[2J\033[H'
 }
 
+deployment_image_source_example_tag() {
+  local source="$1"
+  local version="${DEPLOYMENT_APP_VERSION:-${APP_VERSION:-latest}}"
+  local prefix="nexent"
+
+  case "$source" in
+    mainland)
+      prefix="ccr.ccs.tencentyun.com/nexent-hub"
+      ;;
+    local-latest)
+      version="latest"
+      ;;
+  esac
+
+  printf '%s/nexent:%s' "$prefix" "$version"
+}
+
 deployment_tui_select_image_source() {
   [ -t 0 ] || return 0
   [ -n "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ] && return 0
@@ -789,9 +1733,9 @@ deployment_tui_select_image_source() {
 
   local sources=(general mainland local-latest)
   local details=(
-    "pull images from standard public registries"
-    "pull from mainland China mirrors for better access in mainland networks"
-    "use locally built Nexent :latest images and avoid pulling app images"
+    "$(deployment_image_source_example_tag general)"
+    "$(deployment_image_source_example_tag mainland)"
+    "$(deployment_image_source_example_tag local-latest)"
   )
   local cursor=0
   local i key key_tail
@@ -805,10 +1749,9 @@ deployment_tui_select_image_source() {
 
   deployment_tui_render_image_source() {
     printf '\033[2J\033[H'
-    printf 'Select image source\n'
-    printf 'This controls where deployment images come from.\n'
-    printf 'Use local-latest only after building Nexent images locally.\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.image.title)"
+    printf '%s\n' "$(deployment_i18n tui.image.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
     local row marker radio
     for row in "${!sources[@]}"; do
       marker=" "
@@ -829,7 +1772,7 @@ deployment_tui_select_image_source() {
     fi
 
     if [ "$key" = $'\033' ]; then
-      IFS= read -rsn2 -t 0.1 key_tail || key_tail=""
+      IFS= read -rsn2 -t 1 key_tail || key_tail=""
       key="${key}${key_tail}"
     fi
 
@@ -859,6 +1802,81 @@ deployment_tui_select_image_source() {
 
 }
 
+deployment_tui_select_sandbox_mode() {
+  [ -t 0 ] || return 0
+  [ -n "${DEPLOYMENT_SANDBOX_MODE_EXPLICIT:-}" ] && return 0
+  [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
+
+  local modes=(disabled lightweight full)
+  local details=(
+    "$(deployment_i18n tui.sandbox.disabled)"
+    "$(deployment_i18n tui.sandbox.lightweight)"
+    "$(deployment_i18n tui.sandbox.full)"
+  )
+  local cursor=1
+  local i key key_tail
+
+  for i in "${!modes[@]}"; do
+    if [ "${modes[$i]}" = "$DEPLOYMENT_SANDBOX_MODE" ]; then
+      cursor="$i"
+      break
+    fi
+  done
+
+  deployment_tui_render_sandbox_mode() {
+    printf '\033[2J\033[H'
+    printf '%s\n' "$(deployment_i18n tui.sandbox.title)"
+    printf '%s\n' "$(deployment_i18n tui.sandbox.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
+    local row marker radio
+    for row in "${!modes[@]}"; do
+      marker=" "
+      [ "$row" -eq "$cursor" ] && marker=">"
+      radio=" "
+      [ "$row" -eq "$cursor" ] && radio="*"
+      printf '%s (%s) %s - %s\n' "$marker" "$radio" "${modes[$row]}" "${details[$row]}"
+    done
+  }
+
+  printf '\033[?25l'
+  while true; do
+    deployment_tui_render_sandbox_mode
+    IFS= read -rsn1 key || key=""
+    if [ -z "$key" ]; then
+      DEPLOYMENT_SANDBOX_MODE="${modes[$cursor]}"
+      break
+    fi
+
+    if [ "$key" = $'\033' ]; then
+      IFS= read -rsn2 -t 1 key_tail || key_tail=""
+      key="${key}${key_tail}"
+    fi
+
+    case "$key" in
+      $'\033[A'|k|K)
+        cursor=$((cursor - 1))
+        [ "$cursor" -lt 0 ] && cursor=$((${#modes[@]} - 1))
+        ;;
+      $'\033[B'|j|J)
+        cursor=$((cursor + 1))
+        [ "$cursor" -ge "${#modes[@]}" ] && cursor=0
+        ;;
+      q|Q)
+        deployment_tui_cancel
+        return $?
+        ;;
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          deployment_tui_back
+          return $?
+        fi
+        ;;
+    esac
+  done
+  printf '\033[?25h'
+  printf '\033[2J\033[H'
+}
+
 deployment_tui_step_should_run() {
   local step="$1"
   [ -t 0 ] || return 1
@@ -874,7 +1892,15 @@ deployment_tui_step_should_run() {
       [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
     3)
+      [ "${DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED:-false}" = "true" ] && \
+        [ -z "${DEPLOYMENT_SANDBOX_MODE_EXPLICIT:-}" ] && \
+        [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    4)
       deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ -z "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    5)
+      [ -z "${DEPLOYMENT_HTTPS_MODE_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
     *)
       return 1
@@ -885,14 +1911,14 @@ deployment_tui_step_should_run() {
 deployment_tui_next_step() {
   local step="$1"
   step=$((step + 1))
-  while [ "$step" -lt 4 ]; do
+  while [ "$step" -lt 6 ]; do
     if deployment_tui_step_should_run "$step"; then
       printf '%s' "$step"
       return 0
     fi
     step=$((step + 1))
   done
-  printf '4'
+  printf '6'
 }
 
 deployment_tui_previous_step() {
@@ -911,12 +1937,22 @@ deployment_tui_previous_step() {
 deployment_run_tui_configuration() {
   local step=0
   local result=0
+  local config_mode="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
+  if [ "$config_mode" = "defaults" ]; then
+    return 0
+  fi
+
+  if { [ "$config_mode" = "tui" ] || [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; } && [ ! -t 0 ]; then
+    deployment_error "Interactive deployment configuration requires a TTY."
+    return 1
+  fi
 
   if ! deployment_tui_step_should_run "$step"; then
     step="$(deployment_tui_next_step "$step")"
   fi
 
-  while [ "$step" -lt 4 ]; do
+  while [ "$step" -lt 6 ]; do
     case "$step" in
       0)
         deployment_ensure_required_components
@@ -933,7 +1969,15 @@ deployment_run_tui_configuration() {
         result=$?
         ;;
       3)
+        deployment_tui_select_sandbox_mode
+        result=$?
+        ;;
+      4)
         deployment_tui_select_monitoring_provider
+        result=$?
+        ;;
+      5)
+        deployment_tui_select_https_mode
         result=$?
         ;;
       *)
@@ -959,26 +2003,43 @@ deployment_run_tui_configuration() {
 }
 
 deployment_maybe_select_local_config() {
+  local config_mode="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
+  case "$config_mode" in
+    ""|defaults|tui)
+      ;;
+    *)
+      deployment_error "Unsupported NEXENT_DEPLOY_CONFIG_MODE: $config_mode. Use defaults or tui."
+      return 1
+      ;;
+  esac
+
   [ -f "$DEPLOYMENT_LOCAL_CONFIG_PATH" ] || return 0
-  if [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
+  if [ "$config_mode" = "defaults" ] || [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
+    return 0
+  fi
+  if [ "$config_mode" = "tui" ] || [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
     deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
     return 0
   fi
-  if [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
-    DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
+  if [ ! -t 0 ]; then
+    # Non-interactive callers cannot answer the prompt; apply the saved
+    # config so a re-run keeps previous choices instead of silently
+    # resetting them back to defaults.
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
     return 0
   fi
-  [ -t 0 ] || return 0
 
-  deployment_log "Existing deployment config found: $DEPLOYMENT_LOCAL_CONFIG_PATH"
-  deployment_log "Choose how to handle saved deployment options:"
-  deployment_log "  1) Use local config - skip the menus and reuse the saved components, port policy, image source, and monitoring provider."
-  deployment_log "  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them."
-  deployment_log "     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope."
+  deployment_log "$(deployment_i18n local_config.found "$DEPLOYMENT_LOCAL_CONFIG_PATH")"
+  deployment_log "$(deployment_i18n local_config.choose)"
+  deployment_log "$(deployment_i18n local_config.use)"
+  deployment_log "$(deployment_i18n local_config.reconfigure)"
+  deployment_log "$(deployment_i18n local_config.reconfigure_hint)"
   local input
-  read -r -p "Choose [1/2] (default: 1): " input
+  read -r -p "$(deployment_prompt prompt.choose_1_2)" input
   if [ "${input:-1}" = "1" ]; then
-    DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
   else
     DEPLOYMENT_RECONFIGURE="true"
     deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
@@ -1036,7 +2097,7 @@ deployment_compute_docker_ports() {
     ports+=(5010 5014 5011 5015 5013 3000)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
-    ports+=(5012 5555 8265)
+    ports+=(5012 5555)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
     ports+=(8000 8443 "${SUPABASE_POSTGRES_PORT:-5436}")
@@ -1067,14 +2128,41 @@ deployment_image_tag() {
   printf '%s' "${image##*:}"
 }
 
+deployment_image_rollout_checksum() {
+  local image="$1"
+  local image_id=""
+
+  if command -v docker >/dev/null 2>&1; then
+    image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+    if [ -n "$image_id" ]; then
+      deployment_sha256_string "local-image=${image}|id=${image_id}"
+      return 0
+    fi
+    deployment_warn "Local image not found: $image; same-tag image changes cannot be detected from this host."
+  else
+    deployment_warn "Docker is not available; same-tag image changes cannot be detected for $image."
+  fi
+
+  deployment_sha256_string "image-ref=${image}"
+}
+
+deployment_render_image_rollout_checksums() {
+  printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
+  printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
+  printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
+  printf '    sshImage: "%s"\n' "$(deployment_image_rollout_checksum "$OPENSSH_SERVER_IMAGE")"
+}
+
 deployment_apply_image_source() {
   local version="${DEPLOYMENT_APP_VERSION:-latest}"
+  local image_var
 
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
     export NEXENT_IMAGE="nexent/nexent:latest"
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
     export NEXENT_MCP_DOCKER_IMAGE="nexent/nexent-mcp:latest"
+    export NEXENT_SANDBOX_IMAGE="nexent/nexent-sandbox:latest"
     export OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest"
   fi
 
@@ -1082,14 +2170,83 @@ deployment_apply_image_source() {
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
+  export NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:$version}"
+  case "$DEPLOYMENT_SANDBOX_MODE" in
+    disabled)
+      export NEXENT_SANDBOX_DEFAULT_LEVEL="local"
+      if [[ "$NEXENT_SANDBOX_IMAGE" == *nexent-sandbox-full:* ]]; then
+        NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE%nexent-sandbox-full:*}nexent-sandbox:${NEXENT_SANDBOX_IMAGE##*:}"
+        export NEXENT_SANDBOX_IMAGE
+      fi
+      ;;
+    lightweight)
+      export NEXENT_SANDBOX_DEFAULT_LEVEL="docker"
+      if [[ "$NEXENT_SANDBOX_IMAGE" == *nexent-sandbox-full:* ]]; then
+        NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE%nexent-sandbox-full:*}nexent-sandbox:${NEXENT_SANDBOX_IMAGE##*:}"
+        export NEXENT_SANDBOX_IMAGE
+      fi
+      ;;
+    full)
+      export NEXENT_SANDBOX_DEFAULT_LEVEL="docker"
+      if [[ "$NEXENT_SANDBOX_IMAGE" == *nexent-sandbox:* ]]; then
+        NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE%nexent-sandbox:*}nexent-sandbox-full:${NEXENT_SANDBOX_IMAGE##*:}"
+        export NEXENT_SANDBOX_IMAGE
+      fi
+      ;;
+  esac
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
   export MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  # Nginx image for the optional HTTPS reverse proxy (docker and k8s).
+  export NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
   export OPENSSH_SERVER_IMAGE="${OPENSSH_SERVER_IMAGE:-nexent/nexent-ubuntu-terminal:$version}"
   export SUPABASE_KONG="${SUPABASE_KONG:-kong:2.8.1}"
   export SUPABASE_GOTRUE="${SUPABASE_GOTRUE:-supabase/gotrue:v2.170.0}"
   export SUPABASE_DB="${SUPABASE_DB:-supabase/postgres:15.8.1.060}"
+
+  export OTEL_COLLECTOR_IMAGE="${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.151.0}"
+  export PHOENIX_IMAGE="${PHOENIX_IMAGE:-arizephoenix/phoenix:15}"
+  export TEMPO_IMAGE="${TEMPO_IMAGE:-grafana/tempo:2.10.5}"
+  export GRAFANA_IMAGE="${GRAFANA_IMAGE:-grafana/grafana:12.4}"
+  export ZIPKIN_IMAGE="${ZIPKIN_IMAGE:-openzipkin/zipkin:latest}"
+  export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
+  export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
+  export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
+  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  export LANGFUSE_REDIS_IMAGE="${LANGFUSE_REDIS_IMAGE:-docker.io/redis:alpine}"
+  export LANGFUSE_POSTGRES_IMAGE="${LANGFUSE_POSTGRES_IMAGE:-docker.io/postgres:15-alpine}"
+
+  if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
+    for image_var in \
+      NEXENT_IMAGE \
+      NEXENT_WEB_IMAGE \
+      NEXENT_DATA_PROCESS_IMAGE \
+      NEXENT_MCP_DOCKER_IMAGE \
+      NEXENT_SANDBOX_IMAGE \
+      ELASTICSEARCH_IMAGE \
+      POSTGRESQL_IMAGE \
+      REDIS_IMAGE \
+      MINIO_IMAGE \
+      NGINX_IMAGE \
+      OPENSSH_SERVER_IMAGE \
+      SUPABASE_KONG \
+      SUPABASE_GOTRUE \
+      SUPABASE_DB \
+      OTEL_COLLECTOR_IMAGE \
+      PHOENIX_IMAGE \
+      TEMPO_IMAGE \
+      GRAFANA_IMAGE \
+      ZIPKIN_IMAGE \
+      LANGFUSE_WORKER_IMAGE \
+      LANGFUSE_WEB_IMAGE \
+      CLICKHOUSE_IMAGE \
+      LANGFUSE_MINIO_IMAGE \
+      LANGFUSE_REDIS_IMAGE \
+      LANGFUSE_POSTGRES_IMAGE; do
+      export "$image_var=$(deployment_add_image_registry_prefix "${!image_var}")"
+    done
+  fi
 }
 
 deployment_monitoring_enabled() {
@@ -1122,16 +2279,16 @@ deployment_monitoring_dashboard_url() {
       printf 'http://localhost:%s' "${ZIPKIN_PORT:-9411}"
       ;;
     k8s:phoenix|helm:phoenix)
-      printf 'http://localhost:30006'
+      printf 'http://localhost:%s' "${K8S_PHOENIX_NODE_PORT:-30006}"
       ;;
     k8s:langfuse|helm:langfuse)
-      printf 'http://localhost:30001'
+      printf 'http://localhost:%s' "${K8S_LANGFUSE_NODE_PORT:-30001}"
       ;;
     k8s:grafana|helm:grafana)
-      printf 'http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+      printf 'http://localhost:%s/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1' "${K8S_GRAFANA_NODE_PORT:-30002}"
       ;;
     k8s:zipkin|helm:zipkin)
-      printf 'http://localhost:30011'
+      printf 'http://localhost:%s' "${K8S_ZIPKIN_NODE_PORT:-30011}"
       ;;
     *:langsmith)
       printf 'https://smith.langchain.com/'
@@ -1144,12 +2301,18 @@ deployment_monitoring_dashboard_url() {
 
 deployment_render_docker_env() {
   local output_file="$1"
+  local compose_image_registry_prefix=""
+  [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && compose_image_registry_prefix="${DEPLOYMENT_IMAGE_REGISTRY_PREFIX}/"
   mkdir -p "$(dirname "$output_file")"
   {
+    printf 'DEPLOYMENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
+    printf 'NEXENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$compose_image_registry_prefix"
     printf 'NEXENT_IMAGE="%s"\n' "$NEXENT_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
+    printf 'NEXENT_SANDBOX_IMAGE="%s"\n' "$NEXENT_SANDBOX_IMAGE"
+    printf 'NEXENT_SANDBOX_DEFAULT_LEVEL="%s"\n' "$NEXENT_SANDBOX_DEFAULT_LEVEL"
     printf 'ELASTICSEARCH_IMAGE="%s"\n' "$ELASTICSEARCH_IMAGE"
     printf 'POSTGRESQL_IMAGE="%s"\n' "$POSTGRESQL_IMAGE"
     printf 'REDIS_IMAGE="%s"\n' "$REDIS_IMAGE"
@@ -1158,10 +2321,21 @@ deployment_render_docker_env() {
     printf 'SUPABASE_KONG="%s"\n' "$SUPABASE_KONG"
     printf 'SUPABASE_GOTRUE="%s"\n' "$SUPABASE_GOTRUE"
     printf 'SUPABASE_DB="%s"\n' "$SUPABASE_DB"
-    printf 'ENABLE_TELEMETRY="%s"\n' "$(deployment_monitoring_enabled)"
-    printf 'MONITORING_PROVIDER="%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
-    printf 'MONITORING_DASHBOARD_URL="%s"\n' "$(deployment_monitoring_dashboard_url docker)"
+    printf 'OTEL_COLLECTOR_IMAGE="%s"\n' "$OTEL_COLLECTOR_IMAGE"
+    printf 'PHOENIX_IMAGE="%s"\n' "$PHOENIX_IMAGE"
+    printf 'TEMPO_IMAGE="%s"\n' "$TEMPO_IMAGE"
+    printf 'GRAFANA_IMAGE="%s"\n' "$GRAFANA_IMAGE"
+    printf 'ZIPKIN_IMAGE="%s"\n' "$ZIPKIN_IMAGE"
+    printf 'LANGFUSE_WORKER_IMAGE="%s"\n' "$LANGFUSE_WORKER_IMAGE"
+    printf 'LANGFUSE_WEB_IMAGE="%s"\n' "$LANGFUSE_WEB_IMAGE"
+    printf 'CLICKHOUSE_IMAGE="%s"\n' "$CLICKHOUSE_IMAGE"
+    printf 'LANGFUSE_MINIO_IMAGE="%s"\n' "$LANGFUSE_MINIO_IMAGE"
+    printf 'LANGFUSE_REDIS_IMAGE="%s"\n' "$LANGFUSE_REDIS_IMAGE"
+    printf 'LANGFUSE_POSTGRES_IMAGE="%s"\n' "$LANGFUSE_POSTGRES_IMAGE"
   } > "$output_file"
+  # Generated values may embed TLS private keys and other secrets; restrict
+  # permissions so the default umask does not leave them world-readable.
+  chmod 600 "$output_file"
 }
 
 deployment_render_component_values() {
@@ -1177,7 +2351,7 @@ deployment_render_component_values() {
 
 deployment_render_image_values() {
   local local_pull_policy="IfNotPresent"
-  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
+  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && [ -z "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && local_pull_policy="Never"
 
   printf 'nexent-config:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
@@ -1209,6 +2383,7 @@ deployment_render_image_values() {
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_DB")" "$(deployment_image_tag "$SUPABASE_DB")"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
+  printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
 }
 
 deployment_render_k8s_port_values() {
@@ -1218,8 +2393,22 @@ deployment_render_k8s_port_values() {
     internal_type="NodePort"
   fi
 
+  local web_type="NodePort"
+  local web_port_input="${NEXENT_WEB_PORT:-}"
+  local https_port_input="${NEXENT_HTTPS_PORT:-}"
+  deployment_validate_nodeport_range "$web_port_input" "NEXENT_WEB_PORT" || return 1
+  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
+    deployment_validate_nodeport_range "$https_port_input" "NEXENT_HTTPS_PORT" || return 1
+  fi
+  local web_node_port="${NEXENT_WEB_PORT:-30000}"
+  local https_node_port="${NEXENT_HTTPS_PORT:-31000}"
   printf 'nexent-web:\n'
-  printf '  services:\n    web:\n      type: "NodePort"\n      nodePort: 30000\n'
+  printf '  services:\n    web:\n      type: "%s"\n      nodePort: %s\n' "$web_type" "$web_node_port"
+  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
+    printf 'nexent-nginx:\n'
+    printf '  enabled: true\n'
+    printf '  services:\n    nginx:\n      type: "NodePort"\n      entryPort: %s\n      nodePort: %s\n' "$https_node_port" "$https_node_port"
+  fi
   printf 'nexent-northbound:\n'
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
   printf 'nexent-config:\n'
@@ -1229,7 +2418,7 @@ deployment_render_k8s_port_values() {
   printf 'nexent-mcp:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-data-process:\n'
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n      rayDashboard: 30265\n' "$internal_type"
+  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n' "$internal_type"
   printf 'nexent-elasticsearch:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30920\n      transport: 30930\n' "$internal_type"
   printf 'nexent-postgresql:\n'
@@ -1259,7 +2448,8 @@ deployment_render_helm_chart_values() {
   local local_pull_policy="IfNotPresent"
   local northbound_type="NodePort"
   local internal_type="ClusterIP"
-  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
+  local web_type="NodePort"
+  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && [ -z "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && local_pull_policy="Never"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
     internal_type="NodePort"
   fi
@@ -1283,11 +2473,11 @@ deployment_render_helm_chart_values() {
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
-  printf '  services:\n    web:\n      type: "NodePort"\n      nodePort: 30000\n'
+  printf '  services:\n    web:\n      type: "%s"\n      nodePort: %s\n' "$web_type" "${NEXENT_WEB_PORT:-30000}"
   printf 'nexent-data-process:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled data-process)"
   printf '  images:\n    dataProcess:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_DATA_PROCESS_IMAGE")" "$(deployment_image_tag "$NEXENT_DATA_PROCESS_IMAGE")" "$local_pull_policy"
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n      rayDashboard: 30265\n' "$internal_type"
+  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n' "$internal_type"
   printf 'nexent-elasticsearch:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled infrastructure)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$ELASTICSEARCH_IMAGE")" "$(deployment_image_tag "$ELASTICSEARCH_IMAGE")"
@@ -1307,6 +2497,21 @@ deployment_render_helm_chart_values() {
   printf 'nexent-openssh:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled terminal)"
   printf '  images:\n    openssh:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$OPENSSH_SERVER_IMAGE")" "$(deployment_image_tag "$OPENSSH_SERVER_IMAGE")" "$local_pull_policy"
+  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
+    printf 'nexent-nginx:\n'
+    printf '  enabled: true\n'
+    printf '  images:\n    nginx:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$NGINX_IMAGE")" "$(deployment_image_tag "$NGINX_IMAGE")"
+    printf '  services:\n    nginx:\n      type: "NodePort"\n      entryPort: %s\n      nodePort: %s\n' "${NEXENT_HTTPS_PORT:-31000}" "${NEXENT_HTTPS_PORT:-31000}"
+    if [ -r "${DEPLOYMENT_HTTPS_CERT_PATH:-}" ] && [ -r "${DEPLOYMENT_HTTPS_KEY_PATH:-}" ]; then
+      printf '  tls:\n'
+      # Render PEM contents as a YAML literal block: multi-line certificates
+      # cannot be safely quoted on a single line.
+      printf '    cert: |\n'
+      sed 's/^/      /' "$DEPLOYMENT_HTTPS_CERT_PATH"
+      printf '    key: |\n'
+      sed 's/^/      /' "$DEPLOYMENT_HTTPS_KEY_PATH"
+    fi
+  fi
   printf 'nexent-supabase-kong:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_KONG")" "$(deployment_image_tag "$SUPABASE_KONG")"
@@ -1314,6 +2519,7 @@ deployment_render_helm_chart_values() {
   printf 'nexent-supabase-auth:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_GOTRUE")" "$(deployment_image_tag "$SUPABASE_GOTRUE")"
+  printf '  initImage:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$POSTGRESQL_IMAGE")" "$(deployment_image_tag "$POSTGRESQL_IMAGE")"
   printf '  service:\n    type: "%s"\n    nodePort: 30999\n' "$internal_type"
   printf 'nexent-supabase-db:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
@@ -1321,6 +2527,162 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30436\n' "$internal_type"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
+  printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
+}
+
+deployment_yaml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+deployment_render_helm_monitoring_global_values() {
+  local enabled
+  enabled="$(deployment_monitoring_enabled)"
+
+  printf '  monitoring:\n'
+  printf '    enabled: %s\n' "$enabled"
+  printf '    provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '    dashboardUrl: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_URL "$(deployment_monitoring_dashboard_url k8s)")")"
+  printf '    dashboardAllowedRoles: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_ALLOWED_ROLES "SU,SPEED")")"
+  printf '    projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROJECT_NAME "nexent")")"
+  printf '    serviceName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_SERVICE_NAME "nexent-backend")")"
+  printf '    otlpEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_ENDPOINT "http://nexent-otel-collector:4318")")"
+  printf '    otlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "")")"
+  printf '    otlpMetricsEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENDPOINT "")")"
+  printf '    otlpProtocol: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_PROTOCOL "http")")"
+  printf '    otlpHeaders: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_HEADERS "")")"
+  printf '    otlpAuthorization: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_AUTHORIZATION "")")"
+  printf '    otlpApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_X_API_KEY "")")"
+  printf '    otlpLangfuseIngestionVersion: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION "")")"
+  printf '    langsmithApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_API_KEY "")")"
+  printf '    langsmithProject: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_PROJECT "nexent")")"
+  printf '    langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
+  printf '    otlpMetricsEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENABLED "true")")"
+  printf '    instrumentRequests: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_INSTRUMENT_REQUESTS "false")")"
+  printf '    fastapiIncludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_INCLUDED_URLS "/agent/run,/conversation/generate_title,/nb/v1/generate_title")")"
+  printf '    fastapiExcludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDED_URLS "")")"
+  printf '    fastapiExcludeSpans: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDE_SPANS "receive,send")")"
+  printf '    telemetrySampleRate: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TELEMETRY_SAMPLE_RATE "1.0")")"
+  printf '    traceContentMode: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_CONTENT_MODE "full")")"
+  printf '    traceMaxChars: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_CHARS "4000")")"
+  printf '    traceMaxItems: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_ITEMS "20")")"
+}
+
+deployment_render_monitoring_image_value() {
+  local key="$1"
+  local repository="$2"
+  local tag="$3"
+  local image
+  image="$(deployment_add_image_registry_prefix "${repository}:${tag}")"
+
+  printf '    %s:\n' "$key"
+  printf '      repository: %s\n' "$(deployment_yaml_quote "$(deployment_image_repo "$image")")"
+  printf '      tag: %s\n' "$(deployment_yaml_quote "$(deployment_image_tag "$image")")"
+}
+
+deployment_render_helm_monitoring_chart_values() {
+  local enabled
+  local langfuse_nextauth_url
+  local otel_collector_tag
+  local phoenix_tag
+  local tempo_tag
+  local grafana_tag
+  local zipkin_tag
+  local langfuse_tag
+  local clickhouse_tag
+  local minio_tag
+  local redis_tag
+  local postgres_tag
+  enabled="$(deployment_monitoring_enabled)"
+  langfuse_nextauth_url="$(deployment_monitoring_env_value K8S_LANGFUSE_NEXTAUTH_URL "http://localhost:${K8S_LANGFUSE_NODE_PORT:-30001}")"
+  otel_collector_tag="$(deployment_monitoring_env_value OTEL_COLLECTOR_VERSION "0.151.0")"
+  phoenix_tag="$(deployment_monitoring_env_value PHOENIX_VERSION "15")"
+  tempo_tag="$(deployment_monitoring_env_value TEMPO_VERSION "2.10.5")"
+  grafana_tag="$(deployment_monitoring_env_value GRAFANA_VERSION "12.4")"
+  zipkin_tag="$(deployment_monitoring_env_value ZIPKIN_VERSION "latest")"
+  langfuse_tag="$(deployment_monitoring_env_value LANGFUSE_VERSION "3")"
+  clickhouse_tag="$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")"
+  minio_tag="$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")"
+  redis_tag="$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")"
+  postgres_tag="$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")"
+
+  printf 'nexent-monitoring:\n'
+  printf '  enabled: %s\n' "$enabled"
+  printf '  provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '  images:\n'
+  deployment_render_monitoring_image_value otelCollector otel/opentelemetry-collector-contrib "$otel_collector_tag"
+  deployment_render_monitoring_image_value phoenix arizephoenix/phoenix "$phoenix_tag"
+  deployment_render_monitoring_image_value tempo grafana/tempo "$tempo_tag"
+  deployment_render_monitoring_image_value grafana grafana/grafana "$grafana_tag"
+  deployment_render_monitoring_image_value zipkin openzipkin/zipkin "$zipkin_tag"
+  deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
+  deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
+  deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
+  deployment_render_monitoring_image_value minio quay.io/minio/minio "$minio_tag"
+  deployment_render_monitoring_image_value redis docker.io/redis "$redis_tag"
+  deployment_render_monitoring_image_value postgres docker.io/postgres "$postgres_tag"
+  printf '  collector:\n'
+  printf '    configFile: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_CONFIG_FILE "$(deployment_monitoring_collector_config_file k8s "$DEPLOYMENT_MONITORING_PROVIDER")")")"
+  printf '    service:\n'
+  printf '      grpcPort: %s\n' "$(deployment_monitoring_env_value OTEL_COLLECTOR_GRPC_PORT "4317")"
+  printf '      httpPort: %s\n' "$(deployment_monitoring_env_value OTEL_COLLECTOR_HTTP_PORT "4318")"
+  printf '    env:\n'
+  printf '      langsmithApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_API_KEY "")")"
+  printf '      langsmithProject: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_PROJECT "nexent")")"
+  printf '      langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
+  printf '      langfuseOtlpAuthHeader: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_OTLP_AUTH_HEADER "")")"
+  printf '  phoenix:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value PHOENIX_PORT "6006")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_PHOENIX_NODE_PORT "30006")"
+  printf '  grafana:\n'
+  printf '    adminUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_USER "admin")")"
+  printf '    adminPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_PASSWORD "nexent@4321")")"
+  printf '    defaultLanguage: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_DEFAULT_LANGUAGE "zh-Hans")")"
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value GRAFANA_PORT "3002")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_GRAFANA_NODE_PORT "30002")"
+  printf '  tempo:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value TEMPO_PORT "3200")"
+  printf '  zipkin:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value ZIPKIN_PORT "9411")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_ZIPKIN_NODE_PORT "30011")"
+  printf '  langfuse:\n'
+  printf '    nextauthUrl: %s\n' "$(deployment_yaml_quote "$langfuse_nextauth_url")"
+  printf '    nextauthSecret: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_NEXTAUTH_SECRET "nexent-langfuse-secret")")"
+  printf '    salt: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_SALT "nexent-langfuse-salt")")"
+  printf '    encryptionKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_ENCRYPTION_KEY "0000000000000000000000000000000000000000000000000000000000000000")")"
+  printf '    telemetryEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_TELEMETRY_ENABLED "false")")"
+  printf '    enableExperimentalFeatures: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES "false")")"
+  printf '    init:\n'
+  printf '      orgId: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_ORG_ID "nexent")")"
+  printf '      orgName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_ORG_NAME "Nexent")")"
+  printf '      projectId: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_ID "nexent")")"
+  printf '      projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_NAME "Nexent")")"
+  printf '      projectPublicKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_PUBLIC_KEY "pk-lf-nexent-local")")"
+  printf '      projectSecretKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_SECRET_KEY "sk-lf-nexent-local")")"
+  printf '      userEmail: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_EMAIL "admin@nexent.com")")"
+  printf '      userName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_NAME "admin")")"
+  printf '      userPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_PASSWORD "nexent@4321")")"
+  printf '    service:\n'
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_LANGFUSE_NODE_PORT "30001")"
+  printf '    postgres:\n'
+  printf '      user: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_USER "postgres")")"
+  printf '      password: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_PASSWORD "nexent@4321")")"
+  printf '      database: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_DB "postgres")")"
+  printf '    clickhouse:\n'
+  printf '      user: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_USER "clickhouse")")"
+  printf '      password: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_PASSWORD "clickhouse")")"
+  printf '    minio:\n'
+  printf '      rootUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_ROOT_USER "minio")")"
+  printf '      rootPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_ROOT_PASSWORD "miniosecret")")"
+  printf '      bucket: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_S3_BUCKET "langfuse")")"
+  printf '    redis:\n'
+  printf '      auth: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_REDIS_AUTH "myredissecret")")"
 }
 
 deployment_render_helm_values() {
@@ -1338,21 +2700,10 @@ deployment_render_helm_values() {
     fi
     printf '  portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf '  imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
-    printf '  monitoring:\n'
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-      printf '    enabled: true\n'
-    else
-      printf '    enabled: false\n'
-    fi
-    printf '    provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
-    printf '    dashboardUrl: "%s"\n' "$(deployment_monitoring_dashboard_url k8s)"
-    printf 'nexent-monitoring:\n'
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-      printf '  enabled: true\n'
-    else
-      printf '  enabled: false\n'
-    fi
-    printf '  provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    printf '  sandboxMode: "%s"\n' "$DEPLOYMENT_SANDBOX_MODE"
+    printf '  imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
+    deployment_render_helm_monitoring_global_values
+    deployment_render_helm_monitoring_chart_values
     deployment_render_helm_chart_values
   } > "$output_file"
 }
@@ -1362,7 +2713,6 @@ deployment_persist_local_config() {
   mkdir -p "$(dirname "$output_file")"
   {
     printf 'schemaVersion: "%s"\n' "$DEPLOYMENT_SCHEMA_VERSION"
-    printf 'appVersion: "%s"\n' "$DEPLOYMENT_APP_VERSION"
     printf 'components:\n'
     local old_ifs="$IFS"
     IFS=','
@@ -1374,36 +2724,73 @@ deployment_persist_local_config() {
     IFS="$old_ifs"
     printf 'portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf 'imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
+    printf 'sandboxMode: "%s"\n' "$DEPLOYMENT_SANDBOX_MODE"
+    printf 'imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     printf 'monitoringProvider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    printf 'httpsMode: "%s"\n' "$DEPLOYMENT_HTTPS_MODE"
+    if [ "$DEPLOYMENT_HTTPS_MODE" = "custom" ]; then
+      printf 'httpsCertFile: "%s"\n' "$DEPLOYMENT_HTTPS_CERT_FILE"
+      printf 'httpsKeyFile: "%s"\n' "$DEPLOYMENT_HTTPS_KEY_FILE"
+    fi
+    if [ "$DEPLOYMENT_HTTPS_MODE" = "self-signed" ] && [ -n "$DEPLOYMENT_HTTPS_SAN" ]; then
+      printf 'httpsSan: "%s"\n' "$DEPLOYMENT_HTTPS_SAN"
+    fi
   } > "$output_file"
 }
 
 deployment_print_summary() {
   local target="${1:-all}"
+  local https_entry_port="${NEXENT_HTTPS_PORT:-3100}"
+  [ "$target" = "k8s" ] && https_entry_port="${NEXENT_HTTPS_PORT:-31000}"
 
-  deployment_log "Deployment components: $DEPLOYMENT_COMPONENTS"
-  deployment_log "Port policy: $DEPLOYMENT_PORT_POLICY"
-  deployment_log "Image source: $DEPLOYMENT_IMAGE_SOURCE"
+  deployment_log "$(deployment_i18n summary.components "$DEPLOYMENT_COMPONENTS")"
+  deployment_log "$(deployment_i18n summary.port_policy "$DEPLOYMENT_PORT_POLICY")"
+  deployment_log "$(deployment_i18n summary.image_source "$DEPLOYMENT_IMAGE_SOURCE")"
+  deployment_log "$(deployment_i18n summary.sandbox_mode "$DEPLOYMENT_SANDBOX_MODE")"
+  if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
+    deployment_log "$(deployment_i18n summary.image_registry_prefix "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
+  fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    deployment_log "Monitoring provider: $DEPLOYMENT_MONITORING_PROVIDER"
+    deployment_log "$(deployment_i18n summary.monitoring_provider "$DEPLOYMENT_MONITORING_PROVIDER")"
+  fi
+  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
+    deployment_log "$(deployment_i18n summary.https_mode "$DEPLOYMENT_HTTPS_MODE")"
+    local https_cert_file="${DEPLOYMENT_HTTPS_CERT_FILE:-}"
+    if [ "$DEPLOYMENT_HTTPS_MODE" = "self-signed" ] && [ -n "${DEPLOYMENT_HTTPS_CERT_PATH:-}" ]; then
+      https_cert_file="$DEPLOYMENT_HTTPS_CERT_PATH"
+    fi
+    if [ -n "$https_cert_file" ] && [ -r "$https_cert_file" ]; then
+      local cert_subject cert_end
+      cert_subject="$(openssl x509 -in "$https_cert_file" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+      cert_end="$(openssl x509 -in "$https_cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)"
+      [ -n "$cert_subject" ] && deployment_log "$(deployment_i18n summary.https_cert_subject "$cert_subject")"
+      [ -n "$cert_end" ] && deployment_log "$(deployment_i18n summary.https_cert_expiry "$cert_end")"
+    fi
+    if [ "$DEPLOYMENT_HTTPS_MODE" = "self-signed" ]; then
+      [ -n "${DEPLOYMENT_HTTPS_SAN_RESOLVED:-}" ] && deployment_log "$(deployment_i18n summary.https_san "$DEPLOYMENT_HTTPS_SAN_RESOLVED")"
+      deployment_log "$(deployment_i18n summary.https_self_signed_warning)"
+    fi
+    deployment_log "$(deployment_i18n summary.https_entry "https://<host>:${https_entry_port}")"
   fi
   case "$target" in
     docker)
-      deployment_log "Docker services: $DEPLOYMENT_SELECTED_DOCKER_SERVICES"
-      deployment_log "Docker published ports: $DEPLOYMENT_DOCKER_PORTS"
+      deployment_log "$(deployment_i18n summary.docker_services "$DEPLOYMENT_SELECTED_DOCKER_SERVICES")"
+      deployment_log "$(deployment_i18n summary.docker_ports "$DEPLOYMENT_DOCKER_PORTS")"
       ;;
     k8s|helm)
-      deployment_log "Helm charts: $DEPLOYMENT_SELECTED_HELM_CHARTS"
+      deployment_log "$(deployment_i18n summary.helm_charts "$DEPLOYMENT_SELECTED_HELM_CHARTS")"
       ;;
     *)
-      deployment_log "Docker services: $DEPLOYMENT_SELECTED_DOCKER_SERVICES"
-      deployment_log "Helm charts: $DEPLOYMENT_SELECTED_HELM_CHARTS"
-      deployment_log "Docker published ports: $DEPLOYMENT_DOCKER_PORTS"
+      deployment_log "$(deployment_i18n summary.docker_services "$DEPLOYMENT_SELECTED_DOCKER_SERVICES")"
+      deployment_log "$(deployment_i18n summary.helm_charts "$DEPLOYMENT_SELECTED_HELM_CHARTS")"
+      deployment_log "$(deployment_i18n summary.docker_ports "$DEPLOYMENT_DOCKER_PORTS")"
       ;;
   esac
 }
 
 deployment_prepare_config() {
+  local NEXENT_DEPLOY_CONFIG_MODE="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
   deployment_init_defaults
 
   local raw_args=("$@")
@@ -1413,9 +2800,19 @@ deployment_prepare_config() {
       --components) DEPLOYMENT_COMPONENTS_EXPLICIT="true" ;;
       --port-policy) DEPLOYMENT_PORT_POLICY_EXPLICIT="true" ;;
       --image-source) DEPLOYMENT_IMAGE_SOURCE_EXPLICIT="true" ;;
+      --sandbox-mode) DEPLOYMENT_SANDBOX_MODE_EXPLICIT="true" ;;
       --registry-profile) DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT="true" ;;
+      --image-registry-prefix|--registry-prefix|--image-registry) DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT="true" ;;
       --app-version|--version) DEPLOYMENT_APP_VERSION_EXPLICIT="true" ;;
       --monitoring-provider) DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT="true" ;;
+      --https-mode) DEPLOYMENT_HTTPS_MODE_EXPLICIT="true" ;;
+      --https-cert-file) DEPLOYMENT_HTTPS_CERT_FILE_EXPLICIT="true" ;;
+      --https-key-file) DEPLOYMENT_HTTPS_KEY_FILE_EXPLICIT="true" ;;
+      --https-key-passphrase) DEPLOYMENT_HTTPS_KEY_PASSPHRASE_EXPLICIT="true" ;;
+      --https-san) DEPLOYMENT_HTTPS_SAN_EXPLICIT="true" ;;
+      --config) DEPLOYMENT_RECONFIGURE="true" ;;
+      --reconfigure) DEPLOYMENT_RECONFIGURE="true" ;;
+      --defaults) DEPLOYMENT_RECONFIGURE="false" ;;
       --rotate-secrets) DEPLOYMENT_ROTATE_SECRETS="true" ;;
       --refresh-es-key) DEPLOYMENT_REFRESH_ES_KEY="true" ;;
     esac
@@ -1425,10 +2822,7 @@ deployment_prepare_config() {
   if [ -n "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ]; then
     DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_REGISTRY_PROFILE"
   fi
-  deployment_maybe_select_local_config
-  if [ -n "$DEPLOYMENT_CONFIG_PATH" ] && [ "$DEPLOYMENT_RECONFIGURE" != "true" ]; then
-    deployment_load_config_file "$DEPLOYMENT_CONFIG_PATH" || return 1
-  fi
+  deployment_maybe_select_local_config || return 1
   deployment_apply_legacy_inputs
   deployment_parse_common_args "$@"
   if [ -n "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ]; then
@@ -1439,6 +2833,213 @@ deployment_prepare_config() {
   deployment_run_tui_configuration || tui_result=$?
   [ "$tui_result" -eq 0 ] || return "$tui_result"
   deployment_normalize_image_source || return 1
+  deployment_normalize_image_registry_prefix
   deployment_validate || return 1
+  if [ "$DEPLOYMENT_HTTPS_MODE" = "custom" ]; then
+    deployment_https_validate_cert_pair || return 1
+  fi
   deployment_compute_selection
+}
+deployment_https_is_ipv4() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+deployment_https_detect_san_addresses() {
+  # Auto-detect host NIC addresses (filter lo / docker0 / veth* / br-*) and hostname.
+  local addresses=""
+  local interface address
+  if command -v ip >/dev/null 2>&1; then
+    # Prefer the Linux-standard "ip" tool: one line per address, stable format.
+    while IFS=' ' read -r interface address; do
+      [ -z "$interface" ] && continue
+      case "$interface" in
+        lo|docker0|veth*|br-*|virbr*) continue ;;
+      esac
+      [ -n "$address" ] && addresses="$(deployment_join_csv "$addresses" "$address")"
+    done < <(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}' | sed 's|/.*||')
+  else
+    # ifconfig fallback; strip the optional "addr:" prefix (net-tools legacy
+    # format) so both "inet 1.2.3.4" and "inet addr:1.2.3.4" yield the address.
+    while IFS=' ' read -r interface address; do
+      [ -z "$interface" ] && continue
+      case "$interface" in
+        lo|docker0|veth*|br-*) continue ;;
+      esac
+      [ -n "$address" ] && addresses="$(deployment_join_csv "$addresses" "$address")"
+    done < <(ifconfig -a 2>/dev/null | awk '/^[a-zA-Z0-9_-]+: /{iface=$1} /inet /{sub(/addr:/,"",$2); print iface" "$2}' | sed 's|/.*||')
+  fi
+  local hostname_addr
+  hostname_addr="$(hostname 2>/dev/null || true)"
+  [ -n "$hostname_addr" ] && addresses="$(deployment_join_csv "$addresses" "$hostname_addr")"
+  printf '%s' "$addresses"
+}
+
+deployment_https_build_san_entries() {
+  # Convert a comma-separated address list to openssl SAN entries (IP:/DNS: prefixes).
+  local input="$1"
+  local san_list="" cn="" item
+  local old_ifs="$IFS"
+  IFS=','
+  for item in $input; do
+    IFS="$old_ifs"
+    item="$(deployment_trim "$item")"
+    [ -z "$item" ] && continue
+    [ -z "$cn" ] && cn="$item"
+    if deployment_https_is_ipv4 "$item"; then
+      san_list="${san_list}IP:${item},"
+    else
+      san_list="${san_list}DNS:${item},"
+    fi
+    IFS=','
+  done
+  IFS="$old_ifs"
+  san_list="${san_list%,}"
+  printf '%s|%s' "$cn" "$san_list"
+}
+
+deployment_https_ensure_self_signed_cert() {
+  # Generate or reuse a self-signed cert under ROOT_DIR/nginx/ssl/.
+  local ssl_dir="$1"
+  local cert_file="$ssl_dir/server.pem"
+  local key_file="$ssl_dir/server.key"
+  local san_input="${DEPLOYMENT_HTTPS_SAN:-}"
+
+  if [ -z "$san_input" ]; then
+    san_input="$(deployment_https_detect_san_addresses)"
+  fi
+  if [ -z "$san_input" ]; then
+    san_input="localhost"
+  fi
+  DEPLOYMENT_HTTPS_SAN_RESOLVED="$san_input"
+
+  if [ -r "$cert_file" ] && [ -r "$key_file" ]; then
+    # pkey supports RSA/EC keys; -check is unavailable on LibreSSL, so only
+    # verify the key parses successfully.
+    if openssl x509 -in "$cert_file" -noout >/dev/null 2>&1 && openssl pkey -in "$key_file" -noout >/dev/null 2>&1; then
+      local reused_cert_pubkey reused_key_pubkey reused_end_date reused_epoch_end
+      reused_cert_pubkey="$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null || true)"
+      reused_key_pubkey="$(openssl pkey -in "$key_file" -pubout 2>/dev/null | openssl sha256 2>/dev/null || true)"
+      if [ -n "$reused_cert_pubkey" ] && [ "$reused_cert_pubkey" = "$reused_key_pubkey" ]; then
+        reused_end_date="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)"
+        reused_epoch_end="$(date -j -f '%b %e %H:%M:%S %Y GMT' "$reused_end_date" +%s 2>/dev/null || date -d "$reused_end_date" +%s 2>/dev/null || true)"
+        if [ -z "$reused_epoch_end" ] || [ "$reused_epoch_end" -gt "$(date +%s)" ]; then
+          DEPLOYMENT_HTTPS_CERT_PATH="$cert_file"
+          DEPLOYMENT_HTTPS_KEY_PATH="$key_file"
+          return 0
+        fi
+      fi
+    fi
+  fi
+
+  local parsed cn san_list
+  parsed="$(deployment_https_build_san_entries "$san_input")"
+  cn="${parsed%%|*}"
+  san_list="${parsed#*|}"
+  [ -z "$san_list" ] && san_list="DNS:localhost"
+
+  mkdir -p "$ssl_dir"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  cat > "$tmp_dir/openssl.cnf" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions    = v3_req
+prompt             = no
+
+[req_distinguished_name]
+CN = $cn
+
+[v3_req]
+keyUsage         = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName   = $san_list
+EOF
+  if ! openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 36159 \
+      -keyout "$key_file" -out "$cert_file" \
+      -config "$tmp_dir/openssl.cnf" -extensions v3_req >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    deployment_error "Failed to generate the self-signed certificate."
+    return 1
+  fi
+  rm -rf "$tmp_dir"
+  chmod 600 "$key_file" "$cert_file"
+  # Verify the generated SAN (works on both OpenSSL and LibreSSL: -ext is unsupported on LibreSSL).
+  if ! openssl x509 -in "$cert_file" -noout -text 2>/dev/null | grep -q "Subject Alternative Name"; then
+    deployment_error "Generated certificate is missing the Subject Alternative Name extension."
+    return 1
+  fi
+  DEPLOYMENT_HTTPS_CERT_PATH="$cert_file"
+  DEPLOYMENT_HTTPS_KEY_PATH="$key_file"
+  return 0
+}
+
+deployment_https_materialize_custom_cert() {
+  # Copy the custom cert/key into ROOT_DIR/nginx/ssl/, decrypting an
+  # encrypted private key in the process. Official nginx images do not ship
+  # the Red Hat ssl_pass_phrase_dialog patch, so nginx must receive an
+  # unencrypted key; the user's original key file is never modified.
+  local ssl_dir="$1"
+  local cert_src="$DEPLOYMENT_HTTPS_CERT_PATH"
+  local key_src="$DEPLOYMENT_HTTPS_KEY_PATH"
+  local passphrase="${DEPLOYMENT_HTTPS_KEY_PASSPHRASE:-}"
+  local cert_dst="$ssl_dir/server.pem"
+  local key_dst="$ssl_dir/server.key"
+
+  if ! mkdir -p "$ssl_dir"; then
+    deployment_error "$(deployment_i18n validation.https_materialize_failed "$ssl_dir")"
+    return 1
+  fi
+
+  if ! cp "$cert_src" "$cert_dst"; then
+    deployment_error "$(deployment_i18n validation.https_materialize_failed "$ssl_dir")"
+    return 1
+  fi
+
+  if [ -n "$passphrase" ]; then
+    # Decrypt the key copy; the source file stays untouched.
+    if ! openssl pkey -in "$key_src" -out "$key_dst" -passin "pass:$passphrase" 2>/dev/null; then
+      rm -f "$cert_dst"
+      deployment_error "$(deployment_i18n validation.https_passphrase_wrong)"
+      return 1
+    fi
+  else
+    if ! cp "$key_src" "$key_dst"; then
+      rm -f "$cert_dst"
+      deployment_error "$(deployment_i18n validation.https_materialize_failed "$ssl_dir")"
+      return 1
+    fi
+  fi
+  chmod 600 "$cert_dst" "$key_dst"
+
+  DEPLOYMENT_HTTPS_CERT_PATH="$cert_dst"
+  DEPLOYMENT_HTTPS_KEY_PATH="$key_dst"
+  return 0
+}
+
+deployment_https_prepare() {
+  # Entry point: prepare certificates before deployment.
+  case "$DEPLOYMENT_HTTPS_MODE" in
+    disabled)
+      return 0
+      ;;
+    self-signed)
+      local ssl_dir="${ROOT_DIR:-$HOME/nexent}/nginx/ssl"
+      deployment_https_ensure_self_signed_cert "$ssl_dir" || return 1
+      ;;
+    custom)
+      DEPLOYMENT_HTTPS_CERT_PATH="$(cd "$(dirname "$DEPLOYMENT_HTTPS_CERT_FILE")" && pwd)/$(basename "$DEPLOYMENT_HTTPS_CERT_FILE")"
+      DEPLOYMENT_HTTPS_KEY_PATH="$(cd "$(dirname "$DEPLOYMENT_HTTPS_KEY_FILE")" && pwd)/$(basename "$DEPLOYMENT_HTTPS_KEY_FILE")"
+      deployment_https_materialize_custom_cert "${ROOT_DIR:-$HOME/nexent}/nginx/ssl" || return 1
+      ;;
+  esac
+  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
+    deployment_update_env_var_file "$(deployment_env_dir)/.env" "NEXENT_HTTPS_MODE" "$DEPLOYMENT_HTTPS_MODE"
+    [ -n "${DEPLOYMENT_HTTPS_SAN_RESOLVED:-}" ] && deployment_update_env_var_file "$(deployment_env_dir)/.env" "NEXENT_HTTPS_SAN" "$DEPLOYMENT_HTTPS_SAN_RESOLVED"
+    # Persist the passphrase so subsequent non-interactive runs can decrypt
+    # the same custom key without prompting again.
+    [ "$DEPLOYMENT_HTTPS_MODE" = "custom" ] && [ -n "${DEPLOYMENT_HTTPS_KEY_PASSPHRASE:-}" ] \
+      && deployment_update_env_var_file "$(deployment_env_dir)/.env" "NEXENT_HTTPS_KEY_PASSPHRASE" "$DEPLOYMENT_HTTPS_KEY_PASSPHRASE"
+  fi
+  return 0
 }

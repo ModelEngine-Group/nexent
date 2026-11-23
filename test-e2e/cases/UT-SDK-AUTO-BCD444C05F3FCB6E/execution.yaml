@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: UT-SDK-AUTO-BCD444C05F3FCB6E
+implementations:
+- framework: pytest
+  file: test.py
+  selector: UT-SDK-AUTO-BCD444C05F3FCB6E
+notes: V5 source binding migrated; runtime parity is not yet certified.

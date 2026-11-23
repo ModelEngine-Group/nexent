@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: KB-CREATE-DESCRIPTION-20261022
+  change_type: bugfix
+  bug_id: KB-CREATE-DESCRIPTION-20261022
+  title: Remove the unsupported description field from knowledge creation
+  description: Remove the creation-only description input and unused local state. Continue sending the existing localized default description and preserve summary generation and editing.
+  observed_behavior: The creation form accepts a description that the backend does not persist and the catalog does not display.
+  expected_behavior: New knowledge creation omits the unsupported description input and retains the established default description payload.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing catalog tests do not assert whether optional creation inputs are persisted; remove the unsupported field rather than introducing a new persistence contract.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-098]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: exempt
+    test_selectors: []
+    behaviors:
+      - The new-knowledge form omits the unsupported description field while retaining name, upload, embedding model and advanced settings.
+      - Creation retains its existing default description payload; knowledge summary editing is preserved.
+    reason: Presentation-only removal of a field that was never persisted; no API, database or effective persisted behavior changes. TypeScript and direct browser inspection establish removal and remaining form controls. No new test mirrors deleted markup. Existing frontend catalog and formal F-098 Cases are preserved.
+  notes: Scope and evidence at ../nexent-doc/docs/Developing/kb-create-description/design.md. Static asset validation is separate from formal Case execution.

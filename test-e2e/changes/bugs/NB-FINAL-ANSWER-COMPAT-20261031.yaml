@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: NB-FINAL-ANSWER-COMPAT-20261031
+  change_type: bugfix
+  bug_id: NB-FINAL-ANSWER-COMPAT-20261031
+  title: Restore complete final answers for legacy northbound consumers
+  description: Default northbound chat to a single complete final_answer and preserve the incremental protocol through explicit final_answer_mode=delta.
+  observed_behavior: A legacy consumer stops at the first final_answer delta, which can contain only a newline; the completion may contain no text.
+  expected_behavior: Omitted/complete mode publishes one complete root answer after successful finalization; delta preserves current answer fragments. Failures never publish a successful final answer.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing stream UT asserts fragments and optional empty completions; AGT-064 consumes the whole stream and does not verify first-answer compatibility or mode negotiation.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-146]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [NB-CHAT-FINAL-ANSWER-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Default/explicit complete returns the full first answer while process events continue streaming
+    - Explicit delta retains fragments, phases and empty completion without duplication
+    - Rollbacks, corrected answers, reclassification and child interleaving preserve the canonical root body
+    - Failed, stopped, cancelled and persistence-error runs do not publish success answers
+    - Public/internal mode validation and runtime forwarding preserve native delta defaults
+    test_selectors:
+    - test/backend/services/test_northbound_final_answer_stream.py
+    - test/backend/services/test_agent_answer_mode_propagation.py
+    - test/backend/services/test_northbound_answer_mode.py
+    - test/backend/app/test_northbound_final_answer_mode.py
+    - test/backend/app/test_agent_final_answer_mode.py
+    - test/backend/services/test_runtime_proxy_service.py::test_forward_agent_run_streams_body_and_closes_resources
+    reason: Add regressions to the owning HTTP and stream unit suites; no duplicate formal D1 is needed. D2 independently proves the deployed API contract.
+  notes: >-
+    SPEC: nexent-doc/docs/Developing/chat-northbound-final-answer-compatibility/design.md.
+    Read F-146, AGT-064 and NB-CHAT-DISCONNECT-001 plus their scripts and the existing northbound/answer UT.
+    The existing D3 cases concern retained lifecycle behavior; no producer ownership changes are planned.
+    New D2 execution requires the changed product and a reachable configured provider; missing prerequisites remain blocked.

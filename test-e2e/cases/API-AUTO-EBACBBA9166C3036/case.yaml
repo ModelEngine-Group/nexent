@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-EBACBBA9166C3036
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: GET /repository/agent/mine ownership=all/created/others 过滤与 counts 归属徽标、非法 ownership 返回 400｜接口契约
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: GET /repository/agent/mine ownership=all/created/others 过滤与 counts 归属徽标、非法 ownership 返回 400｜接口契约
+  preconditions:
+  - 本地 NEXENT 后端服务可运行并可访问 /repository/agent/mine 接口；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录；当前租户下存在当前用户创建（created_by == 当前 user_id）与其他用户创建的草稿 Agent，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 以合法 authorization 头调用 GET /repository/agent/mine?ownership=all，记录 HTTP 状态码与响应 JSON。
+    expected: ownership=all 返回 200，items 为当前租户可见草稿 Agent 列表，counts.all 等于可见 Agent 总数，且 all == created + others。
+  - order: 2
+    action: 校验响应结构含 items、counts、pagination 三个顶层字段；counts 含 all/created/others 且 all == created + others。
+    expected: ownership=created 仅返回 created_by == 当前 user_id 的 Agent；ownership=others 仅返回 created_by != 当前 user_id 的 Agent，二者无重叠。
+  - order: 3
+    action: 以 ownership=created 调用，校验 items 中每个 agent 的 created_by == 当前 user_id，且未启用 new_agent_padding 时 pagination.total
+      与 counts.created 一致。
+    expected: 非法 ownership 返回 HTTP 400，detail 包含 "Invalid ownership filter" 与允许值 all/created/others。
+  - order: 4
+    action: 以 ownership=others 调用，校验 items 中每个 agent 的 created_by != 当前 user_id，且 pagination.total 与 counts.others 一致。
+    expected: counts.created/others 与当前用户归属一致，且与对应 ownership 过滤结果的 items 数量一致。
+  - order: 5
+    action: 以非法 ownership（如 unknown）调用，校验返回 HTTP 400 且 detail 提示非法 ownership 及允许值 all/created/others。
+    expected: 分页字段正确：page_size 生效、total_pages == ceil(total/page_size)（total==0 时为 0），跨页无重复/遗漏。
+  - order: 6
+    action: 校验 counts.created/others 与当前用户归属一致，且与三组 ownership 过滤后的 items 数量一致。
+    expected: 无有效 authorization 返回 HTTP 401，不返回任何租户数据，请求无副作用、无跨租户泄露。
+  - order: 7
+    action: 校验分页字段 page/page_size/total/total_pages 语义正确；page_size 为 0 或大于 100 时返回参数校验错误（400/422）。
+    expected: 响应与日志中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 以缺失或无效 authorization 调用，校验返回 HTTP 401 且不返回任何租户数据。
+    expected: 响应与日志中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - ownership=all 返回 200，items 为当前租户可见草稿 Agent 列表，counts.all 等于可见 Agent 总数，且 all == created + others。
+  - ownership=created 仅返回 created_by == 当前 user_id 的 Agent；ownership=others 仅返回 created_by != 当前 user_id 的 Agent，二者无重叠。
+  - 非法 ownership 返回 HTTP 400，detail 包含 "Invalid ownership filter" 与允许值 all/created/others。
+  - counts.created/others 与当前用户归属一致，且与对应 ownership 过滤结果的 items 数量一致。
+  - 分页字段正确：page_size 生效、total_pages == ceil(total/page_size)（total==0 时为 0），跨页无重复/遗漏。
+  - 无有效 authorization 返回 HTTP 401，不返回任何租户数据，请求无副作用、无跨租户泄露。
+  - 响应与日志中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 513
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 以合法 authorization 头调用 GET /repository/agent/mine?ownership=all，记录 HTTP 状态码与响应 JSON。
+    - 校验响应结构含 items、counts、pagination 三个顶层字段；counts 含 all/created/others 且 all == created + others。
+    - 以 ownership=created 调用，校验 items 中每个 agent 的 created_by == 当前 user_id，且未启用 new_agent_padding 时 pagination.total 与 counts.created
+      一致。
+    - 以 ownership=others 调用，校验 items 中每个 agent 的 created_by != 当前 user_id，且 pagination.total 与 counts.others 一致。
+    - 以非法 ownership（如 unknown）调用，校验返回 HTTP 400 且 detail 提示非法 ownership 及允许值 all/created/others。
+    - 校验 counts.created/others 与当前用户归属一致，且与三组 ownership 过滤后的 items 数量一致。
+    - 校验分页字段 page/page_size/total/total_pages 语义正确；page_size 为 0 或大于 100 时返回参数校验错误（400/422）。
+    - 以缺失或无效 authorization 调用，校验返回 HTTP 401 且不返回任何租户数据。
+    response_expectations:
+    - ownership=all 返回 200，items 为当前租户可见草稿 Agent 列表，counts.all 等于可见 Agent 总数，且 all == created + others。
+    - ownership=created 仅返回 created_by == 当前 user_id 的 Agent；ownership=others 仅返回 created_by != 当前 user_id 的 Agent，二者无重叠。
+    - 非法 ownership 返回 HTTP 400，detail 包含 "Invalid ownership filter" 与允许值 all/created/others。
+    - counts.created/others 与当前用户归属一致，且与对应 ownership 过滤结果的 items 数量一致。
+    - 分页字段正确：page_size 生效、total_pages == ceil(total/page_size)（total==0 时为 0），跨页无重复/遗漏。
+    - 无有效 authorization 返回 HTTP 401，不返回任何租户数据，请求无副作用、无跨租户泄露。
+    - 响应与日志中不出现明文 API Key/Token/Password/模型密钥。

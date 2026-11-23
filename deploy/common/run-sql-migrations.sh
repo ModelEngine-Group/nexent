@@ -212,31 +212,47 @@ append_one_migration_sql() {
 
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
 \echo [sql-migrations] check $migration_id
-SELECT CASE WHEN EXISTS (
-  SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
-  WHERE migration_id = '$migration_id_escaped' AND checksum = '$checksum_escaped'
-) THEN 'true' ELSE 'false' END AS migration_checksum_matched \gset
-\if :migration_checksum_matched
-\echo [sql-migrations] skip $migration_id
+-- Refresh cascade flag from the prior file's stored value, then decide whether
+-- this file is still a no-op. A file is skipped only when:
+--   1. its checksum still matches the recorded value, AND
+--   2. no earlier file in this session was re-applied.
+-- Either condition failing means we must execute it again so the schema state
+-- stays consistent with the cumulative history of applied migrations.
+SELECT :'migration_force_rerun' AS migration_force_rerun_prev \gset
+SELECT CASE
+  WHEN :'migration_force_rerun_prev' = 'true' THEN 'false'
+  WHEN EXISTS (
+    SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
+    WHERE migration_id = '$migration_id_escaped' AND checksum = '$checksum_escaped'
+  ) THEN 'true'
+  ELSE 'false'
+END AS migration_skip_eligible \gset
+
+\if :migration_skip_eligible
+  \echo [sql-migrations] skip $migration_id
 \else
-SELECT CASE WHEN EXISTS (
-  SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
-  WHERE migration_id = '$migration_id_escaped'
-) THEN 'true' ELSE 'false' END AS migration_recorded \gset
-\if :migration_recorded
-\echo [sql-migrations] reapply $migration_id
-\else
-\echo [sql-migrations] apply $migration_id
-\endif
-\i '$source_file_escaped'
-INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
-VALUES ('$migration_id_escaped', '$checksum_escaped', 'applied', '$app_version_escaped', '$source_file_escaped')
-ON CONFLICT (migration_id) DO UPDATE SET
-  checksum = EXCLUDED.checksum,
-  status = EXCLUDED.status,
-  executed_at = now(),
-  app_version = EXCLUDED.app_version,
-  source_file = EXCLUDED.source_file;
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
+    WHERE migration_id = '$migration_id_escaped'
+  ) THEN 'true' ELSE 'false' END AS migration_recorded \gset
+  \if :migration_recorded
+    \echo [sql-migrations] reapply $migration_id
+  \else
+    \echo [sql-migrations] apply $migration_id
+  \endif
+  \i '$source_file_escaped'
+  INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
+  VALUES ('$migration_id_escaped', '$checksum_escaped', 'applied', '$app_version_escaped', '$source_file_escaped')
+  ON CONFLICT (migration_id) DO UPDATE SET
+    checksum = EXCLUDED.checksum,
+    status = EXCLUDED.status,
+    executed_at = now(),
+    app_version = EXCLUDED.app_version,
+    source_file = EXCLUDED.source_file;
+  -- Flip the cascade flag so every subsequent file force-runs regardless of
+  -- its own checksum. Once tripped, it stays tripped for the rest of this
+  -- session; only a fresh deployment with no diffs clears it.
+  SELECT 'true' AS migration_force_rerun \gset
 \endif
 SQL
 }
@@ -324,6 +340,13 @@ run_migrate_mode() {
   append_migration_table_sql
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
 SET search_path TO $SQL_SEARCH_PATH;
+
+-- Cascade flag: flipped to 'true' the first time a file is re-applied after its
+-- checksum changed. While true, every subsequent file is force-executed even
+-- if its own checksum still matches the recorded value, because prior
+-- destructive operations (DROP COLUMN / DROP TABLE / etc.) may have rolled
+-- the schema back to a state the later files were compensating against.
+SELECT 'false' AS migration_force_rerun \gset
 SQL
   append_init_sql
   append_all_migrations_sql

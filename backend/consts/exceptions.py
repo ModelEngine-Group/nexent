@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Custom exception classes for the application.
 
@@ -20,9 +22,17 @@ This module provides two types of exceptions:
 The exception handler automatically maps legacy exception class names to ErrorCode.
 """
 
-from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS, RuntimeMetadataValidationCode
 from .error_message import ErrorMessage
-from typing import List
+from typing import Dict, List, Optional
+
+
+class RunModelControlsError(ValueError):
+    """A safe preflight failure for request-scoped model controls."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -83,6 +93,28 @@ class AgentRunException(Exception):
     pass
 
 
+class RuntimeServiceUnavailableError(Exception):
+    """Raised when northbound cannot connect to the runtime service."""
+
+    pass
+
+
+class RuntimeServiceTimeoutError(Exception):
+    """Raised when a request to the runtime service times out."""
+
+    pass
+
+
+class RuntimeUpstreamError(Exception):
+    """Preserve an explicit error response returned by the runtime service."""
+
+    def __init__(self, status_code: int, content: bytes, headers: dict[str, str]):
+        super().__init__(f"Runtime service returned HTTP {status_code}")
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers
+
+
 class LimitExceededError(Exception):
     """Raised when an outer platform calling too frequently"""
 
@@ -91,6 +123,18 @@ class LimitExceededError(Exception):
 
 class UnauthorizedError(Exception):
     """Raised when a user from outer platform is unauthorized."""
+
+    pass
+
+
+class TokenExpiredError(UnauthorizedError):
+    """Raised when the caller's session/JWT/access token is missing, invalid, or expired."""
+
+    pass
+
+
+class ForbiddenError(Exception):
+    """Raised when an authenticated user lacks permission."""
 
     pass
 
@@ -187,8 +231,98 @@ class ValidationError(Exception):
     pass
 
 
+class RuntimeMetadataValidationError(ValueError):
+    """Describe a runtime metadata validation failure without retaining values."""
+
+    def __init__(self, code: RuntimeMetadataValidationCode, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class RuntimeMetadataVersionConflict(ValueError):
+    """Raised when a runtime metadata optimistic-lock check fails."""
+
+    def __init__(self, current_version: int):
+        self.current_version = current_version
+        super().__init__("Runtime metadata version conflict")
+
+
+class WorkbenchError(ValidationError, ValueError):
+    """Safe Workbench boundary error without resource contents or credentials."""
+
+    def __init__(self, code: str, status_code: int = 422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
+
+
+class WorkbenchConfigVersionConflict(ValueError):
+    """Raised when a Workbench optimistic-lock check fails."""
+
+    def __init__(self, current_version: int, current_config: Optional[dict] = None):
+        self.current_version = current_version
+        self.current_config = current_config
+        super().__init__("Workbench configuration version conflict")
+
+
+class TenantResourceLimitError(ValidationError, ValueError):
+    """Raised when a platform or tenant hard resource limit is reached."""
+
+    code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+    def __init__(
+        self,
+        message: str,
+        *,
+        resource: str | None = None,
+        scope: str | None = None,
+        limit: int | None = None,
+        current_count: int | None = None,
+    ):
+        self.resource = resource
+        self.scope = scope
+        self.limit = limit
+        self.current_count = current_count
+        self.details = self.to_detail()
+        super().__init__(message)
+
+    def to_detail(self) -> dict:
+        """Return structured quota details for the standard API error contract."""
+        return {
+            key: value
+            for key, value in {
+                "resource": self.resource,
+                "scope": self.scope,
+                "limit": self.limit,
+                "current_count": self.current_count,
+            }.items()
+            if value is not None
+        }
+
+
+def tenant_resource_limit_error_payload(error: TenantResourceLimitError) -> dict:
+    """Build the standard API error payload for a tenant resource limit."""
+    return {
+        "code": ErrorCode.TENANT_RESOURCE_EXCEEDED.value,
+        "message": str(error),
+        "details": error.to_detail(),
+    }
+
+
 class NotFoundException(Exception):
     """Raised when not found exception occurs."""
+
+    pass
+
+
+class AgentRelationValidationError(ValueError):
+    """Raised when submitted Agent relationships violate the graph contract."""
+
+    pass
+
+
+class AgentNotFoundError(NotFoundException, ValueError):
+    """Raised when an Agent is absent from the caller's visible query scope."""
 
     pass
 
@@ -249,12 +383,70 @@ class DataMateConnectionError(Exception):
 
 class SkillDuplicateError(Exception):
     """Raised when importing an agent with skills that have duplicate names in target tenant."""
-    def __init__(self, duplicate_names: List[str]):
+    def __init__(
+        self,
+        duplicate_names: List[str],
+        skill_conflicts: Optional[List[Dict[str, str]]] = None,
+    ):
         self.duplicate_names = duplicate_names
+        self.skill_conflicts = skill_conflicts or []
+        super().__init__(f"Duplicate skills: {', '.join(duplicate_names)}")
 
 
 class SkillException(Exception):
     """Raised when skill operations fail."""
+    pass
+
+
+class WorkbenchAgentError(Exception):
+    """Stable domain error raised by the system Agent provider."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        message: Optional[str] = None,
+    ):
+        super().__init__(message or code)
+        self.code = code
+        self.message_key = code
+        self.retryable = retryable
+        self.resource_type = "agent"
+
+
+
+
+class QuotaExceededError(Exception):
+    """Raised when tenant storage hard limit is exceeded during file upload."""
+
+    def __init__(self, message: str, usage_bytes: int = 0, hard_limit_bytes: int = 0, exceeded_by_bytes: int = 0):
+        super().__init__(message)
+        self.usage_bytes = usage_bytes
+        self.hard_limit_bytes = hard_limit_bytes
+        self.exceeded_by_bytes = exceeded_by_bytes
+
+
+class PlatformQuotaConflictError(Exception):
+    """Raised when a platform or tenant quota update violates allocation rules."""
+
+    def __init__(self, message: str, error: str, details: dict):
+        super().__init__(message)
+        self.error = error
+        self.details = details
+
+
+class TagManagementConflictError(Exception):
+    """Raised when tag management would violate an active binding or capacity rule."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class TagManagementNotFoundError(NotFoundException):
+    """Raised for absent or cross-tenant tag-management identifiers."""
+
     pass
 
 
@@ -286,7 +478,6 @@ class UnsupportedOperationError(Exception):
 
 # Common aliases
 ParameterInvalidError = ValidationError
-ForbiddenError = Exception  # Generic fallback
 ServiceUnavailableError = Exception  # Generic fallback
 DatabaseError = Exception  # Generic fallback
 TimeoutError = TimeoutException
@@ -300,7 +491,6 @@ InvalidCredentialsError = UnauthorizedError
 TenantNotFoundError = NotFoundException
 TenantDisabledError = Exception  # Generic fallback
 
-AgentNotFoundError = NotFoundException
 AgentDisabledError = Exception  # Generic fallback
 
 ToolNotFoundError = NotFoundException
@@ -328,3 +518,83 @@ OAuthAccountNotFoundError = NotFoundException
 
 # Signature aliases
 # SignatureValidationError already defined above
+
+
+class ModelProviderError(Exception):
+    """A classified provider discovery failure with its upstream status."""
+
+    def __init__(self, upstream_status: int, message: str):
+        self.upstream_status = upstream_status
+        self.message = message
+        super().__init__(f"{upstream_status}: {message}")
+
+
+class RuntimeCapacityExceededError(RuntimeError):
+    """Raised when Runtime agent worker and queue capacity is full."""
+
+    retry_after_seconds = 1
+
+
+class RuntimeQueueTimeoutError(RuntimeError):
+    """Raised when an accepted Runtime agent request expires in the queue."""
+
+    def __init__(self, timeout_seconds: float):
+        self.timeout_seconds = timeout_seconds
+        self.retry_after_seconds = max(1, int(timeout_seconds + 0.999))
+        super().__init__("Agent runtime queue wait timed out")
+
+
+class AgentToolImportError(ValueError):
+    """An exported tool is incompatible with the destination catalog."""
+
+
+class AgentAutomationError(Exception):
+    """Base domain exception for agent automation."""
+
+    error_code = "AUTOMATION_ERROR"
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.message = message
+        self.details = details or {}
+
+
+class AutomationCapabilityNotReadyError(AgentAutomationError):
+    error_code = "AUTOMATION_CAPABILITY_NOT_READY"
+
+
+class AutomationCapabilityUnavailableError(AgentAutomationError):
+    error_code = "AUTOMATION_CAPABILITY_UNAVAILABLE"
+
+
+class AutomationCapabilityBindingInvalidError(AgentAutomationError):
+    error_code = "AUTOMATION_CAPABILITY_BINDING_INVALID"
+
+
+class AutomationScheduleInvalidError(AgentAutomationError):
+    error_code = "AUTOMATION_SCHEDULE_INVALID"
+
+
+class AutomationNotFoundError(AgentAutomationError):
+    error_code = "AUTOMATION_TASK_NOT_FOUND"
+
+
+class AutomationConversationAlreadyBoundError(AgentAutomationError):
+    error_code = "AUTOMATION_CONVERSATION_ALREADY_BOUND"
+
+
+
+class AgentDraftEditError(Exception):
+    """Stable authorization error shared by draft and resource writes."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class ResourceBindingError(Exception):
+    """Stable resource validation error used by Tool and Skill writes."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code

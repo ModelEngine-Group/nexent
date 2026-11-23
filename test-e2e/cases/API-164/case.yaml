@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-164
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: 会话批量删除的归属过滤、级联软删除、failed_ids 与幂等
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 会话批量删除的归属过滤、级联软删除、failed_ids 与幂等
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: UserA 创建多个会话并为其中一个绑定自动任务，UserB 创建对照会话。
+    expected: 只删除调用者拥有的会话。
+  - order: 2
+    action: UserA 批量删除自己的会话。
+    expected: deleted_count/failed_ids 精确。
+  - order: 3
+    action: 混合提交已删、未知和 UserB 会话 ID。
+    expected: 重复删除幂等。
+  - order: 4
+    action: 重复相同批次并验证自动任务/消息级联。
+    expected: 外部会话不受影响。
+  - order: 5
+    action: 无认证请求接口。
+    expected: 绑定自动任务和历史按契约软删除。
+  expected_results:
+  - 只删除调用者拥有的会话。
+  - deleted_count/failed_ids 精确。
+  - 重复删除幂等。
+  - 外部会话不受影响。
+  - 绑定自动任务和历史按契约软删除。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 380
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - UserA 创建多个会话并为其中一个绑定自动任务，UserB 创建对照会话。
+    - UserA 批量删除自己的会话。
+    - 混合提交已删、未知和 UserB 会话 ID。
+    - 重复相同批次并验证自动任务/消息级联。
+    - 无认证请求接口。
+    response_expectations:
+    - 只删除调用者拥有的会话。
+    - deleted_count/failed_ids 精确。
+    - 重复删除幂等。
+    - 外部会话不受影响。
+    - 绑定自动任务和历史按契约软删除。

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from datetime import datetime, timedelta
 
@@ -8,7 +9,7 @@ from http import HTTPStatus
 from consts.const import MOCK_USER, MOCK_SESSION
 from consts.exceptions import UnauthorizedError
 from consts.model import UserSignInRequest, UserSignUpRequest
-from services.user_management_service import get_user_info
+from management.services.permission.identity.authentication import get_user_info
 
 logger = logging.getLogger("mock_user_management_app")
 router = APIRouter(prefix="/user", tags=["user"])

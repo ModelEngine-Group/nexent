@@ -1,0 +1,30 @@
+schema_version: '1.0'
+module:
+  id: AGENT-OUTPUT
+  name: Agent output
+feature:
+  feature_id: TPC-001
+  name: Thinking prefix compatibility
+  status: active
+  description: Reasoning markup does not block valid actions or authorize raw final
+    answers.
+  business_rules:
+  - rule_id: TPC-RULE-001
+    description: Top-level case-insensitive code actions tolerate ordinary HTML and
+      prose; quoted Markdown examples are data. Ordered actions execute together,
+      with an optional unique final envelope last. Prompt guidance requests actual-result
+      confirmation, while runtime follows the ordinary CodeAgent loop.
+  - rule_id: TPC-RULE-002
+    description: Failed protocol-marked output cannot become a raw final at exhaustion;
+      valid explicit completion retains its envelope boundary.
+  - rule_id: TPC-RULE-003
+    description: Tool effects occur once and real results enter history before ordinary
+      CodeAgent continuation. Model final-answer streaming is not suppressed solely
+      because executable code precedes it.
+  required_test_stages:
+  - D3
+  - D4
+  source:
+    requirement_ids:
+    - TPC-001
+    spec_path: nexent-doc/docs/Developing/codeagent-explicit-termination/changes/codeagent-think-prefix-compatibility/proposal.md

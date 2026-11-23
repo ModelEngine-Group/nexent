@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-2EBD3B18F61B382A
+  feature_id: F-183
+  business_rule_ids:
+  - F-183-RULE-01
+  title: is_provider_context_overflow 仅对显式 Provider 上下文/输入超限返回 True、不信任泛化400，及溢出恢复异常层级｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: is_provider_context_overflow 仅对显式 Provider 上下文/输入超限返回 True、不信任泛化400，及溢出恢复异常层级｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - is_provider_context_overflow 与溢出恢复异常为纯逻辑/纯类型定义，无本地资产与外部依赖。
+  test_data:
+    legacy_asset_declaration: 无（纯逻辑函数，不依赖本地资产/配置）
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“is_provider_context_overflow 分类及溢出恢复异常层级”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: code 命中 _CONTEXT_OVERFLOW_CODES 任一成员时 is_provider_context_overflow 返回 True。
+  - order: 2
+    action: 直接导入 sdk/nexent/core/models/context_overflow.py 的 is_provider_context_overflow、ProviderContextOverflowRecoveryError、ProviderContextOverflowRetryUnsafe、ProviderContextOverflowRetryExhausted，构造最小有效输入对象。
+    expected: code 未命中但 message/body 文本命中任一 _CONTEXT_OVERFLOW_MESSAGE_MARKERS 时返回 True（大小写不敏感）。
+  - order: 3
+    action: 先执行正常输入：构造带 code 的 error 对象，code 分别命中 _CONTEXT_OVERFLOW_CODES 各成员（context_length_exceeded、context_overflow、context_window_exceeded、max_tokens_exceeded、input_too_long），断言
+      is_provider_context_overflow 返回 True。
+    expected: 嵌套 body 信封（error/error_code/type）中的显式上下文超限 code 可被识别并返回 True。
+  - order: 4
+    action: 构造 message 命中 _CONTEXT_OVERFLOW_MESSAGE_MARKERS 的 error（如 message 含 "maximum context length"、"too many tokens"、"input
+      tokens exceed"），code 为空或为泛化 400，断言返回 True。
+    expected: 泛化 400（无 marker、无显式 code）返回 False，不将通用 HTTP 400 误判为上下文超限。
+  - order: 5
+    action: 构造 body 为嵌套 Mapping 的 error（body={"error":{"code":"context_length_exceeded"}} 或 {"error":{"error_code":...}} /
+      {"error":{"type":...}}），断言可从嵌套信封提取 code 并返回 True。
+    expected: 无 code/空 body/非 Mapping body 不抛异常，按 message marker 判定。
+  - order: 6
+    action: 针对负例：构造 code="400" 或 "invalid_request_error" 且 message 为普通文本（不含任何 marker）的 error，断言返回 False，不信任泛化 400。
+    expected: 溢出恢复异常层级正确：RetryUnsafe、RetryExhausted 可被 ProviderContextOverflowRecoveryError 捕获，且均为 RuntimeError 子类。
+  - order: 7
+    action: 针对边界值：error 无 code、body 为 None/空、body 为非 Mapping 类型（字符串/列表），断言不抛异常并按 message marker 判定。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 对异常路径断言类型层级：ProviderContextOverflowRetryUnsafe 与 ProviderContextOverflowRetryExhausted 是 ProviderContextOverflowRecoveryError
+      的子类，且后者是 RuntimeError 子类，可被 except 捕获用于有限恢复判定。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 测试结束后释放临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - code 命中 _CONTEXT_OVERFLOW_CODES 任一成员时 is_provider_context_overflow 返回 True。
+  - code 未命中但 message/body 文本命中任一 _CONTEXT_OVERFLOW_MESSAGE_MARKERS 时返回 True（大小写不敏感）。
+  - 嵌套 body 信封（error/error_code/type）中的显式上下文超限 code 可被识别并返回 True。
+  - 泛化 400（无 marker、无显式 code）返回 False，不将通用 HTTP 400 误判为上下文超限。
+  - 无 code/空 body/非 Mapping body 不抛异常，按 message marker 判定。
+  - 溢出恢复异常层级正确：RetryUnsafe、RetryExhausted 可被 ProviderContextOverflowRecoveryError 捕获，且均为 RuntimeError 子类。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 460
+  unit_boundary: 上下文预算
+  inputs:
+  - 无（纯逻辑函数，不依赖本地资产/配置）
+  assertions:
+  - code 命中 _CONTEXT_OVERFLOW_CODES 任一成员时 is_provider_context_overflow 返回 True。
+  - code 未命中但 message/body 文本命中任一 _CONTEXT_OVERFLOW_MESSAGE_MARKERS 时返回 True（大小写不敏感）。
+  - 嵌套 body 信封（error/error_code/type）中的显式上下文超限 code 可被识别并返回 True。
+  - 泛化 400（无 marker、无显式 code）返回 False，不将通用 HTTP 400 误判为上下文超限。
+  - 无 code/空 body/非 Mapping body 不抛异常，按 message marker 判定。
+  - 溢出恢复异常层级正确：RetryUnsafe、RetryExhausted 可被 ProviderContextOverflowRecoveryError 捕获，且均为 RuntimeError 子类。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

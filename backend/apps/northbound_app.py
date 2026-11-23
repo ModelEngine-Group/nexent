@@ -1,16 +1,45 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
-from typing import Optional, Dict, Any
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse, unquote
 import re
 import uuid
 
 import httpx
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import ValidationError as PydanticValidationError
 
-from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError
-from consts.model import ToolParamsRequest
+from consts.model import reject_legacy_agent_fields
+from consts.exceptions import (
+    ConversationNotFoundError,
+    ForbiddenError,
+    LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    NotFoundException,
+    UnauthorizedError,
+    ValidationError,
+    tenant_resource_limit_error_payload,
+)
+from consts.model import (
+    ApiKeyTargetRequest,
+    ApiUserBatchCreateRequest,
+    GenerateTitleRequest,
+    ToolParamsRequest,
+)
+from database.token_db import log_token_usage
+from database.user_tenant_db import get_user_role_by_tenant
+from management.services.permission.api_keys import (
+    create_api_users_batch,
+    refresh_user_api_key,
+    revoke_user_api_keys,
+)
+from management.services.monitor.audit import record_security_event
 from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
@@ -18,11 +47,19 @@ from services.northbound_service import (
     start_streaming_chat,
     stop_chat,
     get_agent_info_list,
+    get_agent_info_by_name_for_northbound,
+    get_agent_knowledge_bases_for_northbound,
+    generate_conversation_title,
+    list_configured_models,
     update_conversation_title,
     upload_files_for_northbound,
 )
 
-from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_access_key
+from management.services.permission.identity.authentication_helpers import (
+    get_user_and_tenant_by_access_key,
+    get_user_language,
+    validate_bearer_token,
+)
 
 from .file_management_app import build_content_disposition_header
 
@@ -113,6 +150,24 @@ async def _get_northbound_context(request: Request) -> NorthboundContext:
 
     request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
 
+    path = request.url.path
+    service_logs_usage = (
+        path == "/nb/v1/chat/run"
+        or path.startswith("/nb/v1/chat/stop/")
+        or (path.startswith("/nb/v1/conversations/") and path.endswith("/title"))
+    )
+    if token_id and token_id > 0 and not service_logs_usage:
+        try:
+            log_token_usage(
+                token_id=token_id,
+                call_function_name=request.url.path,
+                related_id=None,
+                created_by=resolved_user_id,
+                metadata={"method": request.method, "request_id": request_id},
+            )
+        except Exception as exc:
+            logging.warning("Failed to log northbound API key usage: %s", exc)
+
     # Get authorization header if present, otherwise use a placeholder
     auth_header_value = request.headers.get("Authorization", "Bearer placeholder")
 
@@ -128,6 +183,140 @@ async def _get_northbound_context(request: Request) -> NorthboundContext:
 @router.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "northbound-api"}
+
+
+def _role_for_context(user_id: str, tenant_id: str) -> str:
+    return get_user_role_by_tenant(user_id, tenant_id).upper()
+
+
+def _raise_api_key_http_exception(exc: Exception) -> None:
+    if isinstance(exc, ForbiddenError):
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
+    if isinstance(exc, NotFoundException):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    if isinstance(exc, (PydanticValidationError, ValidationError, ValueError)):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    raise exc
+
+
+def _audit_safe_target(result: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    """Pick non-secret target fields for the audit trail.
+
+    The service results carry the freshly created plaintext API key; only the
+    whitelisted identifiers below are handed to the audit entry.
+    """
+    return {
+        "target_user_id": (result or {}).get("user_id"),
+        "target_email": (result or {}).get("email"),
+        "revoked_count": (result or {}).get("revoked_count"),
+        "request_id": request_id,
+    }
+
+
+def _audit_safe_batch(
+    payload: ApiUserBatchCreateRequest,
+    created: List[Dict[str, Any]],
+    request_id: str,
+) -> Dict[str, Any]:
+    """Pick non-secret batch fields for the audit trail.
+
+    Each created item carries a plaintext API key, so only the request intent
+    and the created user ids (bounded) are recorded.
+    """
+    created = created or []
+    return {
+        "role": payload.role,
+        "group_id": payload.group_id,
+        "count": len(created),
+        "user_ids": [item.get("user_id") for item in created][:20],
+        "request_id": request_id,
+    }
+
+
+@router.post(
+    "/api-users/batch",
+    status_code=HTTPStatus.CREATED,
+    tags=["northbound-api-keys"],
+)
+async def create_api_users_batch_endpoint(
+    payload: ApiUserBatchCreateRequest,
+    request: Request,
+) -> JSONResponse:
+    ctx = await _get_northbound_context(request)
+    try:
+        data = create_api_users_batch(
+            actor_user_id=ctx.user_id,
+            actor_tenant_id=ctx.tenant_id,
+            actor_role=_role_for_context(ctx.user_id, ctx.tenant_id),
+            role=payload.role,
+            group_id=payload.group_id,
+            count=payload.count,
+        )
+        record_security_event("northbound_api_users_batch_create", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details=_audit_safe_batch(payload, data, ctx.request_id))
+        return JSONResponse(
+            status_code=HTTPStatus.CREATED,
+            content={"message": "success", "requestId": ctx.request_id, "data": data},
+        )
+    except Exception as exc:
+        if isinstance(exc, TenantResourceLimitError):
+            return JSONResponse(
+                status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                content=tenant_resource_limit_error_payload(exc),
+            )
+        _raise_api_key_http_exception(exc)
+
+
+@router.post("/api-keys/refresh", tags=["northbound-api-keys"])
+async def refresh_api_key_endpoint(
+    payload: ApiKeyTargetRequest, request: Request
+) -> JSONResponse:
+    ctx = await _get_northbound_context(request)
+    try:
+        data = refresh_user_api_key(
+            actor_user_id=ctx.user_id,
+            actor_tenant_id=ctx.tenant_id,
+            actor_role=_role_for_context(ctx.user_id, ctx.tenant_id),
+            user_id=payload.user_id,
+            email=str(payload.email) if payload.email else None,
+        )
+        record_security_event("northbound_api_key_refresh", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details=_audit_safe_target(data, ctx.request_id))
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "requestId": ctx.request_id, "data": data},
+        )
+    except Exception as exc:
+        _raise_api_key_http_exception(exc)
+
+
+@router.delete("/api-keys", tags=["northbound-api-keys"])
+async def revoke_api_key_endpoint(
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    email: Optional[str] = Query(None),
+) -> JSONResponse:
+    ctx = await _get_northbound_context(request)
+    try:
+        target = ApiKeyTargetRequest(user_id=user_id, email=email)
+        data = revoke_user_api_keys(
+            actor_user_id=ctx.user_id,
+            actor_tenant_id=ctx.tenant_id,
+            actor_role=_role_for_context(ctx.user_id, ctx.tenant_id),
+            user_id=target.user_id,
+            email=str(target.email) if target.email else None,
+        )
+        record_security_event("northbound_api_key_revoke", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details=_audit_safe_target(data, ctx.request_id))
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "requestId": ctx.request_id, "data": data},
+        )
+    except Exception as exc:
+        _raise_api_key_http_exception(exc)
 
 
 @router.post(
@@ -213,6 +402,12 @@ async def run_chat(
                     "model so different models can be used for Q&A on the same agent.",
         examples=[123],
     ),
+    metadata: Optional[Dict[str, Any]] = Body(
+        None,
+        embed=True,
+        description="Optional runtime metadata available to the agent. This is separate from meta_data.",
+        examples=[{"project_id": "P001", "manager": "Alice"}],
+    ),
     meta_data: Optional[Dict[str, Any]] = Body(
         None,
         embed=True,
@@ -250,9 +445,16 @@ async def run_chat(
             }
         }],
     ),
+    final_answer_mode: Literal["complete", "delta"] = Body(
+        "complete",
+        embed=True,
+        description="Final answer delivery: complete returns one full root answer (default); "
+                    "delta preserves incremental final_answer events and their completion phase.",
+    ),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     try:
+        reject_legacy_agent_fields(await request.json())
         ctx: NorthboundContext = await _get_northbound_context(request)
         return await start_streaming_chat(
             ctx=ctx,
@@ -260,10 +462,12 @@ async def run_chat(
             agent_name=agent_name,
             query=query,
             attachments=attachments,
+            metadata=metadata,
             meta_data=meta_data,
             tool_params=tool_params,
             model_id=model_id,
             idempotency_key=idempotency_key,
+            final_answer_mode=final_answer_mode,
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
@@ -275,6 +479,10 @@ async def run_chat(
     except PermissionError as e:
         logging.error(f"Permission denied while running northbound chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
+    except RuntimeServiceUnavailableError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -303,6 +511,16 @@ async def stop_chat_stream(
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
                             detail="Too Many Requests: rate limit exceeded")
+    except RuntimeUpstreamError as e:
+        return Response(
+            content=e.content,
+            status_code=e.status_code,
+            headers=e.headers,
+        )
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
+    except RuntimeServiceUnavailableError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -348,6 +566,69 @@ async def list_agents(request: Request):
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
+@router.get("/agents/{agent_name}")
+async def get_agent_by_name(
+    request: Request,
+    agent_name: str,
+):
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await get_agent_info_by_name_for_northbound(ctx=ctx, agent_name=agent_name)
+    except ValueError as e:
+        logging.error(f"Invalid agent detail request: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except LookupError as e:
+        logging.info(f"Published agent not found: {agent_name}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except LimitExceededError as e:
+        logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to get agent by name: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/agents/{agent_name}/knowledge-bases")
+async def get_agent_knowledge_bases(
+    request: Request,
+    agent_name: str,
+):
+    """List knowledge bases the current northbound caller may use with an agent."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await get_agent_knowledge_bases_for_northbound(ctx, agent_name)
+    except ValueError as exc:
+        status = (
+            HTTPStatus.CONFLICT
+            if "both local and AIDP" in str(exc)
+            else HTTPStatus.BAD_REQUEST
+        )
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail="Too Many Requests: rate limit exceeded",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error(
+            "Failed to list northbound agent knowledge bases: %s",
+            exc,
+            exc_info=exc,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        ) from exc
+
+
 @router.get("/conversations")
 async def list_convs(request: Request):
     try:
@@ -363,6 +644,51 @@ async def list_convs(request: Request):
         logging.error(f"Failed to list conversations: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/models")
+async def list_models(request: Request):
+    """List the models configured for the authenticated tenant."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await list_configured_models(ctx=ctx)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error("Failed to list configured models: %s", exc, exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        ) from exc
+
+
+@router.post("/generate_title")
+async def generate_title(payload: GenerateTitleRequest, request: Request):
+    """Generate and persist a conversation title from the supplied question."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await generate_conversation_title(
+            ctx=ctx,
+            conversation_id=payload.conversation_id,
+            question=payload.question,
+            language=get_user_language(request),
+            model_id=payload.model_id,
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error("Failed to generate conversation title: %s", exc, exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        ) from exc
 
 
 @router.put("/conversations/{conversation_id}/title")

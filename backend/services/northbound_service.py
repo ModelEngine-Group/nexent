@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import hashlib
 import json
@@ -5,34 +6,63 @@ import logging
 import time
 from dataclasses import dataclass
 from os.path import basename
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
+from nexent.core.concurrency import ManagedTaskSpec
 
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    ASSET_OWNER_TENANT_ID,
+    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
+    NORTHBOUND_RATE_LIMIT_ENABLED,
+    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+)
 from consts.exceptions import (
+    AppException,
+    RuntimeMetadataValidationError,
     LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
     UnauthorizedError,
     ConversationNotFoundError,
 )
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
-from database.conversation_db import get_conversation_messages, get_source_searches_by_message
-from database.token_db import log_token_usage, get_latest_usage_metadata
-from services.agent_service import (
-    run_agent_stream,
-    stop_agent_tasks,
-    get_agent_id_by_name
+from database.knowledge_db import get_knowledge_info_by_tenant_id
+from database.conversation_db import get_conversation_list, get_conversation_messages
+from database.token_db import get_latest_usage_metadata, log_token_usage
+from management.services.agent.service import (
+    get_agent_by_name_impl,
 )
-from services.agent_version_service import list_published_agents_impl
-from services.conversation_management_service import (
+from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
+from infrastructure.concurrency import northbound_thread_manager
+from management.services.agent.run_state import runtime_state_service
+from management.services.agent.versions import list_published_agents_impl
+from management.services.knowledge_base.scope import (
+    AIDP_TOOL_CLASS,
+    LOCAL_TOOL_CLASS,
+    get_agent_knowledge_capabilities,
+)
+from management.services.knowledge_base.service import ElasticSearchService
+from management.services.model.resolver import get_model_descriptor
+from management.services.conversation.service import (
     save_conversation_user,
-    get_conversation_list_service,
     create_new_conversation,
+    generate_conversation_title_service,
+    get_conversation_service,
     update_conversation_title as update_conversation_title_service,
 )
-from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from management.services.model.management import list_models_for_tenant
+from infrastructure.serialization.runtime_metadata import (
+    runtime_metadata_hash,
+    validate_runtime_metadata,
+)
+from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
 from database.attachment_db import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
 
@@ -234,10 +264,8 @@ def _normalize_northbound_attachments(
 # In-memory idempotency and rate limit placeholders
 # -----------------------------
 _IDEMPOTENCY_RUNNING: Dict[str, float] = {}
-_IDEMPOTENCY_TTL_SECONDS_DEFAULT = 10 * 60
 _IDEMPOTENCY_LOCK = asyncio.Lock()
 
-_RATE_LIMIT_PER_MINUTE = 120  # simple default quota per tenant per minute
 _RATE_STATE: Dict[str, Dict[str, int]] = {}
 _RATE_LOCK = asyncio.Lock()
 
@@ -252,10 +280,21 @@ def _minute_bucket(ts: Optional[float] = None) -> str:
 
 
 async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
+    ttl = ttl_seconds or NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
+    if runtime_state_service.enabled:
+        try:
+            acquired = await runtime_state_service.acquire_idempotency_async(key, ttl)
+        except Exception:
+            logger.exception("Northbound idempotency Redis operation failed")
+            raise LimitExceededError("Idempotency service is unavailable. Please try again later.")
+        if not acquired:
+            raise LimitExceededError("Duplicate request is still running, please wait.")
+        return
+
     async with _IDEMPOTENCY_LOCK:
         # purge expired
         now = _now_seconds()
-        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > (ttl_seconds or _IDEMPOTENCY_TTL_SECONDS_DEFAULT)]
+        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > ttl]
         for k in expired:
             _IDEMPOTENCY_RUNNING.pop(k, None)
         if key in _IDEMPOTENCY_RUNNING:
@@ -264,6 +303,13 @@ async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None
 
 
 async def idempotency_end(key: str) -> None:
+    if runtime_state_service.enabled:
+        try:
+            await runtime_state_service.release_idempotency_async(key)
+        except Exception as exc:
+            logger.warning("Northbound idempotency release failed: %s", exc)
+        return
+
     async with _IDEMPOTENCY_LOCK:
         _IDEMPOTENCY_RUNNING.pop(key, None)
 
@@ -274,11 +320,27 @@ async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
 
 
 async def check_and_consume_rate_limit(tenant_id: str) -> None:
+    if not NORTHBOUND_RATE_LIMIT_ENABLED:
+        return
+
+    if runtime_state_service.enabled:
+        try:
+            await runtime_state_service.consume_rate_limit_async(
+                tenant_id=tenant_id,
+                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+            )
+            return
+        except ValueError:
+            raise LimitExceededError("Query rate exceeded limit. Please try again later")
+        except Exception:
+            logger.exception("Northbound rate limit Redis operation failed")
+            raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
+
     bucket = _minute_bucket()
     async with _RATE_LOCK:
         state = _RATE_STATE.setdefault(tenant_id, {})
         count = state.get(bucket, 0)
-        if count >= _RATE_LIMIT_PER_MINUTE:
+        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
             raise LimitExceededError("Query rate exceeded limit. Please try again later")
         state[bucket] = count + 1
         # cleanup old buckets, keep only current
@@ -311,11 +373,6 @@ def _build_title_update_idempotency_key(tenant_id: str, conversation_id: int, ti
 # -----------------------------
 # Agent resolver
 # -----------------------------
-async def get_agent_info_by_name(agent_name: str, tenant_id: str) -> int:
-    try:
-        return await get_agent_id_by_name(agent_name=agent_name, tenant_id=tenant_id)
-    except Exception as _:
-        raise Exception(f"Failed to get agent id for agent_name: {agent_name} in tenant_id: {tenant_id}")
 
 
 async def start_streaming_chat(
@@ -324,34 +381,66 @@ async def start_streaming_chat(
     agent_name: str,
     query: str,
     attachments: Optional[List[Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
     meta_data: Optional[Dict[str, Any]] = None,
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
-    idempotency_key: Optional[str] = None
+    idempotency_key: Optional[str] = None,
+    final_answer_mode: Literal["complete", "delta"] = "complete",
 ) -> StreamingResponse:
+    new_conversation_data: Optional[Dict[str, Any]] = None
     try:
+        if metadata is not None:
+            try:
+                validate_runtime_metadata(metadata)
+            except RuntimeMetadataValidationError as exc:
+                error_code = (
+                    ErrorCode.CHAT_METADATA_TOO_LARGE
+                    if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                    else ErrorCode.CHAT_METADATA_INVALID
+                )
+                raise AppException(
+                    error_code,
+                    details={"reason": exc.code.value},
+                ) from exc
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)
 
-        # If conversation_id is not provided, create a new conversation
+        agent_info = get_agent_by_name_impl(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        agent_id = agent_info["agent_id"]
+        latest_version_no = agent_info["latest_version_no"]
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(title="New Conversation", user_id=ctx.user_id)
-            conversation_id = new_conversation["conversation_id"]
+            new_conversation_data = create_new_conversation(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                agent_id=agent_id,
+            )
+            conversation_id = new_conversation_data["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
         internal_conversation_id = conversation_id
 
+        # Authorize before reading history or persisting the incoming message.
+        if get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id) is None:
+            raise PermissionError("Conversation is not accessible to the current identity")
+
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
-        agent_id = await get_agent_id_by_name(agent_name=agent_name, tenant_id=ctx.tenant_id)
         normalized_attachments = _normalize_northbound_attachments(
             attachments=attachments,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
         )
         # Idempotency: only prevent concurrent duplicate starts
-        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), agent_id, query)
+        metadata_key = "inherit" if metadata is None else runtime_metadata_hash(metadata)
+        composed_key = idempotency_key or _build_idempotency_key(
+            ctx.tenant_id,
+            str(conversation_id),
+            agent_id,
+            query,
+            metadata_key,
+        )
         await idempotency_start(composed_key)
         agent_request = AgentRequest(
             conversation_id=internal_conversation_id,
@@ -362,36 +451,52 @@ async def start_streaming_chat(
             is_debug=False,
             tool_params=tool_params,
             model_id=model_id,
+            version_no=latest_version_no,
+            metadata=metadata,
+            enable_automation_tool=False,
         )
+        agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
 
-        # Synchronously persist the user message before starting the stream to avoid race conditions
+        # Persist before starting the stream. External callers may not reconnect,
+        # so the managed control-I/O task preserves synchronous commit semantics.
         try:
-            save_conversation_user(
-                agent_request, user_id=ctx.user_id, tenant_id=ctx.tenant_id)
+            await northbound_thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(
+                    task_name="northbound-save-user-message",
+                    owner="services.northbound_service",
+                ),
+                save_conversation_user,
+                agent_request,
+                ctx.user_id,
+                ctx.tenant_id,
+            )
         except Exception as e:
             raise Exception(f"Failed to persist user message: {str(e)}")
 
-    except LimitExceededError as _:
-        raise LimitExceededError("Query rate exceeded limit. Please try again later.")
+    except LimitExceededError as exc:
+        raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
+    except AppException:
+        raise
+    except PermissionError:
+        raise
     except Exception as e:
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
     try:
-        response = await run_agent_stream(
+        response = await forward_agent_run(
             agent_request=agent_request,
-            http_request=None,
-            authorization=ctx.authorization,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
-            skip_user_save=True,
+            final_answer_mode=final_answer_mode,
         )
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
 
-    # Log token usage
+    # Preserve request metadata for conversation continuation and usage auditing.
     if ctx.token_id > 0:
         try:
             log_token_usage(
@@ -399,22 +504,37 @@ async def start_streaming_chat(
                 call_function_name="run_chat",
                 related_id=conversation_id,
                 created_by=ctx.user_id,
-                metadata=meta_data
+                metadata=meta_data,
             )
         except Exception as e:
             logger.warning(f"Failed to log token usage: {str(e)}")
 
-    # Attach request id header and conversation_id (internal id)
+    # Attach northbound response headers used by streaming clients and proxies.
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
+    response.headers["X-Accel-Buffering"] = "no"
+
+    if new_conversation_data is not None and response.status_code < 400:
+        original_body_iterator = response.body_iterator
+
+        async def body_iterator_with_conversation_created():
+            yield ("data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": conversation_id}}, ensure_ascii=False) + "\n\n").encode("utf-8")
+            async for chunk in original_body_iterator:
+                yield chunk
+
+        response.body_iterator = body_iterator_with_conversation_created()
+
     return response
 
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
-        stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
+        stop_result = await forward_agent_stop(
+            conversation_id=conversation_id,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+        )
 
-        # Log token usage
         if ctx.token_id > 0:
             try:
                 log_token_usage(
@@ -422,74 +542,39 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
                     call_function_name="stop_chat_stream",
                     related_id=conversation_id,
                     created_by=ctx.user_id,
-                    metadata=meta_data
+                    metadata=meta_data,
                 )
             except Exception as e:
                 logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
+    except (
+        RuntimeServiceTimeoutError,
+        RuntimeServiceUnavailableError,
+        RuntimeUpstreamError,
+    ):
+        raise
     except Exception as e:
         raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {str(e)}")
 
 
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
-    conversations = get_conversation_list_service(ctx.user_id)
-    # get_conversation_list_service is sync
-
-    # Add meta_data from token usage log if available
-    if ctx.token_id > 0:
-        for item in conversations:
-            # Ensure we do not leak empty meta_data keys
-            if "meta_data" in item and not item.get("meta_data"):
-                item.pop("meta_data", None)
-
-            conversation_id = item.get("conversation_id")
-            if conversation_id:
-                try:
-                    meta_data = get_latest_usage_metadata(
-                        token_id=ctx.token_id,
-                        related_id=int(conversation_id),
-                        call_function_name="run_chat"
-                    )
-                    # Only return meta_data when there is a usage log record and meta_data is non-empty
-                    if meta_data:
-                        item["meta_data"] = meta_data
-                    else:
-                        item.pop("meta_data", None)
-                except Exception as e:
-                    logger.warning(f"Failed to get meta_data for conversation {conversation_id}: {str(e)}")
-                    item.pop("meta_data", None)
+    conversations = get_conversation_list(ctx.user_id)
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
-def _format_search_record(record: Dict[str, Any]) -> Dict[str, Any]:
-    """Format a search source record for API response."""
-    search_item = {
-        "title": record.get("source_title", ""),
-        "text": record.get("source_content", ""),
-        "source_type": record.get("source_type", ""),
-        "url": record.get("source_location", ""),
-        "filename": record.get("source_title", "") if record.get("source_type") == "file" else None,
-        "published_date": None,
-        "score": float(record["score_overall"]) if record.get("score_overall") is not None else None,
-        "tool_sign": record.get("tool_sign", ""),
-        "cite_index": record.get("cite_index")
-    }
-
-    if record.get("published_date"):
-        if hasattr(record["published_date"], "strftime"):
-            search_item["published_date"] = record["published_date"].strftime("%Y-%m-%d")
-        else:
-            search_item["published_date"] = str(record["published_date"])[:10]
-
-    return search_item
+async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
+    """List the models configured for the authenticated tenant."""
+    models = await list_models_for_tenant(ctx.tenant_id)
+    return {"message": "success", "data": models, "requestId": ctx.request_id}
 
 
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
-    history = get_conversation_messages(conversation_id)
+    conversation = get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id)
+    history = get_conversation_messages(conversation_id) if conversation is not None else []
     result = []
     for message in history:
         # Parse minio_files from database (stored as JSON string)
@@ -499,23 +584,14 @@ async def get_conversation_history_internal(ctx: NorthboundContext, conversation
             try:
                 minio_files = json.loads(raw_minio_files) if isinstance(raw_minio_files, str) else raw_minio_files
             except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Failed to parse minio_files for message {message.get('message_id')}")
-
-        # Fetch search results for this message
-        message_id = message.get("message_id")
-        search_results = []
-        if message_id:
-            try:
-                search_records = get_source_searches_by_message(message_id, user_id=ctx.user_id)
-                search_results = [_format_search_record(r) for r in search_records]
-            except Exception as e:
-                logger.warning(f"Failed to get search records for message {message_id}: {str(e)}")
-
+                logger.warning(
+                    "Failed to parse minio_files for message %s",
+                    message.get("message_id"),
+                )
         result.append({
             "role": message["message_role"],
             "content": message["message_content"],
             "minio_files": minio_files,
-            "search": search_results
         })
 
     response = {
@@ -532,27 +608,236 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
         raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {str(e)}")
 
 
-async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
-    try:
-        agent_info_list = await list_published_agents_impl(
+async def _get_visible_published_agents(ctx: NorthboundContext) -> list[dict]:
+    """Return published agents visible to the northbound caller."""
+    agent_info_list = [
+        dict(agent)
+        for agent in await list_published_agents_impl(
             tenant_id=ctx.tenant_id,
             user_id=ctx.user_id,
         )
-        # Match the same scope as /agent/published_list: non-asset-owner tenants
-        # also get the asset owner's published agents merged in.
-        if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
-            asset_agent_list = await list_published_agents_impl(
+    ]
+    for agent in agent_info_list:
+        agent["_northbound_tenant_id"] = ctx.tenant_id
+    if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
+        asset_owner_agents = [
+            dict(agent)
+            for agent in await list_published_agents_impl(
                 tenant_id=ASSET_OWNER_TENANT_ID,
                 user_id=ctx.user_id,
             )
-            agent_info_list.extend(asset_agent_list)
-        # Remove internal information that partner don't need
+        ]
+        for agent in asset_owner_agents:
+            agent["_northbound_tenant_id"] = ASSET_OWNER_TENANT_ID
+        agent_info_list.extend(asset_owner_agents)
+    return agent_info_list
+
+
+async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
+    try:
+        agent_info_list = await _get_visible_published_agents(ctx)
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
+            agent_info.pop("_northbound_tenant_id", None)
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
         raise Exception(f"Failed to get agent info list for tenant {ctx.tenant_id}: {str(e)}")
+
+
+async def get_agent_info_by_name_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return one visible published agent selected by its exact agent name."""
+    if not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    try:
+        agent_info_list = await _get_visible_published_agents(ctx)
+        agent_info = next(
+            (
+                item for item in agent_info_list
+                if item.get("name") == agent_name
+            ),
+            None,
+        )
+        if agent_info is None:
+            raise LookupError(f"Published agent not found: {agent_name}")
+
+        result = dict(agent_info)
+        result.pop("agent_id", None)
+        result.pop("_northbound_tenant_id", None)
+        return {"message": "success", "data": result, "requestId": ctx.request_id}
+    except (ValueError, LookupError):
+        raise
+    except Exception as e:
+        raise Exception(
+            f"Failed to get agent info for agent_name {agent_name} in tenant {ctx.tenant_id}: {str(e)}"
+        )
+
+
+async def get_agent_knowledge_bases_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return knowledge bases the caller may pass to the selected agent tool."""
+    if not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    visible_agents = await _get_visible_published_agents(ctx)
+    agent = next(
+        (item for item in visible_agents if item.get("name") == agent_name),
+        None,
+    )
+    if agent is None:
+        raise LookupError(f"Published agent not found: {agent_name}")
+
+    agent_tenant_id = str(agent.get("_northbound_tenant_id") or ctx.tenant_id)
+    agent_id = int(agent["agent_id"])
+    version_no = agent.get("current_version_no")
+    capabilities = get_agent_knowledge_capabilities(
+        agent_id=agent_id,
+        tenant_id=agent_tenant_id,
+        version_no=int(version_no) if version_no is not None else None,
+        user_id=ctx.user_id,
+    )
+    local_enabled = bool(capabilities["sources"]["local"]["enabled"])
+    aidp_enabled = bool(capabilities["sources"]["aidp"]["enabled"])
+    if local_enabled and aidp_enabled:
+        raise ValueError(
+            "The agent enables both local and AIDP knowledge retrieval."
+        )
+
+    if not local_enabled and not aidp_enabled:
+        return {
+            "message": "success",
+            "data": {
+                "agent_name": agent_name,
+                "source": None,
+                "tool_name": None,
+                "range_parameter": None,
+                "max_select": 0,
+                "default_selected_ids": [],
+                "knowledge_bases": [],
+            },
+            "requestId": ctx.request_id,
+        }
+
+    if local_enabled:
+        records = get_knowledge_info_by_tenant_id(agent_tenant_id)
+        candidate_indices = [
+            str(record["index_name"])
+            for record in records
+            if record.get("index_name")
+            and record.get("knowledge_sources") != "datamate"
+        ]
+        accessible_indices = set(
+            ElasticSearchService.filter_accessible_indices(
+                candidate_indices,
+                user_id=ctx.user_id,
+                tenant_id=agent_tenant_id,
+            )
+        )
+        items = [
+            {
+                "id": str(record["index_name"]),
+                "knowledge_id": str(record["knowledge_id"]),
+                "name": str(record.get("knowledge_name") or record["index_name"]),
+                "embedding_model": str(record.get("embedding_model_name") or ""),
+                "embedding_model_id": record.get("embedding_model_id"),
+                "is_multimodal": get_model_descriptor(
+                    record.get("embedding_model_id"), agent_tenant_id
+                ).is_multimodal,
+            }
+            for record in records
+            if str(record.get("index_name") or "") in accessible_indices
+        ]
+        source = "local"
+        tool_name = LOCAL_TOOL_CLASS
+        range_parameter = "index_names"
+    else:
+        from ext_components.aidp.services.aidp_access_service import (
+            resolve_current_aidp_access,
+        )
+        from ext_components.aidp.services.aidp_service import (
+            get_aidp_kb_impl,
+        )
+
+        snapshot = await northbound_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="northbound-resolve-aidp-access",
+                owner="services.northbound_service",
+            ),
+            resolve_current_aidp_access,
+            server_url=AIDP_SERVER_URL,
+            api_key=AIDP_API_KEY,
+            user_id=ctx.user_id,
+            tenant_id=agent_tenant_id,
+            aidp_tenant_id="aidp",
+        )
+        rows = snapshot.accessible_rows
+        items = []
+        for row in rows:
+            detail: Dict[str, Any] = {}
+            resource_status = str(row.get("resource_status") or "ACTIVE")
+            try:
+                detail = await northbound_thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec(
+                        task_name="northbound-get-aidp-knowledge-base",
+                        owner="services.northbound_service",
+                    ),
+                    get_aidp_kb_impl,
+                    AIDP_SERVER_URL,
+                    AIDP_API_KEY,
+                    str(row["kb_id"]),
+                ) or {}
+                resource_status = "ACTIVE"
+            except Exception as exc:
+                logger.warning(
+                    "AIDP detail fetch failed for northbound knowledge list kb_id=%s: %s",
+                    row["kb_id"],
+                    exc,
+                )
+                resource_status = "UNAVAILABLE"
+            items.append({
+                "id": str(row["kb_id"]),
+                "name": str(
+                    detail.get("kds_name")
+                    or detail.get("name")
+                    or row.get("kds_name")
+                    or row.get("name")
+                    or row["kb_id"]
+                ),
+                "document_count": int(
+                    detail.get("document_count") or row.get("document_count") or 0
+                ),
+                "chunk_count": int(detail.get("chunk_count") or row.get("chunk_count") or 0),
+                "is_multimodal": (
+                    detail.get("caption_enable", row.get("caption_enable")) in (1, "1", True)
+                ),
+                "resource_status": resource_status,
+            })
+        source = "aidp"
+        tool_name = AIDP_TOOL_CLASS
+        range_parameter = "kds_list"
+
+    source_capabilities = capabilities["sources"][source]
+    return {
+        "message": "success",
+        "data": {
+            "agent_name": agent_name,
+            "source": source,
+            "tool_name": tool_name,
+            "range_parameter": range_parameter,
+            "max_select": source_capabilities["max_select"],
+            "default_selected_ids": source_capabilities["default_range_values"],
+            "knowledge_bases": items,
+        },
+        "requestId": ctx.request_id,
+    }
 
 
 async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
@@ -568,7 +853,6 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
 
         update_conversation_title_service(conversation_id, title, ctx.user_id)
 
-        # Log token usage
         if ctx.token_id > 0:
             try:
                 log_token_usage(
@@ -576,7 +860,7 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
                     call_function_name="update_conversation_title",
                     related_id=conversation_id,
                     created_by=ctx.user_id,
-                    metadata=meta_data
+                    metadata=meta_data,
                 )
             except Exception as e:
                 logger.warning(f"Failed to log token usage: {str(e)}")
@@ -596,3 +880,22 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
+
+
+async def generate_conversation_title(
+    ctx: NorthboundContext,
+    conversation_id: int,
+    question: str,
+    language: str,
+    model_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Generate and persist a conversation title from the user's question."""
+    title = await generate_conversation_title_service(
+        conversation_id=conversation_id,
+        question=question,
+        user_id=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        language=language,
+        model_id=model_id,
+    )
+    return {"message": "success", "data": title, "requestId": ctx.request_id}

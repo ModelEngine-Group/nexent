@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-028
+  name: 本人容量查询
+  status: active
+  description: '租户与资源权限 / 个人KB配额: 本人容量查询'
+  business_rules:
+  - rule_id: F-028-RULE-01
+    description: 本人容量查询
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

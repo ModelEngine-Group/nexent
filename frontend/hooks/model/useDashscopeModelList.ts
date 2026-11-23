@@ -39,9 +39,7 @@ export const useDashscopeModelList = ({
     const modelType =
       form.type === "embedding" && form.isMultimodal
         ? ("multi_embedding" as ModelType)
-        : form.type === "vlm2" || form.type === "vlm3"
-          ? ("vlm" as ModelType)
-          : form.type;
+        : form.type;
 
     try {
       // Use manage interface if tenantId is provided (for super admin)
@@ -125,11 +123,16 @@ export const useDashscopeModelList = ({
 
   // Auto-fetch model list when batch import is enabled and API key is provided
   useEffect(() => {
+    // Only execute if this hook matches the current provider
+    if (form.provider !== "dashscope") {
+      return;
+    }
+
     if (form.isBatchImport && form.apiKey.trim() !== "") {
       getModelList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.type, form.isBatchImport]);
+  }, [form.type, form.isBatchImport, form.provider]);
 
   return {
     getModelList,

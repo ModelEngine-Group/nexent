@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: PR4058-READONLY-MODE
+  change_type: bugfix
+  bug_id: PR4058-READONLY-MODE
+  title: Restore read-only Agent navigation from debug to configure
+  description: The configure mode Button inherits Ant Design Form disabled state and
+    traps a read-only user in debug mode. Explicitly keep navigation enabled while
+    retaining mutation protection.
+  observed_behavior: Read-only users can enter debug but configure mode is disabled
+    by the enclosing Form.
+  expected_behavior: Configure mode remains reachable from debug; read-only fields
+    and publish actions remain disabled.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing browser coverage did not return from debug through configure
+      under read-only Form context.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - AGENT-EDITOR-WORKFLOWS
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGENT-EDITOR-D4-005
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    reason: Prove disabled Form inheritance and mode callbacks with real Ant Design
+      components; retain permission and no-Agent boundaries.
+    behaviors:
+    - readonly configure callback remains enabled
+    - readonly publication and fields remain disabled
+    - debug stays disabled without an Agent
+    test_selectors:
+    - frontend/tests/component/agentConfigHeader.test.tsx

@@ -41,6 +41,8 @@ export interface SkillFormData {
   source: string;
   tags: string[];
   content: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
 }
 
 /**
@@ -69,7 +71,6 @@ export interface ExistingSkill {
 export interface CreateSkillStreamRequest {
   user_request: string;
   existing_skill?: ExistingSkill;
-  complexity?: string;
   language?: string;
   files?: SkillFileContent[];
 }
@@ -91,6 +92,7 @@ export interface SkillFileNode {
   name: string;
   type: "file" | "directory";
   children?: SkillFileNode[];
+  preview_status?: "readable" | "unsupported";
 }
 
 /**
@@ -122,6 +124,8 @@ export type SkillBuildTab = "interactive" | "upload";
 export interface SkillFileContent {
   path: string;
   content: string;
+  status?: "readable" | "unsupported" | "read_error";
+  encoding?: string;
 }
 
 /**

@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: UT-SDK-AGENT-CALLABLE-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_callable_identity_reaches_host_without_breaking_other_tools
+acceptance_bindings:
+  AC-01: [test_callable_identity_reaches_host_without_breaking_other_tools]
+  AC-02: [test_callable_identity_reaches_host_without_breaking_other_tools]

@@ -7,7 +7,7 @@ import log from "@/lib/logger";
 interface McpContainerLogsModalProps {
   open: boolean;
   onCancel: () => void;
-  containerId: string;
+  containerId?: string | null;
   tenantId?: string | null;
   tail?: number;
 }
@@ -71,10 +71,17 @@ export default function McpContainerLogsModal({
         },
         () => {
           setLoading(false);
+        },
+        undefined,
+        () => {
+          setLoading(false);
         }
       ).then((controller) => {
         abortControllerRef.current = controller;
       });
+    } else if (open) {
+      setLogs("");
+      setLoading(true);
     }
 
     // Cleanup when modal closes or component unmounts
@@ -91,7 +98,7 @@ export default function McpContainerLogsModal({
 
   return (
     <Modal
-      title={`${t("mcpConfig.containerLogs.title")} - ${containerId?.substring(0, 12)}`}
+      title={`${t("mcpConfig.containerLogs.title")}${containerId ? ` - ${containerId.substring(0, 12)}` : ""}`}
       open={open}
       onCancel={onCancel}
       width={800}
@@ -102,10 +109,9 @@ export default function McpContainerLogsModal({
           ref={logsRef}
           className="bg-gray-100 p-4 rounded max-h-[500px] overflow-auto whitespace-pre-wrap text-xs font-mono"
         >
-          {logs || t("mcpConfig.containerLogs.empty")}
+          {logs || (containerId ? t("mcpConfig.containerLogs.empty") : "")}
         </pre>
       </Spin>
     </Modal>
   );
 }
-

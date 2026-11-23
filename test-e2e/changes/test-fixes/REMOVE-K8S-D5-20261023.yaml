@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-K8S-D5-20261023
+  change_type: test-fix
+  title: Remove Kubernetes deployment D5 scope while retaining Docker contracts
+  description: >-
+    At explicit user request, physically delete the two remaining dedicated
+    Kubernetes deployment Cases with their scripts and execution bindings.
+    Remove Kubernetes backup execution from DEP-06 and Helm rendering from the
+    mixed sandbox contract. Remove obsolete Kubernetes deployment dispatchers.
+    Retain Docker backup, sandbox configuration, product Kubernetes features,
+    traditional UT and historical evidence. This is a test scope reduction,
+    not a product fix or a conversion of historical failures to PASS.
+  affected_features:
+    existing: [F-173, V5-DEP-AUTO-00C24E57476D8253, V5-DEP-AUTO-7177AC18CCE799DD]
+    added: []
+    modified: [V5-DEP-06]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [DEP-06, DEP-AUTO-7177AC18CCE799DD]
+    retired: []
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: Only formal test scope and test helpers change; product deployment scripts and traditional UT are untouched.
+  notes: >-
+    Removed Case IDs: K8S-ENV-D5-001, DEP-AUTO-00C24E57476D8253.
+    Their tracked files remain recoverable from Git. DEP-03 and
+    DEP-AUTO-0E1DE34B7A6EA269 had already been removed before this change;
+    preserve their historical records rather than counting them as new deletions.
+    Feature definitions remain because Kubernetes product behavior still exists.

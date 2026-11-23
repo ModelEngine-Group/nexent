@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: D4-COLLAB-OPENAPI-SCOPE-20261009
+  change_type: test-fix
+  title: Keep collaboration refresh scoped and resolve OpenAPI tool identity
+  description: >-
+    PW-CHAT-04 requires collaboration persistence, not conversation renaming.
+    Reopen the original sidebar title after reload and retain exact collaborator
+    counts and partial-failure assertions. Completed history defaults to collapsed
+    collaboration summaries; expand both summaries via UI before checking nested
+    cards, which are only mounted when open. The independently observed rename
+    cache problem remains a product finding. PW-MCP-API-01 previously attempted
+    to select an API-service category which does not exist: converted tools are
+    registered under outer-apis with mounted names. Resolve the current service's
+    unique tool from the authenticated catalog before UI binding. Keep the health
+    check and real wire assertions; the current product health check still probes
+    an OpenAPI URL using MCP protocol and prevents live validation of later steps.
+    No product code, deployment or operator configuration is changed.
+  affected_features:
+    existing: [V5-PW-CHAT-04, V5-PW-MCP-API-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-CHAT-04, PW-MCP-API-01]
+    retired: []

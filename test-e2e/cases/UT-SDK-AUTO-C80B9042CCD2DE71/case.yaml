@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-C80B9042CCD2DE71
+  feature_id: F-183
+  business_rule_ids:
+  - F-183-RULE-01
+  title: parse_context_budget_snapshot：V2 指纹校验与遗留 W2 V1 迁移｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: parse_context_budget_snapshot：V2 指纹校验与遗留 W2 V1 迁移｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测函数 parse_context_budget_snapshot/validate_context_budget_snapshot/compute_context_budget_fingerprint 为纯函数，可直接导入，无外部凭据依赖。
+  test_data:
+    legacy_asset_declaration: 无：纯 SDK 解析逻辑，不依赖本地资产或固定 fixture。
+  steps:
+  - order: 1
+    action: 直接导入 sdk/nexent/core/models/capacity_budget.py 中的 parse_context_budget_snapshot、validate_context_budget_snapshot、compute_context_budget_fingerprint、ContextBudgetSnapshot
+      与 ContextBudgetFingerprintMismatch。
+    expected: 合法 V2 载荷返回 ContextBudgetSnapshot，字段与输入一致，fingerprint 与 compute_context_budget_fingerprint 期望值一致，schema_version=2、resolver_version="2.0.0"。
+  - order: 2
+    action: 构造一个合法 V2 载荷（含 effective_input_limit_tokens、schema_version=2、resolver_version="2.0.0"、compaction_trigger_threshold_tokens、compaction_target_tokens、field_sources），用
+      compute_context_budget_fingerprint 计算正确 fingerprint 后调用 parse_context_budget_snapshot，记录返回快照各字段与 fingerprint。
+    expected: V2 载荷 fingerprint 错误时抛出 ContextBudgetFingerprintMismatch，异常 expected 等于重算值、actual 等于传入值。
+  - order: 3
+    action: 将同一合法 V2 载荷的 fingerprint 字段替换为错误值后再次调用，捕获异常类型及 expected/actual 属性。
+    expected: ContextBudgetSnapshot 实例路径在校验失败时抛出 ContextBudgetFingerprintMismatch，不返回伪成功快照。
+  - order: 4
+    action: 构造一个合法 ContextBudgetSnapshot 实例直接传入 parse_context_budget_snapshot，验证实例分支走 validate_context_budget_snapshot；再篡改实例中某个参与指纹字段并确认抛出
+      ContextBudgetFingerprintMismatch。
+    expected: 遗留 V1 载荷迁移后：effective_input_limit_tokens == provider_input_limit_tokens；compaction_trigger_threshold_tokens
+      == soft_input_budget_tokens；compaction_target_ratio == 0.6；compaction_target_tokens == max(1, floor(effective_input_limit_tokens
+      * 0.6))。
+  - order: 5
+    action: 构造合法遗留 W2 V1 载荷（含 w1_fingerprint、provider、model_name、requested_output_tokens、output_reserve_source、uncertainty_reserve_tokens、uncertainty_reserve_basis、provider_input_limit_tokens、soft_limit_ratio、soft_input_budget_tokens、hard_input_budget_tokens、soft_limit_ratio_source、field_sources
+      及按 legacy schema 计算的 fingerprint、resolver_version="1.0.0"），调用 parse_context_budget_snapshot，记录迁移后快照的 effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_ratio、compaction_target_tokens、field_sources、warnings、schema_version、resolver_version、fingerprint。
+    expected: field_sources 移除 provider_input_limit_tokens/soft_limit_ratio/soft_input_budget_tokens/hard_input_budget_tokens
+      四键，新增 effective_input_limit_tokens、compaction_trigger_ratio、compaction_trigger_threshold_tokens（来源为 legacy 对应值或 derived/legacy_payload
+      缺省）、compaction_target_ratio="code_default"、compaction_target_tokens="derived"。
+  - order: 6
+    action: 对同一遗留 V1 载荷传入错误 legacy fingerprint，调用 parse_context_budget_snapshot，捕获异常类型及 expected（应为按 legacy 规则重算值）。
+    expected: warnings 末尾追加 "legacy_w2_v1_payload_migrated"；返回快照 fingerprint 为按 V2 规则重算值，schema_version=2、resolver_version="2.0.0"。
+  - order: 7
+    action: 将 provider_input_limit_tokens 取为 1 的边界迁移载荷，确认 compaction_target_tokens 应用 max(1, floor(...)) 下限。
+    expected: 遗留 V1 fingerprint 错误时抛出 ContextBudgetFingerprintMismatch，说明迁移前先校验 legacy 指纹。
+  - order: 8
+    action: 重复执行迁移分支，确认结果一致；结束后确认无外部网络/模型调用与持久化副作用。
+    expected: 迁移分支幂等，重复调用结果一致；全程无外部网络/模型调用、无持久化副作用。
+  expected_results:
+  - 合法 V2 载荷返回 ContextBudgetSnapshot，字段与输入一致，fingerprint 与 compute_context_budget_fingerprint 期望值一致，schema_version=2、resolver_version="2.0.0"。
+  - V2 载荷 fingerprint 错误时抛出 ContextBudgetFingerprintMismatch，异常 expected 等于重算值、actual 等于传入值。
+  - ContextBudgetSnapshot 实例路径在校验失败时抛出 ContextBudgetFingerprintMismatch，不返回伪成功快照。
+  - 遗留 V1 载荷迁移后：effective_input_limit_tokens == provider_input_limit_tokens；compaction_trigger_threshold_tokens == soft_input_budget_tokens；compaction_target_ratio
+    == 0.6；compaction_target_tokens == max(1, floor(effective_input_limit_tokens * 0.6))。
+  - field_sources 移除 provider_input_limit_tokens/soft_limit_ratio/soft_input_budget_tokens/hard_input_budget_tokens 四键，新增
+    effective_input_limit_tokens、compaction_trigger_ratio、compaction_trigger_threshold_tokens（来源为 legacy 对应值或 derived/legacy_payload
+    缺省）、compaction_target_ratio="code_default"、compaction_target_tokens="derived"。
+  - warnings 末尾追加 "legacy_w2_v1_payload_migrated"；返回快照 fingerprint 为按 V2 规则重算值，schema_version=2、resolver_version="2.0.0"。
+  - 遗留 V1 fingerprint 错误时抛出 ContextBudgetFingerprintMismatch，说明迁移前先校验 legacy 指纹。
+  - 迁移分支幂等，重复调用结果一致；全程无外部网络/模型调用、无持久化副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 480
+  unit_boundary: 上下文预算
+  inputs:
+  - 无：纯 SDK 解析逻辑，不依赖本地资产或固定 fixture。
+  assertions:
+  - 合法 V2 载荷返回 ContextBudgetSnapshot，字段与输入一致，fingerprint 与 compute_context_budget_fingerprint 期望值一致，schema_version=2、resolver_version="2.0.0"。
+  - V2 载荷 fingerprint 错误时抛出 ContextBudgetFingerprintMismatch，异常 expected 等于重算值、actual 等于传入值。
+  - ContextBudgetSnapshot 实例路径在校验失败时抛出 ContextBudgetFingerprintMismatch，不返回伪成功快照。
+  - 遗留 V1 载荷迁移后：effective_input_limit_tokens == provider_input_limit_tokens；compaction_trigger_threshold_tokens == soft_input_budget_tokens；compaction_target_ratio
+    == 0.6；compaction_target_tokens == max(1, floor(effective_input_limit_tokens * 0.6))。
+  - field_sources 移除 provider_input_limit_tokens/soft_limit_ratio/soft_input_budget_tokens/hard_input_budget_tokens 四键，新增
+    effective_input_limit_tokens、compaction_trigger_ratio、compaction_trigger_threshold_tokens（来源为 legacy 对应值或 derived/legacy_payload
+    缺省）、compaction_target_ratio="code_default"、compaction_target_tokens="derived"。
+  - warnings 末尾追加 "legacy_w2_v1_payload_migrated"；返回快照 fingerprint 为按 V2 规则重算值，schema_version=2、resolver_version="2.0.0"。
+  - 遗留 V1 fingerprint 错误时抛出 ContextBudgetFingerprintMismatch，说明迁移前先校验 legacy 指纹。
+  - 迁移分支幂等，重复调用结果一致；全程无外部网络/模型调用、无持久化副作用。

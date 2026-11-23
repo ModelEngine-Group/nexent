@@ -2,7 +2,7 @@ import { Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { MCP_GRID_CARD_OUTER, MCP_GRID_CARD_OUTER_STYLE } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
-import { getSourceLabelKey, getTransportLabelKey } from "@/lib/mcpTools";
+import { getTransportLabelKey } from "@/lib/mcpTools";
 import StatusBadge from "./shared/StatusBadge";
 import TransportIcon from "./shared/TransportIcon";
 
@@ -17,7 +17,6 @@ export default function McpServiceCard({
 }: McpServiceCardProps) {
   const { t } = useTranslation("common");
   const transportLabel = t(getTransportLabelKey(service.transportType));
-  const sourceLabel = t(getSourceLabelKey(service.source));
 
   return (
     <div
@@ -41,8 +40,6 @@ export default function McpServiceCard({
             <StatusBadge status={service.enabled} />
           </div>
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
-            <span className="truncate">{sourceLabel}</span>
-            <span className="text-slate-300">·</span>
             <span className="truncate">{transportLabel}</span>
           </div>
         </div>

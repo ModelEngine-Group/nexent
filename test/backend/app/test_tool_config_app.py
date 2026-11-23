@@ -1,6 +1,6 @@
 import types
 import importlib.machinery
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -112,7 +112,7 @@ class TestSearchToolInfoAPI:
         assert data["config"]["key"] == "value"
 
         mock_get_user_id.assert_called_once_with(None)
-        mock_search_tool_info.assert_called_once_with(123, 456, "tenant456")
+        mock_search_tool_info.assert_called_once_with(123, 456, "tenant456", "user123")
 
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.search_tool_info_impl')
@@ -134,28 +134,26 @@ class TestSearchToolInfoAPI:
 class TestUpdateToolInfoAPI:
     """Test endpoint for updating tool information"""
 
+    @pytest.mark.asyncio
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.update_tool_info_impl')
-    def test_update_tool_info_success(self, mock_update_tool_info, mock_get_user_id):
+    async def test_update_tool_info_success(self, mock_update_tool_info, mock_get_user_id):
         """Test successful tool information update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_update_tool_info.return_value = {
             "updated": True, "tool_id": "tool456"}
 
-        response = client.post(
-            "/tool/update",
-            json={
+        response = await tool_config_app.update_tool_info_api(
+            tool_config_app.ToolInstanceInfoRequest(**{
                 "agent_id": 123,
                 "tool_id": 456,
                 "params": {"key": "value"},
                 "enabled": True
-            }
+            }),
+            authorization=None, http_request=None,
         )
 
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["updated"] == True
-        assert data["tool_id"] == "tool456"
+        assert response == {"updated": True, "tool_id": "tool456"}
 
         mock_get_user_id.assert_called_once_with(None)
         assert mock_update_tool_info.call_count == 1
@@ -163,26 +161,58 @@ class TestUpdateToolInfoAPI:
         assert args[1] == "tenant456"
         assert args[2] == "user123"
 
+    @pytest.mark.asyncio
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.update_tool_info_impl')
-    def test_update_tool_info_service_error(self, mock_update_tool_info, mock_get_user_id):
+    async def test_update_tool_info_service_error(self, mock_update_tool_info, mock_get_user_id):
         """Test service error when updating tool info"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_update_tool_info.side_effect = Exception("Update error")
 
-        response = client.post(
-            "/tool/update",
-            json={
-                "agent_id": 123,
-                "tool_id": 456,
-                "params": {"key": "value"},
-                "enabled": True
-            }
+        with pytest.raises(tool_config_app.HTTPException) as exc_info:
+            await tool_config_app.update_tool_info_api(
+                tool_config_app.ToolInstanceInfoRequest(
+                    agent_id=123,
+                    tool_id=456,
+                    params={"key": "value"},
+                    enabled=True,
+                ),
+                authorization=None, http_request=None,
+            )
+
+        assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert exc_info.value.detail == "Failed to update tool"
+        assert "Update error" not in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.update_tool_info_impl')
+    async def test_update_tool_info_returns_stable_binding_error(
+        self,
+        mock_update_tool_info,
+        mock_get_user_id,
+    ):
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_tool_info.side_effect = tool_config_app.AgentDraftEditError(
+            "agent_read_only"
         )
 
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        data = response.json()
-        assert "Failed to update tool, error in: Update error" in data["detail"]
+        with pytest.raises(tool_config_app.HTTPException) as exc_info:
+            await tool_config_app.update_tool_info_api(
+                tool_config_app.ToolInstanceInfoRequest(
+                    agent_id=123,
+                    tool_id=456,
+                    params={},
+                    enabled=True,
+                ),
+                authorization=None, http_request=None,
+            )
+
+        assert exc_info.value.status_code == HTTPStatus.FORBIDDEN
+        assert exc_info.value.detail == {
+            "code": "agent_read_only",
+            "message": "The requested draft resource cannot be updated.",
+        }
 
 
 class TestScanAndUpdateToolAPI:
@@ -490,11 +520,13 @@ class TestValidateToolAPI:
 class TestImportOpenAPIServiceAPI:
     """Test endpoint for importing OpenAPI services"""
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_success(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test successful OpenAPI service import"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -538,11 +570,13 @@ class TestImportOpenAPIServiceAPI:
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_success_with_headers_template(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test successful OpenAPI service import with headers template"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -642,11 +676,13 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "openapi_json is required" in data["detail"]
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_with_force_update(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test import with force_update=True"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -711,11 +747,13 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "Auth error" in data["detail"]
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_with_authorization_header(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test OpenAPI service import with authorization header"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1063,7 +1101,7 @@ class TestDataValidation:
         )
 
         assert response.status_code in [
-            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR]
+            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR, HTTPStatus.UNAUTHORIZED]
 
     def test_update_tool_invalid_data_types(self):
         """Test update with invalid data types"""
@@ -1193,12 +1231,14 @@ class TestErrorHandling:
 class TestUpdateToolLabelsAPI:
     """Test endpoint for updating tool labels"""
 
+    @patch('apps.tool_config_app.get_user_email_map')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('database.tool_db.update_tool_labels')
-    def test_update_tool_labels_success(self, mock_update_labels, mock_get_user_id):
+    def test_update_tool_labels_success(self, mock_update_labels, mock_get_user_id, mock_get_user_email_map):
         """Test successful labels update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_update_labels.return_value = True
+        mock_get_user_email_map.return_value = {"user123": "editor@example.com"}
 
         response = client.put(
             "/tool/labels",
@@ -1209,6 +1249,7 @@ class TestUpdateToolLabelsAPI:
         data = response.json()
         assert data["status"] == "success"
         assert data["labels"] == ["database", "search"]
+        assert data["updated_by_name"] == "editor@example.com"
         mock_get_user_id.assert_called_once_with(None)
         mock_update_labels.assert_called_once_with(
             1, "tenant456", ["database", "search"], "user123"
@@ -1249,3 +1290,209 @@ class TestUpdateToolLabelsAPI:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# ---------------------------------------------------------------------------
+# Exception passthrough coverage for /tool/search and /tool/update
+# ---------------------------------------------------------------------------
+
+
+@patch('apps.tool_config_app.get_current_user_id')
+@patch('apps.tool_config_app.search_tool_info_impl')
+def test_search_tool_info_passthrough_http_exception(mock_search_tool_info, mock_get_user_id):
+    """HTTPException raised by the impl must propagate unchanged."""
+    from fastapi import HTTPException
+
+    mock_get_user_id.return_value = ("user123", "tenant456")
+    mock_search_tool_info.side_effect = HTTPException(
+        status_code=403, detail="forbidden")
+
+    response = client.post(
+        "/tool/search",
+        json={"agent_id": 1, "tool_id": 2},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "forbidden"
+
+
+@patch('apps.tool_config_app.get_current_user_id')
+@patch('apps.tool_config_app.update_tool_info_impl')
+def test_update_tool_info_validation_error_bad_request(mock_update_tool_info, mock_get_user_id):
+    """ValidationError from the impl maps to HTTP 400."""
+    from consts.exceptions import ValidationError
+
+    mock_get_user_id.return_value = ("user123", "tenant456")
+    mock_update_tool_info.side_effect = ValidationError("invalid params")
+
+    response = client.post(
+        "/tool/update",
+        json={"agent_id": 1, "tool_id": 2, "params": {}, "enabled": True},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid params"
+
+
+@patch('apps.tool_config_app.get_current_user_id')
+@patch('apps.tool_config_app.update_tool_info_impl')
+def test_update_tool_info_passthrough_http_exception(mock_update_tool_info, mock_get_user_id):
+    """HTTPException raised by the impl must propagate unchanged."""
+    from fastapi import HTTPException
+
+    mock_get_user_id.return_value = ("user123", "tenant456")
+    mock_update_tool_info.side_effect = HTTPException(
+        status_code=409, detail="conflict")
+
+    response = client.post(
+        "/tool/update",
+        json={"agent_id": 1, "tool_id": 2, "params": {}, "enabled": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "conflict"
+
+
+class TestTokenExpiredMapping:
+    """Every tool config endpoint maps an expired token to 401."""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_tools_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/list")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_search_tool_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/search", json={"agent_id": 123, "tool_id": 456})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_update_tool_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/update",
+            json={
+                "agent_id": 123,
+                "tool_id": 456,
+                "params": {"key": "value"},
+                "enabled": True,
+            },
+        )
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_load_last_tool_config_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/load_config/123")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_openapi_services_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/openapi_services")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_update_tool_labels_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.put(
+            "/tool/labels", json={"tool_id": 1, "labels": ["database"]})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestToolAuditEntries:
+    """Security audit entries emitted by tool configuration endpoints."""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.update_tool_info_impl')
+    def test_update_emits_audit_entry_without_params(self, mock_update, mock_get_user_id, caplog):
+        """Successful tool update records ids and enabled, never the params dict."""
+        import logging
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update.return_value = {"message": "ok"}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post("/tool/update", json={
+                "tool_id": 3, "agent_id": 7,
+                "params": {"api_key": "sk-param-secret"},
+                "enabled": True,
+            })
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tool_config_update" in messages[0]
+        assert "result=success" in messages[0]
+        assert '"tool_id":3' in messages[0]
+        assert '"agent_id":7' in messages[0]
+        assert '"enabled":true' in messages[0]
+        assert "sk-param-secret" not in messages[0]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
+    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
+    @patch('apps.tool_config_app.import_openapi_service')
+    def test_openapi_register_emits_audit_entry_without_spec(
+            self, mock_import, mock_refresh, mock_tool_list, mock_get_user_id, caplog):
+        """Successful OpenAPI import records name/url, never the spec or headers."""
+        import logging
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import.return_value = {"imported": 2}
+        mock_refresh.return_value = {"refreshed": True}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post("/tool/openapi_service", json={
+                "service_name": "pets-api",
+                "server_url": "https://api.example.com",
+                "openapi_json": {"openapi": "3.0.0", "paths": {}},
+                "headers_template": {"Authorization": "Bearer sk-openapi-secret"},
+            })
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tool_openapi_register" in messages[0]
+        assert '"service_name":"pets-api"' in messages[0]
+        assert '"server_url":"https://api.example.com"' in messages[0]
+        assert "sk-openapi-secret" not in messages[0]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
+    @patch('apps.tool_config_app.delete_openapi_service')
+    def test_openapi_delete_emits_audit_entry(self, mock_delete, mock_refresh, mock_get_user_id, caplog):
+        """Successful OpenAPI service deletion records the service name."""
+        import logging
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_delete.return_value = True
+        mock_refresh.return_value = {}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.delete("/tool/openapi_service/pets-api")
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tool_openapi_delete" in messages[0]
+        assert '"service_name":"pets-api"' in messages[0]

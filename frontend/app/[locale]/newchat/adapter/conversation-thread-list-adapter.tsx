@@ -1,0 +1,1944 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import type { FC, MutableRefObject, PropsWithChildren } from "react";
+import { useMemo } from "react";
+import { getSourceAttributes } from "@/lib/source";
+import {
+  ExportedMessageRepository,
+  RuntimeAdapterProvider,
+  useAui,
+} from "@assistant-ui/react";
+import type {
+  CompleteAttachment,
+  ExportedMessageRepositoryItem,
+  GenericThreadHistoryAdapter,
+  MessageFormatAdapter,
+  RemoteThreadListAdapter,
+  ThreadHistoryAdapter,
+} from "@assistant-ui/react";
+
+import {
+  CONVERSATION_PAGE_SIZE,
+  conversationService,
+} from "@/services/conversationService";
+import type { ConversationListPage, WorkbenchPins } from "@/types/conversation";
+import { getConversationDateBoundaries } from "@/lib/conversationViewport";
+import { toMessageCreatedAt } from "@/lib/messageDate";
+import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
+import {
+  appendClarificationPart,
+  parseClarificationResponse,
+  isClarificationFallback,
+} from "@/lib/clarification";
+import { stripAnsiControlSequences } from "@/lib/ansi";
+import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
+import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
+
+import { storageService } from "@/services/storageService";
+import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import type { ConversationListItem } from "@/types/conversation";
+import type { ApiConversationDetail, ApiMessage } from "@/types/conversation";
+import { collapseRefreshUserMessages } from "./history-branching";
+import log from "@/lib/logger";
+import { createAssistantStream } from "assistant-stream";
+import type { AttachmentType } from "../utils/attachment-type";
+import {
+  attachExecutionLogsToTool,
+  collapseSubAgentParts,
+  attachSearchContentToTool,
+  buildExecutionCodePart,
+  buildToolCallPart,
+  conversationSourcesRegistry,
+  extractAidpImageKeys,
+  searchImagesRegistry,
+  isReasoningChunkType,
+  skillFileUploadsRegistry,
+  parseStepTokenCount,
+  parsePlan,
+  parsePlanStepUpdate,
+  parseNl2aMessage,
+  parseNl2AgentState,
+  planRegistry,
+  type PlanData,
+  type SearchSource,
+  type StepTokenCount,
+  type Nl2AgentCardAction,
+} from "./remote-chat-model-adapter";
+
+type RemoteThreadInitializeResponse = Awaited<
+  ReturnType<RemoteThreadListAdapter["initialize"]>
+>;
+type RemoteThreadListResponse = Awaited<
+  ReturnType<RemoteThreadListAdapter["list"]>
+>;
+type RemoteThreadMetadata = Awaited<
+  ReturnType<RemoteThreadListAdapter["fetch"]>
+>;
+
+const historicalPlanCache = new Map<string, PlanData | null>();
+type HistoricalChatMode = "planning" | "execution";
+
+let activeHistoricalConversationId: string | undefined;
+let activeHistoricalChatModeConversationId: string | undefined;
+let historicalChatModeListener:
+  ((mode: HistoricalChatMode) => void) | undefined;
+const historicalChatModeCache = new Map<string, HistoricalChatMode>();
+
+export const restoreHistoricalPlan = (conversationId?: string): void => {
+  activeHistoricalConversationId = conversationId;
+  if (!conversationId) {
+    planRegistry.set(null);
+    return;
+  }
+  planRegistry.set(historicalPlanCache.get(conversationId) ?? null);
+};
+
+export const setHistoricalChatModeListener = (
+  listener: ((mode: HistoricalChatMode) => void) | undefined
+): void => {
+  historicalChatModeListener = listener;
+};
+
+export const restoreHistoricalChatMode = (conversationId?: string): void => {
+  activeHistoricalChatModeConversationId = conversationId;
+  historicalChatModeListener?.(
+    conversationId
+      ? (historicalChatModeCache.get(conversationId) ?? "execution")
+      : "execution"
+  );
+};
+
+export const cacheHistoricalChatMode = (
+  conversationId: string,
+  chatMode: HistoricalChatMode | undefined
+): void => {
+  const mode = chatMode ?? "execution";
+  historicalChatModeCache.set(conversationId, mode);
+  if (activeHistoricalChatModeConversationId === conversationId) {
+    historicalChatModeListener?.(mode);
+  }
+};
+
+const toAttachmentType = (rawType: string): AttachmentType => {
+  const normalizedType = rawType.toLowerCase();
+  if (normalizedType === "image" || normalizedType.startsWith("image/")) {
+    return "image";
+  }
+  if (
+    normalizedType === "document" ||
+    normalizedType.startsWith("text/") ||
+    normalizedType.includes("pdf") ||
+    normalizedType.includes("word") ||
+    normalizedType.includes("spreadsheet") ||
+    normalizedType.includes("presentation") ||
+    normalizedType.includes("json")
+  ) {
+    return "document";
+  }
+  return "file";
+};
+
+const parseImageMetadata = (value: unknown) => {
+  if (typeof value !== "string") return null;
+
+  try {
+    const metadata = JSON.parse(value) as {
+      source_file?: string;
+      image_url?: string;
+    };
+    return typeof metadata.image_url === "string" ? metadata : null;
+  } catch {
+    return null;
+  }
+};
+
+const getRetrievalHighlightTerms = (scoreDetails: unknown): string[] => {
+  if (!scoreDetails || typeof scoreDetails !== "object") return [];
+  const terms = (scoreDetails as { retrieval_highlight_terms?: unknown })
+    .retrieval_highlight_terms;
+  return Array.isArray(terms)
+    ? terms.filter((term): term is string => typeof term === "string")
+    : [];
+};
+
+const toToolSearchItem = (value: unknown) => {
+  if (typeof value !== "object" || value === null) return null;
+
+  const item = value as Record<string, unknown>;
+  const url = typeof item.url === "string" ? item.url : "";
+  const filename = typeof item.filename === "string" ? item.filename : "";
+  const sourceFile =
+    typeof item.source_file === "string" ? item.source_file : "";
+  const imageMetadata = parseImageMetadata(item.text);
+  const resolvedUrl = imageMetadata?.image_url || url;
+  const title =
+    (typeof item.title === "string" && item.title) ||
+    filename ||
+    sourceFile ||
+    imageMetadata?.source_file ||
+    resolvedUrl;
+  const citeIndex =
+    typeof item.cite_index === "number"
+      ? item.cite_index
+      : typeof item.citeIndex === "number"
+        ? item.citeIndex
+        : undefined;
+  const toolSign =
+    typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+
+  return resolvedUrl || sourceFile || filename || title
+    ? {
+        url: resolvedUrl,
+        title,
+        text: imageMetadata
+          ? undefined
+          : typeof item.text === "string"
+            ? item.text
+            : undefined,
+        sourceType:
+          typeof item.source_type === "string" ? item.source_type : undefined,
+        filename: filename || undefined,
+        publishedDate:
+          typeof item.published_date === "string"
+            ? item.published_date
+            : undefined,
+        downloadUrl:
+          typeof item.download_url === "string" ? item.download_url : undefined,
+        sourceFile: sourceFile || imageMetadata?.source_file || undefined,
+        objectName:
+          typeof item.object_name === "string" ? item.object_name : undefined,
+        citeIndex,
+        toolSign,
+        isImage: Boolean(imageMetadata),
+        retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
+        ...getSourceAttributes(item.search_type, item.score_details),
+      }
+    : null;
+};
+
+const parseSearchPlaceholderUnitId = (content: string): string | null => {
+  try {
+    const value = JSON.parse(content) as { unit_id?: unknown };
+    return value.unit_id === undefined || value.unit_id === null
+      ? null
+      : String(value.unit_id);
+  } catch {
+    return null;
+  }
+};
+
+const parseSearchImageUrls = (content: string): string[] => {
+  try {
+    const value = JSON.parse(content) as { images_url?: unknown };
+    return Array.isArray(value.images_url)
+      ? value.images_url.filter(
+          (imageUrl): imageUrl is string =>
+            typeof imageUrl === "string" && imageUrl.length > 0
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+type HistoryMessage = Parameters<
+  typeof ExportedMessageRepository.fromArray
+>[0][number];
+
+type BranchableHistoryMessage = Parameters<
+  typeof ExportedMessageRepository.fromBranchableArray
+>[0][number];
+
+const buildBranchableHistory = (
+  messages: HistoryMessage[]
+): BranchableHistoryMessage[] => {
+  const branchableMessages: BranchableHistoryMessage[] = [];
+  let visibleHeadId: string | null = null;
+
+  for (let groupStart = 0; groupStart < messages.length;) {
+    const role = messages[groupStart].role;
+    let groupEnd = groupStart + 1;
+    while (groupEnd < messages.length && messages[groupEnd].role === role) {
+      groupEnd++;
+    }
+
+    const group = messages.slice(groupStart, groupEnd);
+    const parentId = visibleHeadId;
+
+    for (const message of group) {
+      branchableMessages.push({ message, parentId });
+    }
+
+    visibleHeadId = group.at(-1)?.id ?? visibleHeadId;
+    groupStart = groupEnd;
+  }
+
+  return branchableMessages;
+};
+
+const restoreAttachments = (
+  message: ApiMessage,
+  messageId: string
+): CompleteAttachment[] => {
+  if (!message.minio_files) return [];
+
+  return message.minio_files.map((file, index) => {
+    const item = typeof file === "string" ? { object_name: file } : file;
+    const objectName = item.object_name;
+    const name =
+      "name" in item && item.name
+        ? item.name
+        : objectName.split("/").pop() || "Attachment";
+    const rawType = "type" in item && item.type ? item.type : "file";
+    const attachmentType = toAttachmentType(rawType);
+    const url =
+      "url" in item && typeof item.url === "string" ? item.url : undefined;
+    const previewUrl = objectName
+      ? storageService.getPreviewUrl(objectName, name)
+      : undefined;
+    const content = previewUrl
+      ? attachmentType === "image"
+        ? [{ type: "image" as const, image: previewUrl }]
+        : [
+            {
+              type: "file" as const,
+              filename: name,
+              data: previewUrl,
+              mimeType: rawType,
+            },
+          ]
+      : [];
+
+    return {
+      id: `${messageId}-attachment-${index}`,
+      status: { type: "complete" as const },
+      type: attachmentType,
+      name,
+      contentType: rawType,
+      content,
+      object_name: objectName,
+      url,
+      presigned_url:
+        "presigned_url" in item && typeof item.presigned_url === "string"
+          ? item.presigned_url
+          : undefined,
+      preview_url: previewUrl,
+      size: "size" in item ? item.size : undefined,
+    } as unknown as CompleteAttachment;
+  });
+};
+
+export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
+  private loadGeneration = 0;
+
+  constructor(
+    private readonly getRemoteId: () => string | undefined,
+    private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
+    private readonly loadDetail?: () => Promise<
+      ApiConversationDetail | undefined
+    >
+  ) {}
+
+  async load(): Promise<ExportedMessageRepository> {
+    const loadGeneration = ++this.loadGeneration;
+    // Historical threads may be cached by assistant-ui, so plan state is
+    // cached independently by backend conversation ID. Parsing below updates
+    // only this load's local snapshot; the active conversation applies it.
+    const remoteId = this.getRemoteId();
+    let restoredPlan: PlanData | null = null;
+    log.log(
+      `[history-adapter] load() invoked, remoteId="${remoteId}", prior plan=${
+        planRegistry.data ? "set" : "null"
+      }`
+    );
+    if (!remoteId || remoteId.startsWith("workbench-draft:")) {
+      if (loadGeneration === this.loadGeneration) {
+        historicalPlanCache.delete("");
+      }
+      log.log(`[history-adapter] no remoteId, returning empty`);
+      return { messages: [] };
+    }
+
+    // Translate backend `ApiMessage` items into assistant-ui content parts.
+    // Historical thinking output is restored as completed reasoning content,
+    // while the final answer remains a separate text part.
+    const detail = this.loadDetail
+      ? await this.loadDetail()
+      : (await conversationService.getDetail(Number(remoteId))).data?.[0];
+    if (!detail) {
+      return { messages: [] };
+    }
+    cacheHistoricalChatMode(remoteId, detail.chat_mode);
+    if (!detail.message) {
+      return { messages: [] };
+    }
+
+    const messages: HistoryMessage[] = [];
+    let assistantIdx = 0;
+
+    const historyMessages = collapseRefreshUserMessages(detail.message);
+    const clarificationResponses = new Map<
+      string,
+      NonNullable<ReturnType<typeof parseClarificationResponse>>
+    >(
+      historyMessages.flatMap((message) => {
+        const response =
+          message.role === "user"
+            ? parseClarificationResponse(message.clarification_response)
+            : null;
+        return response
+          ? [
+              [
+                `${response.source_message_id}:${response.unit_index}`,
+                response,
+              ] as const,
+            ]
+          : [];
+      })
+    );
+
+    for (const [messageIndex, msg] of historyMessages.entries()) {
+      // Resolve a stable messageId first — every per-message side store
+      // (sources registry, metadata bucket) is keyed off this value so it
+      // matches the id that assistant-ui later sets on the rendered message.
+      const messageId = String(msg.message_id ?? `${remoteId}-${messageIndex}`);
+
+      // Backend returns message as a string for user messages, but as an array of
+      // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
+      const messageParts = Array.isArray(msg.message)
+        ? msg.message.map((part) => ({
+            ...part,
+            content:
+              typeof part.content === "string"
+                ? stripAnsiControlSequences(part.content)
+                : part.content,
+          }))
+        : typeof msg.message === "string"
+          ? [{ type: "text", content: msg.message }]
+          : [];
+      const runHasFinalAnswer = messageParts.some(
+        (part) => part.type === "final_answer"
+      );
+      const persistedAnswerImageKeys = extractAidpImageKeys(
+        messageParts.flatMap((part) =>
+          (part.type === "final_answer" || part.type === "text") &&
+          typeof part.content === "string"
+            ? [part.content]
+            : []
+        )
+      );
+
+      // Collect token_count units so the per-message `SingleTurnTokenUsage`
+      // can render the historical step breakdown. The streaming adapter writes
+      // the same data into the global registry, but historical restores have
+      // no streaming run to read from.
+      const stepTokenCounts: StepTokenCount[] = [];
+
+      // Populate conversationSourcesRegistry for historical assistant messages
+      // and build the matching `source` parts that drive the
+      // `SourceGroupButton`/`SourcesPanel` UI. Keying the registry by the
+      // messageId (rather than `${remoteId}_${assistantIdx}`) keeps the lookup
+      // aligned with what `markdown-text.tsx` queries via `s.message.id`.
+      if (msg.role === "assistant" && Array.isArray(msg.search)) {
+        const sources: SearchSource[] = [];
+        for (const searchItem of msg.search) {
+          if (typeof searchItem === "object" && searchItem !== null) {
+            const item = searchItem as Record<string, unknown>;
+            const url = (item.url as string | undefined) ?? "";
+            const filename = (item.filename as string | undefined) ?? "";
+            const imageMetadata = parseImageMetadata(item.text);
+            const resolvedUrl = imageMetadata?.image_url || url;
+            const title =
+              (item.title as string | undefined) ||
+              filename ||
+              imageMetadata?.source_file ||
+              resolvedUrl;
+            if (url || filename || title) {
+              const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              const isImage =
+                (item.score_details as Record<string, unknown> | undefined)
+                  ?.chunk_type === "image" ||
+                Boolean(imageMetadata) ||
+                persistedAnswerImageKeys.includes(derivedImageKey);
+              sources.push({
+                citeIndex: (item.cite_index as number | undefined) ?? 0,
+                url: resolvedUrl,
+                title,
+                text: imageMetadata
+                  ? undefined
+                  : (item.text as string | undefined),
+                publishedDate: item.published_date as string | undefined,
+                sourceType: item.source_type as string | undefined,
+                searchType: item.search_type as string | undefined,
+                toolSign: item.tool_sign as string | undefined,
+                filename,
+                sourceFile:
+                  (item.source_file as string | undefined) ||
+                  imageMetadata?.source_file,
+                downloadUrl: item.download_url as string | undefined,
+                objectName: item.object_name as string | undefined,
+                isImage,
+                imageKey:
+                  (item.image_key as string | undefined) ||
+                  (isImage ? derivedImageKey : undefined),
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details
+                ),
+                ...getSourceAttributes(item.search_type, item.score_details),
+              });
+            }
+          }
+        }
+        if (sources.length > 0) {
+          conversationSourcesRegistry.set(messageId, sources);
+        }
+      }
+
+      const content: any[] = [];
+      let historicalCardAction: Nl2AgentCardAction | null = null;
+      let historicalNl2a:
+        import("./remote-chat-model-adapter").Nl2aMessage | null = null;
+
+      if (msg.role === "user") {
+        let text = messageParts
+          .filter((part) => part.type === "text")
+          .map((part) => part.content)
+          .join("\n");
+        try {
+          const action = JSON.parse(text) as Nl2AgentCardAction;
+          if (
+            action?.type === "nl2agent_card_action" &&
+            Number.isInteger(action.agent_id) &&
+            action.agent_id > 0
+          ) {
+            historicalCardAction = action;
+            text =
+              {
+                requirement_clarification: "Requirements submitted",
+                suggested_resource_installation:
+                  "Resource installation completed",
+                installed_resource_binding: "Resource selection completed",
+              }[action.subtype] || "Agent creation continued";
+          }
+        } catch {
+          // Ordinary user text is not a structured card action.
+        }
+        if (text) content.push({ type: "text", text });
+      } else {
+        const parentReasoning = createReasoningAccumulator(content);
+        const finalAnswers = createFinalAnswerProjection(content);
+        // Per-invocation map of currently-open sub-agent runs reconstructed
+        // from persisted ``subagent_start`` / ``subagent_end`` units. We do
+        // not route inner parts into a separate ``subagent-group`` array;
+        // instead we stamp a ``metadata`` block on every reasoning / tool /
+        // source part so ``MessagePrimitive.GroupedParts`` in ``thread.tsx``
+        // can cluster them under the matching ``group-subagent-<id>-<runId>``
+        // header.
+        //
+        // Parallel siblings must not collapse onto one LIFO stack: two
+        // siblings persisted with overlapping units would otherwise swap
+        // ``runId`` for any interleaved chunk. Each ``subagent_start``
+        // carries a stable ``invocation_id`` so we open a fresh slot per
+        // id, and the matching ``subagent_end`` closes exactly that slot
+        // (instead of popping the most-recently-opened entry).
+        type ActiveSubAgent = {
+          runId: string;
+          agentId: number | string;
+          agentName: string;
+          task?: string;
+          depth: number;
+          invocationId: string;
+          reasoningText: string;
+          stepLabel: string;
+          pendingStepLabel: string;
+          pendingWhitespace: string;
+        };
+        const activeSubAgents = new Map<string, ActiveSubAgent>();
+        let historicalRunCounter = 0;
+        // For history replay we keep a deterministic ordering of "active"
+        // scopes by tracking insertion order explicitly. Map iteration is
+        // already insertion-ordered, so the first remaining entry is the
+        // best "default" attribution when a chunk lacks its own id.
+        const currentSubAgent = (
+          invocationId?: string
+        ): ActiveSubAgent | null => {
+          if (invocationId) return activeSubAgents.get(invocationId) ?? null;
+          return null;
+        };
+        const buildMetadata = (
+          invocationId?: string
+        ):
+          | {
+              subagentId: number | string;
+              runId: string;
+              agentName: string;
+              depth: number;
+              task?: string;
+              isRunning: boolean;
+            }
+          | undefined => {
+          const top = currentSubAgent(invocationId);
+          if (!top) return undefined;
+          return {
+            subagentId: top.agentId,
+            runId: top.runId,
+            agentName: top.agentName,
+            depth: top.depth,
+            task: top.task,
+            isRunning: false,
+          };
+        };
+
+        const flushReasoning = (invocationId?: string) => {
+          const entry = invocationId ? activeSubAgents.get(invocationId) : null;
+          if (entry?.reasoningText && entry.reasoningText !== entry.stepLabel) {
+            content.push({
+              type: "reasoning",
+              text: entry.reasoningText,
+              status: { type: "done" },
+              metadata: {
+                subagentId: entry.agentId,
+                runId: entry.runId,
+                agentName: entry.agentName,
+                depth: entry.depth,
+                task: entry.task,
+                isRunning: false,
+              },
+            });
+            entry.reasoningText = "";
+          }
+          if (entry) {
+            entry.reasoningText = "";
+            entry.stepLabel = "";
+            entry.pendingStepLabel = "";
+            entry.pendingWhitespace = "";
+          }
+          if (!invocationId) parentReasoning.close();
+        };
+
+        const answerImageKeys = persistedAnswerImageKeys;
+        const persistedImageSources = Array.isArray(msg.search)
+          ? msg.search.filter(
+              (searchItem) =>
+                typeof searchItem === "object" && searchItem !== null
+            )
+          : [];
+        const restoredImageUrls = new Set<string>();
+        const restoredImageKeys = new Set<string>();
+        const restoredImages: any[] = [];
+        const historicalSkillFiles = new Map<string, string>();
+        let historicalSkillSummaryPart: { type: "text"; text: string } | null =
+          null;
+        const historicalSkillAttemptCheckpoints = new Map<
+          string,
+          { files: Map<string, string>; summary: string | null }
+        >();
+        const appendHistoricalImage = (imageUrl: string) => {
+          if (!imageUrl || restoredImageUrls.has(imageUrl)) return [];
+          const imageIndex = restoredImageUrls.size;
+          const imageKey = answerImageKeys[imageIndex];
+          const matchingSources = persistedImageSources.filter((searchItem) => {
+            const item = searchItem as Record<string, unknown>;
+            const metadata = parseImageMetadata(item.text);
+            return (metadata?.image_url || item.url) === imageUrl;
+          }) as Record<string, unknown>[];
+          const fallbackMetadata = persistedImageSources.find((searchItem) => {
+            const item = searchItem as Record<string, unknown>;
+            return (
+              imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`
+            );
+          }) as Record<string, unknown> | undefined;
+          const appendedImages = [];
+          for (const metadata of matchingSources.length
+            ? matchingSources
+            : [fallbackMetadata]) {
+            const imageMetadata = metadata
+              ? parseImageMetadata(metadata.text)
+              : null;
+            const sourceImageKey =
+              (metadata?.image_key as string | undefined) ||
+              (metadata?.tool_sign && metadata?.cite_index !== undefined
+                ? `${metadata.tool_sign}${metadata.cite_index}`
+                : undefined) ||
+              imageKey;
+            if (sourceImageKey && restoredImageKeys.has(sourceImageKey))
+              continue;
+            const title =
+              (metadata?.title as string | undefined) ||
+              imageMetadata?.source_file ||
+              imageUrl;
+            const imagePart: any = {
+              ...getSourceAttributes(
+                metadata?.search_type,
+                metadata?.score_details
+              ),
+              type: "source",
+              sourceType: "url",
+              url: imageUrl,
+              title,
+              text: imageMetadata
+                ? undefined
+                : (metadata?.text as string | undefined),
+              filename: metadata?.filename as string | undefined,
+              sourceFile:
+                (metadata?.source_file as string | undefined) ||
+                imageMetadata?.source_file,
+              toolSign: metadata?.tool_sign as string | undefined,
+              citeIndex:
+                (metadata?.cite_index as number | undefined) ?? undefined,
+              isImage: true,
+              imageKey: sourceImageKey,
+            };
+            const meta = buildMetadata();
+            if (meta) imagePart.metadata = meta;
+            if (sourceImageKey) restoredImageKeys.add(sourceImageKey);
+            restoredImages.push(imagePart);
+            appendedImages.push(imagePart);
+          }
+          restoredImageUrls.add(imageUrl);
+          return appendedImages;
+        };
+
+        for (const [partIndex, part] of messageParts.entries()) {
+          if (
+            part.type === "model_attempt_control" &&
+            detail.workbench_config?.mode === "skill_create"
+          ) {
+            try {
+              const control = JSON.parse(part.content) as {
+                phase?: string;
+                attempt_id?: string;
+              };
+              if (control.attempt_id && control.phase === "begin") {
+                historicalSkillAttemptCheckpoints.set(control.attempt_id, {
+                  files: new Map(historicalSkillFiles),
+                  summary: historicalSkillSummaryPart?.text ?? null,
+                });
+              } else if (control.attempt_id && control.phase) {
+                const checkpoint = historicalSkillAttemptCheckpoints.get(
+                  control.attempt_id
+                );
+                historicalSkillAttemptCheckpoints.delete(control.attempt_id);
+                if (control.phase === "rollback" && checkpoint) {
+                  historicalSkillFiles.clear();
+                  for (const [path, file] of checkpoint.files) {
+                    historicalSkillFiles.set(path, file);
+                  }
+                  if (checkpoint.summary === null) {
+                    historicalSkillSummaryPart = null;
+                  } else if (historicalSkillSummaryPart) {
+                    historicalSkillSummaryPart.text = checkpoint.summary;
+                  }
+                }
+              }
+            } catch {
+              log.warn("[history-adapter] Invalid model attempt control unit");
+            }
+            continue;
+          }
+          if (part.type === "nl2a") {
+            historicalNl2a = parseNl2aMessage({
+              type: "nl2a",
+              content: part.content,
+            });
+            continue;
+          }
+          if (part.type === "skill_body" || part.type === "file_content") {
+            try {
+              const event = JSON.parse(part.content) as {
+                path?: string;
+                content?: string;
+              };
+              const path = part.type === "skill_body" ? "SKILL.md" : event.path;
+              if (path) {
+                historicalSkillFiles.set(
+                  path,
+                  (historicalSkillFiles.get(path) ?? "") + (event.content ?? "")
+                );
+              }
+            } catch {
+              log.warn("[history-adapter] Invalid NL2Skill file unit");
+            }
+            continue;
+          }
+          if (part.type === "nl2a_state") {
+            const state = parseNl2AgentState(part.content);
+            if (
+              detail.workbench_config?.mode === "agent_create" &&
+              state?.event === "agent_generation_completed"
+            ) {
+              content.push({
+                type: "data",
+                name: "nl2agent-created",
+                data: { agentId: state.agent_id, completed: true },
+              });
+            }
+            continue;
+          }
+          if (part.type === "done") continue;
+          if (part.type === "summary") {
+            if (!part.content) continue;
+            if (detail.workbench_config?.mode === "skill_create") {
+              // The live NL2Skill adapter appends fragments to one text part.
+              // Defer insertion until replay ends so a persisted summary is
+              // shown after the generated answer and file cards, not before.
+              if (!historicalSkillSummaryPart) {
+                historicalSkillSummaryPart = { type: "text", text: "" };
+              }
+              historicalSkillSummaryPart.text += part.content;
+            } else {
+              content.push({ type: "text", text: part.content });
+            }
+            continue;
+          }
+          // Note: do NOT early-return on `!part.content` at the top level —
+          // `tool` items stored in the database have an empty `content` field
+          // and only carry `tool_name` + `tool_arguments` (see the
+          // `get_station_code_of_citys` example in the history payload). An
+          // early return here would drop those tool calls and leave the
+          // matching `execution_logs` chunk unattached, so it would be
+          // surfaced as plain text instead of a tool result. Each branch
+          // below handles its own empty-content case (e.g. `parse` is now
+          // intentionally skipped, mirroring the streaming adapter).
+
+          // Token count units are not part of the rendered content — they are
+          // parsed into the per-message step bucket below and consumed by
+          // `SingleTurnTokenUsage` via message metadata.
+          if (part.type === "token_count") {
+            const parsed = parseStepTokenCount(part.content);
+            if (parsed) stepTokenCounts.push(parsed);
+            continue;
+          }
+
+          // Restore per-tool search sources from the persisted placeholder.
+          // The backend keeps the full results in `searchByUnitId`, keyed by
+          // the placeholder's database unit ID.
+          if (part.type === "search_content_placeholder") {
+            const unitId = parseSearchPlaceholderUnitId(part.content);
+            const searchResults = unitId
+              ? msg.searchByUnitId?.[unitId]
+              : undefined;
+            if (Array.isArray(searchResults)) {
+              for (const searchResult of searchResults) {
+                const item = toToolSearchItem(searchResult);
+                if (item) {
+                  attachSearchContentToTool(content, item, part.tool_call_id);
+                }
+              }
+            }
+            continue;
+          }
+
+          // Older history payloads may retain the original search_content
+          // unit instead of a placeholder. Support that shape as well.
+          if (part.type === "search_content") {
+            try {
+              const parsed = JSON.parse(part.content) as unknown;
+              const searchResults = Array.isArray(parsed) ? parsed : [parsed];
+              for (const searchResult of searchResults) {
+                const item = toToolSearchItem(searchResult);
+                if (item) {
+                  attachSearchContentToTool(content, item, part.tool_call_id);
+                }
+              }
+            } catch (error) {
+              log.warn(
+                "[history-adapter] Failed to parse search_content:",
+                error
+              );
+            }
+            continue;
+          }
+
+          if (part.type === "picture_web") {
+            for (const imageUrl of parseSearchImageUrls(part.content)) {
+              for (const imagePart of appendHistoricalImage(imageUrl)) {
+                attachSearchContentToTool(
+                  content,
+                  {
+                    url: imagePart.url,
+                    title: imagePart.title,
+                    text: imagePart.text,
+                    isImage: true,
+                    imageKey: imagePart.imageKey,
+                    searchType: imagePart.searchType,
+                    sourceMetadata: imagePart.sourceMetadata,
+                    sourceReference: imagePart.sourceReference,
+                    toolSign: imagePart.toolSign,
+                    citeIndex: imagePart.citeIndex,
+                  },
+                  part.tool_call_id
+                );
+              }
+            }
+            continue;
+          }
+
+          if (part.type === "skill_file_uploads") {
+            continue;
+          }
+
+          if (part.type === "plan") {
+            const plan = parsePlan(part.content);
+            log.log(
+              `[history-adapter] plan unit: parsed=${
+                plan ? "ok" : "null"
+              }, steps=${plan?.steps.length ?? 0}`
+            );
+            if (plan) restoredPlan = plan;
+            const previous = content.at(-1);
+            if (
+              previous?.type === "tool-call" &&
+              previous.toolName === "tool"
+            ) {
+              previous.toolName = "create_plan";
+              previous.argsText = part.content;
+            }
+            continue;
+          }
+
+          if (part.type === "plan_step_update") {
+            const update = parsePlanStepUpdate(part.content);
+            log.log(
+              `[history-adapter] plan_step_update unit: parsed=${
+                update ? "ok" : "null"
+              }`
+            );
+            if (update && restoredPlan) {
+              restoredPlan = {
+                ...restoredPlan,
+                steps: restoredPlan.steps.map((step) =>
+                  step.id === update.stepId
+                    ? { ...step, status: update.status }
+                    : step
+                ),
+              };
+            }
+            const previous = content.at(-1);
+            if (
+              previous?.type === "tool-call" &&
+              previous.toolName === "tool"
+            ) {
+              previous.toolName = "update_plan_step";
+              previous.argsText = part.content;
+            }
+            continue;
+          }
+
+          // ``subagent_start`` allocates a fresh ``runId`` and opens a new
+          // per-invocation slot so subsequent reasoning / tool / source parts
+          // inherit its ``metadata``. We also push a ``data`` boundary stamp
+          // (same shape as the streaming adapter emits) so the
+          // ``group-subagent-*`` cluster appears immediately when the
+          // conversation is reloaded. Parallel siblings are stored in a map
+          // keyed by the stable ``invocation_id`` so they never collide on
+          // the same ``runId`` or share reasoning text.
+          if (part.type === "subagent_start") {
+            flushReasoning();
+            let payload: {
+              agent_id?: number | string;
+              agent_name?: string;
+              task?: string;
+              invocation_id?: string;
+            } = {};
+            try {
+              const parsed = JSON.parse(part.content || "{}");
+              if (parsed && typeof parsed === "object") {
+                payload = parsed as typeof payload;
+              }
+            } catch {
+              payload = { task: part.content };
+            }
+            historicalRunCounter += 1;
+            const runId = `run-${historicalRunCounter}`;
+            const invocationId =
+              payload.invocation_id ?? part.invocation_id ?? runId;
+            const descriptor: ActiveSubAgent = {
+              runId,
+              agentId: payload.agent_id ?? "unknown",
+              agentName: payload.agent_name || "subagent",
+              task: payload.task,
+              depth: activeSubAgents.size + 1,
+              invocationId,
+              reasoningText: "",
+              stepLabel: "",
+              pendingStepLabel: "",
+              pendingWhitespace: "",
+            };
+            activeSubAgents.set(invocationId, descriptor);
+            const stampMeta = buildMetadata(invocationId);
+            content.push({
+              type: "data",
+              name: "subagent-boundary",
+              data: {
+                kind: "start",
+                runId,
+                agentId: descriptor.agentId,
+                agentName: descriptor.agentName,
+                task: descriptor.task,
+                depth: descriptor.depth,
+                isRunning: false,
+                invocationId,
+              },
+              metadata: stampMeta,
+            });
+            continue;
+          }
+
+          if (part.type === "subagent_end") {
+            const endInvocationId = (() => {
+              try {
+                const parsed = JSON.parse(part.content || "{}");
+                return parsed && typeof parsed === "object"
+                  ? (parsed as { invocation_id?: string }).invocation_id
+                  : undefined;
+              } catch {
+                return part.invocation_id;
+              }
+            })();
+            flushReasoning(endInvocationId ?? part.invocation_id);
+            let payload: {
+              invocation_id?: string;
+            } = {};
+            try {
+              const parsed = JSON.parse(part.content || "{}");
+              if (parsed && typeof parsed === "object") {
+                payload = parsed as typeof payload;
+              }
+            } catch {
+              // Legacy subagent_end payloads may not be JSON; fall through.
+            }
+            const invocationId = payload.invocation_id ?? part.invocation_id;
+            if (invocationId && activeSubAgents.has(invocationId)) {
+              const closing = activeSubAgents.get(invocationId)!;
+              if (closing.reasoningText) {
+                content.push({
+                  type: "reasoning",
+                  text: closing.reasoningText,
+                  status: { type: "done" },
+                  metadata: {
+                    subagentId: closing.agentId,
+                    runId: closing.runId,
+                    agentName: closing.agentName,
+                    depth: closing.depth,
+                    task: closing.task,
+                    isRunning: false,
+                  },
+                });
+                closing.reasoningText = "";
+              }
+              activeSubAgents.delete(invocationId);
+            } else if (activeSubAgents.size > 0) {
+              // No id supplied (very old payload): fall back to closing the
+              // first active invocation so we stay balanced.
+              const firstKey = activeSubAgents.keys().next().value;
+              if (firstKey) {
+                activeSubAgents.delete(firstKey);
+              }
+            }
+            continue;
+          }
+
+          if (part.type === "step_count") {
+            // Match live NL2Skill rendering: a bare step marker is not
+            // reasoning, and must not restore an empty Reasoning card.
+            if (detail.workbench_config?.mode === "skill_create") continue;
+            flushReasoning(part.invocation_id);
+            if (part.content) {
+              const top = currentSubAgent(part.invocation_id);
+              if (top) {
+                if (top.reasoningText && !top.stepLabel) {
+                  // Old persisted order: model text preceded step_count.
+                  top.reasoningText = part.content + top.reasoningText;
+                } else {
+                  flushReasoning(part.invocation_id);
+                  top.reasoningText = "";
+                  top.pendingStepLabel = part.content;
+                }
+                top.stepLabel = part.content;
+              } else parentReasoning.queueStepLabel(part.content);
+            }
+            continue;
+          }
+
+          if (isReasoningChunkType(part.type)) {
+            if (part.content) {
+              const top = currentSubAgent(part.invocation_id);
+              if (top) {
+                if (!top.reasoningText && !part.content.trim()) {
+                  top.pendingWhitespace += part.content;
+                } else {
+                  top.reasoningText +=
+                    top.pendingStepLabel + top.pendingWhitespace + part.content;
+                  top.pendingStepLabel = "";
+                  top.pendingWhitespace = "";
+                }
+              } else parentReasoning.append(part.content);
+            }
+            continue;
+          }
+
+          if (part.type === "tool" || part.type === "tool-call") {
+            flushReasoning(part.invocation_id);
+            const toolCallPart = buildToolCallPart({
+              type: part.type,
+              content: part.content,
+              unit_index: part.unit_index ?? partIndex,
+              tool_call_id: part.tool_call_id,
+              role: part.role,
+              tool_name: part.tool_name,
+              tool_arguments: part.tool_arguments,
+            });
+            toolCallPart.status = { type: "complete" };
+            const meta = buildMetadata(part.invocation_id);
+            if (meta) toolCallPart.metadata = meta;
+            content.push(toolCallPart);
+            continue;
+          }
+
+          if (part.type === "parse") {
+            flushReasoning(part.invocation_id);
+            if (part.content.trim()) {
+              const executionCodePart = buildExecutionCodePart({
+                type: "parse",
+                content: part.content,
+                unit_index: part.unit_index ?? partIndex,
+              });
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) executionCodePart.metadata = meta;
+              content.push(executionCodePart);
+            }
+            continue;
+          }
+
+          if (part.type === "execution_logs") {
+            flushReasoning(part.invocation_id);
+            attachExecutionLogsToTool(content, part);
+            continue;
+          }
+
+          if (part.type === "error") {
+            flushReasoning(part.invocation_id);
+            if (part.content) {
+              const errorPart: any = {
+                type: "text",
+                text: part.content,
+                ...(runHasFinalAnswer
+                  ? { isWarning: true }
+                  : { isError: true }),
+              };
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) errorPart.metadata = meta;
+              content.push(errorPart);
+            }
+            continue;
+          }
+
+          if (part.type === "warning") {
+            flushReasoning(part.invocation_id);
+            if (part.content) {
+              const warningPart: any = {
+                type: "text",
+                text: part.content,
+                isWarning: true,
+              };
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) warningPart.metadata = meta;
+              content.push(warningPart);
+            }
+            continue;
+          }
+
+          if (
+            part.type === "human_interaction" ||
+            part.type === "clarification"
+          ) {
+            flushReasoning();
+            appendClarificationPart(
+              content,
+              part.content,
+              part.unit_index,
+              msg.status === "completed",
+              clarificationResponses.get(`${msg.message_id}:${part.unit_index}`)
+            );
+            continue;
+          }
+
+          if (part.type === "automation_proposal") {
+            flushReasoning();
+            const proposal = parseAutomationProposal(part.content);
+            if (proposal) {
+              content.push({
+                type: "data",
+                name: "automation-proposal",
+                data: proposal,
+              });
+            } else {
+              log.warn("[history-adapter] Failed to parse automation proposal");
+            }
+            continue;
+          }
+
+          if (part.type === "history_summary") {
+            flushReasoning();
+            try {
+              const payload = JSON.parse(part.content || "{}");
+              if (payload && typeof payload === "object") {
+                content.push({
+                  type: "data",
+                  name: "history-summary",
+                  data: { ...payload, status: "accepted" },
+                });
+              }
+            } catch {
+              log.warn("[history-adapter] Failed to parse history summary");
+            }
+            continue;
+          }
+
+          if (
+            part.type === "final_answer" &&
+            !isClarificationFallback(content, part.content)
+          ) {
+            flushReasoning(part.invocation_id);
+            if (part.content) {
+              const meta = buildMetadata(part.invocation_id);
+              finalAnswers.apply(
+                {
+                  ...part,
+                  content: unwrapFinalAnswer(part.content),
+                  answer_phase: "delta",
+                },
+                meta
+              );
+            }
+          }
+        }
+
+        flushReasoning();
+
+        // Older creation turns may have returned a final answer without the
+        // trusted completion event. Show the saved draft, not a false success.
+        if (
+          detail.workbench_config?.mode === "agent_create" &&
+          Number.isInteger(Number(detail.agent_id)) &&
+          Number(detail.agent_id) > 0 &&
+          messageParts.some(
+            (part) =>
+              part.type === "final_answer" && Boolean(part.content?.trim())
+          ) &&
+          !content.some(
+            (part) => part.type === "data" && part.name === "nl2agent-created"
+          )
+        ) {
+          content.push({
+            type: "data",
+            name: "nl2agent-created",
+            data: { agentId: Number(detail.agent_id), completed: false },
+          });
+        }
+
+        for (const [path, fileContent] of historicalSkillFiles) {
+          const extension = path.split(".").pop()?.toLowerCase();
+          content.push({
+            type: "data",
+            name: "nl2skill-file",
+            data: {
+              path,
+              content: fileContent,
+              kind:
+                extension === "md"
+                  ? "markdown"
+                  : extension === "py" || extension === "sh"
+                    ? "code"
+                    : "generic",
+              ...(extension === "py"
+                ? { language: "python" }
+                : extension === "sh"
+                  ? { language: "bash" }
+                  : {}),
+              isStreaming: false,
+            },
+          });
+        }
+
+        // Flush any incomplete sub-agent reasoning without changing the
+        // order in which persisted units were reconstructed.
+        for (const entry of activeSubAgents.values()) {
+          flushReasoning(entry.invocationId);
+        }
+        activeSubAgents.clear();
+
+        if (historicalSkillSummaryPart?.text) {
+          content.push(historicalSkillSummaryPart);
+        }
+
+        // Some older records only persist the message-level image list.
+        if (Array.isArray(msg.picture) && msg.picture.length > 0) {
+          for (const imageUrl of msg.picture) {
+            if (typeof imageUrl === "string" && imageUrl) {
+              appendHistoricalImage(imageUrl);
+            }
+          }
+        }
+
+        if (content.length === 0) {
+          const fallbackText = messageParts
+            .filter((part) => part.type !== "skill_file_uploads")
+            .map((part) => part.content)
+            .join("\n");
+          if (fallbackText) content.push({ type: "text", text: fallbackText });
+        }
+
+        const restoredImageMap = new Map<string, SearchSource>();
+        for (const image of restoredImages) {
+          if (image.imageKey) restoredImageMap.set(image.imageKey, image);
+        }
+        if (restoredImageMap.size > 0) {
+          searchImagesRegistry.set(messageId, restoredImageMap);
+        }
+        const restoredConversationSources =
+          conversationSourcesRegistry.get(messageId) ?? [];
+        conversationSourcesRegistry.set(messageId, [
+          ...restoredConversationSources.filter((source) => !source.isImage),
+          ...restoredImages,
+        ]);
+
+        // Emit a `source` part for each persisted search result so the
+        // `group-source` block renders the inline "检索结果" trigger button.
+        // Mirrors the streaming adapter's end-of-stream emission, but uses the
+        // already-aggregated `msg.search` data instead of rebuilding it from
+        // the raw SSE chunks.
+        if (Array.isArray(msg.search) && msg.search.length > 0) {
+          for (const searchItem of msg.search) {
+            if (typeof searchItem === "object" && searchItem !== null) {
+              const item = searchItem as Record<string, unknown>;
+              const scoreDetails = item.score_details as
+                Record<string, unknown> | undefined;
+              const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              const imageMetadata = parseImageMetadata(item.text);
+              if (
+                scoreDetails?.chunk_type === "image" ||
+                imageMetadata ||
+                answerImageKeys.includes(searchImageKey)
+              )
+                continue;
+              const url = (item.url as string | undefined) ?? "";
+              const filename = (item.filename as string | undefined) ?? "";
+              const title =
+                (item.title as string | undefined) || filename || url;
+              if (!url && !filename && !title) continue;
+              const citeIndex = (item.cite_index as number | undefined) ?? 0;
+              content.push({
+                type: "source",
+                sourceType: item.source_type === "file" ? "document" : "url",
+                url,
+                title,
+                text: item.text as string | undefined,
+                filename,
+                publishedDate: item.published_date as string | undefined,
+                downloadUrl: item.download_url as string | undefined,
+                objectName: item.object_name as string | undefined,
+                citeIndex,
+                toolSign: item.tool_sign as string | undefined,
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details
+                ),
+                ...getSourceAttributes(item.search_type, item.score_details),
+                messageId,
+              });
+            }
+          }
+        }
+
+        // Keep image sources adjacent to regular sources so GroupedParts
+        // creates one unified source button and side panel selection.
+        for (const image of restoredImages) {
+          content.push(image);
+        }
+      }
+
+      const orderedContent = collapseSubAgentParts(content);
+      content.splice(0, content.length, ...orderedContent);
+
+      const attachments = restoreAttachments(msg, messageId);
+      if (msg.role === "assistant" && attachments.length > 0) {
+        skillFileUploadsRegistry.set(messageId, attachments);
+        content.push({
+          type: "text",
+          text: "",
+          isSkillFiles: true,
+        });
+      }
+
+      // An NL2Agent turn may consist only of an interactive card boundary.
+      // Keep the message so its restored metadata can render the card.
+      if (historicalNl2a && content.length === 0) {
+        content.push({ type: "text", text: "" });
+      }
+
+      // Preserve the running answer boundary before its first visible token.
+      if (
+        msg.role === "assistant" &&
+        detail.streaming_message?.status === "streaming" &&
+        msg.message_id === detail.streaming_message.message_id &&
+        content.length === 0
+      ) {
+        content.push({ type: "text", text: "" });
+      }
+      if (content.length === 0 && attachments.length === 0) {
+        // Still track assistant index even if no content (for registry alignment)
+        if (msg.role === "assistant") assistantIdx++;
+        continue;
+      }
+
+      // Persist the historical step breakdown on message metadata so
+      // `SingleTurnTokenUsage` can find it via the same selector it uses for
+      // the streaming flow (which writes to a global registry). assistant-ui
+      // requires `metadata.custom` to be present on every message, so we
+      // always include the field and only set the token bucket when we have
+      // historical step data.
+      const createdAt = toMessageCreatedAt(msg.create_time);
+      const timing =
+        msg.role === "assistant"
+          ? buildHistoricalMessageTiming(stepTokenCounts)
+          : undefined;
+      const metadata = {
+        ...(timing ? { timing } : {}),
+        custom: {
+          ...(historicalCardAction
+            ? { nl2agentCardAction: historicalCardAction }
+            : {}),
+          ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(msg.role === "user" && typeof msg.message_index === "number"
+            ? { historicalMessageIndex: msg.message_index }
+            : {}),
+          ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
+        },
+      };
+
+      messages.push({
+        id: messageId,
+        role: msg.role,
+        content,
+        ...(createdAt ? { createdAt } : {}),
+        ...(msg.role === "user" && attachments.length > 0
+          ? { attachments }
+          : {}),
+        metadata,
+      });
+
+      if (msg.role === "assistant") assistantIdx++;
+    }
+
+    const branchableMessages = buildBranchableHistory(messages);
+    const repository = ExportedMessageRepository.fromBranchableArray(
+      branchableMessages,
+      { headId: messages.at(-1)?.id ?? null }
+    );
+    if (loadGeneration === this.loadGeneration) {
+      historicalPlanCache.set(remoteId, restoredPlan);
+      if (activeHistoricalConversationId === remoteId) {
+        planRegistry.set(restoredPlan);
+      }
+    }
+    // The shared hook reconnects after loading; automatic resume appends
+    // another assistant below the head and breaks the retry branch.
+    return repository;
+  }
+
+  // `append` is intentionally a no-op: in the remote-thread-list flow, message
+  // persistence is owned by the `runAgent` stream endpoint and message history
+  // is reloaded via `load()`. Hooking `append` here would prematurely persist
+  // draft attachments before the user actually submits the message, which
+  // conflicts with the "upload-on-send" semantics. The runtime only requires
+  // the method to exist so that composer actions (e.g. add attachment) do not
+  // throw "appendMessage is not a function".
+  async append(_item: ExportedMessageRepositoryItem): Promise<void> {
+    return;
+  }
+
+  withFormat<TMessage, TStorageFormat extends Record<string, unknown>>(
+    _formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>
+  ): GenericThreadHistoryAdapter<TMessage> {
+    return this as unknown as GenericThreadHistoryAdapter<TMessage>;
+  }
+}
+
+const toRemoteThreadMetadata = (
+  item: ConversationListItem
+): RemoteThreadMetadata => {
+  // Prefer the most recent activity timestamp; fall back to the creation time
+  // so the thread list can always group by recency. The timestamp is passed
+  // through the `custom` slot because the installed @assistant-ui/react
+  // (0.14.15) does not yet thread `lastMessageAt` through the runtime state.
+  const timestamp = item.last_activity_time ?? item.create_time;
+  return {
+    remoteId: String(item.conversation_id),
+    status: "regular",
+    title: item.conversation_title ?? "Untitled conversation",
+    ...(timestamp || item.agent_id
+      ? {
+          custom: {
+            ...(timestamp
+              ? { lastMessageAt: new Date(timestamp).toISOString() }
+              : {}),
+            ...(item.agent_id ? { agentId: item.agent_id } : {}),
+          },
+        }
+      : {}),
+  };
+};
+
+const INITIAL_CONVERSATION_PAGE_SIZE = 30;
+
+const parseConversationListOffset = (after: string | undefined): number => {
+  if (after === undefined) return 0;
+
+  const offset = Number(after);
+  return Number.isSafeInteger(offset) &&
+    offset >= 0 &&
+    offset <= Number.MAX_SAFE_INTEGER - CONVERSATION_PAGE_SIZE
+    ? offset
+    : 0;
+};
+
+const createHistoryProvider = (
+  loadDetail?: import("@/types/conversation").ConversationDetailReader
+): FC<PropsWithChildren> => {
+  const Provider: FC<PropsWithChildren> = ({ children }) => {
+    const aui = useAui();
+
+    const history = useMemo(
+      () =>
+        new RemoteConversationHistoryAdapter(
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize(),
+          loadDetail
+            ? () => {
+                const id = aui.threadListItem.getState().remoteId;
+                return id ? loadDetail(id) : Promise.resolve(undefined);
+              }
+            : undefined
+        ),
+      [aui]
+    );
+
+    const adapters = useMemo(() => ({ history }), [history]);
+
+    return (
+      <RuntimeAdapterProvider adapters={adapters}>
+        {children}
+      </RuntimeAdapterProvider>
+    );
+  };
+
+  return Provider;
+};
+
+const createShareHistoryProvider = (
+  snapshot: ApiConversationDetail
+): FC<PropsWithChildren> => {
+  const Provider: FC<PropsWithChildren> = ({ children }) => {
+    const aui = useAui();
+    const history = useMemo(
+      () =>
+        new RemoteConversationHistoryAdapter(
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize(),
+          async () => snapshot
+        ),
+      [aui]
+    );
+    const adapters = useMemo(() => ({ history }), [history]);
+    return (
+      <RuntimeAdapterProvider adapters={adapters}>
+        {children}
+      </RuntimeAdapterProvider>
+    );
+  };
+  return Provider;
+};
+
+/**
+ * Creates a single, read-only thread adapter for a public new-chat share.
+ * It deliberately reuses RemoteConversationHistoryAdapter so the snapshot is
+ * reconstructed with the exact same Tool Call, Reasoning, source and
+ * attachment mapping used by a normal historical conversation.
+ */
+export const createShareThreadListAdapter = (
+  snapshot: ApiConversationDetail
+): RemoteThreadListAdapter => {
+  const remoteId = String(snapshot.conversation_id);
+  const title =
+    (snapshot as ApiConversationDetail & { conversation_title?: string })
+      .conversation_title || "Shared conversation";
+  const metadata: RemoteThreadMetadata = {
+    remoteId,
+    status: "regular",
+    title,
+  };
+
+  return {
+    unstable_Provider: createShareHistoryProvider(snapshot),
+    async list(): Promise<RemoteThreadListResponse> {
+      return { threads: [metadata] };
+    },
+    async initialize(): Promise<RemoteThreadInitializeResponse> {
+      return { remoteId, externalId: remoteId };
+    },
+    async fetch(): Promise<RemoteThreadMetadata> {
+      return metadata;
+    },
+    async rename(): Promise<void> {},
+    async archive(): Promise<void> {},
+    async unarchive(): Promise<void> {},
+    async delete(): Promise<void> {},
+    async generateTitle() {
+      return createAssistantStream(() => {});
+    },
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Server conversation id registry
+// ---------------------------------------------------------------------------
+//
+// `generateTitle` is invoked by the assistant-ui runtime concurrently with
+// `ChatModelAdapter.run()`. For a brand-new thread the adapter's `remoteId`
+// is still the empty-string placeholder returned by `initialize()`, while the
+// real backend `conversation_id` only lands in the page state after the
+// `agent/run` response header is parsed. To avoid sending `conversation_id: 0`
+// (which happens because `Number("") === 0`) we let the page register a
+// resolver that points at its `serverConversationIdsRef` plus the active
+// assistant-ui thread id. `generateTitle` then polls the ref until the real
+// id is available before issuing the title request.
+type ServerConversationIdState = {
+  idsRef: MutableRefObject<Map<string, string>>;
+  getActiveThreadId: () => string | undefined;
+};
+
+let serverConversationIdState: ServerConversationIdState | null = null;
+const titleRequests = new Map<string, Promise<string>>();
+
+export const generateConversationTitle = (
+  conversationId: string,
+  question: string
+): Promise<string> => {
+  const existingRequest = titleRequests.get(conversationId);
+  if (existingRequest) return existingRequest;
+
+  const request = conversationService
+    .generateTitle({
+      conversation_id: Number(conversationId),
+      question,
+    })
+    .then((result) => {
+      const title = typeof result === "string" ? result.trim() : "";
+      if (!title) {
+        throw new Error(
+          `Title generation returned an empty title for conversation ${conversationId}.`
+        );
+      }
+      return title;
+    })
+    .catch((error) => {
+      titleRequests.delete(conversationId);
+      throw error;
+    });
+
+  titleRequests.set(conversationId, request);
+  return request;
+};
+
+export const setServerConversationIdState = (
+  state: ServerConversationIdState | null
+) => {
+  serverConversationIdState = state;
+};
+
+let pendingThreadOperationId: string | undefined;
+
+export const setPendingThreadOperationId = (threadId: string | undefined) => {
+  pendingThreadOperationId = threadId;
+};
+
+const MAX_TITLE_WAIT_MS = 5_000;
+const TITLE_POLL_INTERVAL_MS = 50;
+
+const waitForServerConversationId = async (
+  fallbackRemoteId: string
+): Promise<string | null> => {
+  const state = serverConversationIdState;
+  if (!state) return fallbackRemoteId || null;
+
+  const { idsRef, getActiveThreadId } = state;
+  const startedAt = Date.now();
+
+  const isValidConversationId = (value: string | undefined): value is string =>
+    Boolean(value) && Number.isInteger(Number(value)) && Number(value) > 0;
+
+  // Existing threads already have a server id in `remoteId`, which is more
+  // reliable than the active-thread registry while the sidebar is switching.
+  if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
+
+  // New threads use an empty remoteId until they are reloaded from the
+  // backend. The sidebar captures the local ID before calling rename/delete,
+  // because assistant-ui may switch the active thread as part of that action.
+  const readNow = (): string | undefined => {
+    if (pendingThreadOperationId) {
+      const fromPendingThread = idsRef.current.get(pendingThreadOperationId);
+      if (isValidConversationId(fromPendingThread)) return fromPendingThread;
+    }
+
+    const activeThreadId = getActiveThreadId();
+    if (!activeThreadId) return undefined;
+    const fromActiveThread = idsRef.current.get(activeThreadId);
+    return isValidConversationId(fromActiveThread)
+      ? fromActiveThread
+      : undefined;
+  };
+
+  const immediate = readNow();
+  if (immediate) return immediate;
+
+  // Slow path: poll until `agent/run`'s response header callback lands the
+  // server id in the ref, or we time out.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, TITLE_POLL_INTERVAL_MS));
+    const next = readNow();
+    if (next) return next;
+    if (Date.now() - startedAt > MAX_TITLE_WAIT_MS) return null;
+  }
+};
+
+export const createConversationThreadListAdapter = (
+  conversationType: "agent_chat" | "workbench",
+  pinStorageKey?: string,
+  loadPins: () => Promise<WorkbenchPins> = () =>
+    conversationService.getWorkbenchPins(),
+  onDeleted?: (conversationId: number) => Promise<void>,
+  detailLoader?: import("@/types/conversation").ConversationDetailLoader
+): RemoteThreadListAdapter => {
+  const prefetchedConversationIds = new Set<string>();
+  let loadedCount = INITIAL_CONVERSATION_PAGE_SIZE;
+  let generation = 0;
+  return {
+    unstable_Provider: createHistoryProvider(detailLoader?.load),
+
+    async list({ after } = {}): Promise<RemoteThreadListResponse> {
+      const currentGeneration = after === undefined ? ++generation : generation;
+      if (conversationType === "agent_chat") {
+        // Agent-chat history is fetched by Agent group and per-group cursors.
+        return { threads: [] };
+      }
+      const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
+      const keyset = after?.startsWith("activity:")
+        ? after.slice(9)
+        : undefined;
+      let offset = keyset ? 0 : parseConversationListOffset(after);
+      let cursor = keyset;
+      let remaining =
+        after === undefined
+          ? Math.max(INITIAL_CONVERSATION_PAGE_SIZE, loadedCount)
+          : CONVERSATION_PAGE_SIZE;
+      let data: ConversationListPage | undefined;
+      const items: ConversationListItem[] = [];
+      let nextCursor: string | undefined;
+      while (remaining > 0) {
+        const limit = Math.min(100, remaining);
+        data = await conversationService.getList({
+          offset,
+          limit,
+          todayStartMs,
+          weekStartMs,
+          conversationType,
+          ...(cursor ? { cursor } : {}),
+        });
+        if (currentGeneration !== generation) return { threads: [] };
+        items.push(...data.items);
+        offset += data.items.length;
+        nextCursor = data.next_cursor
+          ? `activity:${data.next_cursor}`
+          : data.next_cursor === undefined && offset < data.metadata.total
+            ? String(offset)
+            : undefined;
+        remaining -= limit;
+        if (!nextCursor || !data.items.length) break;
+        cursor = nextCursor.startsWith("activity:")
+          ? nextCursor.slice(9)
+          : undefined;
+        if (cursor) offset = 0;
+      }
+      if (after === undefined) loadedCount = items.length;
+      else loadedCount += items.length;
+
+      let pinnedMetadata: RemoteThreadMetadata[] = [];
+      if (after === undefined) {
+        prefetchedConversationIds.clear();
+        if (pinStorageKey) {
+          const loadedIds = new Set(
+            items.map((item) => String(item.conversation_id))
+          );
+          try {
+            const pins = await loadPins();
+            if (currentGeneration !== generation) return { threads: [] };
+            pinnedMetadata = pins.items
+              .filter(
+                (item) =>
+                  (item.conversation_type ?? "workbench") === conversationType
+              )
+              .filter((item) => !loadedIds.has(String(item.conversation_id)))
+              .map(toRemoteThreadMetadata);
+            for (const item of pinnedMetadata)
+              prefetchedConversationIds.add(item.remoteId);
+          } catch (error) {
+            // Pin availability must not block ordinary conversation history.
+            log.error("Failed to preload Workbench pins", error);
+          }
+        }
+      }
+
+      return {
+        threads: [
+          ...items
+            .filter(
+              (item, index) =>
+                items.findIndex(
+                  (candidate) =>
+                    candidate.conversation_id === item.conversation_id
+                ) === index
+            )
+            .filter(
+              (item) =>
+                !prefetchedConversationIds.has(String(item.conversation_id))
+            )
+            .map(toRemoteThreadMetadata),
+          ...pinnedMetadata,
+        ],
+        nextCursor,
+      };
+    },
+
+    async initialize(
+      _threadId: string
+    ): Promise<RemoteThreadInitializeResponse> {
+      // Conversation creation is now handled lazily by `POST /api/agent/run`:
+      // when the request omits `conversation_id`, the backend auto-creates the
+      // conversation and returns the new id via the `conversation_id` response
+      // header. The remote-chat-model-adapter forwards that id back to the page
+      // state, which then rebinds it as `runConfig.custom.threadId` for later
+      // messages in the same thread.
+      //
+      // We intentionally do NOT call `conversationService.create()` here —
+      // doing so would create a second, empty conversation that the agent
+      // run never reuses (see commit history for details).
+      //
+      return {
+        // Each reserved Workbench draft needs a distinct local identity so
+        // assistant-ui cannot merge unsent conversations under the empty ID.
+        remoteId:
+          conversationType === "workbench"
+            ? `workbench-draft:${_threadId}`
+            : "",
+        externalId: "",
+      };
+    },
+
+    // New conversations do not have a backend ID until their first agent run.
+    // Accept metadata updates so assistant-ui can retain the selected agent in
+    // its local thread state while users switch between conversations.
+    async updateCustom(
+      _remoteId: string,
+      _custom: Record<string, unknown> | undefined
+    ): Promise<void> {
+      return;
+    },
+
+    async rename(remoteId: string, newTitle: string): Promise<void> {
+      const candidateId = await waitForServerConversationId(remoteId);
+      const conversationId = Number(candidateId);
+      if (
+        !candidateId ||
+        !Number.isInteger(conversationId) ||
+        conversationId <= 0
+      ) {
+        throw new Error(
+          "Cannot rename a conversation without a backend conversation ID."
+        );
+      }
+      await conversationService.rename(conversationId, newTitle);
+      detailLoader?.invalidate(String(conversationId));
+    },
+
+    // The backend currently has no archive/unarchive endpoints, so these are
+    // intentionally no-ops. Keeping the implementations lets the runtime call
+    // them safely (e.g. from sidebar actions) without crashing the page.
+    async archive(_remoteId: string): Promise<void> {
+      log.warn(
+        "[adapter] archive is not supported by the backend yet; ignoring."
+      );
+    },
+
+    async unarchive(_remoteId: string): Promise<void> {
+      log.warn(
+        "[adapter] unarchive is not supported by the backend yet; ignoring."
+      );
+    },
+
+    async delete(remoteId: string): Promise<void> {
+      const candidateId = await waitForServerConversationId(remoteId);
+      const conversationId = Number(candidateId);
+      if (
+        !candidateId ||
+        !Number.isInteger(conversationId) ||
+        conversationId <= 0
+      ) {
+        throw new Error(
+          "Cannot delete a conversation without a backend conversation ID."
+        );
+      }
+      await conversationService.delete(conversationId);
+      await onDeleted?.(conversationId);
+    },
+
+    async fetch(threadId: string): Promise<RemoteThreadMetadata> {
+      const detail = await (detailLoader?.load ?? conversationService.getById)(
+        threadId
+      );
+      const lastActivityTime =
+        conversationType === "agent_chat"
+          ? detail.last_activity_time
+          : undefined;
+
+      return toRemoteThreadMetadata({
+        conversation_id: Number(detail.conversation_id),
+        conversation_title:
+          detail.conversation_title ?? "Untitled conversation",
+        agent_id: detail.agent_id,
+        create_time: detail.create_time,
+        update_time: lastActivityTime ?? detail.create_time,
+        ...(lastActivityTime === undefined
+          ? {}
+          : { last_activity_time: lastActivityTime }),
+      });
+    },
+
+    async generateTitle(_remoteId, _messages) {
+      // Title generation is initiated by the page after agent/run returns the
+      // real backend conversation ID. This avoids racing the first run.
+      return createAssistantStream(() => {});
+    },
+  };
+};
+
+export const conversationThreadListAdapter =
+  createConversationThreadListAdapter("agent_chat");
+
+export const workbenchConversationThreadListAdapter =
+  createConversationThreadListAdapter("workbench");

@@ -6,10 +6,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "sdk"))
 
 from nexent.core.models.message_utils import (
     _flatten_content,
+    content_has_multimodal_blocks,
     prepare_messages_for_completion,
     prepare_messages_for_smolagents_text_flattening,
 )
 from types import SimpleNamespace
+
+
+def test_content_has_multimodal_blocks_false_for_non_list():
+    assert content_has_multimodal_blocks("plain text") is False
+    assert content_has_multimodal_blocks(None) is False
+
+
+def test_content_has_multimodal_blocks_false_for_text_only_list():
+    assert content_has_multimodal_blocks([{"type": "text", "text": "hi"}]) is False
+    assert content_has_multimodal_blocks(["a", {"text": "b"}]) is False
+
+
+def test_content_has_multimodal_blocks_true_for_media_block():
+    assert content_has_multimodal_blocks(
+        [{"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}},
+         {"type": "text", "text": "describe"}]
+    ) is True
+    assert content_has_multimodal_blocks([{"type": "image_url"}]) is True
+    assert content_has_multimodal_blocks([{"type": "video_url"}]) is True
 
 
 def test_flatten_string_returns_same():
@@ -45,6 +65,14 @@ def test_prepare_messages_returns_unchanged_when_no_model_factory():
     assert out is msgs
 
 
+def test_prepare_messages_unchanged_for_other_factories():
+    obj = SimpleNamespace(role="user", content="hi")
+    msgs = [obj]
+    out = prepare_messages_for_completion(msgs, "openai")
+    # Non-modelengine factories must leave the normalized messages untouched.
+    assert out is msgs
+
+
 def test_prepare_messages_modelengine_with_objects_and_case_insensitive():
     obj1 = SimpleNamespace(role="system", content="SYS")
     obj2 = SimpleNamespace(role="user", content=["a", {"text": "b"}])
@@ -64,3 +92,33 @@ def test_prepare_messages_for_smolagents_text_flattening_uses_text_part_shape():
     assert prepared[0].content == [{"type": "text", "text": "SYS"}]
     assert prepared[1].content == [{"type": "text", "text": "ab"}]
 
+
+def test_prepare_messages_for_smolagents_text_flattening_preserves_media_blocks():
+    audio_block = {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}}
+    obj = SimpleNamespace(role="user", content=[audio_block, {"type": "text", "text": "describe"}])
+
+    prepared = prepare_messages_for_smolagents_text_flattening([obj])
+
+    assert prepared[0].content == [audio_block, {"type": "text", "text": "describe"}]
+
+
+def test_prepare_messages_for_smolagents_text_flattening_preserves_media_in_dict_msg():
+    audio_block = {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}}
+    msg = {"role": "user", "content": [audio_block, {"type": "text", "text": "describe"}]}
+
+    prepared = prepare_messages_for_smolagents_text_flattening([msg])
+
+    assert prepared[0]["content"] == [audio_block, {"type": "text", "text": "describe"}]
+
+
+
+def test_prepare_messages_for_smolagents_text_flattening_uses_text_shape_for_dict():
+    msgs = [
+        {"role": "system", "content": "SYS"},
+        {"role": "user", "content": ["a", {"text": "b"}]},
+    ]
+
+    prepared = prepare_messages_for_smolagents_text_flattening(msgs)
+
+    assert prepared[0]["content"] == [{"type": "text", "text": "SYS"}]
+    assert prepared[1]["content"] == [{"type": "text", "text": "ab"}]

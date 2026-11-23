@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-CD0683F112D04918
+  feature_id: F-131
+  business_rule_ids:
+  - F-131-RULE-01
+  title: 各应用 /health/live 与 /health/ready 状态码与响应字段契约｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 各应用 /health/live 与 /health/ready 状态码与响应字段契约｜核心流程
+  preconditions:
+  - 本地 API 集成测试环境可运行，Runtime 与 Config 应用可分别通过 ASGI/TestClient 触发 lifespan 启动；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - health 端点不轮询 Redis、数据库、模型等外部依赖，测试无需额外外部服务。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 导入 backend/apps/app_factory.py 的 create_app（默认调用 install_health_contract），构造最小 FastAPI 应用并注入 app.state.thread_manager，确认
+      /health/live 与 /health/ready 已注册。
+    expected: /health/live 始终返回 HTTP 200，响应体为 {"status":"alive"}，不依赖任何外部服务。
+  - order: 2
+    action: 通过 ASGI/TestClient 触发 lifespan 启动，向 /health/live 发送 GET 请求，记录 HTTP 状态码与 JSON 响应体。
+    expected: manager state 为 running 且 stuck_count=0 时，/health/ready 返回 HTTP 200，响应体 status="ready"、manager_state="running"、stuck_count=0。
+  - order: 3
+    action: 在 thread_manager 快照 state 为 running 且 stuck_count=0 时，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    expected: manager state 非 running 或 stuck_count>0 时，/health/ready 返回 HTTP 503，响应体 status="not_ready" 且携带 manager_state
+      与 stuck_count 字段，manager_state 等于快照 state.value、stuck_count 等于快照 stuck_count。
+  - order: 4
+    action: 将 app.state.thread_manager 替换为快照 state 非 running（如 stopping）的桩，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    expected: app.state 无 thread_manager（manager 为 None）时，/health/ready 返回 {"status":"ready"}，不抛异常。
+  - order: 5
+    action: 将 app.state.thread_manager 替换为 stuck_count>0 的桩，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    expected: runtime_app 与 config_app 的 /health/ready 响应中 manager_state 分别反映各自进程级 ThreadManager 状态。
+  - order: 6
+    action: 将 app.state.thread_manager 置为 None，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    expected: 测试过程无外部依赖调用，日志与响应中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 对 backend/apps/runtime_app.py 与 backend/apps/config_app.py 的 app 实例重复步骤 2-4，确认两应用安装同一 health 契约且 manager_state
+      反映各自进程级 ThreadManager。
+    expected: 测试过程无外部依赖调用，日志与响应中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 断言整个测试过程无外部依赖调用，且响应与日志不出现明文 API Key/Token/Password/模型密钥。
+    expected: 测试过程无外部依赖调用，日志与响应中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - /health/live 始终返回 HTTP 200，响应体为 {"status":"alive"}，不依赖任何外部服务。
+  - manager state 为 running 且 stuck_count=0 时，/health/ready 返回 HTTP 200，响应体 status="ready"、manager_state="running"、stuck_count=0。
+  - manager state 非 running 或 stuck_count>0 时，/health/ready 返回 HTTP 503，响应体 status="not_ready" 且携带 manager_state 与 stuck_count
+    字段，manager_state 等于快照 state.value、stuck_count 等于快照 stuck_count。
+  - app.state 无 thread_manager（manager 为 None）时，/health/ready 返回 {"status":"ready"}，不抛异常。
+  - runtime_app 与 config_app 的 /health/ready 响应中 manager_state 分别反映各自进程级 ThreadManager 状态。
+  - 测试过程无外部依赖调用，日志与响应中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 507
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 导入 backend/apps/app_factory.py 的 create_app（默认调用 install_health_contract），构造最小 FastAPI 应用并注入 app.state.thread_manager，确认
+      /health/live 与 /health/ready 已注册。
+    - 通过 ASGI/TestClient 触发 lifespan 启动，向 /health/live 发送 GET 请求，记录 HTTP 状态码与 JSON 响应体。
+    - 在 thread_manager 快照 state 为 running 且 stuck_count=0 时，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    - 将 app.state.thread_manager 替换为快照 state 非 running（如 stopping）的桩，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    - 将 app.state.thread_manager 替换为 stuck_count>0 的桩，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    - 将 app.state.thread_manager 置为 None，向 /health/ready 发送 GET 请求，记录状态码与响应体。
+    - 对 backend/apps/runtime_app.py 与 backend/apps/config_app.py 的 app 实例重复步骤 2-4，确认两应用安装同一 health 契约且 manager_state 反映各自进程级
+      ThreadManager。
+    - 断言整个测试过程无外部依赖调用，且响应与日志不出现明文 API Key/Token/Password/模型密钥。
+    response_expectations:
+    - /health/live 始终返回 HTTP 200，响应体为 {"status":"alive"}，不依赖任何外部服务。
+    - manager state 为 running 且 stuck_count=0 时，/health/ready 返回 HTTP 200，响应体 status="ready"、manager_state="running"、stuck_count=0。
+    - manager state 非 running 或 stuck_count>0 时，/health/ready 返回 HTTP 503，响应体 status="not_ready" 且携带 manager_state 与 stuck_count
+      字段，manager_state 等于快照 state.value、stuck_count 等于快照 stuck_count。
+    - app.state 无 thread_manager（manager 为 None）时，/health/ready 返回 {"status":"ready"}，不抛异常。
+    - runtime_app 与 config_app 的 /health/ready 响应中 manager_state 分别反映各自进程级 ThreadManager 状态。
+    - 测试过程无外部依赖调用，日志与响应中不出现明文 API Key/Token/Password/模型密钥。

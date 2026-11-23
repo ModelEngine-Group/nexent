@@ -1,20 +1,20 @@
 import { App } from "antd";
 import { ExclamationCircleFilled } from "@ant-design/icons";
-
 import React from "react";
-import i18next from "i18next";
+import { useTranslation } from "react-i18next";
 
 interface ConfirmProps {
   title: string;
   content: React.ReactNode;
   okText?: string;
   cancelText?: string;
-  danger?: boolean; // 默认为 true，使用 danger 样式
+  danger?: boolean;
   onOk?: () => void;
   onCancel?: () => void;
 }
 
 export const useConfirmModal = () => {
+  const { t } = useTranslation("common");
   const { modal } = App.useApp();
 
   const confirm = ({
@@ -31,11 +31,11 @@ export const useConfirmModal = () => {
       content,
       centered: true,
       icon: React.createElement(ExclamationCircleFilled),
-      okText: okText || i18next.t("common.confirm"),
-      cancelText: cancelText || i18next.t("common.cancel"),
-      okButtonProps: { 
-        danger, 
-        type: "primary"
+      okText: okText || t("common.confirm"),
+      cancelText: cancelText || t("common.cancel"),
+      okButtonProps: {
+        danger,
+        type: "primary",
       },
       onOk: onOk,
       onCancel,

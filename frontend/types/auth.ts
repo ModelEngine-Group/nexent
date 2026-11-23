@@ -6,6 +6,7 @@ export type UserRole = USER_ROLES;
 export interface User {
   id: string;
   email: string;
+  username?: string | null;
   role: UserRole;
   avatarUrl?: string;
   tenantId?: string;
@@ -27,6 +28,7 @@ export interface ErrorResponse {
   message: string;
   code: number;
   data?: any;
+  details?: Record<string, unknown> | null;
 }
 
 // Authorization context type
@@ -35,7 +37,7 @@ export interface AuthFormValues {
   email: string;
   password: string;
   confirmPassword: string;
-  inviteCode?: string;
+  inviteCode: string;
 }
 
 export interface RegisterModalOptions {
@@ -63,7 +65,7 @@ export interface AuthContextType {
   register: (
     email: string,
     password: string,
-    inviteCode?: string
+    inviteCode: string
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;
@@ -138,7 +140,7 @@ export interface AuthenticationContextType {
   register: (
     email: string,
     password: string,
-    inviteCode?: string
+    inviteCode: string
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;
@@ -159,6 +161,7 @@ export interface AuthenticationContextType {
   isSessionExpiredModalOpen: boolean;
   openSessionExpiredModal: () => void;
   closeSessionExpiredModal: () => void;
+  openLoginModalAfterSessionExpired: () => void;
 }
 
 // Authentication State Return Type - for useAuthenticationState hook
@@ -179,7 +182,7 @@ export interface AuthenticationStateReturn {
   register: (
     email: string,
     password: string,
-    inviteCode?: string
+    inviteCode: string
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;
@@ -206,6 +209,7 @@ export interface AuthenticationUIReturn {
   isSessionExpiredModalOpen: boolean;
   openSessionExpiredModal: () => void;
   closeSessionExpiredModal: () => void;
+  openLoginModalAfterSessionExpired: () => void;
 }
 
 // Authorization Context Type

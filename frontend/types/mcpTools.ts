@@ -1,7 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   FILTER_ALL,
   McpSource,
   type McpContainerStatus,
+  type McpDeploymentType,
   type McpHealthStatus,
   type McpServiceStatus,
   type McpTransportType,
@@ -13,7 +16,6 @@ export type FilterAll = typeof FILTER_ALL;
 export type McpSourceFilter = McpSource | FilterAll;
 /** Transport-filter for toolbars (all | http | sse | container). */
 export type McpTransportFilter = McpTransportType | FilterAll;
-
 
 export interface RegistryServerPayload {
   name: string;
@@ -123,9 +125,13 @@ export interface RegistryQuickAddOption {
 
 export interface CommunityMcpCard {
   communityId?: number;
+  marketId?: number;
+  reviewId?: number;
+  sourceMcpId?: number;
   name: string;
   version?: string;
   description: string;
+  content?: string;
   status: string;
   createdAt: string;
   updatedAt?: string;
@@ -137,6 +143,22 @@ export interface CommunityMcpCard {
   configJson?: Record<string, unknown>;
   registryJson?: Record<string, unknown>;
   tags?: string[];
+  authorName?: string;
+  authorDisplayName?: string;
+  authorCasUsername?: string | null;
+  rating?: number;
+  installCount?: number;
+  deploymentType?: McpDeploymentType;
+  reviewStatus?: "pending" | "approved" | "rejected" | "offline";
+  reviewType?: "initial_listing" | "version_update";
+  previousVersion?: string;
+  pendingVersion?: string;
+  groupIds?: string;
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
+  authorizationToken?: string;
+  customHeaders?: Record<string, string>;
+  containerPort?: number;
 }
 
 export interface McpServiceItem {
@@ -148,6 +170,7 @@ export interface McpServiceItem {
   source: McpSource;
   enabled: McpServiceStatus;
   updatedAt: string;
+  createTime: string;
   tags: string[];
   transportType: McpTransportType;
   serverUrl: string;
@@ -159,6 +182,16 @@ export interface McpServiceItem {
   containerStatus?: McpContainerStatus;
   authorizationToken?: string;
   customHeaders?: Record<string, string>;
+  isListedInRepository?: boolean;
+  communityId?: number;
+  marketId?: number;
+  deploymentType?: McpDeploymentType;
+  reviewStatus?: "pending" | "approved" | "rejected" | "offline";
+  reviewType?: "initial_listing" | "version_update";
+  permission?: "EDIT" | "READ_ONLY";
+  groupIds?: string;
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 export interface McpTagStat {
@@ -172,12 +205,20 @@ export interface AddMcpServicePayload {
   source: McpSource;
   //transport_type: McpTransportType;
   server_url: string;
-  tags: string[];
+  tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
+  container_port?: number;
+  config_json?: Record<string, unknown>;
   version?: string;
   registry_json?: Record<string, unknown>;
+  enabled?: boolean;
+  market_id?: number;
+  group_ids?: string;
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
+  skip_health_check?: boolean;
 }
 
 export interface UpdateMcpServicePayload {
@@ -185,9 +226,15 @@ export interface UpdateMcpServicePayload {
   name: string;
   description: string;
   server_url: string;
-  tags: string[];
+  tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  config_json?: Record<string, unknown>;
+  version?: string;
+  community_id?: number;
+  group_ids?: string;
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 }
 
 export interface ToggleMcpServicePayload {
@@ -222,13 +269,20 @@ export interface McpContainerConfigPayload {
 export interface LocalAddMcpDraft {
   name: string;
   description?: string;
+  deploymentType?: McpDeploymentType;
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
   customHeaders?: string;
+  openApiJson?: string;
   containerConfigJson: string;
   containerPort?: number;
+  uploadImageFile?: File | null;
   tags: string[];
+  version?: string;
+  groupIds?: number[];
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 /**

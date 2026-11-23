@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-036
+  feature_id: F-063
+  business_rule_ids:
+  - F-063-RULE-01
+  title: 请求级工具参数覆盖 DB；未知映射被忽略；KB元字段重算｜异常/边界/越权
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 请求级工具参数覆盖 DB；未知映射被忽略；KB元字段重算｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 使用本批次已创建的真实模型与固定工具 Agent，取得数字 agent_id。
+    expected: 未知 tool_params 映射不导致 4xx，运行流正常建立并到达终态。
+  - order: 2
+    action: 构造 tool_params：在已知 Agent 下为已知工具加入 unknown_param，不修改数据库默认参数。
+    expected: 固定标记 UNKNOWN_MAPPING_IGNORED 可见，证明请求继续执行。
+  - order: 3
+    action: 调用真实 /agent/run 流式入口并读取到终态。
+    expected: 未知映射不写入 Agent 持久配置、不创建额外工具绑定。
+  - order: 4
+    action: 断言请求不会因未知工具参数映射返回 4xx；未知映射被当前产品忽略。
+    expected: 已知映射仍覆盖 DB 默认值；租户隔离与凭据脱敏保持有效。
+  - order: 5
+    action: 断言运行到达 completed/stopped/failed 之一，且固定回答标记 UNKNOWN_MAPPING_IGNORED 出现在事件中。
+    expected: 已知映射仍覆盖 DB 默认值；租户隔离与凭据脱敏保持有效。
+  - order: 6
+    action: 查询 Agent 配置，确认未知映射没有持久化、没有新增工具绑定或跨租户副作用。
+    expected: 已知映射仍覆盖 DB 默认值；租户隔离与凭据脱敏保持有效。
+  - order: 7
+    action: 保存脱敏事件与状态；清理本用例会话。
+    expected: 已知映射仍覆盖 DB 默认值；租户隔离与凭据脱敏保持有效。
+  expected_results:
+  - 未知 tool_params 映射不导致 4xx，运行流正常建立并到达终态。
+  - 固定标记 UNKNOWN_MAPPING_IGNORED 可见，证明请求继续执行。
+  - 未知映射不写入 Agent 持久配置、不创建额外工具绑定。
+  - 已知映射仍覆盖 DB 默认值；租户隔离与凭据脱敏保持有效。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 126
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 未知 tool_params 映射不导致 4xx，运行流正常建立并到达终态。
+  - 固定标记 UNKNOWN_MAPPING_IGNORED 可见，证明请求继续执行。
+  - 未知映射不写入 Agent 持久配置、不创建额外工具绑定。
+  - 已知映射仍覆盖 DB 默认值；租户隔离与凭据脱敏保持有效。
+  cleanup:
+  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

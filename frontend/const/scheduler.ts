@@ -14,7 +14,9 @@ export interface FrequencyOptionsResponse {
 }
 
 // API endpoint to fetch frequency options
-export const SUMMARY_FREQUENCY_OPTIONS_API = "/api/indices/summary_frequency_options";
+import { withBasePath } from "@/lib/basePath";
+
+export const SUMMARY_FREQUENCY_OPTIONS_API = withBasePath("/api/indices/summary_frequency_options");
 
 // Type for summary frequency
 export type SummaryFrequency = string | null;

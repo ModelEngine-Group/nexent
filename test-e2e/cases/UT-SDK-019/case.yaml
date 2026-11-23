@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-019
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: 沙箱桥接线程生命周期、取消、超时与清理
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 沙箱桥接线程生命周期、取消、超时与清理
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 构造成功、取消、连接超时、执行超时和 close 超时的桥接任务。
+    expected: 每个任务只占用声明 lane。
+  - order: 2
+    action: 记录线程管理器 lane、引用计数和 stuck 标记。
+    expected: 取消和超时传播正确。
+  - order: 3
+    action: 重复 release/close。
+    expected: close/release 幂等。
+  - order: 4
+    action: 在进程 shutdown 后枚举桥接线程。
+    expected: shutdown 后无沙箱桥接线程或会话泄漏。
+  expected_results:
+  - 每个任务只占用声明 lane。
+  - 取消和超时传播正确。
+  - close/release 幂等。
+  - shutdown 后无沙箱桥接线程或会话泄漏。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 378
+  unit_boundary: 沙箱与线程
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 每个任务只占用声明 lane。
+  - 取消和超时传播正确。
+  - close/release 幂等。
+  - shutdown 后无沙箱桥接线程或会话泄漏。

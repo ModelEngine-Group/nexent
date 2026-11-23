@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Common test utilities for mocking external dependencies.
 
@@ -47,6 +48,10 @@ def bootstrap_test_env() -> Dict[str, Any]:
     mock_const = MagicMock()
     consts_module = _create_module("consts", const=mock_const)
     sys.modules["consts.const"] = mock_const
+    # Real default for the A2A invocation timeout so backend modules doing
+    # `from consts.const import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS` bind a
+    # numeric value instead of an auto-created MagicMock attribute.
+    mock_const.A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = 900.0
 
     boto3_mock = MagicMock()
     sys.modules.setdefault("boto3", boto3_mock)
@@ -66,15 +71,15 @@ def bootstrap_test_env() -> Dict[str, Any]:
         _create_module("database")
 
     config_utils_module = _create_module(
-        "utils.config_utils",
+        "management.services.configuration.tenant.settings",
         tenant_config_manager=MagicMock(),
         get_model_name_from_config=MagicMock(return_value=""),
     )
 
     nexent_module = _create_module("nexent", MessageObserver=MagicMock())
     _create_module("nexent.core")
-    _create_module("nexent.core.models", OpenAIVLModel=MagicMock())
-    
+    _create_module("nexent.core.models", OpenAIVLModel=MagicMock(), OpenAILongContextModel=MagicMock())
+
     mock_model_management_db = types.ModuleType("database.model_management_db")
     mock_model_management_db.get_model_by_model_id = MagicMock(return_value=None)
     sys.modules["database.model_management_db"] = mock_model_management_db
@@ -117,6 +122,7 @@ def setup_common_mocks():
         "vlm": "VLM_ID",
         "vlm2": "VLM2_ID",
         "vlm3": "VLM3_ID",
+        "vlm4": "VLM4_ID",
         "stt": "STT_ID",
         "tts": "TTS_ID"
     }

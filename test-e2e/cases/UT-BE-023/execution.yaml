@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: UT-BE-023
+implementations:
+- framework: pytest
+  file: test.py
+  selector: UT-BE-023
+notes: V5 source binding migrated; runtime parity is not yet certified.

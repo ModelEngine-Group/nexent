@@ -1,7 +1,11 @@
-import sys
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import json
 import os
+import sys
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
+
+import pytest
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -17,6 +21,7 @@ consts_mock.const.ENABLE_WECHAT_OAUTH = False
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.SUPABASE_URL = "http://supabase.test"
 consts_mock.const.DEFAULT_TENANT_ID = "default"
+consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
@@ -53,10 +58,22 @@ class _UnauthorizedError(Exception):
     pass
 
 
+class _TenantResourceLimitError(Exception):
+    def __init__(self, message, **kwargs):
+        super().__init__(message)
+        self.details = kwargs
+
+
 exceptions_mock = MagicMock()
 exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
 exceptions_mock.UnauthorizedError = _UnauthorizedError
+exceptions_mock.TenantResourceLimitError = _TenantResourceLimitError
+exceptions_mock.tenant_resource_limit_error_payload = lambda error: {
+    "code": "120104",
+    "message": str(error),
+    "details": error.details,
+}
 sys.modules["consts.exceptions"] = exceptions_mock
 
 sys.modules["database"] = MagicMock()
@@ -72,7 +89,7 @@ sys.modules["backend.database.client"] = MagicMock()
 sys.modules["backend.database.db_models"] = MagicMock()
 sys.modules["utils"] = MagicMock()
 sys.modules["utils.token_encryption"] = MagicMock()
-sys.modules["utils.config_utils"] = MagicMock()
+sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_id = MagicMock(return_value=("user-1", "t-1"))
@@ -80,7 +97,7 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["utils.auth_utils"] = auth_utils_mock
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
@@ -89,8 +106,26 @@ oauth_service_mock.parse_state = MagicMock(
 oauth_service_mock.generate_pending_oauth_token = MagicMock(return_value="pending.jwt")
 oauth_service_mock.find_supabase_user_id_by_email = MagicMock(return_value=None)
 oauth_service_mock.complete_pending_oauth_account = AsyncMock()
+oauth_service_mock.get_oauth_config = MagicMock(
+    return_value={
+        "enabled": True,
+        "login_mode": "force",
+        "auto_login_provider": "github",
+        "providers": [
+            {
+                "name": "github",
+                "display_name": "GitHub",
+                "icon": "github",
+                "enabled": True,
+            }
+        ],
+    }
+)
 sys.modules["services"] = MagicMock()
-sys.modules["services.oauth_service"] = oauth_service_mock
+sys.modules["management.services.permission.identity.oauth"] = oauth_service_mock
+# apps.oauth_app imports management.services.monitor.audit; the blanket `services` MagicMock
+# above is not a package, so the audit submodule must be pre-registered.
+sys.modules["management.services.monitor.audit"] = MagicMock()
 
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock
@@ -122,6 +157,19 @@ from apps.oauth_app import router
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_get_oauth_config():
+    config_endpoint = next(route.endpoint for route in router.routes if route.path == "/user/oauth/config")
+    response = await config_endpoint()
+
+    assert response.status_code == HTTPStatus.OK
+    data = json.loads(response.body)
+    assert data["message"] == "success"
+    assert data["data"]["login_mode"] == "force"
+    assert data["data"]["auto_login_provider"] == "github"
+    assert len(data["data"]["providers"]) == 1
 
 
 class TestGetProviders(unittest.TestCase):
@@ -248,6 +296,7 @@ class TestLink(unittest.TestCase):
 class TestCallback(unittest.TestCase):
     def setUp(self):
         oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+        oauth_service_mock.ensure_user_tenant_exists.side_effect = None
 
     def test_returns_error_when_provider_error(self):
         response = client.get(
@@ -273,6 +322,7 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["oauth_error"], "unsupported_provider")
 
     def test_success_returns_session_data(self):
+        auth_utils_mock.reset_mock()
         oauth_service_mock.reset_mock()
         oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
         database_oauth_mock.get_oauth_account_by_provider.return_value = {
@@ -292,7 +342,8 @@ class TestCallback(unittest.TestCase):
 
         auth_utils_mock.generate_session_jwt.return_value = "eyJ.mock.jwt.token"
 
-        response = client.get("/user/oauth/callback?provider=github&code=valid_code")
+        with patch("apps.oauth_app.JWT_EXPIRY_SECONDS", 5432):
+            response = client.get("/user/oauth/callback?provider=github&code=valid_code")
 
         if response.status_code != HTTPStatus.OK:
             print("Response:", response.json())
@@ -304,9 +355,35 @@ class TestCallback(unittest.TestCase):
             data["data"]["session"]["access_token"],
             "eyJ.mock.jwt.token",
         )
-        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
+        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 5432)
+        auth_utils_mock.generate_session_jwt.assert_called_once_with(
+            "user-uuid-123", expires_in=5432
+        )
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+    def test_returns_readable_error_when_tenant_user_limit_is_reached(self):
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "user-uuid-123",
+        }
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {"access_token": "token"}
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345", "email": "octocat@github.com", "username": "octocat"
+        }
+        oauth_service_mock.ensure_user_tenant_exists.side_effect = _TenantResourceLimitError(
+            "Tenant user limit reached: maximum 10000 users per tenant"
+        )
+
+        response = client.get("/user/oauth/callback?provider=github&code=limit_code")
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        data = response.json()
+        self.assertEqual(data["code"], "120104")
+        self.assertIn("maximum 10000", data["message"])
 
     def test_new_unbound_oauth_requires_account_completion(self):
         oauth_service_mock.reset_mock()
@@ -872,6 +949,31 @@ class TestCompleteOAuth(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
+
+    def test_complete_returns_429_for_tenant_resource_limit(self):
+        complete_mock = AsyncMock(
+            side_effect=_TenantResourceLimitError(
+                "Tenant user limit reached: maximum 10000 users per tenant",
+                resource="users",
+                scope="tenant",
+                limit=10000,
+                current_count=10000,
+            )
+        )
+
+        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "limit@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["details"]["limit"], 10000)
 
 
 class TestGetAccounts(unittest.TestCase):

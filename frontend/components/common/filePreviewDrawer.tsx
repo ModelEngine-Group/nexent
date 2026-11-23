@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -10,9 +12,11 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { Drawer, Modal, Spin, Button, Table } from "antd";
 import {
+  ArrowLeft,
   Download,
   Maximize2,
   Minimize2,
@@ -53,6 +57,12 @@ import {
   extractMarkdownHeadings,
   type MarkdownHeading,
 } from "@/components/common/markdownRenderer";
+import { RawStreamPreviewViewer } from "@/components/common/rawStreamPreviewViewer";
+import {
+  getFileExtension,
+  isOfficeDocumentMime,
+  isOfficeExtension,
+} from "@/lib/officePreview";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
 
@@ -81,6 +91,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     !isLocalSource && "previewUrl" in props ? props.previewUrl : undefined;
   const providedDownloadUrl =
     !isLocalSource && "downloadUrl" in props ? props.downloadUrl : undefined;
+  // AIDP streams whatever AIDP decided to serve - the original bytes for
+  // docx/xlsx/pptx/pdf/txt and a PDF conversion for every other format - so
+  // the renderer is chosen by the viewer from the response, not here from the
+  // uploaded name. Every other remote source converts Office files to PDF
+  // first and keeps rendering them through the PDF viewer.
+  const rawStream =
+    !isLocalSource && "rawStream" in props && props.rawStream === true;
+  // AIDP documents open as a page-sized surface: the document is the whole
+  // task, so it gets the viewport and a back arrow instead of a side drawer.
+  const fullscreen = props.presentation === "fullscreen";
   const fileName =
     isLocalSource && localFile
       ? localFile.name
@@ -161,6 +181,9 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
   const textFetchSessionRef = useRef(0);
   const csvDelimiterRef = useRef<string>(",");
+  // Keep preview loading independent from callback identities supplied by parents.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const handleKnowledgePreviewAccessError = useCallback(
     (reason: PreviewAccessReason) => {
@@ -177,10 +200,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         okText: t("common.confirm"),
         centered: true,
       });
-      onClose();
+      onCloseRef.current();
       return true;
     },
-    [previewContext, t, onClose]
+    [previewContext, t]
   );
 
   const resetTextPreviewState = useCallback(() => {
@@ -203,24 +226,23 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     observerRef.current = null;
   }, []);
 
+  // Which renderer owns an Office document: the browser parses the original
+  // bytes, while the converted path and local files keep their existing
+  // behaviour (PDF viewer for remote files, upload hint for local ones).
+  const officeDetectedType: DetectedFileType = isLocalSource ? "office" : "pdf";
+
   const getDetectedFileType = useCallback((): DetectedFileType => {
+    if (rawStream) {
+      // The served format is only known after the response arrives, so the
+      // stream viewer picks the renderer from the served file name.
+      return "stream";
+    }
+
     const mime = providedFileType?.toLowerCase() || "";
 
     if (mime === "application/pdf") return "pdf";
 
-    if (
-      mime === "application/msword" ||
-      mime ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      mime === "application/vnd.ms-excel" ||
-      mime ===
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-      mime === "application/vnd.ms-powerpoint" ||
-      mime ===
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    ) {
-      return isLocalSource ? "office" : "pdf";
-    }
+    if (isOfficeDocumentMime(mime)) return officeDetectedType;
 
     if (mime.startsWith("image/")) return "image";
 
@@ -232,12 +254,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
     if (mime === "text/plain") return "text";
 
-    const extension = fileName.split(".").pop()?.toLowerCase() || "";
+    const extension = getFileExtension(fileName);
 
     if (extension === "pdf") return "pdf";
-    if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) {
-      return isLocalSource ? "office" : "pdf";
-    }
+    if (isOfficeExtension(extension)) return officeDetectedType;
     if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension))
       return "image";
     if (["md", "markdown"].includes(extension)) return "markdown";
@@ -247,7 +267,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       return "text";
 
     return "unknown";
-  }, [providedFileType, fileName, isLocalSource]);
+  }, [providedFileType, fileName, officeDetectedType, rawStream]);
 
   const detectedFileType = getDetectedFileType();
 
@@ -996,6 +1016,15 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     <PdfViewer url={previewUrl} fileName={fileName} />
   );
 
+  const renderStreamViewer = () => (
+    <RawStreamPreviewViewer
+      url={previewUrl}
+      fileName={fileName}
+      fileType={providedFileType}
+      onAccessError={handleKnowledgePreviewAccessError}
+    />
+  );
+
   const renderImageViewer = () => (
     <div className="h-full relative bg-gray-100">
       <div
@@ -1388,12 +1417,49 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         return renderTextViewer();
       case "html":
         return renderHtmlViewer();
+      case "stream":
+        return renderStreamViewer();
       case "office":
         return renderUploadToPreview();
       default:
         return renderUnsupported();
     }
   };
+
+  // Full-screen presentation: the document owns the viewport and the back arrow
+  // returns to whatever opened it. It is portalled into `document.body` because
+  // ancestor transforms (the page transition animates the content) turn such an
+  // element into the containing block for `position: fixed`, which would leave
+  // the surface sized to the content area instead of the viewport. Every guard
+  // above (empty file, too large, load error) still applies, so both layouts
+  // show the same states.
+  if (fullscreen && open && typeof document !== "undefined") {
+    return createPortal(
+      <div className="fixed inset-0 z-[1100] flex flex-col bg-white">
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2">
+          <Button
+            type="text"
+            aria-label={t("common.back")}
+            title={t("common.back")}
+            icon={<ArrowLeft size={18} />}
+            onClick={onClose}
+          />
+          <div className="flex min-w-0 items-center">
+            <span className="truncate font-medium" title={fileName}>
+              {fileName}
+            </span>
+            {fileSize !== undefined && fileSize > 0 && (
+              <span className="ml-3 flex-shrink-0 text-sm font-normal text-gray-500">
+                {formatFileSize(fileSize)}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">{renderContent()}</div>
+      </div>,
+      document.body
+    );
+  }
 
   return (
     <Drawer
@@ -1425,13 +1491,17 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         </div>
       }
       extra={
-        <Button
-          type="primary"
-          icon={<Download size={14} />}
-          onClick={handleDownload}
-        >
-          {t("filePreview.download")}
-        </Button>
+        // AIDP documents stay in AIDP: previewing them is the whole feature,
+        // and the drawer has no Nexent-side copy to hand out.
+        rawStream ? undefined : (
+          <Button
+            type="primary"
+            icon={<Download size={14} />}
+            onClick={handleDownload}
+          >
+            {t("filePreview.download")}
+          </Button>
+        )
       }
     >
       <div className="flex h-full flex-col">

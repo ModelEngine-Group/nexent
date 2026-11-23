@@ -1,12 +1,22 @@
-import re
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
-from typing import List
-from database.agent_db import logger
-from database.client import get_db_session, filter_property, as_dict
-from database.db_models import ToolInstance, ToolInfo
+import logging
+import re
+from typing import Dict, List, Optional, Sequence, Set
+
+from sqlalchemy import cast, or_
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session
+
 from consts.model import ToolSourceEnum
 from consts.tool_labels import BUILTIN_LABEL_MAP
-from utils.tool_utils import get_local_tools_description_zh
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import ToolInfo, ToolInstance
+from management.services.tool.catalog import get_local_tools_description_zh
+
+
+logger = logging.getLogger(__name__)
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -31,7 +41,13 @@ def create_tool(tool_info, version_no: int = 0):
         session.add(new_tool_instance)
 
 
-def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_tool_by_tool_info(
+    tool_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Create or update a ToolInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -45,6 +61,11 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
     Returns:
         Created or updated ToolInstance object
     """
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(tool_info.agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
+
     tool_info_dict = tool_info.__dict__ | {
         "tenant_id": tenant_id, "user_id": user_id, "version_no": version_no}
 
@@ -80,6 +101,19 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
             session.flush()  # Flush to get the ID
             tool_instance = new_tool_instance
         return as_dict(tool_instance)
+
+
+def query_tenant_tools_by_ids(tenant_id: str, tool_ids: list[int]) -> list[dict]:
+    """Read only visible tenant tools with one bounded query."""
+    if not tool_ids:
+        return []
+    with get_db_session() as session:
+        tools = session.query(ToolInfo).filter(
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.tool_id.in_(tool_ids),
+        ).all()
+        return [as_dict(tool) for tool in tools]
 
 
 def query_all_tools(tenant_id: str):
@@ -251,11 +285,27 @@ def check_tool_list_initialized(tenant_id: str) -> bool:
         return count > 0
 
 
-def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
+def update_tool_table_from_scan_tool_list(
+    tenant_id: str,
+    user_id: str,
+    tool_list: List[ToolInfo],
+    enabled_mcp_names: Optional[set] = None,
+):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools
     For MCP tools, use name&source&usage as unique key to allow same tool name from different MCP servers
+
+    Args:
+        tenant_id: Tenant ID
+        user_id: User ID who triggered the scan
+        tool_list: Tools successfully gathered during this scan
+        enabled_mcp_names: Names of MCP services that are enabled. Tools belonging
+            to these MCPs keep their previous availability when the MCP was
+            unreachable during this scan — a single transient connection failure
+            (e.g. a container still warming up) should not hide a healthy MCP's
+            tools from the tool list. Only disabled/deleted MCPs get downgraded.
     """
+    enabled_mcp_names = enabled_mcp_names or set()
     with get_db_session() as session:
         # get all existing tools (including complete information)
         existing_tools = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y',
@@ -271,8 +321,15 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 key = f"{tool.name}&{tool.source}"
             existing_tool_dict[key] = tool
 
-        # set all tools to unavailable
+        # Set tools to unavailable. Tools belonging to enabled MCPs keep their
+        # previous availability so a transient fetch failure this scan does not
+        # remove a healthy MCP's tools from the tool list.
         for tool in existing_tools:
+            if (
+                tool.source == ToolSourceEnum.MCP.value
+                and (tool.usage or "") in enabled_mcp_names
+            ):
+                continue
             tool.is_available = False
 
         for tool in tool_list:
@@ -307,7 +364,55 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                     {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                 new_tool = ToolInfo(**filtered_tool_data)
                 session.add(new_tool)
+                if tool.name == "deepseek_search" and tool.source == ToolSourceEnum.LOCAL.value:
+                    from database.tool_default_tags_db import initialize_search_tool_tags
+
+                    session.flush()
+                    initialize_search_tool_tags(session, tenant_id, new_tool.tool_id, user_id)
     logger.info("Updated tool table in PG database")
+
+
+def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: str) -> int:
+    """
+    Mark a deleted MCP server's tools unavailable and unbind them from agent drafts.
+
+    Keeps tool rows and published agent snapshots in place. Draft tool
+    instances are soft-deleted so users do not retain unusable bindings after
+    the MCP server is removed.
+
+    Args:
+        tenant_id: Tenant ID (stored as ToolInfo.author)
+        mcp_server_name: MCP server name (stored as ToolInfo.usage)
+        user_id: User ID performing the deletion
+
+    Returns:
+        Number of tool records updated
+    """
+    with get_db_session() as session:
+        tool_rows = session.query(ToolInfo.tool_id).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id,
+            ToolInfo.source == ToolSourceEnum.MCP.value,
+            ToolInfo.usage == mcp_server_name,
+        ).all()
+        tool_ids = [row[0] for row in tool_rows]
+        if not tool_ids:
+            return 0
+
+        updated = session.query(ToolInfo).filter(
+            ToolInfo.tool_id.in_(tool_ids),
+        ).update({"is_available": False, "updated_by": user_id})
+
+        session.query(ToolInstance).filter(
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.tool_id.in_(tool_ids),
+            ToolInstance.version_no == 0,
+            ToolInstance.delete_flag != 'Y',
+        ).update({
+            ToolInstance.delete_flag: 'Y',
+            "updated_by": user_id,
+        }, synchronize_session=False)
+        return updated or 0
 
 
 def add_tool_field(tool_info):
@@ -327,7 +432,7 @@ def add_tool_field(tool_info):
                 ele["default"] = instance_value
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-        
+
         # Merge description_zh from SDK for local tools
         tool_name = tool_dict.get("name")
         if tool_dict.get("source") == "local":
@@ -335,7 +440,7 @@ def add_tool_field(tool_info):
             if tool_name in local_tool_descriptions:
                 sdk_info = local_tool_descriptions[tool_name]
                 tool_dict["description_zh"] = sdk_info.get("description_zh")
-                
+
                 # Merge params description_zh from SDK
                 for param in tool_params:
                     if not param.get("description_zh"):
@@ -343,7 +448,7 @@ def add_tool_field(tool_info):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
-                
+
                 # Merge inputs description_zh from SDK
                 inputs_str = tool_dict.get("inputs", "{}")
                 try:
@@ -357,7 +462,7 @@ def add_tool_field(tool_info):
                         tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
                 except (json.JSONDecodeError, TypeError):
                     pass
-        
+
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info
@@ -406,7 +511,13 @@ def check_tool_is_available(tool_id_list: List[int]):
         return [tool.is_available for tool in tools]
 
 
-def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
+def delete_tools_by_agent_id(
+    agent_id,
+    tenant_id,
+    user_id,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Delete all tool instances for an agent.
     Default version_no=0 deletes the draft version.
@@ -417,6 +528,10 @@ def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
     with get_db_session() as session:
         session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,
@@ -450,3 +565,41 @@ def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: 
         ).order_by(ToolInstance.update_time.desc())
         tool_instance = query.first()
         return as_dict(tool_instance) if tool_instance else None
+
+
+def _query_knowledge_tool_instances(session: Session, param_name: str, resource_ids: Set[str]):
+    """Select live tool configurations containing at least one requested ID."""
+    tool_name = {"index_names": "knowledge_base_search", "kds_list": "aidp_search"}[param_name]
+    return session.query(ToolInstance).join(
+        ToolInfo, ToolInfo.tool_id == ToolInstance.tool_id,
+    ).filter(
+        ToolInfo.name == tool_name,
+        ToolInfo.delete_flag != "Y",
+        ToolInstance.delete_flag != "Y",
+        or_(*(cast(ToolInstance.params[param_name], JSONB).contains([resource_id])
+              for resource_id in sorted(resource_ids))),
+    )
+
+
+def query_tool_knowledge_references(
+    session: Session, param_name: str, resource_ids: Set[str],
+) -> List[Dict[str, int]]:
+    """Return agent/version pairs whose tool configurations reference the IDs."""
+    rows = _query_knowledge_tool_instances(session, param_name, resource_ids).with_entities(
+        ToolInstance.agent_id, ToolInstance.version_no,
+    ).distinct().all()
+    return [{"agent_id": row.agent_id, "version_no": row.version_no} for row in rows]
+
+
+def remove_tool_knowledge_references(
+    session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> None:
+    """Remove deleted IDs from draft and published tool configurations."""
+    for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+        if not ids:
+            continue
+        deleted_ids = set(ids)
+        for instance in _query_knowledge_tool_instances(session, param_name, deleted_ids).all():
+            params = dict(instance.params)
+            params[param_name] = [item for item in params[param_name] if item not in deleted_ids]
+            instance.params = params

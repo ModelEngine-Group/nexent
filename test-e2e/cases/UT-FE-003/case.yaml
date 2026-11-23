@@ -1,0 +1,89 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-003
+  feature_id: F-065
+  business_rule_ids:
+  - F-065-RULE-01
+  title: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复｜核心流程
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 newchat 消息渲染组件（AssistantMessage / MarkdownText / ExecutionCodeBlock），注入最小 props、store 与本地固定 fixture，分别覆盖流式与历史两种消息来源。
+    expected: parse 数据块渲染为 ExecutionCodeBlock：标题「Executed code」、默认展开、python 高亮；空/非字符串 code 返回 null 不渲染。
+  - order: 2
+    action: 注入 type=parse 的 SSE/历史数据块，断言渲染为可折叠「Executed code」代码块，默认展开、python 语法高亮，标题栏含语言标签；注入空字符串或非字符串 code 时断言不渲染该块。
+    expected: completeTrailingToolCalls 仅将尾部连续 tool-call 置 complete 并置 result=""，跨非工具 part 或 incomplete 的调用不受影响；空「Result:」段被隐藏。
+  - order: 3
+    action: 注入已完成 ReAct 代码块尾部连续 tool-call（running / 无 status / incomplete 混合），断言尾部连续 tool-call 被补全为 complete 且 result 为空字符串，非尾部工具调用与
+      incomplete 状态保持原样。
+    expected: warning 渲染为灰色告警框（formatWarningText 仅保留末尾异常、line-clamp-3 截断），error 渲染为红色错误框；存在 final_answer 时 error 提升为 warning。
+  - order: 4
+    action: 注入 warning 事件文本与 error 事件文本，断言 warning 渲染为灰色可恢复告警框、error 渲染为红色错误框；再注入包含 final_answer 的历史/流式消息，断言已存在的 error 就地提升为
+      warning（isError 移除、isWarning 置真）。
+    expected: history_summary 渲染为 compacting spinner 或 accepted 折叠摘要，idle 移除摘要。
+  - order: 5
+    action: 注入 history_summary 事件（compacting 与 accepted 两种 status），断言分别渲染为加载 spinner 与可折叠历史摘要卡片；注入 idle 状态断言移除该摘要。
+    expected: 流式与历史消息均剥离 ANSI 控制序列（stripAnsiControlSequences）。
+  - order: 6
+    action: 注入带 ANSI 控制序列（颜色/OSC 元数据）的流式与历史消息文本，断言渲染前后均剥离控制序列并保留正常 Unicode。
+    expected: Markdown del 渲染为 span（strikethrough sanitization）。
+  - order: 7
+    action: 注入 Markdown 删除线文本，断言 del 渲染为纯文本 span（删除线语义被 sanitization 移除）。
+    expected: 引用角标按 toolSign+citeIndex 组合 key 匹配，句级点击高亮 scope 正确，纯数字旧角标向后兼容；selectedCitationKey / citationContext 正确传递。
+  - order: 8
+    action: 注入带 toolSign+citeIndex 的引用角标与纯数字旧角标，断言分别按 citation key 精确匹配与数字向后兼容匹配；触发句级点击，断言仅高亮所属句 scope 并透传 retrievalHighlightTerms
+      / publishedDate。
+    expected: 模型选择器仅展示 available 模型并回退首个可用模型，非 available 模型不展示。
+  - order: 9
+    action: 注入含 available 与 non-available 的模型列表，断言线程模型选择器仅展示 connect_status=available 的模型，且无有效选中时回退首个可用模型。
+    expected: landing 选择 agent 写入线程元数据并 switchToNewThread，跨会话保留 agentId。
+  - order: 10
+    action: 模拟从 landing 选择 agent，断言线程元数据写入 agentId（updateCustom），返回时 switchToNewThread 被调用且跨会话保留。
+    expected: 测试过程无未处理异常；日志/报告不出现明文 API Key/Token/Password；组件渲染与上述契约一致。
+  expected_results:
+  - parse 数据块渲染为 ExecutionCodeBlock：标题「Executed code」、默认展开、python 高亮；空/非字符串 code 返回 null 不渲染。
+  - completeTrailingToolCalls 仅将尾部连续 tool-call 置 complete 并置 result=""，跨非工具 part 或 incomplete 的调用不受影响；空「Result:」段被隐藏。
+  - warning 渲染为灰色告警框（formatWarningText 仅保留末尾异常、line-clamp-3 截断），error 渲染为红色错误框；存在 final_answer 时 error 提升为 warning。
+  - history_summary 渲染为 compacting spinner 或 accepted 折叠摘要，idle 移除摘要。
+  - 流式与历史消息均剥离 ANSI 控制序列（stripAnsiControlSequences）。
+  - Markdown del 渲染为 span（strikethrough sanitization）。
+  - 引用角标按 toolSign+citeIndex 组合 key 匹配，句级点击高亮 scope 正确，纯数字旧角标向后兼容；selectedCitationKey / citationContext 正确传递。
+  - 模型选择器仅展示 available 模型并回退首个可用模型，非 available 模型不展示。
+  - landing 选择 agent 写入线程元数据并 switchToNewThread，跨会话保留 agentId。
+  - 测试过程无未处理异常；日志/报告不出现明文 API Key/Token/Password；组件渲染与上述契约一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 130
+  unit_boundary: 前端流式状态
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - parse 数据块渲染为 ExecutionCodeBlock：标题「Executed code」、默认展开、python 高亮；空/非字符串 code 返回 null 不渲染。
+  - completeTrailingToolCalls 仅将尾部连续 tool-call 置 complete 并置 result=""，跨非工具 part 或 incomplete 的调用不受影响；空「Result:」段被隐藏。
+  - warning 渲染为灰色告警框（formatWarningText 仅保留末尾异常、line-clamp-3 截断），error 渲染为红色错误框；存在 final_answer 时 error 提升为 warning。
+  - history_summary 渲染为 compacting spinner 或 accepted 折叠摘要，idle 移除摘要。
+  - 流式与历史消息均剥离 ANSI 控制序列（stripAnsiControlSequences）。
+  - Markdown del 渲染为 span（strikethrough sanitization）。
+  - 引用角标按 toolSign+citeIndex 组合 key 匹配，句级点击高亮 scope 正确，纯数字旧角标向后兼容；selectedCitationKey / citationContext 正确传递。
+  - 模型选择器仅展示 available 模型并回退首个可用模型，非 available 模型不展示。
+  - landing 选择 agent 写入线程元数据并 switchToNewThread，跨会话保留 agentId。
+  - 测试过程无未处理异常；日志/报告不出现明文 API Key/Token/Password；组件渲染与上述契约一致。

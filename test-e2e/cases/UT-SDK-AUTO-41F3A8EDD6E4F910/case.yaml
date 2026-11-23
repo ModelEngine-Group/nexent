@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-41F3A8EDD6E4F910
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: ThreadManager 按 Lane 隔离调度：start 创建独立 BoundedExecutor、同 Lane 按 max_workers 并发且 FIFO 排队｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ThreadManager 按 Lane 隔离调度：start 创建独立 BoundedExecutor、同 Lane 按 max_workers 并发且 FIFO 排队｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 可导入 sdk/nexent/core/concurrency 源码，Python ≥3.10 且标准库 threading、concurrent.futures 可用。
+  - 测试基线为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  test_data:
+    legacy_asset_declaration: 无（纯逻辑 SDK 组件测试，仅需导入 sdk/nexent/core/concurrency 源码与标准库；不使用本地 fixture 文件）。
+  steps:
+  - order: 1
+    action: 导入 sdk/nexent/core/concurrency 的 ThreadManager、LanePolicy、ManagedTaskSpec 与 ExecutionState、ManagerState。
+    expected: start() 后 state == ManagerState.RUNNING，_executors 仅含 lane "a"、"b" 两个独立的 BoundedExecutor 对象。
+  - order: 2
+    action: '构造 ThreadManager(service_name="sdk-ut", lane_policies={"a": LanePolicy(name="a", max_workers=1, max_queue_size=8,
+      queue_timeout_seconds=None), "b": LanePolicy(name="b", max_workers=2, max_queue_size=8, queue_timeout_seconds=None)})，并调用
+      start()。'
+    expected: lane "a"（max_workers=1）中 A1 进入 RUNNING 后，A2 保持 QUEUED，未被提前执行。
+  - order: 3
+    action: 断言 manager.state == ManagerState.RUNNING，且 manager._executors 的键集合 == {"a","b"}，每个值为 BoundedExecutor 实例，且 lane
+      "a" 与 lane "b" 的 executor 不是同一对象。
+    expected: 释放 A1 后 A2 才运行，执行顺序严格为 A1→A2，符合同 Lane FIFO 排队语义。
+  - order: 4
+    action: 向 lane "a" 提交任务 A1（fn 将自身序号追加到顺序列表并阻塞等待 threading.Event），等待其进入 RUNNING，断言顺序列表 == [A1]。
+    expected: lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。
+  - order: 5
+    action: 向 lane "a" 再提交任务 A2，断言 A2.state == QUEUED（max_workers=1 时未获得 worker 而排队），且顺序列表仍为 [A1]（A2 未提前执行）。
+    expected: lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。
+  - order: 6
+    action: 释放 A1 的阻塞事件，等待 A2 完成，断言顺序列表 == [A1, A2]，即同 Lane 按提交顺序 FIFO 排队执行。
+    expected: lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。
+  - order: 7
+    action: 在 A1 阻塞期间向 lane "b" 提交任务 B1，断言 B1 快速进入 RUNNING（b 使用独立 executor、max_workers=2），与 lane "a" 的排队任务互相隔离、互不阻塞。
+    expected: lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。
+  - order: 8
+    action: 最后调用 manager.shutdown(timeout=5)，断言返回的 DrainResult.stuck_execution_ids 为空且 state 为 CLOSED。
+    expected: lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。
+  expected_results:
+  - start() 后 state == ManagerState.RUNNING，_executors 仅含 lane "a"、"b" 两个独立的 BoundedExecutor 对象。
+  - lane "a"（max_workers=1）中 A1 进入 RUNNING 后，A2 保持 QUEUED，未被提前执行。
+  - 释放 A1 后 A2 才运行，执行顺序严格为 A1→A2，符合同 Lane FIFO 排队语义。
+  - lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 463
+  unit_boundary: 线程调度与Lane隔离
+  inputs:
+  - 无（纯逻辑 SDK 组件测试，仅需导入 sdk/nexent/core/concurrency 源码与标准库；不使用本地 fixture 文件）。
+  assertions:
+  - start() 后 state == ManagerState.RUNNING，_executors 仅含 lane "a"、"b" 两个独立的 BoundedExecutor 对象。
+  - lane "a"（max_workers=1）中 A1 进入 RUNNING 后，A2 保持 QUEUED，未被提前执行。
+  - 释放 A1 后 A2 才运行，执行顺序严格为 A1→A2，符合同 Lane FIFO 排队语义。
+  - lane "b" 的 B1 与 lane "a" 的任务互不阻塞，证明不同 Lane 使用独立 executor 隔离调度。

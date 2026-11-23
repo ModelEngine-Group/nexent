@@ -74,7 +74,92 @@ class TestMemoryConfigLoad:
                     "detail"] == "Failed to load configuration"
 
 
+class TestMemoryEmbeddingStatus:
+    def test_embedding_status_success(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id",
+            return_value=("u", "t"),
+        ), patch(
+            "apps.memory_config_app.is_tenant_embedding_configured",
+            return_value=True,
+        ), patch(
+            "apps.memory_config_app.get_tenant_memory_index_name",
+            return_value="mem_repo_model_1024",
+        ):
+            resp = client.get(
+                "/memory/config/embedding-status",
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json() == {
+            "configured": True,
+            "current_es_index_name": "mem_repo_model_1024",
+        }
+
+    def test_embedding_status_without_configuration(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id",
+            return_value=("u", "t"),
+        ), patch(
+            "apps.memory_config_app.is_tenant_embedding_configured",
+            return_value=False,
+        ), patch(
+            "apps.memory_config_app.get_tenant_memory_index_name",
+            return_value=None,
+        ):
+            resp = client.get(
+                "/memory/config/embedding-status",
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json() == {
+            "configured": False,
+            "current_es_index_name": None,
+        }
+
+
 class TestSetSingleConfig:
+    def test_set_external_provider_top_k(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ), patch(
+            "apps.memory_config_app.set_external_provider_top_k", return_value=True
+        ) as set_top_k:
+            resp = client.post(
+                "/memory/config/set",
+                json={"key": "EXTERNAL_PROVIDER_TOP_K", "value": "12"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.OK
+        set_top_k.assert_called_once_with("u", 12)
+
+    def test_set_external_provider_top_k_rejects_non_integer(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ):
+            resp = client.post(
+                "/memory/config/set",
+                json={"key": "EXTERNAL_PROVIDER_TOP_K", "value": "many"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.NOT_ACCEPTABLE
+
+    def test_set_dreaming_switch(self):
+        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")), patch(
+            "apps.memory_config_app.set_dreaming_switch", return_value=True
+        ) as dreaming_switch:
+            resp = client.post(
+                "/memory/config/set",
+                json={"key": "DREAMING_SWITCH", "value": "true"},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == HTTPStatus.OK
+        dreaming_switch.assert_called_once_with("u", True)
+
     def test_set_memory_switch_true_string(self):
         with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
             with patch("apps.memory_config_app.set_memory_switch", return_value=True) as m_set:
@@ -157,6 +242,45 @@ class TestSetSingleConfig:
                 assert resp.status_code == HTTPStatus.BAD_REQUEST
                 assert resp.json()[
                     "detail"] == "Failed to update configuration"
+
+
+class TestDreamingConfig:
+    def test_disable_stops_schedule_and_deletes_history(self):
+        schedule = {
+            "rule_type": "INTERVAL", "timezone": "Asia/Shanghai",
+            "start_at": "2026-01-01T00:00:00", "cron_expr": None,
+            "interval_seconds": 3600,
+        }
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ), patch(
+            "apps.memory_config_app.set_dreaming_switch", return_value=True
+        ), patch(
+            "apps.memory_config_app.memory_dreaming_db.get_schedule", return_value=schedule
+        ), patch(
+            "apps.memory_config_app.memory_dreaming_db.upsert_schedule"
+        ) as upsert, patch(
+            "apps.memory_config_app.memory_dreaming_db.delete_user_dreaming_history"
+        ) as delete_history:
+            resp = client.post(
+                "/memory/config/dreaming",
+                json={"enabled": False, "delete_history": True},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == HTTPStatus.OK
+        assert upsert.call_args.kwargs["enabled"] is False
+        delete_history.assert_called_once_with("t", "u")
+
+    def test_dreaming_switch_failure(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ), patch("apps.memory_config_app.set_dreaming_switch", return_value=False):
+            resp = client.post(
+                "/memory/config/dreaming",
+                json={"enabled": True},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
 
 
 class TestDisableAgentEndpoints:
@@ -243,217 +367,53 @@ class TestDisableUserAgentEndpoints:
                 assert resp.status_code == HTTPStatus.BAD_REQUEST
 
 
-class TestMemoryCrud:
-    def test_add_memory_success(self):
-        async def _ok_add(**kwargs):
-            return {"added": True, "payload": kwargs.get("messages")}
+# Legacy ``TestMemoryCrud`` class has been removed alongside the mem0-era
+# ``/memory/add``, ``/memory/search``, ``/memory/list``, ``/memory/delete/{id}``
+# and ``/memory/clear`` endpoints. New tests for the ``MemoryService`` facade
+# will land once Phase 2 of the memory refactor ships.
 
+
+# ===== Security Audit Entries =====
+class TestMemoryConfigAuditEntries:
+    """Security audit entries emitted by memory config endpoints."""
+
+    def test_set_config_emits_audit_entry(self, caplog):
+        """Successful config set records the key and the value it got."""
+        import logging
         with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_add_memory", _ok_add):
+            with patch("apps.memory_config_app.set_memory_switch", return_value=True):
+                with caplog.at_level(logging.INFO, logger="audit.security"):
                     resp = client.post(
-                        "/memory/add",
-                        json={
-                            "messages": [{"role": "user", "content": "hi"}],
-                            "memory_level": "user",
-                            "agent_id": None,
-                            "infer": True,
-                        },
+                        "/memory/config/set",
+                        json={"key": "MEMORY_SWITCH", "value": True},
                         headers=_auth_headers(),
                     )
-                    assert resp.status_code == HTTPStatus.OK
-                    data = resp.json()
-                    assert data["added"] is True
 
-    def test_add_memory_error(self):
-        async def _err_add(**kwargs):
-            raise RuntimeError("add-fail")
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=memory_config_set" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=u" in messages[0]
+        assert '"key":"MEMORY_SWITCH"' in messages[0]
+        assert '"value":true' in messages[0]
 
+    def test_disable_agent_add_emits_audit_entry(self, caplog):
+        """Successful agent disable records the removed agent id."""
+        import logging
         with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_add_memory", _err_add):
+            with patch("apps.memory_config_app.add_disabled_agent_id", return_value=True):
+                with caplog.at_level(logging.INFO, logger="audit.security"):
                     resp = client.post(
-                        "/memory/add",
-                        json={
-                            "messages": [{"role": "user", "content": "hi"}],
-                            "memory_level": "user",
-                        },
+                        "/memory/config/disable_agent",
+                        json={"agent_id": "7"},
                         headers=_auth_headers(),
                     )
-                    assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    def test_add_memory_infer_flag_false(self):
-        async def _ok_add(**kwargs):
-            return {"added": True, "infer": kwargs.get("infer")}
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_add_memory", _ok_add):
-                    resp = client.post(
-                        "/memory/add",
-                        json={
-                            "messages": [{"role": "user", "content": "hi"}],
-                            "memory_level": "user",
-                            "infer": False,
-                        },
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    data = resp.json()
-                    assert data["infer"] is False
-
-    def test_search_memory_success_and_error(self):
-        async def _ok_search(**kwargs):
-            return {"hits": [1, 2], "top_k": kwargs.get("top_k")}
-
-        async def _err_search(**kwargs):
-            raise ValueError("search-fail")
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_search_memory", _ok_search):
-                    resp = client.post(
-                        "/memory/search",
-                        json={
-                            "query_text": "hello",
-                            "memory_level": "user",
-                            "top_k": 3,
-                        },
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    assert resp.json()["top_k"] == 3
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_search_memory", _err_search):
-                    resp = client.post(
-                        "/memory/search",
-                        json={"query_text": "hello",
-                              "memory_level": "user"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.BAD_REQUEST
-
-    def test_search_memory_default_top_k(self):
-        async def _ok_search(**kwargs):
-            return {"hits": [], "top_k": kwargs.get("top_k")}
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_search_memory", _ok_search):
-                    resp = client.post(
-                        "/memory/search",
-                        json={
-                            "query_text": "hello",
-                            "memory_level": "user",
-                        },
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    assert resp.json()["top_k"] == 5
-
-    def test_list_memory_success_and_error(self):
-        async def _ok_list(**kwargs):
-            return {"items": [1], "total": 1}
-
-        async def _err_list(**kwargs):
-            raise RuntimeError("list-fail")
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_list_memory", _ok_list):
-                    resp = client.get(
-                        "/memory/list",
-                        params={"memory_level": "user"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    assert resp.json()["total"] == 1
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_list_memory", _err_list):
-                    resp = client.get(
-                        "/memory/list",
-                        params={"memory_level": "user"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.BAD_REQUEST
-
-    def test_list_memory_with_agent_id(self):
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_list_memory", new=AsyncMock(return_value={"items": [], "total": 0})) as m_list:
-                    resp = client.get(
-                        "/memory/list",
-                        params={"memory_level": "user", "agent_id": "A1"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    # Verify agent_id is passed through
-                    assert m_list.await_args.kwargs.get("agent_id") == "A1"
-
-    def test_delete_memory_success_and_error(self):
-        async def _ok_delete(**kwargs):
-            return {"deleted": True}
-
-        async def _err_delete(**kwargs):
-            raise RuntimeError("delete-fail")
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_delete_memory", _ok_delete):
-                    resp = client.delete(
-                        "/memory/delete/ID1", headers=_auth_headers())
-                    assert resp.status_code == HTTPStatus.OK
-                    assert resp.json()["deleted"] is True
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_delete_memory", _err_delete):
-                    resp = client.delete(
-                        "/memory/delete/ID1", headers=_auth_headers())
-                    assert resp.status_code == HTTPStatus.BAD_REQUEST
-
-    def test_clear_memory_success_and_error(self):
-        async def _ok_clear(**kwargs):
-            return {"cleared": True}
-
-        async def _err_clear(**kwargs):
-            raise RuntimeError("clear-fail")
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_clear_memory", _ok_clear):
-                    resp = client.delete(
-                        "/memory/clear",
-                        params={"memory_level": "user"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    assert resp.json()["cleared"] is True
-
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_clear_memory", _err_clear):
-                    resp = client.delete(
-                        "/memory/clear",
-                        params={"memory_level": "user"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.BAD_REQUEST
-
-    def test_clear_memory_with_agent_id(self):
-        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
-            with patch("apps.memory_config_app.build_memory_config", return_value={"cfg": 1}):
-                with patch("apps.memory_config_app.svc_clear_memory", new=AsyncMock(return_value={"cleared": True})) as m_clear:
-                    resp = client.delete(
-                        "/memory/clear",
-                        params={"memory_level": "user", "agent_id": "A1"},
-                        headers=_auth_headers(),
-                    )
-                    assert resp.status_code == HTTPStatus.OK
-                    # Verify agent_id is passed through
-                    assert m_clear.await_args.kwargs.get(
-                        "agent_id") == "A1"
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=memory_disable_agent_add" in messages[0]
+        assert '"agent_id":"7"' in messages[0]

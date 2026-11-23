@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-03
+  feature_id: V5-SEC-03
+  business_rule_ids:
+  - V5-SEC-03-RULE-01
+  title: Share token隔离与过期
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 分享token不能访问未快照消息/其他asset
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 使用本地隔离账号/资源准备“Share token隔离与过期”正常基线，记录资源ID和初始状态。
+    expected: 仅快照asset可访问；过期立即失效；token不可枚举。
+  - order: 2
+    action: 篡改share_token/asset_id；过期后访问；复用Range和下载链接。
+    expected: 仅快照asset可访问；过期立即失效；token不可枚举。
+  - order: 3
+    action: 所有越权/攻击请求必须直接命中真实本地 API/浏览器入口，不能只检查按钮隐藏。
+    expected: 仅快照asset可访问；过期立即失效；token不可枚举。
+  - order: 4
+    action: 每个攻击变体执行后重新检查数据库/对象存储/会话状态，确认失败请求无副作用。
+    expected: 仅快照asset可访问；过期立即失效；token不可枚举。
+  - order: 5
+    action: 扫描 HTTP 响应、backend/frontend 日志、Playwright trace 中是否出现 secret/内部路径/敏感堆栈。
+    expected: 仅快照asset可访问；过期立即失效；token不可枚举。
+  - order: 6
+    action: 保存脱敏请求响应、失败截图/trace（如有UI）、资源前后状态到当次 run 目录。
+    expected: 仅快照asset可访问；过期立即失效；token不可枚举。
+  expected_results:
+  - 仅快照asset可访问；过期立即失效；token不可枚举。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 4
+  risk_type: SECURITY
+  risk: 分享token不能访问未快照消息/其他asset
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  metrics:
+  - 仅快照asset可访问；过期立即失效；token不可枚举。
+  thresholds:
+  - 仅快照asset可访问；过期立即失效；token不可枚举。
+  recovery_expectations:
+  - 仅快照asset可访问；过期立即失效；token不可枚举。

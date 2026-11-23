@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-154
+  name: 模型 metrics 24h/7d/30d、分页、租户隔离
+  status: active
+  description: '平台运维能力 / 监控: 模型 metrics 24h/7d/30d、分页、租户隔离'
+  business_rules:
+  - rule_id: F-154-RULE-01
+    description: 模型 metrics 24h/7d/30d、分页、租户隔离
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

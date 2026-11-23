@@ -3,8 +3,33 @@ import type {
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
+import type { TagAssignmentValue, TagDefinition } from "@/types/tagManagement";
 
 export type MineCardMenuAction = "apply" | "review" | "reviewUpdate";
+
+export function toMineRepositoryInfo(
+  listings: AgentRepositoryListingItem[]
+): MyAgentRepositoryInfoItem[] {
+  return listings.flatMap((item) => {
+    if (
+      item.status !== "shared" &&
+      item.status !== "pending_review" &&
+      item.status !== "rejected"
+    ) {
+      return [];
+    }
+    return [
+      {
+        agent_repository_id: item.agent_repository_id,
+        status: item.status,
+        version_no: item.version_no,
+        version_label: item.version_label,
+        create_time: item.create_time,
+        content: item.content,
+      },
+    ];
+  });
+}
 
 function parseCreateTime(value?: string | null): number {
   if (!value) {
@@ -72,6 +97,30 @@ export function pickReviewDisplayRepositoryInfo(
   return pickLatestRepositoryInfo(sharedItems);
 }
 
+export function findRepositoryInfoById(
+  items: MyAgentRepositoryInfoItem[],
+  agentRepositoryId: number
+): MyAgentRepositoryInfoItem | null {
+  return (
+    items.find((item) => item.agent_repository_id === agentRepositoryId) ?? null
+  );
+}
+
+export function resolveReviewModalMode(
+  agent: MyEditableAgentItem,
+  repositoryInfo: MyAgentRepositoryInfoItem
+): "review" | "reviewUpdate" {
+  const repositoryInfoList = agent.repository_info ?? [];
+  const hasShared = repositoryInfoList.some((item) => item.status === "shared");
+  const isPendingOrRejected =
+    repositoryInfo.status === "pending_review" ||
+    repositoryInfo.status === "rejected";
+  if (isPendingOrRejected && hasShared) {
+    return "reviewUpdate";
+  }
+  return "review";
+}
+
 export function pickPendingReviewRepositoryInfo(
   items: MyAgentRepositoryInfoItem[]
 ): MyAgentRepositoryInfoItem | null {
@@ -108,7 +157,9 @@ export function getMineCardMenuActions(
       (item) => item.status === "pending_review"
     );
     const hasShared = repositoryInfo.some((item) => item.status === "shared");
-    const hasRejected = repositoryInfo.some((item) => item.status === "rejected");
+    const hasRejected = repositoryInfo.some(
+      (item) => item.status === "rejected"
+    );
     if ((hasPending || hasRejected) && hasShared) {
       actions.push("reviewUpdate");
     } else {
@@ -141,10 +192,10 @@ export interface MineCardRepositoryStatusBadge {
 }
 
 const MINE_STATUS_LABEL_KEYS = {
-  reviewing: "agentRepository.mine.status.reviewing",
+  reviewing: "repository.status.reviewing",
   updateReviewing: "agentRepository.mine.status.updateReviewing",
-  listed: "agentRepository.mine.status.listed",
-  rejected: "agentRepository.mine.status.rejected",
+  listed: "repository.status.listed",
+  rejected: "repository.status.rejected",
 } as const;
 
 export function getMineCardRepositoryStatusBadge(
@@ -203,9 +254,36 @@ export function pickApplyListingPrefillSource(
 }
 
 export interface ApplyListingFormPrefill {
-  icon: string | null;
-  categoryId: number | null;
+  icon_url: string | null;
   tags: string[];
+}
+
+export function getListingTagsFromAssignments(
+  assignments: Pick<
+    TagAssignmentValue,
+    "definition_id" | "value_id" | "display_value"
+  >[],
+  agentCategory: Pick<TagDefinition, "definition_id" | "values"> | null
+): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const assignment of assignments) {
+    const categoryValue =
+      assignment.definition_id === agentCategory?.definition_id
+        ? agentCategory.values?.find(
+            (value) => value.value_id === assignment.value_id
+          )
+        : null;
+    const tag = (
+      categoryValue?.normalized_value || assignment.display_value
+    ).trim();
+    const key = tag.toLocaleLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      tags.push(tag);
+    }
+  }
+  return tags;
 }
 
 function normalizeApplyListingTags(tags: string[], maxTags: number): string[] {
@@ -228,30 +306,18 @@ function normalizeApplyListingTags(tags: string[], maxTags: number): string[] {
 export function buildApplyListingFormPrefill(
   item: AgentRepositoryListingItem | null,
   options: {
-    allowedIcons: readonly string[];
-    allowedCategoryIds: readonly number[];
     maxTags?: number;
-  }
+  } = {}
 ): ApplyListingFormPrefill | null {
   if (!item) {
     return null;
   }
 
   const maxTags = options.maxTags ?? 5;
-  const allowedIconSet = new Set(options.allowedIcons);
-  const allowedCategorySet = new Set(options.allowedCategoryIds);
-
-  const icon =
-    item.icon?.trim() && allowedIconSet.has(item.icon.trim())
-      ? item.icon.trim()
-      : null;
-
-  const categoryId =
-    item.category_id != null && allowedCategorySet.has(item.category_id)
-      ? item.category_id
-      : null;
-
   const tags = normalizeApplyListingTags(item.tags ?? [], maxTags);
 
-  return { icon, categoryId, tags };
+  return {
+    icon_url: item.icon_url?.trim() || null,
+    tags,
+  };
 }

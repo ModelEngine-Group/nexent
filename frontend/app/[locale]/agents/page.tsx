@@ -1,187 +1,494 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { Layout, Row, Col, Card } from "antd";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
+import {
+  ChevronDown,
+  ChevronUp,
+  FileInput,
+  LayoutGrid,
+  List,
+  Search,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
 
-import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useConfig } from "@/hooks/useConfig";
-import { motion } from "framer-motion";
-import AgentConfigComp from "./components/AgentConfigComp";
-import AgentInfoComp from "./components/AgentInfoComp";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import AgentVersionManage from "./AgentVersionManage";
-import AgentSelectorHeader from "./components/AgentSelectorHeader";
-import { searchAgentInfo } from "@/services/agentConfigService";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import CreateAgentModal from "@/components/agent/CreateAgentModal";
+import { StandardButton } from "@/components/common/StandardButton";
+import { StandardInput } from "@/components/common/StandardInput";
+import { StandardPaginator } from "@/components/common/StandardPaginator";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import {
+  openImportWizardWithFile,
+  type ImportAgentData,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
+import type { Agent } from "@/types/agentConfig";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
-const { Header, Content } = Layout;
+import AgentConfigurationGuide from "./components/agent-configuration-guide";
+import AgentListCard from "./components/agent-list-card";
+import AgentListTable, {
+  DEFAULT_AGENT_COLUMN_WIDTHS,
+} from "./components/agent-list-table";
+import AgentVersion from "./agent-version";
+import "./agent-list.css";
 
-export default function AgentSetupOrchestrator() {
-  const { pageVariants, pageTransition } = useSetupFlow();
-  const searchParams = useSearchParams();
-  const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
-  const reset = useAgentConfigStore((state) => state.reset);
-  const setDefaultLlmConfig = useAgentConfigStore((state) => state.setDefaultLlmConfig);
-  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
-  const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
-  const { config } = useConfig();
+export default function AgentsPage() {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const pathname = usePathname();
+  const router = useRouter();
+  const initialize = useAgentStore((state) => state.initialize);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
+  const [jumpPage, setJumpPage] = useState<number | null>(null);
+  const [tableColumnWidths, setTableColumnWidths] = useState(
+    DEFAULT_AGENT_COLUMN_WIDTHS
+  );
+  const [view, setView] = useState<"grid" | "list">("grid");
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [importData, setImportData] = useState<ImportAgentData | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isGuideExpanded, setIsGuideExpanded] = useState(true);
+  const [isGuideMounted, setIsGuideMounted] = useState(true);
+  const guideCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync default LLM config from load_config
-  useEffect(() => {
-    if (config?.models?.llm) {
-      setDefaultLlmConfig({
-        id: config.models.llm.id || 0,
-        name: config.models.llm.modelName || "",
-        displayName: config.models.llm.displayName || "",
-      });
+  useEffect(
+    () => () => {
+      if (guideCollapseTimer.current) {
+        clearTimeout(guideCollapseTimer.current);
+      }
+    },
+    []
+  );
+
+  const setGuideExpanded = (expanded: boolean) => {
+    if (guideCollapseTimer.current) {
+      clearTimeout(guideCollapseTimer.current);
+      guideCollapseTimer.current = null;
     }
-  }, [config, setDefaultLlmConfig]);
 
-  // Local UI state for version panel
-  const [isShowVersionManagePanel, setIsShowVersionManagePanel] = useState(false);
-
-  // Handle auto-create mode from URL params
-  useEffect(() => {
-    const create = searchParams.get('create');
-    if (create === 'true') {
-      setTimeout(() => {
-        enterCreateMode();
-      }, 100);
+    if (expanded) {
+      setIsGuideMounted(true);
+      setIsGuideExpanded(true);
+      return;
     }
-  }, [searchParams, enterCreateMode]);
 
-  // Handle auto-select agent from URL params (agent_id)
-  useEffect(() => {
-    const agentId = searchParams.get('agent_id');
-    if (agentId && (!currentAgentId || String(currentAgentId) !== agentId)) {
-      const loadAgent = async () => {
-        try {
-          const result = await searchAgentInfo(parseInt(agentId));
-          if (result.success && result.data) {
-            setCurrentAgent(result.data);
-          } else {
-            log.warn("Failed to load agent from URL agent_id:", result.message);
-          }
-        } catch (error) {
-          log.error("Failed to load agent from URL agent_id:", error);
-        }
-      };
-      loadAgent();
-    }
-  }, [searchParams, currentAgentId, setCurrentAgent]);
-
-  // Reset agent selection state when leaving the page
-  useEffect(() => {
-    return () => {
-      reset();
-    };
-  }, [reset]);
-
-  const headerStyle: React.CSSProperties = {
-    padding: 0,
-    height: 120,
-    lineHeight: '120px',
-    background: '#fff',
-    flexShrink: 0,
+    setIsGuideExpanded(false);
+    guideCollapseTimer.current = setTimeout(() => {
+      setIsGuideMounted(false);
+      guideCollapseTimer.current = null;
+    }, 300);
   };
 
-  const contentStyle: React.CSSProperties = {
-    padding: '32px',
-    background: '#fff',
-    overflow: 'auto',
-    flex: 1,
-    minHeight: 0,
+  const loadAgent = useCallback(
+    async (agentId: number) => {
+      const result = await searchAgentInfo(agentId);
+      if (!result.success || !result.data) {
+        message.error(
+          result.message || t("agentConfig.agents.detailsLoadFailed")
+        );
+        return null;
+      }
+      initialize(result.data);
+      return result.data;
+    },
+    [initialize, message, t]
+  );
+
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, search, t),
+    [tagDefinitions, search, t]
+  );
+  const { agents, pagination, isLoading, isError, refetch } = useAgentList({
+    search,
+    page,
+    pageSize,
+    includeRepositoryInfo: true,
+    ...(searchTagPredicates.length > 0 ? { searchTagPredicates } : {}),
+    ...(tagPredicates.length > 0 ? { tagPredicates } : {}),
+  });
+  const isEmptyAgentList =
+    !isLoading &&
+    !isError &&
+    !search.trim() &&
+    tagPredicates.length === 0 &&
+    agents.length === 0 &&
+    (pagination?.total ?? 0) === 0;
+  const updateUrl = useCallback(
+    (agentId: number) => {
+      router.push(`${pathname}/${agentId}`);
+    },
+    [pathname, router]
+  );
+  const openPublishFlow = useCallback(
+    (agentId: number) => {
+      router.push(`${pathname}/${agentId}?publish=1`);
+    },
+    [pathname, router]
+  );
+
+  const handleOpenAgent = useCallback(
+    (agent: Agent) => updateUrl(Number(agent.id)),
+    [updateUrl]
+  );
+
+  const handleManageVersions = useCallback(
+    async (agentId: number) => {
+      const loadedAgent = await loadAgent(agentId);
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
+      setIsVersionManageOpen(true);
+    },
+    [loadAgent]
+  );
+
+  const refreshSelectedAgentInfo = useCallback(async () => {
+    if (!selectedAgent?.id) return null;
+    const loadedAgent = await loadAgent(Number(selectedAgent.id));
+    if (loadedAgent) setSelectedAgent(loadedAgent);
+    return loadedAgent;
+  }, [loadAgent, selectedAgent]);
+
+  const handleCreate = ({ agentId }: { agentId: number }) => {
+    setIsCreateOpen(false);
+    void refetch();
+    router.push(`${pathname}/${agentId}?onboarding=1`);
+  };
+
+  const handleImport = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (data) => {
+        setImportData(data);
+        setIsImportOpen(true);
+      },
+      message,
+      t,
+      log,
+    });
+  };
+
+  const handleImportComplete = (agentId: number) => {
+    setIsImportOpen(false);
+    setImportData(null);
+    void refetch();
+    updateUrl(agentId);
   };
 
   return (
-    <div className="w-full h-full">
-      <Layout className="h-full bg-white" style={{ borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
-        {/* Fixed Header */}
-        <Header style={headerStyle}>
-          <AgentSelectorHeader
-            onOpenVersionManage={() => setIsShowVersionManagePanel(true)}
-            isShowVersionManagePanel={isShowVersionManagePanel}
-            onCloseVersionManagePanel={() => setIsShowVersionManagePanel(false)}
-          />
-        </Header>
-        <motion.div
-          initial="initial"
-          animate="in"
-          exit="out"
-          variants={pageVariants}
-          transition={pageTransition}
-          style={{ width: "100%", flex: 1, minHeight: 0, display: 'flex' }}
+    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
+      <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
+        <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
+          {t("sidebar.agentConfig")}
+        </h1>
+        <button
+          type="button"
+          className="flex h-[22px] min-w-[72px] shrink-0 items-center justify-center gap-[6px] text-[14px] font-normal leading-[22px] tracking-[0px] text-[#191919]"
+          aria-expanded={isGuideExpanded}
+          aria-controls="agent-configuration-guide"
+          onClick={() => setGuideExpanded(!isGuideExpanded)}
         >
-          <Content style={contentStyle}>
+          <span>
+            {t(
+              isGuideExpanded
+                ? "agentConfig.guide.collapse"
+                : "agentConfig.guide.expand"
+            )}
+          </span>
+          {isGuideExpanded ? (
+            <ChevronUp className="size-2" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="size-2" aria-hidden="true" />
+          )}
+        </button>
+      </header>
+
+      <section className="mt-3 flex min-h-0 w-full flex-1 flex-col">
+        <div
+          id="agent-configuration-guide"
+          data-testid="agent-guide-background"
+          className={
+            isGuideExpanded
+              ? "max-h-[2000px] shrink-0 overflow-hidden rounded-2xl p-6 opacity-100 transition-[max-height,opacity,padding] duration-300 ease-in-out [background:linear-gradient(180deg,rgba(236,243,255,1)_0%,rgba(255,255,255,0)_100%),rgba(255,255,255,1)]"
+              : "max-h-0 shrink-0 overflow-hidden p-0 opacity-0 transition-[max-height,opacity,padding] duration-300 ease-in-out"
+          }
+          aria-hidden={!isGuideExpanded}
+        >
+          {isGuideMounted ? <AgentConfigurationGuide /> : null}
+        </div>
+
+        <div className="relative mt-3 flex min-h-[300px] flex-1 flex-col pb-5">
+          {isGuideExpanded ? (
             <div
-              className="h-full"
-              style={{
-                display: 'flex',
-                gap: isShowVersionManagePanel ? 18 : 0,
-                width: '100%',
-                height: '100%',
-              }}
-            >
-              {/* Main content area with two columns */}
-              <div
-                style={{
-                  flex: isShowVersionManagePanel ? 1 : 'none',
-                  width: isShowVersionManagePanel ? 'auto' : '100%',
-                  height: '100%',
-                }}
+              data-testid="agent-guide-divider"
+              aria-hidden="true"
+              className="absolute inset-x-0 top-0 h-px bg-[rgba(25,25,25,0.1)]"
+            />
+          ) : null}
+          {isEmptyAgentList ? (
+            <div className="relative flex min-h-0 flex-1 items-center justify-center">
+              <Empty
+                image={Empty.PRESENTED_IMAGE_DEFAULT}
+                description={
+                  <span className="text-[14px] leading-[22px] ![letter-spacing:0px] text-[#777777]">
+                    {t("agentConfig.empty.noAgents")}
+                  </span>
+                }
               >
-                <Row
-                  gutter={{ lg: 32, md: 32, sm: 16 }}
-                  className="h-full px-4"
-                  align="stretch"
-                  style={{ height: '100%' }}
+                <StandardButton
+                  variant="primary"
+                  onClick={() => setIsCreateOpen(true)}
                 >
-                  {/* Left column: Agent Config */}
-                  <Col
-                    xs={24}
-                    sm={24}
-                    md={24}
-                    lg={12}
-                    className="flex flex-col h-full"
+                  {t("agent.action.create")}
+                </StandardButton>
+              </Empty>
+            </div>
+          ) : (
+            <>
+              <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
+                <div
+                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
+                >
+                  <StandardInput
+                    allowClear
+                    prefix={<Search className="size-4 text-[#777777]" />}
+                    placeholder={t("agentSelector.searchPlaceholder")}
+                    value={search}
+                    onChange={(event) => {
+                      setSearch(event.target.value);
+                      setPage(1);
+                    }}
+                    className="!h-8 !w-full"
+                  />
+                  <TagFilterPopover
+                    definitions={tagDefinitions ?? []}
+                    value={tagPredicates}
+                    onChange={(value) => {
+                      setTagPredicates(value);
+                      setPage(1);
+                    }}
+                    buttonClassName="!h-8 shrink-0"
+                  />
+                </div>
+                <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
+                  <StandardButton
+                    icon={<FileInput className="size-4" />}
+                    onClick={handleImport}
                   >
-                    <Card className="h-full" styles={{ body: { height: '100%' } }}>
-                      <AgentConfigComp />
-                    </Card>
-                  </Col>
-                  {/* Right column: Agent Info */}
-                  <Col
-                    xs={24}
-                    sm={24}
-                    md={24}
-                    lg={12}
-                    className="flex flex-col h-full"
+                    {t("agentConfig.button.import")}
+                  </StandardButton>
+                  <StandardButton
+                    variant="primary"
+                    onClick={() => setIsCreateOpen(true)}
                   >
-                    <Card className="h-full" styles={{ body: { height: '100%' } }}>
-                      <AgentInfoComp />
-                    </Card>
-                  </Col>
-                </Row>
+                    {t("agentConfig.list.new")}
+                  </StandardButton>
+                  <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
+                    <button
+                      type="button"
+                      className={`flex size-[30px] items-center justify-center ${
+                        view === "list"
+                          ? "bg-[#0067d1] text-white"
+                          : "text-[#777777]"
+                      }`}
+                      aria-label={t("agentConfig.list.listView")}
+                      aria-pressed={view === "list"}
+                      onClick={() => setView("list")}
+                    >
+                      <List className="size-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex size-[30px] items-center justify-center ${
+                        view === "grid"
+                          ? "bg-[#0067d1] text-white"
+                          : "text-[#777777]"
+                      }`}
+                      aria-label={t("agentConfig.list.gridView")}
+                      aria-pressed={view === "grid"}
+                      onClick={() => setView("grid")}
+                    >
+                      <LayoutGrid className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              {/* Version Management Panel - Fixed width */}
-              {isShowVersionManagePanel && (
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.2 }}
-                  style={{ width: 360, height: "100%", flexShrink: 0 }}
-                >
-                  <AgentVersionManage />
-                </motion.div>
-              )}
-            </div>
-          </Content>
-          
+              <div
+                data-testid="agent-list-content"
+                className={`min-h-0 flex-1 ${
+                  view === "list"
+                    ? "mt-3 overflow-hidden"
+                    : "-mx-px mt-[11px] overflow-y-auto overflow-x-hidden px-px pb-5 pt-px"
+                }`}
+              >
+                {isLoading ? (
+                  <div className="flex min-h-40 items-center justify-center">
+                    <Spin size="large" />
+                  </div>
+                ) : isError ? (
+                  <div className="flex min-h-40 flex-col items-center justify-center gap-3">
+                    <p className="text-sm text-slate-500">
+                      {t("agentRepository.mine.loadError")}
+                    </p>
+                    <StandardButton onClick={() => refetch()}>
+                      {t("repository.common.retry")}
+                    </StandardButton>
+                  </div>
+                ) : (
+                  <div
+                    className={`flex min-h-0 flex-col gap-3 ${view === "list" ? "h-full" : ""}`}
+                  >
+                    {agents.length > 0 ? (
+                      view === "list" ? (
+                        <AgentListTable
+                          agents={agents}
+                          columnWidths={tableColumnWidths}
+                          onColumnWidthsChange={setTableColumnWidths}
+                          onOpen={handleOpenAgent}
+                          onConfigure={updateUrl}
+                          onPublish={openPublishFlow}
+                          onManageVersions={handleManageVersions}
+                        />
+                      ) : (
+                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          {agents.map((agent) => (
+                            <AgentListCard
+                              key={agent.id}
+                              agent={agent}
+                              onOpen={handleOpenAgent}
+                              onConfigure={updateUrl}
+                              onPublish={openPublishFlow}
+                              onManageVersions={handleManageVersions}
+                            />
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <Empty className="py-12" />
+                    )}
+                    <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
+                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
+                        {t("agentConfig.list.total", {
+                          count: pagination?.total ?? 0,
+                        })}
+                      </span>
+                      <div className="flex h-auto flex-wrap items-center justify-end gap-2 md:h-8">
+                        <Select
+                          aria-label={t("agentConfig.list.pageSize")}
+                          value={pageSize}
+                          options={[10, 12, 20, 50].map((size) => ({
+                            value: size,
+                            label: t("agentConfig.list.perPage", {
+                              count: size,
+                            }),
+                          }))}
+                          onChange={(nextSize) => {
+                            setPageSize(nextSize);
+                            setPage(1);
+                            setJumpPage(null);
+                          }}
+                          className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
+                        />
+                        <StandardPaginator
+                          current={pagination?.page ?? page}
+                          pageSize={pageSize}
+                          total={pagination?.total ?? 0}
+                          showSizeChanger={false}
+                          onChange={setPage}
+                        />
+                        <InputNumber
+                          aria-label={t("agentConfig.list.jumpPage")}
+                          min={1}
+                          max={Math.max(
+                            1,
+                            Math.ceil((pagination?.total ?? 0) / pageSize)
+                          )}
+                          controls={false}
+                          value={jumpPage}
+                          onChange={setJumpPage}
+                          className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
+                        />
+                        <StandardButton
+                          className="!px-2"
+                          onClick={() => {
+                            if (jumpPage !== null) {
+                              setPage(
+                                Math.min(
+                                  jumpPage,
+                                  Math.max(
+                                    1,
+                                    Math.ceil(
+                                      (pagination?.total ?? 0) / pageSize
+                                    )
+                                  )
+                                )
+                              );
+                            }
+                          }}
+                        >
+                          {t("agentConfig.list.jump")}
+                        </StandardButton>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
 
-        </motion.div>
-      </Layout>
+      <Modal
+        centered
+        width={900}
+        open={isVersionManageOpen}
+        title={t("agent.version.manage")}
+        onCancel={() => setIsVersionManageOpen(false)}
+        footer={null}
+      >
+        <AgentVersion
+          currentVersionNo={selectedAgent?.current_version_no}
+          onRefreshAgentInfo={refreshSelectedAgentInfo}
+        />
+      </Modal>
+      <CreateAgentModal
+        open={isCreateOpen}
+        onCancel={() => setIsCreateOpen(false)}
+        onCreated={handleCreate}
+      />
+      <AgentImportWizard
+        visible={isImportOpen}
+        initialData={importData}
+        onCancel={() => {
+          setIsImportOpen(false);
+          setImportData(null);
+        }}
+        onImportComplete={handleImportComplete}
+      />
     </div>
   );
 }

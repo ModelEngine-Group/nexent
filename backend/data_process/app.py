@@ -8,11 +8,13 @@ from celery.backends.base import DisabledBackend
 
 from consts.const import ELASTICSEARCH_SERVICE, REDIS_BACKEND_URL, REDIS_URL
 
+
 # Configure logging
 logger = logging.getLogger("data_process.app")
 
 # Determine package path dynamically
 import_path = 'data_process.tasks'
+parse_import_path = 'data_process.parse_tasks'
 logger.debug(f"Using import path: {import_path}")
 
 if not REDIS_URL or not REDIS_BACKEND_URL:
@@ -28,7 +30,7 @@ app = Celery(
     broker=REDIS_URL,
     backend=REDIS_BACKEND_URL,
     elasticsearch_service=ELASTICSEARCH_SERVICE,
-    include=[import_path]
+    include=[import_path, parse_import_path]
 )
 
 # Critical check: If backend is still DisabledBackend, it means configuration failed, crash immediately
@@ -44,11 +46,17 @@ app.conf.update(
     # Explicitly set result backend
     broker_url=REDIS_URL,
     result_backend=REDIS_BACKEND_URL,
-    # Two task queues for processing and forward steps
+    # Route parser, forwarding, and aggregation tasks to their isolated queues.
     task_routes={
-        f'{import_path}.process': {'queue': 'process_q'},
+        f'{import_path}.process': {'queue': 'parse_q'},
+        f'{import_path}.process_part': {'queue': 'parse_q'},
+        f'{import_path}.aggregate_store_chunks': {'queue': 'process_q'},
+        f'{import_path}.parser_bootstrap': {'queue': 'parse_q'},
         f'{import_path}.forward': {'queue': 'forward_q'},
-        f'{import_path}.process_and_forward': {'queue': 'process_q'}
+        f'{import_path}.process_and_forward': {'queue': 'process_q'},
+        f'{import_path}.process_sync': {'queue': 'parse_q'},
+        f'{import_path}.forward_part': {'queue': 'forward_part_q'},
+        f'{import_path}.aggregate_forward_parts': {'queue': 'forward_aggregate_q'},
     },
     task_serializer='json',
     accept_content=['json'],
@@ -62,10 +70,9 @@ app.conf.update(
     result_backend_max_retries=10,  # Max retries for backend operations
     task_time_limit=3600,      # 1 hour time limit per task
     worker_prefetch_multiplier=1,  # Fair scheduling; avoid batchy prefetch
-    worker_max_tasks_per_child=1000,  # Reduce restart frequency
     # Important for task chains
-    task_acks_late=True,       # Tasks are acknowledged after completion
-    task_reject_on_worker_lost=True,  # Tasks are rejected if worker is lost
+    task_acks_late=False,
+    task_reject_on_worker_lost=False,
     # Result storage settings
     result_expires=None,       # Results never expire
     result_persistent=True,    # Persist results to backend
@@ -84,7 +91,7 @@ app.conf.update(
     broker_connection_retry=True,
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=10,
-    broker_heartbeat=30,  # Heartbeat check
+    broker_heartbeat=300,  # Heartbeat check
     broker_pool_limit=10,  # Connection pool size
 
     # Add transport options

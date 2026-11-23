@@ -1,0 +1,55 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: NB-CHAT-DISCONNECT-001
+  feature_id: F-146
+  business_rule_ids: [F-146-RULE-01]
+  title: Northbound chat persists its answer after headers-only disconnect
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove a real admitted Northbound run continues through the runtime and real model after the client closes without reading SSE.
+  preconditions:
+  - Local Northbound, configuration, runtime, database and Redis services are healthy and run the recorded product commit.
+  - NEXENT_TEST_HOME is outside Git and contains valid environment, identity, Northbound and real model configuration.
+  - The basic_agent anchor is published and visible to the Northbound key; the configured real LLM provider is reachable.
+  test_data:
+    agent: basic_agent
+    provider: real LLM from models.yaml
+    variants: [new_conversation, existing_conversation]
+    query: Unique per-request marker, requesting an exact answer marker.
+  steps:
+  - order: 1
+    action: For each variant submit exactly one POST /nb/v1/chat/run with agent_name, unique query and real model override; supply conversation_id only for the existing-conversation variant.
+    expected: HTTP 200 has an integer conversation_id header; existing-conversation ID agrees with the request.
+  - order: 2
+    action: Close the streaming HTTP response immediately after inspecting headers, without invoking any response-body iterator or read method.
+    expected: The client detaches without an explicit stop request or resubmission.
+  - order: 3
+    action: Poll the Northbound conversation history and persisted message status for up to 300 seconds, then read the finalized history and message counts.
+    expected: One completed assistant message contains the requested marker and exactly one user query was persisted.
+  expected_results:
+  - Both variants obtain a valid conversation_id without consuming SSE; the existing ID is preserved.
+  - The detached run produces one completed persisted assistant answer with the expected marker within 300 seconds.
+  - Exactly one user message and one assistant message exist for this isolated conversation after completion.
+  forbidden_side_effects:
+  - Do not retry or resubmit chat/run to make the original run complete.
+  - Do not invoke explicit stop during the continuation assertion.
+  acceptance:
+  - id: AC-HEADERS
+    description: Headers-only clients can detach in both new and existing conversations.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-PERSIST
+    description: The original detached run completes and persists exactly one answer.
+    steps: [3]
+    expected_results: [2, 3]
+  integration_boundary:
+  - REAL_REQUIRED Northbound HTTP proxy -> runtime producer -> real configured LLM -> conversation persistence; no product collaborator is mocked.
+  observations:
+  - Response status and conversation ID, finalized assistant status/content and persisted user/assistant counts; never log credentials.
+  cleanup:
+  - Register new Northbound conversations for owned-resource cleanup; use the temporary-conversation fixture for the existing variant.

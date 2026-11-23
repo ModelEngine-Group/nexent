@@ -1,0 +1,25 @@
+services:
+  nexent-cas-mock:
+    build:
+      context: .
+    image: nexent/cas-mock:latest
+    container_name: nexent-cas-mock
+    restart: unless-stopped
+    ports:
+      - "3001:8080"
+    environment:
+      CAS_MOCK_USERNAME: "${CAS_MOCK_USERNAME:-casuser}"
+      CAS_MOCK_PASSWORD: "${CAS_MOCK_PASSWORD:-casuser}"
+      CAS_MOCK_DISPLAY_NAME: "${CAS_MOCK_DISPLAY_NAME:-casuser}"
+      CAS_MOCK_EMAIL: "${CAS_MOCK_EMAIL:-casuser@example.com}"
+      CAS_MOCK_ROLE: "${CAS_MOCK_ROLE:-USER}"
+      CAS_MOCK_TENANT_ID: "${CAS_MOCK_TENANT_ID:-tenant_id}"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')
+      interval: 5s
+      timeout: 3s
+      retries: 10

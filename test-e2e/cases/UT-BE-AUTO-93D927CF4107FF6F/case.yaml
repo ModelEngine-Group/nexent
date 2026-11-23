@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-93D927CF4107FF6F
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: Agent 跨租户导入模型三级回退（model_id/display_name/quick-config）｜核心与边界
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent 跨租户导入模型三级回退（model_id/display_name/quick-config）｜核心与边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml（模型目录 fixture）；${NEXENT_TEST_HOME}/config/secrets.env
+  - get_model_by_model_id、get_model_id_by_display_name、tenant_config_manager.get_model_config 可用最小 mock/fixture 隔离，不访问真实模型服务。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“Agent 跨租户导入模型三级回退”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: model_ids 与 model_display_names 均为空时返回 None，调用方 import_agent_by_agent_id 跳过持久化模型 id。
+  - order: 2
+    action: 直接导入 backend/management/services/agent/management.py 中的 _resolve_model_ids_with_fallback，并对 get_model_by_model_id、get_model_id_by_display_name、tenant_config_manager.get_model_config
+      注入最小 mock/fixture。
+    expected: 显式 model_ids 逐项校验目标租户目录，无效 id 被丢弃、有效 id 保留且保持原始顺序。
+  - order: 3
+    action: 均缺失场景：model_ids 与 model_display_names 均为 None 或空，调用并记录返回值。
+    expected: 至少一个显式 id 有效时仅返回显式 id，不补充 display_name 解析结果。
+  - order: 4
+    action: 显式 ID 全有效场景：model_ids 全部存在于目标租户目录，调用并记录返回值与 mock 调用序列。
+    expected: 显式 id 全部缺失时按 model_display_names 解析为模型 id。
+  - order: 5
+    action: 显式 ID 部分无效场景：model_ids 混入不存在于目标租户目录的 id，调用并记录返回值。
+    expected: 仍无可解析模型且存在缺失项时回退 quick-config LLM 的 model_id。
+  - order: 6
+    action: 显式 ID 全无效 + display_name 回退场景：model_ids 全部无效、model_display_names 可解析到目标租户模型 id，调用并记录返回值。
+    expected: 结果去重且顺序稳定；business_logic_model_id 分支均缺失时不写入该字段。
+  - order: 7
+    action: quick-config 兜底场景：显式 ID 与 display_name 均不可解析且存在缺失项，mock 快速配置 LLM 返回 model_id，调用并记录返回值。
+    expected: 测试过程无未处理异常、无半写入，日志中无明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 去重与跳过持久化场景：传入重复 id 或重复 display_name，断言结果无重复；对 business_logic_model_id 单元素分支均缺失时返回空，确认调用方不写入该字段。
+    expected: 测试过程无未处理异常、无半写入，日志中无明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 测试过程无未处理异常、无半写入，日志中无明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 测试结束后释放 mock/fixture，确保可重复执行。
+    expected: 测试过程无未处理异常、无半写入，日志中无明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - model_ids 与 model_display_names 均为空时返回 None，调用方 import_agent_by_agent_id 跳过持久化模型 id。
+  - 显式 model_ids 逐项校验目标租户目录，无效 id 被丢弃、有效 id 保留且保持原始顺序。
+  - 至少一个显式 id 有效时仅返回显式 id，不补充 display_name 解析结果。
+  - 显式 id 全部缺失时按 model_display_names 解析为模型 id。
+  - 仍无可解析模型且存在缺失项时回退 quick-config LLM 的 model_id。
+  - 结果去重且顺序稳定；business_logic_model_id 分支均缺失时不写入该字段。
+  - 测试过程无未处理异常、无半写入，日志中无明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 407
+  unit_boundary: 导入导出
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - model_ids 与 model_display_names 均为空时返回 None，调用方 import_agent_by_agent_id 跳过持久化模型 id。
+  - 显式 model_ids 逐项校验目标租户目录，无效 id 被丢弃、有效 id 保留且保持原始顺序。
+  - 至少一个显式 id 有效时仅返回显式 id，不补充 display_name 解析结果。
+  - 显式 id 全部缺失时按 model_display_names 解析为模型 id。
+  - 仍无可解析模型且存在缺失项时回退 quick-config LLM 的 model_id。
+  - 结果去重且顺序稳定；business_logic_model_id 分支均缺失时不写入该字段。
+  - 测试过程无未处理异常、无半写入，日志中无明文 API Key/Token/Password/模型密钥。

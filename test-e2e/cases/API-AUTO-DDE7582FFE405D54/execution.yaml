@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: API-AUTO-DDE7582FFE405D54
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-AUTO-DDE7582FFE405D54
+notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-01: [test_api_auto_dde7582ffe405d54, test_name_fallback_http_contract]
+  AC-02: [test_api_auto_dde7582ffe405d54]
+  AC-03: [test_api_auto_dde7582ffe405d54]
+  AC-04: [test_name_fallback_http_contract]
+  AC-05: [test_api_auto_dde7582ffe405d54, test_name_fallback_http_contract]
+  AC-06: [test_api_auto_dde7582ffe405d54]
+  AC-07: [test_name_fallback_http_contract]
+  AC-08: [test_api_auto_dde7582ffe405d54, test_name_fallback_http_contract]
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []

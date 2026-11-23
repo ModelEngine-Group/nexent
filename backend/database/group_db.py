@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Database operations for group management
 """
@@ -5,7 +6,12 @@ from typing import Any, Dict, List, Optional, Union
 
 from database.client import as_dict, get_db_session
 from database.db_models import TenantGroupInfo, TenantGroupUser
-from utils.str_utils import convert_string_to_list
+from management.db.serialization import convert_string_to_list
+from consts.exceptions import TenantResourceLimitError
+from consts.const import MAX_GROUPS_PER_TENANT
+from sqlalchemy import text
+
+_GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
 
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -50,7 +56,8 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
 
 
 def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+                           sort_by: str = "created_at", sort_order: str = "desc",
+                           search: Optional[str] = None) -> Dict[str, Any]:
     """
     Query groups for a tenant with pagination and sorting
 
@@ -65,17 +72,18 @@ def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: O
         Dict[str, Any]: Dictionary containing groups list and total count
     """
     with get_db_session() as session:
-        # Get total count
-        total = session.query(TenantGroupInfo).filter(
+        filters = [
             TenantGroupInfo.tenant_id == tenant_id,
             TenantGroupInfo.delete_flag == "N"
-        ).count()
+        ]
+        if search and search.strip():
+            filters.append(TenantGroupInfo.group_name.ilike(f"%{search.strip()}%"))
+
+        # Count after filtering, before pagination.
+        total = session.query(TenantGroupInfo).filter(*filters).count()
 
         # Build base query
-        query = session.query(TenantGroupInfo).filter(
-            TenantGroupInfo.tenant_id == tenant_id,
-            TenantGroupInfo.delete_flag == "N"
-        )
+        query = session.query(TenantGroupInfo).filter(*filters)
 
         # Add sorting
         if sort_by == "created_at":
@@ -113,6 +121,24 @@ def add_group(tenant_id: str, group_name: str, group_description: Optional[str] 
         int: Created group ID
     """
     with get_db_session() as session:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"tenant-group-limit:{tenant_id}"},
+        )
+        group_count = session.query(TenantGroupInfo).filter(
+            getattr(TenantGroupInfo, "tenant_id", None) == tenant_id,
+            getattr(TenantGroupInfo, "delete_flag", None) == "N",
+        ).count()
+        group_count = group_count if isinstance(group_count, int) else 0
+        if group_count >= _GROUP_LIMIT:
+            error = TenantResourceLimitError(
+                f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant"
+            )
+            error.resource = "groups"
+            error.scope = "tenant"
+            error.limit = _GROUP_LIMIT
+            error.current_count = group_count
+            raise error
         group = TenantGroupInfo(
             tenant_id=tenant_id,
             group_name=group_name,
@@ -250,6 +276,54 @@ def query_group_users(group_id: int) -> List[Dict[str, Any]]:
         return [as_dict(record) for record in result]
 
 
+def query_group_ids_by_user_in_tenant(user_id: str, tenant_id: str) -> List[int]:
+    """Return ``user_id``'s group IDs restricted to ``tenant_id``.
+
+    Joins ``tenant_group_user_t`` with ``tenant_group_info_t`` so a user that
+    happens to share a group ID across tenants cannot leak access. Filters on
+    ``delete_flag='N'`` for both tables.
+    """
+    if not user_id or not tenant_id:
+        return []
+    with get_db_session() as session:
+        result = (
+            session.query(TenantGroupUser.group_id)
+            .join(
+                TenantGroupInfo,
+                TenantGroupInfo.group_id == TenantGroupUser.group_id,
+            )
+            .filter(
+                TenantGroupUser.user_id == user_id,
+                TenantGroupUser.delete_flag == "N",
+                TenantGroupInfo.tenant_id == tenant_id,
+                TenantGroupInfo.delete_flag == "N",
+            )
+            .all()
+        )
+    return [row[0] for row in result]
+
+
+def filter_tenant_group_ids(group_ids: List[int], tenant_id: str) -> List[int]:
+    """Return the subset of ``group_ids`` that exist in ``tenant_id``.
+
+    Used by the AIDP permission service to validate submitted ``group_ids``
+    against the current tenant. Returns an empty list when no IDs match.
+    """
+    if not group_ids or not tenant_id:
+        return []
+    with get_db_session() as session:
+        rows = (
+            session.query(TenantGroupInfo.group_id)
+            .filter(
+                TenantGroupInfo.group_id.in_(group_ids),
+                TenantGroupInfo.tenant_id == tenant_id,
+                TenantGroupInfo.delete_flag == "N",
+            )
+            .all()
+        )
+    return [row[0] for row in rows]
+
+
 def query_group_ids_by_user(user_id: str) -> List[int]:
     """
     Query all group IDs for a user
@@ -290,6 +364,41 @@ def query_groups_by_user(user_id: str) -> List[Dict[str, Any]]:
         ).all()
 
         return [as_dict(record) for record in result]
+
+
+def query_groups_by_users(user_ids: List[str]) -> Dict[str, List[str]]:
+    """
+    Batch query group names for multiple users in a single query.
+
+    Args:
+        user_ids: List of user IDs
+
+    Returns:
+        Dict mapping user_id -> list of group names
+    """
+    if not user_ids:
+        return {}
+
+    result_map: Dict[str, List[str]] = {uid: [] for uid in user_ids}
+
+    with get_db_session() as session:
+        rows = (
+            session.query(TenantGroupUser.user_id, TenantGroupInfo.group_name)
+            .join(
+                TenantGroupInfo,
+                TenantGroupInfo.group_id == TenantGroupUser.group_id,
+            )
+            .filter(
+                TenantGroupUser.user_id.in_(user_ids),
+                TenantGroupUser.delete_flag == "N",
+                TenantGroupInfo.delete_flag == "N",
+            )
+            .all()
+        )
+        for uid, group_name in rows:
+            result_map[uid].append(group_name)
+
+    return result_map
 
 
 def check_user_in_group(user_id: str, group_id: int) -> bool:

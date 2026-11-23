@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Union, BinaryIO
 from smolagents.models import ChatMessage
 
 from ..models import OpenAIModel
+from ..concurrency import run_blocking
 from ..utils.observer import MessageObserver
 
 logger = logging.getLogger(__name__)
@@ -44,8 +45,13 @@ class OpenAIVLModel(OpenAIModel):
         Returns:
             bool: True if the model responds successfully, otherwise False.
         """
-        # Use local test image from images folder - use absolute path based on module location
-        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # Use local test image from images folder - anchor on the nexent
+        # package root (asset lives in nexent/assets/). A relative dirname
+        # chain worked here only by coincidence of module depth and broke in
+        # the gateway copy of this probe; anchoring on the package makes both
+        # robust against future module moves.
+        import nexent
+        module_dir = os.path.dirname(os.path.abspath(nexent.__file__))
         test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
         if os.path.exists(test_image_path):
             base64_image = self.encode_image(test_image_path)
@@ -68,7 +74,8 @@ class OpenAIVLModel(OpenAIModel):
             ]
 
         try:
-            await asyncio.to_thread(
+            await run_blocking(
+                "openai-vlm-connectivity",
                 self.client.chat.completions.create,
                 model=self.model_id,
                 messages=[{"role": "user", "content": content_parts}],

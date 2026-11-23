@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/database/knowledge_db.py
 Tests knowledge database utility functions
@@ -54,6 +55,7 @@ minio_config_mock.validate = MagicMock()
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
     from backend.database.knowledge_db import (
+        _lock_and_check_knowledge_name,
         create_knowledge_record,
         update_knowledge_record,
         delete_knowledge_record,
@@ -64,6 +66,7 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         update_model_name_by_index_name,
         get_index_name_by_knowledge_name,
         get_knowledge_info_by_tenant_and_source,
+        get_knowledge_info_by_ids_and_tenant,
         upsert_knowledge_record,
         _generate_index_name,
         get_knowledge_name_map_by_index_names,
@@ -119,8 +122,8 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 utils_mock.str_utils = MagicMock()
 utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
-sys.modules['utils.str_utils'] = utils_mock.str_utils
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['management.db.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -187,6 +190,7 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 # Import backend modules after all patches are applied
 from backend.database.knowledge_db import (
+        _lock_and_check_knowledge_name,
         create_knowledge_record,
         update_knowledge_record,
         delete_knowledge_record,
@@ -201,6 +205,7 @@ from backend.database.knowledge_db import (
         upsert_knowledge_record,
         _generate_index_name,
         get_knowledge_name_map_by_index_names,
+        _enforce_knowledge_limits,
     )
 
 
@@ -209,8 +214,40 @@ def mock_session():
     """Create a mock database session"""
     mock_session = MagicMock()
     mock_query = MagicMock()
+    mock_query.filter.return_value.first.return_value = None
     mock_session.query.return_value = mock_query
     return mock_session, mock_query
+
+
+def test_lock_and_check_knowledge_name_available(mock_session):
+    session, query = mock_session
+
+    _lock_and_check_knowledge_name(session, "tenant-1", "KB One")
+
+    session.execute.assert_called_once()
+    assert session.execute.call_args.args[1] == {
+        "lock_key": "knowledge-name:tenant-1:KB One"
+    }
+    query.filter.return_value.first.assert_called_once_with()
+
+
+def test_lock_and_check_knowledge_name_conflict(mock_session):
+    from consts.exceptions import DuplicateError
+
+    session, query = mock_session
+    query.filter.return_value.first.return_value = object()
+
+    with pytest.raises(DuplicateError, match="already exists"):
+        _lock_and_check_knowledge_name(session, "tenant-1", "KB One")
+
+
+def test_lock_and_check_knowledge_name_skips_legacy_missing_scope(mock_session):
+    session, _ = mock_session
+
+    _lock_and_check_knowledge_name(session, None, "KB One")
+    _lock_and_check_knowledge_name(session, "tenant-1", None)
+
+    session.execute.assert_not_called()
 
 
 def setup_mock_db_session(monkeypatch, session):
@@ -226,6 +263,124 @@ def setup_mock_db_session(monkeypatch, session):
     monkeypatch.setattr(
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
     return mock_ctx
+
+
+class _LimitQuery:
+    """Small query double that returns deterministic active-record counts."""
+
+    def __init__(self, counts):
+        self._counts = iter(counts)
+
+    def filter(self, *args):
+        return self
+
+    def count(self):
+        return next(self._counts)
+
+
+class _LimitSession:
+    def __init__(self, counts):
+        self.query_calls = 0
+        self.query_result = _LimitQuery(counts)
+        self.execute_calls = []
+
+    def query(self, *args):
+        self.query_calls += 1
+        return self.query_result
+
+    def execute(self, *args):
+        self.execute_calls.append(args)
+
+
+def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
+    """The tenant ceiling rejects creation at the boundary with structured details."""
+    from backend.database import knowledge_db
+
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 1)
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 10)
+    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    session = _LimitSession([1])
+
+    with pytest.raises(Exception) as exc_info:
+        _enforce_knowledge_limits(session, "tenant-1", "user-1")
+
+    assert exc_info.value.error_code.value == "060110"
+    assert exc_info.value.details["scope"] == "tenant"
+    assert exc_info.value.details["limit"] == 1
+    assert session.query_calls == 1
+
+
+def test_knowledge_limit_helpers_handle_missing_identity_and_role_lookup(monkeypatch):
+    """Missing identity is ordinary-user safe, while a tenant role is normalized."""
+    from backend.database import knowledge_db
+
+    assert knowledge_db._count_or_zero(3) == 3
+    assert knowledge_db._count_or_zero(MagicMock()) == 0
+    session = MagicMock()
+    assert knowledge_db._get_user_role_in_session(session, None, "tenant-1") == "USER"
+
+    session.query.return_value.filter.return_value.scalar.return_value = "admin"
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "ADMIN"
+
+    session.query.side_effect = None
+    session.query.return_value.filter.return_value.scalar.return_value = None
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
+
+    session.query.side_effect = RuntimeError("role lookup failed")
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
+
+
+def test_knowledge_limit_skips_user_scope_without_creator(monkeypatch):
+    """Legacy integrations without a creator still observe the tenant ceiling."""
+    from backend.database import knowledge_db
+
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
+    session = _LimitSession([0])
+
+    knowledge_db._enforce_knowledge_limits(session, "tenant-1", None)
+
+    assert session.query_calls == 1
+    assert len(session.execute_calls) == 1
+
+
+def test_knowledge_limit_skips_all_scopes_without_tenant():
+    """Records without a tenant are retained for legacy callers without scope."""
+    session = _LimitSession([])
+
+    _enforce_knowledge_limits(session, None, "user-1")
+
+    assert session.query_calls == 0
+    assert session.execute_calls == []
+
+
+@pytest.mark.parametrize(
+    "role, expected_limit",
+    [
+        ("USER", 1),
+        ("DEV", 1000),
+        ("ADMIN", 1000),
+        ("SU", 1000),
+        ("ASSET_OWNER", 1000),
+    ],
+)
+def test_knowledge_user_limit_applies_to_creator_role(monkeypatch, role, expected_limit):
+    """The creator ceiling is checked after the tenant ceiling and includes role details."""
+    from backend.database import knowledge_db
+
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
+    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    monkeypatch.setattr(knowledge_db, "_get_user_role_in_session", lambda *_: role)
+    session = _LimitSession([0, expected_limit])
+
+    with pytest.raises(Exception) as exc_info:
+        _enforce_knowledge_limits(session, "tenant-1", "user-1")
+
+    assert exc_info.value.error_code.value == "060110"
+    assert exc_info.value.details["scope"] == "user"
+    assert exc_info.value.details["limit"] == expected_limit
+    assert exc_info.value.details["role"] == role
+    assert session.query_calls == 2
 
 
 def test_create_knowledge_record_success(monkeypatch, mock_session):
@@ -249,7 +404,8 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "embedding_model_name": "test_model",
         "knowledge_name": "test_knowledge",
         "group_ids": [1, 2, 3],
-        "ingroup_permission": "READ_ONLY"
+        "ingroup_permission": "READ_ONLY",
+        "quota_limit_bytes": 1024,
     }
 
     # Mock KnowledgeRecord constructor
@@ -264,6 +420,32 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
     session.add.assert_called_once_with(mock_record)
     assert session.flush.call_count == 1
     session.commit.assert_called_once()
+
+
+def test_create_knowledge_record_normalizes_knowledge_name(monkeypatch, mock_session):
+    session, _ = mock_session
+    setup_mock_db_session(monkeypatch, session)
+    mock_record = MockKnowledgeRecord(knowledge_name="Trimmed KB")
+    mock_record.knowledge_id = 124
+    mock_record.index_name = "idx-124"
+
+    with patch(
+        "backend.database.knowledge_db.KnowledgeRecord",
+        return_value=mock_record,
+    ) as mock_constructor:
+        result = create_knowledge_record(
+            {
+                "knowledge_name": "  Trimmed KB  ",
+                "tenant_id": "tenant-1",
+                "user_id": "user-1",
+            }
+        )
+
+    assert result["knowledge_name"] == "Trimmed KB"
+    assert mock_constructor.call_args.kwargs["knowledge_name"] == "Trimmed KB"
+    assert session.execute.call_args.args[1] == {
+        "lock_key": "knowledge-name:tenant-1:Trimmed KB"
+    }
 
 
 def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
@@ -1145,6 +1327,25 @@ def test_get_knowledge_info_by_tenant_id_success(monkeypatch, mock_session):
     assert result == expected
 
 
+def test_get_knowledge_info_by_tenant_id_orders_paginated_source(monkeypatch, mock_session):
+    session, query = mock_session
+    filtered_query = MagicMock()
+    ordered_query = MagicMock()
+    ordered_query.all.return_value = []
+    filtered_query.order_by.return_value = ordered_query
+    query.filter.return_value = filtered_query
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx
+    )
+
+    result = get_knowledge_info_by_tenant_id("tenant1", ordered=True)
+
+    assert result == []
+    filtered_query.order_by.assert_called_once()
+
+
 def test_get_knowledge_info_by_tenant_id_exception(monkeypatch, mock_session):
     """Test exception when retrieving knowledge info by tenant ID"""
     session, query = mock_session
@@ -1827,14 +2028,18 @@ def test_upsert_knowledge_record_create_new(monkeypatch, mock_session):
     monkeypatch.setattr(
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
-    # Mock create_knowledge_record to return expected result
+    # Mock the same-session creator used to keep the existence check and limit
+    # check in one transaction.
     expected_result = {
         "knowledge_id": 123,
         "index_name": "test_index",
         "knowledge_name": "test_kb"
     }
 
-    with patch('backend.database.knowledge_db.create_knowledge_record', return_value=expected_result):
+    with patch(
+        'backend.database.knowledge_db._create_knowledge_record_in_session',
+        return_value=expected_result,
+    ):
         test_query = {
             "index_name": "test_index",
             "tenant_id": "test_tenant",
@@ -2064,13 +2269,14 @@ def test_get_knowledge_name_map_by_index_names_success(monkeypatch, mock_session
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     index_names = ["index1", "index2"]
-    result = get_knowledge_name_map_by_index_names(index_names)
+    result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
 
     expected = {
         "index1": "Knowledge Base 1",
         "index2": "Knowledge Base 2",
     }
     assert result == expected
+    assert any("tenant_id" in str(condition) for condition in query.filter.call_args.args)
 
 
 def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_session):
@@ -2104,7 +2310,7 @@ def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_s
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     index_names = ["index1", "index2"]
-    result = get_knowledge_name_map_by_index_names(index_names)
+    result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
 
     expected = {
         "index1": "Knowledge Base 1",
@@ -2115,7 +2321,7 @@ def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_s
 
 def test_get_knowledge_name_map_by_index_names_empty_list(monkeypatch):
     """Test get_knowledge_name_map_by_index_names with empty list returns empty dict"""
-    result = get_knowledge_name_map_by_index_names([])
+    result = get_knowledge_name_map_by_index_names([], tenant_id="tenant-1")
 
     assert result == {}
 
@@ -2140,7 +2346,7 @@ def test_get_knowledge_name_map_by_index_names_no_results(monkeypatch, mock_sess
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     index_names = ["nonexistent1", "nonexistent2"]
-    result = get_knowledge_name_map_by_index_names(index_names)
+    result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
 
     # Should return index_names as fallback for all
     expected = {
@@ -2167,7 +2373,7 @@ def test_get_knowledge_name_map_by_index_names_exception(monkeypatch, mock_sessi
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        get_knowledge_name_map_by_index_names(["index1", "index2"])
+        get_knowledge_name_map_by_index_names(["index1", "index2"], tenant_id="tenant-1")
 
 
 def test_get_index_name_by_knowledge_name_fallback_to_index_name(monkeypatch, mock_session):
@@ -2243,11 +2449,12 @@ def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
         ("get_knowledge_info_by_tenant_and_source", ("t1", "datamate"), {}),
         ("update_model_name_by_index_name", ("i1", "m1", "t1", "u1"), {}),
         ("get_index_name_by_knowledge_name", ("kb1", "t1"), {}),
-        ("get_knowledge_name_map_by_index_names", (["i1"],), {}),
+        ("get_knowledge_name_map_by_index_names", (["i1"], "t1"), {}),
         ("update_summary_frequency", ("i1", "1d", "t1", "u1"), {}),
         ("update_last_summary_time", ("i1",), {}),
         ("update_last_doc_update_time", ("i1",), {}),
         ("get_knowledge_bases_for_auto_summary", tuple(), {}),
+        ("get_knowledge_info_by_ids_and_tenant", ([1], "t1"), {}),
     ],
 )
 def test_sqlalchemy_error_paths_raise(monkeypatch, func_name, args, kwargs):
@@ -2265,3 +2472,75 @@ def test_sqlalchemy_error_paths_raise(monkeypatch, func_name, args, kwargs):
     target = getattr(knowledge_db_module, func_name)
     with pytest.raises(MockSQLAlchemyError, match="db-error"):
         target(*args, **kwargs)
+
+def test_get_knowledge_info_by_ids_and_tenant_empty(monkeypatch, mock_session):
+    """Empty id list short-circuits without touching the DB."""
+    session, _ = mock_session
+    setup_mock_db_session(monkeypatch, session)
+
+    assert get_knowledge_info_by_ids_and_tenant([], "t1") == []
+    session.query.assert_not_called()
+
+
+def test_get_knowledge_info_by_ids_and_tenant_preserves_order(monkeypatch, mock_session):
+    """Results follow the requested id order and skip ids missing from the DB."""
+    session, mock_query = mock_session
+    setup_mock_db_session(monkeypatch, session)
+
+    rec_b = MockKnowledgeRecord(
+        knowledge_id=2, index_name="idx_b", knowledge_name="KB B",
+        knowledge_sources="elasticsearch", embedding_model_name="model-b",
+        embedding_model_id=9,
+    )
+    rec_a = MockKnowledgeRecord(
+        knowledge_id=1, index_name="idx_a", knowledge_name="KB A",
+        knowledge_sources="elasticsearch", embedding_model_name="model-a",
+        embedding_model_id=10,
+    )
+    # The DB layer returns records in arbitrary order; the function must
+    # re-order them according to the requested ids.
+    mock_query.filter.return_value.all.return_value = [rec_b, rec_a]
+
+    result = get_knowledge_info_by_ids_and_tenant([1, 2, 3], "t1")
+
+    assert [item["knowledge_id"] for item in result] == [1, 2]
+    assert result[0]["index_name"] == "idx_a"
+    assert result[0]["embedding_model_id"] == 10
+    assert result[1]["knowledge_name"] == "KB B"
+    assert result[1]["embedding_model_id"] == 9
+
+
+def test_private_knowledge_queries_filter_and_serialize(monkeypatch, mock_session):
+    from backend.database import knowledge_db as knowledge_db_module
+
+    session, query = mock_session
+    setup_mock_db_session(monkeypatch, session)
+    records = [
+        MockKnowledgeRecord(
+            knowledge_id=1,
+            index_name="private-a",
+            knowledge_name="Private A",
+            created_by="user-a",
+            ingroup_permission="PRIVATE",
+        )
+    ]
+    query.filter.return_value.all.return_value = records
+    monkeypatch.setattr(
+        knowledge_db_module,
+        "as_dict",
+        lambda record: {
+            "knowledge_id": record.knowledge_id,
+            "index_name": record.index_name,
+            "created_by": record.created_by,
+        },
+    )
+
+    assert knowledge_db_module.get_private_knowledge_info_by_tenant_id("tenant-a") == [
+        {"knowledge_id": 1, "index_name": "private-a", "created_by": "user-a"}
+    ]
+    assert knowledge_db_module.get_private_knowledge_info_by_creator(
+        "tenant-a", "user-a"
+    ) == [
+        {"knowledge_id": 1, "index_name": "private-a", "created_by": "user-a"}
+    ]
+    assert query.filter.call_count == 2

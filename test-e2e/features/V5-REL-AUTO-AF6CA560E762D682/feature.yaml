@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-AF6CA560E762D682
+  name: 配置服务生命周期恢复、配置校验与资源回收
+  status: active
+  description: >-
+    系统管理 / 配置服务生命周期：验证任务恢复、评估维护、上传清理、条件回填、外部配置校验与Dreaming的启动编排，
+    以及就绪状态、启动失败后的强制进程重启恢复、正常关闭的线程管理器回收及默认注册清理。私有Prompt模板启动同步已在#4134退役。
+  business_rules:
+  - rule_id: V5-REL-AUTO-AF6CA560E762D682-RULE-01
+    description: 配置服务只在必要前置完成后就绪；启动错误必须保留，允许强制终止旧进程后在故障解除时重启恢复；不强制自动恢复或旧进程清理，正常关闭仍按依赖顺序回收。
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

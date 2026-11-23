@@ -6,7 +6,7 @@ global:
     mode: "local"
     storageClassName: "nexent-local"
     accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     workspace:
       size: "10Gi"
       localPath: "/var/lib/nexent"
@@ -15,9 +15,21 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/skills"
       existingClaim: "nexent-skills"
+    memoryPlugins:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/memory-provider-plugins"
+      existingClaim: "nexent-memory-plugins"
+    logs:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/logs"
+      existingClaim: "nexent-logs"
+    projectConfig:
+      size: "1Gi"
+      localPath: "/var/lib/nexent-data/project-config"
+      existingClaim: "nexent-project-config"
   deploymentVersion: "full"
   deploymentComponents:
-    infrastructure: true
+    infrastructure: false
     application: true
     data-process: true
     supabase: true
@@ -42,10 +54,11 @@ global:
     langsmithProject: "nexent"
     otlpMetricsEnabled: true
     instrumentRequests: false
-    fastapiIncludedUrls: "/agent/run"
+    fastapiIncludedUrls: "/agent/run,/conversation/generate_title,/nb/v1/generate_title"
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -69,10 +82,15 @@ nexent-common:
       userAttribute: ""
       emailAttribute: "email"
       roleAttribute: "role"
+      defaultRole: "USER"
       tenantAttribute: "tenant_id"
+      defaultTenantId: "tenant_id"
       roleMapJson: ""
       sessionMaxAgeSeconds: "3600"
       localSessionMaxAgeSeconds: "3600"
+      heartbeatUrl: ""
+      heartbeatIntervalSeconds: "300"
+      heartbeatCookieName: ""
       renewBeforeSeconds: "300"
       renewTimeoutSeconds: "10"
       syntheticEmailDomain: "cas.local"
@@ -80,24 +98,22 @@ nexent-common:
       sslVerify: "true"
       caBundle: ""
 
-nexent-elasticsearch:
-  enabled: true
-nexent-postgresql:
-  enabled: true
-nexent-redis:
-  enabled: true
-nexent-minio:
-  enabled: true
 nexent-config:
   enabled: true
+  replicaCount: 1
 nexent-runtime:
   enabled: true
+  replicaCount: 1
 nexent-mcp:
   enabled: true
 nexent-northbound:
   enabled: true
+  replicaCount: 1
 nexent-web:
   enabled: true
+  replicaCount: 1
+  config:
+    fileUploadSizeLimit: "10"
 nexent-data-process:
   enabled: true
 nexent-supabase-kong:

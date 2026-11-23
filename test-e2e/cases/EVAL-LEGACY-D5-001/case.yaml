@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: EVAL-LEGACY-D5-001
+  feature_id: V5-PW-EVAL-RUN-01
+  business_rule_ids:
+  - V5-PW-EVAL-RUN-01-RULE-01
+  title: Legacy space permission cleanup is selective, repeatable and transactional
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Run the production permission cleanup SQL on synthetic historical and
+    modern grants in a disposable PostgreSQL container.
+  preconditions:
+  - Docker is available and postgres:15-alpine is already present. Only a uniquely
+    named no-network container may be created.
+  test_data:
+    source: Synthetic grants for all supported roles, duplicate historical paths,
+      modern paths with legacy numeric IDs, similar prefixes and non-navigation permissions.
+  steps:
+  - order: 1
+    action: Create a run-owned no-network PostgreSQL container and seed a minimal
+      role_permission_t with legacy and retained variants.
+    expected: All data is synthetic and existing databases are not accessed.
+  - order: 2
+    action: Inject a failure immediately before COMMIT and compare the entire table,
+      then execute the unchanged production migration.
+    expected: Failure rolls back deletions; normal execution removes only exact legacy
+      VISIBILITY/LEFT_NAV_MENU rows across roles.
+  - order: 3
+    action: Compare every retained row, execute the production SQL again and compare
+      the complete snapshot; also exercise an empty table.
+    expected: Modern /evaluation and unrelated grants retain every value, repeated
+      and empty executions change nothing.
+  - order: 4
+    action: Remove only the run-owned container in a finally block.
+    expected: Cleanup is checked after success or failure and no existing container
+      is changed.
+  expected_results:
+  - Exact legacy navigation grants are removed across roles and duplicates; modern
+    and unrelated permission values remain unchanged.
+  - Injected transaction failure preserves all rows, and repeat or empty execution
+    is safe.
+  - Only isolated synthetic resources are used and all run-owned resources are cleaned.
+  forbidden_side_effects:
+  - Do not access existing databases, delete permissions by numeric ID or broad path
+    prefix, remove current /evaluation access, publish ports or remove unrelated containers.
+  risk_type: DEPLOYMENT
+  risk: Overbroad cleanup could remove modern evaluation access or unrelated permission
+    categories.
+  condition:
+  - Real production SQL executes in a disposable PostgreSQL container with success,
+    repeat, empty and injected-failure variants.
+  metrics:
+  - Exact retained row snapshots, obsolete grant count, rollback snapshot equality
+    and cleanup exit status.
+  thresholds:
+  - Zero obsolete matching grants after success; zero unrelated changes; exact rollback
+    and repeat snapshot equality.
+  recovery_expectations:
+  - A failed transaction retains all pre-migration grants; cleanup removes only the
+    newly created container.
+  acceptance:
+  - id: AC-01
+    description: Exact legacy grant deletion preserves modern and unrelated permissions
+      for every role.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Transactional failure, repeat and empty execution preserve the expected
+      state and isolated resources are cleaned.
+    steps:
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1

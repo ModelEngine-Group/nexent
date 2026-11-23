@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-BE-018
+  name: selected messages 形成不可变 share snapshot
+  status: active
+  description: selected messages 形成不可变 share snapshot
+  business_rules:
+  - rule_id: V5-UT-BE-018-RULE-01
+    description: selected messages 形成不可变 share snapshot
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

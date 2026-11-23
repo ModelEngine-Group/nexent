@@ -17,13 +17,13 @@
 ## 快速开始
 
 1. **了解能力**：阅读 [技能系统概览](./overview) 了解已支持的技能类型
-2. **体验创建**：在 [技能管理](../../user-guide/skills) 页面体验 NL-to-Skill 创建
+2. **体验创建**：在 [技能管理](../../user-guide/resource-repository/skill-repository.md) 页面体验 NL-to-Skill 创建
 3. **手动创建**：上传 `SKILL.md` 或 ZIP 包创建自定义技能
 4. **为智能体配置**：在智能体工具配置中勾选技能
 
 ## 相关参考
 
-- [技能管理（用户指南）](../../user-guide/skills)
+- [技能管理（用户指南）](../../user-guide/resource-repository/skill-repository.md)
 - [智能体开发指南](../../user-guide/agent-development)
 - [本地工具概览](../../user-guide/local-tools/index)
 - [SDK 工具开发规范](../../sdk/core/tools)

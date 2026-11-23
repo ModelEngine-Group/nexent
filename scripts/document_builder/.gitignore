@@ -1,0 +1,6 @@
+__pycache__/
+nexent-documentation-assets/
+*.docx
+!reference.docx
+*.md
+!build_docs_使用指南.md

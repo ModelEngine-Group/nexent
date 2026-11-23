@@ -90,6 +90,7 @@ interface ModelCapacityFieldsProps {
   applyDefaultsOnEmpty?: boolean;
   /** Currently accepted suggestion, used to detect fuzzy canonicalization mismatch */
   acceptedSuggestion?: CapacitySuggestion | null;
+  disabled?: boolean;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -279,6 +280,7 @@ export const ModelCapacityFields = ({
   legacyMaxTokensCandidate,
   applyDefaultsOnEmpty = true,
   acceptedSuggestion,
+  disabled = false,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
@@ -334,9 +336,7 @@ export const ModelCapacityFields = ({
   // behind dropdown chrome. Otherwise show the preset list to help
   // operators avoid typos like "1280000" instead of "128000".
   const suggestionFields = suggestion?.suggestions ?? null;
-  const fieldHasSuggestion = (
-    field: keyof ModelCapacityFormState
-  ): boolean => {
+  const fieldHasSuggestion = (field: keyof ModelCapacityFormState): boolean => {
     if (!suggestionFields) return false;
     const suggested = (suggestionFields as Record<string, unknown>)[field];
     return suggested != null && suggested !== "";
@@ -356,6 +356,7 @@ export const ModelCapacityFields = ({
         options={presetOptions}
         placeholder={defaultPlaceholders[field]}
         onChange={(next) => onChange(field, String(next ?? ""))}
+        disabled={disabled}
         filterOption={(input, option) =>
           String(option?.label ?? "")
             .toLowerCase()
@@ -363,15 +364,17 @@ export const ModelCapacityFields = ({
           String(option?.value ?? "").includes(input)
         }
       >
-        <Input inputMode="numeric" pattern="[0-9]*" />
+        <Input inputMode="numeric" pattern="[0-9]*" disabled={disabled} />
       </AutoComplete>
     ) : (
       <Input
+        className="w-full"
         type="number"
         min="1"
         value={value[field]}
         placeholder={defaultPlaceholders[field]}
         onChange={(event) => onChange(field, event.target.value)}
+        disabled={disabled}
       />
     );
     return (
@@ -380,7 +383,9 @@ export const ModelCapacityFields = ({
           <Tooltip title={t(tooltipKey)}>
             <span>{t(labelKey)}</span>
           </Tooltip>
-          {requiredSet.has(field) && <span className="text-red-500 ml-1">*</span>}
+          {requiredSet.has(field) && (
+            <span className="text-red-500 ml-1">*</span>
+          )}
         </label>
         {inputControl}
       </div>
@@ -410,7 +415,7 @@ export const ModelCapacityFields = ({
         <Alert
           type="warning"
           showIcon
-          message={t("model.dialog.capacity.legacyMaxTokensHint", {
+          title={t("model.dialog.capacity.legacyMaxTokensHint", {
             maxTokens: legacyMaxTokensCandidate,
           })}
           description={
@@ -441,6 +446,7 @@ export const ModelCapacityFields = ({
                     onClick={() =>
                       onChange(fieldName, String(legacyMaxTokensCandidate))
                     }
+                    disabled={disabled}
                   >
                     {t(labelKey)}
                   </Button>
@@ -455,75 +461,59 @@ export const ModelCapacityFields = ({
         <Alert
           type={hasSuggestion ? "success" : "info"}
           showIcon
-          message={
+          title={
             hasSuggestion
               ? t("model.dialog.capacity.suggestion.found")
               : t("model.dialog.capacity.suggestion.notFound")
           }
           description={
-            <div className="space-y-2">
-              <div className="text-xs">
-                {suggestion.matchExplanation ||
-                  t("model.dialog.capacity.suggestion.noExplanation")}
-              </div>
-              {hasSuggestion && (
+            hasSuggestion ? (
+              <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  {suggestion.matchKind && (
-                    <Tag>
-                      {t(
-                        `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
-                        { defaultValue: suggestion.matchKind }
-                      )}
-                    </Tag>
-                  )}
-                  {suggestion.matchConfidence && (
-                    <Tag color="blue">
-                      {t(
-                        `model.dialog.capacity.suggestion.confidence.${suggestion.matchConfidence}`,
-                        { defaultValue: suggestion.matchConfidence }
-                      )}
-                    </Tag>
-                  )}
                   {suggestion.canonicalModelName && (
-                    <Tag color="green">{suggestion.canonicalModelName}</Tag>
+                    <span className="font-medium text-sm">
+                      {suggestion.canonicalModelName}
+                    </span>
                   )}
-                  {suggestion.suggestedProvider && (
-                    <Tag color="purple">{suggestion.suggestedProvider}</Tag>
+                  {suggestion.matchKind && (
+                    <>
+                      <span className="text-gray-300">·</span>
+                      <span className="text-xs text-gray-500">
+                        {t(
+                          `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
+                          { defaultValue: suggestion.matchKind }
+                        )}
+                      </span>
+                    </>
                   )}
-                  {suggestion.matchKind === "catalog_fuzzy" &&
-                    (!acceptedSuggestion ||
-                      (acceptedSuggestion &&
-                        acceptedSuggestion.canonicalModelName !==
-                          suggestion.canonicalModelName)) && (
-                      <div className="text-xs text-yellow-700 mt-1">
-                        {t("model.dialog.capacity.suggestion.profileMissWarning")}
-                      </div>
-                    )}
                   {onUseSuggestion && (
                     <Button
                       size="small"
                       type="primary"
                       loading={suggestionLoading}
                       onClick={onUseSuggestion}
+                      disabled={disabled}
                     >
                       {t("model.dialog.capacity.suggestion.use")}
                     </Button>
                   )}
                 </div>
-              )}
-            </div>
+                {suggestion.matchKind === "catalog_fuzzy" &&
+                  (!acceptedSuggestion ||
+                    (acceptedSuggestion &&
+                      acceptedSuggestion.canonicalModelName !==
+                        suggestion.canonicalModelName)) && (
+                    <div className="text-xs text-yellow-700">
+                      {t("model.dialog.capacity.suggestion.profileMissWarning")}
+                    </div>
+                  )}
+              </div>
+            ) : (
+              <div className="text-xs">
+                {t("model.dialog.capacity.suggestion.notFoundDescription")}
+              </div>
+            )
           }
-        />
-      )}
-
-      {/* The empty hint suggested "fill later if needed", which contradicts
-          required-field asterisks. Only render it when there are no required
-          fields, so edit dialogs with required capacity stay self-consistent. */}
-      {!source && !hasValues && !isAddMode && requiredSet.size === 0 && (
-        <Alert
-          type="info"
-          showIcon
-          message={t("model.dialog.capacity.emptyHint")}
         />
       )}
 
@@ -566,7 +556,7 @@ export const ModelCapacityFields = ({
           adapters registered yet, so all families resolve to estimated). */}
 
       {validationError && (
-        <Alert type="error" showIcon message={t(validationError)} />
+        <Alert type="error" showIcon title={t(validationError)} />
       )}
     </div>
   );

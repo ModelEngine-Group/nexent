@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-01
+  name: Docker fresh install smoke
+  status: active
+  description: 新环境可部署
+  business_rules:
+  - rule_id: V5-DEP-01-RULE-01
+    description: Docker fresh install smoke
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

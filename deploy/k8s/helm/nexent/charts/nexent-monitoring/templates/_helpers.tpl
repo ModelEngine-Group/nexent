@@ -54,7 +54,7 @@
 {{- $mode := default "local" $root.Values.persistence.mode -}}
 {{- $storageClassName := default "" $root.Values.persistence.storageClassName -}}
 {{- $localPath := default "/var/lib/nexent-data" $root.Values.persistence.localPath -}}
-{{- $accessModes := default (list "ReadWriteOnce") $root.Values.persistence.accessModes -}}
+{{- $accessModes := default (list "ReadWriteMany") $root.Values.persistence.accessModes -}}
 {{- if and $root.Values.enabled $root.Values.persistence.enabled -}}
 {{- if eq $mode "local" }}
 apiVersion: v1

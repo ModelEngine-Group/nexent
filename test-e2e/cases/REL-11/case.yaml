@@ -1,0 +1,70 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-11
+  feature_id: V5-REL-11
+  business_rule_ids:
+  - V5-REL-11-RULE-01
+  title: 审批等待期间重启/断线恢复与单次副作用
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 服务或浏览器断开后运行可恢复，审批决定不会丢失或重复执行。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 创建 waiting_for_decision 运行并记录事件。
+    expected: 状态可恢复。
+  - order: 2
+    action: 分别重启 runtime、断开客户端、使 worker lease 过期。
+    expected: 事件连续。
+  - order: 3
+    action: 重连读取 snapshot/events 并提交决定。
+    expected: 决定最多执行一次。
+  - order: 4
+    action: 重复恢复和决定，核对工具副作用计数。
+    expected: 孤儿 lease 可回收。
+  expected_results:
+  - 状态可恢复。
+  - 事件连续。
+  - 决定最多执行一次。
+  - 孤儿 lease 可回收。
+  - 终态不回退。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 33
+  risk_type: RELIABILITY
+  risk: 服务或浏览器断开后运行可恢复，审批决定不会丢失或重复执行。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  metrics:
+  - 状态可恢复。
+  - 事件连续。
+  - 决定最多执行一次。
+  - 孤儿 lease 可回收。
+  - 终态不回退。
+  thresholds:
+  - 状态可恢复。
+  - 事件连续。
+  - 决定最多执行一次。
+  - 孤儿 lease 可回收。
+  - 终态不回退。
+  recovery_expectations:
+  - 状态可恢复。
+  - 事件连续。
+  - 决定最多执行一次。
+  - 孤儿 lease 可回收。
+  - 终态不回退。

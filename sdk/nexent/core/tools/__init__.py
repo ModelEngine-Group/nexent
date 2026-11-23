@@ -1,4 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from .sql_tools import MySqlTool, PostgreSqlTool, MsSqlTool
+from .deepseek_search_tool import DeepSeekSearchTool
 from .exa_search_tool import ExaSearchTool
 from .get_email_tool import GetEmailTool
 from .knowledge_base_search_tool import KnowledgeBaseSearchTool
@@ -6,7 +9,9 @@ from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
-from .aidp_search_tool import AidpSearchTool
+from .ind_aidp_search_tool import IndependentAidpSearchTool
+from .ragflow_search_tool import RAGFlowSearchTool
+from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool
@@ -22,13 +27,15 @@ from .analyze_text_file_tool import AnalyzeTextFileTool
 from .analyze_image_tool import AnalyzeImageTool
 from .analyze_audio_tool import AnalyzeAudioTool
 from .analyze_video_tool import AnalyzeVideoTool
-from .run_skill_script_tool import run_skill_script
-from .read_skill_md_tool import read_skill_md
-from .read_skill_config_tool import read_skill_config
+from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .download_from_s3_tool import DownloadFromS3Tool
+from .upload_to_s3_tool import UploadToS3Tool
+from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
+    "DeepSeekSearchTool",
     "MySqlTool",
     "PostgreSqlTool",
     "MsSqlTool",
@@ -38,6 +45,8 @@ __all__ = [
     "DataMateSearchTool",
     "IdataSearchTool",
     "HaotianSearchTool",
+    "IndependentAidpSearchTool",
+    "RAGFlowSearchTool",
     "AidpSearchTool",
     "SendEmailTool",
     "GetEmailTool",
@@ -50,14 +59,16 @@ __all__ = [
     "DeleteDirectoryTool",
     "MoveItemTool",
     "ListDirectoryTool",
+    "ParallelExecutorTool",
     "TerminalTool",
     "AnalyzeTextFileTool",
     "AnalyzeImageTool",
     "AnalyzeAudioTool",
     "AnalyzeVideoTool",
-    "run_skill_script",
-    "read_skill_md",
-    "read_skill_config",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "DownloadFromS3Tool",
+    "UploadToS3Tool",
+    "CreatePlanTool",
+    "UpdatePlanStepTool",
 ]

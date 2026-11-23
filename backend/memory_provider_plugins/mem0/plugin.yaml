@@ -1,0 +1,22 @@
+name: mem0
+version: "1.0.0"
+description: "Mem0 external memory provider"
+entry_point: "provider.py"
+class_name: "Mem0Provider"
+implements:
+  - searchable
+  - ingestible
+config_schema:
+  - key: api_key
+    label: "API Key"
+    type: secret
+    required: true
+  - key: org_id
+    label: "Organization ID"
+    type: string
+    required: false
+  - key: base_url
+    label: "API Base URL"
+    type: string
+    required: false
+    default: "https://api.mem0.ai"

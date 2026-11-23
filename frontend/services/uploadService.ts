@@ -1,32 +1,35 @@
-import { TFunction } from 'i18next';
+import { TFunction } from "i18next";
 
-import { NAME_CHECK_STATUS } from '@/const/agentConfig';
-import knowledgeBaseService from '@/services/knowledgeBaseService';
-import { AbortableError } from '@/types/knowledgeBase';
+import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import {
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+} from "@/const/knowledgeBase";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { AbortableError } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
 
-import '../app/[locale]/i18n';
+import "../app/[locale]/i18n";
 
 // New method to check knowledge base name status
 export const checkKnowledgeBaseName = async (
   knowledgeBaseName: string,
   t: TFunction
-): Promise<{status: string, action?: string}> => {
+): Promise<{ status: string; action?: string }> => {
   try {
     // Call new service method
     return await knowledgeBaseService.checkKnowledgeBaseName(knowledgeBaseName);
   } catch (error) {
-    log.error(t('knowledgeBase.check.nameError'), error);
+    log.error(t("knowledgeBase.check.nameError"), error);
     // Return a status indicating check failure
     return { status: NAME_CHECK_STATUS.CHECK_FAILED };
   }
 };
 
-
 // Get knowledge base document information
 export const fetchKnowledgeBaseInfo = async (
-  indexName: string, 
-  abortController: AbortController, 
+  indexName: string,
+  abortController: AbortController,
   currentKnowledgeBaseRef: React.MutableRefObject<string>,
   onSuccess: () => void,
   onError: (error: unknown) => void,
@@ -34,36 +37,47 @@ export const fetchKnowledgeBaseInfo = async (
   message: any
 ) => {
   try {
-    if (!abortController.signal.aborted && indexName === currentKnowledgeBaseRef.current) {
+    if (
+      !abortController.signal.aborted &&
+      indexName === currentKnowledgeBaseRef.current
+    ) {
       onSuccess();
     }
   } catch (error: unknown) {
     const err = error as AbortableError;
-    if (err.name !== 'AbortError' && indexName === currentKnowledgeBaseRef.current) {
-      log.error(t('knowledgeBase.fetch.error'), error);
-      message.error(t('knowledgeBase.fetch.retryError'));
+    if (
+      err.name !== "AbortError" &&
+      indexName === currentKnowledgeBaseRef.current
+    ) {
+      log.error(t("knowledgeBase.fetch.error"), error);
+      message.error(t("knowledgeBase.fetch.retryError"));
       onError(error);
     }
   }
 };
 
 // File type validation
-export const validateFileType = (file: File, t: TFunction, message: any): boolean => {
+export const validateFileType = (
+  file: File,
+  t: TFunction,
+  message: any
+): boolean => {
   const validTypes = [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'text/markdown',
-    'text/plain',
-    'text/csv',
-    'application/csv',
-    'application/epub',
-    'application/epub+zip',
-    'text/html',
-    'application/json',
-    'application/xml',
-    'text/xml'
+    "application/pdf",
+    "application/msword", // .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/markdown",
+    "text/plain",
+    "text/csv",
+    "application/csv",
+    "application/epub",
+    "application/epub+zip",
+    "text/html",
+    "application/json",
+    "application/xml",
+    "text/xml",
   ];
 
   // First check MIME type
@@ -73,18 +87,40 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
   if (!isValidType) {
     const name = file.name.toLowerCase();
     if (
-      name.endsWith('.md') ||
-      name.endsWith('.markdown') ||
-      name.endsWith('.csv')
+      name.endsWith(".md") ||
+      name.endsWith(".markdown") ||
+      name.endsWith(".csv") ||
+      name.endsWith(".doc") ||
+      name.endsWith(".docx")
     ) {
       isValidType = true;
     }
   }
 
   if (!isValidType) {
-    message.error(t('knowledgeBase.upload.invalidFileType'));
+    message.error(t("knowledgeBase.upload.invalidFileType"));
     return false;
   }
 
   return true;
+};
+
+export const isKnowledgeBaseFileSizeValid = (file: File): boolean =>
+  file.size <= KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES;
+
+export const validateKnowledgeBaseFileSize = (
+  file: File,
+  t: TFunction,
+  message: any
+): boolean => {
+  if (isKnowledgeBaseFileSizeValid(file)) {
+    return true;
+  }
+
+  message.error(
+    t("knowledgeBase.upload.fileTooLarge", {
+      limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+    })
+  );
+  return false;
 };

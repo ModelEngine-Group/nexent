@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-UI-01
+  feature_id: V5-PW-UI-01
+  business_rule_ids:
+  - V5-PW-UI-01-RULE-01
+  title: 核心路由导航→zh/en切换→页面状态不串
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证真实路由导航和i18n，不把错误边界硬塞进Journey。
+  preconditions:
+  - 管理员+普通用户storageState
+  - 少量基础资源
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/environment.yaml
+  steps:
+  - order: 1
+    action: 管理员从全局导航依次进入当前可见核心模块。
+    expected: 所有启用路由可真实导航。
+  - order: 2
+    action: 每次断言URL和页面主容器匹配，无404/空白。
+    expected: i18n切换不破坏交互。
+  - order: 3
+    action: 在一个有搜索状态页面设置筛选，切另一页再返回，检查状态按设计保存/重置而不串模块。
+    expected: 角色导航与权限Smoke一致。
+  - order: 4
+    action: 切语言zh→en，等待路由/文本更新。
+    expected: Error Boundary归FE-COMP/REL。
+  - order: 5
+    action: 访问3个代表页确认按钮/导航为英文且可点击。
+    expected: Error Boundary归FE-COMP/REL。
+  - order: 6
+    action: 切回zh并刷新。
+    expected: Error Boundary归FE-COMP/REL。
+  - order: 7
+    action: 普通USER重复导航smoke，确认无权限管理入口不出现。
+    expected: Error Boundary归FE-COMP/REL。
+  expected_results:
+  - 所有启用路由可真实导航。
+  - i18n切换不破坏交互。
+  - 角色导航与权限Smoke一致。
+  - Error Boundary归FE-COMP/REL。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 49
+  actor: Nexent browser user
+  journey:
+  - 管理员从全局导航依次进入当前可见核心模块。
+  - 每次断言URL和页面主容器匹配，无404/空白。
+  - 在一个有搜索状态页面设置筛选，切另一页再返回，检查状态按设计保存/重置而不串模块。
+  - 切语言zh→en，等待路由/文本更新。
+  - 访问3个代表页确认按钮/导航为英文且可点击。
+  - 切回zh并刷新。
+  - 普通USER重复导航smoke，确认无权限管理入口不出现。
+  final_business_result:
+  - 所有启用路由可真实导航。
+  - i18n切换不破坏交互。
+  - 角色导航与权限Smoke一致。
+  - Error Boundary归FE-COMP/REL。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-UI-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

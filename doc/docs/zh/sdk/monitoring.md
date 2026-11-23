@@ -15,36 +15,24 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ## 快速启动
 
 ```bash
-cd deploy/docker
-[ -f .env ] || cp .env.example .env
-cp monitoring/monitoring.env.example monitoring/monitoring.env
-
-vim .env
-ENABLE_TELEMETRY=true
-MONITORING_PROVIDER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-
-vim monitoring/monitoring.env
-MONITORING_PROVIDER=otlp
-
-./start-monitoring.sh --stack collector
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp
 ```
 
 ## 本地化部署形态
 
-`docker/start-monitoring.sh` 支持多种形态，均以 OpenTelemetry Collector 作为统一入口。业务服务只需要把 OTLP 发到 Collector，不需要感知后端平台差异。
+Docker 部署脚本通过 `--monitoring-provider` 支持多种形态，均以 OpenTelemetry Collector 作为统一入口。业务服务只需要把 OTLP 发到 Collector，不需要感知后端平台差异。
 
 | 形态 | 命令 | 包含服务 | 适用场景 |
 |------|------|----------|----------|
-| `collector` | `./start-monitoring.sh --stack collector` | OpenTelemetry Collector | 只验证埋点、或转发到外部云端平台 |
-| `phoenix` | `./start-monitoring.sh --stack phoenix` | Collector + Phoenix | 本地 trace 调试、OpenInference 属性查看、实验分析 |
-| `langfuse` | `./start-monitoring.sh --stack langfuse` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | 本地完整 LLMOps 体验、会话/用户/反馈/成本分析 |
-| `langsmith` | `./start-monitoring.sh --stack langsmith` | OpenTelemetry Collector | 转发 traces 到在线 LangSmith 平台 |
-| `grafana` | `./start-monitoring.sh --stack grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
-| `zipkin` | `./start-monitoring.sh --stack zipkin` | Collector + Zipkin | 本地 trace 查询 |
+| `otlp` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp` | OpenTelemetry Collector | 只验证埋点、或转发到外部云端平台 |
+| `phoenix` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider phoenix` | Collector + Phoenix | 本地 trace 调试、OpenInference 属性查看、实验分析 |
+| `langfuse` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langfuse` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | 本地完整 LLMOps 体验、会话/用户/反馈/成本分析 |
+| `langsmith` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith` | OpenTelemetry Collector | 转发 traces 到在线 LangSmith 平台 |
+| `grafana` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
+| `zipkin` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider zipkin` | Collector + Zipkin | 本地 trace 查询 |
 
-也可以在 `deploy/docker/assets/monitoring/monitoring.env` 中设置默认形态：
+也可以在 `deploy/env/monitoring.env` 中设置默认形态：
 
 ```bash
 MONITORING_PROVIDER=phoenix
@@ -55,8 +43,8 @@ MONITORING_PROVIDER=phoenix
 Phoenix 本地部署使用 `arizephoenix/phoenix` 镜像，默认 UI 端口为 `6006`，gRPC OTLP 端口映射为 `4319`，数据持久化到 Docker volume `phoenix-data`。
 
 ```bash
-cd deploy/docker
-./start-monitoring.sh --stack phoenix
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider phoenix
 ```
 
 访问地址：
@@ -81,32 +69,33 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 Langfuse 本地部署使用 v3 架构：Web、Worker、Postgres、ClickHouse、MinIO、Redis。默认 UI 端口为 `3001`，初始化项目和 API Key 来自 `monitoring.env`。
 
 ```bash
-cd deploy/docker
-./start-monitoring.sh --stack langfuse
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langfuse
 ```
 
 访问地址：
 
 - Langfuse UI：`http://localhost:3001`
-- 默认管理员：`admin@nexent.local` / `nexent-langfuse-admin`
+- 默认管理员：`admin@nexent.com` / `nexent@4321`
 - 默认项目 Key：`pk-lf-nexent-local` / `sk-lf-nexent-local`
 
-启动脚本会在 `LANGFUSE_OTLP_AUTH_HEADER` 为空时自动生成 `Basic base64(public_key:secret_key)`，并让 Collector 将 trace 转发到 `http://langfuse-web:3000/api/public/otel`。本地默认密钥只适合开发验证，生产部署必须替换 `LANGFUSE_NEXTAUTH_SECRET`、`LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、数据库密码和对象存储密钥。
+部署脚本会在 `LANGFUSE_OTLP_AUTH_HEADER` 为空时自动生成 `Basic base64(public_key:secret_key)`，并让 Collector 将 trace 转发到 `http://langfuse-web:3000/api/public/otel`。本地默认密钥只适合开发验证，生产部署必须替换 `LANGFUSE_NEXTAUTH_SECRET`、`LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、数据库密码和对象存储密钥。
 
 ### 在线 LangSmith
 
 LangSmith 支持通过在线 OTLP endpoint 摄取 traces。Nexent 可以先把 OTLP 发到本地 Collector，再由 Collector 转发到 LangSmith，业务服务无需直接保存 LangSmith API Key。
 
 ```bash
-cd deploy/docker
-vim monitoring/monitoring.env
+cd deploy
+[ -f env/monitoring.env ] || cp env/monitoring.env.example env/monitoring.env
+vim env/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx
 LANGSMITH_PROJECT=nexent
 LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
 
-./start-monitoring.sh --stack langsmith
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith
 ```
 
 后端在 Docker 网络内运行时：
@@ -126,23 +115,24 @@ LangSmith 当前配置只转发 traces，OTLP metrics 会留在 Collector debug 
 Grafana 本地部署使用 Grafana Tempo 存储 traces，并启用 Tempo `metrics-generator` 的 `local-blocks` processor 支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 通过 OTLP gRPC 转发到 Tempo；OTLP metrics 只进入 Collector debug pipeline，不提供独立指标存储或指标 dashboard。
 
 ```bash
-cd deploy/docker
-./start-monitoring.sh --stack grafana
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana
 ```
 
-后端 `.env` 使用 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口：
+`deploy/env/monitoring.env` 中的 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口地址，`MONITORING_DASHBOARD_ALLOWED_ROLES` 控制入口对哪些角色可见。默认值 `SU,SPEED` 保持标准模式下超级管理员可见、speed 模式下可见的现有行为。
 
 ```bash
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=grafana
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
 访问地址：
 
 - Grafana UI：`http://localhost:3002`
-- 默认管理员：`admin` / `nexent-grafana-admin`
+- 默认管理员：`admin` / `nexent@4321`
 - Tempo API：`http://localhost:3200`
 
 Grafana 会自动预置 Tempo datasource，并加载 `Nexent Agent Trace Monitoring` dashboard。Trace 查询入口在 Grafana Explore 中选择 `Tempo` datasource，示例 TraceQL 为 `{ resource.service.name = "nexent-backend" }`。
@@ -152,11 +142,11 @@ Grafana 会自动预置 Tempo datasource，并加载 `Nexent Agent Trace Monitor
 Zipkin 本地部署使用 `openzipkin/zipkin` 镜像。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 转发到 Zipkin v2 spans endpoint；OTLP metrics 当前只进入 Collector debug pipeline。
 
 ```bash
-cd deploy/docker
-./start-monitoring.sh --stack zipkin
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider zipkin
 ```
 
-后端 `.env`：
+`deploy/env/monitoring.env`：
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -222,6 +212,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - 用户反馈收集
 - 模型成本追踪
 
+> v2.5.0 起额外暴露上下文管理与提示词缓存命中指标（context/cache metrics），可用于评估压缩效果与缓存收益。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -229,6 +221,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
 | `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
 | `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | 可看到监控入口的角色，使用逗号分隔；配置为空时对所有角色隐藏 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | 每个 payload 预览最多写入的字符数 |
@@ -249,7 +242,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span；流式接口建议保持默认值 |
-| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `OTEL_COLLECTOR_VERSION` | `0.151.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
 | `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
 | `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
 | `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
@@ -259,7 +252,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `GRAFANA_VERSION` | `12.4` | 本地 Grafana 镜像版本 |
 | `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |
 | `GRAFANA_ADMIN_USER` | `admin` | 本地 Grafana 管理员用户名 |
-| `GRAFANA_ADMIN_PASSWORD` | `nexent-grafana-admin` | 本地 Grafana 管理员密码 |
+| `GRAFANA_ADMIN_PASSWORD` | `nexent@4321` | 本地 Grafana 管理员密码 |
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
 | `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
@@ -299,7 +292,7 @@ Agent 上下文指标由 SDK 生命周期自动写入。每个 action step 会�
 
 ```python
 @monitoring_manager.monitor_llm_call("gpt-4", "chat_completion")
-def call_llm(messages):
+def call_llm(messages, **kwargs):
     return llm_response
 ```
 
@@ -349,9 +342,6 @@ with monitoring_manager.start_agent_run(metadata):
         ):
             documents = search_knowledge_base("你好")
             monitoring_manager.set_retriever_output(documents)
-
-        with monitoring_manager.trace_tool_call("FinalAnswerTool", "TestAgent", {"query": "你好"}):
-            monitoring_manager.set_tool_output({"answer": result})
 
         monitoring_manager.set_openinference_output({"answer": result})
 ```
@@ -456,7 +446,7 @@ pip install nexent[performance]  # 包含 OTLP 支持
 
 ### 数据未显示
 
-1. 检查 `.env` 中 `ENABLE_TELEMETRY=true`
+1. 检查 `deploy/env/monitoring.env` 中 `ENABLE_TELEMETRY=true`
 2. 验证 OTLP 端点可访问
 3. 检查认证头配置正确
 

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-120
+  name: memory record CRUD/检索/租户与用户隔离
+  status: active
+  description: '记忆 / 记录: memory record CRUD/检索/租户与用户隔离'
+  business_rules:
+  - rule_id: F-120-RULE-01
+    description: memory record CRUD/检索/租户与用户隔离
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

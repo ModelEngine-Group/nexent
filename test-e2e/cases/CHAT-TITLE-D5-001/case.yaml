@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-TITLE-D5-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids: [CHAT-TITLE-ACTIVITY-20261021]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-007]
+  title: Pending automatic titles survive activity and preserve explicit rename revisions
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Real committed conversation writes distinguish title conflicts from activity, and additive title revision deployment preserves existing rows.
+  preconditions:
+  - Real PostgreSQL and product Python dependencies are available; all records use disposable schemas and synthetic identities.
+  test_data:
+    profile: mock
+    title_model: controlled delayed title provider
+    histories: [owned-streaming, foreign-streaming, deleted-during-generation]
+  steps:
+  - order: 1
+    action: Start the real title endpoint, pause only the model boundary, commit visible assistant or user activity or an unrelated audit update, then complete the model; also run the no-write control.
+    expected: The endpoint returns and stores the generated title; revision advances once and committed messages and activity are retained.
+  - order: 2
+    action: During the paused model, commit a different title, the same default title, a rename followed by rename-back, or a competing generated title.
+    expected: The endpoint returns the effective stored title without a second title write; each prior rename advances the revision and preserves its winner.
+  - order: 3
+    action: Delete an owned history during the delayed model and request a foreign history.
+    expected: Neither request reports a successful title write; deleted and foreign rows and their title revisions are not changed by the rejected title save.
+  - order: 4
+    action: Apply the additive title revision migration twice to a populated legacy conversation table, then insert a new row and rename an existing row.
+    expected: Existing rows receive revision zero without audit or title changes; replay preserves a nonzero revision, new rows default to zero, and no additional table is created.
+  expected_results:
+  - Generated titles persist despite activity or unrelated audit changes, without losing message or activity data.
+  - Manual and competing title revisions win even when the final title text equals the initial text.
+  - Deleted and foreign histories reject title generation without mutation or foreign model invocation.
+  - Additive migration and replay preserve row contents and nonzero revisions using only the existing conversation table.
+  forbidden_side_effects:
+  - No production rows, schema or global settings are mutated; all pending work finishes and every disposable schema is removed.
+  observations:
+  - HTTP status and effective title, actual stored revisions, message status/content, activity and audit timestamps, migration catalog and row snapshots.
+  cleanup:
+  - Release model gates, settle requests, close clients and connections, and drop only the disposable schema.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Activity and audit updates do not invalidate automatic title saves.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Explicit and competing title revisions preserve their winner including same-title and rename-back cases.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Deleted and foreign histories reject title writes safely.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Additive title revision migration is repeatable and retains all existing conversation data.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  risk_type: RELIABILITY
+  risk: Successful model output is silently discarded after unrelated activity, or late output overwrites explicit titles
+  condition:
+  - Actual endpoint and PostgreSQL writes with a deterministic model gate; additive migration on legacy fixtures
+  metrics:
+  - Effective response and persisted title, revision increments, ownership/deletion isolation and migration repeatability
+  thresholds:
+  - All requests settle within 15 seconds after releasing the gate; zero unexpected title conflicts or overwritten manual titles
+  - Zero production writes, lost messages, changed migration audit fields or surviving fixture schemas
+  recovery_expectations:
+  - Release every gate and remove only the fixture schema even when an assertion fails

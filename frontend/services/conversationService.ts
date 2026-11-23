@@ -1,16 +1,34 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { t as translate } from "i18next";
+import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
+import type { ClarificationResponse } from "@/types/clarification";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
-  ConversationListItem,
+  ConversationListPage,
+  ConversationListParams,
+  AgentConversationGroupPage,
+  AgentGroupConversationPage,
+  ApiConversationDetail,
   ApiConversationResponse,
+  WorkbenchPins,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
+import type { GenerateConversationTitleParams } from "@/lib/conversationTitle";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeUpdateResult,
+} from "@/types/knowledgeScope";
 
 // @ts-ignore
 const fetch = fetchWithAuth;
+
+export const CONVERSATION_PAGE_SIZE = 20;
 
 // This helper function now ALWAYS connects through the current host and port.
 // This relies on our custom `server.js` to handle the proxying in all environments.
@@ -22,17 +40,235 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getAgentGroups(
+    params: {
+      limit?: number;
+      cursor?: string | null;
+      search?: string;
+      includeAgentIds?: readonly number[];
+      includeOther?: boolean;
+    } = {}
+  ): Promise<AgentConversationGroupPage> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 10) });
+    if (params.cursor) query.set("cursor", params.cursor);
+    if (params.search?.trim()) query.set("search", params.search.trim());
+    for (const agentId of params.includeAgentIds ?? []) {
+      query.append("include_agent_id", String(agentId));
+    }
+    if (params.includeOther) query.set("include_other", "true");
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentGroups}?${query.toString()}`
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data as AgentConversationGroupPage;
+  },
+
+  async getAgentGroupConversations(params: {
+    groupKey: string;
+    limit?: number;
+    cursor?: string | null;
+    search?: string;
+  }): Promise<AgentGroupConversationPage> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 10) });
+    if (params.cursor) query.set("cursor", params.cursor);
+    if (params.search?.trim()) query.set("search", params.search.trim());
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentGroupConversations(params.groupKey)}?${query.toString()}`
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data as AgentGroupConversationPage;
+  },
+
+  async getAgentConversationIds(agentId: number): Promise<string[]> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.agentGroupConversationIds(agentId)
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return Array.isArray(data.data?.items)
+      ? data.data.items.map((id: number | string) => String(id))
+      : [];
+  },
+
+  async getWorkbenchPins(): Promise<WorkbenchPins> {
+    const response = await fetch(API_ENDPOINTS.conversation.workbenchPins);
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
+  async setWorkbenchPin(
+    conversationId: number,
+    pinned: boolean
+  ): Promise<WorkbenchPins> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.workbenchPin(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ pinned }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
   // Get conversation list
-  async getList(): Promise<ConversationListItem[]> {
-    const response = await fetch(API_ENDPOINTS.conversation.list);
+  async getList(
+    params: ConversationListParams & {
+      todayStartMs: number;
+      weekStartMs: number;
+    }
+  ): Promise<ConversationListPage> {
+    const query = new URLSearchParams({
+      offset: String(params.offset),
+      limit: String(params.limit),
+      today_start_ms: String(params.todayStartMs),
+      week_start_ms: String(params.weekStartMs),
+    });
+    if (params.conversationType) {
+      query.set("conversation_type", params.conversationType);
+    }
+    if (params.cursor) query.set("cursor", params.cursor);
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.list}?${query.toString()}`
+    );
 
     const data = (await response.json()) as ConversationListResponse;
 
     if (data.code === 0) {
-      return data.data || [];
+      return data.data;
     }
 
     throw new ApiError(data.code, data.message);
+  },
+
+  // Get conversation detail
+  async getById(conversationId: string): Promise<ApiConversationDetail> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.detail(Number(conversationId)),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
+
+    const data = (await response.json()) as ApiConversationResponse;
+    const conversationData = data.data?.[0];
+
+    if (data.code === 0 && conversationData) {
+      return conversationData;
+    }
+
+    throw new Error(`Conversation ${conversationId} not found`);
+  },
+  async updateKnowledgeScope(
+    conversationId: number,
+    scope: ConversationKnowledgeScope | null
+  ): Promise<KnowledgeScopeUpdateResult> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.knowledgeScope(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ scope }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+
+    return data.data;
+  },
+  async updateWorkbenchConfig(
+    conversationId: number,
+    config: import("@/features/workbench").WorkbenchSessionConfig,
+    expectedVersion: number
+  ): Promise<{
+    workbench_config: import("@/features/workbench").WorkbenchSessionConfig;
+    workbench_config_version: number;
+  }> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.workbenchConfig(conversationId),
+      {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ config, expected_version: expectedVersion }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.detail?.code || data.code || response.status,
+        data.detail?.message ||
+          data.message ||
+          "Workbench config update failed",
+        data.detail
+      );
+    }
+    return data.data;
+  },
+
+  async getKnowledgeCapabilities(
+    agentId: number,
+    versionNo?: number
+  ): Promise<KnowledgeCapabilities> {
+    const url = new URL(
+      API_ENDPOINTS.agent.knowledgeCapabilities(agentId),
+      globalThis.location.origin
+    );
+
+    if (versionNo !== undefined) {
+      url.searchParams.set("version_no", String(versionNo));
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+
+    return data.data;
   },
 
   // Create new conversation
@@ -55,13 +291,18 @@ export const conversationService = {
   },
 
   // Rename conversation
-  async rename(conversationId: number, name: string) {
+  async rename(
+    conversationId: number,
+    name: string,
+    onlyIfDefaultTitle = false
+  ) {
     const response = await fetch(API_ENDPOINTS.conversation.rename, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         conversation_id: conversationId,
         name,
+        ...(onlyIfDefaultTitle ? { only_if_default_title: true } : {}),
       }),
     });
 
@@ -91,7 +332,11 @@ export const conversationService = {
 
       // If the signal is aborted before the request returns, return early
       if (signal?.aborted) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
 
       const data = await response.json();
@@ -107,7 +352,11 @@ export const conversationService = {
         (error instanceof Error && error.name === "AbortError") ||
         signal?.aborted
       ) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
       throw error;
     }
@@ -118,6 +367,7 @@ export const conversationService = {
     mode: "all" | "selected";
     selected_user_message_ids?: number[];
     expire_time?: string | null;
+    render_version?: "legacy" | "newchat";
   }) {
     const response = await fetch(
       API_ENDPOINTS.share.createConversation(params.conversationId),
@@ -128,6 +378,7 @@ export const conversationService = {
           mode: params.mode,
           selected_user_message_ids: params.selected_user_message_ids || [],
           expire_time: params.expire_time || null,
+          render_version: params.render_version || "legacy",
         }),
       }
     );
@@ -176,9 +427,26 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
+  // Batch delete conversations
+  async deleteBatch(conversationIds: number[]) {
+    const response = await fetch(API_ENDPOINTS.conversation.batchDelete, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ conversation_ids: conversationIds }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data as { deleted_count: number; failed_ids: number[] };
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
   // Stop conversation agent
-  async stop(conversationId: number) {
-    const response = await fetch(API_ENDPOINTS.agent.stop(conversationId), {
+  async stop(runId: string | number) {
+    const response = await fetch(API_ENDPOINTS.agent.stop(runId), {
       method: "GET",
       headers: getAuthHeaders(),
     });
@@ -191,7 +459,7 @@ export const conversationService = {
 
     throw new ApiError(
       data.code || -1,
-      data.message || data.detail || "停止失败"
+      data.message || data.detail || translate("ui.localization.stopFailed")
     );
   },
 
@@ -887,7 +1155,8 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
-      conversation_id: number;
+      clarification_response?: ClarificationResponse;
+      conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
       minio_files?: Array<{
@@ -899,12 +1168,45 @@ export const conversationService = {
         presigned_url?: string;
         description?: string;
       }>;
-    agent_id?: number; // Add agent_id parameter
-    model_id?: number; // Optional model override
-    version_no?: number; // Optional version override
-    is_debug?: boolean; // Add debug mode parameter
-    is_resume?: boolean; // Add resume mode parameter for streaming recovery
-  }, signal?: AbortSignal) {
+      agent_id?: number; // Add agent_id parameter
+      model_id?: number; // Optional model override
+      generation_config?: RuntimeGenerationOverrides;
+      reasoning_effort?:
+        | "auto"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max";
+      reasoning_budget_tokens?: number;
+      version_no?: number; // Optional version override
+      is_debug?: boolean; // Add debug mode parameter
+      is_resume?: boolean; // Add resume mode parameter for streaming recovery
+      enable_plan?: boolean;
+      knowledge_scope?: ConversationKnowledgeScope;
+      metadata?: Record<string, unknown> | null;
+      expected_metadata_version?: number;
+      entrypoint?: "workbench";
+      workbench?: import("@/features/workbench").WorkbenchSessionConfig;
+      expected_workbench_config_version?: number;
+      runtime_mode?: "nl2agent" | "nl2skill";
+      persist_history?: boolean;
+      retry_message_index?: number;
+      retry_user_message_id?: number;
+      workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
+      draft_snapshot?: Record<string, unknown>;
+      language?: "zh" | "en";
+    },
+    signal?: AbortSignal,
+    onConversationId?: (id: string) => void,
+    onRuntimeMetadataVersion?: (version: number) => void,
+    onRunId?: (id: string) => void,
+    onWorkbenchConfigVersion?: (version: number) => void
+  ): Promise<
+    ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
+  > {
     try {
       // Construct request parameters
       const requestParams: any = {
@@ -913,7 +1215,37 @@ export const conversationService = {
         history: params.history,
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
+        enable_plan: params.enable_plan || false,
       };
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.clarification_response
+      ) {
+        requestParams.clarification_response = params.clarification_response;
+      }
+      if (params.runtime_mode === "nl2skill") {
+        requestParams.draft_snapshot = params.draft_snapshot;
+        requestParams.language = params.language;
+      }
+      if (params.persist_history && params.runtime_mode) {
+        requestParams.persist_history = true;
+        requestParams.workbench_config = params.workbench_config;
+        if (params.retry_message_index !== undefined) {
+          requestParams.retry_message_index = params.retry_message_index;
+        }
+        if (params.retry_user_message_id !== undefined) {
+          requestParams.retry_user_message_id = params.retry_user_message_id;
+        }
+      }
+
+      // Only include conversation_id if it has a value
+      if (
+        params.conversation_id !== undefined &&
+        params.conversation_id !== null
+      ) {
+        requestParams.conversation_id = params.conversation_id;
+      }
 
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {
@@ -922,15 +1254,62 @@ export const conversationService = {
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
       }
+      if (params.generation_config !== undefined) {
+        requestParams.generation_config = params.generation_config;
+      }
+      const budgetTokens = params.reasoning_budget_tokens;
+      const hasBudgetSelection =
+        typeof budgetTokens === "number" &&
+        Number.isInteger(budgetTokens) &&
+        budgetTokens >= 0;
+      if (
+        !hasBudgetSelection &&
+        params.reasoning_effort !== undefined &&
+        params.reasoning_effort !== "auto"
+      ) {
+        requestParams.reasoning_effort = params.reasoning_effort;
+      }
+      if (
+        hasBudgetSelection &&
+        budgetTokens !== undefined &&
+        budgetTokens > 0
+      ) {
+        requestParams.reasoning_budget_tokens = budgetTokens;
+      }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;
+      }
+      if (params.knowledge_scope !== undefined) {
+        requestParams.knowledge_scope = params.knowledge_scope;
+      }
+      if (params.metadata !== undefined) {
+        requestParams.metadata = params.metadata;
+      }
+      if (params.expected_metadata_version !== undefined) {
+        requestParams.expected_metadata_version =
+          params.expected_metadata_version;
+      }
+      if (params.entrypoint !== undefined) {
+        requestParams.entrypoint = params.entrypoint;
+      }
+      if (params.workbench !== undefined) {
+        requestParams.workbench = params.workbench;
+      }
+      if (params.expected_workbench_config_version !== undefined) {
+        requestParams.expected_workbench_config_version =
+          params.expected_workbench_config_version;
       }
 
       // Build URL with query parameters for resume mode
       let url = API_ENDPOINTS.agent.run;
+      if (params.runtime_mode === "nl2agent") {
+        url = API_ENDPOINTS.agent.nl2agentRun;
+      } else if (params.runtime_mode === "nl2skill") {
+        url = API_ENDPOINTS.skills.nl2skillRun;
+      }
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
-        queryParams.append('resume', 'true');
+        queryParams.append("resume", "true");
       }
       if (queryParams.toString()) {
         url = `${url}?${queryParams.toString()}`;
@@ -943,16 +1322,84 @@ export const conversationService = {
         signal,
       });
 
+      if (response.headers.get("X-Stream-Status") === "conflict") {
+        await response.body?.cancel();
+        throw new Error("agent_run_conflict");
+      }
+
+      const conversationId = response.headers.get("conversation_id");
+      if (conversationId && onConversationId) {
+        onConversationId(conversationId);
+      }
+      const runId = response.headers.get("run_id");
+      if (runId && onRunId) {
+        onRunId(runId);
+      }
+      const runtimeMetadataVersion = response.headers.get(
+        "X-Runtime-Metadata-Version"
+      );
+      if (runtimeMetadataVersion !== null && onRuntimeMetadataVersion) {
+        const parsedVersion = Number(runtimeMetadataVersion);
+        if (Number.isInteger(parsedVersion) && parsedVersion >= 0) {
+          onRuntimeMetadataVersion(parsedVersion);
+        }
+      }
+      const workbenchConfigVersion = response.headers.get(
+        "X-Workbench-Config-Version"
+      );
+      if (workbenchConfigVersion !== null && onWorkbenchConfigVersion) {
+        const parsedVersion = Number(workbenchConfigVersion);
+        if (Number.isInteger(parsedVersion) && parsedVersion >= 0) {
+          onWorkbenchConfigVersion(parsedVersion);
+        }
+      }
+
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let code: string | number = response.status;
+        let details: Record<string, unknown> | undefined;
+        try {
+          const errorData = await response.json();
+          const detail = errorData.detail;
+          const payload =
+            detail && typeof detail === "object" && !Array.isArray(detail)
+              ? detail
+              : errorData;
+          const payloadCode = payload?.code ?? errorData?.code;
+          if (
+            typeof payloadCode === "string" ||
+            typeof payloadCode === "number"
+          ) {
+            code = payloadCode;
+          }
+          const payloadMessage = payload?.message ?? errorData?.message;
+          if (typeof payloadMessage === "string") {
+            errorMessage = payloadMessage;
+          } else if (typeof detail === "string") {
+            errorMessage = detail;
+          }
+
+          if (payload?.details && typeof payload.details === "object") {
+            details = payload.details as Record<string, unknown>;
+          } else if (typeof payload?.current_version === "number") {
+            details = { current_version: payload.current_version };
+          }
+        } catch {
+          // Preserve the HTTP status when the error response is not JSON.
+        }
+        throw new ApiError(code, errorMessage, details);
+      }
+
       if (!response.body) {
         throw new Error("Response body is null");
       }
 
       // Check content-type to distinguish JSON response from SSE stream
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
         // JSON response (e.g., from resume mode when agent finished)
         const data = await response.json();
-        return { type: 'json', data };
+        return { type: "json", data };
       }
 
       return response.body.getReader();
@@ -960,7 +1407,7 @@ export const conversationService = {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === "AbortError") {
         log.log("Agent请求已被取消");
-        throw new Error("请求已被取消");
+        throw new Error(translate("ui.localization.requestWasCancelled"));
       }
       // Other errors are thrown normally
       throw error;
@@ -968,7 +1415,7 @@ export const conversationService = {
   },
 
   // Generate conversation title from user question
-  async generateTitle(params: { conversation_id: number; question: string }) {
+  async generateTitle(params: GenerateConversationTitleParams) {
     const response = await fetch(API_ENDPOINTS.conversation.generateTitle, {
       method: "POST",
       headers: getAuthHeaders(),

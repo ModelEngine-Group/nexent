@@ -8,6 +8,10 @@ images:
     repository: "nexent/nexent-mcp"
     tag: "latest"
     pullPolicy: IfNotPresent
+  sandbox:
+    repository: "nexent/nexent-sandbox"
+    tag: "latest"
+    pullPolicy: IfNotPresent
 
 # SQL content is rendered by deploy/k8s/deploy.sh from deploy/sql/
 # directory. Keep this empty in chart defaults to avoid maintaining a second SQL
@@ -17,8 +21,14 @@ sqlFiles:
   migrations: {}
   supabase: {}
 
+# Base64-encoded file-declared values; full env files are backend-only Secrets.
+envFiles:
+  rootData: {}
+  monitoringData: {}
+
 # ConfigMap data - this will be used by nexent-config ConfigMap
 config:
+  timezone: "Asia/Shanghai"
   # Service URLs (internal)
   services:
     configUrl: "http://nexent-config:5010"
@@ -38,10 +48,23 @@ config:
     url: "redis://nexent-redis:6379/0"
     backendUrl: "redis://nexent-redis:6379/1"
     port: "6379"
+  runtimeState:
+    redisUrl: ""
+    streamTtlSeconds: "86400"
+    streamMaxLen: "10000"
+    runTtlSeconds: "86400"
+    cancelTtlSeconds: "86400"
+    completedTtlSeconds: "300"
+    cancelPollIntervalSeconds: "1.0"
+  northbound:
+    idempotencyTtlSeconds: "600"
+    rateLimitEnabled: "true"
+    rateLimitPerMinute: "120"
   minio:
     endpoint: "http://nexent-minio:9000"
     region: "cn-north-1"
     defaultBucket: "nexent"
+    secure: "true"
   elasticsearch:
     host: "http://nexent-elasticsearch:9200"
     javaOpts: "-Xms2g -Xmx2g"
@@ -52,7 +75,13 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
-  marketBackend: "http://60.204.251.153:8010"
+  memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
+  logDir: "/mnt/nexent-data/logs"
+  skill:
+    maxSkillsPerTenant: "1000"
+    maxUploadSizeMb: "10"
+  evaluationSet:
+    maxFileSizeMb: "20"
   modelEngine:
     enabled: "false"
   voiceService:
@@ -75,7 +104,7 @@ config:
     supabaseUrl: "http://nexent-supabase-kong:8000"
     apiExternalUrl: "http://nexent-supabase-kong:8000"
     disableSignup: "false"
-    jwtExpiry: "3600"
+    jwtExpiry: "7200"
     debugJwtExpireSeconds: "0"
     enableEmailSignup: "true"
     enableEmailAutoconfirm: "true"
@@ -93,23 +122,23 @@ config:
     additionalRedirectUrls: ""
   dataProcess:
     flowerPort: "5555"
-    rayDashboardPort: "8265"
-    rayDashboardHost: "0.0.0.0"
-    rayActorNumCpus: "2"
-    rayNumCpus: "4"
-    rayObjectStoreMemoryGb: "0.25"
-    rayTempDir: "/tmp/ray"
-    rayLogLevel: "INFO"
-    disableRayDashboard: "true"
+    partProcessorCount: "3"
+    fileSplitSizeMb: "5"
     disableCeleryFlower: "true"
     dockerEnvironment: "false"
     enableUploadImage: "false"
     celeryWorkerPrefetchMultiplier: "1"
     celeryTaskTimeLimit: "3600"
     elasticsearchRequestTimeout: "30"
-    queues: "process_q,forward_q"
+    queues: "process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q"
+    parseMaxProcesses: "3"
+    parseMinProcesses: "1"
+    parseThreadsPerProcess: "2"
+    parseMaxTasksPerChild: "1000"
+    preloadModels: "unstructured_default"
+    parserStartupTimeout: "300"
     workerName: ""
-    workerConcurrency: "4"
+    workerConcurrency: ""
   telemetry:
     enabled: "false"
     provider: "otlp"
@@ -131,6 +160,7 @@ config:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -147,6 +177,8 @@ config:
     sslVerify: "true"
     caBundle: ""
     callbackBaseUrl: "http://localhost:30000"
+    # Supported values: disabled, button, force.
+    loginMode: "button"
   cas:
     enabled: "false"
     serverUrl: ""
@@ -160,20 +192,46 @@ config:
     userAttribute: ""
     emailAttribute: "email"
     roleAttribute: "role"
+    defaultRole: "USER"
     tenantAttribute: "tenant_id"
+    defaultTenantId: "tenant_id"
     roleMapJson: ""
     sessionMaxAgeSeconds: "3600"
     localSessionMaxAgeSeconds: "3600"
+    heartbeatUrl: ""
+    heartbeatIntervalSeconds: "300"
+    heartbeatCookieName: ""
     renewBeforeSeconds: "300"
     renewTimeoutSeconds: "10"
     syntheticEmailDomain: "cas.local"
     logoutUrl: ""
     sslVerify: "true"
     caBundle: ""
+  sandbox:
+    # Default sandbox isolation level: local / docker / wasm.
+    # 'local' preserves backward-compatibility for existing deployments.
+    defaultLevel: "local"
+    # Default sandbox container lifecycle scope: session / system.
+    # session = one container per agent_run, destroyed on run end (strictest isolation).
+    # system  = persistent warm pool shared by all runs (lowest cold-start latency).
+    defaultScope: "session"
+    # Sandbox resource limits.
+    memoryLimitMb: "512"
+    cpuQuota: "1.0"
+    # Sandbox execution timeout per step (seconds).
+    timeoutSeconds: "30"
+    # Sandbox network policy: enabled / disabled.
+    network: "disabled"
+    # Shell execution policy: disabled / restricted / boxed.
+    # 'disabled' is recommended — blocks subprocess/os shell calls at AST-parse time.
+    shellPolicy: "disabled"
+    # MinIO bucket for sandbox output file sync.
+    outputBucket: "nexent-artifacts"
+    # Automatically sync sandbox output files to MinIO after each run.
+    autoSyncOutputs: "true"
 
 # Secrets used by common templates
 secrets:
-  elasticPassword: "nexent@2025"
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
   minio:

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: REL-01
+implementations:
+- framework: pytest
+  file: test.py
+  selector: REL-01
+- framework: pytest
+  file: test-e2e/infra/automation/d5/scenarios/scenario_reliability_deployment_special.py
+  selector: REL-01
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - automation_task
+  anchors: true
+  special_assets: false
+  d4_groups: []

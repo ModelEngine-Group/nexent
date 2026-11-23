@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-149
+  name: Idempotency-Key 对 chat/title 等写操作防重复
+  status: active
+  description: 'Northbound API / 幂等: Idempotency-Key 对 chat/title 等写操作防重复'
+  business_rules:
+  - rule_id: F-149-RULE-01
+    description: Idempotency-Key 对 chat/title 等写操作防重复
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-123
+  name: 记忆检索/embedding/policy 注入 Agent context 与 token budget；外部 memory provider 透明代理搜索与写入 fanout；FA 最终回答记忆抽取（LLM 抽取写入 agent
+    短时记忆）；检索管线 MMR 候选上限与内容去重
+  status: active
+  description: '记忆 / Runtime context: 记忆检索/embedding/policy 注入 Agent context 与 token budget；外部 memory provider 透明代理搜索与写入 fanout；FA
+    最终回答记忆抽取（LLM 抽取写入 agent 短时记忆）；检索管线 MMR 候选上限与内容去重'
+  business_rules:
+  - rule_id: F-123-RULE-01
+    description: 记忆检索/embedding/policy 注入 Agent context 与 token budget；外部 memory provider 透明代理搜索与写入 fanout；FA 最终回答记忆抽取（LLM
+      抽取写入 agent 短时记忆）；检索管线 MMR 候选上限与内容去重
+  required_test_stages:
+  - D1
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

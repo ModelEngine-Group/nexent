@@ -1,0 +1,26 @@
+name_system: >-
+  You refine agent variable names so that they stay close to the original meaning and remain unique within the tenant.
+name_user: |-
+  ### Task Description:
+  {task_description}
+
+  ### Original Name:
+  {original_value}
+
+  ### Existing Names:
+  {existing_values}
+
+  Generate a concise Python variable name that keeps the same meaning and does not duplicate the existing names. Return only the variable name.
+display_name_system: >-
+  You refine agent display names so they remain unique, concise, and aligned with the agent's capability.
+display_name_user: |-
+  ### Task Description:
+  {task_description}
+
+  ### Original Display Name:
+  {original_value}
+
+  ### Existing Display Names:
+  {existing_values}
+
+  Generate a new display name that keeps the same meaning but does not duplicate existing names. Return only the display name.

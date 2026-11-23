@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for mcp_container_service.py
 Tests the MCPContainerManager class with comprehensive coverage
@@ -37,7 +38,7 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 from consts.exceptions import MCPContainerError, MCPConnectionError
-from services.mcp_container_service import MCPContainerManager
+from management.services.mcp.containers import MCPContainerManager
 from nexent.container import ContainerError, ContainerConnectionError
 
 
@@ -49,9 +50,9 @@ from nexent.container import ContainerError, ContainerConnectionError
 class TestMCPContainerManagerInit:
     """Test MCPContainerManager initialization"""
 
-    @patch('services.mcp_container_service.create_container_client_from_config')
-    @patch('services.mcp_container_service.DockerContainerConfig')
-    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
+    @patch('management.services.mcp.containers.create_container_client_from_config')
+    @patch('management.services.mcp.containers.DockerContainerConfig')
+    @patch('management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_success(self, mock_config_class, mock_create_client):
         """Test successful initialization"""
         mock_config = MagicMock()
@@ -69,9 +70,9 @@ class TestMCPContainerManagerInit:
         )
         mock_create_client.assert_called_once_with(mock_config)
 
-    @patch('services.mcp_container_service.create_container_client_from_config')
-    @patch('services.mcp_container_service.DockerContainerConfig')
-    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
+    @patch('management.services.mcp.containers.create_container_client_from_config')
+    @patch('management.services.mcp.containers.DockerContainerConfig')
+    @patch('management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_container_error(self, mock_config_class, mock_create_client):
         """Test initialization failure when container client creation fails"""
         mock_config = MagicMock()
@@ -83,9 +84,9 @@ class TestMCPContainerManagerInit:
         with pytest.raises(MCPContainerError, match="Cannot connect to Docker"):
             MCPContainerManager(docker_socket_path="/var/run/docker.sock")
 
-    @patch('services.mcp_container_service.create_container_client_from_config')
-    @patch('services.mcp_container_service.DockerContainerConfig')
-    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
+    @patch('management.services.mcp.containers.create_container_client_from_config')
+    @patch('management.services.mcp.containers.DockerContainerConfig')
+    @patch('management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_default_socket_path(self, mock_config_class, mock_create_client):
         """Test initialization with default socket path"""
         mock_config = MagicMock()
@@ -100,10 +101,10 @@ class TestMCPContainerManagerInit:
             docker_socket_path=None
         )
 
-    @patch('services.mcp_container_service.create_container_client_from_config')
-    @patch('services.mcp_container_service.KubernetesContainerConfig')
-    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True)
-    @patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace')
+    @patch('management.services.mcp.containers.create_container_client_from_config')
+    @patch('management.services.mcp.containers.KubernetesContainerConfig')
+    @patch('management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES', True)
+    @patch('management.services.mcp.containers.KUBERNETES_NAMESPACE', 'test-namespace')
     def test_init_kubernetes_mode_success(self, mock_k8s_config_class, mock_create_client):
         """Test successful initialization in Kubernetes mode"""
         mock_config = MagicMock()
@@ -121,10 +122,10 @@ class TestMCPContainerManagerInit:
         )
         mock_create_client.assert_called_once_with(mock_config)
 
-    @patch('services.mcp_container_service.create_container_client_from_config')
-    @patch('services.mcp_container_service.KubernetesContainerConfig')
-    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True)
-    @patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace')
+    @patch('management.services.mcp.containers.create_container_client_from_config')
+    @patch('management.services.mcp.containers.KubernetesContainerConfig')
+    @patch('management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES', True)
+    @patch('management.services.mcp.containers.KUBERNETES_NAMESPACE', 'test-namespace')
     def test_init_kubernetes_mode_container_error(self, mock_k8s_config_class, mock_create_client):
         """Test initialization failure in Kubernetes mode"""
         mock_config = MagicMock()
@@ -148,8 +149,8 @@ class TestStartMCPContainer:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -278,6 +279,27 @@ class TestStartMCPContainer:
             image=None
         )
 
+    @pytest.mark.asyncio
+    async def test_start_mcp_container_can_skip_readiness(self, mock_manager):
+        """Explicitly disabling readiness is forwarded to the SDK client."""
+        mock_manager.client.start_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "service_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+        })
+
+        await mock_manager.start_mcp_container(
+            service_name="test-service", tenant_id="tenant123", user_id="user12345",
+            full_command=None, wait_for_ready=False,
+        )
+
+        mock_manager.client.start_container.assert_called_once_with(
+            service_name="test-service", tenant_id="tenant123", user_id="user12345",
+            full_command=None, env_vars=None, host_port=None, image=None,
+            wait_for_ready=False,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test stop_mcp_container
@@ -290,8 +312,8 @@ class TestStopMCPContainer:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -376,8 +398,8 @@ class TestListMCPContainers:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -475,8 +497,8 @@ class TestGetContainerLogs:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -530,8 +552,8 @@ class TestStreamContainerLogs:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             manager.client.client = MagicMock()
@@ -1121,8 +1143,8 @@ class TestStreamContainerLogsKubernetes:
     def setup_k8s_patches(self):
         """Setup patches for Kubernetes mode - runs for each test"""
         self._patches = [
-            patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True),
-            patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace'),
+            patch('management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES', True),
+            patch('management.services.mcp.containers.KUBERNETES_NAMESPACE', 'test-namespace'),
         ]
         for p in self._patches:
             p.start()
@@ -1133,8 +1155,8 @@ class TestStreamContainerLogsKubernetes:
     @pytest.fixture
     def mock_manager_k8s(self):
         """Create MCPContainerManager instance with mocked Kubernetes client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.KubernetesContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.KubernetesContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             manager.client.core_v1 = MagicMock()
@@ -1389,8 +1411,8 @@ class TestLoadImageFromTarFile:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -1500,8 +1522,8 @@ class TestStartMCPContainerFromTar:
     @pytest.fixture
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
-        with patch('services.mcp_container_service.create_container_client_from_config'), \
-                patch('services.mcp_container_service.DockerContainerConfig'):
+        with patch('management.services.mcp.containers.create_container_client_from_config'), \
+                patch('management.services.mcp.containers.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -1545,6 +1567,21 @@ class TestStartMCPContainerFromTar:
             image="loaded-image:latest",
             full_command=["npx", "-y", "test-mcp"]
         )
+
+    @pytest.mark.asyncio
+    async def test_start_mcp_container_from_tar_forwards_explicit_readiness_opt_out(self, mock_manager):
+        mock_manager.load_image_from_tar_file = AsyncMock(return_value="loaded-image:latest")
+        mock_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123", "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020", "status": "started",
+        })
+
+        await mock_manager.start_mcp_container_from_tar(
+            tar_file_path="/path/to/image.tar", service_name="test-service",
+            tenant_id="tenant123", user_id="user12345", wait_for_ready=False,
+        )
+
+        assert mock_manager.start_mcp_container.call_args.kwargs["wait_for_ready"] is False
 
     @pytest.mark.asyncio
     async def test_start_mcp_container_from_tar_load_image_error(self, mock_manager):

@@ -8,22 +8,27 @@
 | **内存**  | 8 GiB | 16 GiB |
 | **磁盘** | 40 GiB | 100 GiB |
 | **架构** | x86_64 / ARM64 | |
-| **软件** | 已安装 Docker 和 Docker Compose | Docker 24+, Docker Compose v2+ |
+| **软件** | Docker Engine 18.09+、Docker Compose v2 | 使用仍受维护的 Docker Engine 和 Compose v2 |
 
-> **💡 注意**：推荐的 **8 核 16 GiB 内存** 配置可确保生产环境下的良好性能。
+> **💡 注意**：推荐配置适合启用完整应用、数据处理和 Docker 沙箱的环境。模型服务通常独立部署，不计入上表资源。
 
 ## 🚀 快速开始
 
-### 1. 下载和设置
+- [在线部署](#在线部署)
+- [离线部署](#离线部署)
+
+### 在线部署
+
+#### 1. 下载和设置
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **💡 提示**: `deploy.sh` 使用 `deploy/env/.env` 作为运行配置。已有 `deploy/env/.env` 会原样保留；如果不存在，会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
+> **💡 提示**：Docker 和 Kubernetes 共用 `deploy/env/.env`。部署脚本会保留已有配置，并补充 `deploy/env/.env.example` 中新增的变量。如果 `.env` 不存在，脚本会优先复用旧版 `docker/.env`，否则从当前模板创建。部署前请确认 `.env.example` 可读。
 
-### 2. 部署选项
+#### 2. 部署选项
 
 运行以下命令开始部署：
 
@@ -41,6 +46,8 @@ bash deploy.sh docker
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
+`application` 会同时准备 `nexent-sandbox` 镜像。v2.5.0 的 Docker 部署默认在系统级 Docker 沙箱中执行模型生成的代码和 Skill 脚本；沙箱不是固定的 Compose 服务，而是由 Runtime 按运行策略创建和复用。
+
 **端口策略:**
 - **development（默认）**: 暴露调试和内部服务端口，便于本地排查
 - **production**: 仅发布生产入口端口
@@ -53,6 +60,9 @@ bash deploy.sh docker
 您也可以通过参数跳过交互：
 
 ```bash
+# 使用已保存的 deploy.options 或内置默认值，不进入 TUI
+bash deploy.sh docker --defaults
+
 # 默认组件组合，development 端口策略，标准镜像源
 bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
@@ -62,19 +72,39 @@ bash deploy.sh docker --components infrastructure,application,data-process,supab
 # 使用中国大陆镜像源
 bash deploy.sh docker --image-source mainland
 
-# 使用本地 latest 镜像
++# 使用本地 latest 镜像
 bash deploy.sh docker --image-source local-latest
 ```
 
-部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+#### HTTPS（可选）
+
+Nexent 可通过随部署安装的 Nginx 反向代理终结 HTTPS。该选项默认关闭，启用后 HTTPS 使用独立入口端口：Docker 部署为 3100 端口，Kubernetes 部署为 NodePort 31000；原 HTTP 入口（Docker 3000 / K8s 30000）保持不变，两种入口可同时使用。如需修改入口端口，在 `deploy/env/.env` 中设置 `NEXENT_WEB_PORT`（HTTP 入口）或 `NEXENT_HTTPS_PORT`（HTTPS 入口）。
+
+可交互启用（安装器只询问一个问题：HTTPS 模式），也可非交互启用：
+
+```bash
+# 自签证书（内网部署推荐）
+bash deploy.sh docker --defaults --https-mode self-signed
+
+# 使用自己的证书（路径也可以预先写入 deploy/env/.env）
+bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/server.pem --https-key-file /path/to/server.key
+```
+
+- **self-signed**：安装器生成 99 年有效期的自签证书（私钥不加密），保存在 `<ROOT_DIR>/nginx/ssl/`，重复部署时自动复用。SAN 条目从部署主机网卡自动探测（排除回环与 Docker 网桥）；如需指定，在 `deploy/env/.env` 预填 `NEXENT_HTTPS_SAN`（例如 `NEXENT_HTTPS_SAN=10.0.0.5,example.com`）。浏览器会提示证书不受信任，将证书导入系统信任链后即可消除。
+- **custom**：通过 `NEXENT_HTTPS_CERT_FILE` 与 `NEXENT_HTTPS_KEY_FILE` 指定 PEM 证书与私钥。安装器在部署前校验证书对（PEM 格式、证书与私钥匹配、有效期）。支持加密私钥：通过 `NEXENT_HTTPS_KEY_PASSPHRASE` 或 `--https-key-passphrase` 提供密码；与其他部署凭证一致，密码以明文保存在 `deploy/env/.env` 中。
+- 启用 HTTPS 后，请同步更新 `deploy/env/.env` 中的 `SITE_URL`（例如 `SITE_URL=https://your-host:3100`），确保认证回调与生成的链接使用 HTTPS 入口。
+- 修改 HTTP/HTTPS 入口端口后，`OAUTH_CALLBACK_BASE_URL`、`CAS_CALLBACK_BASE_URL` 等回调地址若包含旧端口也需同步更新。
+- 再次禁用 HTTPS（`--https-mode disabled`）后，Nginx 容器会被移除；证书文件会保留，之后可重新启用。
+
+部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。`--defaults` 会优先复用该文件；文件不存在时使用内置默认值。下次交互部署时可选择复用本地配置或重新全量配置。
 
 
 #### ⚠️ 重要提示
 
-1️⃣ **首次部署 v1.8.0 及以上版本时**，需特别留意 Docker 日志中输出的 `suadmin` 超级管理员账号信息。该账号为系统最高权限账户，密码仅在首次生成时显示，后续无法再次查看，请务必妥善保存。
-> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
+1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时例外：部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
+> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/resource-management)
 
-2️⃣ 忘记留意 `suadmin` 账号密码？请按照以下步骤操作：
+2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 ```bash
 # Step1: 在supabase容器中删除su账号记录
 docker exec -it supabase-db-mini bash
@@ -89,11 +119,62 @@ docker exec -it nexent-postgresql bash
 psql -U root -d nexent
 delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
-# Step 3: 重新部署并记录 su 账号密码
+# Step 3: 重新部署；非交互模式将使用配置值或默认密码
 ```
-### 3. 访问您的安装
+### 离线部署
+
+目标服务器无法访问公网镜像仓库时，可从 GitHub Actions 获取已经打包好的离线部署包：
+
+1. 登录 GitHub，打开 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)。
+2. 选择目标版本对应的成功运行记录，在页面底部的 **Artifacts** 中下载与服务器架构匹配的压缩包。
+3. `amd64` 服务器下载 `nexent-<version>-amd64.zip`，ARM64 服务器下载 `nexent-<version>-arm64.zip`。
+
+GitHub Actions 构建产物默认保留 30 天。如果目标版本的产物已过期，请联系维护者重新运行工作流。
+
+下载后，将压缩包复制到离线服务器并解压。压缩包内直接包含离线包文件，无需再次解压内层归档：
+
+```bash
+unzip nexent-<version>-amd64.zip -d nexent
+cd nexent
+bash deploy.sh --load-images docker
+```
+
+离线包默认安装Nexent全部组件，若需要重新选择组件、端口策略、镜像源或监控 provider 时，添加 `--config`：
+
+```bash
+bash deploy.sh --load-images --config docker
+```
+
+如果服务器上保留了此前已部署的离线包，可通过 `--reuse-from` 复用其中的环境配置和部署选项：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  docker
+```
+
+指定目录必须是已解压的旧部署包根目录，并包含 `deploy/env/.env`。该参数会导入旧 `.env`、保留其已有值，并立即追加当前包 `.env.example` 新增的变量。存在 `monitoring.env` 和 Docker `deploy.options` 时也会复用；Docker 派生配置由新版本脚本重新生成。`--reuse-from` 可与 `--config`、`--defaults` 或 `--push-images` 组合使用。
+
+首次创建 `suadmin@nexent.com` 时，非交互部署使用 `NEXENT_SUPER_ADMIN_PASSWORD`，默认值为 `Nexent@123`，创建成功后会在终端显示实际密码。离线部署使用 `--config` 时会要求手动输入并确认密码，输入值不会写入配置文件，也不会在终端显示。
+
+如果需要先将镜像推送到目标环境可访问的内部仓库：
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  docker
+```
+
+未传入仓库前缀时，脚本会先询问前缀；随后 `push-images.sh` 会在推送前询问仓库用户名和密码。
+
+### 访问您的安装
 
 部署成功完成后：
+
+> **获取管理员密码**：超级管理员账号为 `suadmin@nexent.com`。首次非交互创建成功时，终端会显示实际使用的密码；未额外配置时，默认密码为 `Nexent@123`。离线部署使用 `--config` 时，手动输入的密码不会保存或显示。如果密码已忘记，请按本文前面的“重建 `suadmin` 账号”步骤重建账号。
+
 1. 在浏览器中打开 **http://localhost:3000**
 2. 登录超级管理员账号
 3. 访问租户资源 → 创建租户及租户管理员
@@ -105,10 +186,12 @@ delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
 Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 
-**应用服务:**
+**应用服务：**
 | 服务 | 描述 | 默认端口 |
 |---------|-------------|--------------|
-| nexent | 后端服务 | 5010 |
+| nexent-config | 配置与管理 API | 5010 |
+| nexent-runtime | 智能体运行时 API | 5014 |
+| nexent-mcp | MCP 管理与工具服务 | 5011/5015 |
 | nexent-web | Web 前端 | 3000 |
 | nexent-data-process | 数据处理服务 | 5012 |
 | nexent-northbound | 北向 API 服务 | 5013 |
@@ -119,7 +202,7 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-postgresql | 关系型数据库 |
 | nexent-elasticsearch | 搜索引擎和索引服务 |
 | nexent-minio | S3 兼容对象存储 |
-| redis | 缓存层 |
+| redis | 缓存、分布式锁和任务消息代理 |
 
 **Supabase 服务（选择 `supabase` 组件时）:**
 | 服务 | 描述 |
@@ -134,6 +217,12 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-openssh-server | AI 智能体 SSH 终端 |
 | nexent-monitoring | 可选观测组件 |
 
+**按需执行环境：**
+
+| 组件 | 描述 |
+|---------|-------------|
+| nexent-sandbox | Runtime 按策略创建的隔离执行环境，用于运行模型生成的代码和 Skill 脚本 |
+
 ## 💾 数据持久化
 
 Nexent 使用 Docker volumes 进行数据持久化：
@@ -144,6 +233,7 @@ Nexent 使用 Docker volumes 进行数据持久化：
 | Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
+| 智能体运行工作区 | nexent-agent-workspace | Docker 命名卷，由 `NEXENT_SANDBOX_WORKSPACE_VOLUME` 配置 |
 | Supabase DB（选择 supabase 时）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 默认 `dataDir` 为 `./volumes`（可在 `deploy/env/.env` 中配置 `ROOT_DIR`）。
@@ -168,36 +258,15 @@ bash uninstall.sh docker delete-all
 
 Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compose 资源。删除数据时会移除 `postgresql`、`elasticsearch`、`redis`、`minio`、`volumes`、`openssh-server`、`scripts`、`skills` 等服务目录；如果后续要复用已有数据，请选择保留 volumes。
 
-### 离线镜像包
-
-需要把镜像和部署脚本搬到离线机器时，可使用 `deploy/offline/build_offline_package.sh`：
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target docker \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
-
-在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
-
-```bash
-cd offline-package
-bash deploy.sh --load-images docker
-```
-
 ## 🔌 端口映射
 
 | 服务 | 内部端口 | 外部端口 | 描述 |
 |---------|---------------|---------------|-------------|
-| Web 界面 | 3000 | 3000 | 主应用程序访问 |
+| Web 界面 | 3000 | 3000（`NEXENT_WEB_PORT`） | 主应用程序访问 |
+| HTTPS 入口 | 3100 | 3100（`NEXENT_HTTPS_PORT`） | 可选，启用 HTTPS 后的加密访问入口（Nginx） |
 | 后端 API | 5010 | 5010 | 后端服务 |
+| Runtime API | 5014 | 5014 | 智能体运行时服务 |
+| MCP API | 5011/5015 | 5011/5015 | MCP 管理与工具服务 |
 | 数据处理 | 5012 | 5012 | 数据处理 API |
 | 北向 API | 5013 | 5013 | 北向接口服务 (A2A/MCP 集成) |
 | PostgreSQL | 5432 | 5434 | 数据库连接 |
@@ -211,9 +280,29 @@ bash deploy.sh --load-images docker
 
 ## 🔧 高级配置
 
+v2.5.0 的部署模板默认使用 Docker 沙箱，并复用系统级容器以减少冷启动时间。Runtime 通过独立工作区卷交换上传文件和生成文件；运行结束后，需要保留的产物会同步到 MinIO。
+
+常用配置位于 `deploy/env/.env`：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NEXENT_SANDBOX_DEFAULT_LEVEL` | `docker` | 隔离级别，可选 `local`、`docker`、`wasm` |
+| `NEXENT_SANDBOX_DEFAULT_SCOPE` | `system` | 容器生命周期，可选 `session` 或 `system` |
+| `NEXENT_SANDBOX_DOCKER_IMAGE` | `nexent/nexent-sandbox:latest` | Docker 沙箱镜像 |
+| `NEXENT_SANDBOX_WORKSPACE_VOLUME` | `nexent-agent-workspace` | Runtime 与沙箱共享的 Docker 卷 |
+| `NEXENT_SANDBOX_MEMORY_LIMIT_MB` | `2048` | 沙箱内存上限，单位为 MiB |
+| `NEXENT_SANDBOX_CPU_QUOTA` | `1.0` | 沙箱 CPU 配额 |
+| `NEXENT_SANDBOX_TIMEOUT_S` | `30` | 单步执行超时，单位为秒 |
+| `NEXENT_SANDBOX_NETWORK` | `disabled` | 是否允许沙箱访问网络 |
+| `NEXENT_SANDBOX_SHELL_POLICY` | `disabled` | Shell 调用策略，可选 `disabled`、`restricted`、`boxed` |
+| `NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS` | `true` | 是否自动将输出文件同步到 MinIO |
+| `AGENT_WORKSPACE_ROOT` | `/mnt/nexent/workdir` | 每次运行的临时文件工作区 |
+
+生产环境不建议将隔离级别改为 `local`。调整资源、网络或 Shell 策略后，需要重新部署 Runtime。
+
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `deploy/env/.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。通过 `MONITORING_DASHBOARD_ALLOWED_ROLES` 可配置哪些角色看到前端监控入口，默认值为 `SU,SPEED`。
 
 ```bash
 cd nexent
@@ -236,7 +325,7 @@ bash deploy.sh docker
 如需调整端口、镜像版本或 Langfuse 初始账号，请先复制并编辑监控环境变量：
 
 ```bash
-cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
+cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 ```
 
 常用变量：
@@ -244,12 +333,13 @@ cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/m
 | 变量 | 说明 |
 |------|------|
 | `MONITORING_PROVIDER` | 默认监控 provider；部署脚本中手动选择 provider 后会同步更新 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | 可看到监控面板入口的角色，使用逗号分隔，例如 `SU,ADMIN,SPEED` |
 | `OTEL_COLLECTOR_HTTP_PORT` / `OTEL_COLLECTOR_GRPC_PORT` | Collector 对外暴露的 OTLP HTTP/gRPC 端口 |
 | `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith 转发配置 |
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | 本地 Langfuse 初始管理员账号 |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | 本地 Grafana 管理员账号 |
 
-选择 `langsmith` provider 前，请先在 `deploy/docker/assets/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/.env` 中调整 OTLP 目标地址：
+选择 `langsmith` provider 前，请先在 `deploy/env/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/monitoring.env` 中调整 OTLP 目标地址：
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -298,6 +388,11 @@ WECHAT_OAUTH_APP_SECRET=
 # 访问 OAuth provider 时的 TLS 校验
 OAUTH_SSL_VERIFY=true
 OAUTH_CA_BUNDLE=
+
+# disabled: 隐藏 OAuth 登录入口并禁用自动跳转
+# button: 显示已配置的 OAuth 登录按钮
+# force: 恰好配置一个 Provider 时，未登录用户自动跳转
+OAUTH_LOGIN_MODE=button
 ```
 
 Provider 启用规则：
@@ -311,6 +406,8 @@ Provider 启用规则：
 
 本地默认回调示例为 `http://localhost:3000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，例如 `https://nexent.example.com/api/user/oauth/callback?provider=github`，并在 OAuth provider 控制台中登记相同地址。
 
+`OAUTH_LOGIN_MODE` 支持 `disabled`、`button`、`force`，默认为 `button`。`force` 模式下，恰好有一个 Provider 满足启用条件时，未登录访问 Nexent 会直接跳转到该 Provider；没有可用 Provider 时禁用 OAuth，多个 Provider 时回退到登录按钮。若同时配置了 CAS `force` 模式，CAS 优先。
+
 ### CAS 登录配置
 
 CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `CAS_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`CAS_SERVER_URL` 是 CAS Server 根地址，也不要带结尾 `/`。
@@ -320,6 +417,8 @@ Docker 部署在 `deploy/env/.env` 中配置 CAS：
 ```bash
 CAS_ENABLED=true
 CAS_SERVER_URL=http://localhost:8080/cas
+# 可选：后端容器访问 CAS 的内部地址；为空时复用 CAS_SERVER_URL。
+CAS_INTERNAL_SERVER_URL=
 CAS_VALIDATE_PATH=/p3/serviceValidate
 CAS_CALLBACK_BASE_URL=http://localhost:3000
 
@@ -332,10 +431,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -346,6 +450,12 @@ CAS_LOGOUT_URL=/logout
 CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
+
+CAS 未返回 `CAS_ROLE_ATTRIBUTE` 指定的角色属性、属性为空或映射后的角色不受支持时，使用 `CAS_DEFAULT_ROLE`。支持的默认角色为 `SU`、`ADMIN`、`DEV` 和 `USER`；配置无效时回退到 `USER`。
+
+CAS 未返回 `CAS_TENANT_ATTRIBUTE` 指定的租户属性或属性为空时，使用 `CAS_DEFAULT_TENANT_ID`。
+
+`CAS_HEARTBEAT_URL` 用于启用独立的 CAS 用户活动心跳。页面可见时，首次用户活动立即发送 GET；之后点击、键盘、鼠标、触摸、窗口聚焦或页面可见性变化在所有浏览器标签页中每 `CAS_HEARTBEAT_INTERVAL_SECONDS` 最多发送一次。若配置的 Cookie 可被前端读取，请求会携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送心跳，但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳只保活认证源会话，现有无感续期仍负责刷新 Nexent 本地会话。
 
 常用 CAS 地址：
 
@@ -384,10 +494,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -439,6 +554,74 @@ NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
 ```
 
 > **重要**: URL 必须包含 `/api` 后缀，因为 Northbound 服务使用 FastAPI 的 `root_path="/api"` 配置。
+
+## 🤖 官方智能体部署
+
+Nexent 主平台安装完成后，可以从部署包中的官方智能体资源目录安装指定行业的官方智能体。官方智能体部署与 Nexent 主平台部署解耦，不会在平台启动时自动安装。
+
+### 部署前提
+
+执行前请确认：
+
+1. Nexent 已完成 Docker 或 Kubernetes 部署；
+2. `nexent-config` 服务已启动并完成数据库初始化；
+3. 部署包中存在 `deploy/official-agents` 目录；
+4. Docker 环境使用 Git Bash 或 WSL 执行脚本；Kubernetes 环境使用能够访问目标集群的终端执行脚本。
+
+官方智能体资源不需要额外配置环境变量，也不需要用户手工执行 Git、`docker cp` 或同步接口。
+
+### 交互式部署
+
+在 Nexent 仓库根目录执行：
+
+```bash
+bash deploy/deploy-official-agents.sh
+```
+
+脚本会扫描 `deploy/official-agents` 下实际存在的一级目录，并将这些目录作为可选 Profile 显示。可以输入单个 Profile、多个 Profile（例如 `2,3`），或输入 `all` 安装全部 Profile。脚本会校验目录和 `agent.json`，选择无效时不会执行复制或同步。
+
+Docker 部署时，脚本会将选中的 Profile 复制到 `nexent-config` 容器的 `/mnt/nexent/official-agents/`，然后同步到官方智能体仓库。
+
+Kubernetes 环境执行：
+
+```bash
+bash deploy/deploy-official-agents.sh --kubernetes
+```
+
+如需指定命名空间：
+
+```bash
+bash deploy/deploy-official-agents.sh \
+  --kubernetes \
+  --namespace custom-namespace
+```
+
+### 部署后的使用方式
+
+部署完成后，用户可以在 **智能体仓库** 的官方列表中复制智能体。复制时可以根据页面提示选择模型，并选择复用或创建知识库、Skill 和 MCP 配置。
+
+官方智能体部署阶段只发布模板，不会为所有租户自动创建知识库。包含知识库的官方智能体在首次复制时，要求目标租户配置可用的向量模型。
+
+### 部署验证
+
+Docker 环境可以查看已复制的资源：
+
+```bash
+docker exec nexent-config find /mnt/nexent/official-agents -name agent.json -print
+```
+
+登录 Nexent 后，打开 **智能体仓库**，切换到官方智能体列表，确认所选 Profile 中的模板已经出现。
+
+### 删除官方智能体
+
+删除官方模板需要超级管理员权限：
+
+1. 进入 **资源管理**；
+2. 打开 **智能体** 页面；
+3. 点击 **管理官方智能体**；
+4. 选择需要删除的官方模板并确认。
+
+删除操作会删除官方智能体仓库条目、system 租户中的官方源 Agent 和服务器上的对应 Bundle 文件；已经复制到普通租户中的 Agent 副本不会被删除。
 
 ## 💡 需要帮助
 

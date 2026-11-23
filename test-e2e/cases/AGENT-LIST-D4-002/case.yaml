@@ -1,0 +1,262 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-LIST
+case:
+  case_id: AGENT-LIST-D4-002
+  feature_id: AGENT-LIST-VIEWS
+  requirement_ids:
+  - AGENT-LIST-REQ-003
+  business_rule_ids:
+  - AGENT-LIST-RULE-006
+  - AGENT-LIST-RULE-007
+  - AGENT-LIST-RULE-008
+  - AGENT-LIST-RULE-009
+  - AGENT-LIST-RULE-010
+  - AGENT-LIST-RULE-011
+  - AGENT-LIST-RULE-012
+  title: Match the inspected desktop Agent guide and card layout while retaining list
+    workflows
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the actual browser geometry and computed styles of the refined
+    guide/cards and preserve a complete mocked list user journey.
+  preconditions:
+  - A reachable frontend is available; each scenario controls existing HTTP boundaries
+    with deterministic authorized fixtures.
+  test_data:
+    profile: mock
+    reference_locale: zh
+    translation_regression_locale: en
+    viewport:
+      width: 1920
+      height: 1080
+    constrained_viewport:
+      width: 768
+      height: 900
+    agent_count: 8
+    tolerance_px: 1
+    guide:
+      width: 1808
+      height: 378
+      padding: 24
+      radius: 16
+      inner_width: 1760
+      inner_height: 330
+      introduction_height: 114
+      section_gap: 24
+      process_height: 192
+      process_title_height: 24
+      process_title_gap: 12
+      step_width: 339.2
+      step_gap: 16
+      step_height: 156
+      introduction_title:
+        size: 16
+        line_height: 24
+        weight: 500
+        color: '#191919'
+        left: 24
+        icon_size: 16
+        icon_gap: 8
+      introduction_body:
+        size: 14
+        line_height: 22
+        weight: 400
+        color: '#191919'
+        top: 36
+      introduction_points:
+        size: 14
+        line_height: 22
+        weight: 400
+        color: '#777777'
+        top: 70
+        height: 44
+        preceding_gap: 12
+      step_title:
+        size: 18
+        line_height: 26
+        weight: 500
+        color: '#191919'
+        top: 24
+        left: 21.09
+      step_description:
+        size: 14
+        line_height: 22
+        weight: 400
+        color: '#777777'
+        top: 66
+        width: 297.02
+        preceding_gap: 16
+    tutorial_toggle:
+      width: 72
+      height: 22
+      header_top: 13
+      header_left: 1736
+      text_width: 56
+      font_size: 14
+      line_height: 22
+      font_weight: 400
+      color: '#191919'
+      arrow_size: 8
+      gap: 6
+      order:
+      - text
+      - arrow
+      expanded_copy: 收起教程
+      collapsed_copy: 展开教程
+    grid:
+      columns: 4
+      horizontal_gap: 16
+      vertical_gap: 12
+    card:
+      width: 440
+      height: 180
+      outside_stroke_width: 1
+      horizontal_padding: 24
+      vertical_padding: 16
+      radius: 12
+      inner_width: 392
+      inner_height: 148
+      body_height: 112
+      category_row_height: 22
+      parent_auto_layout_gap: 8
+      header_description_gap: 4
+      footer_gap_derived: 4
+      title:
+        size: 16
+        line_height: 24
+        weight: 500
+        color: '#191919'
+      description:
+        size: 12
+        line_height: 20
+        weight: 400
+        color: '#777777'
+        text_bounds_height: 42
+      footer:
+        height: 32
+        inner_top: 116
+        alignment: date left, publication status right
+      status:
+        width: 48
+        height: 18
+        dot_size: 8
+        text_gap: 4
+      more_glyph:
+        size: 12
+        top: 16
+        right: 24
+        color: '#191919'
+  steps:
+  - order: 1
+    action: Open the Agent list at the desktop viewport and inspect its localized page title,
+      content/header/expanded-guide and card grid bounding boxes. Inspect representative
+      card title/description/footer/status/more glyph computed styles and positions. Hover
+      and keyboard-focus an editable card, open the existing more menu and activate its
+      Configure and Publish actions, collapse and expand the guide, then search for
+      a matching Agent. Switch to table view and back to cards, change page size/page,
+      and activate an existing creation control.
+    expected: Content is 1856px wide with 24px padding and a 48px header; the 1808x378px
+      guide, introduction/process typography and four 440x180px card columns match
+      the inspected sub-layout and gaps within 1px. The scroll viewport retains 1px
+      drawing space around first-row and outer-column cards so the outside stroke
+      is visible without changing card coordinates, toolbar-to-card gap12 or pagination
+      position. The header contains 收起教程 with text before its arrow; the hidden guide-internal
+      toggle is absent. The frozen typography, colors, padding, radius, outside stroke
+      retaining 392px inner width, 112px body with header-description gap4 and a reserved
+      22px category row, and a 32px footer at inner top116 with the date at the left edge and publication status at the right
+      edge; 8px status dot with 4px text gap and 12px more glyph at top16/right24 match.
+      Parent group gap8 is not assigned an unconfirmed child role and footer gap4 remains
+      derived. The heading is 智能体配置 in Chinese. Data labels remain truthful. Existing
+      Configure/Publish actions appear in the more menu with existing permission behavior;
+      the header toggles between 展开教程 and 收起教程 with matching
+      expanded state, search shows the same data-backed collection, and presentation
+      interactions cause no business write. Existing table columns/actions/timestamp
+      semantics and server-backed pagination remain intact, card mode restores the
+      refined layout, and controls use existing navigation/dialog flows.
+  - order: 2
+    action: Return to the list, mock an empty response and inspect the guide height/divider,
+      then restore populated data and resize to the constrained viewport. At the constrained
+      viewport inspect guide/card/toolbar reachability and document width. Open the
+      selected Agent editor through its card body, verify its route, then return
+      to the list before exercising more-menu navigation.
+    expected: Empty and populated data retain the 378px guide. The divider is visible
+      at the list section while the guide is expanded and hidden when collapsed; it
+      adds no guide height. Existing
+      responsive card reflow keeps visible controls usable without horizontal page
+      overflow; desktop pixel constants do not force a fixed-width page.
+  - order: 3
+    action: Open the English locale and inspect its localized page heading, longer translated
+      introduction/step copy and tutorial toggle.
+    expected: The heading is Agent Configuration. Steps retain their 156px minimum and may
+      grow naturally to avoid text clipping; Expand tutorial and Collapse tutorial remain
+      usable without page overflow.
+      Chinese exact-height assertions are not applied to longer translated text.
+  expected_results:
+  - Desktop browser bounds match each frozen guide/card measurement within 1px and
+    numeric typography/colors match the exact contract. Guide expanded height is 378px
+    for populated and empty data; collapse/expand preserves list data and shows the
+    divider at the list section only while expanded, outside the guide height. Header tutorial toggle has the frozen 72x22px
+    bounds, 14/22px/400/#191919 text before an 8px arrow and 6px gap; no hidden guide-internal
+    toggle is implemented. Introduction/process copy has the frozen font sizes, line
+    heights, weights, colors and positions; steps are 339.2x156px with 16px gaps.
+    Card grid has four desktop columns, 16px horizontal and 12px vertical gaps; title
+    and description do not collide with adjacent controls. The 1px outside stroke
+    is not clipped by the scroll viewport along the first row or the left/right outer
+    columns, while original card bounds and pagination positioning are retained. Real
+    metadata determines date/status/category values; unavailable values are placeholders
+    and the creator/import category tabs are absent. Search, pagination, view switching
+    and existing card/dialog/navigation controls remain available.
+  - Narrow layout reflows without horizontal document overflow and retains usable
+    controls.
+  - Longer English guide copy remains readable with naturally growing step cards,
+    localized tutorial controls and no horizontal page overflow.
+  forbidden_side_effects:
+  - Layout inspection, guide toggle, hover/focus and view switching must not cause
+    an Agent write or model/provider call.
+  - Do not change backend routes, payloads or response contracts.
+  - Do not claim matching unavailable proprietary font glyphs from a font-family declaration
+    alone.
+  - Do not claim that missing five-step illustration or purple-avatar assets were
+    replaced precisely; retain existing decoration, actual avatars and general fallback
+    without generating guessed artwork.
+  - Do not fabricate creator, update dates, publication status or import provenance.
+  actor: Agent development list user
+  journey:
+  - Open expanded populated list
+  - inspect measured guide/cards
+  - use hover/focus controls
+  - toggle guide
+  - search and paginate
+  - switch presentations
+  - open existing operation
+  - resize
+  final_business_result:
+  - The existing Agent collection is available with the measured presentation and
+    unchanged action/data boundaries.
+  - Existing list workflows remain reachable at desktop and constrained widths.
+  failure_evidence:
+  - Bounding-box or computed-style mismatch against the frozen inspector contract.
+  - Lost metadata, navigation, search, pagination or action/permission behavior.
+  - Business mutation caused solely by a presentation interaction or horizontal page
+    overflow.
+  acceptance:
+  - id: AC-01
+    description: Prove the actual browser geometry and computed styles of the refined
+      guide/cards and preserve a complete mocked list user journey.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5

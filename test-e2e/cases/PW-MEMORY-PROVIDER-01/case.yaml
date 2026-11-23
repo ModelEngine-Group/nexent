@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MEMORY-PROVIDER-01
+  feature_id: V5-PW-MEMORY-PROVIDER-01
+  business_rule_ids:
+  - V5-PW-MEMORY-PROVIDER-01-RULE-01
+  title: 外部记忆Provider创建→连通性→启用→真实对话检索→删除
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证管理员从 UI 完成外部记忆 Provider 生命周期，并由真实对话使用。
+  preconditions:
+  - 管理员账号可登录
+  - secrets.env 存在测试 Provider 凭据
+  - 真实 LLM 可用
+  test_data:
+    legacy_asset_declaration: config/models.yaml；config/secrets.env；config/users.yaml
+  steps:
+  - order: 1
+    action: 登录后进入 /memory 的 Provider 管理区域。
+    expected: 创建/编辑/启用/删除均持久化。
+  - order: 2
+    action: 选择真实插件，名称使用 run_id，填写 secrets.env 对应 URL/Key，保存。
+    expected: 连通性与真实检索成功。
+  - order: 3
+    action: 执行 UI 连通性/搜索测试并确认成功。
+    expected: 对话使用该 Provider 且回答/trace 包含稳定 marker。
+  - order: 4
+    action: 启用该 Provider，进入 /newchat，用配置中的真实模型发送包含唯一 marker 的记忆问题。
+    expected: API Key 不出现在 DOM、trace、console 或报告。
+  - order: 5
+    action: 等待回答完成并确认外部记忆证据/marker。
+    expected: API Key 不出现在 DOM、trace、console 或报告。
+  - order: 6
+    action: 返回 Provider 页编辑非密钥字段并刷新验证。
+    expected: API Key 不出现在 DOM、trace、console 或报告。
+  - order: 7
+    action: 删除本次 Provider，确认列表消失且密钥从未回显。
+    expected: API Key 不出现在 DOM、trace、console 或报告。
+  expected_results:
+  - 创建/编辑/启用/删除均持久化。
+  - 连通性与真实检索成功。
+  - 对话使用该 Provider 且回答/trace 包含稳定 marker。
+  - API Key 不出现在 DOM、trace、console 或报告。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 52
+  actor: Nexent browser user
+  journey:
+  - 登录后进入 /memory 的 Provider 管理区域。
+  - 选择真实插件，名称使用 run_id，填写 secrets.env 对应 URL/Key，保存。
+  - 执行 UI 连通性/搜索测试并确认成功。
+  - 启用该 Provider，进入 /newchat，用配置中的真实模型发送包含唯一 marker 的记忆问题。
+  - 等待回答完成并确认外部记忆证据/marker。
+  - 返回 Provider 页编辑非密钥字段并刷新验证。
+  - 删除本次 Provider，确认列表消失且密钥从未回显。
+  final_business_result:
+  - 创建/编辑/启用/删除均持久化。
+  - 连通性与真实检索成功。
+  - 对话使用该 Provider 且回答/trace 包含稳定 marker。
+  - API Key 不出现在 DOM、trace、console 或报告。
+  failure_evidence:
+  - ${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MEMORY-PROVIDER-01/（仅失败保存 screenshot/trace/video/console/network/failure.json）

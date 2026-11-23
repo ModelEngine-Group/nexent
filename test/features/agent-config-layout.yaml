@@ -1,0 +1,38 @@
+schema_version: "1.0"
+module:
+  id: AGENT-EDITOR
+  name: Agent editor
+  description: Existing Agent configuration editing and presentation.
+features:
+  - feature_id: AGENT-CONFIG-LAYOUT
+    name: High-fidelity Agent configuration layout
+    status: active
+    description: Present an existing empty Agent draft using the measured four-card editor, actionable resource entries, and a five-question addition limit while preserving existing configuration and workflow contracts.
+    business_rules:
+      - rule_id: AGENT-CONFIG-RULE-001
+        description: Four white cards render in one internal scroll region with 12px gaps; the shared resource card orders knowledge base, welcome/questions, skills, tools, and child Agents, without outer category tabs or unmeasured universal card borders/shadows.
+      - rule_id: AGENT-CONFIG-RULE-002
+        description: Existing section content, collapse state, model/prompt fields, resource ownership, and guardrail capability remain reachable after visual regrouping; empty resource modules are expanded initially.
+      - rule_id: AGENT-CONFIG-RULE-003
+        description: A configuration focus request expands and scrolls to its target section.
+      - rule_id: AGENT-CONFIG-RULE-004
+        description: Unlock, debug, and publish remain reachable outside module scrolling and retain permission, form-validation, idle-save, failure, and existing callback behavior after relocation to the identity/workflow area.
+      - rule_id: AGENT-CONFIG-RULE-005
+        description: Rendering, collapsing, and focusing do not write Agent data; user edits retain existing autosave interfaces, and no backend endpoint or data-contract change is introduced.
+      - rule_id: AGENT-CONFIG-RULE-006
+        description: At the 1920px desktop reference navigation is64px, conversation561px, configuration uses the remaining1295px without overflow, tab navigation64px and identity74px; selected titles are16px/24px weight500 and descriptions12px/22px weight400 using measured colors.
+      - rule_id: AGENT-CONFIG-RULE-007
+        description: Preset-question additions are limited to five; existing arrays longer than five load intact without a write or truncation, and removal below five re-enables addition.
+      - rule_id: AGENT-CONFIG-RULE-008
+        description: Empty resource associations use a two-column row with8px gap and a left-column48px add entry, radius8px, padding8px/12px, rgba(25,25,25,0.03) background; association and create/manage actions remain distinct.
+      - rule_id: AGENT-CONFIG-RULE-009
+        description: High-fidelity description, greeting text, and duty prompt are limited to 200, 200, and 1000 characters respectively; legacy overlong stored values load intact without a write and remain reducible, while the default component mode retains its existing limits.
+      - rule_id: AGENT-CONFIG-RULE-010
+        description: All five resource association entries reuse the shared right drawer while preserving existing selection/save timing, configuration prerequisites, permissions, model priority/overrides, knowledge compatibility and local/external Agent version relations; other knowledge selector consumers retain their default modal.
+      - rule_id: AGENT-CONFIG-RULE-011
+        description: In high-fidelity configuration, selected tools and child Agents precede the add entry in an ordered two-column grid with8px gaps and one column below sm. Rows reuse the current knowledge shell with48px height,4px radius,1px#DFDFDF border,12px horizontal/8px vertical padding,white fill and its soft shadow. Names use14px/22px regular400#191919 and ellipsis/full-name tooltip; real neutral tags use12px/18px#777777 with8px spacing. Tool marks are24px and resolved child avatars32px. Always-visible actions use14px glyphs in24px Ant Design targets. Managed-tool filtering, configuration/removal, read-only checks, separate child IDs and saved versions retain their existing behavior; knowledge rows and selection drawers keep their current presentation.
+    required_test_stages: [D1, D4]
+    source:
+      requirement_ids: [AGENT-CONFIG-REQ-001, AGENT-CONFIG-REQ-002, AGENT-CONFIG-REQ-003]
+      spec_path: ../nexent-doc/docs/Developing/agt-editor-empty-configuration-layout/proposal.md
+      notes: The2026-10-08 partial handoff is historical. Current geometry comes from the2026-10-09 inspector handoff and user authorization. The2026-10-10 selected-tools/child-Agent bug directly extends this baseline; shell geometry reuses measured knowledge rows, while descendant values are frozen screenshot-based choices rather than new inspector claims. D1 proves component contracts; D4 proves browser geometry/scroll/workflow. D2,D3,D5 are excluded with boundary reasons in the formal design; no exact font or artwork parity is claimed without matching assets.

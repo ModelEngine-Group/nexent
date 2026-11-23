@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-121
+  feature_id: F-120
+  business_rule_ids:
+  - F-120-RULE-01
+  title: memory record CRUD/检索/租户与用户隔离｜异常/边界/越权
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: memory record CRUD/检索/租户与用户隔离｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json；${NEXENT_TEST_HOME}/config/models.yaml
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 准备固定测试用户、测试 Agent 与真实 LLM；清空该测试命名空间已有记忆，保证用例初始状态可控。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过实际 API 配置用户级/Agent级记忆策略、开关和阈值。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 按“memory record CRUD/检索/租户与用户隔离｜异常/边界/越权”执行一到多轮真实对话，输入包含唯一记忆 marker（如 MEM-92831）。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 等待记忆写入/总结任务完成，查询 memory record/version/status 并检查作用域。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 新建会话再次提问，确认 Runtime context 能取回正确 marker，且其他用户/Agent 不可见。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 6
+    action: Dreaming/长期记忆类检查版本、合并/总结结果和禁用后的行为变化。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 7
+    action: 对删除/禁用操作再次运行对话，确认旧记忆不再进入上下文。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 8
+    action: '保存脱敏 trace 后清理测试记忆。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 232
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

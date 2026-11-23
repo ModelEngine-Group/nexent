@@ -1,0 +1,884 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Managed context assembly for fine-grained items and adaptive compaction."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import math
+import threading
+from copy import deepcopy
+from dataclasses import asdict, is_dataclass, replace
+from enum import Enum
+from typing import Any, Dict, Optional, Sequence
+
+from smolagents.memory import ActionStep, AgentMemory, TaskStep
+from smolagents.models import ChatMessage, MessageRole
+
+from ...context_runtime.contracts import ContextEvidence, FinalContext
+from ..summary_cache import CompressionCallRecord
+from .budget import extract_message_text, message_role
+from .config import ContextManagerConfig
+from .history_compression import HistoryCompressor, HistorySummaryCandidate
+from .llm_summary import LLMSummary
+from .long_term_memory_selector import select_long_term_memory
+from .models import ContextItem, ContextItemInput, ContextItemType, normalize_context_inputs
+from .policy import ContextProcessingMode, resolve_policy
+from .run_context import ManagedRunContext
+from .selection import select_context_items
+from .step_renderer import StepRenderer
+
+
+logger = logging.getLogger("agent_context")
+
+
+class ContextManager:
+    """Owns ordering, budget checks, compaction and final rendering."""
+
+    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None):
+        self.config = config or ContextManagerConfig()
+        if max_steps is not None:
+            self.config.keep_recent_steps = min(self.config.keep_recent_steps, max_steps)
+        if self.config.max_summary_input_tokens <= 0:
+            self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
+        if self.config.max_summary_reduce_tokens <= 0:
+            self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
+        self._lock = threading.Lock()
+        self._items: list[ContextItem] = []
+        self._renderer = StepRenderer(self.config)
+        self._llm = LLMSummary(self.config, self._renderer)
+        self._history_compressor = HistoryCompressor(self._llm)
+        self._history_candidate: HistorySummaryCandidate | None = None
+        self._current_item_cache: dict[int, ContextItem] = {}
+        self._step_local_log: list[CompressionCallRecord] = []
+        self.compression_calls_log: list[CompressionCallRecord] = []
+        self._last_uncompressed_token_count: int | None = None
+        self._last_compressed_token_count: int | None = None
+        self._previous_stable_fingerprint: str | None = None
+        self._previous_stable_items: dict[str, str] = {}
+        self._pending_history_summary_event: dict[str, Any] | None = None
+        self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
+        self._run_compaction_attempts = 0
+
+    def _compaction_trigger_threshold_tokens(self) -> int:
+        return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
+
+    def _compaction_target_tokens(self) -> int:
+        return self.config.compaction_target_tokens or max(
+            1, int(self._compaction_trigger_threshold_tokens() * 0.75)
+        )
+
+    @property
+    def effective_input_limit_tokens(self) -> int:
+        return self.config.effective_input_limit_tokens
+
+    @property
+    def processing_mode(self) -> str:
+        return resolve_policy(self.config.policy_layers).processing_mode.value
+
+    def prepare_run_context(
+        self,
+        memory: AgentMemory,
+        fallback_system_prompt: str,
+        items: Optional[Sequence[Any]] = None,
+    ) -> ManagedRunContext:
+        self._history_candidate = None
+        self._run_compaction_attempts = 0
+        self._current_item_cache.clear()
+        source = self._item_source(items)
+        if fallback_system_prompt and not any(item.type == ContextItemType.SYSTEM for item in source):
+            source.append(
+                ContextItem.from_input(
+                    ContextItemInput(
+                        id="system:fallback",
+                        type=ContextItemType.SYSTEM,
+                        content={"text": fallback_system_prompt},
+                        metadata={"layout_order": -1, "runtime_fallback": True},
+                    )
+                )
+            )
+        policy = resolve_policy(self.config.policy_layers)
+        selected, decision = select_context_items(source, policy)
+        messages = self.build_context_messages(selected)
+        stable = [message for message in messages if message_role(message) in {"system", "developer"}]
+        dynamic = [message for message in messages if message_role(message) not in {"system", "developer"}]
+        return ManagedRunContext(
+            item_messages=tuple(messages),
+            stable_messages=tuple(stable),
+            dynamic_messages=tuple(dynamic),
+            selected_item_types=tuple(item.type.value for item in selected),
+            items=tuple(selected),
+            selection_decision=decision,
+        )
+
+    def assemble_final_context(
+        self,
+        *,
+        model: Any,
+        memory: AgentMemory,
+        current_run_start_idx: int,
+        tools: Sequence[Any] | None = None,
+        purpose: str = "step",
+        task: str | None = None,
+        final_answer_templates: Optional[Dict[str, Any]] = None,
+        run_context: ManagedRunContext | None = None,
+        force_compaction: bool = False,
+        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+    ) -> FinalContext:
+        if purpose != "step" and (request_system_messages or request_tail_messages):
+            raise ValueError("Request-only action messages require step purpose")
+        run_context = run_context or self.prepare_run_context(memory, "")
+        policy = resolve_policy(self.config.policy_layers)
+        persisted_items = list(run_context.items)
+        if self._history_candidate is not None:
+            persisted_items = [
+                item
+                for item in persisted_items
+                if item.type
+                not in {
+                    ContextItemType.HISTORY_SUMMARY,
+                    ContextItemType.CONVERSATION_TURN,
+                }
+            ]
+            persisted_items.append(self._history_candidate.as_item())
+        current_items = self._project_current_run(memory, current_run_start_idx)
+        items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
+        purpose_stable, purpose_dynamic = self._purpose_messages(
+            purpose=purpose,
+            task=task,
+            final_answer_templates=final_answer_templates,
+        )
+        purpose_stable = [*purpose_stable, *request_system_messages]
+        purpose_dynamic = [*purpose_dynamic, *request_tail_messages]
+        canonical_tools = self._canonical_tools(tools or ())
+        raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
+        final_items = list(items)
+        history_triggered = False
+        new_coverage = None
+        persist_status = "not_attempted"
+        compressible_history_tokens = 0
+        non_history_tokens = raw_tokens
+        compaction_stop_reason = "not_triggered"
+        self._step_local_log = []
+
+        if (
+            policy.processing_mode == ContextProcessingMode.ADAPTIVE_COMPACT
+            and (
+                force_compaction
+                or (
+                    self.config.effective_input_limit_tokens > 0
+                    and raw_tokens >= self._compaction_trigger_threshold_tokens()
+                )
+            )
+        ):
+            summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
+            turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
+            if (turns or summary) and self._run_compaction_attempts < 3:
+                original_history_tokens = sum(
+                    item.token_estimate for item in final_items
+                    if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
+                )
+                compressible_history_tokens = original_history_tokens
+                non_history_tokens = max(0, raw_tokens - original_history_tokens)
+                if (
+                    self.config.effective_input_limit_tokens > 0
+                    and non_history_tokens >= self.config.effective_input_limit_tokens
+                ):
+                    # Even deleting all history cannot make the request fit.
+                    # Preserve the last accepted checkpoint for Provider-side
+                    # handling instead of degrading it without benefit.
+                    history_target = original_history_tokens
+                elif non_history_tokens < self._compaction_target_tokens():
+                    history_target = self._compaction_target_tokens() - non_history_tokens
+                else:
+                    # Fixed request content already makes the ideal Target
+                    # unreachable. In that case, only reclaim history needed
+                    # to stay within the Provider's Effective Input Limit.
+                    # Re-summarizing an accepted checkpoint after every small
+                    # new turn cannot reach Target and steadily degrades it.
+                    history_target = max(
+                        0,
+                        self.config.effective_input_limit_tokens - non_history_tokens,
+                    )
+                # A checkpoint with no uncovered turns is already canonical.
+                # If it is within the useful history target, fixed request
+                # content is the remaining excess and cannot be reclaimed by
+                # repeatedly summarizing the same checkpoint.
+                should_compress_history = original_history_tokens > history_target
+                if not should_compress_history:
+                    compaction_stop_reason = "history_target_reached"
+                else:
+                    history_triggered = True
+                    self._emit_history_summary_status("compacting")
+                current_summary, current_turns = summary, turns
+                last_valid = None
+                attempts = 0
+                remaining_attempts = 3 - self._run_compaction_attempts
+                for _ in range(remaining_attempts if should_compress_history else 0):
+                    self._run_compaction_attempts += 1
+                    attempt = self._run_compaction_attempts
+                    result = self._history_compressor.compress(current_summary, current_turns, model)
+                    attempts = attempt
+                    self._record_compression(result.records)
+                    candidate = result.candidate
+                    if candidate is None:
+                        compaction_stop_reason = "invalid_candidate"
+                        if last_valid is None and result.fallback_turns:
+                            fallback_by_id = {item.id: item for item in result.fallback_turns}
+                            final_items = [fallback_by_id.get(item.id, item) for item in final_items]
+                        break
+                    candidate_item = candidate.as_item()
+                    previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
+                    previous_tokens += sum(item.token_estimate for item in current_turns)
+                    required_saving = max(
+                        self.config.minimum_history_reduction_tokens,
+                        math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
+                    )
+                    if previous_tokens - candidate_item.token_estimate < required_saving:
+                        compaction_stop_reason = "insufficient_candidate_reduction"
+                        break
+                    last_valid = candidate
+                    final_items = [
+                        item for item in final_items
+                        if item.type not in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
+                    ] + [candidate_item]
+                    complete_tokens = self._estimate_items(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools
+                    )
+                    if candidate_item.token_estimate <= history_target:
+                        compaction_stop_reason = "history_target_reached"
+                        break
+                    if complete_tokens <= self._compaction_target_tokens():
+                        compaction_stop_reason = "request_target_reached"
+                        break
+                    current_summary, current_turns = candidate_item, []
+                else:
+                    if should_compress_history:
+                        compaction_stop_reason = "compaction_attempts_exhausted"
+                if last_valid is not None:
+                    final_history_tokens = last_valid.as_item().token_estimate
+                    last_valid = replace(
+                        last_valid,
+                        history_tokens_before=original_history_tokens,
+                        history_tokens_after=final_history_tokens,
+                        compaction_attempts=attempts,
+                        compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
+                        compaction_target_tokens=self._compaction_target_tokens(),
+                    )
+                    self._history_candidate = last_valid
+                    new_coverage = last_valid.covered_through_message_id
+                    final_items = [
+                        item for item in final_items if item.type != ContextItemType.HISTORY_SUMMARY
+                    ] + [last_valid.as_item()]
+                    persist_status = self._persist_candidate(last_valid)
+                    self._pending_history_summary_event = {
+                        **deepcopy(last_valid.as_item().content),
+                        "persist_status": persist_status,
+                        "status": "accepted",
+                    }
+                elif should_compress_history:
+                    self._emit_history_summary_status("idle")
+
+            final_items = self._compact_to_compaction_target(
+                final_items,
+                purpose_stable,
+                purpose_dynamic,
+                canonical_tools,
+                model=model,
+            )
+
+        final_items.sort(key=lambda item: item.layout_key)
+        rendered = self.build_context_messages(final_items)
+        # Stable item messages remain first for KV-cache reuse.
+        stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
+        dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
+        memory_messages = [*stable, *dynamic]
+        messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
+        final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
+        self._last_uncompressed_token_count = raw_tokens
+        self._last_compressed_token_count = final_tokens
+        effective_limit = self.config.effective_input_limit_tokens
+        exceeds_limit = bool(effective_limit and final_tokens > effective_limit)
+        attempts_exhausted = history_triggered and len(self._step_local_log) >= 3
+        if exceeds_limit:
+            logger.warning(
+                "Context exceeds Effective Input Limit after compaction: %s > %s",
+                final_tokens, effective_limit,
+            )
+
+        representations = tuple((item.id, str(item.metadata.get("representation", "raw"))) for item in final_items)
+        hits = sum(item.representation_cache_stats[0] for item in items)
+        misses = sum(item.representation_cache_stats[1] for item in items)
+        loaded = next((item for item in run_context.items if item.type == ContextItemType.HISTORY_SUMMARY), None)
+        stable_fp = self._fingerprint({"messages": [*stable, *purpose_stable], "tools": canonical_tools})
+        reasons = self._change_reasons(
+            stable_fp, self._stable_item_fingerprints(final_items, purpose_stable, canonical_tools)
+        )
+        self._previous_stable_fingerprint = stable_fp
+        selected_ids = tuple(item.id for item in final_items)
+        message_roles = tuple(message_role(message) for message in messages)
+        system_messages = [message for message in messages if message_role(message) in {"system", "developer"}]
+        history_messages = [message for message in messages if message_role(message) not in {"system", "developer"}]
+        return FinalContext(
+            messages=messages,
+            memory_messages=memory_messages,
+            tools=canonical_tools,
+            evidence=ContextEvidence(
+                purpose=purpose,
+                selected_item_ids=selected_ids,
+                selected_item_types=tuple(item.type.value for item in final_items),
+                stable_message_count=len(stable) + len(purpose_stable),
+                dynamic_message_count=len(dynamic) + len(purpose_dynamic),
+                compression_records=tuple(self._step_local_log),
+                stable_prefix_fingerprint=stable_fp,
+                prefix_change_reasons=tuple(reasons),
+                policy_fingerprint=run_context.selection_decision.policy_fingerprint
+                if run_context.selection_decision
+                else None,
+                processing_mode=policy.processing_mode.value,
+                effective_input_limit_tokens=effective_limit,
+                compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
+                compaction_target_tokens=self._compaction_target_tokens(),
+                compaction_attempts=self._run_compaction_attempts,
+                compressible_history_tokens=compressible_history_tokens,
+                non_history_tokens=non_history_tokens,
+                compaction_stop_reason=compaction_stop_reason,
+                raw_token_estimate=raw_tokens,
+                final_token_estimate=final_tokens,
+                loaded_summary_unit_id=(loaded.content.get("unit_id") if loaded else None),
+                loaded_summary_coverage=(loaded.content.get("covered_through_message_id") if loaded else None),
+                new_history_turn_count=sum(
+                    item.type == ContextItemType.CONVERSATION_TURN for item in run_context.items
+                ),
+                history_compression_triggered=history_triggered,
+                new_summary_coverage=new_coverage,
+                summary_persist_status=persist_status,
+                item_representations=representations,
+                current_action_compact_count=sum(
+                    kind == "compact"
+                    and next(item for item in final_items if item.id == item_id).type == ContextItemType.CURRENT_ACTION
+                    for item_id, kind in representations
+                ),
+                representation_cache_hits=hits,
+                representation_cache_misses=misses,
+                compaction_attempts_exhausted=attempts_exhausted,
+                exceeds_effective_input_limit=exceeds_limit,
+                messages_fingerprint=self._fingerprint(messages),
+                tools_fingerprint=self._fingerprint(canonical_tools),
+                system_messages_fingerprint=self._fingerprint(system_messages),
+                history_messages_fingerprint=self._fingerprint(history_messages),
+                final_answer_prompt_fingerprint=(
+                    self._fingerprint(purpose_dynamic)
+                    if purpose == "final_answer" else None
+                ),
+                message_roles=message_roles,
+                history_message_roles=tuple(message_role(message) for message in history_messages),
+                compression_attempted=bool(self._step_local_log),
+                fallback_compaction_used=any(representation != "raw" for _, representation in representations),
+            ),
+        )
+
+    def consume_history_summary_event(self) -> dict[str, Any] | None:
+        """Return a newly-created summary checkpoint once for stream display."""
+        event = self._pending_history_summary_event
+        self._pending_history_summary_event = None
+        return deepcopy(event) if event is not None else None
+
+    def _emit_history_summary_status(self, status: str) -> None:
+        sink = self.config.history_summary_status_sink
+        if sink is None:
+            return
+        try:
+            sink({"status": status})
+        except Exception:
+            logger.exception("History summary status sink failed")
+
+    def _compact_to_compaction_target(self, items, purpose_stable, purpose_dynamic, tools, *, model):
+        result = list(items)
+        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
+            return result
+        keep_recent = max(0, self.config.keep_recent_steps)
+        actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
+        old_actions = actions[:-keep_recent] if keep_recent else actions
+        recent_actions = actions[-keep_recent:] if keep_recent else []
+        long_term_items = [
+            item for item in result
+            if item.type == ContextItemType.MEMORY
+            and (item.metadata.get("version_id") is not None or item.metadata.get("memory_type") == "long_term")
+        ]
+        other_items = [
+            item for item in result
+            if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact and item not in long_term_items
+        ]
+        # The stages are intentional: reclaim old current-run execution detail
+        # before degrading stable resources or planning/evidence Items. Within a
+        # stage, prefer the largest deterministic saving.
+        # Recent actions are the last-resort stage. Keeping them raw is a
+        # preference, not permission to exceed the model input budget.
+        for candidates in (old_actions, other_items, recent_actions):
+            savings = []
+            for item in candidates:
+                if item.type == ContextItemType.CURRENT_ACTION:
+                    if actions and item is actions[-1] and item.content.get("loaded_result"):
+                        continue
+                    saving = item.token_estimate
+                    compact = None
+                else:
+                    compact = item.compact()
+                    saving = max(0, item.token_estimate - compact.token_estimate)
+                savings.append((saving, item.priority, item.layout_key, item, compact))
+            for _, _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1], row[2])):
+                if compact is None:
+                    compact = self._compact_execution(original, model)
+                if compact is None or self._estimate_items([compact], [], [], []) >= self._estimate_items([original], [], [], []):
+                    continue
+                result[result.index(original)] = compact
+                if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
+                    return result
+        if self.config.enable_long_term_memory_selection and long_term_items:
+            return self._select_long_term_memories(result, long_term_items, model=model)
+        return result
+
+    def _compact_execution(self, item, model):
+        from .execution_history import summarize_record
+
+        history = self.config.execution_history
+        key = item.content.get("execution_key")
+        record = history.get(key) if history is not None and key else None
+        if record is None:
+            if "execution_fields" not in item.content:
+                return item.compact()
+            # Debug and standalone SDK runs have no persisted result reference.
+            # Keep their original steps intact, but retain the legacy bounded
+            # view once adaptive compaction is triggered. Never invent a ref.
+            from .execution_history import result_text
+
+            content = deepcopy(item.content)
+            text = result_text(content.get("execution_fields", {}))
+            if len(text) <= 4000:
+                return None
+            content.pop("summary", None)
+            content.pop("output_ref", None)
+            content["preview"] = (
+                text[:2000] + "\n[Execution output truncated; no original-output reference available]\n" + text[-2000:]
+            )
+            data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
+            return item.__class__(
+                **data, content=content,
+                metadata={**item.metadata, "representation": "compact"},
+                token_estimate=max(1, len(content["preview"]) // 2),
+            )
+        # Backend consumes observer events independently of the model worker.
+        # An unbound record must never publish a guessed unit reference.
+        if not record.ready.wait(timeout=0.5):
+            return None
+        already_called = record.called
+        summary = summarize_record(record, model, self.config.effective_input_limit_tokens or self.config.token_threshold)
+        if record.called and not already_called:
+            self._record_compression([CompressionCallRecord(
+                call_type="execution_result_summary", input_chars=len(record.text),
+                output_chars=len(summary or ""),
+                details={"reference": record.reference, "outcome": "accepted" if summary else "fallback"},
+            )])
+        content = deepcopy(item.content)
+        content["output_ref"] = record.reference
+        if summary:
+            content["summary"] = summary
+        else:
+            text = record.text
+            lines = text.splitlines(keepends=True)
+            head = "".join(lines[:20])[:2000]
+            tail = "".join(lines[-20:])[-2000:]
+            if len(lines) <= 40 and len(text) <= 4000:
+                return None
+            content["preview"] = head + "\n[Middle content unloaded; use OUTPUT_REF]\n" + tail
+        data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
+        return item.__class__(**data, content=content,
+                              metadata={**item.metadata, "representation": "compact"},
+                              token_estimate=max(1, len(str(content.get("summary") or content.get("preview"))) // 2))
+
+    def _select_long_term_memories(self, result, memory_items, *, model):
+        task_item = next((item for item in result if item.type == ContextItemType.CURRENT_TASK), None)
+        task = json.dumps(task_item.content, ensure_ascii=False, default=str) if task_item else ""
+        model_id = str(getattr(model, "model_id", None) or getattr(model, "model_name", None)
+                       or model.__class__.__name__)
+        target_tokens = max(64, self._compaction_target_tokens() // 4)
+        versions = tuple(sorted(str(item.metadata.get("version_id") or item.id) for item in memory_items))
+        cache_key = (*versions, task, target_tokens, model_id)
+        cached = self._memory_compact_cache.get(cache_key)
+        if cached is not None:
+            replacements = {item.id: item for item in cached}
+            self._record_compression([CompressionCallRecord(
+                call_type="long_term_memory_block_selection", cache_hit=True,
+                details={"version_ids": versions, "target_tokens": target_tokens,
+                         "model_id": model_id, "outcome": "cache_hit"},
+            )])
+            return [replacements.get(item.id, item) for item in result]
+
+        documents: dict[str, str] = {}
+        by_scope: dict[str, ContextItem] = {}
+        for item in memory_items:
+            scope = str(item.metadata.get("scope") or item.content.get("memory_level") or "user")
+            key = next((name for name in ("memory", "content", "text")
+                        if isinstance(item.content.get(name), str)), None)
+            if key and scope not in by_scope:
+                documents[scope] = item.content[key]
+                by_scope[scope] = item
+        selected, audit = select_long_term_memory(
+            documents, task=task, target_tokens=target_tokens, model=model,
+            chars_per_token=self.config.chars_per_token,
+        )
+        replacements: list[ContextItem] = []
+        for scope, item in by_scope.items():
+            key = next(name for name in ("memory", "content", "text") if isinstance(item.content.get(name), str))
+            content = deepcopy(item.content)
+            content[key] = selected.get(scope, "")
+            data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
+            replacements.append(item.__class__(
+                **data, content=content,
+                metadata={**deepcopy(item.metadata), "representation": "selected_blocks"},
+                token_estimate=max(1, math.ceil(len(content[key]) / self.config.chars_per_token)),
+            ))
+        self._memory_compact_cache[cache_key] = replacements
+        self._record_compression([CompressionCallRecord(
+            call_type="long_term_memory_block_selection",
+            input_chars=int(audit.get("input_chars", 0)), output_chars=sum(len(value) for value in selected.values()),
+            details={**audit, "version_ids": versions, "target_tokens": target_tokens,
+                     "model_id": model_id, "persisted": False},
+        )])
+        replacement_by_id = {item.id: item for item in replacements}
+        return [replacement_by_id.get(item.id, item) for item in result]
+
+
+    def _neutral_action_content(self, step: ActionStep, action_index: int) -> dict[str, Any]:
+        """Preserve completed-action evidence without upstream protocol labels."""
+        fields = getattr(step, "execution_fields", None)
+        if not isinstance(fields, dict):
+            fields = {}
+            observation = getattr(step, "observations", None)
+            output = getattr(step, "action_output", None)
+            if observation is not None:
+                fields["OUTPUT"] = str(observation)
+            if output is not None and str(output) != str(observation or ""):
+                fields["RETURN_VALUE"] = str(output)
+            if getattr(step, "error", None):
+                fields["ERROR"] = str(step.error)
+            if not fields:
+                fields["STDOUT"] = ""
+        return {
+            "step_number": getattr(step, "step_number", action_index + 1),
+            "assistant_output": getattr(step, "model_output", None) or "",
+            "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
+            "execution_fields": dict(fields),
+            "execution_key": getattr(step, "execution_key", None),
+            "loaded_result": getattr(step, "execution_loaded", False),
+        }
+
+    def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
+        projected: list[ContextItem] = []
+        action_index = planning_index = 0
+        for index, step in enumerate(memory.steps[start:]):
+            cached = self._current_item_cache.get(id(step))
+            if cached is not None:
+                projected.append(cached)
+                if cached.type == ContextItemType.CURRENT_ACTION:
+                    action_index += 1
+                elif cached.type == ContextItemType.CURRENT_PLANNING:
+                    planning_index += 1
+                continue
+            if isinstance(step, TaskStep):
+                item = ContextItem.from_input(
+                    ContextItemInput(
+                        id=f"current_task:{index}",
+                        type=ContextItemType.CURRENT_TASK,
+                        content={"text": step.task or ""},
+                        metadata={"layout_order": index, "run_order": index},
+                    )
+                )
+                projected.append(item)
+            elif isinstance(step, ActionStep):
+                content = self._neutral_action_content(step, action_index)
+                # Render completed actions from structured fields instead of
+                # smolagents ActionStep.to_messages(). The upstream rendering
+                # injects protocol labels such as "Calling tools:" and
+                # "Observation:" into the next model request, which can prime
+                # reasoning models to emit a configured stop sequence. The
+                # neutral representation preserves the executable action,
+                # outcome, error, result, and ordering without changing how
+                # the live ReAct step is parsed or executed.
+                item = ContextItem.from_input(
+                    ContextItemInput(
+                        id=f"current_action:{action_index}",
+                        type=ContextItemType.CURRENT_ACTION,
+                        content=content,
+                        metadata={"layout_order": action_index, "run_order": index},
+                    )
+                )
+                projected.append(item)
+                action_index += 1
+            elif step.__class__.__name__ == "PlanningStep":
+                item = ContextItem.from_input(
+                    ContextItemInput(
+                        id=f"current_planning:{planning_index}",
+                        type=ContextItemType.CURRENT_PLANNING,
+                        content={"text": "\n".join(extract_message_text(m) for m in step.to_messages())},
+                        metadata={"layout_order": planning_index, "run_order": index},
+                    )
+                )
+                projected.append(item)
+                planning_index += 1
+            else:
+                continue
+            self._current_item_cache[id(step)] = item
+        return projected
+
+    def _persist_candidate(self, candidate: HistorySummaryCandidate) -> str:
+        sink = self.config.history_summary_sink
+        if sink is None:
+            return "not_configured"
+        try:
+            sink(candidate)
+            return "succeeded"
+        except Exception:
+            logger.exception("History summary persistence failed; using run-local candidate")
+            return "failed"
+
+    def _purpose_messages(self, *, purpose, task, final_answer_templates):
+        if purpose != "final_answer":
+            return [], []
+        if not final_answer_templates:
+            raise ValueError("final_answer purpose requires final_answer_templates")
+        from ..prompt import AgentPromptComposer
+
+        composer = AgentPromptComposer.from_compatibility_templates(final_answer_templates)
+        return (
+            [{"role": "system", "content": [{"type": "text", "text": composer.render_final_answer_pre_message()}]}],
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": composer.render_final_answer_post_message(task or ""),
+                        }
+                    ],
+                }
+            ],
+        )
+
+    def _estimate_items(self, items, stable, dynamic, tools):
+        return self._message_tokens([*self.build_context_messages(items), *stable, *dynamic]) + self._tools_tokens(
+            tools
+        )
+
+    def _message_tokens(self, messages):
+        return max(
+            0, int(sum(len(extract_message_text(message)) for message in messages) / self.config.chars_per_token)
+        )
+
+    def _tools_tokens(self, tools):
+        return (
+            int(len(json.dumps(tools, ensure_ascii=False, default=str)) / self.config.chars_per_token) if tools else 0
+        )
+
+    def _record_compression(self, records):
+        self._step_local_log.extend(records)
+        self.compression_calls_log.extend(records)
+
+    def get_step_compression_stats(self):
+        return {"calls": len(self._step_local_log), "records": list(self._step_local_log)}
+
+    def get_all_compression_stats(self):
+        return {"calls": len(self.compression_calls_log), "records": list(self.compression_calls_log)}
+
+    def get_token_counts(self):
+        return {"uncompressed": self._last_uncompressed_token_count, "compressed": self._last_compressed_token_count}
+
+    def export_summary(self):
+        return {"history_candidate": self._history_candidate}
+
+    def build_compressed_snapshot(self, model, memory, current_run_start_idx):
+        final = self.assemble_final_context(model=model, memory=memory, current_run_start_idx=current_run_start_idx)
+        return final.messages, {
+            "token_counts": self.get_token_counts(),
+            "compression_stats": self.get_step_compression_stats(),
+        }
+
+    def render_memory_messages(self, memory):
+        messages = []
+        if memory.system_prompt:
+            messages.extend(memory.system_prompt.to_messages())
+        action_index = 0
+        for step in memory.steps:
+            if isinstance(step, ActionStep):
+                item = ContextItem.from_input(
+                    ContextItemInput(
+                        id=f"summary_action:{action_index}",
+                        type=ContextItemType.CURRENT_ACTION,
+                        content=self._neutral_action_content(step, action_index),
+                        metadata={"layout_order": action_index},
+                    )
+                )
+                messages.extend(self.build_context_messages([item]))
+                action_index += 1
+            else:
+                messages.extend(step.to_messages())
+        return messages
+
+    def register_item(self, item):
+        normalized = self._item_source([item])[0]
+        with self._lock:
+            if any(existing.id == normalized.id for existing in self._items):
+                raise ValueError(f"duplicate context item id: {normalized.id}")
+            self._items.append(normalized)
+
+    def clear_items(self):
+        with self._lock:
+            self._items.clear()
+
+    def get_registered_items(self):
+        with self._lock:
+            return list(self._items)
+
+    def replace_items(self, items):
+        normalized = self._item_source(items)
+        with self._lock:
+            self._items = normalized
+
+    def build_context_messages(self, items=None):
+        from .rendering import ContextItemRenderer
+
+        return ContextItemRenderer().render(sorted(self._item_source(items), key=lambda item: item.layout_key))
+
+    def build_system_prompt(self):
+        return self.build_context_messages()
+
+    def _item_source(self, items):
+        source = list(items) if items is not None else self.get_registered_items()
+        if not source:
+            return []
+        if all(isinstance(item, ContextItem) for item in source):
+            return source
+        if any(isinstance(item, ContextItem) for item in source):
+            raise TypeError("context items cannot mix public inputs and normalized items")
+        return normalize_context_inputs(source)
+
+    @staticmethod
+    def _canonical_tools(tools):
+        return sorted(
+            list(tools), key=lambda tool: json.dumps(ContextManager._normalize(tool), sort_keys=True, default=str)
+        )
+
+    @staticmethod
+    def _normalize(value, _active_ids=None, _depth=0):
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        class_name = f"{value.__class__.__module__}.{value.__class__.__qualname__}"
+        if _depth >= 32:
+            return {"__max_depth__": class_name}
+
+        active_ids = _active_ids if _active_ids is not None else set()
+        value_id = id(value)
+        if value_id in active_ids:
+            return {"__cycle__": class_name}
+        active_ids.add(value_id)
+        try:
+            if isinstance(value, dict):
+                return {
+                    str(key): ContextManager._normalize(item, active_ids, _depth + 1)
+                    for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+                }
+            if isinstance(value, (list, tuple)):
+                return [
+                    ContextManager._normalize(item, active_ids, _depth + 1)
+                    for item in value
+                ]
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                return ContextManager._normalize(
+                    model_dump(), active_ids, _depth + 1
+                )
+            return {"name": getattr(value, "name", value.__class__.__name__)}
+        finally:
+            active_ids.remove(value_id)
+
+    @staticmethod
+    def _message_to_dict(message):
+        if isinstance(message, dict):
+            return ContextManager._to_json_value(message)
+        role = getattr(message.role, "value", message.role)
+        return {"role": str(role), "content": ContextManager._to_json_value(message.content)}
+
+    @staticmethod
+    def _to_json_value(value):
+        """Convert runtime memory values into detached JSON-compatible payloads."""
+        if isinstance(value, dict):
+            return {str(key): ContextManager._to_json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [ContextManager._to_json_value(item) for item in value]
+        if isinstance(value, Enum):
+            return ContextManager._to_json_value(value.value)
+        if is_dataclass(value) and not isinstance(value, type):
+            return ContextManager._to_json_value(asdict(value))
+        if hasattr(value, "model_dump"):
+            return ContextManager._to_json_value(value.model_dump(mode="json"))
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+    def _fingerprint(self, value):
+        try:
+            normalized = self._normalize(value)
+        except Exception as error:
+            normalized = {
+                "__normalization_error__": type(error).__name__,
+                "__class__": (
+                    f"{value.__class__.__module__}.{value.__class__.__qualname__}"
+                ),
+            }
+        encoded = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+    def _stable_item_fingerprints(self, items, purpose, tools):
+        stable = {
+            item.id: self._fingerprint(item.content)
+            for item in items
+            if item.type
+            in {
+                ContextItemType.SYSTEM,
+                ContextItemType.TOOL,
+                ContextItemType.SKILL,
+                ContextItemType.WORKER_AGENT,
+                ContextItemType.EXTERNAL_AGENT,
+            }
+        }
+        if purpose:
+            stable["purpose"] = self._fingerprint(purpose)
+        if tools:
+            stable["tools"] = self._fingerprint(tools)
+        return stable
+
+    def _change_reasons(self, current, item_fingerprints):
+        if self._previous_stable_fingerprint is None:
+            self._previous_stable_items = item_fingerprints
+            return ["initial_request"]
+        if self._previous_stable_fingerprint == current:
+            return []
+        reasons = []
+        if self._previous_stable_items.get("tools") != item_fingerprints.get("tools"):
+            reasons.append("tool_schema_version")
+        if self._previous_stable_items.get("purpose") != item_fingerprints.get("purpose"):
+            reasons.append("context_purpose")
+        if {k: v for k, v in self._previous_stable_items.items() if k not in {"tools", "purpose"}} != {
+            k: v for k, v in item_fingerprints.items() if k not in {"tools", "purpose"}
+        }:
+            reasons.append("system_prompt_version")
+        self._previous_stable_items = item_fingerprints
+        return reasons or ["unexpected_nondeterminism"]

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+change:
+  change_id: D3-PLANNING-REVISION-CONTRACT-20261010
+  change_type: test-fix
+  title: Observable Planning failure and trusted local revision save contracts
+  description: >-
+    AGT-025 replaces a nonexistent failure-tool instruction and historical
+    plan_id dependency with an owned real-model Agent and actual controlled
+    MCP always_fail calls. Two unique runs require wire receipts, structured
+    plan/step updates, skipping the failed dependency and bounded termination.
+    This proves dependency error handling, not real transport timeout or all
+    planning stop/resume behavior. Owned generated files are also cleaned.
+    NL2Agent partial saves may emit agent_generation_completed when the draft
+    remains complete, as documented by the current prompt and save tool.
+    Updated fields come from the trusted successful execution log receipt,
+    cross-checked against owned draft/resource readback and one save call.
+    Literal duty content tolerates sentence-ending punctuation only;
+    conversation optimization may preserve an already suitable value but
+    still requires a real save, nonempty readback and no unrequested writes.
+    The optimization request supplies explicit confirmed greeting/question
+    content; an ambiguous request may legitimately return a clarification
+    card and cannot be assumed to have saved those fields.
+    The resource probe explicitly limits authorization to searching and
+    recommending. The current Chinese resource-task contract permits a
+    dependency-Prompt regeneration chain after a no-bindable-candidate
+    decision, so a generic resource request cannot be treated as a blanket
+    prohibition on Prompt saves. That unrestricted chain is not covered by
+    this search-only preservation probe; English/Chinese contract divergence
+    is left as a product documentation issue, not changed here.
+    A real initial generation establishes the full-draft prerequisite;
+    resource-free constraint/few-shot text may be empty by the completion
+    contract. Related-field clarification and a no-synchronization
+    submission preserve all non-requested fields. The submission respects
+    the actual card's required-answer constraint instead of forging an empty
+    value for a required multiple-choice question. A card-enabled nonempty
+    Other answer is supported when no explicit no-sync option is provided.
+    Whitelist rejection executes display_name only; separate name/model
+    rejection and draft_incomplete variants remain acceptance gaps, not
+    claimed as proven by a mapped passing script.
+    No product or operator
+    configuration changes, no remote synchronization or commits.
+  affected_features:
+    existing: [F-045, F-059]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGT-025, AGT-AUTO-6A6BC7594487E771]
+    retired: []

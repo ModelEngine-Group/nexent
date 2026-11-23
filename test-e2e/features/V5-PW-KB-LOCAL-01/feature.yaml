@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-KB-LOCAL-01
+  name: Local KB创建→上传→处理→检索→Agent绑定→Chat
+  status: active
+  description: 基于/knowledges本地分支的完整RAG Journey。
+  business_rules:
+  - rule_id: V5-PW-KB-LOCAL-01-RULE-01
+    description: Local KB创建→上传→处理→检索→Agent绑定→Chat
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,61 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-95BBFF3CC39D73F0
+  feature_id: F-131
+  business_rule_ids:
+  - F-131-RULE-01
+  title: Runtime/Config /internal/thread-capacity 返回进程级线程快照且不在 OpenAPI 暴露｜接口契约
+  type: API-IT
+  priority: P2
+  status: active
+  automation: automated
+  objective: Runtime/Config /internal/thread-capacity 返回进程级线程快照且不在 OpenAPI 暴露｜接口契约
+  preconditions:
+  - Runtime 与 Config 服务进程已启动，FastAPI lifespan（runtime_lifespan/config_lifespan）已执行，对应 ThreadManager 已进入 running 状态。
+  - 当次 run_id 已生成；测试基线固定为 develop，执行时另记录实际被测 commit。
+  - 本地测试环境参数就绪，不依赖外部模型或第三方服务；Redis 可缺省（不影响进程内线程快照探针）。
+  - 测试代码不得读取生产凭据。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 启动 Runtime 服务进程，确认 lifespan 完成后 runtime_thread_manager 为 running，向 GET /internal/thread-capacity 发起请求，记录状态码与响应体。
+    expected: Runtime 与 Config 的 GET /internal/thread-capacity 均返回 200，响应体为进程内线程容量快照 JSON。
+  - order: 2
+    action: 解析响应体，核对 state、stuck_count 及按 lane 划分的 worker/队列/卡住计数是否存在，lane 集合是否等于 runtime_thread_manager 的 lane_policies（agent-run/control-io/model-tool-io/mcp-session/sandbox/background-service/evaluation）。
+    expected: 快照包含 state（正常运行值为 running）与 stuck_count（非负整数），并包含按 lane 划分的 worker/队列信息。
+  - order: 3
+    action: 启动 Config 服务进程，向 GET /internal/thread-capacity 发起请求，核对其快照 lane 集合等于 config_thread_manager 的 lane_policies（control-io/background-service/evaluation/model-tool-io）。
+    expected: Runtime 快照 lane 集合与 thread_lifecycle_service.py 的 runtime_thread_manager 一致，Config 快照与 config_thread_manager
+      一致，两者不交叉（进程隔离）。
+  - order: 4
+    action: 对比 Runtime 与 Config 两次快照，确认各自仅暴露本进程线程快照（service_name 与 lane 集合不交叉），不能越权读取另一进程线程。
+    expected: OpenAPI schema 的 paths 不含 /internal/thread-capacity，端点在文档中不可发现、不可越权暴露。
+  - order: 5
+    action: 分别请求 Runtime 与 Config 的 OpenAPI 文档（/openapi.json），确认 paths 中不包含 /internal/thread-capacity。
+    expected: OpenAPI schema 的 paths 不含 /internal/thread-capacity，端点在文档中不可发现、不可越权暴露。
+  expected_results:
+  - Runtime 与 Config 的 GET /internal/thread-capacity 均返回 200，响应体为进程内线程容量快照 JSON。
+  - 快照包含 state（正常运行值为 running）与 stuck_count（非负整数），并包含按 lane 划分的 worker/队列信息。
+  - Runtime 快照 lane 集合与 thread_lifecycle_service.py 的 runtime_thread_manager 一致，Config 快照与 config_thread_manager 一致，两者不交叉（进程隔离）。
+  - OpenAPI schema 的 paths 不含 /internal/thread-capacity，端点在文档中不可发现、不可越权暴露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 500
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 启动 Runtime 服务进程，确认 lifespan 完成后 runtime_thread_manager 为 running，向 GET /internal/thread-capacity 发起请求，记录状态码与响应体。
+    - 解析响应体，核对 state、stuck_count 及按 lane 划分的 worker/队列/卡住计数是否存在，lane 集合是否等于 runtime_thread_manager 的 lane_policies（agent-run/control-io/model-tool-io/mcp-session/sandbox/background-service/evaluation）。
+    - 启动 Config 服务进程，向 GET /internal/thread-capacity 发起请求，核对其快照 lane 集合等于 config_thread_manager 的 lane_policies（control-io/background-service/evaluation/model-tool-io）。
+    - 对比 Runtime 与 Config 两次快照，确认各自仅暴露本进程线程快照（service_name 与 lane 集合不交叉），不能越权读取另一进程线程。
+    - 分别请求 Runtime 与 Config 的 OpenAPI 文档（/openapi.json），确认 paths 中不包含 /internal/thread-capacity。
+    response_expectations:
+    - Runtime 与 Config 的 GET /internal/thread-capacity 均返回 200，响应体为进程内线程容量快照 JSON。
+    - 快照包含 state（正常运行值为 running）与 stuck_count（非负整数），并包含按 lane 划分的 worker/队列信息。
+    - Runtime 快照 lane 集合与 thread_lifecycle_service.py 的 runtime_thread_manager 一致，Config 快照与 config_thread_manager 一致，两者不交叉（进程隔离）。
+    - OpenAPI schema 的 paths 不含 /internal/thread-capacity，端点在文档中不可发现、不可越权暴露。

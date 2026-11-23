@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -11,7 +13,6 @@ import {
   CARD_HEADER,
 } from "@/const/layoutConstants";
 
-import { AppConfigSection } from "./components/appConfig";
 import {
   ModelConfigSection,
   ModelConfigSectionRef,
@@ -58,7 +59,11 @@ export default function AppModelConfig({
     <div
       className="w-full h-full mx-auto"
       style={{
-        maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
+        // v0 redesign: cap the content column (~1440px) instead of the
+        // shared 1920px setup-container width — the redesigned layout was
+        // authored for a ~1150px column and stretched to 1920px it leaves
+        // wide empty gaps in the library rows.
+        maxWidth: "1760px",
         padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
@@ -66,45 +71,11 @@ export default function AppModelConfig({
         <div className="w-full h-full">
           <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
             <Col
-              className="h-full"
-              xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
-              md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
-              lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
-              xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
-              xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
-            >
-              <div
-                className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
-                style={{
-                  padding: STANDARD_CARD.PADDING,
-                }}
-              >
-                <div
-                  style={{
-                    padding: CARD_HEADER.PADDING,
-                    flexShrink: 0,
-                  }}
-                >
-                  <Title level={4}>{t("setup.config.appSettings")}</Title>
-                  <div className={CARD_HEADER.DIVIDER_CLASSES}></div>
-                </div>
-                <div
-                  style={{
-                    flex: 1,
-                    ...STANDARD_CARD.CONTENT_SCROLL,
-                  }}
-                >
-                  <AppConfigSection />
-                </div>
-              </div>
-            </Col>
-
-            <Col
               xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
               md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
-              lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
-              xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
-              xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
+              lg={24}
+              xl={24}
+              xxl={24}
             >
               <div
                 className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
@@ -115,6 +86,7 @@ export default function AppModelConfig({
                 <div
                   style={{
                     padding: CARD_HEADER.PADDING,
+                    marginBottom: CARD_HEADER.MARGIN_BOTTOM,
                     flexShrink: 0,
                   }}
                 >

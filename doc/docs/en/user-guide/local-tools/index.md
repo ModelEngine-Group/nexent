@@ -6,11 +6,11 @@ Local tools let agents interact with the workspace, remote hosts, and external s
 
 - [File Tools](./file-tools): Create/read/move/delete files and folders; list directory trees.
 - [Email Tools](./email-tools): Receive IMAP mail; send HTML mail with CC/BCC.
-- [Search Tools](./search-tools): Local/DataMate KB search plus Exa/Tavily/Linkup web search.
+- [Search Tools](./search-tools): Local/AIDP/DataMate/Dify KB search plus Exa/Tavily/Linkup web search.
 - [Multimodal Tools](./multimodal-tools): Download/parse/analyze text files and images.
 - [Terminal Tool](./terminal-tool): Persistent SSH sessions for remote commands.
 - [SQL Tools](./sql-tools): Connect to MySQL, PostgreSQL, SQL Server to execute SQL queries.
-- [Skills](../skills): Nexent's built-in tool combinations or custom capability packs with NL generation and version management.
+- [Skills](../resource-repository/skill-repository.md): Nexent's built-in tool combinations or custom capability packs with NL generation and version management.
 
 ## ⚙️ Configuration Entry
 

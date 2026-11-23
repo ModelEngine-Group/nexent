@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: DEP-AUTO-7177AC18CCE799DD
+implementations:
+- framework: pytest
+  file: test.py
+  selector: DEP-AUTO-7177AC18CCE799DD
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_dep_auto_7177ac18cce799dd]
+  AC-02: [test_dep_auto_7177ac18cce799dd]
+  AC-03: [test_dep_auto_7177ac18cce799dd]

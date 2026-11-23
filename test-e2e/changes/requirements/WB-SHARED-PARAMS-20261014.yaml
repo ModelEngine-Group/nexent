@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SHARED-PARAMS-20261014
+  change_type: requirement
+  requirement_id: WB-SHARED-PARAMS-20261014
+  title: Shared model selector exposes local advanced settings by default
+  description: Workbench and new Agent chat share advanced temperature and Top P controls, with frontend-only model/conversation state and unchanged real model/thinking integration.
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-001]
+    added: []
+    modified: [WB-CONTROLS-D4-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [frontend/tests/workbench/ModelSelectorThinking.test.tsx, frontend/tests/workbench/ModelParameterSettings.test.tsx, frontend/tests/workbench/Composer.test.tsx]
+    behaviors:
+      - Advanced settings appears without Workbench-only props, supports controlled callers, and isolates local values by model and conversation scope.
+      - Numeric and slider bounds, defaults and disabled controls remain unchanged.
+      - Model selection and registered thinking settings remain real while sampling parameters never enter model context or network requests.
+    reason: Extend actual shared selector interactions, reuse parameter and Composer contracts, and strengthen browser proof for Agent chat.
+  notes: Existing chat-workbench-resource-controls SPEC owns this extension. Legacy /chat uses a different selector and is unchanged. No backend sampling or persistence integration.

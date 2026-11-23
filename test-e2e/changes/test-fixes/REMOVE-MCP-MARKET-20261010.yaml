@@ -1,0 +1,18 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-MCP-MARKET-20261010
+  change_type: test-fix
+  title: Remove the MCP market tag journey at the user's explicit request
+  description: Delete PW-MCP-MARKET-01 contract, binding and script, remove its queue entry and regenerate views. Preserve the product Feature with an explicit coverage gap and historical reports. Do not remove PW-CHAT-01 or PW-A2A-PUBLISH-01.
+  affected_features:
+    existing: []
+    added: []
+    modified: [V5-PW-MCP-MARKET-01]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: The named Case is physically deleted; no surviving Case is modified by this removal record.
+  notes: 'Physical deletion explicitly requested; removed ID PW-MCP-MARKET-01 is recorded here as history, not a dangling current Case reference. Git history preserves its previous assets.'

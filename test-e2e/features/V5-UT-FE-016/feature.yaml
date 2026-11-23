@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-016
+  name: 基础信息/Prompt/模型/工具/技能未保存状态与 reload
+  status: active
+  description: 基础信息/Prompt/模型/工具/技能未保存状态与 reload
+  business_rules:
+  - rule_id: V5-UT-FE-016-RULE-01
+    description: 基础信息/Prompt/模型/工具/技能未保存状态与 reload
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-D426EB1254C4E6BE
+  name: MCP 管理 API 与容器日志流托管线程管理器的启停、优雅关闭、重启重建与异常不崩溃
+  status: active
+  description: MCP 管理服务与容器日志流由裸 Thread 重构为托管线程管理器后，若 register_service/start_service/cancel/shutdown/close_hook 语义不正确，会导致管理
+    API 线程或日志流后台线程无法优雅退出、shutdown 未关闭日志流造成资源（线程/流句柄）泄漏、重启后残留旧线程、日志流线程异常导致进程崩溃。目标为验证正常启停、shutdown 时 close_hook 关闭日志流、无后台线程/日志流泄漏、重启后重建、故障不崩溃。
+  business_rules:
+  - rule_id: V5-REL-AUTO-D426EB1254C4E6BE-RULE-01
+    description: MCP 管理 API 与容器日志流托管线程管理器的启停、优雅关闭、重启重建与异常不崩溃
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

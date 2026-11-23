@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-PERSIST-D5-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids: [CHAT-PERSIST-LOCK-20261021]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-006]
+  title: Concurrent assistant finalization and deletion have consistent lock ordering
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Real PostgreSQL contention cannot deadlock finalization with single or batch deletion, and deleted or foreign conversations reject writes.
+  preconditions:
+  - Real PostgreSQL and product Python dependencies are available; all rows live in a disposable schema.
+  test_data:
+    profile: mock
+    workers: 2
+    histories: [owned-streaming, second-owned-streaming, foreign-streaming]
+  steps:
+  - order: 1
+    action: Pause finalization after its first conversation lock, start single and batch deletion in separate variants, observe deletion waiting, then release finalization.
+    expected: Both transactions settle within the bound without deadlock; final answer and activity commit before deletion cascades all child rows.
+  - order: 2
+    action: Pause single and batch deletion after its conversation update, start finalization, observe its lock wait, then release deletion; also try finalizing a foreign conversation.
+    expected: Deletion commits; finalization rejects before child or activity writes. Foreign ownership also rejects without mutation.
+  - order: 3
+    action: Concurrently delete overlapping histories with reversed input ID orders and include a foreign ID.
+    expected: Both batch transactions settle without deadlock, locking owned histories in ascending order; foreign history remains live.
+  expected_results:
+  - Finalization-first single and batch deletion complete without deadlock and preserve atomic message/activity completion before deletion.
+  - Deleted or inaccessible conversation finalization produces no post-delete or foreign writes.
+  - Reversed overlapping batch inputs serialize in ascending owned conversation order and preserve other owners.
+  forbidden_side_effects:
+  - No production schema/data mutation, global database setting changes, ownership bypass, partial finalization or surviving diagnostic locks.
+  observations:
+  - Actual SQL order, pg_blocking_pids wait relationships, future outcomes, messages, units, sources and conversation activity.
+  cleanup:
+  - Finish or roll back all diagnostic transactions and drop only the disposable schema.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Finalization-first single and batch deletion serialize without deadlock and preserve atomic state.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Deletion-first and foreign finalization reject before mutation.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Reversed overlapping batches use ascending owned locks without deadlock.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  risk_type: RELIABILITY
+  risk: Circular row-lock waits and post-delete assistant writes under concurrent cancellation and finalization
+  condition:
+  - Two real transactions with deterministic lock gates in isolated PostgreSQL tables
+  metrics:
+  - Deadlock or lock-timeout exceptions, transaction completion time, deleted child rows and ownership isolation
+  thresholds:
+  - Zero deadlocks or lock timeouts; futures settle within 15 seconds after releasing the deterministic gate
+  - Zero writes after deletion wins or when the conversation belongs to another owner
+  recovery_expectations:
+  - All connections close and the disposable schema is removed, including after assertion failure

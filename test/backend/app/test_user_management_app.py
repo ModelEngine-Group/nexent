@@ -39,6 +39,7 @@ from consts.exceptions import (
     UserRegistrationException,
     UnauthorizedError,
     AppException,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -119,7 +120,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -130,7 +131,7 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="test@example.com",
                 password="password123",
-                invite_code=None,
+                invite_code="INVITE123",
                 auto_login=True
             )
 
@@ -144,7 +145,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None,
+                    "invite_code": "INVITE123",
                     "auto_login": False
                 }
             )
@@ -156,9 +157,25 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="test@example.com",
                 password="password123",
-                invite_code=None,
+                invite_code="INVITE123",
                 auto_login=False
             )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"email": "test@example.com", "password": "password123"},
+            {"email": "test@example.com", "password": "password123", "invite_code": None},
+            {"email": "test@example.com", "password": "password123", "invite_code": ""},
+            {"email": "test@example.com", "password": "password123", "invite_code": "   "},
+        ],
+    )
+    def test_signup_requires_non_empty_invite_code(self, payload):
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            response = client.post("/user/signup", json=payload)
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        mock_signup.assert_not_called()
 
     def test_signup_success_admin_user(self):
         """Test successful admin user registration"""
@@ -220,7 +237,7 @@ class TestUserSignup:
                 json={
                     "email": "admin@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -263,6 +280,30 @@ class TestUserSignup:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
 
+    def test_signup_tenant_limit_returns_standard_429_payload(self):
+        """Test registration returns the structured tenant quota response."""
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            mock_signup.side_effect = TenantResourceLimitError(
+                "Tenant user limit reached: maximum 10000 users per tenant",
+                resource="users",
+                scope="tenant",
+                limit=10000,
+                current_count=10000,
+            )
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "limit@example.com",
+                    "password": "password123",
+                    "invite_code": "LIMIT123",
+                },
+            )
+
+        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert response.json()["code"] == ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+        assert response.json()["details"]["limit"] == 10000
+
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
         with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
@@ -273,7 +314,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -291,7 +332,7 @@ class TestUserSignup:
                 json={
                     "email": "existing@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -309,7 +350,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "weakpass",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -327,7 +368,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -777,18 +818,21 @@ class TestCurrentUserInfo:
         mock_get_user_info.assert_called_once_with("user123")
 
     @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_provider_username')
     @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_marks_cas_user(
         self,
         mock_get_user_info,
         mock_validate_token,
+        mock_get_provider_username,
         mock_extract_session_id,
     ):
         """Test CAS-authenticated current user info includes auth provider"""
         mock_user = MockUser("user123", "test@example.com")
         mock_validate_token.return_value = (True, mock_user)
         mock_extract_session_id.return_value = "cas-session-123"
+        mock_get_provider_username.return_value = "CAS User"
         mock_get_user_info.return_value = {
             "user": {
                 "user_id": "user123",
@@ -809,7 +853,9 @@ class TestCurrentUserInfo:
         assert response.status_code == HTTPStatus.OK
         data = response.json()
         assert data["data"]["user"]["auth_provider"] == "cas"
+        assert data["data"]["user"]["username"] == "CAS User"
         mock_extract_session_id.assert_called_once_with("Bearer cas-token")
+        mock_get_provider_username.assert_called_once_with("user123", "cas")
 
     def test_current_user_info_no_authorization(self):
         """Test current user info retrieval without authorization header"""
@@ -946,7 +992,7 @@ class TestIntegration:
             json={
                 "email": "test@example.com",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "INVITE123"
             }
         )
         assert signup_response.status_code == HTTPStatus.OK
@@ -1086,10 +1132,10 @@ class TestListTokensEndpoint:
     """Tests for GET /tokens endpoint."""
 
     @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_success(self, mock_get_user_id, mock_list_tokens):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_success(self, mock_get_user_context, mock_list_tokens):
         """Test successful token listing."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
         mock_list_tokens.return_value = [
             {"token_id": 1, "access_key": "nexent-key1", "user_id": "user-123"},
             {"token_id": 2, "access_key": "nexent-key2", "user_id": "user-123"}
@@ -1104,6 +1150,7 @@ class TestListTokensEndpoint:
         data = response.json()
         assert data["message"] == "success"
         assert len(data["data"]) == 2
+        mock_list_tokens.assert_called_once_with("user-123", "USER")
 
     @patch('apps.user_management_app.get_current_user_id')
     def test_list_tokens_no_authorization(self, mock_get_user_id):
@@ -1114,10 +1161,10 @@ class TestListTokensEndpoint:
         data = response.json()
         assert "No authorization header" in data["detail"]
 
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_forbidden_other_user(self, mock_get_user_id):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_forbidden_other_user(self, mock_get_user_context):
         """Test listing tokens for a different user is forbidden."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
 
         response = client.get(
             "/user/tokens?user_id=user-other",
@@ -1129,10 +1176,10 @@ class TestListTokensEndpoint:
         assert "cannot list tokens for other users" in data["detail"]
 
     @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_empty(self, mock_get_user_id, mock_list_tokens):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_empty(self, mock_get_user_context, mock_list_tokens):
         """Test listing tokens when user has none."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "DEV")
         mock_list_tokens.return_value = []
 
         response = client.get(
@@ -1145,10 +1192,10 @@ class TestListTokensEndpoint:
         assert data["data"] == []
 
     @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_exception(self, mock_get_user_id, mock_list_tokens):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_exception(self, mock_get_user_context, mock_list_tokens):
         """Test token listing with exception."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
         mock_list_tokens.side_effect = Exception("Database error")
 
         response = client.get(

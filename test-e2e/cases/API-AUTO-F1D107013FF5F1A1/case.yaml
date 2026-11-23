@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-F1D107013FF5F1A1
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: 来源检索记录持久化并在历史/来源接口返回 retrieval_highlight_terms｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 来源检索记录持久化并在历史/来源接口返回 retrieval_highlight_terms｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）。
+  - 已存在至少一个归属当前测试账号的会话，其 conversation_source_search_t 来源检索记录包含 retrieval_highlight_terms（通过真实 Agent run 产生引用检索，或经测试夹具按真实写入路径种子化），并记录期望的高亮词数组。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 确定一个含有来源检索记录（score_details 应含 retrieval_highlight_terms）的目标 conversation_id，并记录该记录持久化的期望高亮词数组。
+    expected: GET /conversation/{conversation_id} 与 POST /conversation/sources 均在 score_details 中返回 retrieval_highlight_terms，字段为数组且与持久化值一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过 backend/apps/conversation_management_app.py 对外暴露的真实入口 GET /conversation/{conversation_id} 获取会话历史，记录返回结构与状态码。
+    expected: 跨重载：重复调用历史接口返回相同的 retrieval_highlight_terms，字段不被截断、重排或丢失。
+  - order: 3
+    action: 断言返回 data[0].message 中对应 assistant 消息 search 列表内该来源项的 score_details.retrieval_highlight_terms 存在且为数组，内容与持久化值一致；同时
+      score_overall 以 numeric(14,6) 精度正常返回。
+    expected: score_overall 按扩宽后的 numeric(14,6) 精度正常返回，不出现精度溢出或类型错误。
+  - order: 4
+    action: 通过 POST /conversation/sources 请求体 {conversation_id, type:"search"} 获取来源信息，断言 data.searches[] 中同一来源的 score_details.retrieval_highlight_terms
+      存在且与历史接口返回一致。
+    expected: 空/缺失 retrieval_highlight_terms 时不输出该字段，不抛 500；失败路径返回明确错误。
+  - order: 5
+    action: 再次 GET /conversation/{conversation_id}（模拟历史会话重载），断言 retrieval_highlight_terms 在跨重载后仍完整返回，顺序与元素不变，来源卡高亮所需字段不丢失。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 对 retrieval_highlight_terms 为空或不存在的来源记录，断言 score_details 不输出该字段且不产生序列化异常或 500。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 检查日志不泄露 secret，并清理当次临时数据。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - GET /conversation/{conversation_id} 与 POST /conversation/sources 均在 score_details 中返回 retrieval_highlight_terms，字段为数组且与持久化值一致，测试过程无未处理异常。
+  - 跨重载：重复调用历史接口返回相同的 retrieval_highlight_terms，字段不被截断、重排或丢失。
+  - score_overall 按扩宽后的 numeric(14,6) 精度正常返回，不出现精度溢出或类型错误。
+  - 空/缺失 retrieval_highlight_terms 时不输出该字段，不抛 500；失败路径返回明确错误。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 514
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 确定一个含有来源检索记录（score_details 应含 retrieval_highlight_terms）的目标 conversation_id，并记录该记录持久化的期望高亮词数组。
+    - 通过 backend/apps/conversation_management_app.py 对外暴露的真实入口 GET /conversation/{conversation_id} 获取会话历史，记录返回结构与状态码。
+    - 断言返回 data[0].message 中对应 assistant 消息 search 列表内该来源项的 score_details.retrieval_highlight_terms 存在且为数组，内容与持久化值一致；同时 score_overall
+      以 numeric(14,6) 精度正常返回。
+    - 通过 POST /conversation/sources 请求体 {conversation_id, type:"search"} 获取来源信息，断言 data.searches[] 中同一来源的 score_details.retrieval_highlight_terms
+      存在且与历史接口返回一致。
+    - 再次 GET /conversation/{conversation_id}（模拟历史会话重载），断言 retrieval_highlight_terms 在跨重载后仍完整返回，顺序与元素不变，来源卡高亮所需字段不丢失。
+    - 对 retrieval_highlight_terms 为空或不存在的来源记录，断言 score_details 不输出该字段且不产生序列化异常或 500。
+    - 检查日志不泄露 secret，并清理当次临时数据。
+    response_expectations:
+    - GET /conversation/{conversation_id} 与 POST /conversation/sources 均在 score_details 中返回 retrieval_highlight_terms，字段为数组且与持久化值一致，测试过程无未处理异常。
+    - 跨重载：重复调用历史接口返回相同的 retrieval_highlight_terms，字段不被截断、重排或丢失。
+    - score_overall 按扩宽后的 numeric(14,6) 精度正常返回，不出现精度溢出或类型错误。
+    - 空/缺失 retrieval_highlight_terms 时不输出该字段，不抛 500；失败路径返回明确错误。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

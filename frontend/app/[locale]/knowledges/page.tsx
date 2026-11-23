@@ -1,52 +1,69 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import log from "@/lib/logger";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
+import AidpKnowledgeConfiguration from "@/ext_components/aidp/AidpKnowledgeConfiguration";
 
 /**
- * KnowledgesContent - Main component for knowledge base configuration
- * Can be used in setup flow or as standalone page
+ * KnowledgesContent - Unified knowledge base entry page
+ *
+ * Renders the AIDP knowledge base configuration component when the
+ * ENABLE_AIDP_KNOWLEDGE flag is enabled, otherwise renders the built-in
+ * local knowledge base component. A single `/knowledges` route serves
+ * both backends from the user's perspective; the sidebar menu label is
+ * "知识库配置" regardless of which backend is active.
+ *
+ * Loading state: while the deployment config is being fetched, a minimal
+ * loading placeholder is shown to prevent the wrong component from
+ * flashing on screen before the flag is resolved.
  */
 export default function KnowledgesContent() {
-  // Get user and deployment state from respective hooks
-  const { isSpeedMode } = useDeployment();
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
+  const router = useRouter();
 
-  // Use custom hook for common setup flow logic
-  const {
-    pageVariants,
-    pageTransition,
-  } = useSetupFlow();
+  const { pageVariants, pageTransition } = useSetupFlow();
 
-  // Knowledge base specific initialization
-  useEffect(() => {
-    // Trigger knowledge base data acquisition when the page is initialized
-    window.dispatchEvent(
-      new CustomEvent("knowledgeBaseDataUpdated", {
-        detail: { forceRefresh: true },
-      })
+  // Loading state: wait for deployment config before deciding which
+  // component to render. Prevents flashing of the local KB page when
+  // AIDP is actually enabled.
+  if (!isDeploymentReady) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="text-sm text-gray-400">Loading...</div>
+      </div>
     );
+  }
 
-    const loadKnowledgeBaseList = async () => {
-      try {
-        await knowledgeBaseService.getKnowledgeBases(true);
-      } catch (error) {
-        log.error("Failed to load knowledge base list:", error);
-      }
-    };
+  // AIDP branch: render AIDP knowledge base configuration
+  if (enableAidpKnowledge) {
+    return (
+      <div style={{ width: "100%", height: "100%", padding: "0 20px" }}>
+        <motion.div
+          initial="initial"
+          animate="in"
+          exit="out"
+          variants={pageVariants}
+          transition={pageTransition}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <AidpKnowledgeConfiguration />
+        </motion.div>
+      </div>
+    );
+  }
 
-    loadKnowledgeBaseList();
-  }, [isSpeedMode]);
-
+  // Local knowledge base branch
   return (
     <>
-      <div className="w-full h-full p-8">
+      <div className="w-full h-full p-6">
         <motion.div
           initial="initial"
           animate="in"

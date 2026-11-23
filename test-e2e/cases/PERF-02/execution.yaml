@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: PERF-02
+implementations:
+- framework: pytest
+  file: test.py
+  selector: PERF-02
+- framework: pytest
+  file: test-e2e/infra/automation/d5/scenarios/scenario_performance_special.py
+  selector: PERF-02
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - basic_agent
+  anchors: true
+  special_assets: false
+  d4_groups: []

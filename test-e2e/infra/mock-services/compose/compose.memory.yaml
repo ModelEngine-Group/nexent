@@ -1,0 +1,20 @@
+version: "3.7"
+services:
+  memory-provider:
+    build:
+      context: ../memory-provider
+    environment:
+      NEXENT_EXTERNAL_MEMORY_API_KEY: "${NEXENT_EXTERNAL_MEMORY_API_KEY:?Set a machine-local mock credential}"
+    ports:
+      - "127.0.0.1:18120:18120"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18120/readyz', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

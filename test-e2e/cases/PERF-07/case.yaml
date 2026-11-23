@@ -1,0 +1,110 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: PERF-07
+  feature_id: V5-PERF-07
+  business_rule_ids:
+  - V5-PERF-07-RULE-01
+  title: 长上下文+记忆检索token预算（外部provider并入、MMR候选上限与内容去重）
+  type: PERFORMANCE
+  priority: P1
+  status: active
+  automation: automated
+  objective: 长期对话不突破上下文预算；外部 provider 记忆并入检索管线不导致超预算；MMR 候选上限(=200)与 SHA-256 内容去重不引入指数级时延；无 embedding 客户端缓存下写入/检索延迟可控。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+    - ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+      - ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  steps:
+  - order: 1
+    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
+    expected: token 预算受控。
+  - order: 2
+    action: 准备“长上下文+记忆检索token预算”所需固定测试数据：大量 memory + 长对话，并配置启用的外部 memory provider（可选）与 external_provider_top_k（1–100）。
+    expected: 高相关记忆优先。
+  - order: 3
+    action: 构造大量 memory+长对话，记录检索数量、截断、token 和时延。
+    expected: 外部 provider 结果正确并入且不超预算。
+  - order: 4
+    action: 分别测量 ①无外部 provider（external_results 为空/未启用）②启用外部 provider 并经 external_search_hook 并入 Phase4 管线 的最终 token、MMR 候选池（≤200）、去重前后数量与时延。
+    expected: MMR 候选池≤200 且 SHA-256 去重生效。
+  - order: 5
+    action: 测量无 embedding 客户端缓存下（get_embedding_client 每次新建实例）的写入/检索延迟与连接复用开销。
+    expected: 无指数级时延增长。
+  - order: 6
+    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
+    expected: 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。
+  - order: 7
+    action: 性能场景仍要验证业务正确性：高相关记忆优先、内容去重不丢失关键记忆、外部结果正确并入，不能以返回快作为唯一通过条件。
+    expected: 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。
+  - order: 8
+    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1 结果。
+    expected: 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。
+  expected_results:
+  - token 预算受控。
+  - 高相关记忆优先。
+  - 外部 provider 结果正确并入且不超预算。
+  - MMR 候选池≤200 且 SHA-256 去重生效。
+  - 无指数级时延增长。
+  - 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 18
+  risk_type: PERFORMANCE
+  risk: 长期对话不突破上下文预算；外部 provider 记忆并入检索管线不导致超预算；MMR 候选上限(=200)与 SHA-256 内容去重不引入指数级时延；无 embedding 客户端缓存下写入/检索延迟可控。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+    - ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  metrics:
+  - token 预算受控。
+  - 高相关记忆优先。
+  - 外部 provider 结果正确并入且不超预算。
+  - MMR 候选池≤200 且 SHA-256 去重生效。
+  - 无指数级时延增长。
+  - 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。
+  thresholds:
+  - token 预算受控。
+  - 高相关记忆优先。
+  - 外部 provider 结果正确并入且不超预算。
+  - MMR 候选池≤200 且 SHA-256 去重生效。
+  - 无指数级时延增长。
+  - 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。
+  recovery_expectations:
+  - token 预算受控。
+  - 高相关记忆优先。
+  - 外部 provider 结果正确并入且不超预算。
+  - MMR 候选池≤200 且 SHA-256 去重生效。
+  - 无指数级时延增长。
+  - 无 embedding 客户端缓存下 P95 写/检索延迟在阈值内。

@@ -3,7 +3,7 @@
 **请勿通过公开的 GitHub issues、讨论或其他公开渠道报告安全漏洞。**
 
 相反，请通过联系我们的安全团队负责任地披露：  
-📧 [chenshuangrui@gmail.com](mailto:chenshuangrui@gmail.com) 
+📧 [zhenggaoqi@huawei.com](mailto:zhenggaoqi@huawei.com) 
 
 ## 需要包含的内容：
 - 漏洞的详细描述

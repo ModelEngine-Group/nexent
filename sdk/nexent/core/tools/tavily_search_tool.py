@@ -8,6 +8,7 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolSign, ToolCategory
 
 # Get logger instance
@@ -50,7 +51,7 @@ class TavilySearchTool(Tool):
 
     def __init__(self, tavily_api_key:str=Field(description="Tavily API key"),
                  observer: MessageObserver=Field(description="Message observer", default=None, exclude=True),
-                 max_results:int=Field(description="Maximum number of search results", default=3),
+                 max_results:int=Field(description="Maximum number of search results", default=3, ge=1, le=100),
                  image_filter: bool = Field(description="Whether to enable image filtering", default=True)
      ):
 
@@ -58,11 +59,9 @@ class TavilySearchTool(Tool):
 
         self.observer = observer
         self.tavily = TavilyClient(api_key=tavily_api_key)
-        self.max_results = max_results
+        self.max_results = max(1, min(int(unwrap_field_info(max_results) or 3), 100))
         self.image_filter = image_filter
         self.record_ops = 1  # Used to record sequence number
-        self.running_prompt_en = "Searching the web..."
-        self.running_prompt_zh = "网络搜索中..."
         
         # TODO add data_process_service
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
@@ -82,8 +81,9 @@ class TavilySearchTool(Tool):
 
         # Send tool running message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang=="zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py so it is consistent across direct and code_action
+            # invocations. We only emit the search card from inside the tool.
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(
                 card_content, ensure_ascii=False))

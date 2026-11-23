@@ -1,0 +1,38 @@
+schema_version: "1.0"
+stage: D4
+module: AGENT-EDITOR
+cases:
+  - case_id: AGENT-GUIDE-D4-001
+    feature_id: AGENT-CREATION-GUIDE
+    requirement_ids: [AGENT-GUIDE-REQ-001]
+    business_rule_ids: [AGENT-GUIDE-RULE-001, AGENT-GUIDE-RULE-002, AGENT-GUIDE-RULE-003]
+    title: Create an Agent and complete or skip its measured first-creation guide
+    type: E2E
+    priority: P1
+    status: active
+    automation: automated
+    objective: Prove complete creation-to-editor tour journey, geometry, remembered dismissal and safe responsive/read-only behavior.
+    preconditions: [Local frontend running; HTTP intercepted by deterministic authenticated editable draft and creation fixtures; isolated preference storage.]
+    test_data: {draft: {asset_ref: newly_created_agent}, viewport: {width: 1920, height: 1080}, constrained_viewport: {width: 1280, height: 800}, geometry_tolerance_px: 1, profile: mock}
+    steps:
+      - order: 1
+        action: Open Agent list, create a named draft and enter editor.
+        expected: One mocked creation succeeds; first guide appears only after correct draft load; measured body/type/padding/buttons/shadow and assistant highlight.
+      - order: 2
+        action: Navigate next and previous through core, resources and workflow steps, then choose Start creation.
+        expected: Exact four titles/descriptions and matching highlights/arrows; measured popovers within1px; final dismisses and focuses composer without draft updates or run/publication.
+      - order: 3
+        action: Reload completed route, open ordinary editor, then reset local preference and skip a fresh creation entry.
+        expected: Completed and ordinary routes do not replay; skip suppresses replay after reload.
+      - order: 4
+        action: Open read-only marked route and a fresh editable route at constrained viewport.
+        expected: Read-only has no guide; constrained steps keep buttons in viewport with no horizontal page overflow.
+    expected_results: [Full creation and four-step journey; source geometry within1px; remembered skip/finish; read-only exclusion and reachable constrained layout.]
+    forbidden_side_effects: [No real backend/provider invocation; no Agent update after initial mocked create; no debug or publish call caused by tour.]
+    actor: First-time Agent creator
+    journey: [Open Agent list, create draft, advance and return through guide, finish, reload, skip, check read-only and constrained viewport]
+    final_business_result: [User understands configuration workflow and can start editing the created draft after completion or dismissal.]
+    failure_evidence: [Failure screenshot/trace, incorrect title or target, violated geometry, unexpected HTTP writes]
+    execution:
+      profiles: [{name: mock, required_services: [http-fixture]}]
+      timeout_seconds: 120

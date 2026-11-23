@@ -1,13 +1,14 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
   Button,
   App,
   Tooltip,
-  Popconfirm,
   Typography,
   Tag,
   Modal,
@@ -24,6 +25,7 @@ import {
   Clock,
   Eye,
 } from "lucide-react";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -31,23 +33,31 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { deleteAgent, searchAgentInfo } from "@/services/agentConfigService";
 import { fetchAgentVersionList } from "@/services/agentVersionService";
 import { Agent } from "@/types/agentConfig";
-import ExpandEditModal from "@/app/agents/components/agentInfo/ExpandEditModal";
+import ExpandEditModal from "@/components/common/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
+import ManageOfficialAgentsModal from "@/components/agent/ManageOfficialAgentsModal";
+import { USER_ROLES } from "@/const/auth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
 interface AgentDetail extends Agent {
-  duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
+  prompt?: string;
   group_ids?: number[];
 }
 
 type AgentListRow = Pick<
   Agent,
-  "id" | "name" | "display_name" | "description" | "author" | "is_available" | "unavailable_reasons" | "group_ids"
+  | "id"
+  | "name"
+  | "display_name"
+  | "description"
+  | "author"
+  | "is_available"
+  | "unavailable_reasons"
+  | "group_ids"
 > & {
   model_ids?: number[];
   model_names?: string[];
@@ -55,10 +65,12 @@ type AgentListRow = Pick<
   current_version_no?: number;
 };
 
-
 export default function AgentList({ tenantId }: { tenantId: string | null }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
+  const canManageOfficialAgents = user?.role === USER_ROLES.SU;
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
 
@@ -70,7 +82,10 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view modal state
   const [fullscreenEdit, setFullscreenEdit] = useState<{
     visible: boolean;
-    field: "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt" | null;
+    field:
+      | "description"
+      | "prompt"
+      | null;
     title: string;
     value: string;
   }>({
@@ -81,16 +96,83 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   });
 
   // Version list state for each agent
-  const [agentVersions, setAgentVersions] = useState<Map<number, AgentVersion[]>>(new Map());
-  const [loadingVersions, setLoadingVersions] = useState<Map<number, boolean>>(new Map());
-  // Selected version for each agent (0 means current version)
-  const [selectedVersions, setSelectedVersions] = useState<Map<number, number>>(new Map());
+  const [agentVersions, setAgentVersions] = useState<
+    Map<number, AgentVersion[]>
+  >(new Map());
+  const [loadingVersions, setLoadingVersions] = useState<Map<number, boolean>>(
+    new Map()
+  );
+  // User's manual selection for each agent (not persisted, cleared on refresh/switch)
+  const [selectedVersions, setSelectedVersions] = useState<Map<number, number>>(
+    new Map()
+  );
 
   const { agents, isLoading, refetch } = useAgentList(tenantId);
+  const [keyword, setKeyword] = useState("");
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [groupFilters, setGroupFilters] = useState<number[]>([]);
+  const [officialModalOpen, setOfficialModalOpen] = useState(false);
+
+  // Incremented on every component mount so version fetching always runs
+  const [mountKey, setMountKey] = useState(0);
+  useEffect(() => {
+    setMountKey((k) => k + 1);
+  }, []);
+
+  // Auto-fetch versions for all published agents so the Select label renders immediately
+  useEffect(() => {
+    if (!agents || agents.length === 0) return;
+    (agents as AgentListRow[]).forEach((agent: AgentListRow) => {
+      const agentId = Number(agent.id);
+      if (!agent.is_published) return;
+      // Skip if already fetched for current mount
+      if (agentVersions.has(agentId)) return;
+      setLoadingVersions((prev) => new Map(prev).set(agentId, true));
+      fetchAgentVersionList(agentId, tenantId ?? undefined)
+        .then((res) => {
+          if (res.success && res.data) {
+            setAgentVersions((prev) =>
+              new Map(prev).set(agentId, res.data.items || [])
+            );
+          }
+        })
+        .finally(() => {
+          setLoadingVersions((prev) => {
+            const next = new Map(prev);
+            next.delete(agentId);
+            return next;
+          });
+        });
+    });
+    // mountKey added to dep array ensures this re-runs on component re-mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents, tenantId, mountKey]);
 
   // Fetch groups for group name mapping and selection
   const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
+
+  const filteredAgents = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return (agents as AgentListRow[]).filter((agent) => {
+      const matchesName =
+        !normalizedKeyword ||
+        (agent.display_name || "").toLowerCase().includes(normalizedKeyword);
+      const matchesStatus =
+        statusFilters.length === 0 ||
+        statusFilters.includes(
+          agent.is_published !== true
+            ? "unpublished"
+            : agent.is_available === false
+              ? "unavailable"
+              : "available"
+        );
+      const matchesGroup =
+        groupFilters.length === 0 ||
+        (agent.group_ids || []).some((id) => groupFilters.includes(id));
+      return matchesName && matchesStatus && matchesGroup;
+    });
+  }, [agents, groupFilters, keyword, statusFilters]);
 
   // Create group name mapping
   const groupNameMap = useMemo(() => {
@@ -104,7 +186,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Get group names for agent
   const getGroupNames = (groupIds?: number[]) => {
     if (!groupIds || groupIds.length === 0) return [];
-    return groupIds.map((id) => groupNameMap.get(id) || `Group ${id}`).filter(Boolean);
+    return groupIds
+      .map((id) => groupNameMap.get(id) || `Group ${id}`)
+      .filter(Boolean);
   };
 
   const handleDelete = async (agent: AgentListRow) => {
@@ -115,7 +199,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         message.success(t("businessLogic.config.error.agentDeleteSuccess"));
         queryClient.invalidateQueries({ queryKey: ["agents"] });
       } else {
-        message.error(res.message || t("businessLogic.config.error.agentDeleteFailed"));
+        message.error(
+          res.message || t("businessLogic.config.error.agentDeleteFailed")
+        );
       }
     } catch (error) {
       message.error(t("common.unknownError"));
@@ -131,26 +217,24 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       const agentId = Number(agent.id);
       const isPublished = agent.is_published === true;
 
-      // For published agents, use selected version or current_version_no
-      // For unpublished agents, use version_no=0 (draft)
-      let selectedVersionNo: number;
-      if (isPublished) {
-        const currentVersionNo = agent.current_version_no || 0;
-        selectedVersionNo = selectedVersions.get(agentId) ?? currentVersionNo;
-      } else {
-        selectedVersionNo = 0;
-      }
+      // For published agents: user's manual selection takes priority; otherwise use current_version_no.
+      // For unpublished agents, use version_no=0 (draft).
+      const selectedVersionNo = isPublished
+        ? (selectedVersions.get(agentId) ?? agent.current_version_no ?? 0)
+        : 0;
 
-      const res = await searchAgentInfo(agentId, tenantId ?? undefined, selectedVersionNo);
+      const res = await searchAgentInfo(
+        agentId,
+        tenantId ?? undefined,
+        selectedVersionNo
+      );
       if (res.success && res.data) {
         const detail = res.data;
         setEditingAgent(agent);
         form.setFieldsValue({
           display_name: detail.display_name,
           description: detail.description,
-          duty_prompt: detail.duty_prompt,
-          constraint_prompt: detail.constraint_prompt,
-          few_shots_prompt: detail.few_shots_prompt,
+          prompt: detail.prompt,
           group_ids: detail.group_ids || [],
         });
       } else {
@@ -173,7 +257,8 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   // Fullscreen view handlers
   const openFullscreenEdit = (
-    field: "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt",
+    field:
+      "description" | "prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";
@@ -193,18 +278,20 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Load agent versions when dropdown is opened
   const handleVersionDropdownOpen = async (agentId: number, open: boolean) => {
     if (open && !agentVersions.has(agentId)) {
-      setLoadingVersions(prev => new Map(prev).set(agentId, true));
+      setLoadingVersions((prev) => new Map(prev).set(agentId, true));
       try {
         const res = await fetchAgentVersionList(agentId, tenantId ?? undefined);
         if (res.success && res.data) {
-          setAgentVersions(prev => new Map(prev).set(agentId, res.data.items || []));
+          setAgentVersions((prev) =>
+            new Map(prev).set(agentId, res.data.items || [])
+          );
         } else {
           message.error(res.message || t("common.unknownError"));
         }
       } catch (error) {
         message.error(t("common.unknownError"));
       } finally {
-        setLoadingVersions(prev => {
+        setLoadingVersions((prev) => {
           const newMap = new Map(prev);
           newMap.delete(agentId);
           return newMap;
@@ -232,9 +319,12 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       key: "llm_model",
       width: "18%",
       render: (_: unknown, record: AgentListRow) => {
-        const modelNames = Array.isArray(record.model_names) ? record.model_names : [];
+        const modelNames = Array.isArray(record.model_names)
+          ? record.model_names
+          : [];
         const primary = modelNames[0] || "-";
-        const secondary = modelNames.length > 1 ? modelNames.slice(1).join(", ") : "";
+        const secondary =
+          modelNames.length > 1 ? modelNames.slice(1).join(", ") : "";
         return (
           <div>
             <div className="font-medium">{primary}</div>
@@ -256,16 +346,14 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           <div className="flex flex-wrap gap-1">
             {names.length > 0 ? (
               names.map((name, index) => (
-                <Tag
-                  key={index}
-                  color="blue"
-                  variant="outlined"
-                >
+                <Tag key={index} color="blue" variant="outlined">
                   {name}
                 </Tag>
               ))
             ) : (
-              <span className="text-gray-400">{t("agent.userGroup.empty")}</span>
+              <span className="text-gray-400">
+                {t("agent.userGroup.empty")}
+              </span>
             )}
           </div>
         );
@@ -281,18 +369,27 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
         // If not published, show "无已发布版本"
         if (!isPublished) {
-          return <span className="text-gray-400">{t("agent.version.noPublished")}</span>;
+          return (
+            <span className="text-gray-400">
+              {t("agent.version.noPublished")}
+            </span>
+          );
         }
 
         const versions = agentVersions.get(agentId) || [];
         const isLoading = loadingVersions.get(agentId) || false;
         const currentVersionNo = record.current_version_no || 0;
 
-        // Default to current_version_no if not selected, fallback to first version
-        // Must have a default value, cannot be undefined
-        const selectedVersionNo = selectedVersions.has(agentId)
+        // User's manual selection takes priority; otherwise show current_version_no (the bound version).
+        // Fall back to highest version only if current_version_no is 0 and versions have loaded.
+        const hasUserSelected = selectedVersions.has(agentId);
+        const selectedVersionNo = hasUserSelected
           ? selectedVersions.get(agentId)!
-          : currentVersionNo > 0 ? currentVersionNo : (versions[0]?.version_no || undefined);
+          : currentVersionNo > 0
+            ? currentVersionNo
+            : versions.length > 0
+              ? versions[0].version_no
+              : undefined;
 
         // Build options: only published versions (no draft version 0)
         const options = versions.map((version) => ({
@@ -305,9 +402,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             placeholder={t("agent.version.select")}
             value={selectedVersionNo}
             loading={isLoading}
-            onDropdownVisibleChange={(open) => handleVersionDropdownOpen(agentId, open)}
+            onDropdownVisibleChange={(open) =>
+              handleVersionDropdownOpen(agentId, open)
+            }
             onChange={(value) => {
-              setSelectedVersions(prev => new Map(prev).set(agentId, value));
+              setSelectedVersions((prev) => new Map(prev).set(agentId, value));
             }}
             style={{ width: "100%" }}
             options={options}
@@ -328,10 +427,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             <div className="flex items-center gap-2 min-w-0">
               <Tag
                 color="#AEB6BF"
-                className="inline-flex items-center"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
                 variant="solid"
               >
-                <Clock className="w-3 h-3 mr-1" />
+                <span className="inline-flex items-center mr-1">
+                  <Clock className="w-3 h-3" />
+                </span>
                 {t("agent.status.unpublished")}
               </Tag>
             </div>
@@ -350,10 +456,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             {isAvailable ? (
               <Tag
                 color="#229954"
-                className="inline-flex items-center"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
                 variant="solid"
               >
-                <CheckCircle className="w-3 h-3 mr-1" />
+                <span className="inline-flex items-center mr-1">
+                  <CheckCircle className="w-3 h-3" />
+                </span>
                 {t("mcpConfig.status.available")}
               </Tag>
             ) : (
@@ -363,10 +476,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               >
                 <Tag
                   color="#E74C3C"
-                  className="inline-flex items-center"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
                   variant="solid"
                 >
-                  <CircleSlash className="w-3.5 h-3 mr-1" />
+                  <span className="inline-flex items-center mr-1">
+                    <CircleSlash className="w-3.5 h-3" />
+                  </span>
                   {t("mcpConfig.status.unavailable")}
                 </Tag>
               </Tooltip>
@@ -389,22 +509,25 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Popconfirm
-            title={t("businessLogic.config.modal.deleteTitle")}
-            description={t("businessLogic.config.modal.deleteContent", { name: record.display_name })}
-            onConfirm={() => handleDelete(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("common.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("common.delete")}>
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 className="h-4 w-4" />}
+              size="small"
+              onClick={() =>
+                confirm({
+                  title: t("businessLogic.config.modal.deleteTitle"),
+                  content: t("businessLogic.config.modal.deleteContent", {
+                    name: record.display_name,
+                  }),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record),
+                })
+              }
+            />
+          </Tooltip>
         </div>
       ),
     },
@@ -412,10 +535,63 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <div className="mb-3 flex items-center gap-2">
+        <Input.Search
+          allowClear
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          placeholder={t("tenantResources.agents.searchPlaceholder")}
+          className="w-56"
+        />
+        <Select
+          mode="multiple"
+          allowClear
+          value={statusFilters}
+          onChange={setStatusFilters}
+          options={[
+            {
+              label: t("agent.status.unpublished"),
+              value: "unpublished",
+            },
+            {
+              label: t("tenantResources.agents.available"),
+              value: "available",
+            },
+            {
+              label: t("tenantResources.agents.unavailable"),
+              value: "unavailable",
+            },
+          ]}
+          placeholder={t("tenantResources.agents.filterStatus")}
+          className="w-36"
+        />
+        <Select
+          mode="multiple"
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          value={groupFilters}
+          onChange={setGroupFilters}
+          options={groups.map((group) => ({
+            label: group.group_name,
+            value: group.group_id,
+          }))}
+          placeholder={t("tenantResources.agents.filterGroup")}
+          className="w-48"
+        />
+        {canManageOfficialAgents && (
+          <Button
+            className="ml-auto"
+            onClick={() => setOfficialModalOpen(true)}
+          >
+            {t("ui.localization.manageOfficialAgents")}
+          </Button>
+        )}
+      </div>
       <div className="flex-1 overflow-hidden">
         <Table
           columns={columns}
-          dataSource={agents as AgentListRow[]}
+          dataSource={filteredAgents}
           rowKey="id"
           loading={isLoading}
           size="small"
@@ -434,31 +610,19 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         footer={[
           <Button key="close" onClick={handleEditModalCancel}>
             {t("common.cancel")}
-          </Button>
+          </Button>,
         ]}
         width={700}
       >
         <Spin spinning={isLoadingDetail}>
           <Form form={form} layout="vertical">
-            <Form.Item
-              name="display_name"
-              label={t("agent.displayName")}
-            >
-              <Input
-                placeholder={t("agent.displayName")}
-                readOnly
-              />
+            <Form.Item name="display_name" label={t("agent.displayName")}>
+              <Input placeholder={t("agent.displayName")} readOnly />
             </Form.Item>
 
-            <Form.Item
-              noStyle
-              shouldUpdate
-            >
+            <Form.Item noStyle shouldUpdate>
               {() => (
-                <Form.Item
-                  name="description"
-                  label={t("agent.description")}
-                >
+                <Form.Item name="description" label={t("agent.description")}>
                   <div style={{ position: "relative" }}>
                     <TextArea
                       value={form.getFieldValue("description")}
@@ -471,7 +635,12 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                       <Button
                         type="text"
                         icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() => openFullscreenEdit("description", t("agent.description"))}
+                        onClick={() =>
+                          openFullscreenEdit(
+                            "description",
+                            t("agent.description")
+                          )
+                        }
                         style={{
                           position: "absolute",
                           right: 4,
@@ -485,19 +654,16 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               )}
             </Form.Item>
 
-            <Form.Item
-              noStyle
-              shouldUpdate
-            >
+            <Form.Item noStyle shouldUpdate>
               {() => (
                 <Form.Item
-                  name="duty_prompt"
-                  label={t("systemPrompt.card.duty.title")}
+                  name="prompt"
+                  label={t("systemPrompt.card.prompt.title")}
                 >
                   <div style={{ position: "relative" }}>
                     <TextArea
-                      value={form.getFieldValue("duty_prompt")}
-                      placeholder={t("systemPrompt.card.duty.title")}
+                      value={form.getFieldValue("prompt")}
+                      placeholder={t("systemPrompt.card.prompt.title")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly
@@ -506,7 +672,12 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                       <Button
                         type="text"
                         icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() => openFullscreenEdit("duty_prompt", t("systemPrompt.card.duty.title"))}
+                        onClick={() =>
+                          openFullscreenEdit(
+                            "prompt",
+                            t("systemPrompt.card.prompt.title")
+                          )
+                        }
                         style={{
                           position: "absolute",
                           right: 4,
@@ -520,80 +691,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               )}
             </Form.Item>
 
-            <Form.Item
-              noStyle
-              shouldUpdate
-            >
-              {() => (
-                <Form.Item
-                  name="constraint_prompt"
-                  label={t("systemPrompt.card.constraint.title")}
-                >
-                  <div style={{ position: "relative" }}>
-                    <TextArea
-                      value={form.getFieldValue("constraint_prompt")}
-                      placeholder={t("systemPrompt.card.constraint.title")}
-                      autoSize={{ minRows: 5, maxRows: 8 }}
-                      style={{ resize: "none", paddingRight: 32 }}
-                      readOnly
-                    />
-                    <Tooltip title={t("common.fullscreen")}>
-                      <Button
-                        type="text"
-                        icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() => openFullscreenEdit("constraint_prompt", t("systemPrompt.card.constraint.title"))}
-                        style={{
-                          position: "absolute",
-                          right: 4,
-                          top: 4,
-                          padding: 4,
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                </Form.Item>
-              )}
-            </Form.Item>
-
-            <Form.Item
-              noStyle
-              shouldUpdate
-            >
-              {() => (
-                <Form.Item
-                  name="few_shots_prompt"
-                  label={t("systemPrompt.card.fewShots.title")}
-                >
-                  <div style={{ position: "relative" }}>
-                    <TextArea
-                      value={form.getFieldValue("few_shots_prompt")}
-                      placeholder={t("systemPrompt.card.fewShots.title")}
-                      autoSize={{ minRows: 5, maxRows: 8 }}
-                      style={{ resize: "none", paddingRight: 32 }}
-                      readOnly
-                    />
-                    <Tooltip title={t("common.fullscreen")}>
-                      <Button
-                        type="text"
-                        icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() => openFullscreenEdit("few_shots_prompt", t("systemPrompt.card.fewShots.title"))}
-                        style={{
-                          position: "absolute",
-                          right: 4,
-                          top: 4,
-                          padding: 4,
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                </Form.Item>
-              )}
-            </Form.Item>
-
-            <Form.Item
-              name="group_ids"
-              label={t("agent.userGroup")}
-            >
+            <Form.Item name="group_ids" label={t("agent.userGroup")}>
               <Select
                 mode="multiple"
                 placeholder={t("agent.userGroup")}
@@ -623,13 +721,24 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           </Form>
         </Spin>
       </Modal>
+      <ManageOfficialAgentsModal
+        open={officialModalOpen}
+        onClose={() => setOfficialModalOpen(false)}
+      />
 
       {/* Fullscreen View Modal */}
       <ExpandEditModal
         open={fullscreenEdit.visible}
         title={fullscreenEdit.title}
         content={fullscreenEdit.value}
-        onClose={() => setFullscreenEdit({ visible: false, field: null, title: "", value: "" })}
+        onClose={() =>
+          setFullscreenEdit({
+            visible: false,
+            field: null,
+            title: "",
+            value: "",
+          })
+        }
         onSave={handleFullscreenSave}
         readOnly={true}
       />

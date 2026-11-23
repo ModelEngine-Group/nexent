@@ -165,10 +165,7 @@ class TestDeleteDirectoryTool:
         assert result_data["size_deleted_bytes"] > 0
         assert "deleted successfully" in result_data["message"]
 
-        # Verify observer messages
-        delete_directory_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Deleting directory..."
-        )
+        # Verify CARD observer message
         delete_directory_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "folder-minus", "text": f"Deleting directory {directory_path}"}], ensure_ascii=False)
@@ -304,13 +301,6 @@ class TestDeleteDirectoryTool:
 
         # Create directory first
         os.makedirs(abs_path, exist_ok=True)
-
-        result = delete_directory_tool.forward(directory_path)
-
-        # Verify Chinese running prompt
-        delete_directory_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在删除文件夹..."
-        )
 
         # Verify Chinese warning message for large directory
         # Create another large directory

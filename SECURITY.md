@@ -3,7 +3,7 @@
 **Please do not report security vulnerabilities through public GitHub issues, discussions, or other public channels.**
 
 Instead, please disclose them responsibly by contacting our security team at:  
-📧 [chenshuangrui@gmail.com](mailto:chenshuangrui@gmail.com) 
+📧 [zhenggaoqi@huawei.com](mailto:zhenggaoqi@huawei.com) 
 
 ## What to Include:
 - Detailed description of the vulnerability

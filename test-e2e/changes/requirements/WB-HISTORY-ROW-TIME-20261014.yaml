@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: WB-HISTORY-ROW-TIME-20261014
+  change_type: requirement
+  requirement_id: WB-HISTORY-ROW-TIME-20261014
+  title: Hide Workbench history row relative times
+  description: Remove relative-time text from Workbench recency rows while preserving grouping, pin order, menus and Agent-chat time labels.
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR-D4-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors: [frontend/tests/workbench/ThreadPins.test.tsx, frontend/tests/workbench/WorkbenchThreadAdapter.test.ts]
+    behaviors:
+      - Retain pin order, persistence and conversation paging/state behavior.
+    reason: Reversible presentation-only change has no new unit state contract. Reuse existing state tests and assert visible copy absence in the real browser journey rather than adding implementation-mirroring UT.
+  notes: Reuse the existing Workbench recency-row variant. Timestamps remain available to grouping/sorting; no model, API, storage or generation changes. Existing SPEC AC-05 owns the row presentation refinement.

@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-044
+  feature_id: F-028
+  business_rule_ids:
+  - F-028-RULE-01
+  title: 本人容量查询｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 本人容量查询｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    expected: GET /capacity/personal/me 返回 200，响应包含 used_bytes、used_readable、es_physical_bytes、es_physical_readable、quota_bytes、quota_readable、quota_source、usage_rate、is_over_quota、kb_count。
+  - order: 2
+    action: 使用普通用户账号（UserA）携带其 Authorization token 调用 GET /capacity/personal/me，记录完整响应。
+    expected: used_bytes 等于当前用户所有私有 KB 源文件持久账本字节之和（source-only），与 ES 物理索引容量解耦。
+  - order: 3
+    action: 校验响应含 used_bytes、used_readable、es_physical_bytes、es_physical_readable、quota_bytes、quota_readable、quota_source、usage_rate、is_over_quota、kb_count
+      字段。
+    expected: es_physical_bytes/es_physical_readable 为 ES 物理索引容量的独立观测值，仅用于展示/诊断，不参与配额判定。
+  - order: 4
+    action: 为 UserA 创建含固定大小源文件的私有 KB，待源文件持久账本提交后再次调用 GET /capacity/personal/me，读取 used_bytes。
+    expected: usage_rate 与 is_over_quota 仅由 source-only used_bytes 与 quota_bytes 计算得出，不随 ES 物理索引容量变化。
+  - order: 5
+    action: 通过个人配额接口（PUT /capacity/personal/users/{user_id}/quota 或 PUT /capacity/personal/default-quota）为 UserA 设置配额，再次查询确认
+      usage_rate 与 is_over_quota 基于 source-only used_bytes 计算。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 6
+    action: 构造源文件大小与 ES 物理索引容量明显不同的场景（如副本/段合并回收导致 store_size 大于 source_size），确认 used_bytes/usage_rate/is_over_quota 仅随源文件账本变化，es_physical_bytes/es_physical_readable
+      仅作观测展示。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 清理当次创建的用户、私有 KB 与配额配置。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - GET /capacity/personal/me 返回 200，响应包含 used_bytes、used_readable、es_physical_bytes、es_physical_readable、quota_bytes、quota_readable、quota_source、usage_rate、is_over_quota、kb_count。
+  - used_bytes 等于当前用户所有私有 KB 源文件持久账本字节之和（source-only），与 ES 物理索引容量解耦。
+  - es_physical_bytes/es_physical_readable 为 ES 物理索引容量的独立观测值，仅用于展示/诊断，不参与配额判定。
+  - usage_rate 与 is_over_quota 仅由 source-only used_bytes 与 quota_bytes 计算得出，不随 ES 物理索引容量变化。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 52
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    - 使用普通用户账号（UserA）携带其 Authorization token 调用 GET /capacity/personal/me，记录完整响应。
+    - 校验响应含 used_bytes、used_readable、es_physical_bytes、es_physical_readable、quota_bytes、quota_readable、quota_source、usage_rate、is_over_quota、kb_count
+      字段。
+    - 为 UserA 创建含固定大小源文件的私有 KB，待源文件持久账本提交后再次调用 GET /capacity/personal/me，读取 used_bytes。
+    - 通过个人配额接口（PUT /capacity/personal/users/{user_id}/quota 或 PUT /capacity/personal/default-quota）为 UserA 设置配额，再次查询确认 usage_rate
+      与 is_over_quota 基于 source-only used_bytes 计算。
+    - 构造源文件大小与 ES 物理索引容量明显不同的场景（如副本/段合并回收导致 store_size 大于 source_size），确认 used_bytes/usage_rate/is_over_quota 仅随源文件账本变化，es_physical_bytes/es_physical_readable
+      仅作观测展示。
+    - 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    - 清理当次创建的用户、私有 KB 与配额配置。
+    response_expectations:
+    - GET /capacity/personal/me 返回 200，响应包含 used_bytes、used_readable、es_physical_bytes、es_physical_readable、quota_bytes、quota_readable、quota_source、usage_rate、is_over_quota、kb_count。
+    - used_bytes 等于当前用户所有私有 KB 源文件持久账本字节之和（source-only），与 ES 物理索引容量解耦。
+    - es_physical_bytes/es_physical_readable 为 ES 物理索引容量的独立观测值，仅用于展示/诊断，不参与配额判定。
+    - usage_rate 与 is_over_quota 仅由 source-only used_bytes 与 quota_bytes 计算得出，不随 ES 物理索引容量变化。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

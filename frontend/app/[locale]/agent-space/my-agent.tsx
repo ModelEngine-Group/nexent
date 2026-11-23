@@ -1,0 +1,799 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { App, Button, Empty, Input, Select, Spin } from "antd";
+import { Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import CreateAgentModal, {
+  type CreatedAgentResult,
+} from "@/components/agent/CreateAgentModal";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useToolList } from "@/hooks/agent/useToolList";
+import { useSkillList } from "@/hooks/agent/useSkillList";
+import type { Agent } from "@/types/agentConfig";
+import type { AgentListFilters } from "@/services/agentConfigService";
+import { deleteAgent } from "@/services/agentConfigService";
+import {
+  AGENTS_LIST_QUERY_KEY,
+  invalidateAgentRepositoryCaches,
+  useCreateAgentRepositoryListing,
+  useMyEditableAgents,
+  useAgentRepositoryListings,
+  useUpdateAgentRepositoryStatus,
+} from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
+import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
+import { parseAgentUsageGuideParams } from "@/lib/agentUsageGuide";
+import log from "@/lib/logger";
+import {
+  getAgentUsageGuideOpenAction,
+  parseAgentUsageGuideTargetParams,
+  resolveAgentUsageGuideTarget,
+} from "@/lib/agentUsageGuide";
+import {
+  isCancelableRepositoryStatus,
+  isTakeDownableRepositoryStatus,
+  findRepositoryInfoById,
+  pickReviewDisplayRepositoryInfo,
+  resolveReviewModalMode,
+  toMineRepositoryInfo,
+} from "@/lib/agentRepositoryMine";
+import {
+  isNewAgentPaddingItem,
+  type AgentRepositoryListingCreatePayload,
+  type MyAgentRepositoryInfoItem,
+  type MyEditableAgentItem,
+} from "@/types/agentRepository";
+import { MineApplyListingModal } from "./components/MineApplyListingModal";
+import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
+import { AgentUsageGuideModal } from "./components/AgentUsageGuideModal";
+import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
+import { MyAgentCard } from "./components/MyAgentCard";
+import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import type { TagResourcePredicate } from "@/types/tagManagement";
+import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
+import { mapMyAgentDetail } from "@/lib/myAgentDetail";
+import { AgentDetail } from "@/components/agent/agent-detail";
+import { MyAgentIcon } from "./components/MyAgentIcon";
+
+type MineSortOrder = "default" | "latest";
+
+export function MyAgent({
+  active,
+  onTotalChange,
+}: {
+  active: boolean;
+  onTotalChange?: (total: number) => void;
+}) {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
+  const { user } = useAuthorizationContext();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState<MineSortOrder>("default");
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [page, setPage] = useState(1);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
+    [tagDefinitions, searchQuery, t]
+  );
+  const pageSize = REPOSITORY_PAGE_SIZE - 1;
+  const listParams = useMemo(
+    (): AgentListFilters => ({
+      tenantId: user?.tenantId ?? null,
+      enabled: active,
+      includeRepositoryInfo: true,
+      page,
+      pageSize,
+      search: searchQuery.trim() || undefined,
+      tagPredicates,
+      searchTagPredicates,
+      sortByUpdateTime: sortOrder === "latest" || undefined,
+    }),
+    [
+      active,
+      user?.tenantId,
+      page,
+      pageSize,
+      searchQuery,
+      tagPredicates,
+      searchTagPredicates,
+      sortOrder,
+    ]
+  );
+  const {
+    agents: listedAgents,
+    creatorCounts,
+    pagination,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useAgentList(listParams);
+  const agents: MyEditableAgentItem[] = useMemo(
+    () => listedAgents.map(toMyAgentItem),
+    [listedAgents]
+  );
+  const total = pagination?.total ?? 0;
+  useEffect(() => {
+    if (active && creatorCounts && tagPredicates.length === 0) {
+      onTotalChange?.(creatorCounts.all);
+    }
+  }, [active, creatorCounts, onTotalChange, tagPredicates.length]);
+  const reviewDeepLink = useMemo(
+    () => parseReviewDeepLinkParams(searchParams),
+    [searchParams]
+  );
+  const usageGuideDeepLink = useMemo(
+    () => parseAgentUsageGuideParams(searchParams),
+    [searchParams]
+  );
+  const usageGuideTarget = useMemo(
+    () => parseAgentUsageGuideTargetParams(searchParams),
+    [searchParams]
+  );
+  const { data: deepLinkMineData, isLoading: deepLinkFallbackLoading } =
+    useMyEditableAgents(
+      {
+        ownership: "all",
+        agent_id: reviewDeepLink?.agentId ?? usageGuideTarget?.agentId,
+        page: 1,
+        page_size: 1,
+        new_agent_padding: false,
+      },
+      active && (reviewDeepLink != null || usageGuideTarget != null)
+    );
+  const deepLinkFallbackAgent = useMemo(() => {
+    const item = deepLinkMineData?.items?.[0];
+    return item && !isNewAgentPaddingItem(item) ? item : null;
+  }, [deepLinkMineData]);
+  const onReviewDeepLinkConsumed = useCallback(() => {
+    router.replace(`/${locale}/agent-space?tab=mine`);
+  }, [locale, router]);
+  const onUsageGuideDeepLinkConsumed = useCallback(() => {
+    if (!usageGuideTarget) return;
+    router.replace(
+      `/${locale}/agent-space?tab=mine&agent_id=${usageGuideTarget.agentId}`
+    );
+  }, [locale, router, usageGuideTarget]);
+  const onSortOrderChange = (value: MineSortOrder) => {
+    setSortOrder(value);
+    setPage(1);
+  };
+  const onSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  };
+  const onTagPredicatesChange = (value: TagResourcePredicate[]) => {
+    setTagPredicates(value);
+    setPage(1);
+  };
+  const [createAgentModalVisible, setCreateAgentModalVisible] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewModalAgent, setReviewModalAgent] =
+    useState<MyEditableAgentItem | null>(null);
+  const [reviewModalInfo, setReviewModalInfo] =
+    useState<MyAgentRepositoryInfoItem | null>(null);
+  const [reviewModalMode, setReviewModalMode] = useState<
+    "review" | "reviewUpdate"
+  >("review");
+  const [applyingAgentId, setApplyingAgentId] = useState<number | null>(null);
+  const [detailTarget, setDetailTarget] = useState<{
+    agentId: number;
+    versionNo: number;
+    agent: MyEditableAgentItem;
+  } | null>(null);
+  const {
+    data: versionDetail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+    isFetching: isDetailFetching,
+    refetch: refetchDetail,
+  } = useAgentVersionDetail(
+    detailTarget?.agentId ?? null,
+    detailTarget?.versionNo ?? null,
+    active && detailTarget != null
+  );
+  const { tools: availableTools } = useToolList({
+    enabled: active && detailTarget != null,
+  });
+  const { skills: availableSkills } = useSkillList({
+    enabled: active && detailTarget != null,
+  });
+  const {
+    data: detailListings,
+    isLoading: isDetailListingsLoading,
+    isError: isDetailListingsError,
+    isFetching: isDetailListingsFetching,
+    refetch: refetchDetailListings,
+  } = useAgentRepositoryListings(
+    detailTarget
+      ? { agent_id: detailTarget.agentId, page: 1, page_size: 100 }
+      : undefined,
+    active && detailTarget != null
+  );
+  const detail = useMemo(() => {
+    if (!detailTarget) return null;
+    if (!versionDetail) return undefined;
+    const repositoryInfo = pickReviewDisplayRepositoryInfo(
+      toMineRepositoryInfo(detailListings?.items ?? [])
+    );
+    return {
+      ...mapMyAgentDetail(versionDetail, detailTarget.agent, {
+        tools: availableTools,
+        skills: availableSkills,
+      }),
+      status: repositoryInfo?.status,
+    };
+  }, [
+    availableSkills,
+    availableTools,
+    detailTarget,
+    detailListings,
+    versionDetail,
+  ]);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [applyModalAgent, setApplyModalAgent] =
+    useState<MyEditableAgentItem | null>(null);
+  const [usageGuideAgent, setUsageGuideAgent] =
+    useState<MyEditableAgentItem | null>(null);
+  const [guidedMenuAgentId, setGuidedMenuAgentId] = useState<number | null>(
+    null
+  );
+  const consumedDeepLinkRef = useRef<number | null>(null);
+  const consumedUsageGuideRef = useRef<number | null>(null);
+
+  const createListingMutation = useCreateAgentRepositoryListing();
+  const updateStatusMutation = useUpdateAgentRepositoryStatus();
+  const deleteAgentMutation = useMutation({
+    mutationFn: (agentId: number) => deleteAgent(agentId),
+  });
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const usageGuideTargetState = useMemo(
+    () =>
+      usageGuideTarget
+        ? resolveAgentUsageGuideTarget({
+            agentId: usageGuideTarget.agentId,
+            agents,
+            fallbackAgent: deepLinkFallbackAgent,
+            isListLoading: isLoading,
+            isFallbackLoading: deepLinkFallbackLoading,
+            isActive: active,
+            getAgentId: (agent) =>
+              isNewAgentPaddingItem(agent) ? null : agent.agent_id,
+          })
+        : null,
+    [
+      agents,
+      deepLinkFallbackAgent,
+      deepLinkFallbackLoading,
+      isLoading,
+      usageGuideTarget,
+    ]
+  );
+  const displayedAgents = useMemo(() => {
+    if (usageGuideTargetState?.state !== "found") {
+      return agents;
+    }
+    const targetAgent = usageGuideTargetState.agent;
+    if (
+      isNewAgentPaddingItem(targetAgent) ||
+      agents.some(
+        (agent) =>
+          !isNewAgentPaddingItem(agent) &&
+          agent.agent_id === targetAgent.agent_id
+      )
+    ) {
+      return agents;
+    }
+    return [targetAgent, ...agents];
+  }, [agents, usageGuideTargetState]);
+  const highlightedAgentId =
+    usageGuideTargetState?.state === "found" &&
+    !isNewAgentPaddingItem(usageGuideTargetState.agent)
+      ? usageGuideTargetState.agent.agent_id
+      : null;
+
+  const handleCreateAgent = () => {
+    setCreateAgentModalVisible(true);
+  };
+
+  const handleAgentCreated = async ({ agentId }: CreatedAgentResult) => {
+    setCreateAgentModalVisible(false);
+    await Promise.all([
+      invalidateAgentRepositoryCaches(queryClient),
+      queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+    ]);
+    router.push(`/${locale}/agents/${agentId}?onboarding=1`);
+  };
+
+  const handleEdit = (
+    agentId: number,
+    permission?: MyEditableAgentItem["permission"]
+  ) => {
+    if (permission === "READ_ONLY") {
+      return;
+    }
+    router.push(`/${locale}/agents/${agentId}?from=agent-space&tab=mine`);
+  };
+
+  const handleDeleteAgent = (agent: MyEditableAgentItem) => {
+    const name = agent.name?.trim() || t("agentRepository.card.untitled");
+    confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", { name }),
+      onOk: async () => {
+        try {
+          const result = await deleteAgentMutation.mutateAsync(agent.agent_id);
+          if (!result.success) {
+            throw new Error(result.message || "delete failed");
+          }
+          message.success(
+            t("businessLogic.config.error.agentDeleteSuccess", { name })
+          );
+          await Promise.all([
+            invalidateAgentRepositoryCaches(queryClient),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
+          ]);
+        } catch (error) {
+          log.error("Failed to delete agent:", error);
+          message.error(t("businessLogic.config.error.agentDeleteFailed"));
+          throw error;
+        }
+      },
+    });
+  };
+
+  const handleEvaluate = (agent: MyEditableAgentItem) => {
+    const versionNo = agent.current_version_no ?? 0;
+    if (versionNo <= 0) {
+      return;
+    }
+    router.push(
+      `/${locale}/evaluation?agent_ids=${encodeURIComponent(JSON.stringify([agent.agent_id]))}`
+    );
+  };
+
+  const closeReviewModal = () => {
+    setReviewModalOpen(false);
+    setReviewModalAgent(null);
+    setReviewModalInfo(null);
+  };
+
+  const handleApplyListing = (agent: MyEditableAgentItem) => {
+    const versionNo = agent.current_version_no ?? 0;
+    if (versionNo <= 0) {
+      return;
+    }
+    setApplyModalAgent(agent);
+    setApplyModalOpen(true);
+  };
+
+  const closeApplyModal = () => {
+    setApplyModalOpen(false);
+    setApplyModalAgent(null);
+  };
+
+  const handleSubmitApplyListing = async (
+    payload: AgentRepositoryListingCreatePayload
+  ) => {
+    if (!applyModalAgent) {
+      return;
+    }
+
+    const versionNo = applyModalAgent.current_version_no ?? 0;
+    if (versionNo <= 0) {
+      return;
+    }
+
+    setApplyingAgentId(applyModalAgent.agent_id);
+    try {
+      await createListingMutation.mutateAsync({
+        agentId: applyModalAgent.agent_id,
+        versionNo,
+        payload,
+      });
+      message.success(t("repository.mine.applySuccess"));
+      closeApplyModal();
+    } catch {
+      message.error(t("repository.mine.applyError"));
+    } finally {
+      setApplyingAgentId(null);
+    }
+  };
+
+  const handleViewReview = (
+    agent: MyEditableAgentItem,
+    mode: "review" | "reviewUpdate"
+  ) => {
+    const repositoryInfo = pickReviewDisplayRepositoryInfo(
+      agent.repository_info ?? []
+    );
+    if (!repositoryInfo) {
+      return;
+    }
+    openReviewModal(agent, repositoryInfo, mode);
+  };
+
+  const openReviewModal = (
+    agent: MyEditableAgentItem,
+    repositoryInfo: MyAgentRepositoryInfoItem,
+    mode: "review" | "reviewUpdate"
+  ) => {
+    setReviewModalAgent(agent);
+    setReviewModalInfo(repositoryInfo);
+    setReviewModalMode(mode);
+    setReviewModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!active) return;
+    if (!reviewDeepLink) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+
+    if (consumedDeepLinkRef.current === reviewDeepLink.agentRepositoryId) {
+      return;
+    }
+
+    const listStillLoading = isLoading;
+    const fallbackStillLoading = deepLinkFallbackLoading;
+    if (listStillLoading && fallbackStillLoading) {
+      return;
+    }
+
+    const agentFromList = agents.find(
+      (item) => item.agent_id === reviewDeepLink.agentId
+    );
+    const agent = deepLinkFallbackAgent ?? agentFromList;
+
+    if (!agent) {
+      if (listStillLoading || fallbackStillLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    const repositoryInfo = findRepositoryInfoById(
+      agent.repository_info ?? [],
+      reviewDeepLink.agentRepositoryId
+    );
+
+    if (!repositoryInfo) {
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    openReviewModal(
+      agent,
+      repositoryInfo,
+      resolveReviewModalMode(agent, repositoryInfo)
+    );
+    consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+    onReviewDeepLinkConsumed?.();
+  }, [
+    active,
+    agents,
+    deepLinkFallbackAgent,
+    deepLinkFallbackLoading,
+    isLoading,
+    message,
+    onReviewDeepLinkConsumed,
+    reviewDeepLink,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (!usageGuideDeepLink) {
+      consumedUsageGuideRef.current = null;
+      return;
+    }
+
+    if (!usageGuideTargetState) {
+      return;
+    }
+    const openAction = getAgentUsageGuideOpenAction({
+      agentId: usageGuideDeepLink.agentId,
+      consumedAgentId: consumedUsageGuideRef.current,
+      target: usageGuideTargetState,
+    });
+    if (openAction.action === "ignore" || openAction.action === "wait") {
+      return;
+    }
+    if (openAction.action === "missing") {
+      message.error(t("notifications.usageGuide.agentNotFound"));
+      consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+      onUsageGuideDeepLinkConsumed?.();
+      return;
+    }
+
+    if (isNewAgentPaddingItem(openAction.agent)) {
+      return;
+    }
+    setGuidedMenuAgentId(openAction.agent.agent_id);
+    consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+    onUsageGuideDeepLinkConsumed?.();
+  }, [
+    onUsageGuideDeepLinkConsumed,
+    t,
+    usageGuideDeepLink,
+    usageGuideTargetState,
+  ]);
+
+  const closeUsageGuide = () => {
+    setUsageGuideAgent(null);
+  };
+
+  const handleSetNotShared = async () => {
+    if (!reviewModalInfo) {
+      return;
+    }
+
+    const canUpdate =
+      isCancelableRepositoryStatus(reviewModalInfo.status) ||
+      isTakeDownableRepositoryStatus(reviewModalInfo.status);
+    if (!canUpdate) {
+      return;
+    }
+
+    const wasShared = reviewModalInfo.status === "shared";
+
+    try {
+      await updateStatusMutation.mutateAsync({
+        agentRepositoryId: reviewModalInfo.agent_repository_id,
+        status: "not_shared",
+      });
+      message.success(
+        wasShared
+          ? t("repository.mine.takeDownSuccess")
+          : t("repository.mine.cancelApplySuccess")
+      );
+      closeReviewModal();
+    } catch {
+      message.error(
+        wasShared
+          ? t("repository.mine.takeDownError")
+          : t("repository.mine.cancelApplyError")
+      );
+      throw new Error("Update repository status failed");
+    }
+  };
+
+  const hasActiveFilter =
+    normalizedQuery.length > 0 || tagPredicates.length > 0;
+  const showFilteredEmpty =
+    !isLoading && !isError && agents.length === 0 && hasActiveFilter;
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
+          <Input
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={t("agentRepository.mine.searchPlaceholder")}
+            prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+            className="rounded-xl"
+            allowClear
+          />
+        </div>
+        <TagFilterPopover
+          definitions={tagDefinitions ?? []}
+          value={tagPredicates}
+          onChange={onTagPredicatesChange}
+        />
+        <Select<MineSortOrder>
+          value={sortOrder}
+          onChange={onSortOrderChange}
+          className="w-44 shrink-0"
+          aria-label={t("agentRepository.sort.label")}
+          options={[
+            { value: "default", label: t("agentRepository.sort.default") },
+            { value: "latest", label: t("agentRepository.sort.latest") },
+          ]}
+        />
+      </div>
+
+      <div className="min-h-0">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Spin size="large" />
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {t("agentRepository.mine.loadError")}
+            </p>
+            <Button
+              type="primary"
+              onClick={() => refetch()}
+              loading={isFetching}
+            >
+              {t("repository.common.retry")}
+            </Button>
+          </div>
+        ) : (
+          <>
+            <ResourceCardGrid
+              items={displayedAgents}
+              pageSize={REPOSITORY_PAGE_SIZE}
+              page={page}
+              total={total}
+              onPageChange={setPage}
+              paginateItems={false}
+              showToolbar={false}
+              emptyState={
+                showFilteredEmpty ? (
+                  <Empty
+                    description={t("agentRepository.mine.emptyFiltered")}
+                  />
+                ) : undefined
+              }
+              showCreateCard
+              createCard={<CreateNewAgentCard onClick={handleCreateAgent} />}
+              renderItem={(agent) => (
+                <MyAgentCard
+                  key={agent.agent_id}
+                  agent={agent}
+                  onEdit={() => handleEdit(agent.agent_id, agent.permission)}
+                  onView={() =>
+                    setDetailTarget({
+                      agentId: agent.agent_id,
+                      versionNo: agent.current_version_no ?? 0,
+                      agent,
+                    })
+                  }
+                  onApplyListing={() => handleApplyListing(agent)}
+                  onViewReview={handleViewReview}
+                  onDelete={() => handleDeleteAgent(agent)}
+                  onEvaluate={() => handleEvaluate(agent)}
+                  onUsageGuide={() => {
+                    setGuidedMenuAgentId(null);
+                    setUsageGuideAgent(agent);
+                  }}
+                  highlighted={highlightedAgentId === agent.agent_id}
+                  guideMenuOpen={
+                    guidedMenuAgentId === agent.agent_id ? true : undefined
+                  }
+                  onGuideMenuOpenChange={(open) => {
+                    if (!open && guidedMenuAgentId === agent.agent_id) {
+                      setGuidedMenuAgentId(null);
+                    }
+                  }}
+                  isApplying={
+                    applyingAgentId === agent.agent_id &&
+                    createListingMutation.isPending
+                  }
+                  isDeleting={
+                    deleteAgentMutation.isPending &&
+                    deleteAgentMutation.variables === agent.agent_id
+                  }
+                />
+              )}
+            />
+            {showFilteredEmpty ? (
+              <Empty
+                className="py-16"
+                description={t("agentRepository.mine.emptyFiltered")}
+              />
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <MineApplyListingModal
+        open={active && applyModalOpen}
+        agent={applyModalAgent}
+        isSubmitting={createListingMutation.isPending}
+        onClose={closeApplyModal}
+        onSubmit={handleSubmitApplyListing}
+      />
+
+      <MineReviewStatusModal
+        open={active && reviewModalOpen}
+        agent={reviewModalAgent}
+        repositoryInfo={reviewModalInfo}
+        mode={reviewModalMode}
+        isUpdatingStatus={updateStatusMutation.isPending}
+        onClose={closeReviewModal}
+        onSetNotShared={handleSetNotShared}
+      />
+
+      <AgentUsageGuideModal
+        agent={usageGuideAgent}
+        locale={locale}
+        open={usageGuideAgent !== null}
+        onClose={closeUsageGuide}
+      />
+
+      <CreateAgentModal
+        open={active && createAgentModalVisible}
+        onCancel={() => setCreateAgentModalVisible(false)}
+        onCreated={handleAgentCreated}
+      />
+      <AgentDetail
+        open={active && detailTarget != null}
+        onClose={() => setDetailTarget(null)}
+        onEdit={
+          detailTarget?.agent.permission === "READ_ONLY"
+            ? undefined
+            : detailTarget
+              ? () =>
+                  handleEdit(
+                    detailTarget.agentId,
+                    detailTarget.agent.permission
+                  )
+              : undefined
+        }
+        detail={detail}
+        agentIcon={
+          detailTarget ? (
+            <MyAgentIcon agent={detailTarget.agent} size={48} iconSize={24} />
+          ) : undefined
+        }
+        published={(detailTarget?.versionNo ?? 0) > 0}
+        status={detail?.status}
+        isLoading={isDetailLoading || isDetailListingsLoading}
+        isError={isDetailError || isDetailListingsError}
+        isFetching={isDetailFetching || isDetailListingsFetching}
+        onRetry={() => {
+          void refetchDetail();
+          void refetchDetailListings();
+        }}
+      />
+    </div>
+  );
+}
+
+function toMyAgentItem(agent: Agent): MyEditableAgentItem {
+  const currentVersionNo = agent.current_version_no ?? 0;
+  return {
+    agent_id: Number(agent.id),
+    icon_url: agent.icon_url,
+    is_available: agent.is_available,
+    unavailable_reasons: agent.unavailable_reasons,
+    name: agent.display_name || agent.name,
+    description: agent.description,
+    current_version_no: currentVersionNo,
+    version_label:
+      agent.version_label ??
+      (currentVersionNo > 0 ? `V${currentVersionNo}` : null),
+    version_create_time: agent.version_create_time ?? null,
+    permission: agent.permission,
+    is_main_agent: agent.is_main_agent,
+    tags: agent.tags,
+    repository_info: agent.repository_info ?? [],
+  };
+}

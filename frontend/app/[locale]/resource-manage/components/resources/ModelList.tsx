@@ -1,9 +1,21 @@
-﻿"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag, Segmented, Tooltip } from "antd";
-import { Edit, Trash2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Table, Button, message, Tag, Segmented, Tooltip } from "antd";
+import {
+  CheckCircle,
+  CircleEllipsis,
+  CircleHelp,
+  CircleSlash,
+  Edit,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+  XCircle,
+} from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
@@ -14,11 +26,10 @@ import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
-import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
-
 interface UnifiedModelRow extends ModelOption {
   request_count?: number;
   error_rate?: number;
@@ -30,6 +41,7 @@ interface UnifiedModelRow extends ModelOption {
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
 
   const { bareModelIds } = useCapacityCoverage();
 
@@ -48,18 +60,19 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   });
 
   const {
-  models: monitoringModels,
-  loading: monitoringLoading,
-  refresh: refreshMonitoring,
-  timeRange: monitoringTimeRange,
-  setTimeRange: setMonitoringTimeRange,
-} = useMonitoringData();
+    models: monitoringModels,
+    loading: monitoringLoading,
+    refresh: refreshMonitoring,
+    timeRange: monitoringTimeRange,
+    setTimeRange: setMonitoringTimeRange,
+  } = useMonitoringData();
 
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
-  const [editDialogVisible, setEditDialogVisible] = useState(false);
 
-  const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(new Set());
+  const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(
+    new Set()
+  );
 
   const monitoringMap = useMemo(() => {
     const map = new Map<string, ModelMonitoringItem>();
@@ -98,19 +111,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   const handleEditDialogClose = () => {
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const handleEditDialogSuccess = async () => {
     await refetch();
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const openEdit = (model: ModelOption) => {
     setEditingModel(model);
-    setEditDialogVisible(true);
   };
 
   const handleDelete = async (displayName: string, _provider?: string) => {
@@ -135,7 +145,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   // Handle checking model connectivity
-  const handleCheckConnectivity = async (displayName: string, modelType: string) => {
+  const handleCheckConnectivity = async (
+    displayName: string,
+    modelType: string
+  ) => {
     if (!tenantId) {
       message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
@@ -143,11 +156,15 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
     setCheckingConnectivity((prev) => new Set(prev).add(displayName));
     try {
-      const isConnected = await modelService.verifyCustomModel(displayName, modelType);
+      const isConnected = await modelService.checkManageTenantModelConnectivity(
+        tenantId,
+        displayName,
+        modelType
+      );
       if (isConnected) {
         message.success(t("tenantResources.models.connectivitySuccess"));
       } else {
-        message.warning(t("tenantResources.models.connectivityFailed"));
+        message.error(t("tenantResources.models.connectivityFailed"));
       }
       refetch();
     } catch (error) {
@@ -201,6 +218,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         return t("model.type.imageGeneration");
       case MODEL_TYPES.VLM3:
         return t("model.type.videoUnderstanding");
+      case MODEL_TYPES.VLM4: {
+        return t("model.type.audioUnderstanding");
+      }
       default:
         return t("model.type.unknown");
     }
@@ -232,7 +252,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         // type list that drifted -- it silently hid the badge on vlm2
         // (image-gen) and vlm3 (video-und) rows even when backend marked
         // them bare. Drop the guard and trust the authoritative set.
-        const isBareCapacity = Boolean(record.id && bareModelIds.has(record.id));
+        const isBareCapacity = Boolean(
+          record.id && bareModelIds.has(record.id)
+        );
 
         return (
           <div className="flex items-center">
@@ -257,32 +279,66 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.type"),
       dataIndex: "type",
       key: "type",
-      width: 100,
-      render: (type: ModelType) => <Tag>{getModelTypeName(type)}</Tag>,
+      width: 220,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (type: ModelType) => {
+        const typeName = getModelTypeName(type);
+        return (
+          <Tooltip title={typeName} placement="topLeft">
+            <Tag
+              color="default"
+              className="max-w-full"
+              style={{ display: "inline-flex", verticalAlign: "middle" }}
+            >
+              <span className="truncate">{typeName}</span>
+            </Tag>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("common.status"),
       dataIndex: "connect_status",
       key: "connect_status",
-      width: 110,
+      width: 120,
       render: (status: string) => {
         const color =
-                status === "available" ? "#229954" :
-                status === "unavailable" ? "#E74C3C" :
-                status === "detecting" ? "#5499C7" :
-                status === "not_detected" ? "#AEB6BF" : "#2E4053";
+          status === "available"
+            ? "#229954"
+            : status === "unavailable"
+              ? "#E74C3C"
+              : status === "detecting"
+                ? "#5499C7"
+                : status === "not_detected"
+                  ? "#AEB6BF"
+                  : "#2E4053";
 
-        const icon = status === "available" ? <CheckCircle className="w-3 h-3 mr-1" /> :
-                status === "unavailable" ? <CircleSlash className="w-3 h-3 mr-1" /> :
-                status === "detecting" ? <CircleEllipsis className="w-3 h-3 mr-1" /> :
-                status === "not_detected" ? <CircleHelp className="w-3.5 h-3.5 mr-1" /> :
-                <XCircle className="w-3 h-3 mr-1" />;
+        const icon =
+          status === "available" ? (
+            <CheckCircle className="w-3 h-3" />
+          ) : status === "unavailable" ? (
+            <CircleSlash className="w-3 h-3" />
+          ) : status === "detecting" ? (
+            <CircleEllipsis className="w-3 h-3" />
+          ) : status === "not_detected" ? (
+            <CircleHelp className="w-3.5 h-3.5" />
+          ) : (
+            <XCircle className="w-3 h-3" />
+          );
         return (
           <Tag
             color={color}
-            className="inline-flex items-center"
-            variant="solid">
-            {icon}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+            variant="solid"
+          >
+            <span className="inline-flex items-center mr-1">{icon}</span>
             {t(`tenantResources.models.status.${status}`)}
           </Tag>
         );
@@ -292,49 +348,77 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.source"),
       dataIndex: "source",
       key: "source",
-      width: 90,
-      render: (source: string) => <Tag color="default">{source}</Tag>,
+      width: 180,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (source: string) => (
+        <Tooltip title={source} placement="topLeft">
+          <Tag
+            color="default"
+            className="max-w-full"
+            style={{ display: "inline-flex", verticalAlign: "middle" }}
+          >
+            <span className="truncate">{source}</span>
+          </Tag>
+        </Tooltip>
+      ),
     },
     {
       title: t("monitoring.table.requests"),
       dataIndex: "request_count",
       key: "request_count",
-      width: 100,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.request_count ?? 0) - (b.request_count ?? 0),
-      render: (v: number | undefined) => v !== undefined ? v.toLocaleString() : "--",
+      width: 120,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.request_count ?? 0) - (b.request_count ?? 0),
+      render: (v: number | undefined) =>
+        v !== undefined ? v.toLocaleString() : "--",
     },
     {
       title: t("monitoring.table.errorRate"),
       dataIndex: "error_rate",
       key: "error_rate",
-      width: 100,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.error_rate ?? 0) - (b.error_rate ?? 0),
+      width: 130,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.error_rate ?? 0) - (b.error_rate ?? 0),
       render: (v: number | undefined) =>
-        v !== undefined ? <Tag color={getErrorRateColor(v)}>{v.toFixed(2)}%</Tag> : "--",
+        v !== undefined ? (
+          <Tag color={getErrorRateColor(v)}>{v.toFixed(2)}%</Tag>
+        ) : (
+          "--"
+        ),
     },
     {
       title: t("monitoring.table.avgDuration"),
       dataIndex: "avg_duration",
       key: "avg_duration",
-      width: 110,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_duration ?? 0) - (b.avg_duration ?? 0),
-      render: (v: number | undefined) => v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
+      width: 150,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.avg_duration ?? 0) - (b.avg_duration ?? 0),
+      render: (v: number | undefined) =>
+        v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
     },
     {
       title: t("monitoring.table.avgTTFT"),
       dataIndex: "avg_ttft",
       key: "avg_ttft",
-      width: 110,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
+      width: 170,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        renderTextModelMetric(v, record, (val) => `${val.toFixed(0)} ${t("monitoring.time.ms")}`),
+        renderTextModelMetric(
+          v,
+          record,
+          (val) => `${val.toFixed(0)} ${t("monitoring.time.ms")}`
+        ),
     },
     {
       title: t("monitoring.table.tokens"),
       dataIndex: "total_tokens",
       key: "total_tokens",
-      width: 100,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
+      width: 110,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
         renderTextModelMetric(v, record, (val) => val.toLocaleString()),
     },
@@ -342,21 +426,34 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("monitoring.table.tokenGenerationRate"),
       dataIndex: "token_generation_rate",
       key: "token_generation_rate",
-      width: 120,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
+      width: 150,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        renderTextModelMetric(v, record, (val) => `${val.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}`),
+        renderTextModelMetric(
+          v,
+          record,
+          (val) => `${val.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}`
+        ),
     },
     {
       key: "actions",
-      width: 200,
+      width: 120,
       render: (_, record: UnifiedModelRow) => (
         <div className="flex items-center space-x-2">
           <Tooltip title={t("tenantResources.models.checkConnectivity")}>
             <Button
               type="text"
-              icon={checkingConnectivity.has(record.displayName) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              onClick={() => handleCheckConnectivity(record.displayName, record.type)}
+              icon={
+                checkingConnectivity.has(record.displayName) ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )
+              }
+              onClick={() =>
+                handleCheckConnectivity(record.displayName, record.type)
+              }
               size="small"
               loading={checkingConnectivity.has(record.displayName)}
             />
@@ -369,53 +466,62 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Popconfirm
-            title={t("tenantResources.models.confirmDelete")}
-            description={t("common.cannotBeUndone")}
-            onConfirm={() => handleDelete(record.displayName, record.source)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("tenantResources.models.deleteModel")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("tenantResources.models.deleteModel")}>
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 className="h-4 w-4" />}
+              size="small"
+              onClick={() =>
+                confirm({
+                  title: t("tenantResources.models.confirmDelete"),
+                  content: t("common.cannotBeUndone"),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.displayName, record.source),
+                })
+              }
+            />
+          </Tooltip>
         </div>
       ),
     },
   ];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <ModelCapacityCoverageWidget />
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Segmented
-            size="small"
-            value={monitoringTimeRange}
-            onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
-            options={[
-              { label: t("monitoring.dashboard.timeRange.24h"), value: "24h" },
-              { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
-              { label: t("monitoring.dashboard.timeRange.30d"), value: "30d" },
-            ]}
-          />
-          <Button
-            icon={<RefreshCw className="h-3 w-3" />}
-            size="small"
-            onClick={refreshMonitoring}
-          >
-            {t("monitoring.dashboard.refresh")}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="mb-4 flex shrink-0 flex-col gap-4 [&>.ant-card]:!mb-0">
+        <ModelCapacityCoverageWidget />
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Segmented
+              size="small"
+              value={monitoringTimeRange}
+              onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
+              options={[
+                {
+                  label: t("monitoring.dashboard.timeRange.24h"),
+                  value: "24h",
+                },
+                { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
+                {
+                  label: t("monitoring.dashboard.timeRange.30d"),
+                  value: "30d",
+                },
+              ]}
+            />
+            <Button
+              icon={<RefreshCw className="h-3 w-3" />}
+              size="small"
+              onClick={refreshMonitoring}
+            >
+              {t("monitoring.dashboard.refresh")}
+            </Button>
+          </div>
+          <Button type="primary" onClick={openCreate}>
+            + {t("modelConfig.button.addCustomModel")}
           </Button>
         </div>
-        <Button type="primary" onClick={openCreate}>
-          + {t("modelConfig.button.addCustomModel")}
-        </Button>
       </div>
 
       <Table
@@ -430,7 +536,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         }}
         onChange={handlePageChange}
         scroll={{ y: "calc(100vh - 580px)" }}
-        className="flex-1 [&_.ant-table]:h-full"
+        className="min-h-0 flex-1 [&_.ant-table]:h-full [&_.ant-table-thead>tr>th]:whitespace-nowrap [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-title]:mr-3 [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-sorter]:shrink-0"
       />
 
       <ModelAddDialog
@@ -441,11 +547,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       />
 
       <ModelEditDialog
-        isOpen={editDialogVisible}
         model={editingModel}
+        tenantId={tenantId || undefined}
         onClose={handleEditDialogClose}
         onSuccess={handleEditDialogSuccess}
-        tenantId={tenantId || undefined}
       />
     </div>
   );

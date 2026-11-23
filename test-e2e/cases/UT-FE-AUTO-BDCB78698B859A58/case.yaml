@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-BDCB78698B859A58
+  feature_id: F-184
+  business_rule_ids:
+  - F-184-RULE-01
+  title: Agent/Skill 仓库 tag_predicates/search_tag_predicates/tag 查询串序列化与 tagStats 端点解析｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent/Skill 仓库 tag_predicates/search_tag_predicates/tag 查询串序列化与 tagStats 端点解析｜核心流程
+  preconditions:
+  - 本地组件/单元测试环境可运行（前端 JS/TS 测试框架），不要求外部模型服务或后端在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - frontend/services/api.ts 可被编译导入，其依赖的 @/lib/basePath、@/const 等模块可正常解析。
+  test_data:
+    legacy_asset_declaration: '- 无需专项本地资产；测试直接导入 frontend/services/api.ts 的 API_ENDPOINTS，构造最小 tag 谓词对象数组与 tag 字符串作为固定输入。'
+  steps:
+  - order: 1
+    action: 在测试环境中直接导入 frontend/services/api.ts 的 API_ENDPOINTS，准备最小 tag 谓词对象数组 fixture（如 [{key:'分类',value:'对话'}]）、search
+      谓词数组与 tag 字符串。
+    expected: agentRepository.listings 返回 `${API_BASE_URL}/repository/agent?...`，tag_predicates/search_tag_predicates 以 JSON.stringify
+      后的字符串出现于同名查询参数，tag 以去除首尾空格后的字符串出现。
+  - order: 2
+    action: 调用 agentRepository.listings({tag_predicates:[...], search_tag_predicates:[...], tag:' 客服 '})，记录返回 URL 及查询串。
+    expected: agentRepository.mineAgents 返回 `${API_BASE_URL}/repository/agent/mine?...`，正确附加 tag_predicates 与 search_tag_predicates。
+  - order: 3
+    action: 调用 agentRepository.mineAgents({tag_predicates:[...], search_tag_predicates:[...]})，记录返回 URL 及查询串。
+    expected: skillRepository.listings 返回 `${API_BASE_URL}/repository/skill?...`，附加 tag_predicates 与 tag；skillRepository.mineSkills
+      返回 `${API_BASE_URL}/repository/skill/mine?...`，附加 tag_predicates。
+  - order: 4
+    action: 调用 skillRepository.listings({tag_predicates:[...], tag:' 客服 '}) 与 skillRepository.mineSkills({tag_predicates:[...]})，记录返回
+      URL 及查询串。
+    expected: agentRepository.tagStats 恒等于 `${API_BASE_URL}/repository/agent/tags`，skillRepository.tagStats 恒等于 `${API_BASE_URL}/repository/skill/tags`。
+  - order: 5
+    action: 读取 agentRepository.tagStats 与 skillRepository.tagStats 的端点常量值。
+    expected: 空数组、纯空白 tag、undefined/null 参数不追加对应查询参数，且不产生多余的 '?' 或重复参数。
+  - order: 6
+    action: 边界：分别传入空数组 tag_predicates/search_tag_predicates、纯空白 tag、以及 undefined/null params，记录是否产生查询串。
+    expected: 测试全程无未处理异常，不访问任何外部服务或网络。
+  - order: 7
+    action: 逐条断言上述每一步返回的 URL 前缀与查询参数符合契约；结束后释放临时对象确保可重复执行。
+    expected: 测试全程无未处理异常，不访问任何外部服务或网络。
+  expected_results:
+  - agentRepository.listings 返回 `${API_BASE_URL}/repository/agent?...`，tag_predicates/search_tag_predicates 以 JSON.stringify
+    后的字符串出现于同名查询参数，tag 以去除首尾空格后的字符串出现。
+  - agentRepository.mineAgents 返回 `${API_BASE_URL}/repository/agent/mine?...`，正确附加 tag_predicates 与 search_tag_predicates。
+  - skillRepository.listings 返回 `${API_BASE_URL}/repository/skill?...`，附加 tag_predicates 与 tag；skillRepository.mineSkills
+    返回 `${API_BASE_URL}/repository/skill/mine?...`，附加 tag_predicates。
+  - agentRepository.tagStats 恒等于 `${API_BASE_URL}/repository/agent/tags`，skillRepository.tagStats 恒等于 `${API_BASE_URL}/repository/skill/tags`。
+  - 空数组、纯空白 tag、undefined/null 参数不追加对应查询参数，且不产生多余的 '?' 或重复参数。
+  - 测试全程无未处理异常，不访问任何外部服务或网络。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 450
+  unit_boundary: 标签筛选与统计
+  inputs:
+  - '- 无需专项本地资产；测试直接导入 frontend/services/api.ts 的 API_ENDPOINTS，构造最小 tag 谓词对象数组与 tag 字符串作为固定输入。'
+  assertions:
+  - agentRepository.listings 返回 `${API_BASE_URL}/repository/agent?...`，tag_predicates/search_tag_predicates 以 JSON.stringify
+    后的字符串出现于同名查询参数，tag 以去除首尾空格后的字符串出现。
+  - agentRepository.mineAgents 返回 `${API_BASE_URL}/repository/agent/mine?...`，正确附加 tag_predicates 与 search_tag_predicates。
+  - skillRepository.listings 返回 `${API_BASE_URL}/repository/skill?...`，附加 tag_predicates 与 tag；skillRepository.mineSkills
+    返回 `${API_BASE_URL}/repository/skill/mine?...`，附加 tag_predicates。
+  - agentRepository.tagStats 恒等于 `${API_BASE_URL}/repository/agent/tags`，skillRepository.tagStats 恒等于 `${API_BASE_URL}/repository/skill/tags`。
+  - 空数组、纯空白 tag、undefined/null 参数不追加对应查询参数，且不产生多余的 '?' 或重复参数。
+  - 测试全程无未处理异常，不访问任何外部服务或网络。

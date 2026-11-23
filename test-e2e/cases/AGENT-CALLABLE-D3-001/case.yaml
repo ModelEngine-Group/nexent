@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGENT-CALLABLE-D3-001
+  feature_id: F-096
+  business_rule_ids: [F-096-RULE-02]
+  title: Current-source Agent executes directory and compatible A2A calls through real Docker
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove both screenshot operations using current source, real Jupyter Docker kernels and published Nexent A2A peers with a real model.
+  preconditions:
+  - Existing local Nexent Runtime, Config, Northbound, Docker daemon and sandbox image are available.
+  - The machine-local test home supplies tenant_a_admin and an accessible configured text-capable model.
+  - No deployment recovery is pending; shared service processes remain running.
+  test_data:
+    legal_callable: parallel_probe_a
+    invalid_display_name: probe-agent with a run-specific suffix
+    directory_path: test
+  steps:
+  - order: 1
+    action: Create and publish two owned Nexent peers, preserve their original Agent Card names, and stage fingerprinted current sources into a private directory for a fresh Runtime process.
+    expected: Real Cards and endpoint versions are available; the process loads the exact worktree source and original legal callable parallel_probe_a remains unchanged.
+  - order: 2
+    action: With both peers mounted, ask a real model to create directory test, invoke parallel_probe_a, and invoke the hyphenated external Agent in three independent runs using real session-scoped Docker kernels.
+    expected: The directory exists in the owned tool workspace; both A2A calls return markers known only to their respective published peers; no code parse or execution error occurs.
+  - order: 3
+    action: Verify prompt/call/observer identities and release all owned kernels, containers, Agent records, temporary keys and staged source directories.
+    expected: Generated aliases identify the correct peers, legal callable compatibility is preserved, original display names survive, owned runtime resources are absent after cleanup and retained A2A audit registrations are disabled.
+  expected_results:
+  - Current-source fingerprints match and the sandbox backend is Docker with an actual live Jupyter kernel, with local fallback forbidden.
+  - create_directory(directory_path="test") creates the owned directory while an invalid external display name is mounted.
+  - Both the existing legal callable and the generated alias invoke a real published peer and return its unique response marker.
+  - Cleanup succeeds for every owned container, key, Agent and staged directory; test A2A registrations are disabled through the supported API.
+  forbidden_side_effects:
+  - No shared service restart, image replacement, deployment flag change, global model modification or volume deletion.
+  - No deletion or mutation of pre-existing business Agents or access keys, and no credentials in evidence.
+  integration_boundary:
+  - Fresh current-source Nexent SDK Runtime, real model provider, actual TLS/Jupyter Docker sandbox, authenticated host bridge and real published Northbound A2A peer Runtime.
+  observations:
+  - Source hashes, actual container/kernel IDs, parsed actions, original/display/callable identity and peer-only markers.
+  - Cleanup receipts and sanitized failures retained outside Git.
+  cleanup:
+  - Remove only run-owned Agents, any run-created access key, session sandbox containers and the exact private staged directory.
+  acceptance:
+  - id: AC-01
+    description: Actual current-source Docker execution creates the directory and invokes both real A2A peers with compatible names.
+    steps: [1, 2]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Identity remains correct and all owned resources are cleaned up.
+    steps: [3]
+    expected_results: [4]

@@ -24,8 +24,6 @@ export const CONFIG_QUERY_KEY = ["config"];
 
 const defaultConfig: GlobalConfig = {
   app: {
-    appName: "",
-    appDescription: "",
     iconType: ICON_TYPES.PRESET,
     iconKey: "search",
     customIconUrl: "",
@@ -90,6 +88,14 @@ const defaultConfig: GlobalConfig = {
       },
     },
     vlm3: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
+    vlm4: {
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -167,8 +173,6 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
 
   const app: AppConfig = backendConfig.app
     ? {
-        appName: backendConfig.app.name || "",
-        appDescription: backendConfig.app.description || "",
         iconType:
           (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
         iconKey: iconKey,
@@ -191,6 +195,7 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         vlm: transformModelEntry(backendConfig.models.vlm),
         vlm2: transformModelEntry(backendConfig.models.vlm2),
         vlm3: transformModelEntry(backendConfig.models.vlm3),
+        vlm4: transformModelEntry(backendConfig.models.vlm4),
         stt: transformVoiceModelEntry(backendConfig.models.stt),
         tts: transformVoiceModelEntry(backendConfig.models.tts),
       }
@@ -217,7 +222,10 @@ function loadConfigFromStorage(): GlobalConfig | null {
 
     if (storedAppConfig) {
       try {
-        mergedConfig.app = JSON.parse(storedAppConfig);
+        const stored = JSON.parse(storedAppConfig);
+        delete stored.appName;
+        delete stored.appDescription;
+        mergedConfig.app = stored;
       } catch (error) {
         log.error("Failed to parse app config:", error);
       }
@@ -251,7 +259,10 @@ function saveConfigToStorage(config: GlobalConfig): void {
 
   try {
     if (config.app) {
-      localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(config.app));
+      const app = { ...config.app } as Record<string, unknown>;
+      delete app.appName;
+      delete app.appDescription;
+      localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(app));
     }
     if (config.models) {
       localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(config.models));
@@ -335,6 +346,11 @@ export function useConfig() {
   const isVideoUnderstandingAvailable = !!(
     config?.models?.vlm3?.modelName ||
     config?.models?.vlm3?.displayName
+  );
+
+  const isAudioUnderstandingAvailable = !!(
+    config?.models?.vlm4?.modelName ||
+    config?.models?.vlm4?.displayName
   );
 
   // Whether config has selected an Embedding model
@@ -426,6 +442,7 @@ export function useConfig() {
     isVlmAvailable,
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isAudioUnderstandingAvailable,
     isEmbeddingAvailable,
     isMultiEmbeddingAvailable,
     defaultLlmModelName,

@@ -17,13 +17,13 @@ In Nexent, **Tools** and **Skills** are two distinct layers:
 ## Quick Start
 
 1. **Explore capabilities**: Read [Skills System Overview](./overview) to understand the supported skill types
-2. **Try creation**: Experience NL-to-Skill creation on the [Skill Management](../../user-guide/skills) page
+2. **Try creation**: Experience NL-to-Skill creation on the [Skill Management](../../user-guide/resource-repository/skill-repository.md) page
 3. **Create manually**: Upload `SKILL.md` or a ZIP package to create a custom skill
 4. **Configure for agents**: Enable skills in the agent's tool configuration
 
 ## Related References
 
-- [Skill Management (User Guide)](../../user-guide/skills)
+- [Skill Management (User Guide)](../../user-guide/resource-repository/skill-repository.md)
 - [Agent Development Guide](../../user-guide/agent-development)
 - [Local Tools Overview](../../user-guide/local-tools/index)
 - [SDK Tool Development Guide](../../sdk/core/tools)

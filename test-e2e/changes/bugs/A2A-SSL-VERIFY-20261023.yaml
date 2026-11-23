@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-SSL-VERIFY-20261023
+  change_type: bugfix
+  bug_id: A2A-SSL-VERIFY-20261023
+  title: Configure certificate verification for external A2A Agents
+  description: Persist a default-enabled URL discovery certificate verification preference and honor it in refresh and invocation.
+  observed_behavior: Self-signed or internal CA certificates prevent discovery and invocation with no configurable override.
+  expected_behavior: Explicitly disabling verification allows the selected Agent to be discovered and invoked while defaults remain enabled.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing discovery and client tests do not cover TLS preference propagation or self-signed peers.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-089]
+    retired: []
+  affected_cases:
+    existing: [CTR-031]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_a2a_ssl_verify.py
+      - test/backend/services/test_a2a_client_service.py
+      - test/backend/utils/test_a2a_http_client.py
+      - test/backend/app/test_a2a_client_app.py
+      - test/backend/database/test_a2a_agent_db.py
+      - test/backend/agents/test_create_agent_info.py::TestBuildExternalAgentConfig
+      - test/backend/agents/test_create_agent_info.py::test_build_external_config_preserves_ssl_preference
+      - test/sdk/core/agents/test_a2a_agent_proxy.py
+      - test/sdk/core/agents/test_agent_model.py
+      - frontend/tests/workbench/A2ADiscoveryLoading.test.tsx
+      - frontend/tests/workbench/A2ADiscoveryErrors.test.ts
+    behaviors:
+      - Default certificate verification on and preserve explicit false through discovery, persistence, refresh and calls.
+      - Preserve SDK sub-agent verification configuration and reject null API configuration.
+      - Render the default checked checkbox and submit the user selection.
+    reason: Existing timeout and HTTP success/error tests remain useful but lack preference assertions; add focused UT without duplicating D1.
+  notes: >-
+    Design ../nexent-doc/docs/Developing/dev-agent-a2a-published-version/changes/a2a-ssl-verification/design.md.
+    CTR-031 is unchanged discovery/refresh regression, not self-signed TLS acceptance.
+    Running-stack TLS integration, deployed UI and database migration execution remain unverified.
+    Targeted Python and frontend UT, TypeScript and local self-signed TLS probe passed.
+    CTR-031 execution blocked during administrator sign-in with HTTP 401 before discovery.

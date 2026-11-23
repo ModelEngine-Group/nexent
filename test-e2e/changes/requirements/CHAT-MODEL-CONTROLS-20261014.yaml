@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-MODEL-CONTROLS-20261014
+  change_type: requirement
+  requirement_id: CHAT-MODEL-CONTROLS-20261014
+  title: 六入口统一模型选择、思考控制和根运行模型
+  description: Implement shared session controls and presence-aware runtime overrides for ordinary chats and four creator entries, retaining existing scopes, model parameters and frontend-only sampling.
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: [CHAT-MODEL-CONTROLS]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-002, WB-CONTROLS-D4-003]
+    added: [CHAT-MODEL-CONTROLS-D2-001, CHAT-MODEL-CONTROLS-D2-002, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002, CHAT-MODEL-CONTROLS-D4-001, CHAT-MODEL-CONTROLS-D4-002, CHAT-MODEL-CONTROLS-D4-003]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/test_run_agent_cancellation_controls.py
+      - test/sdk/core/agents/test_run_agent.py
+      - test/backend/services/test_run_model_controls.py
+      - test/backend/services/test_nl2agent_service.py
+      - test/backend/services/test_nl2skill_service.py
+      - test/backend/agents/test_workbench_generation_overlay.py
+      - test/backend/agents/test_create_agent_info.py
+      - test/backend/agents/test_create_agent_info_workbench_coverage.py
+      - test/backend/app/test_agent_app.py
+      - test/backend/app/test_skill_app.py
+      - frontend/tests/workbench/ConversationModelControls.test.tsx
+      - frontend/tests/workbench/AgentModels.test.ts
+      - frontend/tests/workbench/ModelSelectorThinking.test.tsx
+      - frontend/tests/workbench/Composer.test.tsx
+    behaviors:
+      - Reuse capability/scope/default and frontend sampling tests; strengthen controller isolation, initial/subsequent creator state, immutable turn serialization and asynchronous default races.
+      - Strengthen DTO presence handling for omitted fields, false, auto, all eight efforts, null, budget zero/ranges and duplicate configuration conflicts.
+      - Strengthen NL2 model resolver and root overlay isolation, actual selected capacity, inherited sampling/custom/output parameters and preservation of independent business models.
+      - Strengthen permission/unavailable selection, run locks, cancellation, retry and late event protection without replacing existing draft or SSE behavior.
+    reason: Existing AgentModels/ModelSelectorThinking/Composer, NL2 service and generation overlay unit assertions cover isolated policies but lack the new creator wiring and partial override branches. Actual unit selectors are listed above; no UT is registered as a formal D1 case.
+  notes: Seven added Cases now have case-local scripts and explicit acceptance bindings; active denotes implemented executability, not acceptance PASS. Reuse both existing WB browser contracts unchanged. D2 proves real endpoint validation; D3 proves actual runtime-to-provider protocol and capacity; D4 proves browser state/request journeys. No additional D1/D5 quota, deployment, database migration or claimed execution result.

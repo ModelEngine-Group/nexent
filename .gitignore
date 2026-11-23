@@ -20,7 +20,7 @@ docker/openssh-server
 docker/volumes/db/data
 docker/.env
 docker/.env.generated
-deploy/docker/assets/monitoring/monitoring.env
+deploy/env/monitoring.env
 docker/.run
 docker/deploy.options
 k8s/helm/deploy.options
@@ -41,6 +41,10 @@ deploy/k8s/helm/nexent/generated-values.yaml
 deploy/k8s/helm/nexent/generated-runtime-values.yaml
 deploy/k8s/helm/nexent/generated-secrets-values.yaml
 deploy/k8s/helm/nexent/generated-persistence-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-runtime-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-secrets-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-persistence-values.yaml
 offline-package/
 
 frontend_standalone/
@@ -63,11 +67,11 @@ model-assets/
 openspec/
 logs/
 
-.agents/
 .devspace/
 devspace.yaml
 deploy/k8s/helm/**/*.tgz
 deploy/k8s/helm/nexent/Chart.lock
+deploy/k8s/helm/nexent-infrastructure/Chart.lock
 
 MAC_DEVELOPMENT_GUIDE.md
 data/
@@ -75,8 +79,22 @@ sdk/benchmark/.env
 /docker/.env.bak
 
 .venv
+node_modules/
+
+# Formal test runtime data stays on each developer/runner machine.
+test-e2e/**/secrets.env
+test-e2e/**/node_modules/
+test-e2e/**/test-results/
+test-e2e/**/.playwright-internal/
+test-e2e/**/__pycache__/
+test-e2e/**/.pytest_cache/
+test-e2e/**/runs/
+/test-e2e/config/
+/test-e2e/runs/
+/test-e2e/infra/generated/
 
 .pytest-tmp
+test/ext_components/aidp/mock_servers/_state/
 doc/mermaid
 _doc/
 
@@ -85,3 +103,12 @@ _doc/
 /deploy/env/.env.bak
 
 agent_repository_frontend
+.omo/
+.tokensave
+.playwright-mcp/
+# Added by code-review-graph
+.code-review-graph/
+
+.codex/skills/openspec-*
+# Added by Serena MCP
+.serena/

@@ -163,6 +163,15 @@ class StorageClient(ABC):
         pass
 
     @abstractmethod
+    def get_file_size_strict(
+        self,
+        object_name: str,
+        bucket: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return object size, ``None`` for a confirmed miss, and raise on other failures."""
+        pass
+
+    @abstractmethod
     def list_files(
         self,
         prefix: str = "",

@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: D1D5-DEEP-REVIEW-20261009
+  change_type: test-fix
+  title: Distinguish failed SSE termination and resolve runtime Agent names
+  description: Accept only an explicit last root error in the negative nested scenario, after bounded stream consumption;
+    success cases remain strict. Resolve tool override names from the actual owned Agent rather than another cached
+    role. Pair automatically discovered Elasticsearch with the same deployment credential, preserving explicit endpoint
+    overrides and keeping keys out of logs. Remove a historical SQL filename from the business prerequisite. Check
+    the A2A total field value independently of localized presentation, retaining real external invocation wire evidence.
+    Preserve wire checks, security assertions and product failures.
+  affected_features:
+    existing:
+    - F-060
+    - F-063
+    - F-177
+    - V5-PW-A2A-DISCOVERY-01
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - AGT-035
+    - API-AUTO-357B84F01BA6D321
+    - PW-A2A-DISCOVERY-01
+    retired: []

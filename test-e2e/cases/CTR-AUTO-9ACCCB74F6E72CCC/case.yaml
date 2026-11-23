@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-AUTO-9ACCCB74F6E72CCC
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: AIDP_Memorybank(MemoryBank)与 mem0(Hosted API)真实 wire 调用：鉴权头、payload 映射、异步 ingest 事件轮询与错误码映射｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: AIDP_Memorybank(MemoryBank)与 mem0(Hosted API)真实 wire 调用：鉴权头、payload 映射、异步 ingest 事件轮询与错误码映射｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过；内存 provider 插件目录已加载内置 AIDP_Memorybank 与 mem0。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - 本地 MemoryBank/mem0 测试桩已启动并清空 wire log；users.yaml 中 ADMIN/SPEED 账号具备 MEM.PROVIDER 读写权限，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/services/test-memory-provider/（MemoryBank/mem0 测试桩及 wire log）'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 与 secrets.env 读取具备 MEM.PROVIDER 权限的 ADMIN/SPEED 隔离账号与租户；provider 的 api_key 仅从 secrets.env
+      注入，不写入报告。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 启动本地 MemoryBank 与 mem0 Hosted API 测试桩并清空 wire log，桩实现对应 HTTP 契约（MemoryBank 的 /MemoryBank/Tenants/... 与 mem0 的
+      /v3/memories/search/、/v3/memories/add/、/v1/event/{event_id}/）。
+    expected: AIDP_Memorybank 使用 Bearer、mem0 使用 Token 鉴权头，请求 URL 与 payload 映射与插件实现一致（由测试桩 wire capture 证明真实到达）。
+  - order: 3
+    action: 通过 POST /memory/providers 分别创建 AIDP_Memorybank 与 mem0 两个 provider 配置（params 含 plugin.name、plugin.api_key、plugin.base_url
+      指向测试桩），记录返回的 provider_config_id 与掩码后的 params；掩码规则为短值 ***、长值前3+***+后4。
+    expected: mem0 ingest 异步事件经 /v1/event/{event_id}/ 轮询至终态（SUCCEEDED/FAILED），不把未终态误报成功。
+  - order: 4
+    action: '对 AIDP_Memorybank 调用 POST /memory/providers/{id}/test-search，断言测试桩收到 Authorization: Bearer <api_key> 的 POST /MemoryBank/Tenants/{tenant_id}/Instances/{instance_name}/Memories/Query，请求体含
+      query/top_k/threshold/rerank；返回 items 正确映射 external_id/content/score/source=unifiedmemory。'
+    expected: 错误码映射正确：401→unauthorized、403→forbidden、429→rate_limited、5xx→provider_error，并回写 last_error_code；失败路径返回明确错误，无半写入、重复副作用或跨租户泄露。
+  - order: 5
+    action: 对 AIDP_Memorybank 调用 POST /memory/providers/{id}/test-ingest，断言测试桩收到 PUT /MemoryBank/Tenants/.../Memories，请求体
+      messages 由各 unit.unit_content 映射为 [{"role":"user","content":...}] 且含 timestamp；返回 accepted_count/rejected_count 与 status=ok。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  - order: 6
+    action: '对 mem0 调用 POST /memory/providers/{id}/test-search，断言测试桩收到 Authorization: Token <api_key>（配置 org_id 时含 X-Org-Id）的
+      POST /v3/memories/search/，请求体含 query/filters/top_k/threshold，filters 由 user_id/agent_id 组成（单个或 AND）。'
+    expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  - order: 7
+    action: 对 mem0 调用 POST /memory/providers/{id}/test-ingest，断言测试桩按 unit 逐个收到 POST /v3/memories/add/，payload 含 messages/metadata/infer=False
+      及 user_id/agent_id/run_id；返回 event_id 后按 GET /v1/event/{event_id}/ 轮询直至 SUCCEEDED 或 FAILED 终态并解析。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  - order: 8
+    action: 将测试桩分别返回 401/403/429/5xx，重复 test-search 与 test-ingest；test-search 返回 HTTP 400 且 message 说明失败，test-ingest 返回 HTTP 200 且 status=error、accepted_count=0、rejected_count=1。last_error_code 被写为对应错误码（unauthorized/forbidden/rate_limited/provider_error），成功后再调用将
+      last_error_code 清空；错误响应不泄露上游明文 body。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  - order: 9
+    action: 检查日志与响应不含明文 api_key/Token；清理当次创建的 provider 配置、参数与测试桩数据，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - AIDP_Memorybank 使用 Bearer、mem0 使用 Token 鉴权头，请求 URL 与 payload 映射与插件实现一致（由测试桩 wire capture 证明真实到达）。
+  - mem0 ingest 异步事件经 /v1/event/{event_id}/ 轮询至终态（SUCCEEDED/FAILED），不把未终态误报成功。
+  - 错误码映射正确：401→unauthorized、403→forbidden、429→rate_limited、5xx→provider_error，并回写 last_error_code；失败路径返回明确错误，无半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 536
+  integration_boundary:
+  - LOCAL_REAL_PROTOCOL：使用本地测试桩 MemoryBank 与 mem0 API 完成真实 HTTP 协议与鉴权头调用；不访问生产 MemoryBank 或 mem0 SaaS。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - AIDP_Memorybank 使用 Bearer、mem0 使用 Token 鉴权头，请求 URL 与 payload 映射与插件实现一致（由测试桩 wire capture 证明真实到达）。
+  - mem0 ingest 异步事件经 /v1/event/{event_id}/ 轮询至终态（SUCCEEDED/FAILED），不把未终态误报成功。
+  - 错误码映射正确：401→unauthorized、403→forbidden、429→rate_limited、5xx→provider_error，并回写 last_error_code；失败路径返回明确错误，无半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、last_error_code 状态快照；协议场景保存 MemoryBank/mem0 测试桩 wire capture 与 event 轮询轨迹。

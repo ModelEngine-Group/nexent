@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: NB-CHAT-DISCONNECT-20261026
+  change_type: bugfix
+  bug_id: NB-CHAT-DISCONNECT-20261026
+  title: Continue admitted chat runs after headers-only client disconnect
+  description: Start the persisted-chat producer before response-body iteration and retain its preparation reservation until producer exit.
+  observed_behavior: Closing the HTTP response after reading conversation_id can prevent producer startup or invalidate its preparation reservation.
+  expected_behavior: An admitted persisted chat continues and saves its answer after subscriber disconnect; explicit stop and direct debug-stream cancellation remain effective.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing UT reads a producer chunk before disconnecting; AGT-064 consumes the entire SSE response. Neither checks a headers-only disconnect or reservation ownership during preparation.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-146]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-064]
+    added: [NB-CHAT-DISCONNECT-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Producer starts without response-body iteration
+    - Subscriber close during preparation preserves the reservation and rejects concurrent runs
+    - Completed, failed and cancelled producers release reservations and deferred workers
+    - Buffered delivery, debug disconnect, explicit stop and admission boundaries retain their behavior
+    test_selectors:
+    - test/backend/services/test_agent_subscription_lifecycle.py
+    - test/backend/services/test_agent_service.py::test_non_debug_producer_survives_sse_disconnect
+    - test/backend/services/test_agent_service.py::test_cancelled_producer_explicitly_closes_stream_generator
+    - test/backend/services/test_agent_service.py::test_debug_stream_keeps_direct_execution_path
+    - test/backend/services/test_agent_service.py::test_shutdown_agent_stream_tasks_cancels_request_owned_tasks
+    reason: Add focused lifecycle regressions and reuse adjacent service tests; no duplicate formal D1 is needed.
+  notes: >-
+    Design and proof-gap assessment: changes/bugs/NB-CHAT-DISCONNECT-20261026/design.md.
+    Both sibling nexent-doc and nexent_SPEC are unavailable in this checkout; this repository-local delivery record does not replace the external SPEC.
+    AGT-064 is retained unchanged for normal new/existing conversation SSE regression. Its broad historical contract is not acceptance-certified by this fix.
+    NB-CHAT-DISCONNECT-001 adds the distinct real HTTP/runtime/model/persistence boundary. Runtime execution depends on machine-local configuration and real provider availability; UT and static validation are not D3 passes.

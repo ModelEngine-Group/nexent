@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: SYSTEM-BRANDING-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: SYSTEM-BRANDING-D4-001
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01: [SYSTEM-BRANDING-D4-001]
+  AC-02: [SYSTEM-BRANDING-D4-001]
+  AC-03: [SYSTEM-BRANDING-D4-001]
+  AC-04: [SYSTEM-BRANDING-D4-001]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -1,0 +1,70 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-CALLABLE-NAMES-20261026
+  change_type: bugfix
+  bug_id: AGENT-CALLABLE-NAMES-20261026
+  title: Align internal names and isolate external display names from Python callables
+  description: Preserve legal legacy calls and allocate stable aliases for invalid or conflicting external A2A names.
+  observed_behavior: Hyphenated external names become invalid proxy assignments and stop unrelated tool actions; internal entry points disagree about valid names.
+  expected_behavior: All internal write entry points apply the existing Unicode identifier and 100-character contract; external names remain visible and safe aliases execute without overwriting tools.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: Name UT covers whitespace and NL2Agent identifiers; sandbox UT uses my_tool only. No existing assertion follows alias identity through prompt, wrapper, proxy bootstrap and actual host dispatch.
+  feature_contract_changed: true
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: [F-043, F-096]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [UT-SDK-AGENT-CALLABLE-001, AGENT-CALLABLE-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/sdk/core/agents/test_agent_names.py
+    - test/sdk/core/agents/test_callable_proxy_guard.py
+    - test/sdk/core/agents/test_a2a_agent_proxy.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_nexent_agent_external_names.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/services/test_agent_name_contract.py
+    - test/backend/services/test_nl2agent_name_validation.py
+    - test/backend/services/test_a2a_name_validation.py
+    - test/backend/services/test_agent_version_service.py
+    - test/backend/services/test_agent_version_a2a_publication.py
+    - test/backend/services/test_default_generation_prompts.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/test_model_consts.py
+    - test/sdk/core/agents/test_agent_model.py
+    - test/sdk/core/agents/test_sandbox.py
+    - frontend/tests/workbench/AgentNameContract.test.ts
+    behaviors:
+    - Shared internal validation accepts existing Unicode and 100-character identifiers, rejects keywords, invalid syntax and overlength values, and preserves omitted partial fields.
+    - External allocation preserves legal unique names, handles tool collisions and duplicate names deterministically, and preserves original display metadata.
+    - Prompt and wrapper use the same aliases and sandbox rejects invalid proxy names before submitting code.
+    reason: Isolated allocator and validation branches belong in UT; the formal component case adds actual prompt-wrapper-HTTP-bridge dispatch evidence missing from UT.
+  notes: >-
+    Design ../nexent-doc/docs/Developing/management-agent-callable-names/design.md.
+    Inspected F-043/F-045/F-096, A2A-NAME-WHITESPACE-20261020 and its unavailable referenced SPEC,
+    API-094/API-095 and PW-A2A-DISCOVERY-01. Existing relation CRUD/browser contracts do not
+    exercise malformed proxy source. New D1 executes real internal alias/context/wrapper/bridge collaboration
+    with controlled kernel and external transport boundaries, not a deployed D3 runtime or D4 journey.
+    Existing D1-D5 assets are preserved. No deployment, authentication or provider protocol change.
+    Local verification: selected Python UT passed in isolated file/group processes, frontend name UT passed,
+    and the new D1 passed for zh/en through run_cases.py. A process-local mutation restoring the raw
+    agent-one callable caused both D1 variants to fail before dispatch, proving regression detection.
+    Global design/implementation validation is BLOCKED by the pre-existing untracked
+    UT-BE-AIDP-COOLDOWN-001 reference to unknown F-111-RULE-02; generated global views were not rewritten
+    from an invalid baseline. Initial D1 verification did not claim real Docker/provider/browser acceptance.
+    User-requested D3 follow-up now passed with current-source fingerprints, a real configured model,
+    three actual session Docker/Jupyter kernels and two published Nexent A2A peers. Directory creation,
+    legal parallel_probe_a compatibility and the hyphenated peer's generated alias all returned verified results.
+    Runtime HTTP 400 was the owned peer's disabled metadata-input setting; allow_chat_metadata was enabled
+    only on owned test Agents. Owned Card interfaces use reachable Docker-network addresses; shared
+    deployment settings/processes/images were untouched. All five attempts' owned peers, external records,
+    temporary keys and staged sources were cleaned; retained A2A audit registrations were disabled.
+    Browser acceptance remains outside this follow-up.

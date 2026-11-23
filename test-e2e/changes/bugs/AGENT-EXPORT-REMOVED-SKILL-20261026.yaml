@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-EXPORT-REMOVED-SKILL-20261026
+  change_type: bugfix
+  bug_id: AGENT-EXPORT-REMOVED-SKILL-20261026
+  title: Exclude removed skills from agent exports
+  description: Filter disabled skill instances from portable JSON and agent-tree skill ZIP collection.
+  observed_behavior: Removing a skill disables its instance, but export includes all non-deleted instances and bundles the removed skill.
+  expected_behavior: Export only selected skills at each agent version; an agent tree with no enabled skills exports JSON without skill names.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing UT omits disabled instances; API-066 binds a skill and exports but never removes it before re-exporting.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-053]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [API-066]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [test/backend/services/test_agent_export_skills.py]
+    behaviors:
+      - Disabled instances are absent from JSON and recursive ZIP selection while enabled instances remain.
+      - Removed-only agents return plain JSON without invoking skill file export.
+      - Resolved child versions, deduplication, cycles, missing catalog entries and read-error behavior remain safe.
+    reason: Existing UT does not provide disabled-instance input. Add isolated filter and export regression coverage; retain the existing API-066 runtime boundary without a duplicate D1.
+  notes: See nexent-doc/docs/Developing/dev-agent-export-skills/design.md. API-066 script-only strengthening retains the existing no-skill JSON contract; historical acceptance completeness is unreviewed. Configuration and version consumers still require the all-instances query, so its behavior is preserved.

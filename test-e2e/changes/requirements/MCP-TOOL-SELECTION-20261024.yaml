@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: MCP-TOOL-SELECTION-20261024
+  change_type: requirement
+  requirement_id: MCP-TOOL-SELECTION-20261024
+  title: Group MCP tools by service with partial and batch selection
+  description: Expand service groups in the Agent tool picker and select individual tools, matching service children or the current MCP page without changing tool-ID persistence.
+  affected_features:
+    existing: [AGENT-EDITOR-WORKFLOWS]
+    added: []
+    modified: [F-050]
+    retired: []
+  affected_cases:
+    existing: [AGENT-EDITOR-D4-004]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/toolDrawer.test.tsx
+      - frontend/tests/component/resourceDrawer.test.tsx
+      - frontend/tests/component/skillDrawer.test.tsx
+    behaviors:
+      - Shared description two-line truncation and full hover text for all ResourceItem consumers, including custom slots and empty descriptions.
+      - Service grouping, expand/collapse, descriptions and partial checkbox state.
+      - Individual, service and MCP page selection with filtered scope and retained hidden selections.
+      - Confirm/cancel isolation, existing configuration and tag batching.
+      - Required parameters, duplicate names, capability restrictions and batch error recovery.
+    reason: Existing frontend DOM interaction UT owns picker behavior. Extend it rather than duplicate formal D1. Existing D4 covers cancellation only; no backend, API, Agent execution or deployment behavior changes.

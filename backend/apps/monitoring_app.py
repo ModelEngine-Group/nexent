@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Model Monitoring API endpoints.
 
@@ -14,12 +15,14 @@ from sqlalchemy import text
 
 from consts.const import (
     ENABLE_TELEMETRY,
+    MONITORING_DASHBOARD_ALLOWED_ROLES,
     MONITORING_DASHBOARD_URL,
     MONITORING_PROVIDER,
 )
 from consts.model import ConversationResponse
+from consts.exceptions import TokenExpiredError
 from database.client import get_monitoring_db_session
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
 
@@ -28,6 +31,18 @@ router = APIRouter(prefix="/monitoring")
 
 def _normalize_monitoring_provider(value: str | None) -> str:
     return str(value or "otlp").strip().lower()
+
+
+def _normalize_monitoring_dashboard_allowed_roles(value: str | None) -> list[str]:
+    """Normalize a comma-separated dashboard role allowlist."""
+    roles: list[str] = []
+    seen: set[str] = set()
+    for item in str(value or "").split(","):
+        role = item.strip().upper()
+        if role and role not in seen:
+            roles.append(role)
+            seen.add(role)
+    return roles
 
 
 def get_monitoring_status() -> dict[str, Any]:
@@ -40,6 +55,9 @@ def get_monitoring_status() -> dict[str, Any]:
         "telemetry_enabled": telemetry_enabled,
         "provider": provider,
         "dashboard_url": dashboard_url,
+        "dashboard_allowed_roles": _normalize_monitoring_dashboard_allowed_roles(
+            MONITORING_DASHBOARD_ALLOWED_ROLES
+        ),
         "dashboard_port": None,
         "dashboard_path": None,
     }
@@ -133,6 +151,9 @@ async def list_models_endpoint(
         paginated = all_metrics[start:end]
 
         return ConversationResponse(code=0, message="success", data=paginated)
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list monitoring models: {str(e)}")
         raise HTTPException(

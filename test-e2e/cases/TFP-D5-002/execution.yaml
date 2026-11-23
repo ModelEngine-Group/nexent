@@ -1,0 +1,11 @@
+schema_version: '1.0'
+case_id: TFP-D5-002
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_tfp_d5_002
+  profiles:
+  - mock
+preparation:
+  families: []
+notes: Self-contained controlled-boundary checks; no deployed services or asset factories are needed.

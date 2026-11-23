@@ -1,0 +1,125 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-HEALTH-PRECONDITION-20261023
+  change_type: test-fix
+  title: Remove model-management health gates from ordinary business prerequisites
+  no_case_change_reason: >-
+    Formal business acceptance and case-local bindings are unchanged. Only the
+    shared prerequisite helpers and their infrastructure regression tests change.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: No backend or SDK product behavior changes; helper behavior is covered by infrastructure regression tests.
+  description: >-
+    Model listing is allowed for ordinary users, while saved-model healthcheck
+    requires model:update. The shared resolver reused a successful catalog
+    reader for an unconditional management healthcheck, incorrectly blocking
+    business tests with HTTP 403. Resolve configured tenant-local models without
+    probing connectivity. Remove repeated probes from existing VLM assets,
+    D4 voice/embedding preparation and memory business preconditions. Newly
+    created owned models retain one activation because product runtime requires
+    available status rather than the initial not_detected status. Keep explicit connectivity,
+    permission assertions and post-failure opt-in diagnostics intact. Business
+    requests retain their original identities and real Provider assertions;
+    missing models, runtime failures and cleanup failures remain failures.
+    No product code, model preference, credential, role or pipeline is changed.
+    The existing Cases below are the 56 dependency-blocked Cases selected from
+    the previous Ubuntu batch for a targeted rerun, not automatically marked PASS.
+  affected_features:
+    existing:
+    - F-055
+    - F-056
+    - F-057
+    - F-058
+    - F-059
+    - F-060
+    - F-061
+    - F-062
+    - F-063
+    - F-064
+    - F-068
+    - F-075
+    - F-095
+    - F-112
+    - F-120
+    - F-123
+    - F-124
+    - F-126
+    - F-127
+    - F-128
+    - F-129
+    - F-135
+    - F-137
+    - F-146
+    - F-147
+    - F-148
+    - F-150
+    - V5-PERF-01
+    - V5-PERF-02
+    - V5-PERF-07
+    - V5-REL-01
+    - V5-SEC-10
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-124
+    - API-126
+    - API-128
+    - API-129
+    - API-130
+    - API-164
+    - AGT-013
+    - AGT-015
+    - AGT-016
+    - AGT-017
+    - AGT-018
+    - AGT-020
+    - AGT-021
+    - AGT-022
+    - AGT-023
+    - AGT-024
+    - AGT-026
+    - AGT-027
+    - AGT-029
+    - AGT-030
+    - AGT-031
+    - AGT-032
+    - AGT-033
+    - AGT-034
+    - AGT-035
+    - AGT-036
+    - AGT-037
+    - AGT-038
+    - AGT-039
+    - AGT-051
+    - AGT-054
+    - AGT-056
+    - AGT-057
+    - AGT-058
+    - AGT-059
+    - AGT-061
+    - AGT-064
+    - AGT-065
+    - AGT-066
+    - AGT-067
+    - AGT-068
+    - AGT-069
+    - AGT-070
+    - API-081
+    - API-082
+    - API-096
+    - API-120
+    - API-153
+    - API-154
+    - CTR-018
+    - CTR-019
+    - PERF-01
+    - PERF-02
+    - PERF-07
+    - REL-01
+    - SEC-10
+    added: []
+    modified: []
+    retired: []

@@ -1,0 +1,47 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-nginx
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-nginx
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-nginx
+  template:
+    metadata:
+      labels:
+        app: nexent-nginx
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.images.nginx.repository }}:{{ .Values.images.nginx.tag }}
+          imagePullPolicy: {{ .Values.images.nginx.pullPolicy }}
+          ports:
+            - containerPort: 3000
+              name: https
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: nginx-tls
+              mountPath: /etc/nginx/ssl
+              readOnly: true
+          resources:
+            requests:
+              memory: {{ .Values.resources.nginx.requests.memory }}
+              cpu: {{ .Values.resources.nginx.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.nginx.limits.memory }}
+              cpu: {{ .Values.resources.nginx.limits.cpu }}
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nexent-nginx-config
+        - name: nginx-tls
+          secret:
+            secretName: nexent-nginx-tls
+{{- end }}
