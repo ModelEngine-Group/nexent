@@ -41,6 +41,33 @@ def conversation_belongs_to(conversation_id: int, *, user_id: str, tenant_id: st
         ) is not None
 
 
+def load_execution_result_record(user_id: str, tenant_id: str, conversation_id: int,
+                                 message_id: int, unit_index: int) -> dict:
+    """Read one real execution unit under the current identity and conversation."""
+    message, unit, conversation = ConversationMessage, ConversationMessageUnit, ConversationRecord
+    membership = select(UserTenant.user_id).where(
+        UserTenant.user_id == user_id, UserTenant.tenant_id == tenant_id, UserTenant.delete_flag == "N",
+    ).exists()
+    statement = select(unit.unit_type, unit.unit_content, unit.tool_call_id, unit.invocation_id).join(
+        message, message.message_id == unit.message_id,
+    ).join(conversation, conversation.conversation_id == message.conversation_id).where(
+        membership, conversation.created_by == user_id, conversation.conversation_id == conversation_id,
+        conversation.delete_flag == "N", message.message_id == message_id,
+        message.message_role == "assistant", message.delete_flag == "N",
+        unit.conversation_id == conversation_id, unit.unit_index == unit_index,
+        unit.unit_type.in_(["execution_result", "tool_result"]), unit.delete_flag == "N",
+    )
+    with get_db_session() as session:
+        rows = session.execute(statement).mappings().all()
+    if not rows:
+        raise PermissionError("Execution result is unavailable or not authorized")
+    if len(rows) != 1:
+        raise ValueError("Ambiguous execution result reference")
+    row = rows[0]
+    return {"record_type": row["unit_type"], "content": row["unit_content"],
+            "tool_call_id": row["tool_call_id"], "invocation_id": row["invocation_id"]}
+
+
 def read_legacy_resume_state(conversation_id: int, user_id: str, tenant_id: str):
     """Read the persisted playback offset within the signed conversation scope."""
     message, unit = ConversationMessage, ConversationMessageUnit

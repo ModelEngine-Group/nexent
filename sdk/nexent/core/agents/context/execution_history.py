@@ -55,14 +55,27 @@ class HistoricalExecutionResult:
 class ExecutionHistory:
     """One trusted run scope; ownership cannot be supplied by model arguments."""
 
-    def __init__(self, read_persisted: Callable[[int, int], str] | None = None):
+    def __init__(self, read_persisted: Callable[[int, int], str] | None = None, *,
+                 read_conversation_result: Callable[[int, int], str] | None = None):
         self._lock = RLock()
         self._read_persisted = read_persisted
+        self._read_conversation_result = read_conversation_result
+        self._persisted_owners: set[str] = set()
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
         self._restored: dict[tuple[str, str], HistoricalExecutionResult] = {}
         self._read_chars: dict[str, int] = {}
         self._rendered_budget: dict[str, int | None] = {}
+
+    @property
+    def has_conversation_reader(self) -> bool:
+        return self._read_conversation_result is not None
+
+    def authorize_persisted_reads(self, owner: str) -> None:
+        """Bind a runtime owner to the backend-scoped callback, never to summary text."""
+        if self.has_conversation_reader:
+            with self._lock:
+                self._persisted_owners.add(owner)
 
     def register(self, owner: str, fields: dict[str, str]) -> str:
         key = uuid4().hex
@@ -148,11 +161,15 @@ class ExecutionHistory:
             raise ValueError("max_chars must be between 1 and 16000")
         with self._lock:
             record = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
-            if record is None or record.owner != owner:
+            backend_read = (reference.startswith("message:") and self.has_conversation_reader
+                            and owner in self._persisted_owners
+                            and (record is None or isinstance(record, HistoricalExecutionResult)))
+            if not backend_read and (record is None or record.owner != owner):
                 raise PermissionError("Execution result is unavailable or not authorized")
-            if record.persisted and self._read_persisted is not None:
+            if backend_read or record.persisted and self._read_persisted is not None:
                 message, index = reference.split("/unit-index:")
-                text = self._read_persisted(int(message.removeprefix("message:")), int(index))
+                reader = self._read_conversation_result if backend_read else self._read_persisted
+                text = reader(int(message.removeprefix("message:")), int(index))
                 if not isinstance(text, str):
                     raise ValueError("Invalid persisted execution content")
             else:

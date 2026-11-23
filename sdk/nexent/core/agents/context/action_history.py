@@ -27,6 +27,7 @@ def register_historical_results(items, history, owner):
     """Grant only completed execution results present in this authorized run snapshot."""
     from .native_history import decode_history_event
 
+    history.authorize_persisted_reads(owner)
     results, refs_by_item = [], {}
     for item in items:
         selected = []

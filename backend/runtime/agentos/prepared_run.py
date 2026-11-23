@@ -7,6 +7,7 @@ import logging
 from concurrent.futures import Future
 from contextlib import aclosing
 from dataclasses import dataclass
+from functools import partial
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
@@ -20,10 +21,12 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import (
     ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
 )
+from infrastructure.rdb.conversation_state import load_execution_result_record
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
 from nexent.core.agents.context.execution_history import ExecutionHistory
+from nexent.core.agents.context.native_history import decode_history_event
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.prepared_evaluation import (
@@ -64,6 +67,19 @@ async def _snapshot_chunks(info):
     async with aclosing(agent_run(info, thread_manager=runtime_thread_manager)) as chunks:
         async for chunk in chunks:
             yield chunk
+
+
+def _read_execution_result(user_id, tenant_id, conversation_id, message_id, unit_index):
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] == "tool_result":
+        event = decode_history_event(record)
+        if event is None or not event.get("call_id"):
+            raise ValueError("Invalid persisted native execution result")
+        return event["result"]
+    payload = json.loads(record["content"])
+    if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+        raise ValueError("Invalid persisted execution content")
+    return payload["content"]
 
 
 def _execution_record(history, event):
@@ -119,7 +135,9 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
             minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
         )
-        history = ExecutionHistory()
+        history = ExecutionHistory(read_conversation_result=partial(
+            _read_execution_result, actor.user_id, actor.tenant_id, identity.conversation_id,
+        ))
         info.observer.execution_history = history
         facts = {}
         index = 0

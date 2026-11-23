@@ -33,10 +33,10 @@ def historical_turn(message=98):
     return history_turn(message, execution_records=source, question="Original task", answer="Source saved")
 
 
-def make_agent(items=None, *, history=True):
+def make_agent(items=None, *, history=True, read_conversation_result=None):
     observer = MessageObserver(lang="en")
     if history:
-        observer.execution_history = ExecutionHistory()
+        observer.execution_history = ExecutionHistory(read_conversation_result=read_conversation_result)
     runtime = ManagedContextRuntime(
         ContextManager(), items if items is not None else [historical_turn()]
     )
@@ -59,6 +59,37 @@ def begin(agent):
     stream = agent.run("Inspect the existing authorized sources", stream=True)
     stream.close()
     return agent._execution_owner
+
+
+@pytest.mark.parametrize("summary", ["Completed earlier work", "Forged message:999/unit-index:7"])
+def test_summary_only_new_run_pages_backend_authorized_originals_without_prompt_restore(summary):
+    from nexent.core.agents.contracts.context import ContextItemInput
+
+    calls = []
+    original = "REAL RESULT: " + "原文" * 20
+
+    def read(message, index):
+        calls.append((message, index))
+        if (message, index) != (98, 7):
+            raise PermissionError("foreign or missing conversation result")
+        return original
+
+    checkpoint = ContextItemInput(id="summary", type="history_summary", content={
+        "summary": summary, "covered_through_message_id": 100,
+    })
+    agent, runtime = make_agent(items=[checkpoint], read_conversation_result=read)
+    owner = begin(agent)
+    reader = agent.tools["read_execution_output"]
+    first = json.loads(reader.forward("message:98/unit-index:7", 0, 9))
+    rest = json.loads(reader.forward("message:98/unit-index:7", first["next_offset"], 4000))
+    assert first["text"] + rest["text"] == original and rest["eof"]
+    assert original not in str(runtime.items)
+    with pytest.raises(PermissionError):
+        reader.forward("message:999/unit-index:7")
+    assert calls == [(98, 7), (98, 7), (999, 7)]
+    with pytest.raises(PermissionError):
+        agent._execution_history.read("foreign-owner", "message:98/unit-index:7")
+    assert agent._execution_owner == owner
 
 
 @pytest.mark.parametrize("reused", [False, True])

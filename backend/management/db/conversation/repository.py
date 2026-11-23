@@ -62,7 +62,6 @@ from management.db.conversation.models import (
     ConversationSourceImage,
     ConversationSourceSearch,
 )
-from management.db.identity.models import UserTenant
 from management.db.knowledge_base.models import KnowledgeRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 from infrastructure.rdb.orm import as_dict
@@ -73,35 +72,12 @@ def load_execution_result_content(
 ) -> str:
     """Load one execution unit in the caller's current conversation scope."""
 
-    membership = select(UserTenant.user_id).where(
-        UserTenant.user_id == user_id,
-        UserTenant.tenant_id == tenant_id,
-        UserTenant.delete_flag == "N",
-    ).exists()
-    statement = (
-        select(ConversationMessageUnit.unit_content)
-        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
-        .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-        .where(
-            membership,
-            ConversationRecord.created_by == user_id,
-            ConversationRecord.conversation_id == conversation_id,
-            ConversationRecord.delete_flag == "N",
-            ConversationMessage.message_id == message_id,
-            ConversationMessage.delete_flag == "N",
-            ConversationMessageUnit.conversation_id == conversation_id,
-            ConversationMessageUnit.unit_index == unit_index,
-            ConversationMessageUnit.unit_type == "execution_result",
-            ConversationMessageUnit.delete_flag == "N",
-        )
-    )
-    with get_db_session() as session:
-        rows = session.execute(statement).scalars().all()
-    if not rows:
+    from infrastructure.rdb.conversation_state import load_execution_result_record
+
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] != "execution_result":
         raise PermissionError("Execution result is unavailable or not authorized")
-    if len(rows) != 1:
-        raise ValueError("Ambiguous execution result reference")
-    payload = json.loads(rows[0])
+    payload = json.loads(record["content"])
     if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
         raise ValueError("Invalid persisted execution content")
     return payload["content"]

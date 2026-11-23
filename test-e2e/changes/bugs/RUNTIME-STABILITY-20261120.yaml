@@ -17,12 +17,12 @@ change:
       protocol and replay collaboration.
   feature_contract_changed: true
   affected_features:
-    existing: [CHAT-TRAJECTORY, CMSR-005, JIUWEN-OUTPUT]
+    existing: [CHAT-TRAJECTORY, CMSR-005, JIUWEN-CONTEXT, JIUWEN-OUTPUT]
     added: []
     modified: [F-171]
     retired: []
   affected_cases:
-    existing: [CHAT-TRAJECTORY-REAL-MODEL-D3-001, CMSR-D3-001]
+    existing: [CHAT-TRAJECTORY-REAL-MODEL-D3-001, CMSR-D3-001, JIUWEN-CONTEXT-D3-001]
     added: []
     modified: [AGENT-HISTORY-D3-001, AOS-MODEL-D3-001, AOS-TRANSPORT-D3-001, CONTEXT-POST-RESPONSE-D3-001, JIUWEN-OUTPUT-D3-001]
     retired: []
@@ -49,10 +49,16 @@ change:
         evidence stays user data and actual final answers stay assistant.
       - AgentOS HTTP fixtures keep retired output-limit inputs as negative tests and the existing authorization allowlist
         on all three Skill tools.
+      - Preserve successful tools/answers when maintenance admission is full; retry only unaccepted maintenance within
+        existing deadlines off the tool worker, with cancellation, busy errors and unchanged hard capacity checks.
+      - Read summary-covered CodeAgent/native originals through a backend-bound conversation reader with unchanged
+        pagination/budgets; reject foreign/deleted/non-result units and never authorize reads from summary references.
     reason: Reuse targeted UT and existing self-contained Case preparation/cleanup; preserve all prior variants and D1
       contracts without a new test framework.
     test_selectors:
+      - test/backend/app/test_agentos_prepared_run.py
       - test/backend/app/test_history_source_contracts.py
+      - test/backend/database/test_execution_result_read_db.py
       - test/backend/database/test_conversation_history_stopped.py
       - test/backend/services/test_agent_execution_history_stream.py
       - test/backend/services/test_agent_run_final_answers.py
@@ -66,6 +72,8 @@ change:
       - test/sdk/core/agents/test_context_message_format.py
       - test/sdk/core/agents/test_context_scope_reduction.py
       - test/sdk/core/agents/test_execution_owner_lifecycle.py
+      - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+      - test/sdk/core/agents/test_jiuwen_context_admission.py
       - test/sdk/core/agents/test_history_context_runtime.py
       - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
       - test/sdk/core/agents/test_jiuwen_tool_spans.py
@@ -73,4 +81,5 @@ change:
       - test/sdk/core/agents/test_post_response_context.py
   notes: SPEC10 Scope Reduction defines retained behavior; SPEC09 retains original failure evidence. Recovery/catalog
     extensions and independent Ops fixes remain withdrawn. Raw journal/DB/context history and current mapper contracts
-    remain unchanged; real-model/container acceptance is separate.
+    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02 in the current technical design
+    cover bounded maintenance admission and backend-authorized originals after summaries; existing D3 preparation is reused.

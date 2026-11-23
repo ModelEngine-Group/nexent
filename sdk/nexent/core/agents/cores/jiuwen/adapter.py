@@ -409,9 +409,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.context.action_history import register_historical_results
         from nexent.core.agents.context.execution_history import ExecutionHistory
         from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
-        self.execution_history = ExecutionHistory()
+        history = getattr(info.observer, "execution_history", None)
+        self.execution_history = history if isinstance(history, ExecutionHistory) else ExecutionHistory()
         self.context_items = register_historical_results(self.context_items, self.execution_history, self.owner_id)
-        if any(item.metadata.get("execution_source_refs") for item in self.context_items):
+        if self.execution_history.has_conversation_reader or any(
+                item.metadata.get("execution_source_refs") for item in self.context_items):
             reader = ReadExecutionOutputTool(self.execution_history, self.owner_id, lambda: None)
             self.business_tools[reader.name] = reader
             self.visible_tool_names.add(reader.name)
