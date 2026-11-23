@@ -150,6 +150,29 @@ def test_read_historical_entry_is_immutable_and_current_shape_is_unambiguous():
         read_agent_parameter_entry({"parameter_values": {}, "temperature": 0.3})
 
 
+def test_persisted_thinking_omission_is_repaired_for_budget_only_outlets(profile):
+    from types import SimpleNamespace
+    from management.services.agent.model_parameters import bind_agent_model_profiles, merge_runtime_model_parameters
+
+    data = profile.model_dump(mode="json")
+    data["parameter_rules"] = [rule for rule in data["parameter_rules"] if rule["key"] != "enable_thinking"]
+    data["parameter_values"].pop("enable_thinking", None)
+    data["capabilities"]["reasoning"]["controls"] = [
+        control for control in data["capabilities"]["reasoning"]["controls"] if control.get("type") != "toggle"]
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 42
+    budget_only = profile.__class__.model_validate(data)
+
+    entry = {"extra_params": {"enable_thinking": False}}
+    resolved = merge_runtime_model_parameters(budget_only, entry, {})
+    assert "enable_thinking" not in resolved.parameter_values
+    assert resolved.parameter_values["reasoning_budget_tokens"] == 64
+
+    base = SimpleNamespace(cite_name="budget", resolved_profile=budget_only)
+    root = SimpleNamespace(agent_id=1, version_no=0, model_name="budget", worker_agents=[])
+    bind_agent_model_profiles([base], root, {"model_params_override": {"42": entry}}, lambda *args: {})
+    assert base.resolved_profile.parameter_values["reasoning_budget_tokens"] == 64
+
+
 @pytest.mark.parametrize("values", [{"not_declared": 1}, {"temperature": "bad"},
     {"enable_thinking": False, "reasoning_budget_tokens": 32}])
 def test_current_agent_invalid_values_are_not_hidden_by_session_overrides(profile, values):

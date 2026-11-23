@@ -26,30 +26,6 @@ COMMON_REASONING_LEVELS = {"low", "medium", "high"}
 logger = logging.getLogger(__name__)
 
 
-def _drop_unsupported_saved_parameters(model_key: str, profile, entry: dict) -> dict:
-    """Drop persisted values the model profile no longer declares.
-
-    Legacy agent snapshots can carry parameters such as ``enable_thinking``
-    for outlets whose profile only exposes another reasoning control. Keeping
-    them would make the agent impossible to save, so they are removed and the
-    next save rewrites a snapshot the current profile accepts.
-    """
-    declared = {rule.get("key") for rule in profile.parameter_rules}
-    values = entry.get("parameter_values") or {}
-    unknown = [key for key in values if key not in declared]
-    if not unknown:
-        return entry
-    logger.warning(
-        "Dropping unsupported persisted agent parameters %s for model %s",
-        unknown,
-        model_key,
-    )
-    return {
-        **entry,
-        "parameter_values": {key: value for key, value in values.items() if key in declared},
-    }
-
-
 def _resolve_model_reasoning_capability(model_info: Optional[dict]) -> Optional[dict]:
     """Resolve capability metadata for an agent snapshot when needed."""
     if not isinstance(model_info, dict):
@@ -175,7 +151,10 @@ def snapshot_agent_reasoning_config(
             # Validate only explicit overrides; omitted values keep inheriting the outlet.
             from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
             from nexent.core.model_service.registry import model_service_references
-            from management.services.agent.model_parameters import merge_agent_model_parameters
+            from management.services.agent.model_parameters import (
+                drop_legacy_agent_omissions,
+                merge_agent_model_parameters,
+            )
 
             if not entry:
                 continue
@@ -186,7 +165,7 @@ def snapshot_agent_reasoning_config(
             if requested_overrides is None:
                 # Nothing was submitted for this model, so this entry is a
                 # historical snapshot: repair it instead of rejecting the save.
-                entry = _drop_unsupported_saved_parameters(model_key, profile, entry)
+                entry = drop_legacy_agent_omissions(profile, entry)
                 if (not entry["parameter_values"]
                         and entry.get("context_window_tokens") is None
                         and entry.get("custom_overrides") is None):
