@@ -1,0 +1,51 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Sample Clock Service",
+    "version": "1.0.0",
+    "description": "A minimal sample REST API that exposes current time. Used to demo Nexent's OpenAPI→MCP conversion pipeline."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5013",
+      "description": "Local Nexent gateway"
+    }
+  ],
+  "paths": {
+    "/dev/clock/current": {
+      "get": {
+        "summary": "Get current time",
+        "description": "Return the current timestamp as ISO 8601, Unix epoch and timezone metadata.",
+        "operationId": "get_current_time",
+        "parameters": [
+          {
+            "name": "use_utc",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": true },
+            "description": "Return UTC time (default) or local wall-clock time."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current time payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "time": { "type": "string", "example": "2026-11-23T07:45:00+00:00" },
+                    "timezone": { "type": "string", "example": "UTC" },
+                    "unix": { "type": "integer", "example": 1732359900 },
+                    "utc": { "type": "boolean", "example": true }
+                  },
+                  "required": ["time", "timezone", "unix", "utc"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
