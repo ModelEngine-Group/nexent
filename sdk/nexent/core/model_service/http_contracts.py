@@ -4,6 +4,7 @@
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -83,6 +84,7 @@ class PreparedHttpRequest:
     timeout_seconds: float
     ssl_verify: bool
     stream_protocol: str | None = None
+    on_dispatch: Callable[[], None] | None = field(default=None, repr=False, compare=False)
     url: str = field(init=False, repr=False)
     body_bytes: bytes = field(init=False, repr=False)
 

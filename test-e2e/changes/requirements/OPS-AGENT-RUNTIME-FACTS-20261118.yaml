@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-RUNTIME-FACTS-20261118
+  change_type: requirement
+  requirement_id: OPS-AGENT-RUNTIME-FACTS-20261118
+  title: Capture real main Agent executions in Ops monitoring
+  description: Time the root adapter run and report its observations through the shared SDK sink independently of telemetry.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [test/sdk/core/agents/test_agent_run_facts.py]
+    behaviors:
+    - Confirm the same trusted Agent identity and group snapshot on start and finish with telemetry disabled.
+    - Exclude adapter preparation, common teardown and the start sink call from the measured duration.
+    - Preserve success, error, stop and cleanup behavior, including runs cancelled before execution.
+    reason: The existing Agent facts case submits samples directly. The existing worker tests exercise tracing and resource lifetime without Ops fact assertions.
+  notes: Reuse the Agent facts D3 case and add real SDK worker, loopback model HTTP, and SSE recovery evidence. Daily statistics and Ops querying are a later milestone.
