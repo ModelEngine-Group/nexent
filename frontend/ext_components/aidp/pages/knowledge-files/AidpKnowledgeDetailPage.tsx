@@ -9,6 +9,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { App, Modal } from "antd";
 
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
+import type { AidpDocumentItem } from "@/ext_components/aidp/shared/types/management";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useErrorHandler } from "@/hooks/useErrorHandler";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -38,6 +39,7 @@ const AidpKnowledgeDetailPage: React.FC = () => {
   const tabParam = searchParams?.get("tab");
   const initialTab =
     tabParam === "tasks" || tabParam === "information" ? tabParam : "files";
+  const initialFolder = searchParams?.get("folder") || "/";
   const { updateKnowledgeBase, fetchKnowledgeBase } = useAidpKnowledgeCache();
   const deleteMutation = useDeleteAidpKnowledgeBase();
   const { handleError } = useErrorHandler();
@@ -145,6 +147,35 @@ const AidpKnowledgeDetailPage: React.FC = () => {
     [updateKnowledgeBase]
   );
 
+  // File detail is its own route; carry the display fields and the current
+  // folder so returning from the detail restores the same listing level.
+  const handleOpenFile = useCallback(
+    (file: AidpDocumentItem, folderPath: string) => {
+      if (!kbId || !file.file_uuid) return;
+      const search = new URLSearchParams({ kb: kbId, file: file.file_uuid });
+      if (file.file_name) search.set("name", file.file_name);
+      if (file.file_type) search.set("type", file.file_type);
+      if (typeof file.file_size === "number") {
+        search.set("size", String(file.file_size));
+      }
+      if (folderPath && folderPath !== "/") search.set("folder", folderPath);
+      router.push(`/${locale}/knowledges/detail/file?${search.toString()}`);
+    },
+    [kbId, locale, router]
+  );
+
+  // Keep the folder in the URL while browsing the list so browser back from a
+  // file detail returns to the same folder instead of the root.
+  const handleFolderChange = useCallback(
+    (folderPath: string) => {
+      if (!kbId) return;
+      const search = new URLSearchParams({ kb: kbId, tab: "files" });
+      if (folderPath && folderPath !== "/") search.set("folder", folderPath);
+      router.replace(`/${locale}/knowledges/detail?${search.toString()}`);
+    },
+    [kbId, locale, router]
+  );
+
   if (!isDeploymentReady || loading || !kb) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -162,8 +193,11 @@ const AidpKnowledgeDetailPage: React.FC = () => {
           onBack={handleBack}
           onDelete={handleDelete}
           onUpdated={handleUpdated}
+          onOpenFile={handleOpenFile}
+          onFolderChange={handleFolderChange}
           pollingPaused={deleteConfirmOpen}
           initialTab={initialTab}
+          initialFolder={initialFolder}
         />
       </div>
     </div>

@@ -34,7 +34,6 @@ import { ApiError } from "@/services/api";
 import log from "@/lib/logger";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
-import AidpFileDetailView from "@/ext_components/aidp/pages/knowledge-files/AidpFileDetailView";
 import AidpFileMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpFileMetadataDrawer";
 import {
   useKbOntologyBinding,
@@ -75,6 +74,12 @@ interface AidpKnowledgeFilesPanelProps {
   knowledgeBase: AidpKbDetail;
   canEdit: boolean;
   isAvailable: boolean;
+  /** Open one file in the routed file-detail page. */
+  onOpenFile: (file: AidpDocumentItem, folderPath: string) => void;
+  /** Reflect the current folder in the knowledge base URL. */
+  onFolderChange: (folderPath: string) => void;
+  /** Folder restored from the URL after returning from a file detail. */
+  initialPath?: string;
   pollingPaused?: boolean;
   onFilesChanged?: () => void;
 }
@@ -144,13 +149,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   knowledgeBase,
   canEdit,
   isAvailable,
+  onOpenFile,
+  onFolderChange,
+  initialPath = "/",
   pollingPaused = false,
   onFilesChanged,
 }) => {
   const { t, i18n } = useTranslation();
   const { message, modal } = App.useApp();
 
-  const [currentPath, setCurrentPath] = useState("/");
+  const [currentPath, setCurrentPath] = useState(initialPath);
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [pageParams, setPageParams] = useState({
@@ -177,9 +185,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [fileRenameSaving, setFileRenameSaving] = useState(false);
   const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  // The file detail replaces the list while open: it hosts the preview, the
-  // summary tab and the semantic chunk panel for one file.
-  const [detailFile, setDetailFile] = useState<AidpDocumentItem | null>(null);
   // Whole-file metadata editing through the batch-metadata file_uuid_list
   // variant; only offered while the KB is bound to an ontology domain.
   const [metadataFile, setMetadataFile] = useState<AidpDocumentItem | null>(
@@ -208,8 +213,14 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     fileMoveRequest !== null ||
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
-    detailFile !== null ||
     metadataFile !== null;
+
+  // Keep the knowledge-base URL in sync with the current folder so browser
+  // back from a file detail returns to the same folder instead of the root.
+  useEffect(() => {
+    if (currentPath === initialPath) return;
+    onFolderChange(currentPath);
+  }, [currentPath, initialPath, onFolderChange]);
 
   const treeQuery = useAidpFolderTree(
     knowledgeBase.kds_id,
@@ -1155,7 +1166,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               }
               data-aidp-file-name="true"
               className="flex max-w-full items-center gap-2 truncate text-left text-blue-600 hover:text-blue-700 hover:underline disabled:cursor-default disabled:text-gray-500 disabled:no-underline"
-              onClick={() => setDetailFile(toDocumentItem(record.file))}
+              onClick={() =>
+                onOpenFile(toDocumentItem(record.file), currentPath)
+              }
             >
               <FileTextOutlined className="shrink-0 text-blue-500" />
               <span className="truncate">{record.name || "-"}</span>
@@ -1382,24 +1395,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     segments.length > 0
       ? segments[segments.length - 1].label
       : knowledgeBase.kds_name;
-
-  if (detailFile) {
-    return (
-      <AidpFileDetailView
-        kdsId={knowledgeBase.kds_id}
-        file={detailFile}
-        canEdit={canEdit}
-        summaryEnabled={knowledgeBase.summary_enable === true}
-        summaryPreview={knowledgeBase.summary_preview === true}
-        onBack={() => {
-          setDetailFile(null);
-          // The list paused polling while the detail was open; refresh once
-          // on return so ingestion changes are reflected.
-          refreshAll();
-        }}
-      />
-    );
-  }
 
   return (
     <section className="flex min-h-[420px] grow shrink-0 basis-auto flex-col bg-white">

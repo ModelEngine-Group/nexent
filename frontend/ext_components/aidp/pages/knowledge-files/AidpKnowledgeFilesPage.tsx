@@ -18,7 +18,10 @@ import {
 } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
-import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
+import type {
+  AidpDocumentItem,
+  AidpKbDetail,
+} from "@/ext_components/aidp/shared/types/management";
 import {
   AIDP_UNKNOWN_VALUE,
   formatAidpCreator,
@@ -43,8 +46,14 @@ interface AidpKnowledgeFilesPageProps {
   onBack: () => void;
   onDelete: (knowledgeBase: AidpKnowledgeBaseItem) => void;
   onUpdated: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+  /** Open one file in its own `/knowledges/detail/file` route. */
+  onOpenFile: (file: AidpDocumentItem, folderPath: string) => void;
+  /** Reflect the current folder in the knowledge base URL. */
+  onFolderChange: (folderPath: string) => void;
   pollingPaused?: boolean;
   initialTab?: DetailTab;
+  /** Folder restored from the URL after returning from a file detail. */
+  initialFolder?: string;
 }
 
 type DetailTab =
@@ -57,8 +66,11 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   onBack,
   onDelete,
   onUpdated,
+  onOpenFile,
+  onFolderChange,
   pollingPaused = false,
   initialTab = "files",
+  initialFolder = "/",
 }) => {
   const { t } = useTranslation();
   const {
@@ -256,6 +268,9 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           knowledgeBase={detail}
           canEdit={canEdit}
           isAvailable={isAvailable}
+          onOpenFile={onOpenFile}
+          onFolderChange={onFolderChange}
+          initialPath={initialFolder}
           pollingPaused={pollingPaused || editingKbMode !== null}
           onFilesChanged={() => void detailQuery.refetch()}
         />

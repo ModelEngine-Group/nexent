@@ -18,12 +18,15 @@ import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { getAidpDownloadFilename } from "@/ext_components/aidp/shared/utils/aidpDownloadFilename";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import log from "@/lib/logger";
-import AidpSemanticChunksPanel from "./AidpSemanticChunksPanel";
+import AidpSemanticChunksPanel from "../knowledge-files/AidpSemanticChunksPanel";
 import AidpFileSummaryPanel from "./AidpFileSummaryPanel";
 import styles from "./AidpFileDetail.module.css";
 
 const AidpPdfViewer = dynamic(
-  () => import("./AidpPdfViewer").then((module) => module.AidpPdfViewer),
+  () =>
+    import("../knowledge-files/AidpPdfViewer").then(
+      (module) => module.AidpPdfViewer
+    ),
   { ssr: false }
 );
 
