@@ -60,10 +60,10 @@ test = [
     "unittest2",
     "mock",
     "pytest-mock",
-    "fakeredis[lua]>=2.31,<3",
+    "fakeredis[lua]>=2.31,<2.34",
     "httpx>=0.28.1",
     "selenium",
-    "botocore"
+    "botocore",
 ]
 
 [dependency-groups]
