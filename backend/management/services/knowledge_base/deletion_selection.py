@@ -19,6 +19,10 @@ from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from pydantic import ValidationError
 
 
+class DocumentLedgerNotFound(ValueError):
+    pass
+
+
 def _selection(path):
     if not isinstance(path, str) or not 0 < len(path) <= 2048:
         raise ValueError('path_or_url or file_id is required')
@@ -142,7 +146,7 @@ def prepare_deletion(records, resources, index_name, path, scope, actor, *, file
         where=Junction('and', tuple(terms)), order_by=(Sort('update_time', descending=True), Sort('file_id')),
     ), PageRequest(limit=1), context=context)
     if not page.items:
-        raise ValueError('Document not found')
+        raise DocumentLedgerNotFound('Document not found')
     row = page.items[0]
     if scope == 'source_only' and row['status'] != 'COMPLETED':
         raise ValueError('Cannot delete source file before processing is completed')

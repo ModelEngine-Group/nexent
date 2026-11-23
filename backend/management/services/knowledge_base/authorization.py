@@ -15,9 +15,10 @@ from management.services.knowledge_base.file_authorization import (
 )
 from management.services.knowledge_base.legacy_vector_file_links import (
     legacy_source_addresses,
+    require_unique_source_addresses,
 )
 from management.services.knowledge_base.owner_cleanup import has_cleanup_authority
-from nexent.storage.errors import Conflict, ScopeDenied
+from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from pydantic import ValidationError
 
@@ -77,18 +78,9 @@ class KnowledgeAuthorization:
         addresses = legacy_source_addresses(file, strict=True)
         if not addresses:
             return []
-        # Include retired rows: reusing a name does not transfer its historical vectors.
-        cursor = None
-        query = RecordQuery(where=Comparison("knowledge_id", "eq", request.knowledge_id),
-                            fields=("file_id", "bucket_name", "source_key", "object_name", "local_source_path"))
-        while True:
-            page = self.resources.records.query("knowledge_file_history", query, PageRequest(limit=500, cursor=cursor),
-                                                context=context)
-            if any(row["file_id"] != request.file_id and addresses & legacy_source_addresses(row) for row in page.items):
-                raise Conflict()
-            cursor = page.next_cursor
-            if cursor is None:
-                return sorted(addresses)
+        require_unique_source_addresses(self.resources.records, request.knowledge_id, addresses,
+                                        file_id=request.file_id, context=context)
+        return sorted(addresses)
 
     def _require_cleanup_inspection(self, file, knowledge, request):
         try:

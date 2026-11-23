@@ -22,6 +22,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionLookup,
     KnowledgeCollectionsDescribe,
     KnowledgeCollectionsUsage,
+    KnowledgeUntrackedSourceDelete,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppend
 from contracts.knowledge_sources import KnowledgeSources
@@ -79,6 +80,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.COLLECTION_USAGE.value, include_in_schema=False)
     async def collection_usage(request: Request):
         return await dispatch(request, KnowledgeCollectionsUsage, service.collection_usage, 200)
+
+    @router.post(KnowledgeOperation.DELETE_UNTRACKED_SOURCE.value, include_in_schema=False)
+    async def delete_untracked_source(request: Request):
+        return await dispatch(request, KnowledgeUntrackedSourceDelete, service.delete_untracked_source, 200)
 
     @router.post(KnowledgeOperation.APPEND_DOCUMENTS.value, include_in_schema=False)
     async def append_documents(request: Request):

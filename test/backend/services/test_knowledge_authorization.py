@@ -1,10 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management grants only current authorized resources and completed cleanse outputs."""
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 import pytest
 from contracts.agentos_knowledge import KnowledgeAuthorizationRequest, ObjectReference
+from contracts.constants import environment
+from contracts.knowledge_collections import KnowledgeCollectionAuthorization
 from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.file.cleanse_jobs import CleanseJobs
+from management.services.knowledge_base import collection_authorization
 from management.services.knowledge_base.authorization import KnowledgeAuthorization
 from nexent.storage.errors import Conflict, ScopeDenied
 from nexent.storage.models import (
@@ -17,6 +23,7 @@ from nexent.storage.models import (
 )
 from pydantic import ValidationError
 
+from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
 from test.backend.services.test_cleanse_authorization import (
     resources as resources,  # noqa: PLC0414 - Re-export the shared pytest fixture.
@@ -173,3 +180,32 @@ def test_authorization_contract_has_explicit_action_payload(action, extra):
         KnowledgeAuthorizationRequest(
             knowledge_id=1, file_id="b" * 32, file_version=0, action=action, **extra
         )
+
+
+@pytest.mark.parametrize('scenario', ['untracked', 'ledger', 'read_only', 'flag_off', 'other_tenant'])
+def test_untracked_source_authorization_checks_live_dac_and_file_history(setup, monkeypatch, scenario):
+    _, _, update, resource_policy, _ = setup
+    base = {'knowledge_id': 1, 'index_name': 'kb-one', 'tenant_id': 'tenant-a', 'embedding_model_id': 2,
+            'deletion_request': None, 'knowledge_sources': 'elasticsearch'}
+    actor = ServicePrincipal('user-a', 'tenant-a')
+    source = knowledge_request().source.key if scenario == 'ledger' else 'external/source.txt'
+    if scenario == 'read_only':
+        update('cleanse_knowledge', created_by='other', ingroup_permission='READ_ONLY')
+    if scenario == 'other_tenant':
+        base['tenant_id'] = 'other'
+    monkeypatch.setattr(environment, 'KNOWLEDGE_RUNTIME_HYBRID_ENABLED', scenario != 'flag_off')
+
+    @contextmanager
+    def ports(principal, *, context):
+        assert principal == actor
+        yield None, resource_policy.records
+
+    monkeypatch.setattr(collection_authorization, 'knowledge_deletion_ports', ports)
+    reader = SimpleNamespace(knowledge=lambda *args, **kwargs: base)
+    request = KnowledgeCollectionAuthorization(knowledge_id=1, untracked_source=source)
+    if scenario == 'untracked':
+        grant = collection_authorization.authorize_collection(request, actor, context=context(), reader=reader)
+        assert grant.untracked_source == source and grant.resource_tenant_id == actor.tenant_id
+    else:
+        with pytest.raises(Conflict if scenario == 'ledger' else ScopeDenied):
+            collection_authorization.authorize_collection(request, actor, context=context(), reader=reader)

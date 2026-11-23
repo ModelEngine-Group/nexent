@@ -17,6 +17,8 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionGrant,
     KnowledgeCollectionLookup,
     KnowledgeCollectionStatus,
+    KnowledgeUntrackedSourceDelete,
+    KnowledgeUntrackedSourceDeleted,
 )
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
@@ -39,21 +41,25 @@ from infrastructure.knowledge_chunk_mutations import (
     knowledge_chunk_mutation_ports,
     knowledge_creation_vector_ports,
 )
+from infrastructure.vdb.native_file_cleanup import delete_untracked_native_source
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeCollectionService:
     def __init__(self, client, models, *, records=knowledge_chunk_mutation_ports,
-                 ports=knowledge_creation_vector_ports, operation_seconds=180):
+                 ports=knowledge_creation_vector_ports, source_delete=delete_untracked_native_source, operation_seconds=180):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
             raise InvalidInput()
+        self.source_delete = source_delete
         self.client, self.models, self.records, self.ports, self.seconds = client, models, records, ports, operation_seconds
 
     async def _grant(self, request, actor):
         grant = await self.client.authorize_knowledge_collection(
-            KnowledgeCollectionAuthorization(knowledge_id=request.knowledge_id), actor.user_id, actor.tenant_id)
+            KnowledgeCollectionAuthorization(knowledge_id=request.knowledge_id,
+                                             untracked_source=request.untracked_source), actor.user_id, actor.tenant_id)
         if (not isinstance(grant, KnowledgeCollectionGrant) or grant.knowledge_id != request.knowledge_id
+            or grant.untracked_source != request.untracked_source
             or grant.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}):
             raise ScopeDenied()
         if grant.revision != request.expected_revision:
@@ -71,22 +77,32 @@ class KnowledgeCollectionService:
                 return KnowledgeCollectionStatus(knowledge_id=request.knowledge_id,
                     expected_revision=grant.revision, setup=journal.inspect(context=context))
             journal.reserve(setup, context=context)
+            deleting_source = type(request) is KnowledgeUntrackedSourceDelete
             attempted = False
             returned = False
             try:
-                with self.ports(actor, grant.collection, request.dimensions, context=context, **namespace) as vectors:
-                    if (vectors.scope.actor_id != actor.user_id or vectors.scope.tenant_id != grant.resource_tenant_id
-                        or vectors.scope.service_role != 'runtime' or vectors.scope.system
-                        or vectors.scope.namespaces != {grant.collection} or vectors.scope.resource_prefix):
-                        raise ScopeDenied()
+                if deleting_source:
                     journal.begin(setup.operation_id, context=context)
                     context.remaining()
                     attempted = True
-                    info = vectors.ensure_collection(grant.collection, context=context)
+                    count = self.source_delete(actor, grant, request.untracked_source, context=context)
                     returned = True
-                    if (not isinstance(info, VectorCollectionInfo) or info.collection != grant.collection
-                        or info.dimensions != request.dimensions or info.metric != 'cosine'):
-                        raise Conflict()
+                    result = KnowledgeUntrackedSourceDeleted(knowledge_id=request.knowledge_id,
+                        expected_revision=grant.revision, untracked_source=request.untracked_source, deleted_count=count)
+                else:
+                    with self.ports(actor, grant.collection, request.dimensions, context=context, **namespace) as vectors:
+                        if (vectors.scope.actor_id != actor.user_id or vectors.scope.tenant_id != grant.resource_tenant_id
+                            or vectors.scope.service_role != 'runtime' or vectors.scope.system
+                            or vectors.scope.namespaces != {grant.collection} or vectors.scope.resource_prefix):
+                            raise ScopeDenied()
+                        journal.begin(setup.operation_id, context=context)
+                        context.remaining()
+                        attempted = True
+                        info = vectors.ensure_collection(grant.collection, context=context)
+                        returned = True
+                        if (not isinstance(info, VectorCollectionInfo) or info.collection != grant.collection
+                            or info.dimensions != request.dimensions or info.metric != 'cosine'):
+                            raise Conflict()
                 journal.finish(setup.operation_id, confirmed=True, context=context)
             except Exception as error:
                 rejected = attempted and not returned and isinstance(error, (
@@ -108,6 +124,8 @@ class KnowledgeCollectionService:
                 if uncertain or settlement_failed:
                     raise OutcomeUnknown(operation_id=context.operation_id) from error
                 raise
+            if deleting_source:
+                return result
             return KnowledgeCollectionEnsured(knowledge_id=request.knowledge_id, expected_revision=grant.revision,
                                                present=True, dimensions=request.dimensions, metric='cosine')
 
@@ -117,18 +135,25 @@ class KnowledgeCollectionService:
     async def inspect(self, request, actor, *, context=None):
         return await self._dispatch(request, actor, context=context, inspect=True)
 
-    async def _dispatch(self, request, actor, *, context, inspect):
-        schema = KnowledgeCollectionLookup if inspect else KnowledgeCollectionEnsure
+    async def delete_untracked_source(self, request, actor, *, context=None):
+        return await self._dispatch(request, actor, context=context, inspect=False, delete_source=True)
+
+    async def _dispatch(self, request, actor, *, context, inspect, delete_source=False):
+        schema = KnowledgeUntrackedSourceDelete if delete_source else (
+            KnowledgeCollectionLookup if inspect else KnowledgeCollectionEnsure)
+
         if type(request) is not schema:
             raise InvalidInput()
         request = schema.model_validate(request.model_dump())
+        if not delete_source and request.untracked_source is not None:
+            raise InvalidInput()
         context = context or OperationContext('knowledge-collection-' + uuid4().hex, monotonic() + self.seconds)
         context, cancelled = cancellable_context(context)
         threshold = context.remaining()
         try:
             async with asyncio.timeout(threshold):
                 grant = await self._grant(request, actor)
-                if not inspect and request.model_binding is not None:
+                if not inspect and not delete_source and request.model_binding is not None:
                     binding = request.model_binding
                     if grant.embedding_model_id != binding.model_id:
                         raise ScopeDenied()
@@ -140,8 +165,10 @@ class KnowledgeCollectionService:
                 if await self._grant(request, actor) != grant:
                     raise Conflict()
                 setup = None if inspect else CollectionSetup(operation_id=context.operation_id,
-                    actor_id=actor.user_id, resource_revision=grant.revision, dimensions=request.dimensions,
-                    model_binding=request.model_binding, phase='reserved', writer_ended=False)
+                    actor_id=actor.user_id, resource_revision=grant.revision,
+                    dimensions=None if delete_source else request.dimensions,
+                    model_binding=None if delete_source else request.model_binding,
+                    operation='delete_source' if delete_source else 'ensure', phase='reserved', writer_ended=False)
                 result = await run_blocking('knowledge-collection-inspect' if inspect else 'knowledge-collection-ensure',
                     self._execute, request, actor, grant, setup, context=context, inspect=inspect,
                     lane='control-io', owner='runtime.knowledge_base')
@@ -150,7 +177,7 @@ class KnowledgeCollectionService:
                 return result
         except (TimeoutError, DeadlineExceeded, RuntimeServiceTimeoutError) as error:
             logger.warning('knowledge_collection_timeout operation_id=%s phase=%s threshold_seconds=%s exception_type=%s',
-                context.operation_id, 'inspect' if inspect else 'ensure', threshold, type(error).__name__)
+                context.operation_id, 'inspect' if inspect else 'delete_source' if delete_source else 'ensure', threshold, type(error).__name__)
             raise DeadlineExceeded(operation_id=context.operation_id) from error
         finally:
             cancelled.set()

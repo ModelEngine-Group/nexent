@@ -12,6 +12,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionEnsure,
     KnowledgeCollectionGrant,
     KnowledgeCollectionLookup,
+    KnowledgeUntrackedSourceDelete,
 )
 from nexent.storage.errors import (
     Conflict,
@@ -174,3 +175,28 @@ async def test_timeout_during_provider_keeps_fence_until_explicit_reconciliation
     assert a.s.vectors.ensure_collection.call_count == 1
     with pytest.raises(Conflict):
         await a.s.db(a.s.s.mutation.revision, context=context())
+
+
+@pytest.mark.parametrize('uncertain', [False, True])
+async def test_untracked_source_delete_reserves_collection_without_model_invocation(setup, mocker, uncertain):
+    a = setup
+    path = 'files/untracked.txt'
+    a.client.authorize_knowledge_collection.return_value = a.grant.model_copy(update={'untracked_source': path})
+    request = KnowledgeUntrackedSourceDelete(knowledge_id=1, expected_revision='a' * 64, untracked_source=path)
+    a.service.source_delete = mocker.Mock(return_value=3, side_effect=OutcomeUnknown() if uncertain else None)
+    if uncertain:
+        with pytest.raises(OutcomeUnknown):
+            await a.service.delete_untracked_source(request, a.s.s.actor, context=context())
+        state = await a.s.db(a.journal.inspect, context=context())
+        assert state.operation == 'delete_source' and state.phase == 'unknown'
+        with pytest.raises(Conflict):
+            await a.service.delete_untracked_source(request, a.s.s.actor, context=context())
+    else:
+        deleted = await a.service.delete_untracked_source(request, a.s.s.actor, context=context())
+        assert deleted.deleted_count == 3 and deleted.untracked_source == path
+        assert await a.s.db(a.journal.inspect, context=context()) is None
+        assert await a.s.db(a.s.s.mutation.revision, context=context()) == 1
+    assert a.service.source_delete.call_count == 1
+    assert a.client.authorize_knowledge_collection.call_args.args[0].untracked_source == path
+    a.s.models.get.assert_not_awaited()
+    a.s.vectors.ensure_collection.assert_not_called()

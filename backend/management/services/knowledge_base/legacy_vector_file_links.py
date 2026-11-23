@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from contracts.knowledge_ingestion import is_historical_file_id
 from contracts.knowledge_maintenance import LegacyVectorFileLink
 from nexent.storage.errors import Conflict, ScopeDenied
+from nexent.storage.models import Comparison, PageRequest, RecordQuery
 
 FILE_LINK_FIELDS = (
     'file_id', 'public_file_id', 'tenant_id', 'knowledge_id', 'index_name', 'bucket_name',
@@ -58,6 +59,22 @@ def legacy_source_addresses(row, *, strict=False):
     if local:
         result.add(local)
     return result
+
+
+def require_unique_source_addresses(records, knowledge_id, addresses, *, context, file_id=None):
+    # Include retired rows. A reused source path can still identify historical vectors.
+    cursor = None
+    query = RecordQuery(where=Comparison("knowledge_id", "eq", knowledge_id),
+                        fields=("file_id", "bucket_name", "source_key", "object_name", "local_source_path"))
+    while True:
+        page = records.query("knowledge_file_history", query, PageRequest(limit=500, cursor=cursor), context=context)
+        for row in page.items:
+            raw_addresses = {row[field] for field in ("source_key", "object_name", "local_source_path")}
+            if row["file_id"] != file_id and addresses & (legacy_source_addresses(row) | raw_addresses):
+                raise Conflict()
+        cursor = page.next_cursor
+        if cursor is None:
+            return
 
 
 class LegacyVectorFileLinks:

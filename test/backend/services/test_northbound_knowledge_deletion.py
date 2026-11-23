@@ -5,8 +5,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from contracts.constants import environment
 from management.services import northbound as module
+from management.services.knowledge_base import deletion
+from management.services.knowledge_base.deletion_selection import DocumentLedgerNotFound
 from nexent.storage.errors import ScopeDenied
+
+from infrastructure.agentos_identity import ServicePrincipal
 
 
 @pytest.mark.parametrize('scope,status', [('full', 'success'), ('full', 'pending'), ('source_only', 'success')])
@@ -46,3 +51,29 @@ async def test_whole_base_adapter_keeps_actual_scope_and_original_success(monkey
     ctx = SimpleNamespace(user_id='editor', tenant_id='asset-tenant')
     assert await module.delete_knowledge_base_for_northbound(ctx=ctx, index_name='kb') is expected
     invoke.assert_awaited_once_with('kb', requested_by='editor', tenant_id='asset-tenant')
+
+
+@pytest.mark.parametrize('scope,file_id,enabled,allowed', [
+    ('full', None, True, True),
+    ('source_only', None, True, False),
+    ('full', 'existing-id', True, False),
+    ('full', None, False, False),
+])
+async def test_ledger_miss_uses_source_operation_only_for_enabled_full_path_requests(
+    monkeypatch, scope, file_id, enabled, allowed,
+):
+    monkeypatch.setattr(environment, 'KNOWLEDGE_RUNTIME_HYBRID_ENABLED', enabled)
+    coordinator = SimpleNamespace(client=object(), request=AsyncMock(side_effect=DocumentLedgerNotFound()))
+    monkeypatch.setattr(deletion, 'default_coordinator', lambda: None)
+    monkeypatch.setattr(deletion, 'default_deletion_coordinator', lambda _: coordinator)
+    untracked = AsyncMock(return_value={'status': 'success', 'deleted_es_count': 2, 'deleted_minio': False})
+    monkeypatch.setattr(deletion, '_delete_untracked_source', untracked)
+    delete = deletion.KnowledgeBaseDocumentDeletionService.delete_document_by_scope
+    if allowed:
+        result = await delete('kb', 'external/path', scope, requested_by='editor', tenant_id='tenant-a')
+        assert result['deleted_es_count'] == 2 and not result['deleted_minio']
+        untracked.assert_awaited_once_with(coordinator.client, 'kb', 'external/path', ServicePrincipal('editor', 'tenant-a'))
+    else:
+        with pytest.raises(DocumentLedgerNotFound):
+            await delete('kb', 'external/path', scope, requested_by='editor', tenant_id='tenant-a', file_id=file_id)
+        untracked.assert_not_awaited()

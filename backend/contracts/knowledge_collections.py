@@ -15,14 +15,38 @@ class CollectionSetup(Contract):
     operation_id: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
     actor_id: str = Field(min_length=1, max_length=100)
     resource_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
-    dimensions: int = Field(gt=0, le=2**31 - 1)
+    dimensions: int | None = Field(default=None, gt=0, le=2**31 - 1)
+    operation: Literal['ensure', 'delete_source'] = 'ensure'
     model_binding: ModelVersion | None = None
     phase: Literal['reserved', 'writing', 'unknown']
     writer_ended: bool
 
+    @model_validator(mode='after')
+    def consistent_operation(self):
+        if self.operation == 'ensure' and self.dimensions is None or (
+            self.operation == 'delete_source' and (self.dimensions is not None or self.model_binding is not None)
+        ):
+            raise ValueError('Unexpected setup fields')
+        return self
+
+    @model_serializer(mode='wrap')
+    def serialize_setup(self, handler):
+        payload = handler(self)
+        if self.operation == 'ensure':
+            payload.pop('operation', None)
+        return payload
+
 
 class KnowledgeCollectionAuthorization(Contract):
     knowledge_id: int = Field(gt=0, le=2**31 - 1)
+    untracked_source: str | None = Field(default=None, min_length=1, max_length=2048)
+
+    @model_serializer(mode='wrap')
+    def serialize_source_scope(self, handler):
+        payload = handler(self)
+        if self.untracked_source is None:
+            payload.pop('untracked_source', None)
+        return payload
 
 
 class KnowledgeCollectionGrant(KnowledgeCollectionAuthorization):
@@ -39,6 +63,14 @@ class KnowledgeCollectionLookup(KnowledgeCollectionAuthorization):
 class KnowledgeCollectionEnsure(KnowledgeCollectionLookup):
     dimensions: int = Field(gt=0, le=2**31 - 1)
     model_binding: ModelVersion | None = None
+
+
+class KnowledgeUntrackedSourceDelete(KnowledgeCollectionLookup):
+    untracked_source: str = Field(min_length=1, max_length=2048)
+
+
+class KnowledgeUntrackedSourceDeleted(KnowledgeCollectionLookup):
+    deleted_count: int = Field(ge=0)
 
 
 class KnowledgeCollectionEnsured(KnowledgeCollectionLookup):

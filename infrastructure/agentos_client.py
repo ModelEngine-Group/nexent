@@ -72,6 +72,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionsGrant,
     KnowledgeCollectionStatus,
     KnowledgeCollectionsUsageResult,
+    KnowledgeUntrackedSourceDeleted,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppended
 from contracts.knowledge_sources import KnowledgeSourcesResult
@@ -172,6 +173,10 @@ class AgentOSClient:
 
     async def mutate_knowledge_chunk(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.MUTATE_CHUNK, payload, user_id, tenant_id, ChunkMutationState)
+
+    async def delete_untracked_knowledge_source(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.DELETE_UNTRACKED_SOURCE, payload, user_id, tenant_id,
+                                             KnowledgeUntrackedSourceDeleted)
 
     async def append_knowledge_documents(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.APPEND_DOCUMENTS, payload, user_id, tenant_id, KnowledgeDocumentsAppended)

@@ -621,6 +621,7 @@ class KnowledgeOperation(str, Enum):
     COLLECTION_USAGE = '/internal/agentos/v1/knowledge/bases/collections/usage'
     ENSURE_COLLECTION = '/internal/agentos/v1/knowledge/bases/collection/ensure'
     INSPECT_COLLECTION = '/internal/agentos/v1/knowledge/bases/collection/state'
+    DELETE_UNTRACKED_SOURCE = '/internal/agentos/v1/knowledge/documents/delete-untracked-source'
     APPEND_DOCUMENTS = '/internal/agentos/v1/knowledge/documents/append'
     INSPECT_CHUNK = '/internal/agentos/v1/knowledge/chunks/inspect'
     MUTATE_CHUNK = '/internal/agentos/v1/knowledge/chunks/mutate'

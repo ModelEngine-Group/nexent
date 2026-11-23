@@ -8,6 +8,10 @@ import httpx
 import pytest
 from contracts.agentos_knowledge import KnowledgeOperation
 from contracts.constants import environment
+from contracts.knowledge_collections import (
+    KnowledgeUntrackedSourceDelete,
+    KnowledgeUntrackedSourceDeleted,
+)
 from contracts.knowledge_documents import (
     KnowledgeDocument,
     KnowledgeDocumentsAppend,
@@ -52,3 +56,20 @@ async def test_unsigned_or_modified_append_never_reaches_service(endpoint, mode)
             headers={} if mode == "missing" else {"Authorization": "Bearer " + token})
     assert response.status_code == 401
     service.append_documents.assert_not_called()
+
+
+async def test_untracked_source_signature_binds_identity_and_exact_path(endpoint):
+    app, service, _, _ = endpoint
+    request = KnowledgeUntrackedSourceDelete(knowledge_id=1, expected_revision='a' * 64, untracked_source='old/a')
+    result = KnowledgeUntrackedSourceDeleted(**request.model_dump(), deleted_count=2)
+    service.delete_untracked_source = AsyncMock(return_value=result)
+    api = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(transport=httpx.ASGITransport(app=app), **kwargs))
+    route = KnowledgeOperation.DELETE_UNTRACKED_SOURCE
+    token = sign_call(route, request.model_dump_json().encode(), ServicePrincipal("operator", "tenant-a"))
+    modified = request.model_copy(update={'untracked_source': 'old/b'})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
+        response = await client.post(route.value, content=modified.model_dump_json(),
+                                     headers={"Authorization": "Bearer " + token})
+    assert response.status_code == 401
+    assert await api.delete_untracked_knowledge_source(request, 'operator', 'tenant-a') == result
+    service.delete_untracked_source.assert_awaited_once_with(request, ServicePrincipal('operator', 'tenant-a'))

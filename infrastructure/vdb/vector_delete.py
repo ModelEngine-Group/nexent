@@ -33,7 +33,7 @@ def delete_vectors(store, binding, query, *, context):
                                       ("_si_tenant", "_si_collection", "_si_key"), validate, context=context)
 
 
-def delete_index_documents(store, client, index, query, fields, validate, *, context, exact_index=False):
+def delete_index_documents(store, client, index, query, fields, validate, *, context, exact_index=False, validate_all=False):
     receipts = []
     opened = store._call(
         client, "open_point_in_time", context, index=index, keep_alive="1m", allow_partial_search_results=False,
@@ -42,6 +42,31 @@ def delete_index_documents(store, client, index, query, fields, validate, *, con
     if not isinstance(pit, str) or not pit:
         raise Unavailable()
     after = None
+    pending = []
+
+    def delete(operations):
+        try:
+            current = store._bulk(
+                client, operations, context, len(operations), delete=True,
+                **({"expected_index": index} if exact_index else {}),
+            )
+        except PartialFailure as error:
+            raise PartialFailure(
+                results=tuple(receipts)
+                + _numbered(error.results, context.operation_id, len(receipts)),
+                operation_id=context.operation_id,
+            ) from None
+        except OutcomeUnknown:
+            unknown = tuple(
+                DeleteReceipt(context.operation_id + ":unknown:" + str(i), False, WriteOutcome.UNKNOWN)
+                for i in range(len(operations))
+            )
+            raise PartialFailure(
+                results=tuple(receipts) + _numbered(unknown, context.operation_id, len(receipts)),
+                operation_id=context.operation_id,
+            ) from None
+        receipts.extend(_numbered(current, context.operation_id, len(receipts)))
+
     try:
         while True:
             options = {
@@ -61,6 +86,8 @@ def delete_index_documents(store, client, index, query, fields, validate, *, con
                 raise Unavailable()
             hits = page.get("hits", {}).get("hits", [])
             if not hits:
+                for operations in pending:
+                    delete(operations)
                 return tuple(receipts)
             if hits[-1].get("sort") == after:
                 raise Unavailable()
@@ -83,32 +110,10 @@ def delete_index_documents(store, client, index, query, fields, validate, *, con
                         }
                     }
                 )
-            try:
-                current = store._bulk(
-                    client, operations, context, len(hits), delete=True,
-                    **({"expected_index": index} if exact_index else {}),
-                )
-            except PartialFailure as error:
-                raise PartialFailure(
-                    results=tuple(receipts)
-                    + _numbered(error.results, context.operation_id, len(receipts)),
-                    operation_id=context.operation_id,
-                ) from None
-            except OutcomeUnknown:
-                unknown = tuple(
-                    DeleteReceipt(
-                        context.operation_id + ":unknown:" + str(i),
-                        False,
-                        WriteOutcome.UNKNOWN,
-                    )
-                    for i in range(len(hits))
-                )
-                raise PartialFailure(
-                    results=tuple(receipts)
-                    + _numbered(unknown, context.operation_id, len(receipts)),
-                    operation_id=context.operation_id,
-                ) from None
-            receipts.extend(_numbered(current, context.operation_id, len(receipts)))
+            if validate_all:
+                pending.append(operations)
+            else:
+                delete(operations)
             after = hits[-1]["sort"]
     except PartialFailure:
         raise

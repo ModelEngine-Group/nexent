@@ -73,6 +73,13 @@ class KnowledgeService:
 
         return await ChunkMutationService(self.client, self.models).mutate(payload, actor, context=context)
 
+    async def delete_untracked_source(self, payload, actor, *, context=None):
+        from runtime.knowledge_base.collection_service import KnowledgeCollectionService
+
+        return await KnowledgeCollectionService(
+            self.client, self.models, operation_seconds=self.operation_seconds,
+        ).delete_untracked_source(payload, actor, context=context)
+
     async def append_documents(self, payload, actor, *, context=None):
         from runtime.knowledge_base.chunk_write import ChunkMutationService
         from runtime.knowledge_base.document_append import KnowledgeDocumentAppender

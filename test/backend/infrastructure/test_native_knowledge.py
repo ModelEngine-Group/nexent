@@ -13,6 +13,7 @@ from infrastructure.vdb import native_knowledge
 from infrastructure.vdb.native_file_cleanup import (
     _delete,
     _delete_legacy,
+    _delete_legacy_sources,
     _legacy_target,
     _native_target,
 )
@@ -327,4 +328,30 @@ def test_legacy_source_delete_rejects_conflicting_lineage(fixture, extra, error)
     _, actor, grant, _ = fixture
     grant.file_id, grant.file_version, grant.legacy_sources = "a" * 32, 3, ["files/old.txt"]
     with pytest.raises(error):
-        _legacy_target({"_index": "kb", "_source": {"path_or_url": "files/old.txt", **extra}}, grant, actor.tenant_id)
+        _legacy_target({"_index": "kb", "_source": {"path_or_url": "files/old.txt", **extra}},
+                       grant.collection, actor.tenant_id, grant.legacy_sources, file_id=grant.file_id,
+                       file_version=grant.file_version)
+
+
+@pytest.mark.parametrize("claim", [None, {"file_id": "explicit"}])
+def test_untracked_source_validates_all_pages_before_writing(fixture, claim):
+    es, actor, grant, context = fixture
+    address = "files/untracked.txt"
+    es.indices.get_mapping.return_value["kb"]["mappings"]["properties"]["path_or_url"] = {"type": "keyword"}
+    es.open_point_in_time.return_value = {"id": "pit"}
+    es.search.side_effect = [
+        {"hits": {"hits": [{"_index": "kb", "_id": "first", "_seq_no": 2, "_primary_term": 1, "sort": [0],
+                           "_source": {"path_or_url": address}}]}},
+        {"hits": {"hits": [{"_index": "kb", "_id": "second", "_seq_no": 3, "_primary_term": 1, "sort": [1],
+                           "_source": {"path_or_url": address, "metadata": claim}}]}},
+        {"hits": {"hits": []}},
+    ]
+    es.bulk.return_value = {"items": [{"delete": {"_index": "kb", "status": 200}}]}
+    es.count.return_value = {"count": 0, "_shards": {"failed": 0}}
+    if claim:
+        with pytest.raises(ScopeDenied):
+            _delete_legacy_sources(es, grant.collection, actor.tenant_id, [address], context=context)
+        es.bulk.assert_not_called()
+    else:
+        assert _delete_legacy_sources(es, grant.collection, actor.tenant_id, [address], context=context) == 2
+        assert es.bulk.call_count == 2

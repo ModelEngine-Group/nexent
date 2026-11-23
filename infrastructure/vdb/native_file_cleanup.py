@@ -1,10 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Delete only the confirmed native generations in an authorized file cleanup."""
+"""Delete authorized native generations and exact historical sources."""
 
 from contextlib import closing
 from types import SimpleNamespace
 
-from nexent.storage.errors import Conflict, NotFound, ScopeDenied, Unavailable
+from nexent.storage.errors import (
+    Conflict,
+    NotFound,
+    OutcomeUnknown,
+    ScopeDenied,
+    StorageError,
+    Unavailable,
+)
 
 from infrastructure.knowledge_vectors import _configured_client
 from infrastructure.rdb.composition import close_owned, record_engine
@@ -70,62 +77,87 @@ def _delete(client, grant, tenant_id, generations, *, context):
         _native_target(hit, grant, tenant_id, generations)
 
     query = {"terms": {INGEST_GENERATION: sorted(generations)}}
-    return _remove_matching(client, grant, reader, identities, query,
+    return _remove_matching(client, grant.collection, reader, identities, query,
                             (INGEST_GENERATION, "id", "index", "tenant_id", "metadata.tenant_id"), validate,
                             context=context)
 
 
-def _legacy_target(hit, grant, tenant_id):
+def _legacy_target(hit, collection, tenant_id, addresses, *, file_id=None, file_version=None):
     source = hit.get("_source", {})
-    if (hit.get("_index") != grant.collection or INGEST_GENERATION in source or not _owns_source(source, tenant_id)
-        or source.get("path_or_url") not in grant.legacy_sources):
+    if (hit.get("_index") != collection or INGEST_GENERATION in source or not _owns_source(source, tenant_id)
+        or source.get("path_or_url") not in addresses):
         raise ScopeDenied()
     metadata = source.get("metadata")
     if metadata is not None and not isinstance(metadata, dict):
         raise Conflict()
     for fields in (source, metadata or {}):
-        file_id, version = fields.get("file_id"), fields.get("file_version")
-        if file_id is not None and file_id != grant.file_id:
+        claimed_id, version = fields.get("file_id"), fields.get("file_version")
+        if claimed_id is not None and claimed_id != file_id:
             raise ScopeDenied()
-        if version is not None and (type(version) is not int or not 0 <= version <= grant.file_version):
+        if version is not None and (file_version is None or type(version) is not int or not 0 <= version <= file_version):
             raise Conflict()
 
 
+def delete_untracked_native_source(actor, resource, address, *, context):
+    """Apply an exact source deletion after Management proves there is no file ledger."""
+    if not isinstance(address, str) or not 0 < len(address) <= 2048:
+        raise ScopeDenied()
+    engine = record_engine(context)
+    try:
+        require_index_owner(actor, resource, engine=engine, context=context)
+        with closing(_configured_client(context.remaining())) as client:
+            return _delete_legacy_sources(client, resource.collection, resource.resource_tenant_id,
+                                          [address], context=context)
+    finally:
+        close_owned(context, [engine.dispose])
+
+
 def _delete_legacy(client, grant, tenant_id, *, context):
-    reader = _NativeHybrid(client, {grant.collection: tenant_id}, context)
+    return _delete_legacy_sources(client, grant.collection, tenant_id, grant.legacy_sources,
+                                  file_id=grant.file_id, file_version=grant.file_version, context=context)
+
+
+def _delete_legacy_sources(client, collection, tenant_id, addresses, *, context, file_id=None, file_version=None):
+    reader = _NativeHybrid(client, {collection: tenant_id}, context)
     try:
         identities = reader.identities()
     except NotFound:
         return 0
     reader.read_mappings()
-    field = reader.mappings[grant.collection].get("path_or_url")
+    field = reader.mappings[collection].get("path_or_url")
     if field is None:
-        if _count(client, grant.collection, {"match_all": {}}, context) == 0:
+        if _count(client, collection, {"match_all": {}}, context) == 0:
             return 0
         raise Conflict()
     limit = field.get("ignore_above", 32766)
     if (field.get("type") != "keyword" or field.get("index", True) is not True or type(limit) is not int
-        or any(len(address.encode("utf-8")) > limit for address in grant.legacy_sources)):
+        or any(len(address.encode("utf-8")) > limit for address in addresses)):
         raise Conflict()
 
     def validate(hit):
-        _legacy_target(hit, grant, tenant_id)
+        _legacy_target(hit, collection, tenant_id, addresses, file_id=file_id, file_version=file_version)
 
     query = {"bool": {"filter": [
-        legacy_document_filter(), {"terms": {"path_or_url": grant.legacy_sources}},
+        legacy_document_filter(), {"terms": {"path_or_url": addresses}},
     ]}}
-    return _remove_matching(client, grant, reader, identities, query, (
+    return _remove_matching(client, collection, reader, identities, query, (
         INGEST_GENERATION, "path_or_url", "tenant_id", "file_id", "file_version",
         "metadata.tenant_id", "metadata.file_id", "metadata.file_version",
-    ), validate, context=context)
+    ), validate, context=context, validate_all=file_id is None)
 
 
-def _remove_matching(client, grant, reader, identities, query, fields, validate, *, context):
+def _remove_matching(client, collection, reader, identities, query, fields, validate, *, context, validate_all=False):
     receipts = delete_index_documents(
-        ElasticsearchVectorStore, client, grant.collection, query, fields, validate, context=context, exact_index=True,
+        ElasticsearchVectorStore, client, collection, query, fields, validate, context=context, exact_index=True,
+        validate_all=validate_all,
     )
-    if _count(client, grant.collection, query, context) != 0 or reader.identities() != identities:
-        raise Conflict()
+    try:
+        if _count(client, collection, query, context) != 0 or reader.identities() != identities:
+            raise Conflict()
+    except StorageError as error:
+        if validate_all and receipts:
+            raise OutcomeUnknown(operation_id=context.operation_id) from error
+        raise
     return sum(receipt.deleted for receipt in receipts)
 
 
