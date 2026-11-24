@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 from pydantic import ValidationError
@@ -26,13 +26,12 @@ def store(monkeypatch):
     index.index_record.return_value = True
     lookup = Mock(return_value=None)
     write = Mock(return_value=(17, "ADD"))
-    mirror = Mock(side_effect=lambda *args: args[-1]({"memory_id": 17}))
+    mirror = Mock(side_effect=lambda *args, **kwargs: args[-1]({"memory_id": 17}))
 
     async def inline(_label, fn, *args, **_options):
         return fn(*args)
 
-    monkeypatch.setattr(memory, "_control", inline)
-    monkeypatch.setattr(memory, "run_blocking", inline)
+    monkeypatch.setattr(memory, "run_memory_io", inline)
     monkeypatch.setattr(memory, "_load_embedding", Mock(return_value=model))
     monkeypatch.setattr(memory, "find_existing_memory", lookup)
     monkeypatch.setattr(memory, "write_agent_memory", write)
@@ -54,8 +53,9 @@ async def test_signed_scope_selects_model_and_persists_index(store):
     invocation, actor = store.model.invoke.await_args.args
     assert (invocation.model_id, invocation.expected_revision, invocation.input) == (11, "r1", ["remember"])
     assert actor == store.actor
-    store.write.assert_called_once_with("tenant-a", "user-a", 7, 42, "one", "remember", "mem_provider_embed_2")
+    store.write.assert_called_once_with("tenant-a", "user-a", 7, 42, "one", "remember", "mem_provider_embed_2", deadline=ANY)
     assert store.index.index_record.call_args.kwargs["embedding"] == [0.1, 0.2]
+    assert store.index.index_record.call_args.kwargs["refresh"] is False
 
 
 @pytest.mark.asyncio
@@ -172,6 +172,7 @@ async def test_prepared_store_ignores_identity_in_sdk_payload(monkeypatch):
     assert local.await_args.args == (
         AgentMemoryStore(agent_id=8, conversation_id=42, content="remember", idempotency_key="one"), actor,
     )
+    assert local.await_args.kwargs == {"deadline": ANY}
     notify.assert_awaited_once_with(AgentMemoryStored(memory_id=17, agent_id=8, conversation_id=42), actor)
 
 
@@ -222,3 +223,136 @@ def test_short_term_memory_still_requires_search_binding():
     )
     with pytest.raises(ValueError, match="requires a search binding"):
         prepared_memory.materialize_memory(resource, ServicePrincipal("user-a", "tenant-a"), 42)
+
+
+@pytest.mark.parametrize("caller_offset", [None, 10])
+@pytest.mark.asyncio
+async def test_store_deadline_cancels_model_and_prevents_late_database_write(store, monkeypatch, caller_offset):
+    import asyncio
+    from time import monotonic
+
+    async def blocked(*args):
+        await asyncio.Future()
+
+    monkeypatch.setattr(memory, "memory_write_deadline", lambda: monotonic() + 0.1)
+    store.model.invoke.side_effect = blocked
+    start = monotonic()
+    with pytest.raises(TimeoutError):
+        await store.service.store(
+            store.request, store.actor, **({"deadline": start + caller_offset} if caller_offset else {}),
+        )
+    assert monotonic() - start < 0.5
+    store.write.assert_not_called()
+    store.mirror.assert_not_called()
+
+
+@pytest.mark.parametrize("config", [
+    [("MEMORY_SWITCH", "N")],
+    [("MEMORY_SWITCH", "Y"), ("DISABLE_AGENT_ID", "7")],
+    [("DISABLE_USERAGENT_ID", "7")],
+])
+def test_runtime_storage_honors_existing_personal_memory_policy(config):
+    from infrastructure.rdb import memory_store
+
+    session = Mock()
+    session.execute.return_value.all.return_value = config
+    with pytest.raises(memory_store.MemoryStoreScopeError):
+        memory_store._require_automatic_memory(session, "user", 7)
+
+
+@pytest.mark.parametrize("lookup_consumes_budget", [False, True])
+def test_expired_storage_worker_cannot_modify_database(monkeypatch, lookup_consumes_budget):
+    from contextlib import contextmanager
+    from infrastructure.rdb import memory_store
+
+    session = Mock()
+
+    @contextmanager
+    def connection():
+        yield session
+
+    monkeypatch.setattr(memory_store, "get_db_session", connection)
+    monkeypatch.setattr(memory_store, "_lock", Mock())
+    monkeypatch.setattr(memory_store, "_require_scope", Mock())
+    monkeypatch.setattr(memory_store, "_require_automatic_memory", Mock())
+    clock = Mock(return_value=0 if lookup_consumes_budget else 2)
+    monkeypatch.setattr(memory_store, "time", SimpleNamespace(monotonic=clock))
+
+    def read(*args):
+        if lookup_consumes_budget:
+            clock.return_value = 2
+        return None
+
+    monkeypatch.setattr(memory_store, "_find", read)
+    with pytest.raises(TimeoutError):
+        memory_store.write_agent_memory("t", "u", 7, 42, "one", "remember", "index", deadline=1)
+    session.add.assert_not_called()
+    session.flush.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_slow_index_returns_persisted_receipt_before_store_deadline(store, monkeypatch):
+    import asyncio
+    from time import monotonic
+
+    async def io(label, fn, *args, deadline, **options):
+        if label == "memory-index-record":
+            async with asyncio.timeout(max(0, deadline - monotonic())):
+                await asyncio.Event().wait()
+        return fn(*args)
+
+    monkeypatch.setattr(memory, "run_memory_io", io)
+    monkeypatch.setattr(memory, "memory_write_deadline", lambda: monotonic() + 0.15)
+    started = monotonic()
+    result = await store.service.store(store.request, store.actor)
+    assert (result.memory_id, result.event, result.indexed) == (17, "ADD", False)
+    assert monotonic() - started < 0.3
+    store.write.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_no_index_budget_preserves_committed_receipt(store, monkeypatch):
+    from time import monotonic
+
+    monkeypatch.setattr(memory, "memory_write_deadline", lambda: monotonic() + 0.03)
+    result = await store.service.store(store.request, store.actor)
+    assert (result.memory_id, result.event, result.indexed) == (17, "ADD", False)
+    store.write.assert_called_once()
+    store.mirror.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_caller_deadline_bounds_store_before_database_write(store, monkeypatch):
+    import asyncio
+    from time import monotonic
+
+    async def blocked(*args):
+        await asyncio.Event().wait()
+
+    store.model.invoke.side_effect = blocked
+    started = monotonic()
+    with pytest.raises(TimeoutError):
+        await store.service.store(store.request, store.actor, deadline=started + 0.05)
+    assert monotonic() - started < 0.3
+    store.write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_index_wait_does_not_swallow_caller_cancellation(store, monkeypatch):
+    import asyncio
+
+    entered = asyncio.Event()
+
+    async def io(label, fn, *args, **options):
+        if label == "memory-index-record":
+            entered.set()
+            await asyncio.Event().wait()
+        return fn(*args)
+
+    monkeypatch.setattr(memory, "run_memory_io", io)
+    task = asyncio.create_task(store.service.store(store.request, store.actor))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    store.write.assert_called_once()

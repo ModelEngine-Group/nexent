@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Runtime's tenant-scoped model lookup and invocation."""
 
+import time
 from datetime import datetime
 
 from fastapi.encoders import jsonable_encoder
@@ -71,6 +72,9 @@ class ModelService:
         return metadata
 
     async def invoke(self, payload: ModelInvocation, actor: ServicePrincipal) -> ModelResult:
+        memory_deadline = (time.monotonic() + payload.memory_timeout_seconds
+                           if isinstance(payload, EmbeddingInvocation) and payload.memory_timeout_seconds is not None
+                           else None)
         record, metadata = await self._load(payload.model_id, actor)
         if payload.expected_revision is not None and (
             normalize_model_revision(payload.expected_revision) != normalize_model_revision(metadata.revision)
@@ -121,7 +125,23 @@ class ModelService:
             modality = metadata.model_type
             slot = "multiEmbedding" if modality == "multi_embedding" else "embedding"
             adapter = self.build_adapter(record, modality, slot, actor.tenant_id)
-            output = await adapter.invoke(EmbeddingRequest(payload.input, worker_lane="model-embedding"))
+            if payload.memory_timeout_seconds is None:
+                output = await adapter.invoke(EmbeddingRequest(payload.input, worker_lane="model-embedding"))
+            else:
+                if len(payload.input) != 1:
+                    raise ModelAccessError(422, "MEMORY_EMBEDDING_REQUIRES_SINGLE_INPUT")
+                from nexent.memory.embedding_model import EmbeddingModelInfo
+                from runtime.model.memory_embedding import compute_runtime_embedding
+
+                model = EmbeddingModelInfo(
+                    model_name=record["model_name"], dimension=int(record["max_tokens"]), base_url="", api_key="",
+                    model_id=payload.model_id, revision=metadata.revision,
+                )
+                vector = await compute_runtime_embedding(
+                    payload.input[0], model, tenant_id=actor.tenant_id, client=adapter,
+                    deadline=memory_deadline,
+                )
+                output = [vector] if vector is not None else None
         else:
             adapter = self.build_adapter(record, "rerank", "rerank", actor.tenant_id)
             options = payload.options

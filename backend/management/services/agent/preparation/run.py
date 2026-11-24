@@ -127,6 +127,7 @@ async def create_agent_run_info(
     user_query: str | None = None,
     prompt_candidate_id: int | None = None,
     excluded_root_tools: frozenset[str] = frozenset(),
+    memory_query_deadline: float | None = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -176,6 +177,8 @@ async def create_agent_run_info(
         "enable_planning": enable_planning,
         "portable_evaluation": True,
     }
+    if memory_query_deadline is not None:
+        create_config_kwargs["memory_query_deadline"] = memory_query_deadline
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if authorized_knowledge_tools is not None:

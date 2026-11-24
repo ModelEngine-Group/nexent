@@ -370,6 +370,8 @@ class MemoryExternalProviderService:
         tenant_id: str,
         request: MemorySearchRequest,
         limit: int = 5,
+        *,
+        deadline: float | None = None,
     ) -> List[MemorySearchResult]:
         """Search all enabled providers in parallel and concatenate results.
 
@@ -394,9 +396,22 @@ class MemoryExternalProviderService:
                 )
                 return []
 
-        results = await asyncio.gather(
-            *[_search_one(p) for p in providers]
-        )
+        if deadline is None:
+            results = await asyncio.gather(*[_search_one(p) for p in providers])
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return []
+            tasks = [asyncio.create_task(_search_one(p)) for p in providers]
+            try:
+                done, pending = await asyncio.wait(tasks, timeout=remaining)
+                if pending:
+                    logger.warning("event=memory_provider_search_deadline pending_count=%d", len(pending))
+                results = [task.result() for task in tasks if task in done and not task.cancelled()]
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
 
         combined: List[MemorySearchResult] = []
         for result_list in results:

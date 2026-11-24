@@ -327,6 +327,10 @@ W_AGENT_SHORT_TERM = float(os.getenv('W_AGENT_SHORT_TERM', '1.0'))
 W_EXTERNAL = float(os.getenv('W_EXTERNAL', '0.8'))
 
 # Token budget selection
+# Reserve one second of the 10-second budget for event-loop scheduling and cancellation.
+MEMORY_QUERY_TIMEOUT_SECONDS = min(9.0, max(0.1, float(os.getenv("MEMORY_QUERY_TIMEOUT_SECONDS", "9"))))
+MEMORY_WRITE_TIMEOUT_SECONDS = min(10.0, max(0.1, float(os.getenv("MEMORY_WRITE_TIMEOUT_SECONDS", "2"))))
+MEMORY_EMBEDDING_COOLDOWN_SECONDS = max(0, int(os.getenv("MEMORY_EMBEDDING_COOLDOWN_SECONDS", "300")))
 MEMORY_TOKEN_BUDGET = int(os.getenv('MEMORY_TOKEN_BUDGET', '2000'))
 
 # Dreaming promotion thresholds
