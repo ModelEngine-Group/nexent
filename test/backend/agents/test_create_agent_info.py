@@ -2,6 +2,7 @@
 
 from test.common.contract_stubs import install_shared_contract_stub
 from test.common.contract_stubs import install_business_contract_stubs
+import asyncio
 import pytest
 import sys
 import types
@@ -10,6 +11,7 @@ from pathlib import Path
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 import nexent.core.agent_names  # noqa: F401 - Load before dependency namespace stubs.
+from nexent.memory import models as runtime_memory_models
 
 # Load the real compatibility helpers before this fixture replaces SDK model packages.
 import nexent.core.model_service.compatibility.legacy_config
@@ -28,6 +30,7 @@ from test.common.test_mocks import bootstrap_test_env
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
 consts_const.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = 120
+consts_const.MEMORY_QUERY_TIMEOUT_SECONDS = 9.0
 consts_const.NEXENT_TOOL_FASTPATH_ENABLED = False
 consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = (
     "KnowledgeBaseSearchTool", "ReadSkillMdTool", "ReadSkillConfigTool", "AidpSearchTool",
@@ -374,8 +377,8 @@ nexent_module = _create_stub_module("nexent", MessageObserver=mock_message_obser
 nexent_module.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk" / "nexent")]
 sys.modules['nexent'] = nexent_module
 sys.modules['nexent.memory'] = _create_stub_module("nexent.memory")
-sys.modules['nexent.memory.models'] = _create_stub_module("nexent.memory.models")
-sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
+sys.modules['nexent.memory.models'] = runtime_memory_models
+sys.modules['nexent.memory'].models = runtime_memory_models
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
@@ -393,8 +396,21 @@ async def _run_blocking(_task_name, fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
+_concurrency_mod.ManagedTaskSpec = types.SimpleNamespace
 _concurrency_mod.run_blocking = _run_blocking
 sys.modules['nexent.core.concurrency'] = _concurrency_mod
+
+
+async def _run_memory_task(_lane, _spec, fn, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+sys.modules['runtime.thread_management'] = _create_stub_module(
+    "runtime.thread_management",
+    runtime_thread_manager=types.SimpleNamespace(run=_run_memory_task, submit=MagicMock()),
+)
+_concurrency_mod.get_current_thread_manager = lambda: None
+_concurrency_mod.get_default_thread_manager = lambda: types.SimpleNamespace(run=_run_memory_task, submit=MagicMock())
 nexent_agents_module = _create_stub_module("nexent.core.agents")
 nexent_agents_module.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk" / "nexent" / "core" / "agents")]
 sys.modules['nexent.core.utils'] = _create_stub_module(
@@ -2303,7 +2319,10 @@ class TestCreateAgentConfig:
         components: Optional[List[Mock]] = None,
         memory_switch: bool = False,
         fixed_search_result: str = "No relevant memories found.",
+        real_memory_preparation: bool = False,
+        context_error=None,
     ):
+        prepare_memory = preparation_compiler._prepare_runtime_memory if real_memory_preparation else None
         with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
                 patch('management.services.agent.preparation.compiler.create_tool_config_list', return_value=[]), \
@@ -2314,7 +2333,8 @@ class TestCreateAgentConfig:
                 patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
                 patch('management.services.agent.preparation.compiler.build_context_inputs') as mock_build_components, \
                 patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
-                patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+                patch('management.services.agent.preparation.compiler._prepare_runtime_memory',
+                      side_effect=prepare_memory, return_value=([], fixed_search_result)) as mock_search_tool, \
                 patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]), \
                 patch.dict(sys.modules, {
                     'management.services.memory.records': MagicMock(
@@ -2323,7 +2343,7 @@ class TestCreateAgentConfig:
                     'management.services.memory.context': MagicMock(
                         get_memory_context_service=MagicMock(
                             return_value=MagicMock(
-                                build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                build_context=AsyncMock(side_effect=context_error, return_value=types.SimpleNamespace(
                                     tenant_long_term=(),
                                     user_long_term=(),
                                 ))
@@ -2333,6 +2353,7 @@ class TestCreateAgentConfig:
                     'management.services.memory.provider': MagicMock(
                         build_memory_service_for_agent=MagicMock(return_value=None),
                     ),
+                    'management.services.memory.runtime_embedding': MagicMock(compute_runtime_embedding=AsyncMock()),
                 }), \
                 patch(
                     'management.services.agent.preparation.compiler.ContextManagerConfig',
@@ -2363,10 +2384,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            if isinstance(fixed_search_result, Exception):
-                mock_search_tool.return_value.forward.side_effect = fixed_search_result
-            else:
-                mock_search_tool.return_value.forward.return_value = fixed_search_result
             mock_prepare_templates.return_value = {"system_prompt": prepared_prompt}
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
@@ -2470,8 +2487,8 @@ class TestCreateAgentConfig:
             fixed_search_result=result_text,
         )
 
-        search_instance = mocks["search_tool"].return_value
-        search_instance.forward.assert_called_once_with("test query", 5)
+        mocks["search_tool"].assert_awaited_once()
+        assert mocks["search_tool"].await_args.kwargs["query"] == "test query"
 
         context_kwargs = mocks["build_components"].call_args.kwargs
         assert context_kwargs["memory_list"] == [{
@@ -2523,25 +2540,26 @@ class TestCreateAgentConfig:
         ):
             mocks = await self._run_context_manager_case(
                 enable_context_manager=True, prepared_prompt="", memory_switch=enabled,
-                fixed_search_result=RuntimeError("private") if fail else "Found 1 memory",
+                real_memory_preparation=True, context_error=RuntimeError("private") if fail else None,
             )
         if not enabled:
             assert events == []
             mocks["search_tool"].assert_not_called()
             return
-        search = mocks["search_tool"].return_value.forward
+        mocks["search_tool"].assert_awaited_once()
         assert all(event["attributes"]["agent.name"] == "test_agent" for event in events)
         assert all(event["attributes"]["agent.display_name"] == "知识助手" for event in events)
-        search.assert_called_once_with("test query", 5)
         assert [event["name"] for event in events] == [
-            "memory.initialize", "memory.initialize", "memory.load_context", "memory.presearch",
+            "memory.presearch", "memory.initialize", "memory.load_context", "memory.initialize",
         ]
-        assert events[0]["error"] == "RuntimeError"
+        assert events[3]["error"] == "RuntimeError"
         assert events[1]["output"] == {"service": "context", "ready": True}
-        assert events[2]["output"] == []
-        assert events[-1]["input"] == {"query": "test query", "top_k": 5}
-        assert events[-1]["error"] == ("RuntimeError" if fail else None)
-        assert events[-1]["output"] == (None if fail else "Found 1 memory")
+        assert events[2]["error"] == ("RuntimeError" if fail else None)
+        assert events[2]["output"] == (None if fail else [])
+        assert events[0]["input"] == {"query": "test query", "top_k": 5}
+        assert events[0]["error"] is None
+        assert events[0]["output"] == "Vector memory unavailable. Continuing with other available context."
+        mocks["agent_config"].assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("fail", [False, True])
@@ -2566,16 +2584,21 @@ class TestCreateAgentConfig:
         with patch('management.services.agent.preparation.compiler.trace_phase', phase), patch(
             'management.services.agent.preparation.compiler._get_external_provider_service_for_search',
             return_value=provider,
-        ), patch.object(preparation_compiler.memory_models, 'MemorySearchRequest', MagicMock(), create=True):
+        ):
             mocks = await self._run_context_manager_case(
-                enable_context_manager=True, prepared_prompt="", memory_switch=True,
+                enable_context_manager=True, prepared_prompt="", memory_switch=True, real_memory_preparation=True,
             )
         provider.search_all_enabled.assert_awaited_once()
         event = next(e for e in events if e["name"] == "memory.external_search")
         assert event["input"] == {"query": "test query", "top_k": 5}
         assert event["error"] == ("RuntimeError" if fail else None)
         assert event["output"] == (None if fail else [])
-        mocks["search_tool"].return_value.forward.assert_called_once_with("test query", 5)
+        call = provider.search_all_enabled.await_args.kwargs
+        assert call["tenant_id"] == "tenant_1" and call["limit"] == 5
+        assert call["request"].query == "test query" and call["request"].top_k == 5
+        assert call["deadline"] > 0
+        mocks["search_tool"].assert_awaited_once()
+        mocks["agent_config"].assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
@@ -2729,6 +2752,7 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
+                automatic_memory_enabled=False,
                 capacity_snapshot=ANY,
                 context_budget_snapshot=ANY,
                 verification_config=ANY,
@@ -2812,6 +2836,7 @@ class TestCreateAgentConfig:
                     context_items=ANY,
                     prompt_tool_policy_snapshot=ANY,
                     pre_run_tool_events=ANY,
+                    automatic_memory_enabled=False,
                     capacity_snapshot=ANY,
                     context_budget_snapshot=ANY,
                     verification_config=ANY,
@@ -2947,7 +2972,8 @@ class TestCreateAgentConfig:
                 patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
                 patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
                 patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
-                patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+                patch('management.services.agent.preparation.compiler._prepare_runtime_memory',
+                      return_value=([], 'No relevant memories found.')) as mock_search_tool, \
                 patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
                 patch.dict(sys.modules, {
@@ -2999,9 +3025,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_search_tool.return_value.forward = MagicMock(
-                return_value="Found 1 result"
-            )
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
@@ -3014,9 +3037,8 @@ class TestCreateAgentConfig:
                 "test query",
             )
 
-            # Verify that fixed search memory tool's forward was called
-            search_instance = mock_search_tool.return_value
-            search_instance.forward.assert_called_once_with("test query", 5)
+            mock_search_tool.assert_awaited_once()
+            assert mock_search_tool.await_args.kwargs["query"] == "test query"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_disabled_no_search(self):
@@ -3158,6 +3180,7 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
+                automatic_memory_enabled=False,
                 capacity_snapshot=ANY,
                 context_budget_snapshot=ANY,
                 verification_config=ANY,
@@ -3265,7 +3288,7 @@ class TestCreateAgentConfig:
                 agent_id="agent_1",
             )
 
-            mock_search_tool.return_value.forward.side_effect = Exception("boom")
+            mock_build_memory.side_effect = RuntimeError("policy unavailable")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -3280,20 +3303,12 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            mock_logger.error.assert_called_once()
-            error_message = mock_logger.error.call_args[0][0]
-            assert "Failed to load memory tools" in error_message
+            mock_search_tool.assert_not_called()
+            mock_build_memory.assert_called_once_with("user_1", "tenant_1", "agent_1")
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_agent_share_never(self):
-        """Verify that with ``agent_share_option='never'`` the agent-level
-        memory search is still executed via the fixed search tool.
-
-        The legacy ``search_memory_in_levels`` multi-level fan-out has been
-        removed; the new code path always uses a single
-        ``_create_fixed_search_memory_tool`` instance whose ``forward`` is
-        invoked once during agent preparation.
-        """
+        """Private sharing retains the user's automatic retrieval."""
         with (
             patch(
                 'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
@@ -3314,7 +3329,8 @@ class TestCreateAgentConfig:
                 'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
+                'management.services.agent.preparation.compiler._prepare_runtime_memory',
+                return_value=([], 'No relevant memories found.')
             ) as mock_search_tool,
             patch(
                 'management.services.agent.preparation.inputs.prepare_prompt_templates'
@@ -3376,7 +3392,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -3393,17 +3408,12 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Fixed search memory tool should have been invoked exactly once.
-            mock_search_tool.assert_called_once()
-            search_instance = mock_search_tool.return_value
-            search_instance.forward.assert_called_once_with("test query", 5)
+            mock_search_tool.assert_awaited_once()
+            assert mock_search_tool.await_args.kwargs["query"] == "test query"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_disable_agent(self):
-        """Verify that with ``disable_agent_ids`` containing the agent id the
-        fixed search memory tool is still invoked (its level filtering is
-        now performed inside the service).
-        """
+        """The personal Agent deny list prevents automatic retrieval."""
         with (
             patch(
                 'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
@@ -3424,7 +3434,8 @@ class TestCreateAgentConfig:
                 'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
+                'management.services.agent.preparation.compiler._prepare_runtime_memory',
+                return_value=([], 'No relevant memories found.')
             ) as mock_search_tool,
             patch(
                 'management.services.agent.preparation.inputs.prepare_prompt_templates'
@@ -3486,7 +3497,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -3503,16 +3513,11 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            mock_search_tool.assert_called_once()
-            search_instance = mock_search_tool.return_value
-            search_instance.forward.assert_called_once_with("test query", 5)
+            mock_search_tool.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_disable_user_agent(self):
-        """Verify that with ``disable_user_agent_ids`` containing the agent id
-        the fixed search memory tool is still invoked (per-level disable
-        checks are now performed inside the service).
-        """
+        """The personal Agent deny list prevents automatic retrieval."""
         with (
             patch(
                 'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
@@ -3533,7 +3538,8 @@ class TestCreateAgentConfig:
                 'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
+                'management.services.agent.preparation.compiler._prepare_runtime_memory',
+                return_value=([], 'No relevant memories found.')
             ) as mock_search_tool,
             patch(
                 'management.services.agent.preparation.inputs.prepare_prompt_templates'
@@ -3595,7 +3601,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -3612,9 +3617,7 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            mock_search_tool.assert_called_once()
-            search_instance = mock_search_tool.return_value
-            search_instance.forward.assert_called_once_with("test query", 5)
+            mock_search_tool.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
@@ -4140,7 +4143,7 @@ class TestCreateAgentConfig:
 
             # Create a tool that raises exception when accessing class_name
             mock_tool = MagicMock()
-            type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
+            type(mock_tool).class_name = PropertyMock(side_effect=["KnowledgeBaseSearchTool", Exception("Test Error")])
             mock_create_tools.return_value = [mock_tool]
 
             mock_get_template.return_value = {
@@ -6990,7 +6993,10 @@ class TestCreateAgentConfigMemoryBuildFailure:
                 tool.name for tool in mock_agent_config.call_args.kwargs["tools"]
             ]
             assert "store_memory" not in tool_names
-            mock_search_tool.return_value.forward.assert_called_once_with("query", 5)
+            assert any(
+                "Vector memory unavailable" in event["content"]
+                for event in mock_agent_config.call_args.kwargs["pre_run_tool_events"]
+            )
 
 
 class TestCreateAgentConfigMemoryContextServiceFailure:
@@ -7126,7 +7132,8 @@ class TestCreateAgentConfigMemoryProviderResults:
             tools = mock_agent_config.call_args.kwargs["tools"]
             store_tool = next(tool for tool in tools if tool.name == "store_memory")
             assert store_tool.metadata["memory_service"] is memory_service
-            mock_search_tool.return_value.forward.assert_called_once_with("query", 5)
+            memory_context_service.build_context.assert_awaited_once()
+            assert memory_context_service.build_context.await_args.kwargs["layers"] == ["tenant", "user"]
 
     @pytest.mark.asyncio
     async def test_none_memory_providers_skip_store_and_presearch(self):
@@ -7626,3 +7633,94 @@ class TestDeepSeekRuntimeLanguage:
             assert "max_content_chars" not in actual
             assert actual["only_high_quality"] is True
             assert params["language"] == "zh"
+
+
+@pytest.fixture
+def recursive_memory_compiler(monkeypatch):
+    compiler = preparation_compiler
+    real_create = compiler.create_agent_config
+    monkeypatch.setattr(compiler, 'search_agent_info_by_agent_id', lambda **kw: {
+        'name': str(kw['agent_id']), 'description': '', 'prompt': '', 'model_ids': [],
+    })
+    monkeypatch.setattr(compiler, 'query_sub_agent_relations', lambda **kw: (
+        [{'selected_agent_id': 2, 'selected_agent_version_no': 0}] if kw['main_agent_id'] == 1 else []
+    ))
+    monkeypatch.setattr(compiler, 'resolve_sub_agent_version_no', lambda **kw: 0)
+    monkeypatch.setattr(compiler, '_get_external_a2a_agents', lambda *_: [])
+    monkeypatch.setattr(compiler, 'create_tool_config_list', AsyncMock(return_value=[]))
+    monkeypatch.setattr(compiler, '_get_skills_for_template', lambda *_, **kw: [])
+    monkeypatch.setattr(compiler, '_get_skill_script_tools', lambda *_, **kw: [])
+    monkeypatch.setattr(compiler, '_select_agent_model_id', lambda *_: None)
+    monkeypatch.setattr(compiler, '_resolve_context_budget', lambda **kw: None)
+    monkeypatch.setattr(compiler, '_resolve_input_budget', lambda *_: (2000, None, None))
+    monkeypatch.setattr(compiler, '_build_effective_knowledge_base_summary', lambda *_, **kw: ([], []))
+    monkeypatch.setattr(compiler, 'build_context_inputs', lambda **kw: [])
+    monkeypatch.setattr(compiler, 'build_agent_context_policy', Mock())
+    monkeypatch.setattr(compiler, 'resolve_policy', Mock())
+    monkeypatch.setattr(compiler, 'ContextManagerConfig', Mock())
+    monkeypatch.setattr(compiler, 'AgentConfig', lambda **kw: types.SimpleNamespace(**kw))
+    monkeypatch.setattr(compiler, '_build_runtime_store_tool', lambda *_, **kw: types.SimpleNamespace(name='store_memory'))
+    async def policy(_label, callback, *args, **kw):
+        return callback(*args)
+    monkeypatch.setattr(compiler, 'optional_memory_io', policy)
+    return compiler, real_create
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mounted', [False, True])
+@pytest.mark.parametrize('disabled,call_enabled', [([1], True), ([2], True), ([], False), ([1, 2], True), (None, True)])
+async def test_recursive_agent_memory_switch_is_local(recursive_memory_compiler, monkeypatch, disabled, call_enabled, mounted):
+    compiler, create = recursive_memory_compiler
+    personal_enabled = disabled is not None
+    disabled = disabled or []
+    context = Mock(user_config=Mock(memory_switch=personal_enabled, external_provider_top_k=5,
+                                   disable_agent_ids=[str(x) for x in disabled], disable_user_agent_ids=[]))
+    monkeypatch.setattr(compiler, 'build_memory_context', lambda *_: context)
+    prepare = AsyncMock(return_value=([], 'No relevant memories found.'))
+    monkeypatch.setattr(compiler, '_prepare_runtime_memory', prepare)
+    kwargs = {}
+    if mounted:
+        monkeypatch.setattr(compiler, 'query_sub_agent_relations', lambda **kw: [])
+        kwargs['runtime_sub_agent_mounts'] = [{'agent_id': 2, 'version_no': 0}]
+    root = await create(1, 't', 'u', 'en', 'query', allow_memory_search=call_enabled, **kwargs)
+    for agent_id, agent in zip([1, 2], [root, *root.worker_agents]):
+        enabled = call_enabled and personal_enabled and agent_id not in disabled
+        assert any(t.name == 'store_memory' for t in agent.tools) is enabled
+    assert {int(c.kwargs['agent_id']) for c in prepare.await_args_list} == (
+        {1, 2} - set(disabled) if call_enabled and personal_enabled else set()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [None, 'error', 'cancel'])
+async def test_parent_memory_starts_before_child_and_is_cleaned_up(recursive_memory_compiler, monkeypatch, failure):
+    compiler, create = recursive_memory_compiler
+    root_started, root_finished = asyncio.Event(), asyncio.Event()
+    context = Mock(user_config=Mock(memory_switch=True, external_provider_top_k=5,
+                                   disable_agent_ids=[], disable_user_agent_ids=[]))
+    monkeypatch.setattr(compiler, 'build_memory_context', lambda *_: context)
+    async def prepare(**kw):
+        if kw['agent_id'] == '1':
+            root_started.set()
+            try:
+                if failure:
+                    await asyncio.Future()
+                return [{'memory': 'healthy parent fact', 'memory_level': 'user'}], None
+            finally:
+                root_finished.set()
+        await asyncio.wait_for(root_started.wait(), .15)
+        if failure == 'error':
+            raise ValueError('child compile failed')
+        if failure == 'cancel':
+            raise asyncio.CancelledError()
+        return [], None
+    monkeypatch.setattr(compiler, '_prepare_runtime_memory', prepare)
+    contexts = Mock(return_value=[])
+    monkeypatch.setattr(compiler, 'build_context_inputs', contexts)
+    if failure:
+        with pytest.raises(ValueError if failure == 'error' else asyncio.CancelledError):
+            await create(1, 't', 'u', 'en', 'query')
+        assert root_finished.is_set()
+    else:
+        await create(1, 't', 'u', 'en', 'query')
+        assert contexts.call_args.kwargs['long_term_memory_items'][0]['memory'] == 'healthy parent fact'

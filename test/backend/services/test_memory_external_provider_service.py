@@ -639,3 +639,29 @@ async def test_ingest_all_enabled_empty(service, mock_config_service):
     mock_config_service.get_enabled_providers.return_value = []
     results = await service.ingest_all_enabled("t1", MemoryIngestRequest(units=[]))
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_search_preserves_healthy_provider_at_deadline(service, mock_config_service, monkeypatch):
+    import asyncio
+    from time import monotonic
+
+    mock_config_service.get_enabled_providers.return_value = [
+        {"provider_name": "slow", "params": {}},
+        {"provider_name": "healthy", "params": {}},
+    ]
+    cancelled = asyncio.Event()
+    healthy = MemorySearchResult(memory_id=7)
+
+    async def search(config, params, request, limit):
+        if config["provider_name"] == "healthy":
+            return [healthy]
+        try:
+            await asyncio.sleep(60)
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(service, "search", search)
+    results = await service.search_all_enabled("t1", MemorySearchRequest(query="hi"), deadline=monotonic() + 0.05)
+    assert results == [healthy]
+    await asyncio.wait_for(cancelled.wait(), timeout=0.5)

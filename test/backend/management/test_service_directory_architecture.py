@@ -180,6 +180,7 @@ MIGRATED_MODULES = {
     'memory/providers/service.py',
     'memory/records.py',
     'memory/retrieval.py',
+    'memory/runtime_embedding.py',
     'model/adapter.py',
     'model/capacity.py',
     'model/catalog.py',
