@@ -71,36 +71,16 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
 
 
 def _extract_upstream_code(response: httpx.Response) -> int | None:
-    """Read an AIDP business error code from a structured HTTP error body.
+    """Read the business code from AIDP's fixed error body.
 
-    AIDP reports some business failures with an unrelated HTTP status (for
-    example a duplicate knowledge base name arrives with HTTP 500 and
-    ``{"error": {"code": 1022}}``). Keeping the business code separate from
-    the human-readable reason lets callers recognise known failures without
-    parsing localized text.
+    AIDP error responses use ``{"error": {"code": <int>, "message": <str>}}``.
+    A non-JSON body (for example an empty proxy response) carries no code.
     """
     try:
         payload = response.json()
-    except (TypeError, ValueError):
+    except ValueError:
         return None
-
-    def find(value: Any) -> int | None:
-        if isinstance(value, dict):
-            for key in ("code", "error_code", "errorCode"):
-                candidate = value.get(key)
-                if isinstance(candidate, bool):
-                    continue
-                if isinstance(candidate, int):
-                    return candidate
-                if isinstance(candidate, str) and candidate.strip().isdigit():
-                    return int(candidate.strip())
-            for key in ("detail", "message", "error"):
-                found = find(value.get(key))
-                if found is not None:
-                    return found
-        return None
-
-    return find(payload)
+    return payload["error"]["code"]
 
 
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:

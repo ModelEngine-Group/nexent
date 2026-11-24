@@ -1440,7 +1440,7 @@ def create_knowledge_base(
     # The live service rejects a duplicate name with HTTP 500 and business
     # code 1022 (not a 4xx). Mirror that shape so the proxy's error parsing
     # and the UI's duplicate-name message are exercised realistically.
-    if any(kb.get("kds_name") == body.name for kb in _KNOWLEDGE_BASES.values()):
+    if any(kb["kds_name"] == body.name for kb in _KNOWLEDGE_BASES.values()):
         logger.info("CREATE REJECTED duplicate name=%r", body.name)
         return JSONResponse(
             status_code=500,
