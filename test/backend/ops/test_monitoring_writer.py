@@ -84,6 +84,26 @@ def test_stage_merges_skill_duplicate_using_earliest_trigger(writer, mocker):
     assert staged["writes"][0]["document"]["record_revision"] == 2
 
 
+def test_stage_merges_out_of_order_sdk_skill_fact_without_changing_identity(writer, mocker):
+    previous_payload = {"tenant_id": "t", "fact_kind": "skill", "fact_id": "skill-use",
+                        "call_context_id": "run", "started_at": "2026-11-23T02:00:00Z",
+                        "triggered_at": "2026-11-23T02:01:00Z", "trigger_kind": "guide_read",
+                        "skill_id": "7", "skill_name": "summarize", "record_revision": 1,
+                        "outcome": "succeeded"}
+    incoming_payload = {**previous_payload, "started_at": "2026-11-23T01:00:00Z",
+                        "triggered_at": "2026-11-23T01:01:00Z", "trigger_kind": "script_started"}
+    previous = SkillFact.model_validate(previous_payload).document(writer.zone)
+    mocker.patch.object(service, "existing_fact", return_value=previous)
+
+    staged = writer._stage({"write_version": 5, "replay_payload": [incoming_payload]}, "skill", "t")
+
+    document = staged["writes"][0]["document"]
+    assert document["started_at"] == previous["started_at"]
+    assert document["triggered_at"] == "2026-11-23T01:01:00Z"
+    assert document["trigger_kind"] == "script_started"
+    assert document["record_revision"] == 2
+
+
 def test_stage_skips_skill_duplicate_when_existing_trigger_is_earlier(writer, mocker):
     skill_payload = {"tenant_id": "t", "fact_kind": "skill", "fact_id": "skill-use",
                      "call_context_id": "run", "started_at": "2026-11-23T00:00:00Z",

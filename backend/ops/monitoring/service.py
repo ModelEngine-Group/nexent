@@ -48,8 +48,6 @@ def _merge_skill_usage(previous, document):
     if not previous_triggered or not current_triggered or current_triggered >= previous_triggered:
         return None
     merged = dict(previous)
-    merged.update({key: value for key, value in document.items()
-                   if key not in {"triggered_at", "trigger_kind", "record_revision", "write_version"}})
     merged["triggered_at"] = current_triggered
     merged["trigger_kind"] = document.get("trigger_kind")
     merged["record_revision"] = max(previous.get("record_revision", 1), document.get("record_revision", 1)) + 1
