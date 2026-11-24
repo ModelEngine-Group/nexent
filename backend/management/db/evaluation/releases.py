@@ -9,6 +9,7 @@ from contracts.errors.exceptions import AppException
 from contracts.evolution_sources import task_digest
 from contracts.releases import supports_release
 from contracts.roles import has_any_role
+from infrastructure.rdb.agent_execution import request_version_stop
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.skill_execution_records import SkillInfo, effective_skill_description, release_skill
 from infrastructure.skill_execution import skill_execution_revision
@@ -491,6 +492,8 @@ def restore(tenant, actor, lock, request, ready):
                 params,
             )
             _event(session, lock, "stop", actor, request.reason)
+        if request.emergency:
+            request_version_stop(session, tenant, agent, record["new_version"], actor)
         if not record["rollback_at"] and is_default:
             stopped_base = session.scalar(
                 text("""SELECT disabled FROM nexent.evolution_release_t

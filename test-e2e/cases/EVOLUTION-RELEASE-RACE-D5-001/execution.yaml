@@ -7,6 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01: [test_release_race_and_rollback_to_previous_version]
   AC-02: [test_release_race_and_rollback_to_previous_version]
+  AC-03: [test_release_race_and_rollback_to_previous_version]
 preparation:
   families: []
   anchors: false

@@ -19,6 +19,7 @@ def test_release_race_and_rollback_to_previous_version(runtime):
     from contracts.errors.exceptions import AppException
     from contracts.evolution_sources import task_digest
     from contracts.releases import RollbackRequest
+    from infrastructure.rdb.agent_execution import OWNER_ID, RunIdentity, mark_running
     from infrastructure.rdb.client import db_client, get_db_session
     from infrastructure.system_configuration.runtime import load_system_configuration
     from management.db.agent.session_versions import confirm_chat_version, lock_release_scope, select_chat_version
@@ -146,3 +147,33 @@ def test_release_race_and_rollback_to_previous_version(runtime):
         assert actual == [(901, 0, 2, "Draft remains editable"), (901, 1, None, "Original published instructions"),
                           (901, 2, None, candidates[winner][2]), (901, 3, None, "Published revision C"),
                           (902, 0, 1, "Another business agent"), (903, 0, 1, "Another tenant")]
+
+    # Runtime can be preparing an execution when the publisher disables its version.
+    written = {
+        "a": (tenant, 301, "running", 3),
+        "b": (tenant, 401, "running", 2),
+        "c": (tenant, 301, "completed", 3),
+        "d": ("other-tenant", 501, "running", 3),
+        "e": (tenant, 302, "starting", None),
+        "f": (tenant, 402, "starting", None),
+    }
+    with db_client.engine.begin() as conn:
+        for name, (scope, conversation, status, version) in written.items():
+            versions = {"agent_id": agent, "agent_version_no": version} if version else {}
+            conn.execute(text("""INSERT INTO nexent.agent_execution_t
+                (run_id,conversation_id,tenant_id,owner_id,lease_until,status,resource_versions,created_by,delete_flag)
+                VALUES (:r,:c,:t,:o,now()+interval '1 minute',:s,CAST(:v AS jsonb),:u,'N')"""),
+                dict(r=name * 32, c=conversation, t=scope, o=OWNER_ID, s=status, v=json.dumps(versions), u=first))
+    stop = request.model_copy(update={"emergency": True})
+    assert releases.restore(tenant, first, next_lock, stop, True)["disabled"]
+    assert releases.restore(tenant, second, next_lock, stop, True)["disabled"]
+    assert not mark_running(RunIdentity(tenant, first, 302, "e" * 32), {"agent_id": agent, "agent_version_no": 3})
+    assert mark_running(RunIdentity(tenant, first, 402, "f" * 32), {"agent_id": agent, "agent_version_no": 2})
+    with db_client.engine.connect() as conn:
+        assert conn.execute(text("""SELECT left(run_id,1),status,cancellation_requested
+            FROM nexent.agent_execution_t ORDER BY run_id""")).all() == [
+                ("a", "running", True), ("b", "running", False), ("c", "completed", False),
+                ("d", "running", False), ("e", "starting", False), ("f", "running", False),
+            ]
+        assert conn.scalar(text("""SELECT count(*) FROM nexent.evolution_release_event_t
+            WHERE lock_id=:l AND action='stop'"""), {"l": next_lock}) == 1

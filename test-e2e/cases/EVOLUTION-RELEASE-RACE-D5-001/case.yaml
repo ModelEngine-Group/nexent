@@ -4,7 +4,7 @@ module: V5-BASELINE
 case:
   case_id: EVOLUTION-RELEASE-RACE-D5-001
   feature_id: AGENT-EVOLUTION-RELEASE
-  business_rule_ids: [AGENT-EVOLUTION-RELEASE-RULE-01, AGENT-EVOLUTION-RELEASE-RULE-04]
+  business_rule_ids: [AGENT-EVOLUTION-RELEASE-RULE-01, AGENT-EVOLUTION-RELEASE-RULE-04, AGENT-EVOLUTION-RELEASE-RULE-05]
   title: 并发晋升只生效一次，连续发布后回退到上一稳定版
   type: RELIABILITY
   priority: P0
@@ -21,8 +21,11 @@ case:
   - order: 2
     action: 选择 V2 的已确认候选继续发布 V3，在各阶段绑定会话。两次并发回退 V3 后再开启会话。
     expected: 新会话恢复 V2，已绑定 V2 和 V3 的会话保持原版。V2 和 V3 分别装入对应提示词，V3 只写一条回退记录。
-  expected_results: [同基线只有一个事务生成版本和上线事件。, 两次发布及一次回退的版本与会话、资源回执一致。]
-  forbidden_side_effects: [其他智能体、其他租户和正在编辑的草稿发生改变。]
+  - order: 3
+    action: 紧急停用 V3，分别检查已运行、正在启动及已完成的执行。
+    expected: 正在运行的 V3 收到取消标记，已准备但尚未开始的 V3 无法执行，已完成的记录保留。
+  expected_results: [同基线只有一个事务生成版本和上线事件。, 两次发布及一次回退的版本与会话、资源回执一致。, 停用版本的取消及启动拦截均生效。]
+  forbidden_side_effects: [其他智能体、其他租户和正在编辑的草稿发生改变。, 停用 V3 时影响 V2 或改写已完成的执行。]
   acceptance:
   - id: AC-01
     description: 真实并发事务在锁和当前版本约束下发布，重试不产生第二次上线。
@@ -33,6 +36,11 @@ case:
     steps: [2]
     expected_results: [2]
     forbidden_side_effects: [1]
+  - id: AC-03
+    description: Runtime 和发布事务共同阻止已停用版本继续开始业务执行。
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [2]
   execution:
     profiles:
     - name: mock

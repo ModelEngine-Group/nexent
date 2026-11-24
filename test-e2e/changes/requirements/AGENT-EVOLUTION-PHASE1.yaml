@@ -18,6 +18,7 @@ change:
   traditional_ut:
     decision: add
     test_selectors:
+    - test/backend/database/test_agent_execution_release.py
     - test/backend/database/test_evolution_consent.py
     - test/backend/ops/test_evolution_review.py
     - test/backend/services/test_evolution_online_diagnosis.py
@@ -60,6 +61,7 @@ change:
     - test/backend/utils/test_logging_utils.py
     - test/backend/services/test_prepared_public_turn.py
     behaviors:
+    - 紧急停用同事务标记该已发布版本的活跃执行，保留已完成回执。Runtime 进入运行状态时与同一发布记录同步，不能启动已停用的版本。
     - 按冻结的已发布智能体版本核对历史工具移除记录，并与本次候选移除项合并。禁止调用项仍须有完整运行回执；必须调用项缺调用判失败，未知缺项列为缺证。
     - P3 读取并校验两个已发布条款，仅指定段落可替换。接受单个 JSON 代码块，仍强制核对原文、证据和占位符。
     - 公开评测报告按实验记录并受智能体编辑权限约束，只接收来源和聚合分数，不影响业务判分或提名。

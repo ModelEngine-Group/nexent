@@ -199,9 +199,25 @@ def stop_requested(identity: RunIdentity) -> bool:
 
 def mark_running(identity: RunIdentity, resource_versions: dict) -> bool:
     with get_db_session() as session:
+        agent, version = resource_versions.get("agent_id"), resource_versions.get("agent_version_no")
+        if agent and version and session.scalar(text("""
+            SELECT disabled FROM nexent.evolution_release_t
+            WHERE tenant_id=:tenant AND agent_id=:agent AND new_version=:version FOR SHARE
+        """), {"tenant": identity.tenant_id, "agent": agent, "version": version}):
+            return False
+        # Share the release row lock until the running version is recorded. A concurrent stop
+        # either sees this execution or disables the release before this execution can start.
         return bool(session.execute(update(AgentExecution).where(
             *_scope(identity), *_live_owner(), AgentExecution.cancellation_requested.is_(False),
         ).values(status="running", resource_versions=resource_versions)).rowcount)
+
+
+def request_version_stop(session, tenant, agent, version, actor):
+    """Signal the existing Runtime cancellation monitors within the release transaction."""
+    session.execute(update(AgentExecution).where(
+        AgentExecution.tenant_id == tenant, *_active(), AgentExecution.cancellation_requested.is_(False),
+        AgentExecution.resource_versions.contains({"agent_id": agent, "agent_version_no": version}),
+    ).values(cancellation_requested=True, updated_by=actor))
 
 
 def bind_assistant_message(session, identity: RunIdentity, message_id: int) -> None:

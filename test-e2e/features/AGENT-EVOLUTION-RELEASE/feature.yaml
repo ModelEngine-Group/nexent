@@ -16,4 +16,6 @@ feature:
     description: 业务用户的 Skill 建议可经候选对照、独立确认和指定发布人上线或回退。提交者可查询实际状态。
   - rule_id: AGENT-EVOLUTION-RELEASE-RULE-04
     description: 同一基线的并发晋升只切换一次。回退到上一稳定版时，同一发布记录只更新一次，其他范围及草稿不受影响。
+  - rule_id: AGENT-EVOLUTION-RELEASE-RULE-05
+    description: 紧急停用时取消指定版本正在运行的会话，拦截尚未开始的执行，并保留已经完成的执行回执。
   required_test_stages: [D2, D3, D4, D5]
