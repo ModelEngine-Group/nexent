@@ -45,7 +45,9 @@ async def _extract_answer(job, source):
     items = job.selected_items
     extractor = FaMemoryExtractor(
         tenant_id=source.tenant_id, user_id=source.user_id, agent_id=str(job.agent_id),
-        conversation_id=str(source.conversation_id), memory_service=build_memory_service_for_fa_extraction(),
+        conversation_id=str(source.conversation_id), memory_service=build_memory_service_for_fa_extraction(
+            agent_version_no=source.agent_version_no,
+        ),
     )
     if items is None:
         model_id = await _io(
@@ -67,7 +69,10 @@ async def process_memory_job(job):
     try:
         async with asyncio.timeout(240):
             source = await _io("memory-completion-source", queue.read_source, job)
-            if source is not None and await _io("memory-completion-switch", can_write_automatic_memory, source.tenant_id, source.user_id, job.agent_id):
+            if source is not None and await _io(
+                "memory-completion-switch", can_write_automatic_memory,
+                source.tenant_id, source.user_id, job.agent_id, source.agent_version_no,
+            ):
                 if job.job_type == queue.TURN_COMPLETED:
                     from contracts.constants.environment import MEMORY_WRITE_TIMEOUT_SECONDS
                     async with asyncio.timeout(MEMORY_WRITE_TIMEOUT_SECONDS):

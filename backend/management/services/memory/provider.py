@@ -292,15 +292,19 @@ def build_memory_service_for_dreaming() -> MemoryService:
         backend_search=None,
     )
 
-def build_memory_service_for_fa_extraction() -> MemoryService:
+def build_memory_service_for_fa_extraction(*, agent_version_no: int | None = None) -> MemoryService:
     """Return a facade for final-answer memory extraction.
 
     Reuses the same backend store hook as StoreMemoryTool. The extraction
     pipeline writes agent short-term memory with the same policy constraints.
+    Bind queued writes to the Agent version that produced the answer.
     """
+    async def store_extracted_memory(payload):
+        return await _backend_store_hook({**payload, "agent_version_no": agent_version_no})
+
     return MemoryService(
         embedding_model=None,
         embedding_model_info=None,
-        backend_store=_backend_store_hook,
+        backend_store=store_extracted_memory,
         backend_search=None,
     )

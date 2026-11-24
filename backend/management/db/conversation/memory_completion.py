@@ -12,6 +12,7 @@ from contracts.conversation import MessageSource
 from infrastructure.rdb.base import SCHEMA, TableBase
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.agent_admission import ConversationRunAdmission
+from infrastructure.rdb.agent_execution import AgentExecution
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
@@ -57,6 +58,7 @@ class MemorySource:
     message_id: int
     answer: str
     query: str
+    agent_version_no: int
 
 
 def _job_id(run_id: str, job_type: str) -> str:
@@ -125,10 +127,15 @@ def read_source(job: MemoryJob) -> MemorySource | None:
     receipt = ConversationProjectionReceipt
     message = ConversationMessage
     conversation = ConversationRecord
+    execution = AgentExecution
     with get_db_session() as session:
-        row = session.execute(select(receipt.tenant_id, receipt.created_by, message).join(
+        row = session.execute(select(receipt.tenant_id, receipt.created_by, message, execution.resource_versions).join(
             message, message.message_id == receipt.message_id,
-        ).join(conversation, conversation.conversation_id == message.conversation_id).where(
+        ).join(conversation, conversation.conversation_id == message.conversation_id).join(execution, (
+            (execution.run_id == receipt.run_id) & (execution.conversation_id == conversation.conversation_id)
+            & (execution.tenant_id == receipt.tenant_id) & (execution.created_by == receipt.created_by)
+            & (execution.delete_flag == "N") & (execution.resource_versions["agent_id"].as_integer() == job.agent_id)
+        )).where(
             receipt.run_id == job.run_id, receipt.delete_flag == "N",
             message.created_by == receipt.created_by, message.delete_flag == "N",
             message.message_role == "assistant",
@@ -159,7 +166,7 @@ def read_source(job: MemoryJob) -> MemorySource | None:
             return None
         return MemorySource(
             row.tenant_id, row.created_by, assistant.conversation_id, assistant.message_id,
-            assistant.message_content or "", query,
+            assistant.message_content or "", query, row.resource_versions["agent_version_no"],
         )
 
 
