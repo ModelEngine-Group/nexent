@@ -107,7 +107,7 @@ def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_ena
     spec = deployment["spec"]["template"]["spec"]
     container = spec["containers"][0]
     assert container["command"] == [
-        "/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service",
+        "/opt/nexent/scripts/start-ops.sh", "python", "-m", "backend.http.ops_service",
     ]
     mounts = {mount["name"]: mount for mount in container["volumeMounts"]}
     volumes = {volume["name"]: volume for volume in spec["volumes"]}
@@ -158,7 +158,7 @@ def test_docker_ops_uses_monitoring_configuration_and_same_archive_as_runtime():
         "services"
     ]["nexent-ops"]
     assert ops["entrypoint"] == [
-        "/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service",
+        "/opt/nexent/scripts/start-ops.sh", "python", "-m", "backend.http.ops_service",
     ]
     assert ops["env_file"] == ["../../env/.env", "../../env/monitoring.env"]
     archive_mount = "${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory"

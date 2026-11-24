@@ -1,5 +1,9 @@
 # Quick Setup
 
+::: warning Legacy Setup Flow: Consolidation Pending
+This page remains available at its existing URL but is no longer a separate guide module. The homepage Quick Setup shortcut currently opens agent configuration; see [Agent Configuration](./agent-development). The former three-step wizard and screenshots below need review. Knowledge bases and memory are optional, depending on the task.
+:::
+
 Quick Setup provides a guided path that walks you through the recommended setup order. Follow the three steps—model management, knowledge bases, and agent development—to get the platform ready fast.
 
 ## 📋 Configuration Flow
