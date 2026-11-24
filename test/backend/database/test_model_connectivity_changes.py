@@ -61,18 +61,26 @@ def test_cs01_metadata_and_context_preserve_status(database, openai_profile):
     assert not changed(db, openai_profile, ResolvedModelProfile.model_validate(data))
 
 
-@pytest.mark.parametrize("parameter,value", [("temperature", 0.3), ("top_p", 0.8),
-    ("enable_thinking", True), ("max_output_tokens", 1024)])
-def test_cs02_sent_parameters_reset(database, openai_profile, parameter, value):
+@pytest.mark.parametrize("parameter,value,reset", [("temperature", 0.3, True), ("top_p", 0.8, True),
+    ("enable_thinking", True, True), ("max_output_tokens", 1024, False),
+    ("max_tokens", 1024, False), ("max_completion_tokens", 1024, False)])
+def test_cs02_sent_parameters_reset(database, openai_profile, parameter, value, reset):
     db, _, _ = database
     data = openai_profile.model_dump()
+    if not reset:
+        # Historical profiles have one output-length binding; avoid duplicate /max_tokens rules.
+        limits = {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+        data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] not in limits]
+        data["parameter_values"] = {k: v for k, v in data["parameter_values"].items() if k not in limits}
     data["parameter_values"][parameter] = value
     if not any(r["key"] == parameter for r in data["parameter_rules"]):
         data["parameter_rules"].append({"key": parameter, "schema": {}, "visible": True,
             "editable": True, "required": False, "allowed_scopes": ["outlet"], "ui_group": "common",
             "owner": "provider", "source": {}, "api_binding": {"path": "/" + parameter,
             "transform_ref": "identity_v1", "transform_version": 1}})
-    assert changed(db, openai_profile, ResolvedModelProfile.model_validate(data))
+    proposed = ResolvedModelProfile.model_validate(data)
+    assert proposed.parameter_values[parameter] == value
+    assert changed(db, openai_profile, proposed) is reset
 
 
 def test_cs01_unsupported_sampling_change_is_not_a_wire_change(database, openai_profile):

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-MEMORY-IO-20261117
+  change_type: bugfix
+  bug_id: BUG-AGENT-MEMORY-IO
+  title: Bound optional Agent memory I/O
+  description: Bound memory queries and automatic writes independently of the Agent model loop.
+  observed_behavior: Slow or malformed embedding responses can delay replies, and optional memory failures may interrupt Agent preparation.
+  expected_behavior: Memory failures degrade independently, keeping healthy context and allowing the Agent stream to finish.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Unit tests now exercise cancellation, invalid embeddings, cooldown recovery and independent context paths.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-119, F-120, F-123, F-178]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-051, AGT-071]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Recover without retrying within the shared memory deadline.
+    - Keep healthy memory when another optional source or write fails.
+    - Share a five-minute cooldown and permit one recovery probe.
+    - Preserve signed AgentOS model and store boundaries, durable unindexed receipts, and idempotent writes.
+    - Acknowledge automatic indexing without waiting for refresh; preserve committed receipts on index timeout.
+    - Keep shared Redis health I/O off the event loop and exclude caller budget expiry from model cooldown.
+    - Prepare parent memory before waiting for children and evaluate each Agent switch independently.
+    test_selectors:
+    - test/backend/app/test_agentos_memory_store.py
+    - test/backend/services/test_agentos_model.py
+    - test/backend/services/test_memory_stream_no_presearch.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/services/test_memory_record_unchanged.py
+    - test/backend/services/test_memory_backend_adapter.py
+    - test/backend/services/test_memory_external_provider_service.py
+    - test/sdk/core/gateway/modality/test_embedding_adapter.py
+    - test/backend/services/test_memory_index_service.py
+    - test/sdk/vector_database/test_elasticsearch_core.py
+    reason: Deterministic unit cases protect the error and write boundaries, while real Agent acceptance measures first stream and verifies the context.
+  notes: Split from PR 4349. The existing external provider scenario covers timeout and recovery; a controlled embedding endpoint provides branch-specific live evidence.

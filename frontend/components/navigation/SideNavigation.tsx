@@ -44,6 +44,7 @@ import { NotificationBell } from "@/components/navigation/NotificationBell";
 import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
 import { useGlobalConfigStore } from "@/stores/global";
 import { AUTH_EVENTS } from "@/const/auth";
+import { OPS_PAGES } from "@/const/navigationPages";
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -55,6 +56,7 @@ import { publicAsset } from "@/lib/publicAsset";
 import { getHomeLogo, getHomeTitle } from "@/lib/projectBranding";
 
 interface RouteConfig {
+  pageId?: string;
   path: string;
   Icon: ComponentType<{ className?: string }>;
   labelKey: string;
@@ -66,14 +68,14 @@ interface RouteConfig {
 
 const ROUTE_CONFIG: RouteConfig[] = [
   {
-    path: "/ops/dashboard",
+    ...OPS_PAGES.dashboard,
     Icon: LineChart,
     labelKey: "ops.dashboard",
     order: 12.5,
     parentKey: null,
   },
   {
-    path: "/ops/configuration",
+    ...OPS_PAGES.configuration,
     Icon: Settings,
     labelKey: "ops.configuration",
     order: 12.6,
