@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
@@ -37,6 +39,15 @@ journey("PW-EVAL-SET-01", async (context) => {
     }
   });
   let setRow = page.getByRole("row").filter({ hasText: name });
+  // The trash trigger keeps its "删除" Tooltip open after the Popconfirm
+  // appears, and that floating layer physically covers the "确定" button
+  // until the pointer leaves the trigger. Park the pointer and wait for the
+  // Tooltip to hide before confirming, like a real user would.
+  const confirmDelete = async () => {
+    await page.mouse.move(0, 0);
+    await expect(page.locator(".ant-tooltip").filter({ hasText: /^删\s*除$/ })).toBeHidden();
+    await page.getByRole("button", { name: /^(?:确\s*定|OK)$/ }).click();
+  };
   await executeFixedScenario(context, {
     preconditions: [
       async () => { expect(existsSync(file)).toBe(true); return `fixed Evaluation Excel exists: ${file}`; },
@@ -52,7 +63,7 @@ journey("PW-EVAL-SET-01", async (context) => {
       async () => { setRow = page.getByRole("row").filter({ hasText: name }); await setRow.locator("button:has(svg.lucide-eye)").click(); const detail = page.getByRole("dialog").filter({ hasText: name }); await expect(detail.getByRole("columnheader", { name: /^问题(?:\s|$)/ })).toBeVisible(); await expect(detail.getByRole("columnheader", { name: /^答案(?:\s|$)/ })).toBeVisible(); await expect(detail.getByText("NX-EVAL-92831", { exact: true })).toBeVisible(); await page.keyboard.press("Escape"); return "detail exposes the current query/answer mapping and imported marker"; },
       async () => { await page.getByRole("tab", { name: "标注标签", exact: true }).click(); await page.getByRole("button", { name: "创建标注标签", exact: true }).click(); const dialog = page.getByRole("dialog", { name: "创建标注标签" }); await dialog.getByPlaceholder("1-50 字符").fill(label); await dialog.getByPlaceholder(/^正确(?:\\n|\n)错误(?:\\n|\n)部分正确$/).fill("通过\n失败"); const created = page.waitForResponse((r) => r.request().method() === "POST" && /evaluation-annotations\/schemas/.test(r.url())); const [response] = await Promise.all([created, dialog.getByRole("button", { name: /^(?:确\s*定|OK)$/ }).click()]); if (!response.ok()) throw new Error("annotation label creation failed"); const payload = await response.json(); labelId = Number((payload.data || payload).schema_id); expect(labelId).toBeGreaterThan(0); registerReadyAsset("evaluation", "d4_ui_label_id", String(labelId), "PW-EVAL-SET-01", { service: "config", identity: "tenant_a_admin", method: "DELETE", path: `/evaluation-annotations/schemas/${labelId}`, allowed_statuses: [200, 404] }); await expect(dialog).toBeHidden(); return `created annotation label ${label}`; },
       async () => { await page.reload({ waitUntil: "domcontentloaded" }); await page.getByRole("tab", { name: "标注标签", exact: true }).click(); await expect(page.getByRole("row").filter({ hasText: label })).toBeVisible(); await page.getByRole("tab", { name: "评测集", exact: true }).click(); await expect(page.getByRole("row").filter({ hasText: name })).toBeVisible(); return "Evaluation Set and label both survived a full refresh"; },
-      async () => { await page.getByRole("tab", { name: "标注标签", exact: true }).click(); const labelRow = page.getByRole("row").filter({ hasText: label }); await labelRow.locator("button:has(svg.lucide-trash-2, svg.lucide-trash2)").click(); await page.getByRole("button", { name: /^(?:确\s*定|OK)$/ }).click(); await expect(labelRow).toHaveCount(0); await page.getByRole("tab", { name: "评测集", exact: true }).click(); const row = page.getByRole("row").filter({ hasText: name }); await row.locator("button:has(svg.lucide-trash-2, svg.lucide-trash2)").click(); await page.getByRole("button", { name: /^(?:确\s*定|OK)$/ }).click(); await expect(row).toHaveCount(0); return "deleted the run-scoped label and Evaluation Set from their respective tabs"; },
+      async () => { await page.getByRole("tab", { name: "标注标签", exact: true }).click(); const labelRow = page.getByRole("row").filter({ hasText: label }); await labelRow.locator("button:has(svg.lucide-trash-2, svg.lucide-trash2)").click(); await confirmDelete(); await expect(labelRow).toHaveCount(0); await page.getByRole("tab", { name: "评测集", exact: true }).click(); const row = page.getByRole("row").filter({ hasText: name }); await row.locator("button:has(svg.lucide-trash-2, svg.lucide-trash2)").click(); await confirmDelete(); await expect(row).toHaveCount(0); return "deleted the run-scoped label and Evaluation Set from their respective tabs"; },
     ],
     assertions: [
       async () => "Evaluation Set was created, imported and read through real UI",

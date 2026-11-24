@@ -11,8 +11,8 @@ from contracts.evaluation import EvalRunStatus
 from management.db.evaluation.runs import claim_agent_evaluation_run, list_dispatchable_pending_runs
 from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation
+from management.services.evaluation import dispatch as evaluation_dispatch
 from management.services.evaluation import maintenance as evaluation_maintenance
-from management.services.agent import runtime_client as runtime_proxy_service
 
 
 def _insert_run(session, *, tenant_id, created_by, evaluation_set_id, status, delete_flag, create_time):
@@ -91,7 +91,7 @@ def test_persistent_pending_redispatch_and_idempotent_claim(monkeypatch, caplog)
             calls.append((agent_evaluation_id, user_id, tenant_id))
             return {'accepted': True}
 
-        monkeypatch.setattr(runtime_proxy_service, 'dispatch_agent_evaluation_run', recording_dispatch)
+        monkeypatch.setattr(evaluation_dispatch, 'dispatch_agent_evaluation_run', recording_dispatch)
         with caplog.at_level(logging.WARNING):
             evaluation_maintenance._dispatch_pending_runs(runs)
 
@@ -115,7 +115,7 @@ def test_persistent_pending_redispatch_and_idempotent_claim(monkeypatch, caplog)
         def raising_dispatch(agent_evaluation_id, user_id, tenant_id):
             raise RuntimeError('runtime unavailable')
 
-        monkeypatch.setattr(runtime_proxy_service, 'dispatch_agent_evaluation_run', raising_dispatch)
+        monkeypatch.setattr(evaluation_dispatch, 'dispatch_agent_evaluation_run', raising_dispatch)
         retryable = [r for r in runs if r['agent_evaluation_id'] in (ids['good_a'], ids['good_b'])]
         evaluation_maintenance._dispatch_pending_runs(retryable)
 

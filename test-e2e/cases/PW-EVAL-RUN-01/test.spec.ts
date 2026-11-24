@@ -24,6 +24,7 @@ journey("PW-EVAL-RUN-01", async (context) => {
   let terminal = "";
   let trialAnswer = "";
   let runScore: number | undefined;
+  let agentNameShown = false;
   const drawer = page.getByRole("dialog", { name: "创建评测", exact: true });
   const card = (title: RegExp) => drawer.locator(".ant-card").filter({
     has: page.locator(".ant-card-head-title").filter({ hasText: title }),
@@ -180,6 +181,7 @@ journey("PW-EVAL-RUN-01", async (context) => {
             expect.objectContaining({ agent_evaluation_id: runId, agent_name: agent })
           );
           await expect(ownedRow().getByRole("cell", { name: agent, exact: true })).toBeVisible();
+          agentNameShown = true;
         } finally {
           await page.unroute(publishedList, omitPublishedAgents);
         }
@@ -202,6 +204,7 @@ journey("PW-EVAL-RUN-01", async (context) => {
       async () => { expect(trialAnswer).toContain("NX-EVAL-92831"); expect(terminal).toBe("COMPLETED"); return "trial and formal run used real runtime calls"; },
       async () => { expect(runScore).toBe(1); await expect(page).toHaveURL(new RegExp(`/evaluation/${runId}$`)); return "completed detail and expected deterministic score are consistent"; },
       async () => "Evaluator catalog used read-only; no invented edit action executed",
+      async () => { expect(agentNameShown).toBe(true); return "the owned run still showed its agent name after refresh while published agent options were absent"; },
     ],
   });
 });
