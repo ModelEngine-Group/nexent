@@ -20,7 +20,7 @@ case:
   steps:
   - order: 1
     action: Request model metadata and invoke the model through AgentOS.
-    expected: Runtime returns metadata with revision and no provider secret. The provider receives the tenant model and returns the answer.
+    expected: Runtime returns metadata with revision and no provider secret. The provider receives the tenant model and sampling options, omits all output-length limits including legacy options, and returns the answer.
   - order: 2
     action: Invoke with a foreign tenant, stale revision or incompatible operation.
     expected: Runtime rejects each invalid request before it reaches the provider.
