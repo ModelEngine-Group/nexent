@@ -1919,7 +1919,7 @@ class FusionSearchRequest(BaseModel):
 
 
 class RemoveFilesBody(BaseModel):
-    file_uuids: List[uuid.UUID] = Field(..., min_length=1)
+    file_uuids: List[str] = Field(..., min_length=1)
 
 
 class CountFilesBody(BaseModel):
@@ -3012,7 +3012,11 @@ def remove_documents(
     for raw_file_uuid in body.file_uuids:
         file_uuid = str(raw_file_uuid)
         matched = next(
-            (document for document in documents if document.get("file_uuid") == file_uuid),
+            (
+                document
+                for document in documents
+                if _uuid_hex(document.get("file_uuid")) == _uuid_hex(file_uuid)
+            ),
             None,
         )
         already_deleted = (
