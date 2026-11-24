@@ -143,7 +143,7 @@ def test_disk_quantiles_cancel_removes_owned_files():
 
 
 def test_projection_schema_only_has_approved_business_fields():
-    from management.db.trajectory.models import (
+    from infrastructure.rdb.trajectory.models import (
         TrajectoryExecution,
         TrajectoryStatistics,
     )

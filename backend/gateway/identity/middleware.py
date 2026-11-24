@@ -4,8 +4,8 @@
 from starlette.responses import JSONResponse
 
 from contracts.agentos import MANAGEMENT_OPERATION_PATHS, PRINCIPAL_KEY
-from gateway.security.policy import canonical_path
-from gateway.downstream.identity import (
+from gateway.identity.policy import canonical_path
+from gateway.identity.downstream import (
     IDENTITY_HEADER, LOOKUP_PATH, IdentityError, enabled, identity_context, signing_key, verify_identity,
 )
 
@@ -43,7 +43,7 @@ class GatewayIdentityMiddleware:
         try:
             if (self.audience == "runtime" and self.internal_runtime_request is not None
                     and self.internal_runtime_request(method, path)):
-                from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
+                from gateway.identity.internal_tokens import verify_internal_runtime_jwt
 
                 user_id, tenant_id = verify_internal_runtime_jwt(headers.get("authorization"))
                 identity = {"user_id": user_id, "tenant_id": tenant_id, "kind": "internal"}

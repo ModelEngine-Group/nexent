@@ -264,7 +264,7 @@ async def test_replay_rejects_missing_or_discontinuous_snapshot_before_streaming
     ([("2-0", {"kind": "chunk", "data": "data: skipped\n\n"})], "AGENTOS_CURSOR_UNAVAILABLE"),
     (ConnectionError("unavailable"), "AGENTOS_EVENT_STORE_UNAVAILABLE"),
 ])
-async def test_resume_reports_errors_after_keepalive_as_sse(journal, follow, code):
+async def test_resume_reports_errors_after_an_idle_poll_as_sse(journal, follow, code):
     start = ("0-1", {"kind": "start"})
     journal.replay.return_value = ([start], [], [start])
     journal.wait.side_effect = [[], follow]
@@ -272,7 +272,6 @@ async def test_resume_reports_errors_after_keepalive_as_sse(journal, follow, cod
     response = await resume.resume_run(AgentResume(conversation_id=42, run_id=RUN_ID), ACTOR)
 
     assert [chunk async for chunk in response.body_iterator] == [
-        ": keep-alive\n\n",
         f'event: agentos_error\ndata: {{"code": "{code}"}}\n\n',
     ]
     assert [call.args for call in journal.wait.call_args_list] == [("0-1",), ("0-1",)]
@@ -298,7 +297,7 @@ async def test_resume_replays_after_cursor_then_follows(journal):
         [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
         [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
     )
-    journal.wait.return_value = [("3-0", {"kind": "terminal", "status": "completed"})]
+    journal.wait.side_effect = [[], [], [("3-0", {"kind": "terminal", "status": "completed"})]]
     result = await resume.resume_run(
         AgentResume(conversation_id=42, run_id=RUN_ID, after_event_id=f"{RUN_ID}:1"), ACTOR,
     )
@@ -307,7 +306,7 @@ async def test_resume_replays_after_cursor_then_follows(journal):
         f'id: {RUN_ID}:3\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n',
     ]
     journal.replay.assert_called_once_with("1-0")
-    journal.wait.assert_called_once_with("2-0")
+    assert [call.args for call in journal.wait.call_args_list] == [("2-0",)] * 3
     resume.conversation_belongs_to.assert_called_once_with(42, user_id="actor", tenant_id="tenant")
 
 

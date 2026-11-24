@@ -89,7 +89,7 @@ def create_app(
         allow_headers=["*"],
     )
     if gateway_identity_audience:
-        from gateway.downstream.middleware import GatewayIdentityMiddleware
+        from gateway.identity.middleware import GatewayIdentityMiddleware
 
         app.add_middleware(
             GatewayIdentityMiddleware,

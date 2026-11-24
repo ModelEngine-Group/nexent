@@ -28,7 +28,7 @@ import { publicAsset } from "@/lib/publicAsset";
 import { getHomeLogo } from "@/lib/projectBranding";
 import logger from "@/lib/logger";
 
-import { PlatformQuotaPanel } from "./PlatformQuotaPanel";
+import { PlatformQuotaPanel } from "@/components/quota/PlatformQuotaPanel";
 
 interface ProjectConfigTabProps {
   showPlatformQuota?: boolean;

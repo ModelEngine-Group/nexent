@@ -36,6 +36,7 @@ from nexent.core.concurrency import (
 from runtime.api.sandbox import router as sandbox_router
 from runtime.identity import uses_distributed_runtime
 from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
+from runtime.trajectory import configure_runtime_trajectory
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
@@ -71,8 +72,6 @@ async def runtime_lifespan(_app):
             ),
             fn,
         )
-
-    from infrastructure.trace.bootstrap import local_trajectory_processor
 
     try:
         configuration_runtime = await start_system_configuration(run_configuration_io)
@@ -150,6 +149,8 @@ async def runtime_lifespan(_app):
                         finally:
                             clear_default_thread_manager(runtime_thread_manager)
 
+
+local_trajectory_processor = configure_runtime_trajectory()
 
 app = create_app(
     title="Nexent Runtime API",

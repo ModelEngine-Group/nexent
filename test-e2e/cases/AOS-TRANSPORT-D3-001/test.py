@@ -23,8 +23,8 @@ from contracts.agentos import (
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
-from gateway.downstream.middleware import GatewayIdentityMiddleware
-from gateway.security.context import trusted_identity
+from gateway.identity.middleware import GatewayIdentityMiddleware
+from gateway.identity.context import trusted_identity
 from infrastructure import agentos_identity
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
@@ -157,7 +157,9 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
             metadata_patches, northbound=True, metadata={"project": "replacement"},
         )
     with monkeypatch.context() as workbench_patches:
-        await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True, use_root_skill=True)
+        await _assert_public_prepared_turn_over_signed_http(
+            workbench_patches, use_workbench=True, use_root_skill=True, requested_model_id=23,
+        )
     with monkeypatch.context() as native_metadata_patches:
         await _assert_public_prepared_turn_over_signed_http(
             native_metadata_patches, metadata={}, check_cursorless_resume=True,
@@ -1984,7 +1986,7 @@ def _serve_workbench_aidp_images():
 
 async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, provider_url, provider_calls):
     from contracts.agentos import EvaluationSkillTool, ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
-    from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+    from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
     from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
     from infrastructure.local_tool_execution import build_local_tool
@@ -2230,7 +2232,7 @@ async def test_raw_new_conversation_over_signed_agentos(monkeypatch, prior_users
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
     use_knowledge_scope=False, clarification=False, use_memory=False, use_root_skill=False,
-    check_cursorless_resume=False, raw_prior_users=None,
+    check_cursorless_resume=False, raw_prior_users=None, requested_model_id=None,
 ):
     from contracts.agentos import CompatibilityConversationRun
     from contracts.agent import WorkbenchSessionConfig
@@ -2328,7 +2330,7 @@ async def _assert_public_prepared_turn_over_signed_http(
                     "index_names": ["kb-one"], "document_paths": ["report.txt"],
                 }
             assert turn["automation"] == {
-                "agent_id": 7, "agent_version_no": 2, "model_id": 11 if use_workbench else None,
+                "agent_id": 7, "agent_version_no": 2, "model_id": requested_model_id,
                 "tool_params": automation_params,
                 "has_attachments": False,
             }
@@ -2403,6 +2405,12 @@ async def _assert_public_prepared_turn_over_signed_http(
                 root_skills=(SimpleNamespace(tool_ids=()),) if use_root_skill else (), root=SimpleNamespace(identity=identity),
             ),
         ))
+    if requested_model_id is not None:
+        def lookup_model(model_id, tenant_id):
+            assert (model_id, tenant_id) == (requested_model_id, actor.tenant_id)
+            return {"model_type": "llm"}
+
+        monkeypatch.setattr("management.services.model.run_controls.get_model_by_model_id", lookup_model)
     if use_knowledge_scope:
         from management.services.knowledge_base import mount, scope
 
@@ -2420,6 +2428,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        assert request.model_id == requested_model_id
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         if raw_new:
@@ -2501,6 +2510,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                 "query": "test", "entrypoint": "workbench", "workbench": config.model_dump(mode="json"),
                 "expected_workbench_config_version": 3,
             }
+        if requested_model_id is not None:
+            request["model_id"] = requested_model_id
         if metadata is not None:
             request.update(metadata=metadata, expected_metadata_version=metadata_version - 1)
         if use_knowledge_scope:

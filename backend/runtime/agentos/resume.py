@@ -158,8 +158,6 @@ async def resume_run(payload: AgentResume, actor):
             if pending is None:
                 yield _stream_error("AGENTOS_CURSOR_UNAVAILABLE")
                 return
-            if not pending:
-                yield ": keep-alive\n\n"
 
     tail_id, tail_fields = tail[0]
     # Derive the boundary from the same Redis snapshot that supplied the initial replay.

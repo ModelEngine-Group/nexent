@@ -4,7 +4,7 @@
 from starlette.responses import JSONResponse
 
 from contracts.agentos import BODY_KEY, MAX_REQUEST_BYTES, NAMESPACE, OPERATIONS_BY_PATH, PRINCIPAL_KEY
-from gateway.security.context import identity_context
+from gateway.identity.context import identity_context
 from infrastructure.agentos_identity import AgentOSIdentityError, read_bearer_token, verify_call
 
 

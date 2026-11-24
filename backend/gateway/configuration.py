@@ -57,7 +57,7 @@ class GatewaySettings:
         return self.deployment_version == "speed"
 
     def signing_key(self):
-        from gateway.security.identity import derive_signing_key
+        from gateway.identity.protocol import derive_signing_key
 
         return derive_signing_key(self.jwt_secret, self.signing_secret)
 
