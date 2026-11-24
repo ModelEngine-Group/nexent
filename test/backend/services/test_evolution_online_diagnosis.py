@@ -11,7 +11,7 @@ import pytest
 from management.services.evaluation import online_diagnosis as diagnosis
 
 
-@pytest.mark.parametrize("evidence", [[], ["other-turn"], ["answer", "answer"]])
+@pytest.mark.parametrize("evidence", [[], ["other-turn"], ["answer", "answer"], {"answer": "actual output"}])
 def test_reject_missing_unknown_or_repeated_model_evidence(evidence):
     result = json.dumps({"finding": "tool_arguments", "evidence": evidence, "missing": []})
     with pytest.raises(ValueError):
@@ -70,6 +70,9 @@ async def test_only_ambiguous_authorized_turns_use_the_diagnosis_model(mocker, s
     if source == "model":
         model.assert_called_once_with("t")
         assert model_call.await_args.kwargs["diagnosis_attempt"] == 27
+        prompt = json.loads(model_call.await_args.kwargs["user_prompt"])
+        assert prompt["allowed_evidence_keys"] == list(prompt["evidence"]) == ["request", "answer", "correction"]
+        assert all("ref" not in item for item in prompt["evidence"].values())
         assert output["direction"] == "prompt" and output["evidence"] == ["message:10"]
         assert "required value" not in json.dumps(output)
     else:

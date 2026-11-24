@@ -103,7 +103,9 @@ async def test_online_diagnosis(runtime, monkeypatch):
                 first = report(bad)
                 assert first["status"] == "needs_review" and first["direction"] == "prompt", first
                 assert first["evidence"] == ["message:10", "message:11"] and first["model_id"] == 11
-                assert first["template_version"] == "online-diagnosis-v1"
+                assert first["template_version"] == "online-diagnosis-v2"
+                sent = json.loads(calls[0]["messages"][-1]["content"])
+                assert sent["allowed_evidence_keys"] == list(sent["evidence"])
                 assert first["usage"]["reported_input"] == 6 and first["usage"]["reported_micros"] == 10
                 assert "Private fixture" not in json.dumps(first)
                 assert len(calls) == 1 and calls[0]["max_tokens"] == 20
