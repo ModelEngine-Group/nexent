@@ -63,16 +63,14 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
   onExportMetadata,
 }) => {
   const { t } = useTranslation();
-  const text = typeof chunk.chunk_text === "string" ? chunk.chunk_text : "";
+  const text = chunk.chunk_text;
   const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [textOverflowing, setTextOverflowing] = useState(false);
   const editable = isAidpChunkEditable(chunk);
   const chunkType = normalizeAidpChunkType(chunk.chunk_type);
   // Ontology auto-tags arrive only on newer AIDP builds; absent means empty.
-  const tags = Array.isArray(chunk.tag)
-    ? chunk.tag.filter((tag) => typeof tag === "string" && tag.trim())
-    : [];
+  const tags = chunk.tag ?? [];
   // Only the user-defined metadata is surfaced; AIDP's system metadata
   // (chapter/page_index/parent_chunk...) stays out of the page.
   const metadataEntries = Object.entries(chunk.metadata_json ?? {}).filter(

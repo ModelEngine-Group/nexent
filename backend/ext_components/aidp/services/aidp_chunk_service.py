@@ -19,6 +19,7 @@ from nexent.core.ext_components.aidp.retrieval_config import (
     build_payload,
     resolve_config,
 )
+
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_client
@@ -33,7 +34,6 @@ from ext_components.aidp.services.aidp_client import (
     _request_aidp_json,
     _validate_params,
 )
-from ext_components.aidp.services.aidp_service import _extract_list_payload
 
 
 logger = logging.getLogger("aidp_chunk_service")
@@ -57,45 +57,11 @@ def _normalize_chunk_id(value: Any) -> Any:
     return value
 
 
-def _file_name_stem(name: str) -> str:
-    """Return a file name without its last extension.
-
-    AIDP keeps two name shapes for the same file: the KnowledgeFiles list
-    reports ``file_name`` without the extension while retrieval ``title`` and
-    ``original_file_name`` keep it (verified 2026-11-18). Comparing stems lets
-    the defensive title check agree with the ``contains`` filter for both
-    shapes.
-    """
-    base = name.strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    stem, dot, _ = base.rpartition(".")
-    return stem if dot else base
-
-
 def _normalize_aidp_chunk(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize one AIDP chunk item without inventing missing fields.
-
-    Only types are corrected: the text, type, name/path and metadata are passed
-    through as reported so the page can show an empty state instead of made-up
-    content for anything AIDP omitted.
-    """
+    """Normalize the chunk id type the frontend addresses chunks with."""
     out = dict(raw)
     if "chunk_id" in out:
-        out["chunk_id"] = _normalize_chunk_id(out.get("chunk_id"))
-
-    page_ids = out.get("page_ids")
-    if isinstance(page_ids, list):
-        normalized_pages = [_normalize_chunk_id(page) for page in page_ids]
-        out["page_ids"] = [
-            page
-            for page in normalized_pages
-            if isinstance(page, int) and not isinstance(page, bool)
-        ]
-    elif page_ids is not None:
-        out["page_ids"] = []
-
-    metadata = out.get("metadata")
-    if metadata is not None and not isinstance(metadata, dict):
-        out["metadata"] = {}
+        out["chunk_id"] = _normalize_chunk_id(out["chunk_id"])
     return out
 
 
@@ -120,20 +86,8 @@ def list_aidp_chunks_impl(
         context="list-chunks",
         params={"file_uuid": file_uuid, "page": page, "page_size": page_size},
     )
-    if not isinstance(result, dict):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "Unexpected AIDP chunk list response format",
-        )
-    items = _extract_list_payload(result)
-    if items is None:
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "AIDP chunk list response does not contain a chunk list",
-        )
     result["value"] = [
-        _normalize_aidp_chunk(item) if isinstance(item, dict) else item
-        for item in items
+        _normalize_aidp_chunk(item) for item in result["value"]
     ]
     return result
 
@@ -152,11 +106,6 @@ def get_aidp_chunk_impl(
         f"{_get_chunks_path(kds_id)}/{chunk_id}",
         context="get-chunk",
     )
-    if not isinstance(result, dict):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "Unexpected AIDP chunk detail response format",
-        )
     return _normalize_aidp_chunk(result)
 
 
@@ -184,10 +133,7 @@ def create_aidp_chunk_impl(
         retry=False,
         json_body={"file_uuid": file_uuid, "chunk_text": chunk_text},
     )
-    if not isinstance(result, dict):
-        return {}
-    if "chunk_id" in result:
-        result["chunk_id"] = _normalize_chunk_id(result["chunk_id"])
+    result["chunk_id"] = _normalize_chunk_id(result["chunk_id"])
     return result
 
 
@@ -214,8 +160,6 @@ def update_aidp_chunk_impl(
         retry=False,
         json_body={"chunk_text": chunk_text},
     )
-    if not isinstance(result, dict):
-        return {}
     return _normalize_aidp_chunk(result)
 
 
@@ -241,7 +185,7 @@ def remove_aidp_chunks_impl(
         retry=False,
         json_body={"chunk_ids": list(chunk_ids)},
     )
-    return result if isinstance(result, dict) else {}
+    return result
 
 
 def get_aidp_image_impl(
@@ -327,10 +271,7 @@ def search_aidp_chunks_impl(
             {
                 "name": "original_file_name",
                 # Real AIDP (verified 2026-11-18) rejects "=" on string fields
-                # with 400 code 1002; allowed operators are contains / is /
-                # in / start with. "contains" matches the file-name filter
-                # semantics here because the defensive title check below
-                # pins the hit to the requested file.
+                # with 400 code 1002; "contains" is the allowed file-name filter.
                 "comparison_operator": "contains",
                 "value": normalized_file_name,
             }
@@ -345,65 +286,29 @@ def search_aidp_chunks_impl(
         context="chunk search",
         json_body=body,
     )
-    records = result.get("result") if isinstance(result, dict) else None
-    if not isinstance(records, list):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "Unexpected AIDP chunk search response format",
-        )
+    records = result["result"]
 
     chunks: List[Dict[str, Any]] = []
-    wanted_stem = _file_name_stem(normalized_file_name)
     for hit in records:
-        if not isinstance(hit, dict):
-            continue
-        title = hit.get("title")
-        if isinstance(title, str) and title.strip():
-            # Defensive check: the upstream filter is authoritative, but do not
-            # surface a different file if it is ignored or unavailable. Compare
-            # name stems because AIDP titles carry the extension while the
-            # Nexent file list drops it.
-            if _file_name_stem(title) != wanted_stem:
-                continue
-        chunk_id = _normalize_chunk_id(hit.get("id"))
-        if not isinstance(chunk_id, int) or chunk_id < 0:
-            continue
-        raw_pages = hit.get("pages", hit.get("page_ids"))
-        pages = []
-        if isinstance(raw_pages, list):
-            normalized_pages = [_normalize_chunk_id(page) for page in raw_pages]
-            pages = [
-                page
-                for page in normalized_pages
-                if isinstance(page, int) and not isinstance(page, bool)
-            ]
-        metadata = hit.get("metadata")
-        raw_tags = hit.get("tag")
-        # Ontology auto-tagging only exists on newer AIDP builds; pass the
-        # list through when present and keep it absent otherwise.
-        tags = [
-            str(tag).strip()
-            for tag in raw_tags
-            if isinstance(tag, str) and tag.strip()
-        ] if isinstance(raw_tags, list) else []
-        chunk = {
-            "chunk_id": chunk_id,
-            "chunk_text": str(hit.get("text") or hit.get("chunk_text") or ""),
-            "chunk_type": str(hit.get("chunk_type") or "TEXT").upper(),
-            "file_name": str(title or normalized_file_name),
-            "file_url": str(hit.get("file_url") or ""),
-            "page_ids": pages,
-            "metadata": {
-                key: value
-                for key, value in (metadata if isinstance(metadata, dict) else {}).items()
-                if not key.startswith("_")
-            },
-            "metadata_json": hit.get("metadata_json") or {},
-            "score": hit.get("score"),
-        }
-        if tags:
-            chunk["tag"] = tags
-        chunks.append(chunk)
+        chunks.append(
+            {
+                # The request is already scoped to the current KB and file by
+                # ``kds_list`` and ``metadata_condition``; map the fixed
+                # FusionSearch fields without re-filtering the response.
+                "chunk_id": hit["id"],
+                "chunk_text": hit["text"],
+                "chunk_type": hit["chunk_type"].upper(),
+                "file_name": hit["title"],
+                "file_url": hit["file_url"],
+                "page_ids": hit["pages"],
+                "metadata": {
+                    key: value
+                    for key, value in hit["metadata"].items()
+                    if not key.startswith("_")
+                },
+                "score": hit["score"],
+            }
+        )
 
     return {
         "value": chunks,
@@ -477,21 +382,7 @@ def sync_chunk_tags_impl(
         json_body={"kb_ids": list(kb_ids)},
         retry=False,
     )
-    if not isinstance(payload, dict):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "Unexpected AIDP tag sync response format",
-        )
-    code = payload.get("code")
-    if code not in (None, 0, "0", "Success"):
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP tag sync failed: {payload.get('message') or code}",
-        )
-    data = payload.get("data")
-    result: Dict[str, Any] = {
-        "task_id": data.get("task_id") if isinstance(data, dict) else None,
-    }
+    result: Dict[str, Any] = {"task_id": payload["data"]["task_id"]}
     if payload.get("message"):
         result["message"] = payload["message"]
     return result

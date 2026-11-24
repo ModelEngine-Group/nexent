@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
 from ext_components.aidp.services.aidp_client import (
     _request_aidp_json,
     _resolve_tenant_id,
@@ -34,25 +32,6 @@ def _get_file_summary_path(kds_id: str, file_uuid: str, tenant_id: str | None = 
     )
 
 
-def _normalize_summary_result(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize the fields AIDP documents for one file summary.
-
-    The contract spells the payload as ``result.summary_text``,
-    ``result.summary_status`` and ``result.summary_model``; status is compared
-    case-insensitively by the page, so it is lower-cased here. Unknown extra
-    fields are preserved rather than dropped.
-    """
-    out = dict(raw)
-    status = out.get("summary_status")
-    if isinstance(status, str):
-        out["summary_status"] = status.strip().lower()
-    for key in ("summary_text", "summary_model"):
-        value = out.get(key)
-        if value is not None and not isinstance(value, str):
-            out[key] = str(value)
-    return out
-
-
 def get_aidp_file_summary_impl(
     server_url: str,
     api_key: str,
@@ -61,11 +40,9 @@ def get_aidp_file_summary_impl(
 ) -> Dict[str, Any]:
     """Read one file's summary.
 
-    AIDP wraps the payload in ``result``; when a deployment answers the summary
-    fields at the top level instead, those fields are lifted into the same
-    ``result`` shape so the page has one contract to consume. An empty
-    ``result`` is preserved: whether it means "not previewable" or "not
-    generated yet" depends on the knowledge base configuration.
+    The fixed response is ``{result: {summary_text, summary_status,
+    summary_model}}``; an empty ``result`` means summaries are off or not
+    generated yet and is returned unchanged.
     """
     result = _request_aidp_json(
         server_url,
@@ -75,22 +52,7 @@ def get_aidp_file_summary_impl(
         context="get-file-summary",
         retry=True,
     )
-    if not isinstance(result, dict):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "Unexpected AIDP file summary response format",
-        )
-    inner = result.get("result")
-    if isinstance(inner, dict):
-        return {"result": _normalize_summary_result(inner)}
-    direct = {
-        key: result[key]
-        for key in ("summary_text", "summary_status", "summary_model")
-        if key in result
-    }
-    if direct:
-        return {"result": _normalize_summary_result(direct)}
-    return {"result": _normalize_summary_result(result)}
+    return {"result": result["result"]}
 
 
 # ==================== Knowledge-file history (all-status listing) ====================

@@ -126,10 +126,8 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
     [chunk?.metadata_json]
   );
   // Ontology auto-tags arrive only on newer AIDP builds; absent means empty.
-  const tags = Array.isArray(chunk?.tag)
-    ? chunk.tag.filter((tag) => typeof tag === "string" && tag.trim())
-    : [];
-  const text = typeof chunk?.chunk_text === "string" ? chunk.chunk_text : "";
+  const tags = chunk?.tag ?? [];
+  const text = chunk?.chunk_text ?? "";
   const chunkType = normalizeAidpChunkType(chunk?.chunk_type);
   // Real AIDP formats TABLE chunks as "<title>\n\n<table>...</table>"; older
   // fixtures used pipe-separated rows. Prefer the sanitized HTML, fall back

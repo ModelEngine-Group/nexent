@@ -1,23 +1,18 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-/**
- * One AIDP semantic chunk of an ingested file.
- *
- * Every field except `chunk_id` is optional because AIDP may omit data for a
- * given chunk; the UI shows an empty state instead of inventing content.
- */
+/** One AIDP semantic chunk of an ingested file. */
 export interface AidpChunk {
   /** AIDP chunk identifier; detail, edit and delete all address the chunk by it. */
   chunk_id: number;
-  chunk_text?: string;
+  chunk_text: string;
   /** AIDP chunk type: text, table, image, caption or multimodal. */
-  chunk_type?: string;
-  file_name?: string;
-  file_url?: string;
+  chunk_type: string;
+  file_name: string;
+  file_url: string;
   /** Source page numbers; the contract exposes no in-page coordinates. */
-  page_ids?: number[];
+  page_ids: number[];
   /** System metadata AIDP derives while parsing (not shown in the page). */
-  metadata?: Record<string, unknown>;
+  metadata: Record<string, unknown>;
   /** User-defined metadata from the bound ontology domain; default `{}`. */
   metadata_json?: Record<string, unknown>;
   /**

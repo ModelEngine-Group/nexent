@@ -19,19 +19,11 @@ interface AidpFileSummaryPanelProps {
   previewEnabled: boolean;
 }
 
-const readReason = (summary: AidpFileSummary): string | undefined => {
-  for (const key of ["message", "reason", "error_reason", "error_message"]) {
-    const value = summary[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-};
-
 /**
  * File summary tab.
  *
  * States come from AIDP's `result`: pending is polled by the query, success
- * renders `summary_text`, failed shows the upstream reason. An empty result is
+ * renders `summary_text`, failed shows `error_reason`. An empty result is
  * interpreted together with the KB's `summary_preview` flag and is never
  * reported as a generation failure. AIDP has no summary-retry endpoint, so the
  * failed state is read-only.
@@ -47,15 +39,13 @@ const AidpFileSummaryPanel: React.FC<AidpFileSummaryPanelProps> = ({
     () => query.data?.result ?? {},
     [query.data]
   );
-  const status = summary.summary_status?.toString().toLowerCase() ?? "";
-  const text =
-    typeof summary.summary_text === "string" ? summary.summary_text : "";
-  const model =
-    typeof summary.summary_model === "string" ? summary.summary_model : "";
-  const reason = readReason(summary);
-  const isPending = status === "pending" || (!status && !text);
+  const status = summary.summary_status ?? "";
+  const text = summary.summary_text ?? "";
+  const model = summary.summary_model ?? "";
+  const reason = summary.error_reason;
+  const isPending = status === "pending";
   const isFailed = status === "failed";
-  const isSuccess = status === "success" || (!status && !!text);
+  const isSuccess = status === "success";
 
   if (query.isError) {
     return (
