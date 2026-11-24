@@ -16,10 +16,7 @@ import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
 import type { ContentReference } from "@/types/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
 import { TrajectoryMarkdown } from "./TrajectoryMarkdown";
-import {
-  modelInputMessages,
-  TrajectoryModelInput,
-} from "./TrajectoryModelInput";
+import { modelInputRows, TrajectoryModelInput } from "./TrajectoryModelInput";
 import {
   outputMarkdown,
   type MarkdownOutputKind,
@@ -113,21 +110,22 @@ function TrajectoryBodyContent({
       logs: t("trajectory.markdownLogs"),
     });
   }, [complete, previewKind, reference.availability, t, text]);
-  const messages = useMemo(
+  const modelRows = useMemo(
     () =>
       previewKind === "modelInput" &&
       complete &&
       reference.availability === "available"
-        ? modelInputMessages(text)
+        ? modelInputRows(text)
         : null,
     [complete, previewKind, reference.availability, text]
   );
   const mode =
     (preferredMode === "markdown" && !markdown) ||
-    (preferredMode === "table" && !messages)
+    (preferredMode === "table" && !modelRows)
       ? "json"
       : preferredMode;
-  const richPreview = mode === "markdown" || mode === "table";
+  const tableRows = mode === "table" ? modelRows : null;
+  const isMarkdown = mode === "markdown";
   const formatted = useMemo(() => {
     if (mode === "markdown") return markdown;
     if (mode !== "json") return text;
@@ -139,13 +137,13 @@ function TrajectoryBodyContent({
   }, [text, mode, markdown]);
   const lineNumbers = useMemo(
     () =>
-      richPreview
+      isMarkdown || tableRows
         ? ""
         : Array.from(
             { length: Math.min(formatted.split("\n").length, 10000) },
             (_, index) => index + 1
           ).join("\n"),
-    [formatted, richPreview]
+    [formatted, isMarkdown, tableRows]
   );
   const load = useCallback(
     async (offset: number) => {
@@ -230,6 +228,23 @@ function TrajectoryBodyContent({
     )
       void load(current.next);
   };
+  const copyButton = (
+    <button
+      className="trajectory-icon-button"
+      aria-label={t("trajectory.copy")}
+      disabled={
+        awaitingFirstChunk || (!text && reference.availability !== "available")
+      }
+      onClick={() => {
+        void navigator.clipboard.writeText(formatted).then(
+          () => message.success(t("trajectory.copied")),
+          () => message.error(t("trajectory.copyFailed"))
+        );
+      }}
+    >
+      <Copy size={14} />
+    </button>
+  );
   return (
     <section className="trajectory-body" aria-busy={showLoading}>
       <header>
@@ -251,14 +266,16 @@ function TrajectoryBodyContent({
               ...(markdown
                 ? [{ label: "Markdown", value: "markdown" as const }]
                 : []),
-              ...(messages
+              ...(modelRows
                 ? [{ label: t("trajectory.table"), value: "table" as const }]
                 : []),
             ]}
           />
+          {!collapsed && tableRows && copyButton}
         </div>
       </header>
-      {!collapsed && (
+      {!collapsed && tableRows && <TrajectoryModelInput rows={tableRows} />}
+      {!collapsed && !tableRows && (
         <>
           {reference.availability !== "available" ? (
             <p className="p-3 text-xs text-gray-500">
@@ -271,13 +288,7 @@ function TrajectoryBodyContent({
               {!awaitingFirstChunk && (
                 <div className="trajectory-code-card">
                   <div className="trajectory-code-toolbar">
-                    <span>
-                      {mode === "table"
-                        ? t("trajectory.table")
-                        : mode === "markdown"
-                          ? "Markdown"
-                          : mode.toUpperCase()}
-                    </span>
+                    <span>{isMarkdown ? "Markdown" : mode.toUpperCase()}</span>
                     <span
                       className="trajectory-code-meta"
                       title={t(
@@ -297,7 +308,7 @@ function TrajectoryBodyContent({
                         count: reference.char_count ?? Array.from(text).length,
                       })}
                       <span className="trajectory-code-actions">
-                        {!richPreview && (
+                        {!isMarkdown && (
                           <Button
                             type={wordWrap ? "primary" : "text"}
                             size="small"
@@ -317,22 +328,7 @@ function TrajectoryBodyContent({
                             onClick={() => setWordWrap((value) => !value)}
                           />
                         )}
-                        <button
-                          className="trajectory-icon-button"
-                          aria-label={t("trajectory.copy")}
-                          disabled={
-                            awaitingFirstChunk ||
-                            (!text && reference.availability !== "available")
-                          }
-                          onClick={() => {
-                            void navigator.clipboard.writeText(formatted).then(
-                              () => message.success(t("trajectory.copied")),
-                              () => message.error(t("trajectory.copyFailed"))
-                            );
-                          }}
-                        >
-                          <Copy size={14} />
-                        </button>
+                        {copyButton}
                         <button
                           className="trajectory-icon-button"
                           aria-label={t(
@@ -351,18 +347,14 @@ function TrajectoryBodyContent({
                       </span>
                     </span>
                   </div>
-                  {richPreview ? (
+                  {isMarkdown ? (
                     <div
                       className={`markdown-body trajectory-markdown-body ${expanded ? "trajectory-body-full" : "trajectory-body-preview"}`}
                       role="region"
                       aria-label={t(`trajectory.${slot}`)}
                       tabIndex={0}
                     >
-                      {mode === "table" && messages ? (
-                        <TrajectoryModelInput messages={messages} />
-                      ) : (
-                        <TrajectoryMarkdown text={markdown} />
-                      )}
+                      <TrajectoryMarkdown text={markdown} />
                     </div>
                   ) : (
                     <div className="trajectory-code-scroll">

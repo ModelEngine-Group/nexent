@@ -4,6 +4,8 @@ import type { Page } from "playwright/test";
 
 export const modelInput = JSON.stringify({
   model: "DeepSeek",
+  enable_thinking: false,
+  temperature: 0,
   messages: [
     { role: "system", content: "### Storage instructions" },
     { role: "user", content: "| Policy |\n| --- |\n| Retention |" },

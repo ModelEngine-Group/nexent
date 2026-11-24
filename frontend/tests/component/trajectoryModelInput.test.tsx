@@ -38,11 +38,14 @@ function renderInput(input: ContentReference, kind = "model") {
     .closest("section")!;
 }
 
-it("renders messages in order and block Markdown inside content cells", async () => {
+it("nests ordered Markdown messages under messages and keeps parameters in the request table", async () => {
   const user = userEvent.setup();
   const request = {
     model: "model-a",
-    temperature: 0.4,
+    temperature: 0,
+    enable_thinking: false,
+    chat_template_kwargs: { enable_thinking: false },
+    stop: null,
     messages: [
       { role: "system", content: "### Instructions\n\n1. Use the **facts**" },
       {
@@ -60,17 +63,44 @@ it("renders messages in order and block Markdown inside content cells", async ()
   const source = JSON.stringify(request);
   const input = renderInput(body(source));
   const table = within(input).getByRole("table", {
+    name: "trajectory.modelInput",
+  });
+  expect(table.closest(".ant-table-wrapper")?.parentElement).toBe(input);
+  expect(
+    input.querySelector(".trajectory-code-card, .trajectory-body-preview")
+  ).toBeNull();
+  expect(
+    within(input).queryByRole("button", { name: "trajectory.expandContent" })
+  ).toBeNull();
+  expect(table.querySelector(":scope > thead")).toBeNull();
+  const requestRows = Array.from(
+    table.querySelectorAll<HTMLTableRowElement>(":scope > tbody > tr")
+  );
+  expect(
+    requestRows.map((row) => row.querySelector(":scope > th")?.textContent)
+  ).toEqual([
+    "messages",
+    "model",
+    "temperature",
+    "enable_thinking",
+    "chat_template_kwargs",
+    "stop",
+  ]);
+  expect(requestRows.every((row) => row.children.length === 2)).toBe(true);
+  expect(
+    requestRows.slice(1).map((row) => within(row).getByRole("cell").textContent)
+  ).toEqual(['"model-a"', "0", "false", '{"enable_thinking":false}', "null"]);
+  const messagesTable = within(requestRows[0]).getByRole("table", {
     name: "trajectory.modelInputMessages",
   });
-  const rows = within(table.querySelector("tbody")!)
-    .getAllByRole("row")
-    .filter((row) => row.parentElement === table.querySelector("tbody"));
-  expect(rows.map((row) => row.children[1].textContent)).toEqual([
-    "system",
-    "user",
-    "assistant",
-    "tool",
-  ]);
+  expect(messagesTable.querySelector(":scope > thead")).toBeNull();
+  const rows = Array.from(
+    messagesTable.querySelectorAll<HTMLTableRowElement>(":scope > tbody > tr")
+  );
+  expect(
+    rows.map((row) => within(row).getByRole("rowheader").textContent)
+  ).toEqual(["system", "user", "assistant", "tool"]);
+  expect(rows.every((row) => row.children.length === 2)).toBe(true);
   expect(
     within(rows[0]).getByRole("heading", { name: "Instructions" })
   ).toBeVisible();
@@ -82,12 +112,17 @@ it("renders messages in order and block Markdown inside content cells", async ()
   expect(rows[3]).toHaveTextContent("Done | complete");
   expect(table).not.toHaveTextContent("/private-image");
   await user.click(
-    within(input).getByRole("button", { name: "trajectory.copy" })
+    within(input.querySelector("header")!).getByRole("button", {
+      name: "trajectory.copy",
+    })
   );
   expect(await navigator.clipboard.readText()).toBe(source);
 
   const modes = within(within(input).getByRole("radiogroup"));
   await user.click(modes.getByText("JSON"));
+  expect(
+    input.querySelector(".trajectory-code-card .trajectory-body-preview")
+  ).toBeInTheDocument();
   expect(input.querySelector("pre code")?.textContent).toBe(
     JSON.stringify(request, null, 2)
   );
@@ -95,7 +130,7 @@ it("renders messages in order and block Markdown inside content cells", async ()
   expect(input.querySelector("pre code")?.textContent).toBe(source);
   await user.click(modes.getByText("trajectory.table"));
   expect(
-    within(input).getByRole("table", { name: "trajectory.modelInputMessages" })
+    within(input).getByRole("table", { name: "trajectory.modelInput" })
   ).toBeVisible();
 });
 
@@ -141,6 +176,15 @@ it.each([
     "model",
     JSON.stringify({
       messages: [{ role: "user", content: "x".repeat(128 * 1024) }],
+    }),
+  ],
+  [
+    "model",
+    JSON.stringify({
+      messages: [{ role: "user", content: "Input" }],
+      ...Object.fromEntries(
+        Array.from({ length: 201 }, (_, index) => [`parameter_${index}`, index])
+      ),
     }),
   ],
   ["tool", '{"messages":[{"role":"user","content":"same shape"}]}'],

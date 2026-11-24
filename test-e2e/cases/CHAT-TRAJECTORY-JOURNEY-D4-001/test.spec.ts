@@ -169,10 +169,39 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     const input = page
       .locator(".trajectory-node-detail .trajectory-body")
       .filter({ has: page.getByRole("button", { name: "输入", exact: true }) });
-    const modelMessages = input.getByRole("table", { name: "模型输入消息" });
+    const modelRequest = input.getByRole("table", {
+      name: "模型输入",
+      exact: true,
+    });
+    await expect(input.locator(":scope > .ant-table-wrapper")).toHaveCount(1);
     await expect(
-      modelMessages.getByRole("cell", { name: "system", exact: true }),
-    ).toBeVisible();
+      input.locator(".trajectory-code-card, .trajectory-body-preview"),
+    ).toHaveCount(0);
+    await expect(modelRequest.locator(":scope > thead")).toHaveCount(0);
+    const requestRows = modelRequest.locator(":scope > tbody > tr");
+    const messagesRow = requestRows.filter({
+      has: page.getByRole("rowheader", { name: "messages", exact: true }),
+    });
+    const modelMessages = messagesRow.getByRole("table", {
+      name: "模型输入消息",
+      exact: true,
+    });
+    await expect(modelMessages.locator(":scope > thead")).toHaveCount(0);
+    const systemRow = modelMessages.getByRole("row").filter({
+      has: page.getByRole("rowheader", { name: "system", exact: true }),
+    });
+    await expect(systemRow.locator(":scope > :is(th, td)")).toHaveCount(2);
+    for (const [name, value] of [
+      ["enable_thinking", "false"],
+      ["temperature", "0"],
+    ]) {
+      const parameterRow = requestRows.filter({
+        has: page.getByRole("rowheader", { name, exact: true }),
+      });
+      await expect(
+        parameterRow.getByRole("cell", { name: value, exact: true }),
+      ).toBeVisible();
+    }
     await expect(
       modelMessages.getByRole("heading", { name: "Storage instructions" }),
     ).toBeVisible();

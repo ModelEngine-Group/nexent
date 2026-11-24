@@ -1,24 +1,55 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { Table } from "antd";
 import { useTranslation } from "react-i18next";
 import { TrajectoryMarkdown } from "./TrajectoryMarkdown";
 
 type ModelInputMessage = {
+  key: number;
   role: string;
   content: string;
   nonTextParts: number;
   toolCalls: number;
 };
 
+type ModelInputRow = { label: string } & (
+  | { kind: "messages"; messages: ModelInputMessage[] }
+  | { kind: "parameter"; value: string }
+);
+
+const tableProps = {
+  size: "small",
+  pagination: false,
+  showHeader: false,
+  rowHoverable: false,
+  tableLayout: "fixed",
+  styles: {
+    body: { cell: { verticalAlign: "top", overflowWrap: "anywhere" } },
+  },
+} as const;
+
+const labelColumn = {
+  rowScope: "row",
+  width: "28%",
+  onCell: () => ({
+    style: {
+      background: "transparent",
+      color: "inherit",
+      fontWeight: "normal",
+    },
+  }),
+} as const;
+
 const MAX_REQUEST_LENGTH = 1024 * 1024;
 const MAX_CONTENT_LENGTH = 128 * 1024;
 const MAX_MESSAGES = 200;
+const MAX_PARAMETERS = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function modelInputMessages(source: string): ModelInputMessage[] | null {
+export function modelInputRows(source: string): ModelInputRow[] | null {
   if (source.length > MAX_REQUEST_LENGTH) return null;
   let request: unknown;
   try {
@@ -26,15 +57,18 @@ export function modelInputMessages(source: string): ModelInputMessage[] | null {
   } catch {
     return null;
   }
-  const messages: unknown = isRecord(request) ? request.messages : undefined;
+  if (!isRecord(request)) return null;
+  const { messages, ...parameters } = request;
+  const parameterEntries = Object.entries(parameters);
   if (
     !Array.isArray(messages) ||
     !messages.length ||
-    messages.length > MAX_MESSAGES
+    messages.length > MAX_MESSAGES ||
+    parameterEntries.length > MAX_PARAMETERS
   )
     return null;
 
-  const rows: ModelInputMessage[] = [];
+  const messageRows: ModelInputMessage[] = [];
   let previewLength = 0;
   for (const message of messages as unknown[]) {
     if (
@@ -64,7 +98,8 @@ export function modelInputMessages(source: string): ModelInputMessage[] | null {
     }
     previewLength += message.role.length + content.length;
     if (previewLength > MAX_CONTENT_LENGTH) return null;
-    rows.push({
+    messageRows.push({
+      key: messageRows.length,
       role: message.role,
       content,
       nonTextParts,
@@ -73,49 +108,82 @@ export function modelInputMessages(source: string): ModelInputMessage[] | null {
         : 0,
     });
   }
+  const rows: ModelInputRow[] = [
+    { label: "messages", kind: "messages", messages: messageRows },
+  ];
+  try {
+    for (const [name, value] of parameterEntries) {
+      rows.push({
+        label: name,
+        kind: "parameter",
+        value: JSON.stringify(value),
+      });
+    }
+  } catch {
+    return null;
+  }
   return rows;
 }
 
-export function TrajectoryModelInput({
-  messages,
-}: {
-  messages: ModelInputMessage[];
-}) {
+function ModelInputMessages({ messages }: { messages: ModelInputMessage[] }) {
   const { t } = useTranslation();
   return (
-    <table
-      className="trajectory-model-input-table"
+    <Table
+      {...tableProps}
       aria-label={t("trajectory.modelInputMessages")}
-    >
-      <thead>
-        <tr>
-          <th scope="col">{t("trajectory.markdownIndex")}</th>
-          <th scope="col">{t("trajectory.modelInputRole")}</th>
-          <th scope="col">{t("trajectory.modelInputContent")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {messages.map(({ role, content, nonTextParts, toolCalls }, index) => (
-          <tr key={index}>
-            <td>{index + 1}</td>
-            <td>{role}</td>
-            <td>
-              {content.trim() ? <TrajectoryMarkdown text={content} /> : null}
-              {nonTextParts > 0 && (
-                <div>
-                  {t("trajectory.modelInputNonText", { count: nonTextParts })}
-                </div>
-              )}
-              {toolCalls > 0 && (
-                <div>
-                  {t("trajectory.modelInputToolCalls", { count: toolCalls })}
-                </div>
-              )}
-              {!content.trim() && !nonTextParts && !toolCalls && "—"}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+      dataSource={messages}
+      bordered
+      columns={[
+        { ...labelColumn, dataIndex: "role" },
+        {
+          dataIndex: "content",
+          render: (content: string, { nonTextParts, toolCalls }) => {
+            const hasText = Boolean(content.trim());
+            return (
+              <div className="markdown-body trajectory-model-input-content">
+                {hasText && <TrajectoryMarkdown text={content} />}
+                {nonTextParts > 0 && (
+                  <div>
+                    {t("trajectory.modelInputNonText", { count: nonTextParts })}
+                  </div>
+                )}
+                {toolCalls > 0 && (
+                  <div>
+                    {t("trajectory.modelInputToolCalls", { count: toolCalls })}
+                  </div>
+                )}
+                {!hasText && !nonTextParts && !toolCalls && "—"}
+              </div>
+            );
+          },
+        },
+      ]}
+    />
+  );
+}
+
+export function TrajectoryModelInput({ rows }: { rows: ModelInputRow[] }) {
+  const { t } = useTranslation();
+  return (
+    <Table
+      {...tableProps}
+      aria-label={t("trajectory.modelInput")}
+      dataSource={rows}
+      rowKey="label"
+      columns={[
+        { ...labelColumn, dataIndex: "label" },
+        {
+          key: "value",
+          render: (_value, row) =>
+            row.kind === "messages" ? (
+              <div>
+                <ModelInputMessages messages={row.messages} />
+              </div>
+            ) : (
+              <code>{row.value}</code>
+            ),
+        },
+      ]}
+    />
   );
 }
