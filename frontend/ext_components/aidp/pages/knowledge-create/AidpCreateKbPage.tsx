@@ -26,7 +26,10 @@ import type { AidpGraphConfig } from "@/ext_components/aidp/shared/types/managem
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { ApiError } from "@/services/api";
 import { useErrorHandler } from "@/hooks/useErrorHandler";
-import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import {
+  getAidpErrorMessage,
+  isAidpDuplicateError,
+} from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 import {
   useAidpModels,
@@ -315,7 +318,9 @@ const AidpCreateKbPage: React.FC = () => {
         handleSession: false,
       });
       message.error(
-        getAidpErrorMessage(error, t, t("aidpKnowledge.createKbFailed"))
+        isAidpDuplicateError(error)
+          ? t("aidpKnowledge.createKbDuplicateName")
+          : getAidpErrorMessage(error, t, t("aidpKnowledge.createKbFailed"))
       );
     } finally {
       setValidating(false);

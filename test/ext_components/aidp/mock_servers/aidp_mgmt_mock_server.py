@@ -1437,6 +1437,21 @@ def create_knowledge_base(
     _check_auth(authorization)
     _validate_graph_request(body)
 
+    # The live service rejects a duplicate name with HTTP 500 and business
+    # code 1022 (not a 4xx). Mirror that shape so the proxy's error parsing
+    # and the UI's duplicate-name message are exercised realistically.
+    if any(kb.get("kds_name") == body.name for kb in _KNOWLEDGE_BASES.values()):
+        logger.info("CREATE REJECTED duplicate name=%r", body.name)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": 1022,
+                    "message": "Create knowledge base failed",
+                }
+            },
+        )
+
     kds_id = f"aidp-kb-{uuid.uuid4().hex[:8]}"
     now = int(time.time())
     new_kb = {

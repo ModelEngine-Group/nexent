@@ -70,20 +70,57 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
 
 
+def _extract_upstream_code(response: httpx.Response) -> int | None:
+    """Read an AIDP business error code from a structured HTTP error body.
+
+    AIDP reports some business failures with an unrelated HTTP status (for
+    example a duplicate knowledge base name arrives with HTTP 500 and
+    ``{"error": {"code": 1022}}``). Keeping the business code separate from
+    the human-readable reason lets callers recognise known failures without
+    parsing localized text.
+    """
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+
+    def find(value: Any) -> int | None:
+        if isinstance(value, dict):
+            for key in ("code", "error_code", "errorCode"):
+                candidate = value.get(key)
+                if isinstance(candidate, bool):
+                    continue
+                if isinstance(candidate, int):
+                    return candidate
+                if isinstance(candidate, str) and candidate.strip().isdigit():
+                    return int(candidate.strip())
+            for key in ("detail", "message", "error"):
+                found = find(value.get(key))
+                if found is not None:
+                    return found
+        return None
+
+    return find(payload)
+
+
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
     """Map an AIDP HTTP error to the common application exception format."""
     response = error.response
     upstream_reason = _extract_upstream_error(response)
+    upstream_code = _extract_upstream_code(response)
     logger.exception(
-        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        "AIDP %s HTTP error: status_code=%s upstream_code=%s upstream_reason=%s",
         operation,
         response.status_code,
+        upstream_code,
         upstream_reason or "unavailable",
     )
     details = {
         "upstream_status": response.status_code,
         "upstream_reason": upstream_reason,
     }
+    if upstream_code is not None:
+        details["upstream_code"] = upstream_code
     error_code = {
         401: ErrorCode.AIDP_AUTH_ERROR,
         403: ErrorCode.AIDP_AUTH_ERROR,
@@ -1104,27 +1141,9 @@ def create_aidp_kb_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        # Body is already logged above before raise_for_status, so we
-        # only re-log the status for correlation with existing searches.
-        logger.exception(
-            "AIDP API HTTP error: %s, status_code: %s",
-            e,
-            e.response.status_code,
-        )
-        if e.response.status_code in (401, 403):
-            raise AppException(
-                ErrorCode.AIDP_AUTH_ERROR,
-                f"AIDP authentication failed: {str(e)}",
-            )
-        if e.response.status_code == 429:
-            raise AppException(
-                ErrorCode.AIDP_RATE_LIMIT,
-                f"AIDP rate limit exceeded: {str(e)}",
-            )
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-        )
+        # Preserve AIDP's business code (e.g. 1022 for a duplicate name) so
+        # the UI can distinguish a rejected request from an outage.
+        _raise_aidp_http_error(e, "create KB")
     except ValueError as e:
         logger.exception("Failed to parse AIDP API response: %s", e)
         raise AppException(
