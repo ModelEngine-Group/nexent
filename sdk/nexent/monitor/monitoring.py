@@ -42,7 +42,6 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
 from collections import deque
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
@@ -206,7 +205,6 @@ class AgentRunMetadata:
     monitoring_run_id: Optional[str] = None
     monitoring_root_run_id: Optional[str] = None
     monitoring_parent_run_id: Optional[str] = None
-    monitoring_started_at: Optional[datetime] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""

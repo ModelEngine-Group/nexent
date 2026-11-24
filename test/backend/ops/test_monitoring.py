@@ -2,7 +2,7 @@
 """Unit coverage for shared keys, collection and model statistics."""
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import Mock, call
@@ -12,8 +12,7 @@ import pytest
 
 from nexent.monitor.facts import emit_fact, set_fact_sink
 from nexent.monitor.model_fact import AttemptObservation
-from nexent.monitor.monitoring import AgentRunMetadata, _MonitoredChatCompletions, agent_monitoring_context
-from nexent.monitor.skill_usage import observe_skill_usage
+from nexent.monitor.monitoring import _MonitoredChatCompletions
 from ops.monitoring.contracts import Fact, MonitoringKind, day_id
 from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, summarize
 from infrastructure.monitoring.runtime import Producer
@@ -174,21 +173,6 @@ def test_shared_sink_accepts_a_non_model_fact():
         set_fact_sink(None)
     emit_fact(payload)
     assert events == [payload]
-
-
-def test_skill_usage_reuses_agent_run_start_time():
-    events = []
-    set_fact_sink(events.append)
-    try:
-        with agent_monitoring_context(AgentRunMetadata(
-                tenant_id="tenant", agent_id=7, monitoring_run_id="run",
-                monitoring_root_run_id="run",
-                monitoring_started_at=datetime(2026, 11, 23, 1, 2, 3, tzinfo=timezone.utc))):
-            observe_skill_usage(17, "writer", "guide_read")
-    finally:
-        set_fact_sink(None)
-    assert events[0]["started_at"] == "2026-11-23T01:02:03+00:00"
-    assert events[0]["triggered_at"] != events[0]["started_at"]
 
 
 def test_skill_usage_server_merge_keeps_earliest_trigger():
