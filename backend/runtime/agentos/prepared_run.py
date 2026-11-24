@@ -150,6 +150,9 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             versions["runtime_metadata_version"] = payload.runtime_metadata_version
         if payload.workbench_config_version is not None:
             versions["workbench_config_version"] = payload.workbench_config_version
+        if payload.resource.released_skill_guides:
+            # The loader has already verified and staged these version-specific packages.
+            versions["released_skill_guides"] = [guide.model_dump(mode="json") for guide in payload.resource.released_skill_guides]
         if not versions["mounted_agents"]:
             del versions["mounted_agents"]
         if not await _control_io("agentos-prepared-running", mark_running, identity, versions):
