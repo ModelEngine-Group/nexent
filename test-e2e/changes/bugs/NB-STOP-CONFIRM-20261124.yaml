@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: NB-STOP-CONFIRM-20261124
+  change_type: bugfix
+  bug_id: NB-STOP-CONFIRM-20261124
+  title: Confirm Northbound stop before allowing the client to continue
+  description: Wait for the targeted worker and prepared turn to release their conversation reservations.
+  observed_behavior: Northbound reports successful stop as soon as Runtime accepts cancellation. An immediate next turn can still conflict.
+  expected_behavior: A successful Northbound stop confirms release. An unfinished release at the wait deadline returns HTTP 409 with NORTHBOUND_STOP_IN_PROGRESS.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The signed stop case verifies the exact cancellation target and success envelope but lacks assertions for worker drain, pending admission, and same-conversation continuation.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified: [AOS-TRANSPORT]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [AOS-TRANSPORT-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Hold the Runtime execution until the worker exits and unregisters.
+    - Confirm both reservations for the same run, cover idle and fenced targets, and bound the wait.
+    - Map an unfinished stop to a public retryable conflict while preserving the success envelope.
+    reason: Isolated unit cases cover lifecycle branches and failure handling. The existing signed D3 case covers the public HTTP and Runtime protocol boundary.
+    test_selectors:
+    - test/backend/app/test_agentos_prepared_run.py::test_prepared_execution_retains_occupancy_until_worker_cleanup
+    - test/backend/services/test_prepared_public_turn.py::test_northbound_stop_fences_pending_run_without_legacy_stop
+    - test/backend/services/test_prepared_public_turn.py::test_northbound_stop_targets_registered_run_without_legacy_stop
+    - test/backend/services/test_prepared_public_turn.py::test_northbound_stop_times_out_while_runtime_still_owns_run
+    - test/backend/services/test_prepared_public_turn.py::test_northbound_stop_propagates_release_lookup_failure
+    - test/backend/services/test_agentos_proxy_service.py::test_forward_agent_stop_returns_json
+    - test/backend/app/test_northbound_app.py::test_stop_chat_reports_unreleased_conversation
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/design.md, Northbound prepared conversation section.
+    The D3 case owns loopback HTTP services, synthetic credentials, and controlled execution state. Scoped context managers close the services, and fixtures release their state. No shared families, anchors, special assets, or browser groups are needed.
+    NB-CHAT-DISCONNECT-001 proves detached streaming rather than explicit stop and remains outside this change.

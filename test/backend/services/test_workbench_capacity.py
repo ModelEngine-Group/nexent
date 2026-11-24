@@ -88,25 +88,34 @@ async def test_workbench_users_and_versions_share_the_same_tenant_budget(monkeyp
 @pytest.mark.parametrize("outcome", ["completed", "failed", "stopped"])
 async def test_worker_future_releases_only_its_tenant_slot(monkeypatch, runtime, payload, capacity, outcome):
     fill(capacity, "tenant-b", 50)
+    stream_finished = asyncio.Event()
     worker = Future()
     runtime.info.thread_future = worker
     runtime.info.attempt_outcome = outcome
 
     async def run(_info, **_options):
         yield '{"type":"final_answer","content":"test"}'
+        stream_finished.set()
 
     monkeypatch.setattr(prepared_run, "agent_run", run)
     await prepared_run.start_prepared_run(workbench(payload), ACTOR)
-    await join(runtime)
+    producer, = runtime.tasks
 
     key = f"{ACTOR.tenant_id}:workbench_main"
-    assert capacity.get_agent_capacity_count(key) == 1
-    if outcome == "completed":
-        worker.set_result(None)
-    elif outcome == "failed":
-        worker.set_exception(RuntimeError("worker failed"))
-    else:
-        worker.cancel()
+    try:
+        await asyncio.wait_for(stream_finished.wait(), timeout=2)
+        assert not producer.done()
+        assert capacity.get_agent_capacity_count(key) == 1
+        assert capacity.get_agent_capacity_count("tenant-b:workbench_main") == 50
+    finally:
+        # The producer holds the reservation until this worker can exit.
+        if outcome == "completed":
+            worker.set_result(None)
+        elif outcome == "failed":
+            worker.set_exception(RuntimeError("worker failed"))
+        else:
+            worker.cancel()
+        await asyncio.wait_for(producer, timeout=2)
 
     assert capacity.get_agent_capacity_count(key) == 0
     assert capacity.get_agent_capacity_count("tenant-b:workbench_main") == 50

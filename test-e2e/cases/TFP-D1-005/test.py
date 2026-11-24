@@ -7,13 +7,16 @@ import threading
 from concurrent.futures import CancelledError
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from shared.tool_fastpath import OrdinaryExecutor, make_wrapper
 from shared.tool_fastpath_aidp import aidp_runtime as aidp_runtime
+from smolagents.local_python_executor import InterpreterError
 
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.ext_components.aidp.retrieval_client import AidpRetrievalError
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -151,8 +154,13 @@ def test_tfp_d1_005_aidp(aidp_runtime):
     """TFP-D1-005: AIDP transport errors do not initialize Docker or replay requests."""
     executor = aidp_runtime.create().python_executor
     aidp_runtime.status.code = 400
-    with pytest.raises(Exception, match="AIDP HTTP error"):
+    with pytest.raises(InterpreterError) as error:
         executor('aidp_search(query="rules")')
+    provider_error = error.value.__context__
+    assert isinstance(provider_error, AidpRetrievalError)
+    http_error = provider_error.__cause__
+    assert isinstance(http_error, httpx.HTTPStatusError)
+    assert http_error.response.status_code == 400
     assert len(aidp_runtime.requests) == 1
     assert aidp_runtime.acquisitions == []
     assert executor.remote is None
