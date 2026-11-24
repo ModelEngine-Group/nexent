@@ -458,6 +458,10 @@ def experiment_report(tenant, user, eid, *, cancel=False):
         }
     return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
             **decision,
+            **({"can_retry": True} if status == "finished" and not (scope.get("cancelled") or cancel)
+               and scope.get("created_by") == user and scope.get("before_deadline") and not scope.get("budget_stop_reason")
+               and states & jobs.INCONCLUSIVE_TRIAL_STATES
+               and not any((row.get("result") or {}).get("previous_attempt") for row in rows) else {}),
             **({"budget": {**scope["budget"], "deadline": scope["deadline"],
                            "expired_trials": sum((row.get("result") or {}).get("error") == "experiment_time_budget_exceeded"
                                                  for row in rows)}} if scope.get("budget") else {}),
@@ -472,6 +476,17 @@ def experiment_report(tenant, user, eid, *, cancel=False):
             **({"valid_triplets": valid_triplets, "verified_guide_pairs": verified_guide_pairs}
                if any("no_skill" in p for p in pairs.values()) else {}),
             "valid_pairs": pair_count - counts["inconclusive"], "counts": dict(counts), "pairs": pairs}
+
+
+def retry_experiment(tenant, user, eid):
+    scope = jobs.scope(tenant, eid)
+    if scope is None:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Unknown development experiment")
+    require_business_agent_edit(scope["agent_id"], tenant, user)
+    if not EVOLUTION_REPLAY_RUNTIME_URL:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Configure the isolated replay Runtime before retrying a trial")
+    jobs.retry_inconclusive(tenant, user, eid)
+    return experiment_report(tenant, user, eid)
 
 
 def workspace_choices(tenant, user, agent_id, version):

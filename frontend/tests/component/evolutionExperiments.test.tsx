@@ -41,6 +41,7 @@ vi.mock("@/services/evolutionService", () => ({
     traceCaseDraft: vi.fn(),
     createCase: vi.fn(),
     report: vi.fn(),
+    retry: vi.fn(),
     publicBenchmarks: vi.fn(),
     recordPublicBenchmark: vi.fn(),
     nominate: vi.fn(),
@@ -74,6 +75,41 @@ async function choose(label: string, option: string) {
     fireEvent.click(item!);
   });
 }
+
+it("retries only the inconclusive result and displays its previous receipt", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting agent" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({ candidates: [],
+    cases: [{ case_id: 9, family: "Owners", query: "List" }],
+    experiments: [{ experiment_id: 42, create_time: "2026-11-23T00:00:00Z" }],
+  });
+  const incomplete = { experiment_id: 42, agent_id: 7, version_no: 1, status: "finished", can_retry: true,
+    total_pairs: 1, valid_pairs: 0, pairs: { "9": { base: { status: "fail", result: { answer: "kept result" } },
+      result: { status: "invalid", result: { judgment: { reason: "invalid judge output" } } }, comparison: "inconclusive" } },
+  };
+  const recovered = { ...incomplete, can_retry: false, valid_pairs: 1, pairs: { "9": { ...incomplete.pairs["9"],
+    result: { status: "pass", result: { answer: "recovered result", previous_attempt: {
+      status: "invalid", receipt_id: "previous-tool-receipt", result: { judgment: { reason: "invalid judge output" } },
+    } } }, comparison: "improved" },
+  } };
+  vi.mocked(evolutionService.report).mockResolvedValue(incomplete);
+  vi.mocked(evolutionService.retry).mockImplementation(async () => {
+    vi.mocked(evolutionService.report).mockResolvedValue(recovered);
+    return recovered;
+  });
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <EvolutionExperiments focusParams={new URLSearchParams("agent_id=7&version_no=1&experiment_id=42")} />
+  </QueryClientProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.retryInconclusive" }, { timeout: 10000 }));
+  await waitFor(() => expect(evolutionService.retry).toHaveBeenCalledWith(42));
+  expect(await screen.findByText("recovered result")).toBeInTheDocument();
+  expect(screen.getByText("kept result")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("evolution.previousAttempt"));
+  expect(screen.getByText("previous-tool-receipt")).toBeInTheDocument();
+  expect(screen.getByText("invalid judge output")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "evolution.retryInconclusive" })).not.toBeInTheDocument();
+});
 
 it("selects a published scope and opens its paired results with the original statuses", async () => {
   vi.mocked(evolutionService.agents).mockResolvedValue([

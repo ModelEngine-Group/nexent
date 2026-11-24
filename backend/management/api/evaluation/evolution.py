@@ -34,7 +34,7 @@ from management.services.agent.preparation.evaluation_snapshot import prepare_ev
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, resolve_prompt_candidate
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
 from management.services.evaluation.replay_cases import freeze_development_case, get_development_case, preview_trace_case
-from management.services.evaluation.experiments import create_experiment, experiment_report, workspace_choices
+from management.services.evaluation.experiments import create_experiment, experiment_report, retry_experiment, workspace_choices
 from management.services.evaluation.public_benchmarks import read_reports, record_report
 from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
 from management.services.evaluation.feedback_handoff import tool_mapping_from_experiment, tool_sets_from_experiment
@@ -359,6 +359,13 @@ async def cancel_experiment(experiment_id: int, authorization: str | None = Head
     result = await run_blocking("cancel-experiment", partial(experiment_report, cancel=True),
                                 tenant_id, user_id, experiment_id, lane="control-io", owner="management")
     return {"data": result}
+
+
+@router.post("/experiments/{experiment_id}/retry", status_code=202)
+async def retry_experiment_trials(experiment_id: int, authorization: str | None = Header(None)):
+    user_id, tenant_id = get_current_user_id(authorization)
+    return {"data": await run_blocking("retry-experiment-trials", retry_experiment, tenant_id, user_id, experiment_id,
+                                       lane="control-io", owner="management")}
 
 
 @router.get("/agents/{agent_id}/versions/{version_no}/reviews/{turn_id}/case-draft")

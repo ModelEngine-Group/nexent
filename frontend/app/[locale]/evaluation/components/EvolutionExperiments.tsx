@@ -322,6 +322,7 @@ function Experiments({
       void report.refetch();
     },
   });
+  const retry = useMutation({ mutationFn: (id: number) => api.retry(id), onSuccess: () => void report.refetch() });
   const nomination = useMutation({ mutationFn: (id: number) => api.nominate(id) });
   const confirmations = useQuery({
     queryKey: ["confirmation-results", viewer, agent, version, selected],
@@ -349,7 +350,7 @@ function Experiments({
     rules.error ||
     start.error ||
     report.error ||
-    cancel.error || confirmations.error;
+    cancel.error || (retry.variables === selected ? retry.error : null) || confirmations.error;
   return (
     <Flex vertical gap={14}>
       {error instanceof Error && (
@@ -625,6 +626,8 @@ function Experiments({
                 {t("evolution.cancel")}
               </Button>
             )}
+            {report.data.can_retry && <Button loading={retry.isPending}
+              onClick={() => retry.mutate(report.data.experiment_id)}>{t("evolution.retryInconclusive")}</Button>}
           </Flex>
           {report.data.status === "finished" && !baselineReport && (
             <PublicBenchmarkReports
@@ -684,6 +687,14 @@ function Experiments({
                 render: (trial?: Trial) => trial && (
                   <div>
                     <strong>{t(`evolution.state.${trial.status}`)}</strong>
+                    {trial.result?.previous_attempt && <details>
+                      <summary>{t("evolution.previousAttempt", {
+                        status: t(`evolution.state.${trial.result.previous_attempt.status}`),
+                      })}</summary>
+                      <div>{trial.result.previous_attempt.result?.error || trial.result.previous_attempt.result?.judgment?.reason
+                        || trial.result.previous_attempt.result?.tool_use?.reason}</div>
+                      <code>{trial.result.previous_attempt.receipt_id}</code>
+                    </details>}
                     {trial.result?.skills?.map(s => <div key={s.candidate_id}>{t("evolution.mountedSkill", {
                       id: s.candidate_id, revision: s.mounted_revision, reads: s.guide_reads,
                     })}</div>)}

@@ -15,6 +15,33 @@ def test_invalid_budget(limits):
         DevelopmentRunBudget(**limits)
 
 
+@pytest.mark.parametrize("authority", ["editor", "revoked", "missing", "no_runtime"])
+def test_retry_authorizes_before_queueing(monkeypatch, authority):
+    from management.services.evaluation import experiments as service
+
+    monkeypatch.setattr(service, "EVOLUTION_REPLAY_RUNTIME_URL", "" if authority == "no_runtime" else "http://replay")
+    monkeypatch.setattr(service.jobs, "scope", Mock(return_value=None if authority == "missing" else {"agent_id": 1}))
+    check = Mock(side_effect=AppException(service.ErrorCode.COMMON_FORBIDDEN) if authority == "revoked" else None)
+    monkeypatch.setattr(service, "require_business_agent_edit", check)
+    schedule = Mock()
+    monkeypatch.setattr(service.jobs, "retry_inconclusive", schedule)
+    report = Mock(return_value={"experiment_id": 7, "status": "running"})
+    monkeypatch.setattr(service, "experiment_report", report)
+    if authority == "editor":
+        assert service.retry_experiment("tenant", "editor", 7) == report.return_value
+        schedule.assert_called_once_with("tenant", "editor", 7)
+        report.assert_called_once_with("tenant", "editor", 7)
+    else:
+        with pytest.raises(AppException):
+            service.retry_experiment("tenant", "editor", 7)
+        schedule.assert_not_called()
+        report.assert_not_called()
+    if authority == "missing":
+        check.assert_not_called()
+    else:
+        check.assert_called_once_with(1, "tenant", "editor")
+
+
 @pytest.mark.asyncio
 async def test_budget_includes_followups_and_fixed_tasks_in_every_arm(monkeypatch):
     from management.services.evaluation import experiments as service

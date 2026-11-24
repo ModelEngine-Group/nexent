@@ -106,6 +106,8 @@ export interface Trial {
     }[]; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
     error?: string;
     judgment?: { score?: number; reason?: string; status?: string };
+    previous_attempt?: { status: string; receipt_id?: string | null;
+      result?: { error?: string; judgment?: { reason?: string }; tool_use?: { reason?: string } } | null };
   };
 }
 export interface ScreeningCriteria {
@@ -122,6 +124,7 @@ interface DevelopmentRunBudget {
 }
 
 export interface ExperimentReport {
+  can_retry?: boolean;
   budget?: DevelopmentRunBudget & { planned_replay_turns: number; deadline: string; expired_trials: number };
   model_budget?: {
     max_model_tokens: number;
@@ -376,6 +379,8 @@ export const evolutionService = {
   ),
   cancel: (id: number) =>
     read<ExperimentReport>(`${root}/experiments/${id}/cancel`, {}),
+  retry: (id: number) =>
+    read<ExperimentReport>(`${root}/experiments/${id}/retry`, {}),
 };
 
 export type ExpectedMcpReply = {

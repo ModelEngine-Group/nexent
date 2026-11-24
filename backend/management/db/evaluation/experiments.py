@@ -19,6 +19,9 @@ _DEADLINE = "e.create_time + make_interval(secs => (e.plan->'budget'->>'max_elap
 _RUNNING = """SELECT count(*) FROM nexent.evolution_trial_t active
               JOIN nexent.evolution_experiment_t owner USING (experiment_id)
               WHERE active.status='running' AND owner.tenant_id=e.tenant_id"""
+INCONCLUSIVE_TRIAL_STATES = frozenset({"invalid", "error", "missing_evidence"})
+_PREVIOUS_ATTEMPT = """CASE WHEN t.result ? 'previous_attempt'
+    THEN jsonb_build_object('previous_attempt', t.result->'previous_attempt') ELSE '{}'::jsonb END"""
 
 
 def previous_submission(tenant, user, request):
@@ -80,7 +83,9 @@ def submit(tenant, user, request, plan):
 def scope(tenant, eid):
     with get_db_session() as session:
         row = session.execute(text(f"""
-            SELECT e.plan->'budget' AS budget, e.plan->'metering' AS metering, {_DEADLINE} AS deadline, agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
+            SELECT e.plan->'budget' AS budget, e.plan->'metering' AS metering, {_DEADLINE} AS deadline,
+                   agent_id, version_no, cancelled, created_by, e.budget_stop_reason,
+                   {_DEADLINE} > statement_timestamp() AS before_deadline, plan->'request'->'screening' AS screening,
                    plan->'script_build'->'source_cases' AS script_source_cases,
                    plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
                    ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
@@ -111,28 +116,75 @@ def cancel(tenant, eid):
         """), dict(tenant=tenant, eid=eid))
 
 
+def retry_inconclusive(tenant, user, eid):
+    """Queue one bounded retry under the same execution identity and frozen plan."""
+    params = {"tenant": tenant, "eid": eid}
+    with get_db_session() as session:
+        experiment = session.execute(text(f"""
+            SELECT created_by, cancelled, budget_stop_reason, plan->'budget' AS budget,
+                   {_DEADLINE} > statement_timestamp() AS before_deadline
+            FROM nexent.evolution_experiment_t e
+            WHERE tenant_id=:tenant AND experiment_id=:eid FOR UPDATE
+        """), params).mappings().one_or_none()
+        if experiment is None:
+            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Unknown development experiment")
+        if experiment["created_by"] != user:
+            raise AppException(ErrorCode.COMMON_FORBIDDEN, "Only the experiment submitter can retry it")
+        rows = session.execute(text("""
+            SELECT t.trial_id, t.status, t.result ? 'previous_attempt' AS already_retried,
+                   1 + jsonb_array_length(COALESCE(NULLIF(c.task->'followups', 'null'::jsonb), '[]'::jsonb)) AS replay_turns
+            FROM nexent.evolution_trial_t t JOIN nexent.evolution_replay_case_t c USING (case_id)
+            WHERE t.experiment_id=:eid ORDER BY t.trial_id FOR UPDATE OF t
+        """), params).mappings().all()
+        if any(row["already_retried"] for row in rows):
+            return
+        if experiment["cancelled"] or experiment["budget_stop_reason"] or not experiment["before_deadline"]:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The experiment is cancelled or its budget has ended")
+        if any(row["status"] in {"pending", "running"} for row in rows):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Wait until the experiment has finished")
+        unresolved = [row for row in rows if row["status"] in INCONCLUSIVE_TRIAL_STATES]
+        if not unresolved:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "No inconclusive trials to retry")
+        budget = experiment["budget"]
+        total_turns = budget["planned_replay_turns"] + sum(row["replay_turns"] for row in unresolved)
+        if total_turns > budget["max_replay_turns"]:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The remaining replay-turn budget cannot cover the retry")
+        if session.scalar(text("""
+            SELECT EXISTS (SELECT 1 FROM nexent.evolution_confirmation_candidate_t WHERE experiment_id=:eid)
+        """), params):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "A nominated experiment cannot be retried")
+        session.execute(text("""
+            UPDATE nexent.evolution_trial_t SET status='pending',
+                result=jsonb_build_object('previous_attempt', jsonb_build_object(
+                    'status', status, 'receipt_id', receipt_id, 'result', result, 'retry_requested_at', statement_timestamp())),
+                lease_until=NULL, dispatch_started=NULL, recovery_attempted=false,
+                receipt_id=CASE WHEN cleanup_due IS NULL THEN NULL ELSE receipt_id END
+            WHERE trial_id=ANY(:trial_ids)
+        """), {"trial_ids": [row["trial_id"] for row in unresolved]})
+
+
 def claim(experiment_id=None):
     with get_db_session() as session:
         session.execute(text(f"""
             UPDATE nexent.evolution_trial_t t SET status='error', lease_until=NULL,
-                   result=jsonb_build_object('error', 'experiment_time_budget_exceeded')
+                   result=jsonb_build_object('error', 'experiment_time_budget_exceeded') || ({_PREVIOUS_ATTEMPT})
               FROM nexent.evolution_experiment_t e
              WHERE t.experiment_id=e.experiment_id AND t.status IN ('pending','running')
                AND {_DEADLINE} <= statement_timestamp()
         """))
         # A legacy claim has no dispatch record and may already have sent its request.
-        session.execute(text("""
-            UPDATE nexent.evolution_trial_t
+        session.execute(text(f"""
+            UPDATE nexent.evolution_trial_t t
             SET status=CASE WHEN dispatch_started IS FALSE AND NOT recovery_attempted THEN 'pending' ELSE 'error' END,
-                result=CASE WHEN dispatch_started IS FALSE AND NOT recovery_attempted THEN NULL
-                            ELSE '{"error":"worker_interrupted"}'::jsonb END,
+                result=CASE WHEN dispatch_started IS FALSE AND NOT recovery_attempted THEN NULLIF(({_PREVIOUS_ATTEMPT}), jsonb_build_object())
+                            ELSE jsonb_build_object('error','worker_interrupted') || ({_PREVIOUS_ATTEMPT}) END,
                 recovery_attempted=recovery_attempted OR dispatch_started IS FALSE,
                 lease_until=NULL
             WHERE status='running' AND lease_until < now()
         """))
-        session.execute(text("""
+        session.execute(text(f"""
             UPDATE nexent.evolution_trial_t t SET status='invalid', lease_until=NULL,
-                   result=jsonb_build_object('error', e.budget_stop_reason)
+                   result=jsonb_build_object('error', e.budget_stop_reason) || ({_PREVIOUS_ATTEMPT})
               FROM nexent.evolution_experiment_t e
              WHERE t.experiment_id=e.experiment_id AND t.status='pending' AND e.budget_stop_reason IS NOT NULL
         """))
@@ -354,8 +406,9 @@ def finish(job, status, result):
         return bool(session.execute(text(f"""
             UPDATE nexent.evolution_trial_t t SET
                 status=CASE WHEN {_DEADLINE} <= statement_timestamp() THEN 'error' ELSE :status END,
-                result=CASE WHEN {_DEADLINE} <= statement_timestamp()
-                            THEN jsonb_build_object('error','experiment_time_budget_exceeded') ELSE CAST(:result AS jsonb) END,
+                result=(CASE WHEN {_DEADLINE} <= statement_timestamp()
+                            THEN jsonb_build_object('error','experiment_time_budget_exceeded') ELSE CAST(:result AS jsonb) END)
+                            || ({_PREVIOUS_ATTEMPT}),
                 lease_until=NULL
             FROM nexent.evolution_experiment_t e WHERE t.experiment_id=e.experiment_id
                 AND t.trial_id=:trial_id AND t.receipt_id=:receipt_id AND t.status='running' AND t.lease_until >= now()

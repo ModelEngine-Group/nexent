@@ -322,6 +322,8 @@
   "evolution.history": "Previous comparisons",
   "evolution.coverage": "Both versions have valid scores on {{valid}} of {{total}} tasks",
   "evolution.cancel": "Stop comparison",
+  "evolution.retryInconclusive": "Retry inconclusive trials",
+  "evolution.previousAttempt": "Previous attempt · {{status}}",
   "evolution.base": "Baseline",
   "evolution.result": "Candidate",
   "evolution.publicBenchmark.title": "Public benchmark diagnostics",

@@ -21,7 +21,8 @@ def test_distributed_budget(runtime, monkeypatch):
     runtime[3].TableBase.metadata.create_all(engine)
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        for name in ("018_evolution_replay_cases", "019_evolution_experiments", "028_evolution_confirmation_suites",
+        for name in ("018_evolution_replay_cases", "019_evolution_experiments", "026_evolution_combination",
+                     "028_evolution_confirmation_suites",
                      "029_evolution_confirmation_locks", "030_evolution_confirmation_results",
                      "003_conversation_run_admission", "011_trajectory", "015_conversation_evolution",
                      "021_evolution_online_reviews",
@@ -75,6 +76,84 @@ def test_distributed_budget(runtime, monkeypatch):
     _verify_provider_quota(monkeypatch)
     _verify_experiment_quota(monkeypatch, submit)
     _verify_confirmation_quota(monkeypatch, submit)
+    _verify_inconclusive_retry(engine)
+
+
+def _verify_inconclusive_retry(engine):
+    from contracts.errors.exceptions import AppException
+    from contracts.evolution import DevelopmentExperimentRequest
+    from management.db.evaluation import experiments as jobs
+
+    tenant, editor = "tenant-retry", "editor"
+    turns = {"base": "fail", "only_a": "fail", "only_b": "invalid", "result": "pass"}
+    previous_result = {"judgment": {"status": "invalid", "reason": "invalid_judge_output"}}
+
+    def submit(suffix, replay_limit):
+        with engine.begin() as conn:
+            cid = conn.scalar(text("""INSERT INTO nexent.evolution_replay_case_t
+                (tenant_id,agent_id,version_no,digest,task,created_by)
+                VALUES (:tenant,1,1,:digest,'{"followups":[{"query":"Next"}]}','editor') RETURNING case_id"""),
+                {"tenant": tenant, "digest": suffix.zfill(64)})
+        request = DevelopmentExperimentRequest(agent_id=1, version_no=1, request_id=f"retry-{suffix}",
+            case_ids=[cid], evaluator_id=1, candidate_type="combination", components=[
+                {"experiment_id": 1, "candidate_type": "prompt", "candidate_id": 1},
+                {"experiment_id": 2, "candidate_type": "tool_set", "candidate_id": 2},
+            ], budget={"max_replay_turns": replay_limit, "max_elapsed_seconds": 300})
+        plan = {"cases": {str(cid): suffix}, "snapshots": dict.fromkeys(turns, "digest"),
+                "request": request.model_dump(), "budget": {**request.budget.model_dump(), "planned_replay_turns": 8}}
+        eid = jobs.submit(tenant, editor, request, plan)
+        with pytest.raises(AppException, match="finished"):
+            jobs.retry_inconclusive(tenant, editor, eid)
+        for _ in turns:
+            job = jobs.claim(eid)
+            arm = job["variant"]
+            assert jobs.authorize_dispatch(job, 0)
+            assert jobs.finish(job, turns[arm], previous_result if arm == "only_b" else {"answer": arm})
+            if arm == "only_b":
+                bad = job
+        return eid, bad, plan
+
+    limited, _, _ = submit("1", 9)
+    with pytest.raises(AppException, match="remaining replay-turn budget"):
+        jobs.retry_inconclusive(tenant, editor, limited)
+    jobs.cancel(tenant, limited)
+    with pytest.raises(AppException, match="cancelled"):
+        jobs.retry_inconclusive(tenant, editor, limited)
+
+    eid, bad, plan = submit("2", 10)
+    with pytest.raises(AppException, match="Unknown development experiment"):
+        jobs.retry_inconclusive("tenant-foreign", editor, eid)
+    with pytest.raises(AppException, match="submitter"):
+        jobs.retry_inconclusive(tenant, "other-editor", eid)
+    stable = {row["variant"]: row for row in jobs.trials(tenant, eid) if row["variant"] != "only_b"}
+    barrier = Barrier(2)
+
+    def retry(_):
+        barrier.wait(timeout=5)
+        jobs.retry_inconclusive(tenant, editor, eid)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(retry, range(2)))
+    assert jobs.read_plan(tenant, eid) == plan
+    assert jobs.claim(eid) is None  # Old input copies still belong to the first receipt.
+    jobs.complete_cleanup(bad["trial_id"], "z" * 32)
+    assert jobs.claim(eid) is None
+    jobs.complete_cleanup(bad["trial_id"], bad["receipt_id"])
+    replacement = jobs.claim(eid)
+    assert replacement["trial_id"] == bad["trial_id"] and replacement["receipt_id"] != bad["receipt_id"]
+    assert not jobs.finish(bad, "pass", {"answer": "late"})
+    assert jobs.finish(replacement, "pass", {"answer": "recovered"})
+    jobs.retry_inconclusive(tenant, editor, eid)
+    assert jobs.claim(eid) is None
+    for row in jobs.trials(tenant, eid):
+        if row["variant"] in stable:
+            assert row == stable[row["variant"]]
+            continue
+        assert row["status"] == "pass" and row["receipt_id"] == replacement["receipt_id"]
+        assert row["result"]["answer"] == "recovered"
+        history = row["result"]["previous_attempt"]
+        assert history["receipt_id"] == bad["receipt_id"] and history["status"] == "invalid"
+        assert history["result"] == previous_result and history["retry_requested_at"]
 
 
 def _verify_candidate_budget(monkeypatch):

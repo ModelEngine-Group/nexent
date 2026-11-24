@@ -322,6 +322,8 @@
   "evolution.history": "查看已有对比",
   "evolution.coverage": "已有 {{valid}} / {{total}} 道题取得两组有效判分",
   "evolution.cancel": "停止此次对比",
+  "evolution.retryInconclusive": "补跑未判定项",
+  "evolution.previousAttempt": "上次结果 · {{status}}",
   "evolution.base": "现用版",
   "evolution.result": "候选版",
   "evolution.publicBenchmark.title": "公开评测诊断",
