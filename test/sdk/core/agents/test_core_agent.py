@@ -117,6 +117,7 @@ def _create_mock_smolagents():
 
     # monitoring submodule
     monitoring_mod = ModuleType("smolagents.monitoring")
+    setattr(monitoring_mod, "AgentLogger", MagicMock(name="AgentLogger"))
     setattr(monitoring_mod, "LogLevel", MagicMock(name="LogLevel"))
     setattr(monitoring_mod, "Timing", MagicMock(name="Timing"))
     setattr(monitoring_mod, "YELLOW_HEX", MagicMock(name="YELLOW_HEX"))
