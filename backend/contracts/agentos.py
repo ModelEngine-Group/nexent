@@ -880,6 +880,8 @@ class ChatInvocation(ModelInvokeBase):
 class EmbeddingInvocation(ModelInvokeBase):
     operation: Literal["embedding"] = "embedding"
     input: Annotated[list[str], Field(min_length=1)]
+    # Automatic Memory only; other model callers retain their existing policy.
+    memory_timeout_seconds: Annotated[float, Field(gt=0, le=10)] | None = None
 
 
 class RerankInput(BaseModel):

@@ -6,7 +6,7 @@ from contracts.agentos import ChatMessage, EvaluationAgentRun
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from contracts.errors.exceptions import AppException
+from contracts.errors.exceptions import AppException, RuntimeUpstreamError
 
 import adapters.jiuwen_sdk_adapter as adapter
 import asyncio
@@ -26,6 +26,9 @@ from management.services.evaluation.common import logger
 from management.clients.model import invoke_chat_messages, invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
+
+# Reason recorded for every evaluator when the agent produced no final answer.
+_EMPTY_ANSWER_REASON = "Agent produced no final answer (no final_answer events in run)"
 
 
 def _is_llm_related_error(exc: Exception) -> bool:
@@ -51,6 +54,20 @@ def _is_llm_related_error(exc: Exception) -> bool:
     return any(keyword in error_str for keyword in llm_keywords)
 
 
+def _runtime_upstream_detail(exc: "RuntimeUpstreamError") -> str:
+    """Render a compact readable detail for a runtime upstream failure.
+
+    Keeps the HTTP status plus a short body excerpt (runtime 401/5xx bodies
+    carry structured codes such as TOKEN_EXPIRED that identify the failure).
+    """
+    content = getattr(exc, "content", b"")
+    if isinstance(content, (bytes, bytearray)):
+        text = content.decode("utf-8", "replace")
+    else:
+        text = str(content or "")
+    return f"HTTP {exc.status_code}: {text[:300]}".strip()
+
+
 def _generate_friendly_error_message(
     exc: Exception,
     default_msg: str,
@@ -60,6 +77,11 @@ def _generate_friendly_error_message(
     *,
     user_id: str | None = None,
 ) -> str:
+    # Runtime upstream failures carry their own structured detail; surface it
+    # directly instead of routing through the LLM rephraser (whose keyword
+    # filter never matches "Runtime service returned HTTP 401").
+    if isinstance(exc, RuntimeUpstreamError):
+        return f"Runtime call failed: {_runtime_upstream_detail(exc)}"
     if not model_id or not user_id or not tenant_id or not _is_llm_related_error(exc):
         return default_msg
     try:
@@ -408,13 +430,26 @@ def _setup_no_set_and_execute(
             user_id=user_id,
             tenant_id=tenant_id,
         )
-    except Exception:
+    except RuntimeUpstreamError as exc:
+        # Distinguish runtime dispatch failures (auth windows, runtime 5xx)
+        # from query-generation failures so the persisted error_message
+        # reflects the actual broken segment instead of a fixed string.
+        detail = _runtime_upstream_detail(exc)
+        logger.exception("No-set dispatch failed for run %d: %s", agent_evaluation_id, detail)
+        update_agent_evaluation_status(
+            agent_evaluation_id=agent_evaluation_id,
+            tenant_id=tenant_id,
+            status=EvalRunStatus.FAILED,
+            error_message=f"Runtime dispatch failed: {detail}",
+            updated_by=user_id,
+        )
+    except Exception as exc:
         logger.exception("No-set setup failed for run %d", agent_evaluation_id)
         update_agent_evaluation_status(
             agent_evaluation_id=agent_evaluation_id,
             tenant_id=tenant_id,
             status=EvalRunStatus.FAILED,
-            error_message="Failed to generate test queries",
+            error_message=f"Failed to generate test queries: {type(exc).__name__}: {exc}"[:500],
             updated_by=user_id,
         )
 
@@ -642,6 +677,22 @@ async def _evaluate_query(
         history=history,
         conversation_id=conversation_id,
     )
+    # Empty-output guard: when the agent produced no final answer (model
+    # failure, max-steps, or extraction loss), scoring an empty "actual"
+    # invites judge hallucination — vacuous passes on empty expected, JSON
+    # format errors in code evaluators. Skip the judges, mark the case as
+    # a scoring failure so it lands in fail_count instead of a fake pass.
+    if not str(answer_text or "").strip():
+        logger.warning(
+            "_evaluate_query empty answer: agent_id=%s version=%s query_len=%s events=%s",
+            agent_id,
+            agent_version_no,
+            len(query or ""),
+            len(events or []),
+        )
+        score = {ev["name"]: 0.0 for ev in evaluators.values() if ev.get("name")}
+        reason = {ev["name"]: _EMPTY_ANSWER_REASON for ev in evaluators.values() if ev.get("name")}
+        return answer_text, events, score, reason
     if evaluators:
         score, reason = _score_with_evaluators(
             evaluators=evaluators,

@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -170,6 +171,40 @@ async def test_scoped_stop_cancels_detached_worker(monkeypatch, payload, runtime
     runtime.finish.assert_called_once_with(runtime.begin.call_args.args[0], "stopped")
     runtime.journal.return_value.repair_terminal.assert_called_once_with("stopped")
     runtime.release.assert_called_once_with(runtime.info, 42, "actor", "stopped")
+
+
+@pytest.mark.asyncio
+async def test_prepared_execution_retains_occupancy_until_worker_cleanup(monkeypatch, payload, runtime):
+    running = asyncio.Event()
+    detached = asyncio.Event()
+    worker = Future()
+    assert worker.set_running_or_notify_cancel()
+    runtime.info.thread_future = worker
+
+    async def runner(_info, **_kwargs):
+        try:
+            running.set()
+            await asyncio.Future()
+            yield
+        finally:
+            detached.set()
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(payload, ACTOR)
+    producer, = runtime.tasks
+    try:
+        await asyncio.wait_for(running.wait(), timeout=2)
+        runtime.stop.return_value = True
+        await asyncio.wait_for(detached.wait(), timeout=2)
+        await asyncio.sleep(0)
+        runtime.finish.assert_not_called()
+        runtime.release.assert_not_called()
+    finally:
+        worker.set_result(None)
+        await asyncio.wait_for(producer, timeout=2)
+
+    runtime.release.assert_called_once_with(runtime.info, 42, "actor", "stopped")
+    runtime.finish.assert_called_once_with(runtime.begin.call_args.args[0], "stopped")
 
 
 @pytest.mark.asyncio

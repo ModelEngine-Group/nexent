@@ -2321,7 +2321,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                     "index_names": ["kb-one"], "document_paths": ["report.txt"],
                 }
             assert turn["automation"] == {
-                "agent_id": 7, "agent_version_no": 2, "model_id": 11 if use_workbench else None,
+                # Automation retains the requested model. This request leaves model selection to the Agent.
+                "agent_id": 7, "agent_version_no": 2, "model_id": None,
                 "tool_params": automation_params,
                 "has_attachments": False,
             }
@@ -2484,7 +2485,17 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
             return
         if northbound:
-            await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata)
+            def prepare_followup():
+                nonlocal reference, snapshot, pending, confirmed
+                reference = reference.model_copy(update={"run_id": "d" * 32})
+                snapshot = snapshot.model_copy(update={"run_id": reference.run_id})
+                pending = SimpleNamespace(**(vars(pending) | {"reference": reference}))
+                confirmed = SimpleNamespace(**(vars(confirmed) | {"reference": reference}))
+                calls.clear()
+                state.clear()
+                state["status"] = "pending"
+
+            await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata, prepare_followup)
             assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
             return
 
@@ -2573,13 +2584,13 @@ async def _assert_public_prepared_turn_over_signed_http(
     assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
 
 
-async def _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata):
-    from unittest.mock import AsyncMock, Mock
+async def _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata, prepare_followup):
+    from unittest.mock import AsyncMock, Mock, call
 
     from contracts.authentication import NorthboundContext
     from management.api import northbound as northbound_api
     from management.services import northbound as northbound_service
-    from management.services.agent import prepared_turn
+    from management.services.agent import prepared_turn, runtime_client
     from runtime.agentos import resume
 
     async def authenticate(request):
@@ -2613,10 +2624,22 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
     monkeypatch.setattr(northbound_service, "log_token_usage", log_usage)
 
     stopped_id = "c" * 32
-    pending = SimpleNamespace(reference=reference.model_copy(update={"run_id": stopped_id}))
-    cancel = Mock(return_value={
-        "conversation_id": reference.conversation_id, "status": "stopped", "cancellation_requested": True,
-    })
+    pending = SimpleNamespace(
+        reference=reference.model_copy(update={"run_id": stopped_id}),
+        user_id=actor.user_id, tenant_id=actor.tenant_id, assistant_message_id=None,
+    )
+    scope = (reference.conversation_id, actor.user_id, actor.tenant_id)
+    occupied = {"runtime": True, "management": True, "allow_close": False}
+
+    def read_execution(run_id, user_id, tenant_id, conversation_id, *, request_stop=False, prevent_start=False):
+        assert (conversation_id, user_id, tenant_id) == scope and run_id == stopped_id
+        assert prevent_start is request_stop
+        return {
+            "conversation_id": conversation_id, "status": "running" if occupied["runtime"] else "stopped",
+            "cancellation_requested": True,
+        }
+
+    cancel = Mock(side_effect=read_execution)
 
     body = {"query": "test", "agent_name": "test-agent", "metadata": metadata}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management), base_url="http://management") as caller:
@@ -2626,13 +2649,44 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
         foreign_tenant = await caller.post("/nb/v1/chat/run", json=followup, headers={"Authorization": "foreign"})
         foreign_user = await caller.post("/nb/v1/chat/run", json=followup,
                                          headers={"Authorization": actor.tenant_id, "X-Test-Actor": "foreign"})
-        monkeypatch.setattr(prepared_turn.store, "pending_turn", lambda *scope: pending if scope == (
-            reference.conversation_id, actor.user_id, actor.tenant_id,
-        ) else None)
-        monkeypatch.setattr(resume, "read_execution", cancel)
-        monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=False))
-        stop = await caller.get(f"/nb/v1/chat/stop/{reference.conversation_id}",
-                                headers={"Authorization": actor.tenant_id})
+        stop_path = f"/nb/v1/chat/stop/{reference.conversation_id}"
+        auth = {"Authorization": actor.tenant_id}
+        with monkeypatch.context() as stop_patches:
+            stop_patches.setattr(prepared_turn.store, "pending_turn", lambda *requested: (
+                pending if requested == scope and occupied["management"] else None
+            ))
+            stop_patches.setattr(resume, "active_execution", lambda *requested: (
+                stopped_id if requested == scope and occupied["runtime"] else None
+            ))
+            stop_patches.setattr(resume, "read_execution", cancel)
+            stop_patches.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=False))
+            stop_patches.setattr(runtime_client, "_NORTHBOUND_STOP_WAIT_SECONDS", 0.4)
+
+            def close_staged(turn):
+                assert turn is pending
+                if occupied["allow_close"]:
+                    occupied["management"] = False
+
+            stop_patches.setattr(prepared_turn.store, "close_turn", close_staged)
+            for blocker in ("runtime", "management"):
+                waiting = await caller.get(stop_path, headers=auth)
+                assert waiting.status_code == 409
+                assert waiting.json()["code"] == "NORTHBOUND_STOP_IN_PROGRESS"
+                assert waiting.headers["Retry-After"] == "1"
+                if blocker == "runtime":
+                    assert occupied["runtime"]
+                    occupied["runtime"] = False
+                else:
+                    assert occupied["management"]
+
+            occupied["allow_close"] = True
+            stop_patches.setattr(runtime_client, "_NORTHBOUND_STOP_WAIT_SECONDS", 5)
+            stop = await caller.get(stop_path, headers=auth)
+            assert not occupied["management"]
+
+        prepare_followup()
+        continued = await caller.post("/nb/v1/chat/run", json=followup,
+                                      headers={**auth, "Idempotency-Key": "next-external-key"})
     assert response.status_code == 200
     assert foreign_tenant.status_code == foreign_user.status_code == 403
     assert response.headers["X-Request-Id"] == "northbound-request"
@@ -2645,17 +2699,23 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
     assert [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")] == [
         created, {"type": "final_answer", "content": "answer", "unit_index": 0, "answer_phase": "complete"},
     ]
-    claim_external.assert_awaited_once_with("external-key")
+    assert claim_external.await_args_list == [call("external-key"), call("next-external-key")]
     legacy_write.assert_not_called()
     legacy_dispatch.assert_not_awaited()
     assert stop.status_code == 200 and stop.json() == {
         "message": f"successfully stopped agent run for user_id {actor.user_id}, run_id {reference.conversation_id}",
         "data": reference.conversation_id, "requestId": "northbound-request",
     }
-    cancel.assert_called_once_with(
-        stopped_id, actor.user_id, actor.tenant_id, reference.conversation_id, request_stop=True, prevent_start=True,
-    )
-    assert [call.kwargs["call_function_name"] for call in log_usage.call_args_list] == ["run_chat", "stop_chat_stream"]
+    stop_calls = [item for item in cancel.call_args_list if item.kwargs["request_stop"]]
+    assert stop_calls == [call(stopped_id, actor.user_id, actor.tenant_id, reference.conversation_id,
+                               request_stop=True, prevent_start=True)] * 3
+    assert continued.status_code == 200 and continued.headers["conversation_id"] == str(reference.conversation_id)
+    assert [json.loads(line[6:]) for line in continued.text.splitlines() if line.startswith("data: ")] == [
+        {"type": "final_answer", "content": "answer", "unit_index": 0, "answer_phase": "complete"},
+    ]
+    assert [item.kwargs["call_function_name"] for item in log_usage.call_args_list] == [
+        "run_chat", "stop_chat_stream", "run_chat",
+    ]
     assert all(call.kwargs["related_id"] == reference.conversation_id for call in log_usage.call_args_list)
 
 

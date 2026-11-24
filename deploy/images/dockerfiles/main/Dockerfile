@@ -81,9 +81,6 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 COPY VERSION /opt/nexent/VERSION
 RUN /opt/backend/.venv/bin/python -B -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
-COPY deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
-COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
-COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 RUN chmod +x /opt/nexent/scripts/*.sh
 RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \

@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Bind prepared Memory tools to an admitted Runtime conversation."""
 
+import asyncio
 import logging
 
 import httpx
@@ -9,6 +10,7 @@ from contracts.agentos import AgentMemoryStore, AgentMemoryStored, ManagementOpe
 from contracts.constants import environment
 from infrastructure.agent_tool_config import STORE_MEMORY_TOOL, build_store_memory_tool
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
+from infrastructure.memory_io import memory_write_deadline, remaining_time
 from nexent.memory.service import MemoryService
 from runtime.agentos.memory import get_memory_store_service
 
@@ -47,13 +49,22 @@ def materialize_memory(resource, actor: ServicePrincipal, conversation_id: int |
         raise ValueError("Unsupported prepared Memory store binding")
 
     async def store(payload):
+        deadline = memory_write_deadline()
+        async with asyncio.timeout(remaining_time(deadline)):
+            return await bounded_store(payload, deadline)
+
+    async def bounded_store(payload, deadline):
         receipt = await get_memory_store_service().store(AgentMemoryStore(
             agent_id=resource.agent_id, conversation_id=conversation_id, content=payload["content"],
             idempotency_key=payload["idempotency_key"],
-        ), actor)
-        await notify_memory_stored(AgentMemoryStored(
-            memory_id=receipt.memory_id, agent_id=resource.agent_id, conversation_id=conversation_id,
-        ), actor)
+        ), actor, deadline=deadline)
+        try:
+            async with asyncio.timeout(max(0.001, remaining_time(deadline) - 0.01)):
+                await notify_memory_stored(AgentMemoryStored(
+                    memory_id=receipt.memory_id, agent_id=resource.agent_id, conversation_id=conversation_id,
+                ), actor)
+        except TimeoutError:
+            logger.warning("External Memory notification exceeded write budget memory_id=%s", receipt.memory_id)
         return receipt.model_dump()
 
     tool = build_store_memory_tool({

@@ -680,7 +680,7 @@ class TestCurrentUserInfo:
                 "user_email": "test@example.com",
                 "user_role": "USER",
                 "permissions": ["agent:create", "agent:read"],
-                "accessibleRoutes": ["chat", "agents"]
+                "accessiblePages": ["chat", "agents"]
             }
         }
         mock_get_user_info.return_value = mock_user_info
@@ -701,7 +701,7 @@ class TestCurrentUserInfo:
         assert data["data"]["user"]["auth_provider"] == "local"
         assert data["data"]["user"]["permissions"] == [
             "agent:create", "agent:read"]
-        assert data["data"]["user"]["accessibleRoutes"] == ["chat", "agents"]
+        assert data["data"]["user"]["accessiblePages"] == ["chat", "agents"]
         mock_get_user_info.assert_called_once_with("user123")
 
     @patch('management.api.identity.user_management.extract_session_id_from_authorization')
@@ -728,7 +728,7 @@ class TestCurrentUserInfo:
                 "user_email": "test@example.com",
                 "user_role": "USER",
                 "permissions": ["agent:read"],
-                "accessibleRoutes": ["chat"]
+                "accessiblePages": ["chat"]
             }
         }
 

@@ -2,6 +2,7 @@
 """Prove automatic independent Ops initialization through the deployment launcher."""
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -35,7 +36,7 @@ def test_ops_database_migration(tmp_path):
 
     def start(**overrides):
         process = subprocess.Popen(
-            ["bash", str(root / "deploy/common/start-backend.sh"), sys.executable, "-c", "print('OPS_READY')"],
+            ["bash", str(root / "deploy/common/start-ops.sh"), sys.executable, "-c", "print('OPS_READY')"],
             env={**env, **overrides}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         processes.append(process)
         return process
@@ -78,30 +79,43 @@ def test_ops_database_migration(tmp_path):
         finish(second)
         assert control_tables(concurrent_db) == 2 and control_tables(business) == 0
 
-        # Prepare only the business migration ledger before launching a waiting consumer.
-        migrations = tmp_path / "main-migrations"
-        migrations.mkdir()
-        init = tmp_path / "main-init.sql"
-        init.write_text("-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.\n"
-                        "CREATE SCHEMA IF NOT EXISTS nexent;\n", encoding="utf-8")
-        result = subprocess.run(["bash", str(root / "deploy/common/run-sql-migrations.sh"), "--migrate"],
-                                env={**env, "NEXENT_SQL_MIGRATION_DIR": str(migrations), "NEXENT_SQL_INIT_FILE": str(init)},
-                                capture_output=True, text=True, timeout=25)
-        assert result.returncode == 0, result.stdout + result.stderr
         waiting_db = "ops_wait_" + uuid4().hex
         databases.add(waiting_db)
-        consumer = start(NEXENT_SQL_STARTUP_MODE="wait", OPS_POSTGRES_DB=waiting_db,
-                         NEXENT_SQL_MIGRATION_DIR=str(migrations), NEXENT_SQL_INIT_FILE=str(init))
+        consumer = subprocess.Popen(
+            ["bash", str(root / "deploy/common/run-ops-sql-migrations.sh"), "--wait"],
+            env={**env, "OPS_POSTGRES_DB": waiting_db},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        processes.append(consumer)
         time.sleep(0.5)
         assert consumer.poll() is None and not exists(waiting_db)
         finish(start(OPS_POSTGRES_DB=waiting_db))
-        finish(consumer)
+        stdout, stderr = consumer.communicate(timeout=25)
+        assert consumer.returncode == 0, stdout + stderr
         assert control_tables(waiting_db) == 2
 
         disabled_db = "ops_disabled_" + uuid4().hex
         databases.add(disabled_db)
         finish(start(OPS_MONITORING_ENABLED="false", OPS_POSTGRES_DB=disabled_db))
         assert not exists(disabled_db)
+
+        # DataProcess does not package Ops SQL helpers, even when monitoring is globally enabled.
+        unrelated_db = "ops_unrelated_" + uuid4().hex
+        databases.add(unrelated_db)
+        launcher = tmp_path / "data-process"
+        launcher.mkdir()
+        shutil.copy(root / "deploy/common/start-backend.sh", launcher / "start-backend.sh")
+        unrelated = subprocess.Popen(
+            ["bash", str(launcher / "start-backend.sh"), sys.executable, "-c",
+             "import os; assert os.environ['OPS_MONITORING_ENABLED'] == 'true'; print('OPS_READY')"],
+            env={**env, "OPS_MONITORING_ENABLED": "true", "OPS_POSTGRES_DB": unrelated_db},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        processes.append(unrelated)
+        finish(unrelated)
+        assert not exists(unrelated_db)
+        assert not (launcher / "run-ops-sql-migrations.sh").exists()
+
         finish(start(OPS_POSTGRES_DB=business), success=False)
         finish(start(OPS_POSTGRES_DB="o" * 64), success=False)
         assert control_tables(business) == 0
