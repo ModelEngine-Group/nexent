@@ -3,35 +3,22 @@
 """Conversation-only parameter patches validated against frozen outlet rules."""
 
 from contracts.errors.exceptions import ModelOutletValidationError
-from nexent.core.models.sampling import without_unset_sampling
-from nexent.core.model_service.profiles.parameter_rules import (
-    overlay_profile_parameters,
-    patch_parameter_values,
-)
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
+from nexent.core.model_service.profiles.parameter_rules import patch_parameter_values
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from nexent.core.model_service.profiles.protocol_parameters import (
     OUTLET_TOKEN_LIMIT_KEYS, without_outlet_token_limits,
 )
 
 from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+from nexent.core.models.sampling import without_unset_sampling
 
 
 def merge_model_preferences(profile, preferences):
-    """Do not discard invalid stored choices or apply creation defaults during a run."""
-    if not isinstance(preferences, dict):
-        raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
-    profile = ensure_outlet_parameter_rules(profile)
+    """Validate conversation values through the shared model profile rules."""
+    from nexent.core.model_service.profiles.runtime_parameters import merge_conversation_parameters
+
     try:
-        submitted = without_unset_sampling(without_outlet_token_limits(preferences))
-        validate_sampling_parameters(submitted)
-        resolved = overlay_profile_parameters(profile, submitted, scope="conversation")
-        values = resolved.parameter_values
-        output = values.get("max_output_tokens", values.get("max_tokens"))
-        context = profile.capabilities.context
-        limits = [value for value in (context.output_limit, context.combined_window) if value is not None]
-        if type(output) is int and limits and output > min(limits):
-            raise ModelOutletValidationError("PARAMETER_LIMIT_EXCEEDED", "/max_output_tokens")
-        return resolved
+        return merge_conversation_parameters(profile, preferences)
     except ParameterValidationError as error:
         raise ModelOutletValidationError(error.category, error.path) from None
 

@@ -437,16 +437,14 @@ async def run_chat(
     except PermissionError as e:
         logging.error(f"Permission denied while running northbound chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except RuntimeUpstreamError as e:
+        return Response(content=e.content, status_code=e.status_code, headers=e.headers)
     except RuntimeServiceTimeoutError as e:
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except RuntimeServiceUnavailableError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
-    except AppException:
-        # Let the global AppException handler map error codes to HTTP status
-        # (runtime metadata / MCP header passthrough failures rely on this).
+    except (AppException, HTTPException):
         raise
-    except HTTPException as e:
-        raise e
     except Exception as e:
         logging.error(f"Failed to run chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
@@ -1046,13 +1044,15 @@ async def delete_documents(
                     index_name,
                     redis_error,
                 )
-                result["redis_cleanup_error"] = str(redis_error)
+                result["redis_cleanup_error"] = "Redis cleanup could not be completed."
                 original_message = result.get("message", "Documents deleted successfully")
-                result["message"] = f"{original_message}, but Redis cleanup encountered an error: {str(redis_error)}"
+                result["message"] = f"{original_message}. Redis cleanup could not be completed."
 
         return result
     except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail="Invalid document deletion request"
+        ) from exc
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting documents")
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=RATE_LIMIT_EXCEEDED_DETAIL)

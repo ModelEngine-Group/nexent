@@ -47,6 +47,7 @@ change:
     - 重领按任务、身份和准确触发时间查找已原子提交的自动化 prompt；已开始的周期跳过，未开始及下一周期仍可执行，查找失败不执行。
     reason: 维护和协调器 UT 覆盖启动隔离、锁序、失败和容量边界；不替代实际跨进程业务接纳和分布式流的正式证明。
     test_selectors:
+    - test/backend/app/test_agentos_prepared_run.py::test_fixed_replicas_apply_tenant_quota_before_publishing
     - test/backend/app/test_runtime_application_lifespan.py
     - test/backend/deploy/test_k8s_bootstrap.py
     - test/backend/services/test_runtime_maintenance.py

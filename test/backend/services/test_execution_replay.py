@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from management.services.agent.channels import StreamingChannel
+from infrastructure.agent_stream_channels import StreamingChannel
 from management.services.agent.replay import CompactReplay, subscribe_shared_checkpoint
 
 
@@ -50,8 +50,8 @@ def test_compact_replay_preserves_control_boundaries_and_metric_events():
 async def test_full_replay_survives_trim_and_slow_subscribers(monkeypatch):
     async def discard(**kwargs):
         return None
-    monkeypatch.setattr('management.services.agent.channels.runtime_state_service.append_stream_event_async', discard)
-    monkeypatch.setattr('management.services.agent.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES', 128)
+    monkeypatch.setattr('infrastructure.agent_stream_channels.runtime_state_service.append_stream_event_async', discard)
+    monkeypatch.setattr('infrastructure.agent_stream_channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES', 128)
     channel = StreamingChannel('execution', 'owner', history_size=2)
     await channel.publish(event('parse', 'first-code', unit_index=0))
     await channel.publish(event('token_count', '{"duration":2}', unit_index=1))
@@ -75,7 +75,7 @@ async def test_full_replay_survives_trim_and_slow_subscribers(monkeypatch):
 @pytest.mark.asyncio
 async def test_initial_stream_ids_acknowledge_only_shared_commits(monkeypatch):
     append = AsyncMock(side_effect=["1-0", None])
-    monkeypatch.setattr("management.services.agent.channels.runtime_state_service.append_stream_event_async", append)
+    monkeypatch.setattr("infrastructure.agent_stream_channels.runtime_state_service.append_stream_event_async", append)
     channel = StreamingChannel("conversation", "owner")
     channel.generation = "execution:42"
     await channel.publish(event("final_answer", "a😀", unit_index=0))

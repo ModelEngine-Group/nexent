@@ -17,9 +17,11 @@ from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 from uuid import UUID, uuid4
 
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.agent_execution import recover_expired_executions
+from infrastructure.rdb.model_records import fail_detecting_models_on_startup
 from management.db.execution import repository
 from management.recovery import recover_runtime_tasks
-from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
+from infrastructure.workspace_cleanup import cleanup_orphaned_agent_workspaces
 
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,8 @@ def run_runtime_maintenance(
         if repository.maintenance_completed_at(session, epoch) is not None:
             return False
         recover_runtime_tasks(db_session=session)
+        recover_expired_executions(offline_session=session)
+        fail_detecting_models_on_startup(db_session=session)
         cleanup_orphaned_agent_workspaces(strict=True)
         check_paused(epoch)
         repository.interrupt_active_executions(session)

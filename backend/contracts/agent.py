@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
+from contracts.clarification import ClarificationResponse
+from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.conversation import HistoryItem
+from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
+from contracts.model import WorkbenchGenerationConfig as WorkbenchGenerationConfig
+from contracts.skill import SkillResolution, SkillZipEntry
+from contracts.tool import ToolParamsRequest
+from contracts.agent_prompt import normalize_imported_agent_bundle
 from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.contracts.config import AgentVerificationConfig, ToolConfig
 from pydantic import (
@@ -194,6 +202,9 @@ class AgentRequest(BaseModel):
     _runtime_user_message_index: Optional[int] = PrivateAttr(default=None)
     # Internal provenance is never accepted from serialized client requests.
     _message_source: str = PrivateAttr(default="CHAT")
+    _projection_run_id: str | None = PrivateAttr(default=None)
+    _run_admission_scope: str | None = PrivateAttr(default=None)
+    _track_execution: bool = PrivateAttr(default=False)
     query: str
     clarification_response: Optional[ClarificationResponse] = None
     # Reply annotations ("add to chat" quotes) attached to this turn's user

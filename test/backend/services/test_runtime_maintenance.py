@@ -20,6 +20,8 @@ def maintenance_calls(monkeypatch):
     monkeypatch.setattr(maintenance, "get_db_session", lambda: nullcontext(session))
     monkeypatch.setattr(maintenance, "repository", calls.repository)
     monkeypatch.setattr(maintenance, "recover_runtime_tasks", calls.recover)
+    monkeypatch.setattr(maintenance, "recover_expired_executions", calls.recover_agentos)
+    monkeypatch.setattr(maintenance, "fail_detecting_models_on_startup", calls.recover_models)
     monkeypatch.setattr(maintenance, "cleanup_orphaned_agent_workspaces", calls.cleanup)
     calls.repository.maintenance_completed_at.return_value = None
     return session, calls
@@ -62,6 +64,8 @@ def test_maintenance_checks_full_stop_again_before_publishing(maintenance_calls)
         call.check_paused(EPOCH),
         call.repository.maintenance_completed_at(session, EPOCH),
         call.recover(db_session=session),
+        call.recover_agentos(offline_session=session),
+        call.recover_models(db_session=session),
         call.cleanup(strict=True),
         call.check_paused(EPOCH),
         call.repository.interrupt_active_executions(session),

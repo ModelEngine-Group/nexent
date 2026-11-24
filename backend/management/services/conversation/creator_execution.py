@@ -9,15 +9,11 @@ from contextlib import suppress
 
 from contracts.constants.environment import APP_VERSION, RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
-from contracts.errors.exceptions import ForbiddenError, RuntimeCoordinationUnavailableError
+from contracts.errors.exceptions import AgentRunAlreadyActiveError, ForbiddenError, RuntimeCoordinationUnavailableError
 from infrastructure.redis.run_state import creator_runtime_state_service as runtime_state_service
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.admission import reserve_agent_scope, uses_durable_agent_admission
-from management.services.agent.control import get_owned_execution, read_owned_stream
-from management.services.agent.lifecycle import (
-    AgentRunAlreadyActiveError,
-    agent_run_manager,
-)
+from management.services.agent.control import get_owned_execution
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import (
     create_creation_conversation,
@@ -27,7 +23,9 @@ from management.services.conversation.creator_checkpoints import (
     checkpoint_creator_stream,
 )
 from management.services.conversation.creator_runtime import (
+    agent_run_manager,
     CreatorControl,
+    agent_run_manager,
     claim_creator,
     claim_request,
     launch_creator,
@@ -242,7 +240,10 @@ async def start_creation_turn(
                 execution_id, status, run_scope = owned
                 if run_scope != scope:
                     raise ValueError("Conversation execution belongs to another runtime entrypoint")
-                snapshot = await read_owned_stream(user_id, conversation_id, execution_id)
+                try:
+                    snapshot = await runtime_state_service.read_execution_stream_async(user_id, conversation_id, execution_id)
+                except Exception as exc:
+                    raise RuntimeCoordinationUnavailableError("Creator replay coordination is unavailable") from exc
                 if snapshot is None and status in {"PREPARING", "RUNNING", "FINALIZING"}:
                     if expected_message_id is not None:
                         return unavailable_replay(), conversation_id
@@ -340,13 +341,13 @@ async def start_creation_turn(
             user_id=user_id,
             tenant_id=tenant_id,
             status="streaming",
+            streaming_owner="management",
         )
 
     try:
         if coordinated:
-            await control.admit(early=True)
             if conversation_id is not None:
-                durable = await reserve_agent_scope(scope, conversation_id, user_id, tenant_id, control.execution.future)
+                durable = await reserve_agent_scope(scope, conversation_id, user_id, tenant_id, control.transport_done)
                 control.bind_reservation(durable)
                 history = await run_blocking(
                     "creator-admitted-history", _read_creator_history, conversation_id, user_id, ref.agent_id,
@@ -367,7 +368,7 @@ async def start_creation_turn(
                 conversation_id = await step(run_blocking(
                     "creator-allocate-conversation", create_creation_conversation, **history_options,
                 ))
-                durable = await reserve_agent_scope(scope, conversation_id, user_id, tenant_id, control.execution.future)
+                durable = await reserve_agent_scope(scope, conversation_id, user_id, tenant_id, control.transport_done)
                 control.bind_reservation(durable)
         request.__dict__["_creator_generation"] = control.generation
         effective.__dict__["_creator_control"] = control
@@ -450,6 +451,7 @@ async def start_creation_turn(
                     raise
                 logger.exception("Creator failed to clean up preparation run_id=%s", control.generation)
             finally:
+                control.close_transport()
                 if durable is not None:
                     durable.outcome = "stopped" if isinstance(exc, asyncio.CancelledError) else "failed"
                     durable.close()

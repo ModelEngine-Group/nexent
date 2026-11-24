@@ -136,7 +136,7 @@ def test_runtime_maintenance_is_explicitly_submitted_after_bootstrap(chart_dirs)
 
     rendered = _template(chart, "example", [*args, "--set", "global.businessPaused=true",
         "--set", "global.renderRuntimeMaintenanceJob=true",
-        "--show-only", "charts/nexent-runtime/templates/maintenance-job.yaml"])
+        "--show-only", "charts/nexent-config/templates/maintenance-job.yaml"])
     assert rendered.returncode == 0, rendered.stderr
     job, = _documents(rendered.stdout)
     assert job["kind"] == "Job" and job["metadata"]["name"] == f"nexent-runtime-maintenance-{EPOCH}"
@@ -145,6 +145,7 @@ def test_runtime_maintenance_is_explicitly_submitted_after_bootstrap(chart_dirs)
     assert pod["spec"]["serviceAccountName"] == "nexent-runtime-maintenance"
     assert pod["spec"]["automountServiceAccountToken"] is True
     container, = pod["spec"]["containers"]
+    assert container["image"] == "nexent/nexent-management:latest"
     assert container["command"] == ["python", "-m", "management.maintenance"]
     assert container["args"] == ["--namespace", "nexent", "--release", "example", "--epoch", EPOCH]
     assert "ports" not in container and "readinessProbe" not in container

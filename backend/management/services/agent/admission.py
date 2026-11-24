@@ -7,7 +7,7 @@ import logging
 from concurrent.futures import Future
 
 from contracts.constants.environment import NEXENT_MAINTENANCE_EPOCH, NEXENT_RECOVERY_MODE, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
-from contracts.errors.exceptions import RuntimeCapacityExceededError
+from contracts.errors.exceptions import AgentRunAlreadyActiveError, RuntimeCapacityExceededError
 from infrastructure.redis.run_state import runtime_state_service
 from management.services.execution_coordination import (
     RUNTIME_OWNER_INSTANCE_ID,
@@ -18,8 +18,7 @@ from management.services.execution_coordination import (
     transition_runtime_execution,
 )
 from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded
-from runtime.executions import AgentRunAlreadyActiveError
-from runtime.thread_management import runtime_thread_manager
+from management.thread_management import config_thread_manager
 
 logger = logging.getLogger(__name__)
 _coordination_tasks: set[asyncio.Task] = set()
@@ -30,7 +29,7 @@ def uses_durable_agent_admission() -> bool:
 
 
 async def _run_coordination(operation, *args, **kwargs):
-    return await runtime_thread_manager.run(
+    return await config_thread_manager.run(
         "control-io",
         ManagedTaskSpec(task_name="agent-execution-coordination", owner=__name__),
         operation,

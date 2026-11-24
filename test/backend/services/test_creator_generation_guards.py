@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import fakeredis
 import pytest
 
-from contracts.agent import NL2SkillRunRequest
 from contracts.errors.exceptions import (
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
@@ -19,7 +18,7 @@ from management.services.agent import channels, lifecycle, run
 from management.services.conversation import creator_runtime
 from management.services.conversation.creator_runtime import CreatorControl
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
-from services import nl2skill_service
+from runtime.agentos import ephemeral
 
 
 def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
@@ -130,31 +129,25 @@ def test_durable_creator_owner_replaces_obsolete_lease_without_waiting_for_redis
 
 
 @pytest.mark.asyncio
-async def test_skill_creator_binds_the_admitted_worker_without_signalling_stop(
-    monkeypatch,
-):
+async def test_skill_creator_binds_the_admitted_worker_without_signalling_stop(monkeypatch):
     info = SimpleNamespace(stop_event=Event())
-    monkeypatch.setattr(
-        nl2skill_service, "build_nl2skill_run_info", AsyncMock(return_value=info)
-    )
-    control = CreatorControl()
-    control.execution = SimpleNamespace(future=MagicMock())
+    execution = MagicMock()
+    deferred = object()
     calls = []
 
     async def agent_run(run_info, **kwargs):
         calls.append((run_info, kwargs))
         yield json.dumps({"type": "final_answer", "content": "plain output"})
 
-    monkeypatch.setattr(nl2skill_service, "agent_run", agent_run)
-    request = NL2SkillRunRequest(query="build")
-    request.__dict__["_creator_control"] = control
-    stream = await nl2skill_service.create_nl2skill_stream(request, "tenant", "en")
-    events = [json.loads(event[6:]) async for event in stream]
+    monkeypatch.setattr(ephemeral, "agent_run", agent_run)
+    events = [event async for event in ephemeral._observer_stream(
+        info, execution, deferred, creator_mode="nl2skill",
+    )]
     assert calls[0][0] is info
-    assert calls[0][1]["execution"] is control.execution
-    assert calls[0][1]["deferred_run"] is control.deferred
-    assert events[-1]["type"] == "done"
-    assert info.stop_event is control.stop_event and not control.stop_event.is_set()
+    assert calls[0][1]["execution"] is execution
+    assert calls[0][1]["deferred_run"] is deferred
+    assert events[-1] == "event: agentos_execution_complete\ndata: {}\n\n"
+    assert not info.stop_event.is_set()
 
 
 @pytest.mark.asyncio
@@ -179,3 +172,28 @@ async def test_creator_admission_reports_overload_and_cancels_queued_worker(
     if queued:
         assert control.stop_event.is_set()
         manager.cancel.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested,expected", [("retired", False), ("current", True)])
+async def test_remote_creator_stop_is_fenced_by_the_request_generation(monkeypatch, requested, expected):
+    state = SimpleNamespace(
+        enabled=True,
+        get_run_state_async=AsyncMock(return_value={"status": "running", "generation": "current"}),
+        creator_lease_async=AsyncMock(return_value=True),
+        _run_managed=AsyncMock(return_value=True),
+        set_cancel_signal=MagicMock(),
+    )
+    monkeypatch.setattr(creator_runtime, "runtime_state_service", state)
+    monkeypatch.setattr(creator_runtime, "agent_run_manager", SimpleNamespace(get_agent_run_info=lambda *_: None))
+
+    result = await creator_runtime.stop_creator(91, "owner", requested)
+
+    assert result is expected
+    state.get_run_state_async.assert_awaited_once_with("owner", 91)
+    if expected:
+        state._run_managed.assert_awaited_once_with(
+            "creator-stop", state.set_cancel_signal, "owner", 91, "current",
+        )
+    else:
+        state._run_managed.assert_not_awaited()

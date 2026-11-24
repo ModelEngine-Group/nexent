@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from runtime.identity import ensure_request_run_id, resolve_execution_run_id
-from runtime.workspace import create_run_workspace
+from infrastructure.workspace_paths import create_run_workspace
 
 
 def test_request_identity_is_stable_and_separate_from_public_identifiers():
@@ -56,16 +56,6 @@ def test_distributed_identity_helpers_forward_only_server_owned_reference(monkey
         identity.current_reference_options('', 'user', 7)
     assert identity.current_reference_options('tenant', 'user', 7) == {
         'run_ref': coordinator.current_reference.return_value}
-    bind, associate = Mock(), Mock()
-    monkeypatch.setattr(sandbox_runtime, 'bind_request_reservation', bind)
-    monkeypatch.setattr(sandbox_runtime, 'associate_request', associate)
-    identity.bind_run_reservation(request, 'user')
-    identity.associate_run_request(request, assistant_message_id=19)
-    bind.assert_called_once_with(request, 'user')
-    associate.assert_called_once_with(request, assistant_message_id=19)
-    options = identity.distributed_run_options(request, 'tenant', kind='DEBUG')
-    assert options['kind'] == 'DEBUG' and options['tenant_id'] == 'tenant'
-    assert options['execution_run_id'] == request._runtime_execution_run_id
 
 
 @pytest.mark.asyncio

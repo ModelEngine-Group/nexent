@@ -21,10 +21,8 @@ APPLICATION_DEPLOYMENTS = {
     "nexent-data-process",
     "nexent-mcp",
     "nexent-gateway",
+    "nexent-ops",
     "nexent-runtime",
-    "nexent-supabase-auth",
-    "nexent-supabase-db",
-    "nexent-supabase-kong",
     "nexent-web",
 }
 INFRASTRUCTURE_DEPLOYMENTS = {
@@ -57,7 +55,7 @@ APPLICATION_PVCS = {
     "nexent-memory-plugins",
     "nexent-logs",
     "nexent-project-config",
-    "nexent-supabase-db",
+    "nexent-trajectory",
 }
 INFRASTRUCTURE_PVCS = {
     "nexent-elasticsearch",
@@ -78,6 +76,7 @@ def _run(
         check=check,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
         env=env,
     )
@@ -422,11 +421,71 @@ def _infrastructure_existing_args() -> list[str]:
 
 
 def _template(chart: Path, release: str, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return _run(["helm", "template", release, str(chart), *args], check=False)
+    baseline = [
+        "--set", "nexent-runtime.replicaCount=1",
+        "--set", "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret",
+    ] if chart.name == "nexent" else []
+    return _run(["helm", "template", release, str(chart), *baseline, *args], check=False)
 
 
 def _documents(rendered: str) -> list[dict]:
     return [document for document in yaml.safe_load_all(rendered) if isinstance(document, dict)]
+
+
+@pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_compose_sql_startup_is_owned_by_management(filename: str) -> None:
+    path = PROJECT_ROOT / "deploy/docker/compose" / filename
+    services = yaml.safe_load(path.read_text(encoding="utf-8"))["services"]
+    management = services["nexent-config"]
+    assert management["environment"]["NEXENT_SQL_STARTUP_MODE"] == "migrate"
+    assert any("/opt/nexent/sql" in str(volume) for volume in management["volumes"])
+    assert "healthcheck" in management
+    for name, service in services.items():
+        if name == "nexent-config":
+            continue
+        environment = service.get("environment", {})
+        if isinstance(environment, list):
+            environment = {key: value for key, _, value in (item.partition("=") for item in environment)}
+        assert environment.get("NEXENT_SQL_STARTUP_MODE", "off") == "off", name
+        assert not any("/opt/nexent/sql" in str(volume) or "/docker-entrypoint-initdb.d/" in str(volume)
+                       for volume in service.get("volumes", [])), name
+    for name in ("nexent-runtime", "nexent-mcp", "nexent-data-process"):
+        assert services[name]["depends_on"]["nexent-config"]["condition"] == "service_healthy"
+
+
+def test_helm_sql_startup_is_owned_by_management(chart_dirs: dict[str, Path]) -> None:
+    rendered = _template(chart_dirs["application"], "nexent", [
+        *_application_dynamic_args(), "--set-file",
+        f"nexent-common.sqlFiles.init={(PROJECT_ROOT / 'deploy/sql/init.sql').as_posix()}",
+    ])
+    assert rendered.returncode == 0, rendered.stderr
+    sql_config = next(document for document in _documents(rendered.stdout)
+                      if document.get("kind") == "ConfigMap" and document["metadata"]["name"] == "nexent-sql-files")
+    assert sql_config["data"]["init.sql"].strip() == (PROJECT_ROOT / "deploy/sql/init.sql").read_text(encoding="utf-8").strip()
+    deployments = {
+        document["metadata"]["name"]: document for document in _documents(rendered.stdout)
+        if document.get("kind") == "Deployment"
+    }
+    for name in ("nexent-config", "nexent-runtime", "nexent-mcp", "nexent-data-process"):
+        pod = deployments[name]["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        env = {item["name"]: item.get("value") for item in container["env"]}
+        assert env["NEXENT_SQL_STARTUP_MODE"] == ("migrate" if name == "nexent-config" else "off")
+        mounts = {item["mountPath"] for item in container.get("volumeMounts", [])}
+        assert ("/opt/nexent/sql" in mounts) == (name == "nexent-config")
+        sql_volumes = [item for item in pod.get("volumes", []) if item.get("name") == "nexent-sql-files"]
+        assert bool(sql_volumes) == (name == "nexent-config")
+        if name != "nexent-config":
+            wait = next(item for item in pod["initContainers"] if item["name"] == "wait-for-management")
+            assert "http://nexent-config:5010/health/ready" in wait["command"][-1]
+            assert "psql" not in " ".join(wait["command"])
+
+    infrastructure = _template(chart_dirs["infrastructure"], "nexent-infrastructure", _infrastructure_dynamic_args())
+    assert infrastructure.returncode == 0, infrastructure.stderr
+    postgres = next(document for document in _documents(infrastructure.stdout)
+                    if document.get("kind") == "Deployment" and document["metadata"]["name"] == "nexent-postgresql")
+    mounts = postgres["spec"]["template"]["spec"]["containers"][0]["volumeMounts"]
+    assert all(not item["mountPath"].startswith("/docker-entrypoint-initdb.d") for item in mounts)
 
 
 def _resource_ids(documents: list[dict]) -> set[tuple[str, str, str, str]]:
@@ -653,7 +712,7 @@ def test_infrastructure_components_cannot_be_scaled(
     assert f"{component} must remain single-replica" in rendered.stderr
 
 
-def test_startup_recovery_deployments_default_to_single_replica_recreate(
+def test_single_replica_recovery_deployments_use_recreate(
     chart_dirs: dict[str, Path],
 ) -> None:
     rendered = _template(

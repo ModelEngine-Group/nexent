@@ -176,6 +176,7 @@ class AgentAutomationFacade:
         try:
             parsed = await automation_intent_analyzer.analyze(AutomationIntentContext(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 message=request.message,
                 timezone=request.timezone,
                 model_id=request.model_id,
@@ -737,11 +738,12 @@ class AgentAutomationFacade:
             raise AutomationNotFoundError("Automation task not found.")
         return _enrich_task_with_agent_name(updated, tenant_id, user_id)
 
-    def delete_task(self, task_id: int, tenant_id: str, user_id: str) -> bool:
+    async def delete_task(self, task_id: int, tenant_id: str, user_id: str) -> bool:
         task = self.get_task(task_id, tenant_id, user_id)
-        self._cancel_active_runs_for_conversation(
+        await self._cancel_active_runs_for_conversation(
             task["conversation_id"],
             user_id,
+            tenant_id,
             "Automation task was deleted.",
         )
         if not agent_automation_db.soft_delete_task(task_id, tenant_id, user_id):
@@ -766,7 +768,7 @@ class AgentAutomationFacade:
         from management.services.automation.runner import agent_automation_runner
         return await agent_automation_runner.execute_task(task, trigger_type="MANUAL")
 
-    def cancel_run(self, run_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def cancel_run(self, run_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         run = agent_automation_db.get_run(run_id, tenant_id, user_id)
         if not run:
             raise AutomationNotFoundError("Automation run not found.")
@@ -775,12 +777,24 @@ class AgentAutomationFacade:
             return run
 
         from management.services.automation.runner import agent_automation_runner
+
+        if run.get("projection_message_index") is not None:
+            canceled = agent_automation_db.cancel_run(
+                run_id, tenant_id, user_id, "Automation run was canceled by user.",
+            )
+            if canceled:
+                await agent_automation_runner.cancel_runtime_run(
+                    run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
+                )
+            return canceled or agent_automation_db.get_run(run_id, tenant_id, user_id) or run
         task = self.get_task(run["task_id"], tenant_id, user_id)
         canceled, won = agent_automation_runner.cancel_run_by_user(run, task)
-        # Only the transition winner requests a stop, fenced to this execution.
         if won:
-            self._request_conversation_stop(run["conversation_id"], user_id, run_id)
+            await agent_automation_runner.cancel_runtime_run(
+                run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
+            )
         return canceled
+
 
     def delete_run(self, run_id: int, tenant_id: str, user_id: str) -> bool:
         run = agent_automation_db.get_run(run_id, tenant_id, user_id)
@@ -826,39 +840,26 @@ class AgentAutomationFacade:
         )
         return True
 
-    def on_conversation_deleted(self, conversation_id: int, user_id: str) -> int:
-        self._cancel_active_runs_for_conversation(
+    async def on_conversation_deleted(self, conversation_id: int, user_id: str, tenant_id: str) -> int:
+        await self._cancel_active_runs_for_conversation(
             conversation_id,
             user_id,
+            tenant_id,
             "Conversation was deleted.",
         )
         return agent_automation_db.soft_delete_task_by_conversation(conversation_id, user_id)
 
-    def _cancel_active_runs_for_conversation(self, conversation_id: int, user_id: str, reason: str) -> None:
-        self._request_conversation_stop(conversation_id, user_id)
-        agent_automation_db.cancel_runs_by_conversation(conversation_id, user_id, reason)
+    async def _cancel_active_runs_for_conversation(self, conversation_id: int, user_id: str, tenant_id: str, reason: str) -> None:
+        await self._request_conversation_stop(conversation_id, user_id, tenant_id)
+        agent_automation_db.cancel_runs_by_conversation(conversation_id, user_id, tenant_id, reason)
 
-    def _request_conversation_stop(self, conversation_id: int, user_id: str, run_id=None) -> None:
+    async def _request_conversation_stop(self, conversation_id: int, user_id: str, tenant_id: str) -> None:
+        from management.services.automation.runner import agent_automation_runner
+
         try:
-            from runtime.identity import uses_distributed_runtime
-
-            if uses_distributed_runtime():
-                from management.db.identity.user_tenant import get_user_tenant_by_user_id
-                from runtime.sandbox_cancel import request_distributed_cancel
-
-                identity = get_user_tenant_by_user_id(user_id)
-                if not identity or not identity.get('tenant_id'):
-                    raise ValueError('Conversation cancellation has no trusted tenant identity')
-                request_distributed_cancel(identity['tenant_id'], user_id, conversation_id, run_id)
-                return
-            from management.services.automation.runner import agent_automation_runner
-            if run_id is None:
-                agent_automation_runner.cancel_for_conversation(conversation_id, user_id)
-            else:
-                agent_automation_runner.cancel_for_conversation(conversation_id, user_id, run_id)
+            await agent_automation_runner.cancel_for_conversation(conversation_id, user_id, tenant_id)
         except Exception:
-            logger.warning('Conversation stop could not be confirmed conversation_id=%s', conversation_id,
-                           exc_info=True)
+            logger.warning("Unable to request automation cancellation for conversation_id=%s", conversation_id)
 
 
 agent_automation_facade = AgentAutomationFacade()

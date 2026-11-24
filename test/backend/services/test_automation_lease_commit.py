@@ -89,7 +89,7 @@ async def test_scheduled_admission_fences_a_previously_started_occurrence(
     execute = AsyncMock(return_value={"status": "SUCCEEDED"})
     finish = Mock(return_value={"status": "SKIPPED", "error_code": expected_reason})
     find_marker = Mock(return_value=marker)
-    find_root = Mock(return_value=object() if root_active else None)
+    find_root = AsyncMock(return_value=object() if root_active else None)
     create_run = Mock(return_value={"run_id": 22})
 
     @contextmanager
@@ -101,26 +101,27 @@ async def test_scheduled_admission_fences_a_previously_started_occurrence(
     monkeypatch.setattr(repository, "has_active_run_for_conversation", lambda *_args: False)
     monkeypatch.setattr(repository, "has_started_scheduled_occurrence", find_marker)
     monkeypatch.setattr(repository, "create_run", create_run)
-    monkeypatch.setattr(module, "uses_durable_agent_admission", lambda: True)
-    monkeypatch.setattr(module.execution_db, "find_active_execution", find_root)
+    monkeypatch.setattr(module, "forward_active_run", find_root)
     monkeypatch.setattr(runner, "_execute_active_run", execute)
     monkeypatch.setattr(runner, "_finish_run", finish)
 
     result = await runner.execute_task(task, scheduled_fire_at=scheduled, lease_owner="scheduler-b")
 
-    find_marker.assert_called_once_with(session, task["task_id"], task["tenant_id"], task["user_id"], scheduled)
+    find_root.assert_awaited_once_with(task["conversation_id"], task["user_id"], task["tenant_id"])
+    if root_active:
+        find_marker.assert_not_called()
+    else:
+        find_marker.assert_called_once_with(session, task["task_id"], task["tenant_id"], task["user_id"], scheduled)
     assert create_run.call_args.kwargs["db_session"] is session
     run = {"run_id": 22, "_lease_owner": "scheduler-b"}
     if expected_reason is None:
         assert result == {"status": "SUCCEEDED"}
-        execute.assert_awaited_once_with(run, task, scheduled, "SCHEDULED")
+        execute.assert_awaited_once_with(run, task)
         finish.assert_not_called()
-        find_root.assert_not_called()
     else:
         assert result == {"status": "SKIPPED", "error_code": expected_reason}
         assert finish.call_args.args[:3] == (run, task, "SKIPPED")
         assert finish.call_args.args[3]["error_code"] == expected_reason
-        find_root.assert_called_once_with(session, task["tenant_id"], f"conversation:{task['conversation_id']}")
         execute.assert_not_called()
 
 

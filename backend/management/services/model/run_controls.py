@@ -8,6 +8,7 @@ from typing import Any
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 
 from contracts.errors.exceptions import RunModelControlsError
+from infrastructure.agent_model_overrides import overlay_root_model
 from management.db.model.repository import get_model_by_model_id
 
 

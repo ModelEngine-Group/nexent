@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
+from infrastructure.workspace_cleanup import cleanup_orphaned_agent_workspaces
 
 
 def test_cleanup_orphaned_agent_workspaces_removes_only_run_directories(tmp_path):
@@ -55,9 +55,9 @@ def test_cleanup_orphaned_agent_workspaces_logs_run_removal_failure(tmp_path):
     run_dir.mkdir(parents=True)
 
     with patch(
-        "services.workspace_cleanup_service.shutil.rmtree",
+        "infrastructure.workspace_cleanup.shutil.rmtree",
         side_effect=OSError("busy"),
-    ), patch("services.workspace_cleanup_service.logger.error") as error:
+    ), patch("infrastructure.workspace_cleanup.logger.error") as error:
         removed = cleanup_orphaned_agent_workspaces(str(root))
 
     assert removed == 0
@@ -69,7 +69,7 @@ def test_strict_workspace_cleanup_propagates_run_removal_failure(tmp_path):
     run_dir = tmp_path / "user-1" / ("d" * 32)
     run_dir.mkdir(parents=True)
 
-    with patch("services.workspace_cleanup_service.shutil.rmtree", side_effect=PermissionError("busy")):
+    with patch("infrastructure.workspace_cleanup.shutil.rmtree", side_effect=PermissionError("busy")):
         with pytest.raises(PermissionError, match="busy"):
             cleanup_orphaned_agent_workspaces(str(tmp_path), strict=True)
 

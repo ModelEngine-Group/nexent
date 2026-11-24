@@ -6,7 +6,6 @@
 {{- if and $epoch (not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $epoch)) -}}
 {{- fail "global.maintenanceEpoch must be a canonical UUID" -}}
 {{- end -}}
-{{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
   {{- if not $epoch -}}
@@ -66,15 +65,21 @@ spec:
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-secret: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
-        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
-        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "runtimeImage" "" .Values.global | quote }}
     spec:
       enableServiceLinks: false
 {{- if eq (default "docker" $global.sandboxProvider) "kubernetes" }}
       serviceAccountName: nexent-runtime-sandbox
 {{- end }}
-{{- if $kubernetesSandbox }}
       initContainers:
+        - name: wait-for-management
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - until curl --noproxy '*' -fsS http://nexent-config:5010/health/ready >/dev/null; do sleep 2; done
+{{- if $kubernetesSandbox }}
         - name: sandbox-workspace-permissions
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
@@ -161,11 +166,13 @@ spec:
             - name: NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT
               value: {{ default false $global.sandboxSingleNodeDevelopment | toString | quote }}
             - name: NEXENT_SQL_STARTUP_MODE
-              value: "wait"
+              value: "off"
+{{- if $epoch }}
             - name: NEXENT_RECOVERY_MODE
               value: "maintenance"
             - name: NEXENT_MAINTENANCE_EPOCH
               value: {{ $epoch | quote }}
+{{- end }}
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy
@@ -193,9 +200,6 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
           volumeMounts:
-            - name: nexent-sql-files
-              mountPath: /opt/nexent/sql
-              readOnly: true
             - name: nexent-workspace
               mountPath: /mnt/nexent
             - name: nexent-skills
@@ -214,19 +218,6 @@ spec:
               memory: {{ .Values.resources.backend.limits.memory }}
               cpu: {{ .Values.resources.backend.limits.cpu }}
       volumes:
-        - name: nexent-sql-files
-          configMap:
-            name: nexent-sql-files
-            items:
-              - key: init.sql
-                path: init.sql
-              - key: migrations-.keep
-                path: migrations/.keep
-{{ range $name := default (list) $sqlFileNames.migrations }}
-              - key: {{ printf "migrations-%s" $name | quote }}
-                path: {{ printf "migrations/%s" $name | quote }}
-{{ end }}
-
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

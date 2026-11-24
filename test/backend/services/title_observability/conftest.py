@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real tracing and worker contexts with isolated external dependencies."""
 
-import asyncio
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,13 +13,6 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from pytest_mock import MockerFixture
 
-from nexent.core.concurrency import (
-    LanePolicy,
-    ThreadManager,
-    clear_default_thread_manager,
-    get_default_thread_manager,
-    set_default_thread_manager,
-)
 from nexent.monitor import MonitoringConfig, get_monitoring_manager
 
 
@@ -55,18 +47,13 @@ def runtime(service, monkeypatch, mocker):
     ))
     monkeypatch.setattr(manager, "_tracer", tracer)
     monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
-    threads = ThreadManager("title-tests", {"model-tool-io": LanePolicy("model-tool-io", 2, 4)})
-    previous = get_default_thread_manager()
-    threads.start()
-    set_default_thread_manager(threads)
-
     def prompt(language, operation, values):
         with tracer.start_as_current_span("title.prepare"):
             return SimpleNamespace(system="Generate a title", user=values["question"])
 
-    def model(messages):
+    async def model(**request):
         with tracer.start_as_current_span("model.generate"):
-            return SimpleNamespace(content="Title: " + messages[-1]["content"])
+            return "Title: " + request["user_prompt"]
 
     def persist(*_args, **_kwargs):
         with tracer.start_as_current_span("title.persist"):
@@ -74,10 +61,9 @@ def runtime(service, monkeypatch, mocker):
 
     prepare = mocker.patch.object(service, "compose_auxiliary_prompt", side_effect=prompt)
     mocker.patch.object(service.tenant_config_manager, "get_model_config", return_value={
-        "display_name": "test-model", "model_factory": "openai",
+        "display_name": "test-model", "model_id": 17,
     })
-    adapter = mocker.Mock(side_effect=model)
-    mocker.patch.object(service, "get_llm_adapter_from_config", return_value=adapter)
+    invoke = mocker.patch.object(service, "invoke_chat_prompt", side_effect=model)
     save = mocker.patch.object(service, "rename_conversation", side_effect=persist)
     mocker.patch.object(service, "get_conversation", return_value={
         "conversation_title": "New Conversation", "title_version": 0,
@@ -99,10 +85,6 @@ def runtime(service, monkeypatch, mocker):
 
     yield SimpleNamespace(
         service=service, tracer=tracer, exporter=exporter, manager=manager,
-        app=app, prepare=prepare, adapter=adapter, save=save, model=model,
+        app=app, prepare=prepare, invoke=invoke, save=save, model=model,
     )
-    asyncio.run(threads.shutdown(timeout=2))
-    clear_default_thread_manager(threads)
-    if previous is not None:
-        set_default_thread_manager(previous)
     provider.shutdown()

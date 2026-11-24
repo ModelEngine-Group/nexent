@@ -34,6 +34,7 @@ config:
     configUrl: "http://nexent-gateway:5013"
     elasticsearchService: "http://nexent-gateway:5013/api"
     runtimeUrl: "http://nexent-runtime:5014"
+    managementAgentosUrl: "http://nexent-config:5010"
     mcpServer: "http://nexent-mcp:5011"
     mcpManagementServer: "http://nexent-mcp:5015"
     dataProcessService: "http://nexent-data-process:5012/api"

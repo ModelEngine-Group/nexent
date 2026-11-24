@@ -74,6 +74,8 @@ domains:
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
   NEXENT-SERVICE-REPLICAS: deployment
+  AOS-MODEL: model
+  AOS-TRANSPORT: runtime
   SI-STORAGE: system
   GW-AUTH: system
   AGENT-CORE-CONFIG: agent_config

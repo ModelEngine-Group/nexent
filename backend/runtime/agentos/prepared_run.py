@@ -1,0 +1,321 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Execute signed conversation snapshots and retain Runtime observer events."""
+
+import asyncio
+import json
+import logging
+from concurrent.futures import Future
+from contextlib import aclosing
+from dataclasses import dataclass
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.responses import JSONResponse
+
+from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentRunReference, PreparedAgentRun
+from contracts.constants.environment import (
+    NEXENT_RECOVERY_MODE, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
+)
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.rdb.agent_execution import (
+    ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
+)
+from infrastructure.redis.agent_events import RunJournal
+from infrastructure.redis.run_state import runtime_state_service
+from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
+from nexent.core.agents.context.execution_history import ExecutionHistory
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
+from runtime.adapters.nexent.runner import DeferredAgentRun, agent_run
+from runtime.agentos.prepared_evaluation import (
+    discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
+)
+from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
+from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _AdmissionSlot:
+    """Hold one runtime slot for the lifetime of its worker."""
+
+    token: str
+    worker: Future | None = None
+    execution: object = None
+    deferred: DeferredAgentRun | None = None
+
+    async def start_worker(self, run_id):
+        self.deferred = DeferredAgentRun()
+        self.execution = runtime_thread_manager.submit(
+            "agent-run",
+            ManagedTaskSpec(
+                task_name="agentos-prepared-run", owner="runtime", run_id=run_id,
+                close_hook=self.deferred.cancel, pass_cancel_event=True,
+            ),
+            self.deferred.run,
+        )
+        self.worker = self.execution.future
+        await runtime_thread_manager.wait_until_started(self.execution)
+
+    def cancel_worker(self):
+        if self.deferred is not None and (self.worker is None or not self.worker.done()):
+            self.deferred.cancel()
+
+    def release(self, _completed=None):
+        if self.worker is not None and not self.worker.done():
+            self.worker.add_done_callback(self.release)
+            return
+        agent_run_manager.release_agent_capacity(self.token)
+
+
+async def _control_io(task, function, *args, **kwargs):
+    return await run_blocking(task, function, *args, lane="control-io", owner="runtime", **kwargs)
+
+
+async def _wait_for_stop(identity):
+    while not await _control_io("agentos-prepared-stop", stop_requested, identity):
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+
+async def _snapshot_chunks(info, slot=None):
+    for event in info.agent_config.pre_run_tool_events:
+        yield json.dumps(event, ensure_ascii=False)
+    options = {} if slot is None or slot.execution is None else {
+        "execution": slot.execution, "deferred_run": slot.deferred,
+    }
+    async with aclosing(agent_run(info, thread_manager=runtime_thread_manager, **options)) as chunks:
+        async for chunk in chunks:
+            yield chunk
+
+
+def _execution_record(history, event):
+    value = event.get("content")
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except ValueError:
+        return None, None
+    key = value.get("execution_key") if isinstance(value, dict) else None
+    record = history.get(key) if isinstance(key, str) else None
+    return (key, record) if record is not None and record.reference is None else (None, None)
+
+
+async def _append_event(journal, sequence, kind, payload):
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    await _control_io("agentos-prepared-event", journal.append, sequence, f"event: {kind}\ndata: {data}\n\n")
+
+
+async def _run_snapshot(payload, actor, identity, journal, slot=None):
+    options = {"settle_on_cancel": True} if NEXENT_RECOVERY_MODE == "maintenance" else {}
+    info = await load_prepared_run(payload, actor, prepare_run_snapshot, **options)
+    try:
+        agent_run_manager.register_agent_run(identity.conversation_id, info, identity.user_id)
+    except BaseException:
+        discard_prepared_workspace(info)
+        raise
+
+    status = "failed"
+    try:
+        versions = {
+            "agent_id": payload.resource.agent_id,
+            "agent_version_no": payload.resource.version_no,
+            "model_id": payload.models.llm.model_id,
+            "model_revision": payload.models.llm.revision,
+            "mounted_agents": [
+                {"agent_id": item.agent_id, "version_no": item.version_no}
+                for item in payload.resource.subagents
+            ],
+        }
+        if payload.runtime_metadata_version is not None:
+            versions["runtime_metadata_version"] = payload.runtime_metadata_version
+        if payload.workbench_config_version is not None:
+            versions["workbench_config_version"] = payload.workbench_config_version
+        if not versions["mounted_agents"]:
+            del versions["mounted_agents"]
+        if not await _control_io("agentos-prepared-running", mark_running, identity, versions):
+            status = "stopped"
+            return status
+        metadata = AgentRunMetadata(
+            user_id=actor.user_id, tenant_id=actor.tenant_id, conversation_id=identity.conversation_id,
+            agent_id=payload.resource.agent_id, query=payload.input.trace_query, language=payload.language,
+            is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
+            minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
+        )
+        history = ExecutionHistory()
+        info.observer.execution_history = history
+        facts = {}
+        index = 0
+        with agent_monitoring_context(metadata):
+            async with aclosing(_snapshot_chunks(info, slot)) as chunks:
+                async for chunk in chunks:
+                    # Re-encode JSON to keep each payload within one SSE data line.
+                    observer_event = json.loads(chunk)
+                    if observer_event.get("type") == "skill_artifact":
+                        raise ValueError("Prepared runs cannot journal local skill artifact paths")
+                    if observer_event.get("type") == "execution_result":
+                        key, record = _execution_record(history, observer_event)
+                        if record is None:
+                            continue
+                        index += 1
+                        fact = record.payload()
+                        for field in ("invocation_id", "tool_call_id"):
+                            if isinstance(observer_event.get(field), str):
+                                fact[field] = observer_event[field]
+                        await _append_event(journal, index, "agentos_execution_fact", fact)
+                        history.bind_run(key, identity.run_id, index)
+                        facts[index] = (record, fact.get("summary"))
+                        continue
+                    index += 1
+                    await _append_event(journal, index, "agentos_observer", observer_event)
+        for fact_index, (record, original_summary) in facts.items():
+            if record.summary and record.summary != original_summary:
+                index += 1
+                await _append_event(journal, index, "agentos_execution_summary", {
+                    "fact_sequence": fact_index, "summary": record.summary,
+                })
+        status = info.attempt_outcome or "completed"
+        return status
+    except asyncio.CancelledError:
+        status = "stopped"
+        raise
+    finally:
+        if slot is not None:
+            if slot.execution is None:
+                slot.worker = info.thread_future
+            else:
+                slot.cancel_worker()
+            if slot.worker is not None and not slot.worker.done():
+                await asyncio.gather(asyncio.wrap_future(slot.worker), return_exceptions=True)
+        release_prepared_run(info, identity.conversation_id, identity.user_id, status)
+
+
+async def _finish_producer(runner, monitor, identity, journal, status, slot=None):
+    for task in (runner, monitor):
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(runner, monitor, return_exceptions=True)
+    if slot is not None:
+        slot.cancel_worker()
+        if slot.worker is not None and not slot.worker.done():
+            await asyncio.gather(asyncio.wrap_future(slot.worker), return_exceptions=True)
+    try:
+        finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
+        if finished:
+            await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
+    except (RedisError, SQLAlchemyError, RuntimeError):
+        logger.exception("Prepared AgentOS terminal will be reconciled run_id=%s", identity.run_id)
+
+
+async def _produce(payload, actor, identity, journal, slot=None):
+    status = "failed"
+    runner = asyncio.create_task(_run_snapshot(payload, actor, identity, journal, slot))
+    monitor = asyncio.create_task(_wait_for_stop(identity))
+    try:
+        done, _ = await asyncio.wait((runner, monitor), return_when=asyncio.FIRST_COMPLETED)
+        if runner in done:
+            status = "stopped" if runner.cancelled() else runner.result()
+        else:
+            monitor.result()
+            status = "stopped"
+    except asyncio.CancelledError:
+        status = "stopped"
+        raise
+    except Exception:
+        logger.exception("Prepared AgentOS run failed run_id=%s", identity.run_id)
+    finally:
+        # Keep joining the owned worker and terminal write during repeated shutdown cancellation.
+        cleanup = asyncio.create_task(_finish_producer(runner, monitor, identity, journal, status, slot))
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+async def _start_journal(identity, *, agent_scope=None):
+    try:
+        quota = {"agent_scope": agent_scope, "agent_limit": RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS} if agent_scope else {}
+        await _control_io("agentos-prepared-begin", begin_execution, identity, **quota)
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
+    except ActiveExecutionError as exc:
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"}) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EXECUTION_STORE_UNAVAILABLE"}) from exc
+
+    track_execution(identity)
+    journal = RunJournal(
+        identity.tenant_id, identity.user_id, identity.conversation_id, identity.run_id, retain_for_projection=True,
+    )
+    try:
+        await _control_io("agentos-prepared-journal", journal.start)
+    except (RedisError, RuntimeError) as exc:
+        try:
+            await _control_io("agentos-prepared-reject", finish_execution, identity, "failed")
+        except (SQLAlchemyError, RuntimeError):
+            logger.exception("Prepared AgentOS admission cleanup will be reconciled run_id=%s", identity.run_id)
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EVENT_STORE_UNAVAILABLE"}) from exc
+    return journal
+
+
+async def _admit(payload, actor):
+    identity = RunIdentity(actor.tenant_id, actor.user_id, payload.conversation_id, payload.run_id)
+    key = payload.resource.agent_id
+    if payload.workbench_config_version is not None:
+        key = f"{actor.tenant_id}:workbench_main"
+    slot = _AdmissionSlot(agent_run_manager.reserve_agent_capacity(key, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS))
+    try:
+        options = {}
+        if NEXENT_RECOVERY_MODE == "maintenance":
+            await slot.start_worker(identity.run_id)
+            options["agent_scope"] = "workbench_main" if payload.workbench_config_version is not None else f"agent:{key}"
+        journal = await _start_journal(identity, **options)
+        producer = asyncio.create_task(_produce(payload, actor, identity, journal, slot), name=f"agentos-run:{identity.run_id}")
+    except BaseException:
+        slot.cancel_worker()
+        slot.release()
+        raise
+    producer.add_done_callback(slot.release)
+    agent_stream_producer_tasks.add(producer)
+    producer.add_done_callback(agent_stream_producer_tasks.discard)
+    return AgentRunReference(conversation_id=identity.conversation_id, run_id=identity.run_id)
+
+
+async def start_prepared_run(payload: PreparedAgentRun, actor: ServicePrincipal) -> AgentRunReference:
+    if not runtime_state_service.enabled:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EVENT_STORE_UNAVAILABLE"})
+
+    # Settle an admitted run even if the caller drops the acknowledgement.
+    admission = asyncio.create_task(_admit(payload, actor))
+    try:
+        return await asyncio.shield(admission)
+    except asyncio.CancelledError:
+        await asyncio.gather(admission, return_exceptions=True)
+        raise
+
+
+def create_prepared_run_router() -> APIRouter:
+    router = APIRouter()
+
+    @router.post(AgentOperation.RUN.value, status_code=202, include_in_schema=False)
+    async def submit(request: Request):
+        actor = request.scope.get(PRINCIPAL_KEY)
+        if actor is None:
+            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+        try:
+            payload = PreparedAgentRun.model_validate_json(request.scope[BODY_KEY])
+        except ValidationError:
+            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+        try:
+            return await start_prepared_run(payload, actor)
+        except (AgentRunConcurrencyExceededError, ThreadCapacityExceeded, ThreadQueueTimedOut):
+            return JSONResponse({
+                "code": "RUNTIME_CAPACITY_FULL", "message": "Agent runtime is at capacity.", "retryable": True,
+            }, status_code=429, headers={"Retry-After": "1"})
+
+    return router

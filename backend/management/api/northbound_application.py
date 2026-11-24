@@ -13,9 +13,9 @@ from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECOND
 from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
 from management.api.northbound import a2a_router
 from management.api.northbound import router as northbound_router
-from management.configuration.runtime import start_system_configuration, stop_system_configuration
+from infrastructure.system_configuration.runtime import start_system_configuration, stop_system_configuration
 from management.thread_management import config_thread_manager
-from infrastructure.redis.run_state import runtime_state_service
+from infrastructure.redis.run_state import creator_runtime_state_service, runtime_state_service
 from backend.http.server.app_factory import create_app
 from nexent.core.concurrency import (
     ManagedTaskSpec,
@@ -53,6 +53,7 @@ async def northbound_lifespan(_app):
         config_thread_manager.start()
     set_default_thread_manager(config_thread_manager)
     runtime_state_service.set_thread_manager(config_thread_manager)
+    creator_runtime_state_service.set_thread_manager(config_thread_manager)
     cleanup_tasks = []
 
     async def run_configuration_io(fn):
@@ -60,7 +61,7 @@ async def northbound_lifespan(_app):
             "control-io",
             ManagedTaskSpec(
                 task_name="system-configuration-refresh",
-                owner="management.configuration.runtime",
+                owner="infrastructure.system_configuration.runtime",
             ),
             fn,
         )

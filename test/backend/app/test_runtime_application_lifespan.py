@@ -6,12 +6,12 @@ import asyncio
 import importlib.util
 import sys
 import types
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[3] / "backend"
 
@@ -62,76 +62,76 @@ class RuntimeThreadManager:
         return {"service_name": "runtime", "active_count": 0}
 
 
-@pytest.mark.parametrize("recovery_mode", ["startup", "maintenance", "unfinished"])
-def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch, recovery_mode):
+@pytest.mark.parametrize("recovery_mode", ["startup", "maintenance"])
+def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, recovery_mode):
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.configuration.runtime",
+        "infrastructure.system_configuration.runtime",
         _module(
-            "management.configuration.runtime",
+            "infrastructure.system_configuration.runtime",
             start_system_configuration=start_configuration,
             stop_system_configuration=stop_configuration,
         ),
     )
-    epoch = "9d323186-23f6-4ab6-b0ab-8990661e6320"
     monkeypatch.setitem(
         sys.modules,
         "contracts.constants.environment",
         _module(
-            "contracts.constants.environment",
-            RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1,
-            NEXENT_RECOVERY_MODE="startup" if recovery_mode == "startup" else "maintenance",
-            NEXENT_MAINTENANCE_EPOCH=epoch,
+            "contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1,
+            NEXENT_RECOVERY_MODE=recovery_mode, NEXENT_MAINTENANCE_EPOCH="maintenance-batch",
         ),
     )
     manager = RuntimeThreadManager()
+    shutdown_streams = AsyncMock(return_value=[])
     monkeypatch.setitem(
         sys.modules,
         "runtime.thread_management",
-        _module("runtime.thread_management", runtime_thread_manager=manager),
+        _module("runtime.thread_management", runtime_thread_manager=manager,
+                shutdown_agent_stream_tasks=shutdown_streams),
     )
 
-    automation = _module("management.api.automation.agent_automation")
-    automation.conversation_automation_router = object()
-    automation.router = object()
-    monkeypatch.setitem(sys.modules, automation.__name__, automation)
     for name, attribute in (
-        ("management.api.conversation.conversation_management", "router"),
-        ("management.api.conversation.conversation_share", "router"),
-        ("management.api.conversation.workbench_pins", "router"),
-        ("runtime.api.agent.execution", "agent_runtime_router"),
-        ("runtime.api.evaluation.execution", "router"),
-        ("runtime.api.file.upload", "file_management_runtime_router"),
-        ("runtime.api.sandbox", "router"),
-        ("runtime.api.skill.creation", "skill_creator_router"),
+        ("runtime.agentos.memory", "create_memory_store_router"),
+        ("runtime.agentos.model", "create_model_router"),
+        ("runtime.agentos.model_administration", "create_model_administration_router"),
+        ("runtime.agentos.prepared_run", "create_prepared_run_router"),
+        ("runtime.agentos.resume", "create_run_lifecycle_router"),
+        ("runtime.agentos.ephemeral", "create_ephemeral_run_router"),
+        ("runtime.agentos.evaluation", "create_evaluation_router"),
+        ("runtime.model.service", "ModelService"),
+        ("runtime.agentos.middleware", "AgentOSMiddleware"),
+        ("runtime.agentos.debug", "stop_agentos_debug"),
         ("runtime.api.voice.streaming", "voice_runtime_router"),
+        ("runtime.api.sandbox", "router"),
+        ("infrastructure.model_adapter", "get_adapter_from_config"),
     ):
-        monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: object()}))
+        monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: MagicMock()}))
+
+    recover_models = MagicMock()
+    verify_maintenance = MagicMock()
+    initialize_sandbox = MagicMock(return_value=None)
+    monkeypatch.setitem(
+        sys.modules, "infrastructure.rdb.runtime_maintenance",
+        _module("infrastructure.rdb.runtime_maintenance", require_completed_runtime_maintenance=verify_maintenance),
+    )
+    monkeypatch.setitem(
+        sys.modules, "runtime.sandbox_runtime",
+        _module("runtime.sandbox_runtime", initialize_sandbox_coordination=initialize_sandbox),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "infrastructure.rdb.model_records",
+        _module("infrastructure.rdb.model_records", fail_detecting_models_on_startup=recover_models,
+                get_model_by_model_id=MagicMock()),
+    )
 
     runtime_state = MagicMock()
     monkeypatch.setitem(
         sys.modules,
         "infrastructure.redis.run_state",
-        _module("infrastructure.redis.run_state", runtime_state_service=runtime_state, creator_runtime_state_service=MagicMock()),
-    )
-    agent_run_manager = object()
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.agent.lifecycle",
-        _module("management.services.agent.lifecycle", agent_run_manager=agent_run_manager),
-    )
-    configure_coordination = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "runtime.sandbox_runtime",
-        _module("runtime.sandbox_runtime", configure_runtime_coordination=configure_coordination),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "runtime.identity",
-        _module("runtime.identity", uses_distributed_runtime=lambda: False),
+        _module("infrastructure.redis.run_state", runtime_state_service=runtime_state),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -179,43 +179,17 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     )
 
     recover = MagicMock()
+    watch = AsyncMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.recovery",
-        _module("management.recovery", recover_runtime_tasks=recover),
-    )
-    scheduler = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.automation.scheduler",
-        _module("management.services.automation.scheduler", agent_automation_scheduler=scheduler),
+        "runtime.recovery",
+        _module("runtime.recovery", recover_streaming_runs=recover, watch_executions=watch),
     )
     cleanup = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "services.workspace_cleanup_service",
-        _module("services.workspace_cleanup_service", cleanup_orphaned_agent_workspaces=cleanup),
-    )
-    cutoff = datetime(2026, 11, 19, tzinfo=timezone.utc)
-    require_completed = MagicMock(return_value=cutoff)
-    if recovery_mode == "unfinished":
-        require_completed.side_effect = RuntimeError("maintenance is unfinished")
-    monkeypatch.setitem(
-        sys.modules,
-        "management.maintenance",
-        _module("management.maintenance", require_completed_runtime_maintenance=require_completed),
-    )
-    shutdown_streams = AsyncMock(return_value=[])
-    shutdown_creators = AsyncMock(return_value=0)
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.conversation.creator_runtime",
-        _module("management.services.conversation.creator_runtime", shutdown_creator_streams=shutdown_creators),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.agent.execution",
-        _module("management.services.agent.execution", shutdown_agent_stream_tasks=shutdown_streams),
+        "runtime.workspace_cleanup",
+        _module("runtime.workspace_cleanup", cleanup_orphaned_agent_workspaces=cleanup),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -229,27 +203,14 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     spec.loader.exec_module(application)
 
     shutdown_order = MagicMock()
-    shutdown_order.attach_mock(shutdown_creators, "creators")
     shutdown_order.attach_mock(shutdown_streams, "agents")
     shutdown_order.attach_mock(trajectory_processor.shutdown, "trajectory")
     shutdown_order.attach_mock(stop_configuration, "configuration")
     shutdown_order.attach_mock(manager.shutdown, "thread_manager")
 
     async def exercise():
-        async with application.app.lifespan(application.app):
-            assert application.app.state.configuration_runtime is start_configuration.return_value
-
-    if recovery_mode == "unfinished":
-        with pytest.raises(RuntimeError, match="maintenance is unfinished"):
-            asyncio.run(exercise())
-        require_completed.assert_called_once_with(epoch)
-        recover.assert_not_called()
-        cleanup.assert_not_called()
-        start_configuration.assert_not_awaited()
-        trajectory_processor.start.assert_not_called()
-        scheduler.start.assert_not_awaited()
-        manager.shutdown.assert_awaited_once()
-        return
+        async with application.runtime_lifespan(None):
+            pass
 
     asyncio.run(exercise())
 
@@ -259,7 +220,6 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     start_configuration.assert_awaited_once()
     configuration_io = start_configuration.call_args.args[0]
     assert asyncio.run(configuration_io(lambda: "loaded")) == "loaded"
-    configure_coordination.assert_called_once_with(manager, agent_run_manager, runtime_state)
     trajectory_processor.start.assert_called_once()
     assert trajectory_processor.start.call_args.args[0] is manager
     assert (
@@ -267,25 +227,23 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     )
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
-    if recovery_mode == "startup":
-        scheduler.start.assert_awaited_once_with()
-        recover.assert_called_once_with()
-        cleanup.assert_called_once_with()
-        require_completed.assert_not_called()
-    else:
-        scheduler.start.assert_awaited_once_with(maintenance_cutoff=cutoff)
-        require_completed.assert_called_once_with(epoch)
+    initialize_sandbox.assert_called_once_with(manager)
+    if recovery_mode == "maintenance":
+        verify_maintenance.assert_called_once_with("maintenance-batch")
+        recover_models.assert_not_called()
         recover.assert_not_called()
         cleanup.assert_not_called()
-    scheduler.stop.assert_awaited_once_with()
-    shutdown_creators.assert_awaited_once()
-    assert 0 <= shutdown_creators.await_args.kwargs["timeout"] <= 1
+    else:
+        verify_maintenance.assert_not_called()
+        recover_models.assert_called_once_with()
+        recover.assert_called_once_with()
+        cleanup.assert_called_once_with()
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()
     manager.shutdown.assert_awaited_once()
     assert 0 <= manager.shutdown.await_args.kwargs["timeout"] <= 1
     assert [call[0] for call in shutdown_order.mock_calls] == [
-        "creators", "agents", "trajectory", "configuration", "thread_manager",
+        "agents", "trajectory", "configuration", "thread_manager",
     ]
     clear_default.assert_called_once_with(manager)

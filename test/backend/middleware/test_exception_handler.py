@@ -317,7 +317,8 @@ class TestExceptionHandlerMiddleware:
         assert response.status_code == ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR]  
 
     @pytest.mark.asyncio
-    async def test_dispatch_http_exception(self):
+    @pytest.mark.parametrize("status_code", [404, 500, 503])
+    async def test_dispatch_http_exception(self, status_code):
         """Test handling of FastAPI HTTPException."""
         middleware = ExceptionHandlerMiddleware(app=MagicMock())
 
@@ -325,12 +326,13 @@ class TestExceptionHandlerMiddleware:
         mock_request.state = MagicMock()
 
         # Simulate HTTPException being raised
-        http_exception = HTTPException(status_code=404, detail="Not found")
+        http_exception = HTTPException(status_code=status_code, detail="private exception details")
         mock_call_next = AsyncMock(side_effect=http_exception)
 
         response = await middleware.dispatch(mock_request, mock_call_next)
 
-        assert response.status_code == 404
+        assert response.status_code == status_code
+        assert b"private exception details" not in response.body
 
     @pytest.mark.asyncio
     async def test_dispatch_generic_exception(self):

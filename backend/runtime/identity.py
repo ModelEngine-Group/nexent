@@ -60,30 +60,6 @@ def current_reference_options(tenant_id, user_id, conversation_id):
     return {'run_ref': get_coordinator().current_reference(tenant_id, user_id, conversation_id)}
 
 
-def distributed_run_options(request, tenant_id, **kwargs):
-    if not uses_distributed_runtime():
-        return {}
-    from runtime.sandbox_runtime import run_options
-
-    return run_options(request, tenant_id, **kwargs)
-
-
-def bind_run_reservation(request, user_id):
-    if not uses_distributed_runtime():
-        return
-    from runtime.sandbox_runtime import bind_request_reservation
-
-    bind_request_reservation(request, user_id)
-
-
-def associate_run_request(request, **associations):
-    if not uses_distributed_runtime():
-        return
-    from runtime.sandbox_runtime import associate_request
-
-    associate_request(request, **associations)
-
-
 async def reserve_runtime_run(manager, conversation_id, user_id, **options):
     if not options:
         return manager.reserve_agent_run(conversation_id, user_id)

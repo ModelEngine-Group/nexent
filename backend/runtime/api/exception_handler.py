@@ -8,8 +8,8 @@ It catches all exceptions and returns a standardized JSON response.
 """
 
 import logging
-import traceback
 import uuid
+from http import HTTPStatus
 from typing import Callable
 
 from fastapi import Request, Response, HTTPException
@@ -103,13 +103,17 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
             elif isinstance(exc, HTTPException):
                 # Handle FastAPI HTTPException for backward compatibility
                 # Map HTTP status codes to error codes
-                error_code = _http_status_to_error_code(exc.status_code)
+                status = next(
+                    (candidate for candidate in HTTPStatus if candidate == exc.status_code),
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                error_code = _http_status_to_error_code(status)
 
                 return JSONResponse(
-                    status_code=exc.status_code,
+                    status_code=status,
                     content={
                         "code": error_code.value,  # Keep as string to preserve leading zeros
-                        "message": exc.detail,
+                        "message": ErrorMessage.get_message(error_code),
                         "trace_id": trace_id
                     }
                 )

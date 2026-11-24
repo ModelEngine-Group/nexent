@@ -2,17 +2,17 @@
 
 from typing import Any
 
+from contracts.agentos import ChatMessage, EvaluationAgentRun
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from contracts.errors.exceptions import AppException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
-from contracts.agent import AgentRequest
+from contracts.errors.exceptions import AppException
 
+import adapters.jiuwen_sdk_adapter as adapter
 import asyncio
 import json
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
 from datetime import datetime
 from statistics import mean
 
@@ -22,19 +22,10 @@ from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
-from runtime.thread_management import runtime_thread_manager
-from management.services.agent.service import prepare_agent_run
-from management.services.evaluation.common import (
-    agent_run_manager,
-    logger,
-)
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.services.evaluation.common import logger
+from management.clients.model import invoke_chat_messages, invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
-from runtime.adapters.nexent.runner import agent_run
-from runtime.identity import (
-    associate_run_request, bind_run_reservation, distributed_run_options, reference_options, uses_distributed_runtime,
-    reserve_runtime_run, runtime_coordination_call, runtime_journal_call,
-)
+from nexent.core.concurrency import run_blocking
 
 
 def _is_llm_related_error(exc: Exception) -> bool:
@@ -66,18 +57,21 @@ def _generate_friendly_error_message(
     model_id: int | None = None,
     tenant_id: str | None = None,
     language: str = "zh",
+    *,
+    user_id: str | None = None,
 ) -> str:
-    if not model_id or not _is_llm_related_error(exc):
+    if not model_id or not user_id or not tenant_id or not _is_llm_related_error(exc):
         return default_msg
     try:
         prompt = compose_auxiliary_prompt(
             language, "evaluation_error", {"error_message": str(exc)[:500]}
         )
-        response = call_llm_for_system_prompt(
+        response = invoke_chat_prompt_in_worker(
             model_id=model_id,
             user_prompt=prompt.user,
             system_prompt=prompt.system,
-            tenant_id=tenant_id or "",
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
         return (response or "").strip() or default_msg
     except Exception as llm_exc:
@@ -89,15 +83,8 @@ def _make_background_done_callback(
     tenant_id: str, user_id: str, agent_evaluation_id: int, language: str = "zh"
 ):
     def callback(future):
-        if future.cancelled():
-            return
         exc = future.exception()
         if exc is not None:
-            if isinstance(exc, (RuntimeServiceUnavailableError, RuntimeServiceTimeoutError)) or (
-                isinstance(exc, RuntimeUpstreamError) and exc.status_code in (429, 503, 504)
-            ):
-                logger.warning("Evaluation %s dispatch will be reconciled from its persisted status", agent_evaluation_id)
-                return
             logger.exception(
                 "Background evaluation run failed (id=%s): %r", agent_evaluation_id, exc
             )
@@ -111,7 +98,6 @@ def _make_background_done_callback(
                     status=EvalRunStatus.FAILED,
                     updated_by=user_id,
                     error_message=friendly_msg,
-                    expected_status=EvalRunStatus.PENDING,
                 )
             except Exception as update_exc:
                 logger.error(
@@ -131,108 +117,20 @@ async def _run_agent_to_final_answer(
     version_no: int,
     history: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
-    *, evaluation_id: int | None = None, evaluation_case_id: int | None = None,
 ) -> tuple[str, list[dict]]:
     """Run agent once; return (final_answer_text, [all_observer_events])."""
-    run_conversation_id = conversation_id if conversation_id is not None else 0
-    agent_request = AgentRequest(
-        query=query,
-        conversation_id=run_conversation_id,
-        history=history,
-        minio_files=None,
-        agent_id=agent_id,
-        version_no=version_no,
-        is_debug=True,
+    from management.services.agent.runtime_client import forward_evaluation_case
+
+    result = await forward_evaluation_case(
+        EvaluationAgentRun(
+            agent_id=agent_id, version_no=version_no, query=query, history=history,
+            conversation_id=conversation_id if conversation_id is not None else 0,
+        ),
+        user_id,
+        tenant_id,
     )
-    agent_run_info = None
-    reservation = None
-    runtime_admission = None
-    terminal_status = "failed"
-    from runtime.identity import ensure_request_run_id
+    return result.answer, result.events
 
-    ensure_request_run_id(agent_request, new=True)
-    try:
-        run_manager = agent_run_manager
-        if run_manager is None:
-            from management.services.agent.lifecycle import agent_run_manager as run_manager
-
-        options = distributed_run_options(agent_request, tenant_id, kind='EVALUATION')
-        if options:
-            from runtime.sandbox_runtime import begin_owned_agent_admission
-
-            if conversation_id is None:
-                run_conversation_id = 'trial:' + agent_request.__dict__['_runtime_execution_run_id']
-                agent_request.__dict__['_debug_run_id'] = run_conversation_id
-            loop, task = asyncio.get_running_loop(), asyncio.current_task()
-            runtime_admission = await begin_owned_agent_admission(tenant_id, user_id, run_conversation_id,
-                lambda: loop.call_soon_threadsafe(task.cancel), kind='EVALUATION', holder='evaluation')
-            reservation = runtime_admission.reservation_token
-            agent_request.__dict__['_runtime_execution_run_id'] = runtime_admission.run_id
-            agent_request.__dict__['_runtime_execution_future'] = runtime_admission.execution.future
-            await runtime_coordination_call('bind-evaluation-run', bind_run_reservation, agent_request, user_id)
-            associations = {name: value for name, value in (
-                ('evaluation_id', evaluation_id), ('evaluation_case_id', evaluation_case_id),
-            ) if value is not None}
-            if associations:
-                await runtime_journal_call('associate-evaluation-run', associate_run_request, agent_request, **associations)
-            from infrastructure.redis.run_state import runtime_state_service
-
-            await runtime_state_service.reset_stream_async(user_id, run_conversation_id, **reference_options(agent_request))
-
-        agent_run_info, _memory_context = await prepare_agent_run(
-            agent_request=agent_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            allow_memory_search=False,
-            **({'reservation_token': reservation} if reservation is not None else {}),
-        )
-        final_answer_parts: list[str] = []
-        runtime_events: list[dict] = []
-        async for chunk in agent_run(
-            agent_run_info,
-            thread_manager=runtime_thread_manager,
-            **({'execution': runtime_admission.execution, 'deferred_run': runtime_admission.deferred_run}
-               if runtime_admission is not None else {}),
-        ):
-            try:
-                data = json.loads(chunk)
-                if isinstance(data, dict):
-                    runtime_events.append(data)
-                    if data.get("type") == "final_answer":
-                        content = data.get("content")
-                        if isinstance(content, str):
-                            final_answer_parts.append(content)
-            except Exception:
-                logger.debug(
-                    "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
-                )
-        remaining = agent_run_info.observer.get_cached_message()
-        for msg in remaining:
-            try:
-                data = json.loads(msg)
-                if isinstance(data, dict):
-                    runtime_events.append(data)
-            except Exception:
-                logger.debug(
-                    "Failed to parse straggler observer message", exc_info=True
-                )
-        terminal_status = "completed"
-        return "".join(final_answer_parts).strip(), runtime_events
-    finally:
-        if agent_run_info is not None:
-            run_manager.unregister_agent_run(
-                run_conversation_id,
-                user_id,
-                status=terminal_status,
-                agent_run_info=agent_run_info,
-            )
-        if runtime_admission is not None:
-            from runtime.sandbox_runtime import finish_automation_admission
-
-            await runtime_coordination_call('finish-evaluation-worker-admission',
-                                             finish_automation_admission, runtime_admission)
-        elif reservation is not None:
-            run_manager.release_agent_run_reservation(run_conversation_id, user_id, reservation)
 
 
 def _evaluation_conversation_id(agent_evaluation_id: int, case_id: int) -> int:
@@ -306,7 +204,7 @@ def _execute_single_case(
        scheduler sweeps do not re-pick it).
     2. Run the target agent via ``_evaluate_query``. The per-case managed
        worker is synchronous, so ``asyncio.run()`` provides its event loop.
-       LLM evaluators fan out through the runtime evaluation lane.
+       LLM evaluators fan out through the Management model lane.
     3. Build the ``{evaluator_name: pass_threshold}`` map from the evaluator
        rows already loaded for this run (one-time map per case, zero DB calls
        here).  Names missing from the map fall back to ``DEFAULT_PASS_THRESHOLD``
@@ -359,8 +257,6 @@ def _execute_single_case(
                 conversation_id=_evaluation_conversation_id(
                     run["agent_evaluation_id"], case_id
                 ),
-                **({'evaluation_id': run['agent_evaluation_id'], 'evaluation_case_id': case_id}
-                   if uses_distributed_runtime() else {}),
             )
         )
         predict = {"answer": answer_text}
@@ -417,6 +313,7 @@ def _execute_single_case(
             str(exc),
             model_id=judge_model_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             language=run.get("language", "zh"),
         )
         update_agent_evaluation_case_result(
@@ -476,6 +373,7 @@ def _setup_no_set_and_execute(
             model_id=gen_model_id,
             query_count=query_count,
             language=language,
+            user_id=user_id,
         )
 
         # Create virtual evaluation set
@@ -504,6 +402,12 @@ def _setup_no_set_and_execute(
             created_by=user_id,
         )
 
+        # Claim and schedule the evaluation through Management.
+        _dispatch_agent_evaluation_run(
+            agent_evaluation_id=agent_evaluation_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
     except Exception:
         logger.exception("No-set setup failed for run %d", agent_evaluation_id)
         update_agent_evaluation_status(
@@ -512,15 +416,7 @@ def _setup_no_set_and_execute(
             status=EvalRunStatus.FAILED,
             error_message="Failed to generate test queries",
             updated_by=user_id,
-            expected_status=EvalRunStatus.PENDING,
         )
-        return
-
-    _dispatch_agent_evaluation_run(
-        agent_evaluation_id=agent_evaluation_id,
-        user_id=user_id,
-        tenant_id=tenant_id,
-    )
 
 
 def _preload_evaluators_for_run(run: dict, tenant_id: str) -> dict[int, dict[str, Any]]:
@@ -587,19 +483,15 @@ def execute_agent_evaluation_run(
     user_id: str,
     agent_evaluation_id: int,
     judge_model_id: int | None = None,
-    *,
-    before_finalize: Callable[[], None] | None = None,
-) -> str:
+):
     run: dict[str, Any] = {}
-    status_guard = {} if before_finalize is None else {"expected_status": EvalRunStatus.RUNNING}
     try:
-        if before_finalize is None:
-            update_agent_evaluation_status(
-                agent_evaluation_id=agent_evaluation_id,
-                tenant_id=tenant_id,
-                status=EvalRunStatus.RUNNING,
-                updated_by=user_id,
-            )
+        update_agent_evaluation_status(
+            agent_evaluation_id=agent_evaluation_id,
+            tenant_id=tenant_id,
+            status=EvalRunStatus.RUNNING,
+            updated_by=user_id,
+        )
         run = get_agent_evaluation(
             agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
         )
@@ -672,7 +564,6 @@ def execute_agent_evaluation_run(
                     status=EvalRunStatus.RUNNING,
                     updated_by=user_id,
                     progress_done=done_count,
-                    **status_guard,
                 )
 
         overall = float(mean(scores)) if scores else 0.0
@@ -682,8 +573,11 @@ def execute_agent_evaluation_run(
         # DEFAULT_PASS_THRESHOLD is consistent with run-level UI display while
         # not double-counting evaluators.
         pass_count = sum(1 for s in scores if s >= DEFAULT_PASS_THRESHOLD)
-        outcome = EvalRunStatus.COMPLETED
-        result_fields = dict(
+        update_agent_evaluation_status(
+            agent_evaluation_id=agent_evaluation_id,
+            tenant_id=tenant_id,
+            status=EvalRunStatus.COMPLETED,
+            updated_by=user_id,
             score_overall=overall,
             progress_done=done_count,
             pass_count=pass_count,
@@ -696,22 +590,16 @@ def execute_agent_evaluation_run(
             str(exc),
             model_id=judge_model_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             language=run.get("language", "zh"),
         )
-        outcome = EvalRunStatus.FAILED
-        result_fields = {"error_message": friendly_msg}
-
-    if before_finalize is not None:
-        before_finalize()
-    update_agent_evaluation_status(
-        agent_evaluation_id=agent_evaluation_id,
-        tenant_id=tenant_id,
-        status=outcome,
-        updated_by=user_id,
-        **result_fields,
-        **status_guard,
-    )
-    return outcome
+        update_agent_evaluation_status(
+            agent_evaluation_id=agent_evaluation_id,
+            tenant_id=tenant_id,
+            status=EvalRunStatus.FAILED,
+            updated_by=user_id,
+            error_message=friendly_msg,
+        )
 
 
 from typing import Any
@@ -738,8 +626,6 @@ async def _evaluate_query(
     history: list[dict[str, Any]] | None = None,
     expected: str = "",
     conversation_id: int | None = None,
-    evaluation_id: int | None = None,
-    evaluation_case_id: int | None = None,
 ) -> tuple[str, list[dict] | None, dict, dict]:
     """Run agent + score with evaluators. Returns (answer, events, scores, reasons)."""
     if not evaluators:
@@ -755,21 +641,42 @@ async def _evaluate_query(
         version_no=agent_version_no,
         history=history,
         conversation_id=conversation_id,
-        **({'evaluation_id': evaluation_id, 'evaluation_case_id': evaluation_case_id}
-           if evaluation_id is not None else {}),
     )
-    score, reason = _score_with_evaluators(
-        evaluators=evaluators,
-        judge_system_prompt=judge_system_prompt,
-        tenant_id=tenant_id,
-        query=query,
-        expected=expected,
-        actual=answer_text,
-        judge_model_id=judge_model_id,
-        runtime_events=runtime_events or events,
-        context_window=context_window,
-        conversation_history=history,
-    )
+    if evaluators:
+        score, reason = _score_with_evaluators(
+            evaluators=evaluators,
+            judge_system_prompt=judge_system_prompt,
+            tenant_id=tenant_id,
+            query=query,
+            expected=expected,
+            actual=answer_text,
+            judge_model_id=judge_model_id,
+            runtime_events=runtime_events or events,
+            context_window=context_window,
+            conversation_history=history,
+            user_id=user_id,
+        )
+    else:
+        def invoke_judge(messages):
+            return asyncio.run(invoke_chat_messages(
+                model_id=judge_model_id,
+                messages=[ChatMessage(role=message.role, content=message.content or "") for message in messages],
+                user_id=user_id,
+                tenant_id=tenant_id,
+            ))
+
+        score, reason = await run_blocking(
+            "agent-evaluation-semantic-judge",
+            adapter.evaluate_semantic_consistency,
+            lane="model-tool-io",
+            owner="management",
+            question=query,
+            expected_answer="",
+            model_answer=answer_text,
+            judge_invoker=invoke_judge,
+        )
+        score = {"semantic_consistency": score}
+        reason = {"semantic_consistency": reason}
     return answer_text, events, score, reason
 
 
@@ -778,8 +685,8 @@ def _dispatch_agent_evaluation_run(
     user_id: str,
     tenant_id: str,
 ) -> dict:
-    """Lazily import the config-to-runtime proxy to keep service imports light."""
-    from management.services.agent.runtime_client import dispatch_agent_evaluation_run
+    """Claim and schedule an evaluation in Management."""
+    from management.services.evaluation.dispatch import dispatch_agent_evaluation_run
 
     return dispatch_agent_evaluation_run(
         agent_evaluation_id=agent_evaluation_id,

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from management.configuration.runtime import SystemConfigurationRuntime
+from infrastructure.system_configuration.runtime import SystemConfigurationRuntime
 from backend.http.server.app_factory import create_app
 from backend.http.server.health import install_health_contract
 

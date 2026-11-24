@@ -6,9 +6,9 @@ from copy import deepcopy
 
 from contracts.agent import AgentRequest, SystemAgentRef, WorkbenchSessionConfig
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from management.services.agent import run as run_service
 from management.services.agent import workbench
 from management.services.agent.preparation import run as preparation
+from nexent.core.agents.contracts.config import AgentConfig
 
 
 def test_shared_profile_resolves_published_shared_bindings(mocker):
@@ -68,19 +68,8 @@ def test_shared_plan_mounts_published_capabilities_with_tenant_runtime(mocker):
     persistent_bindings.assert_called_once_with(agent_id=77, tenant_id=ASSET_OWNER_TENANT_ID, version_no=3)
     assert skill_resolution.call_args.kwargs["published_tenant_id"] == ASSET_OWNER_TENANT_ID
 
-    from management.services.knowledge_base import scope
-
-    mocker.patch.object(
-        scope,
-        "snapshot_runtime_knowledge_tree",
-        return_value=[
-            {
-                "agent_id": 77,
-                "version_no": 3,
-                "tools": [],
-            }
-        ],
-    )
+    mocker.patch.object(workbench, "ENABLE_AGENT_WORKBENCH", True)
+    knowledge = mocker.patch.object(workbench, "resolve_workbench_knowledge")
     tools = mocker.patch.object(
         workbench.system_agent_provider,
         "get_workbench_default_tools",
@@ -99,10 +88,24 @@ def test_shared_plan_mounts_published_capabilities_with_tenant_runtime(mocker):
         history=[],
         minio_files=[],
         is_debug=False,
+        entrypoint="workbench",
+        workbench=canonical,
+        expected_workbench_config_version=1,
     )
-    run_service.apply_workbench_runtime_plan(request, canonical, plan, "tenant-a")
+    prepared = workbench.prepare_portable_workbench(
+        request, {"workbench_config": canonical.model_dump(mode="json"), "workbench_config_version": 1},
+        "user-a", "tenant-a",
+    )
+    compiled = workbench.compile_runtime_mount_plan(
+        prepared.plan, AgentConfig(
+            agent_id=77, version_no=3, name="workbench_main", description="", model_name="model", tools=[],
+        ),
+    )
     tools.assert_not_called()
-    assert request.__dict__["_runtime_root_identity"]["origin"] == "SYSTEM"
+    knowledge.assert_not_called()
+    assert prepared.version == 1
+    assert compiled.root.identity == plan.root.identity
+    assert compiled.root.identity.origin == "SYSTEM"
     assert source == original
 
 

@@ -15,15 +15,9 @@ _upload_cleanup_tasks: set[asyncio.Task] = set()
 
 def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
     """Fail work that was owned by the previous runtime process."""
-    from runtime.identity import uses_distributed_runtime
-
-    if db_session is None and uses_distributed_runtime():
-        from runtime.sandbox_runtime import get_runtime_recovery
-
-        return get_runtime_recovery().recover()
     from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
     from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
-    from management.db.conversation.repository import fail_streaming_assistant_messages
+    from infrastructure.rdb.conversation_state import fail_streaming_assistant_messages
     from infrastructure.redis.run_state import runtime_state_service
 
     transaction = {} if db_session is None else {"db_session": db_session}
@@ -62,16 +56,19 @@ def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
 
 def recover_config_tasks() -> dict[str, int]:
     """Fail config-owned background work lost during process restart."""
-    from management.db.evaluation.runs import fail_interrupted_no_set_runs_on_startup
+    from management.db.evaluation.runs import (
+        fail_interrupted_no_set_runs_on_startup, list_evaluation_tenant_ids, reap_stale_runs,
+    )
     from management.db.evaluation.sets import cleanup_orphaned_virtual_evaluation_sets, recover_interrupted_generations
-    from management.db.model.repository import fail_detecting_models_on_startup
     from management.db.memory.dreaming import recover_stale
 
     result = {
         "agent_evaluation_setups": fail_interrupted_no_set_runs_on_startup(),
+        "agent_evaluations": sum(
+            reap_stale_runs(tenant_id, timeout_minutes=0) for tenant_id in list_evaluation_tenant_ids()
+        ),
         "evaluation_set_generations": recover_interrupted_generations(),
         "orphaned_virtual_sets": cleanup_orphaned_virtual_evaluation_sets(),
-        "model_connectivity_checks": fail_detecting_models_on_startup(),
         "dreaming_runs": recover_stale(include_unexpired=True),
     }
     logger.info("Config startup recovery completed: %s", result)
@@ -196,4 +193,3 @@ async def schedule_interrupted_upload_cleanup(upload_owner_service: str, *, thre
     _upload_cleanup_tasks.add(task)
     task.add_done_callback(_upload_cleanup_tasks.discard)
     return task
-

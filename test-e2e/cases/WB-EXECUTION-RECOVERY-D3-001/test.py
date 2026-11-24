@@ -13,7 +13,7 @@ import pytest
 import redis
 
 from infrastructure.redis import run_state
-from management.services.agent.channels import StreamingChannel
+from infrastructure.agent_stream_channels import StreamingChannel
 from management.services.agent.replay import subscribe_shared_checkpoint
 
 
@@ -68,9 +68,9 @@ async def test_execution_checkpoint_replay_and_generation_ownership(monkeypatch)
                 return client
 
         service = State()
-        monkeypatch.setattr("management.services.agent.channels.runtime_state_service", service)
+        monkeypatch.setattr("infrastructure.agent_stream_channels.runtime_state_service", service)
         monkeypatch.setattr(run_state, "RUNTIME_STREAM_MAX_LEN", 2)
-        monkeypatch.setattr("management.services.agent.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 128)
+        monkeypatch.setattr("infrastructure.agent_stream_channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 128)
         service.reset_stream("owner", 91, generation="first")
         service.register_run("owner", 91)
         channel = StreamingChannel("91", "owner", history_size=2)

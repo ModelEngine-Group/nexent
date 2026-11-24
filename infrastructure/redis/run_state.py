@@ -252,7 +252,10 @@ class RuntimeStateService:
         """, 3, run_key, run_key + ':creator-lease', self._cancel_key(user_id, conversation_id),
             expected_generation or '', RUNTIME_CANCEL_TTL_SECONDS))
 
-    def register_run(self, user_id: str, conversation_id: int, message_id: Optional[int] = None, *, run_ref=None) -> None:
+    def register_run(
+        self, user_id: str, conversation_id: int | str, message_id: Optional[int] = None, *,
+        run_ref=None, tenant_id: str | None = None,
+    ) -> None:
         if self._distributed is not None:
             return self._distributed.register_run(user_id, conversation_id, message_id, run_ref=run_ref)
         if not self.enabled:
@@ -267,6 +270,8 @@ class RuntimeStateService:
             }
             if message_id is not None:
                 payload["message_id"] = str(message_id)
+            if tenant_id is not None:
+                payload["tenant_id"] = tenant_id
             key = self._run_key(user_id, conversation_id)
             self.client.hset(key, mapping=payload)
             self.client.expire(key, RUNTIME_RUN_TTL_SECONDS)

@@ -116,7 +116,8 @@ class TestCreateApp:
 
     def test_create_app_wires_gateway_identity_middleware(self):
         from gateway.downstream.middleware import GatewayIdentityMiddleware
-        from runtime.api.identity_routes import is_runtime_service_request
+        def is_runtime_service_request(method, path):
+            return method == "POST" and path == "/service"
 
         app = create_app(
             enable_monitoring=False,
@@ -727,7 +728,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('management.utils.exception_handlers.logger') as mock_logger:
+        with patch('backend.http.server.exception_handlers.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -887,7 +888,7 @@ class TestAidpImportErrorBranch:
         from unittest.mock import patch
         from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 
-        with patch("management.utils.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
+        with patch("backend.http.server.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
             fresh_app = FastAPI()
             register_exception_handlers(fresh_app)
 

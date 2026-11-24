@@ -3,8 +3,8 @@ import asyncio
 import importlib
 import sys
 import types
-from unittest.mock import AsyncMock, Mock
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -16,19 +16,14 @@ class _Payload:
 
 def _load_runner_with_stubs(monkeypatch):
     consts_model = types.ModuleType("contracts.agent")
+    consts_model.__dict__.update(vars(importlib.import_module("contracts.agent")))
     consts_model.AgentRequest = _Payload
     consts_model.HistoryItem = _Payload
     consts_model.MessageRequest = _Payload
     consts_model.MessageUnit = _Payload
 
-    agent_service = types.ModuleType("management.services.agent.service")
-
     async def fail_run_agent_background(*args, **kwargs):
         raise AssertionError("Agent should not run when automation capabilities are unavailable.")
-
-    agent_service.run_agent_background = fail_run_agent_background
-    agent_service.stop_agent_tasks = lambda conversation_id, user_id: None
-    agent_service.is_agent_running = lambda conversation_id, user_id: False
 
     conversation_service = types.ModuleType("management.services.conversation.service")
     conversation_service.get_conversation_history_service = lambda conversation_id, user_id: [{"message": []}]
@@ -37,17 +32,22 @@ def _load_runner_with_stubs(monkeypatch):
     conversation_service.update_unit_content = lambda *args, **kwargs: None
 
     monkeypatch.setitem(sys.modules, "contracts.agent", consts_model)
-    monkeypatch.setitem(sys.modules, "management.services.agent.service", agent_service)
     monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
     sys.modules.pop("management.services.automation.runner", None)
     runner_module = importlib.import_module("management.services.automation.runner")
+    monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fail_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_scoped_stop", AsyncMock())
+    monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
+    monkeypatch.setattr(runner_module.agent_automation_db, "get_run", lambda *args: None)
     monkeypatch.setattr(
         runner_module,
         "automation_conversation_adapter",
         types.SimpleNamespace(
             append_run_prompt=lambda conversation_id, prompt, user_id, tenant_id, **kwargs: {
                 "user_message_id": 101,
+                "assistant_message_index": 1,
                 "history": [],
             },
             append_run_assistant=lambda *args, **kwargs: 456,
@@ -80,99 +80,6 @@ def _base_task():
         "consecutive_failures": 0,
         "status": "ACTIVE",
     }
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('outcome', ['completed', 'failed', 'remote_cancel', 'busy'])
-async def test_distributed_automation_owns_admission_until_business_finalization(monkeypatch, outcome):
-    from management.services.agent.lifecycle import AgentRunAlreadyActiveError
-    from runtime import sandbox_runtime
-
-    module = _load_runner_with_stubs(monkeypatch)
-    monkeypatch.setattr(module, 'uses_distributed_runtime', lambda: True)
-    admission = types.SimpleNamespace(lease=object(), run_id='a' * 32)
-    begin, finish = AsyncMock(return_value=admission), Mock()
-    if outcome == 'busy':
-        begin.side_effect = AgentRunAlreadyActiveError('already owned')
-    coordinator = Mock()
-    monkeypatch.setattr(sandbox_runtime, 'begin_automation_admission', begin)
-    monkeypatch.setattr(sandbox_runtime, 'finish_automation_admission', finish)
-    monkeypatch.setattr(sandbox_runtime, 'get_coordinator', lambda: coordinator)
-    coordinator.stream_state.is_cancelled.return_value = outcome == "remote_cancel"
-    async def coordinated(name, function, *args, **kwargs):
-        return function(*args, **kwargs)
-    monkeypatch.setattr(module, 'runtime_coordination_call', coordinated)
-    runner = module.AgentAutomationRunner()
-    async def business(*args, **kwargs):
-        if outcome == 'busy':
-            assert kwargs == {'force_busy': True}
-        else:
-            assert kwargs['runtime_admission'] is admission
-            finish.assert_not_called()
-            await asyncio.sleep(0.01)
-        if outcome == 'failed':
-            raise RuntimeError('business failed')
-        return {'status': 'COMPLETED'}
-    monkeypatch.setattr(runner, '_execute_task_impl', business)
-    task = asyncio.create_task(runner.execute_task(_base_task()))
-    if outcome == 'remote_cancel':
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    elif outcome == 'failed':
-        with pytest.raises(RuntimeError, match='business failed'):
-            await task
-    else:
-        assert await task == {'status': 'COMPLETED'}
-    assert finish.call_count == int(outcome != 'busy')
-    if outcome != 'busy':
-        finish.assert_called_once_with(admission)
-    assert not any(task.get_name().startswith('automation-runtime-cancel-') for task in asyncio.all_tasks())
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('activation_fails', [False, True])
-async def test_automation_association_and_activation_precede_agent_execution(monkeypatch, activation_fails):
-    from runtime import sandbox_runtime
-
-    module = _load_runner_with_stubs(monkeypatch)
-    task = _base_task()
-    run = {'run_id': 42}
-    monkeypatch.setattr(module.agent_automation_db, 'has_active_run_for_conversation', lambda *_: False)
-    monkeypatch.setattr(module.agent_automation_db, 'create_run', lambda *args, **kwargs: run)
-    coordinator = Mock()
-    if activation_fails:
-        coordinator.activate.side_effect = RuntimeError('lease lost')
-    monkeypatch.setattr(sandbox_runtime, 'get_coordinator', lambda: coordinator)
-    async def coordinated(name, function, *args, **kwargs):
-        return function(*args, **kwargs)
-    monkeypatch.setattr(module, 'runtime_coordination_call', coordinated)
-    runner = module.AgentAutomationRunner()
-    active = AsyncMock(return_value={'status': 'COMPLETED'})
-    monkeypatch.setattr(runner, '_execute_active_run', active)
-    failed = Mock(return_value={'status': 'FAILED'})
-    monkeypatch.setattr(runner, '_fail_run', failed)
-    admission = types.SimpleNamespace(lease=object())
-    result = await runner._execute_task_impl(task, 'MANUAL', lease_owner='lock-a', runtime_admission=admission)
-    coordinator.associate.assert_called_once_with(admission.lease, automation_run_id=42,
-        automation_task_id=task['task_id'], automation_lock_owner='lock-a')
-    coordinator.activate.assert_called_once_with(admission.lease)
-    assert active.await_count == int(not activation_fails)
-    assert result['status'] == ('FAILED' if activation_fails else 'COMPLETED')
-    if activation_fails:
-        assert failed.call_args.args[2] == 'AUTOMATION_COORDINATION_LOST'
-
-
-def test_distributed_automation_cancel_recovers_trusted_tenant(monkeypatch):
-    module = _load_runner_with_stubs(monkeypatch)
-    monkeypatch.setattr(module, 'uses_distributed_runtime', lambda: True)
-    monkeypatch.setattr(module.agent_automation_db, 'get_task_by_conversation', Mock(return_value={'tenant_id': 'tenant'}))
-    stop = Mock()
-    monkeypatch.setattr(module, 'stop_agent_tasks', stop)
-    runner = module.AgentAutomationRunner()
-    runner.cancel_for_conversation(7, 'user')
-    runner.cancel_for_conversation(7, 'user', 42, tenant_id='tenant')
-    assert stop.call_args_list[0].kwargs == {'tenant_id': 'tenant'}
-    assert stop.call_args_list[1].kwargs == {'tenant_id': 'tenant', 'expected_generation': '42'}
 
 
 def test_scheduled_task_state_update_is_fenced_by_lease_owner(monkeypatch):
@@ -226,7 +133,7 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "has_active_run_for_conversation",
-        lambda conversation_id: False,
+        lambda *_scope: False,
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -238,7 +145,7 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
         },
     )
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, **kwargs):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None):
         updates["run"] = {"run_id": run_id, **values}
         return updates["run"]
 
@@ -259,11 +166,11 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
 @pytest.mark.asyncio
 async def test_runner_skips_when_conversation_agent_is_running(monkeypatch):
     runner_module = _load_runner_with_stubs(monkeypatch)
-    monkeypatch.setattr(runner_module, "is_agent_running", lambda *args: True)
+    monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value="a" * 32))
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "has_active_run_for_conversation",
-        lambda conversation_id: False,
+        lambda *_scope: False,
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -301,19 +208,18 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     async def fake_validate_bindings_available(*args, **kwargs):
         return {"available": True, "unavailable_bindings": []}
 
-    async def fake_run_agent_background(agent_request, user_id, tenant_id, skip_user_save=False, **kwargs):
+    async def fake_run_agent_background(agent_request, run_id, user_id, tenant_id):
         captured["agent_request"] = agent_request
         captured["user_id"] = user_id
         captured["tenant_id"] = tenant_id
-        captured["skip_user_save"] = skip_user_save
-        return {"assistant_message_id": 456, "status": "completed", "persisted": True}
+        return _Payload(assistant_message_id=456)
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "has_active_run_for_conversation",
-        lambda conversation_id: False,
+        lambda *_scope: False,
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -327,7 +233,7 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -349,7 +255,6 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     assert captured["agent_request"].model_id == 55
     assert captured["agent_request"].tool_params == {"tools": {"search": {"top_k": 5}}}
     assert captured["agent_request"].conversation_id == 100
-    assert captured["skip_user_save"] is True
 
 
 @pytest.mark.asyncio
@@ -367,7 +272,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
     async def fake_run_agent_background(agent_request, *args, **kwargs):
         agent_conversation_ids.append(agent_request.conversation_id)
         agent_history_lengths.append(len(agent_request.history))
-        return {"assistant_message_id": 456, "status": "completed", "persisted": True}
+        return _Payload(assistant_message_id=456)
 
     def fake_create_run(values, user_id):
         run = {
@@ -378,7 +283,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         runs[run["run_id"]] = run
         return run
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, **kwargs):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None):
         run = runs[run_id]
         if expected_statuses and run["status"] not in expected_statuses:
             return None
@@ -386,7 +291,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         return run
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(runner_module.agent_automation_db, "create_run", fake_create_run)
     monkeypatch.setattr(runner_module.agent_automation_db, "update_run", fake_update_run)
@@ -403,6 +308,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         runs[run_id]["user_message_id"] = message_id
         return {
             "user_message_id": message_id,
+            "assistant_message_index": (message_id - 100) * 2 - 1,
             "history": [_Payload(role="user", content="previous")] * (message_id - 100),
         }
 
@@ -458,10 +364,10 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
 
     async def fake_run_agent_background(agent_request, *args, **kwargs):
         captured["agent_request"] = agent_request
-        return {"assistant_message_id": 456, "status": "completed", "persisted": True}
+        return _Payload(assistant_message_id=456)
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -475,7 +381,7 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -512,11 +418,12 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
         return {"available": True, "unavailable_bindings": []}
 
     async def slow_run_agent_background(*args, **kwargs):
+        stopped["dispatched_run_id"] = kwargs["run_id"]
         await asyncio.sleep(1)
-        return {"assistant_message_id": 456, "status": "completed", "persisted": True}
+        return _Payload(assistant_message_id=456)
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "run_agent_background", slow_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", slow_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -526,7 +433,7 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -535,11 +442,14 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     )
     monkeypatch.setattr(
         runner_module,
-        "stop_agent_tasks",
-        lambda conversation_id, user_id, **kwargs: stopped.update({
-            "conversation_id": conversation_id,
+        "forward_scoped_stop",
+        AsyncMock(side_effect=lambda payload, user_id, tenant_id: stopped.update({
+            "conversation_id": payload.conversation_id,
+            "cancelled_run_id": payload.run_id,
+            "prevent_start": payload.prevent_start,
             "user_id": user_id,
-        }),
+            "tenant_id": tenant_id,
+        })),
     )
 
     run = await runner_module.AgentAutomationRunner().execute_task({
@@ -551,7 +461,11 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     assert run["error_code"] == "AUTOMATION_RUN_TIMEOUT"
     assert updates["task"]["last_run_status"] == "TIMEOUT"
     assert updates["task"]["consecutive_failures"] == 1
-    assert stopped == {"conversation_id": 100, "user_id": "user"}
+    assert stopped == {
+        "conversation_id": 100, "user_id": "user", "tenant_id": "tenant", "prevent_start": True,
+        "dispatched_run_id": stopped["cancelled_run_id"], "cancelled_run_id": stopped["dispatched_run_id"],
+    }
+    assert len(stopped["dispatched_run_id"]) == 32
 
 
 def test_finish_run_does_not_overwrite_canceled_run(monkeypatch):
@@ -592,7 +506,7 @@ def test_finish_run_preserves_task_paused_during_execution(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -622,7 +536,7 @@ def test_scheduled_failure_advances_to_next_occurrence(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
@@ -661,7 +575,7 @@ def test_manual_run_does_not_consume_scheduled_occurrence(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
@@ -718,7 +632,7 @@ async def test_execute_task_carries_lease_owner_into_active_run(monkeypatch):
         lambda values, user_id, **kwargs: {"run_id": 21, **values},
     )
 
-    async def capture_active_run(run, task, scheduled, trigger_type):
+    async def capture_active_run(run, task):
         captured.update(run)
         return run
 
@@ -746,7 +660,7 @@ async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(
         "cancel_run",
         lambda *args: canceled.append(args) or {"run_id": 22, "status": "CANCELED"},
     )
-    monkeypatch.setattr(runner, "cancel_for_conversation", lambda *args: canceled.append(args))
+    monkeypatch.setattr(runner, "cancel_runtime_run", AsyncMock(side_effect=lambda *args: canceled.append(args)))
 
     monkeypatch.setattr(runner_module.agent_automation_db, "update_run", lambda run_id, values, *a, **k: {"run_id": run_id, **values})
     monkeypatch.setattr(runner_module.agent_automation_db, "update_task", lambda *a, **k: {})
@@ -757,7 +671,10 @@ async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(
     monkeypatch.setattr(runner, "_execute_active_run", interrupt)
     with pytest.raises(asyncio.CancelledError):
         await runner.execute_task(_base_task())
-    assert canceled == [(100, "user", 22)]
+    assert len(canceled) == 1
+    runtime_run_id, conversation_id, user_id, tenant_id = canceled[0]
+    assert len(runtime_run_id) == 32
+    assert (conversation_id, user_id, tenant_id) == (100, "user", "tenant")
 
     async def fail(*args):
         raise RuntimeError("agent failed")
@@ -795,7 +712,7 @@ def test_repeated_scheduled_failures_pause_task_and_stale_writes_are_discarded(m
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, **kwargs: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
@@ -819,3 +736,31 @@ def test_repeated_scheduled_failures_pause_task_and_stale_writes_are_discarded(m
         lambda *args: None,
     )
     assert runner._update_task_state(task, {}, "SCHEDULED", "stale-owner") is None
+
+
+
+@pytest.mark.asyncio
+async def test_runtime_unavailable_during_inspection_fails_without_starting_agent(monkeypatch):
+    runner_module = _load_runner_with_stubs(monkeypatch)
+    task = _base_task()
+    monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *_: False)
+    inspect = AsyncMock(side_effect=runner_module.RuntimeServiceUnavailableError("Runtime service is unavailable"))
+    monkeypatch.setattr(runner_module, "forward_active_run", inspect)
+    background = AsyncMock()
+    monkeypatch.setattr(runner_module, "forward_tracked_background", background)
+    monkeypatch.setattr(
+        runner_module.agent_automation_db, "create_run",
+        lambda values, _user: {"run_id": 3, **values},
+    )
+    runner = runner_module.AgentAutomationRunner()
+    failed = {"run_id": 3, "status": "FAILED", "error_code": "AUTOMATION_RUN_FAILED"}
+    finish = MagicMock(return_value=failed)
+    monkeypatch.setattr(runner, "_fail_run", finish)
+
+    assert await runner.execute_task(task) == failed
+    run, failed_task, code, message = finish.call_args.args
+    assert run["run_id"] == 3
+    assert failed_task == task
+    assert (code, message) == ("AUTOMATION_RUN_FAILED", "Runtime service is unavailable")
+    inspect.assert_awaited_once_with(task["conversation_id"], task["user_id"], task["tenant_id"])
+    background.assert_not_called()

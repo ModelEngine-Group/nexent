@@ -8,12 +8,24 @@ import logging
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
+from contracts.constants import environment
+from infrastructure.sandbox_deployment import default_sandbox_policy
 from nexent.core.agents.sandbox.config import SandboxConfig
 
 if TYPE_CHECKING:
     from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_deployed_sandbox(database_policy: dict[str, Any] | None) -> SandboxConfig | None:
+    return resolve_sandbox_config(
+        database_policy,
+        default_sandbox_policy(),
+        workspace_mode=environment.NEXENT_SANDBOX_WORKSPACE_MODE,
+        container_workspace_root=environment.NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+        failure_policy=environment.NEXENT_SANDBOX_FAILURE_POLICY,
+    )
 
 
 def resolve_sandbox_config(

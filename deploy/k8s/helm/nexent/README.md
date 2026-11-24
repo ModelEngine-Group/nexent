@@ -118,7 +118,7 @@ Set `global.sandboxNetworkPolicyVerified: true` after verifying that the cluster
 
 ### Runtime Maintenance
 
-Use `bash deploy.sh k8s` (or `--release-scope nexent`) to deploy or upgrade Runtime. The script holds a PostgreSQL session lock while it stops old business Pods, runs system bootstrap, and submits the Runtime maintenance Job. It activates the release only after verifying the paused batch and its committed completion marker. Each ordinary Runtime Pod checks that same marker; restarting a Pod does not run global recovery. The selected backend image must include `management.maintenance`.
+Use `bash deploy.sh k8s` (or `--release-scope nexent`) to deploy or upgrade Runtime. The script holds a PostgreSQL session lock while it stops old business Pods, runs system bootstrap, and submits the Runtime maintenance Job. The Job uses the Management image configured for `nexent-config` and settles interrupted AgentOS executions in the maintenance transaction. The script activates the release after verifying the paused batch and its committed completion marker. Each Runtime Pod checks the same marker and renews only its own execution leases.
 
 Before bootstrap, the script waits for each existing business Deployment to report zero replicas for its current generation and for its Pods to disappear. The maintenance Job independently checks both conditions for Runtime; an empty Pod list by itself does not confirm that the controller has applied the scale-to-zero request.
 

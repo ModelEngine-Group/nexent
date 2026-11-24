@@ -6,12 +6,12 @@ from contracts.errors.exceptions import RuntimeCoordinationUnavailableError
 from infrastructure.redis.run_state import runtime_state_service
 from management.services.execution_coordination import read_owned_agent_execution
 from nexent.core.concurrency import ManagedTaskSpec, ThreadManagerError
-from runtime.thread_management import runtime_thread_manager
+from management.thread_management import config_thread_manager
 
 
 async def get_owned_execution(tenant_id, user_id, identifier, *, active_only=False):
     try:
-        return await runtime_thread_manager.run(
+        return await config_thread_manager.run(
             "control-io", ManagedTaskSpec(task_name="runtime-read-owned-execution", owner=__name__),
             read_owned_agent_execution, tenant_id, user_id, identifier, active_only=active_only,
         )
