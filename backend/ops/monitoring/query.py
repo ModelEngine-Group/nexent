@@ -247,7 +247,8 @@ def skill_rows(rows, inventory, *, covered):
                                     "skill_name": row.get("skill_name")})
     result = []
     for key, skill in identities.items():
-        usage_count = sum(row.get("usage_count", 0) for row in by_skill[key])
+        usage_rows = by_skill.get(key, ())
+        usage_count = sum(row.get("usage_count", 0) for row in usage_rows)
         result.append({**skill, "metrics": {"usage_count": usage_count}
                        if covered or key in by_skill else None})
     return result

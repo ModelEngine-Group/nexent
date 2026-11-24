@@ -11,10 +11,10 @@ from zoneinfo import ZoneInfo
 import pytest
 from elasticsearch import NotFoundError
 
-from infrastructure.monitoring.facts import ModelFact
+from infrastructure.monitoring.facts import ModelFact, SkillFact
 from ops.monitoring import service
 from ops.monitoring.contracts import MonitoringKind
-from ops.monitoring.model import MODEL_MONITORING
+from ops.monitoring.model import MODEL_MONITORING, SKILL_MONITORING
 
 
 DAY = date(2026, 11, 23)
@@ -29,7 +29,7 @@ def payload(**changes):
 @pytest.fixture
 def writer(mocker):
     store, es = MagicMock(), MagicMock()
-    instance = service.Monitoring(store, es, ZoneInfo("UTC"), {"model": MODEL_MONITORING})
+    instance = service.Monitoring(store, es, ZoneInfo("UTC"), {"model": MODEL_MONITORING, "skill": SKILL_MONITORING})
     store.next_batch.return_value = None
     store.dirty_days.return_value = [(DAY, 7)]
     mocker.patch.object(service, "existing_fact", return_value=None)
@@ -69,6 +69,32 @@ def test_stage_ignores_identical_or_older_revision(writer, mocker, previous_revi
 def test_stage_rejects_cross_tenant_batch(writer):
     with pytest.raises(ValueError, match="scope"):
         writer._stage({"write_version": 1, "replay_payload": [payload(tenant_id="other")]}, "model", "t")
+
+
+def test_stage_merges_skill_duplicate_using_earliest_trigger(writer, mocker):
+    skill_payload = {"tenant_id": "t", "fact_kind": "skill", "fact_id": "skill-use",
+                     "call_context_id": "run", "started_at": "2026-11-23T00:00:00Z",
+                     "triggered_at": "2026-11-23T01:00:00Z", "trigger_kind": "script_started",
+                     "skill_id": "7", "skill_name": "summarize", "record_revision": 1,
+                     "outcome": "succeeded"}
+    previous = SkillFact.model_validate({**skill_payload, "triggered_at": "2026-11-23T02:00:00Z"}).document(writer.zone)
+    mocker.patch.object(service, "existing_fact", return_value=previous)
+    staged = writer._stage({"write_version": 5, "replay_payload": [skill_payload]}, "skill", "t")
+    assert staged["writes"][0]["document"]["trigger_kind"] == "script_started"
+    assert staged["writes"][0]["document"]["record_revision"] == 2
+
+
+def test_stage_skips_skill_duplicate_when_existing_trigger_is_earlier(writer, mocker):
+    skill_payload = {"tenant_id": "t", "fact_kind": "skill", "fact_id": "skill-use",
+                     "call_context_id": "run", "started_at": "2026-11-23T00:00:00Z",
+                     "triggered_at": "2026-11-23T02:00:00Z", "trigger_kind": "script_started",
+                     "skill_id": "7", "skill_name": "summarize", "record_revision": 1,
+                     "outcome": "succeeded"}
+    previous = SkillFact.model_validate({**skill_payload, "triggered_at": "2026-11-23T01:00:00Z"}).document(writer.zone)
+    mocker.patch.object(service, "existing_fact", return_value=previous)
+    assert writer._stage({"write_version": 5, "replay_payload": [skill_payload]}, "skill", "t") == {
+        "writes": [], "coverage": {},
+    }
 
 
 def test_queued_batch_is_staged_written_then_confirmed(writer, mocker):
