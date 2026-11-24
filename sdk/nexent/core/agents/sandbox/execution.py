@@ -1387,6 +1387,7 @@ SANDBOX_CONTAINER_NAME = "nexent-runtime-sandbox"
 SANDBOX_NETWORK_NAME = "nexent_sandbox_control"
 SANDBOX_JUPYTER_PORT = 8888
 SANDBOX_SESSION_CONTAINER_PREFIX = "nexent-runtime-sandbox-session"
+SANDBOX_NAMESPACE_LABEL = "com.nexent.sandbox.namespace"
 SANDBOX_PNPM_STORE_SOURCE = "/opt/nexent/pnpm-store"
 SANDBOX_PNPM_STORE_PATH = "/mnt/nexent/workdir/.pnpm-store"
 _DOCKER_CLONE3_SECCOMP_MIN_VERSION = (20, 10, 10)
@@ -1458,23 +1459,25 @@ def _apply_legacy_docker_seccomp_compatibility(
         )
 
 
-def _ensure_sandbox_control_network(client: Any) -> Any:
+def _namespaced_sandbox_name(name: str, namespace: str) -> str:
+    return f"{name}-{namespace}" if namespace else name
+
+
+def _ensure_sandbox_control_network(client: Any, network_name: str = SANDBOX_NETWORK_NAME) -> Any:
     """Return an internal control network shared only with the runtime."""
     import docker
 
     try:
-        network = client.networks.get(SANDBOX_NETWORK_NAME)
+        network = client.networks.get(network_name)
     except docker.errors.NotFound:
         network = client.networks.create(
-            SANDBOX_NETWORK_NAME,
+            network_name,
             driver="bridge",
             internal=True,
         )
     network.reload()
     if not bool((network.attrs or {}).get("Internal")):
-        raise RuntimeError(
-            f"Sandbox control network {SANDBOX_NETWORK_NAME} must be internal"
-        )
+        raise RuntimeError(f"Sandbox control network {network_name} must be internal")
 
     if _is_containerized_runtime():
         runtime_container = client.containers.get(socket.gethostname())
@@ -1490,9 +1493,10 @@ def _attach_sandbox_to_control_network(
     container: Any,
     *,
     alias: str,
+    network_name: str = SANDBOX_NETWORK_NAME,
 ) -> Any:
     """Attach an egress-enabled sandbox to the internal runtime control plane."""
-    network = _ensure_sandbox_control_network(client)
+    network = _ensure_sandbox_control_network(client, network_name)
     container.reload()
     connected = (network.attrs or {}).get("Containers") or {}
     if container.id not in connected:
@@ -1546,14 +1550,16 @@ def _kernel_gateway_command(hostname: Optional[str] = None) -> list[str]:
     ]
 
 
-def _sandbox_connection_hosts(container: Any) -> list[str]:
+def _sandbox_connection_hosts(
+    container: Any, *, name: str = SANDBOX_CONTAINER_NAME, network_name: str = SANDBOX_NETWORK_NAME,
+) -> list[str]:
     """Return Jupyter connection hosts in preferred order for this runtime."""
     if _is_containerized_runtime():
-        return [SANDBOX_CONTAINER_NAME]
+        return [name]
 
     hosts = ["127.0.0.1"]
     networks = (container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
-    network_ip = (networks.get(SANDBOX_NETWORK_NAME) or {}).get("IPAddress")
+    network_ip = (networks.get(network_name) or {}).get("IPAddress")
     if network_ip:
         hosts.append(network_ip)
     return hosts
@@ -2298,12 +2304,14 @@ class SandboxPoolManager:
         cancellation_scope: Optional[RunCancellationScope] = None,
     ) -> Any:
         """Create one Docker container per system pool and lease one kernel per run."""
-        # A system sandbox has one fixed Docker container and network regardless
+        # A system sandbox has one Docker container and network per deployment regardless
         # of whether an individual lease exposes Runtime-hosted tools. Host-tool
         # bridges are installed per kernel lease below, so splitting the owner by
         # host_tools_exist would let two pool owners manage and remove the same
         # named container.
         pool_key = config.docker_image
+        if config.docker_namespace:
+            pool_key = f"{pool_key}|namespace={config.docker_namespace}"
 
         def discard_owner(owner: Any) -> None:
             removed = False
@@ -2594,23 +2602,26 @@ class SandboxPoolManager:
         from requests.exceptions import SSLError
 
         tls_client = None
+        name = _namespaced_sandbox_name(SANDBOX_CONTAINER_NAME, config.docker_namespace)
+        network_name = _namespaced_sandbox_name(SANDBOX_NETWORK_NAME, config.docker_namespace)
         try:
             import docker
 
             client = docker.from_env()
             containers = [
                 item for item in client.containers.list(all=True)
-                if item.name == SANDBOX_CONTAINER_NAME
+                if item.name == name
             ]
             if not containers:
-                logger_.debug("No persisted sandbox container named %s found", SANDBOX_CONTAINER_NAME)
+                logger_.debug("No persisted sandbox container named %s found", name)
                 return None
 
             container = containers[0]
             container.reload()
             labels = container.labels or {}
-            if labels.get("com.nexent.sandbox") != "runtime":
-                logger_.warning("Ignoring unrelated container named %s", SANDBOX_CONTAINER_NAME)
+            if (labels.get("com.nexent.sandbox") != "runtime"
+                    or labels.get(SANDBOX_NAMESPACE_LABEL, "") != config.docker_namespace):
+                logger_.warning("Ignoring unrelated container named %s", name)
                 return None
             require_tls_container(container)
             if container.status != "running":
@@ -2648,8 +2659,8 @@ class SandboxPoolManager:
 
             networks = (container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
             containerized_runtime = _is_containerized_runtime()
-            if containerized_runtime and SANDBOX_NETWORK_NAME not in networks:
-                logger_.warning("Persisted sandbox container is not attached to network %s", SANDBOX_NETWORK_NAME)
+            if containerized_runtime and network_name not in networks:
+                logger_.warning("Persisted sandbox container is not attached to network %s", network_name)
                 return None
 
             connection_port = SANDBOX_JUPYTER_PORT if containerized_runtime else _published_sandbox_port(container)
@@ -2663,7 +2674,9 @@ class SandboxPoolManager:
 
             selected_host = None
             kernels = None
-            for candidate_host in (_sandbox_connection_hosts(container) if containerized_runtime else ["127.0.0.1"]):
+            hosts = (_sandbox_connection_hosts(container, name=name, network_name=network_name)
+                     if containerized_runtime else ["127.0.0.1"])
+            for candidate_host in hosts:
                 base_url = f"https://{candidate_host}:{connection_port}"
                 try:
                     response = tls_client.http.get(f"{base_url}/api/kernels", timeout=3)
@@ -2710,17 +2723,20 @@ class SandboxPoolManager:
                 tls_client.close()
 
     def _remove_stale_docker_containers(self, config: SandboxConfig, logger_: logging.Logger) -> None:
-        """Remove only Nexent-owned containers conflicting with the stable system name."""
+        """Remove only Nexent-owned containers belonging to this deployment."""
         try:
             import docker
 
             client = docker.from_env()
+            name = _namespaced_sandbox_name(SANDBOX_CONTAINER_NAME, config.docker_namespace)
             containers = []
             for container in client.containers.list(all=True):
+                if container.name != name:
+                    continue
                 container.reload()
-                if container.name == SANDBOX_CONTAINER_NAME and (container.labels or {}).get(
-                    "com.nexent.sandbox"
-                ) == "runtime":
+                labels = container.labels or {}
+                if (container.name == name and labels.get("com.nexent.sandbox") == "runtime"
+                        and labels.get(SANDBOX_NAMESPACE_LABEL, "") == config.docker_namespace):
                     require_tls_container(container)
                     containers.append(container)
             for container in containers:
@@ -2747,6 +2763,7 @@ class SandboxPoolManager:
         run_kwargs = dict(container_run_kwargs)
         _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
+        network_name = _namespaced_sandbox_name(SANDBOX_NETWORK_NAME, config.docker_namespace)
         run_kwargs.update({
             "name": container_name,
             "labels": {**run_kwargs.get("labels", {}), "com.nexent.sandbox": "session", TLS_LABEL: TLS_VERSION},
@@ -2768,10 +2785,10 @@ class SandboxPoolManager:
             # The runtime's 127.0.0.1 is not the Docker host. Connect directly
             # over the shared Docker network using this container's unique DNS
             # name and do not publish a host port.
-            _ensure_sandbox_control_network(client)
+            _ensure_sandbox_control_network(client, network_name)
             run_kwargs.pop("ports", None)
             if config.network_disabled:
-                run_kwargs["network"] = SANDBOX_NETWORK_NAME
+                run_kwargs["network"] = network_name
             else:
                 # Docker's default bridge supplies outbound access. The
                 # container is attached to the internal control network after
@@ -2799,6 +2816,7 @@ class SandboxPoolManager:
                     client,
                     container,
                     alias=container_name,
+                    network_name=network_name,
                 )
             _seed_pnpm_offline_store(container)
             container.reload()
@@ -2899,7 +2917,9 @@ class SandboxPoolManager:
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
-        run_kwargs["command"] = _kernel_gateway_command()
+        name = _namespaced_sandbox_name(SANDBOX_CONTAINER_NAME, config.docker_namespace)
+        network_name = _namespaced_sandbox_name(SANDBOX_NETWORK_NAME, config.docker_namespace)
+        run_kwargs["command"] = _kernel_gateway_command(name)
         run_kwargs["labels"] = {**run_kwargs.get("labels", {}), TLS_LABEL: TLS_VERSION}
         _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         containerized_runtime = _is_containerized_runtime()
@@ -2938,7 +2958,8 @@ class SandboxPoolManager:
                 _attach_sandbox_to_control_network(
                     client,
                     container,
-                    alias=SANDBOX_CONTAINER_NAME,
+                    alias=name,
+                    network_name=network_name,
                 )
             container.reload()
             host_config = container.attrs.get("HostConfig", {})
@@ -2962,10 +2983,12 @@ class SandboxPoolManager:
             deadline = time.monotonic() + max(10, config.timeout_seconds)
             selected_host = None
             last_probe_errors: dict[str, str] = {}
+            hosts = (_sandbox_connection_hosts(container, name=name, network_name=network_name)
+                     if containerized_runtime else ["127.0.0.1"])
             while time.monotonic() < deadline:
                 self._check_system_startup_cancelled(cancellation_scope)
                 container.reload()
-                for candidate_host in (_sandbox_connection_hosts(container) if containerized_runtime else ["127.0.0.1"]):
+                for candidate_host in hosts:
                     base_url = f"https://{candidate_host}:{connection_port}"
                     try:
                         response = tls_client.http.get(f"{base_url}/api/kernels", timeout=1)
@@ -3097,25 +3120,30 @@ class SandboxPoolManager:
                 }
             }
         if config.scope == SandboxScope.SYSTEM:
+            name = _namespaced_sandbox_name(SANDBOX_CONTAINER_NAME, config.docker_namespace)
+            network_name = _namespaced_sandbox_name(SANDBOX_NETWORK_NAME, config.docker_namespace)
             try:
                 import docker
 
                 docker_client = docker.from_env()
                 if _is_containerized_runtime():
-                    _ensure_sandbox_control_network(docker_client)
+                    _ensure_sandbox_control_network(docker_client, network_name)
+                labels = {**container_run_kwargs.get("labels", {}), "com.nexent.sandbox": "runtime"}
+                if config.docker_namespace:
+                    labels[SANDBOX_NAMESPACE_LABEL] = config.docker_namespace
                 container_run_kwargs.update({
-                    "name": SANDBOX_CONTAINER_NAME,
-                    "labels": {**container_run_kwargs.get("labels", {}), "com.nexent.sandbox": "runtime"},
-                    "command": _kernel_gateway_command(),
+                    "name": name,
+                    "labels": labels,
+                    "command": _kernel_gateway_command(name),
                 })
                 if _is_containerized_runtime() and config.network_disabled:
-                    container_run_kwargs["network"] = SANDBOX_NETWORK_NAME
+                    container_run_kwargs["network"] = network_name
                 else:
                     container_run_kwargs.pop("network", None)
             except Exception as exc:
                 if config.failure_policy == "error":
                     raise RuntimeError("Docker sandbox FAILED phase=network_setup") from exc
-                logger_.warning("Could not prepare Docker network %s: %s", SANDBOX_NETWORK_NAME, exc)
+                logger_.warning("Could not prepare Docker network %s: %s", network_name, exc)
 
         if host_tools_exist and config.network_disabled and config.scope != SandboxScope.SYSTEM:
             logger_.warning(

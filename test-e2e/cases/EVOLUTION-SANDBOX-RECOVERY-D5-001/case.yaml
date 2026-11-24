@@ -1,0 +1,38 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-SANDBOX-RECOVERY-D5-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-09]
+  title: 同一 Docker 宿主机上评测沙箱独立创建和恢复
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 核验两个 Runtime 的系统沙箱、工作目录、TLS 和恢复清理边界。
+  preconditions: [本地 Docker Linux 守护进程可用，已预载 Nexent 沙箱镜像，可创建两个专用测试容器。]
+  test_data:
+    profile: 两个测试专用部署名，绑定各自独立的临时工作目录。
+  steps:
+  - order: 1
+    action: 两个部署在同一宿主机创建真实系统沙箱，分别执行一个带文件的核验任务。
+    expected: 容器、访问地址和挂载目录独立，任务读取各自的文件并返回预期内容。
+  - order: 2
+    action: 独立恢复其中一个部署的沙箱，再关闭该部署。
+    expected: 恢复只连接本部署容器，关闭后另一容器仍能执行任务。
+  expected_results: [两个部署均返回各自的内容和真实容器信息。, 恢复和终止只作用于目标部署。]
+  forbidden_side_effects: [读取另一测试目录，或者清理、复用另一部署的系统容器。]
+  acceptance:
+  - {id: AC-01, description: 同宿主机两个沙箱可独立创建与执行, steps: [1], expected_results: [1], forbidden_side_effects: [1]}
+  - {id: AC-02, description: 只恢复与停止当前部署的容器, steps: [2], expected_results: [2], forbidden_side_effects: [1]}
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: RELIABILITY
+  risk: 离线评测与普通会话竞争同一 Jupyter 网关，或重启时影响另一部署的执行。
+  condition: [两个配置使用相同 Docker 守护进程，保持真实 TLS、工作目录和启动恢复逻辑。]
+  metrics: [容器和访问端点、文件内容、关闭后的可用性。]
+  thresholds: [两个容器 ID 和访问端点均不同，两个文件核验都通过，另一部署关闭后仍能正常执行。]
+  recovery_expectations: [销毁本用例创建的容器和临时目录，保留环境中的已有沙箱。]

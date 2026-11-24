@@ -12,7 +12,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [EVOLUTION-DEVELOPMENT-RECOVERY-D5-001, EVOLUTION-PRIVATE-RECOVERY-D5-001, EVOLUTION-ONLINE-DIAGNOSIS-D3-001, EVOLUTION-RUN-BUDGET-D3-001, EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
+    added: [EVOLUTION-SANDBOX-RECOVERY-D5-001, EVOLUTION-DEVELOPMENT-RECOVERY-D5-001, EVOLUTION-PRIVATE-RECOVERY-D5-001, EVOLUTION-ONLINE-DIAGNOSIS-D3-001, EVOLUTION-RUN-BUDGET-D3-001, EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
     modified: []
     retired: []
   traditional_ut:
@@ -33,6 +33,9 @@ change:
     - test/backend/services/test_evolution_combinations.py
     - test/backend/services/test_evolution_run_budget.py
     - test/sdk/core/agents/test_clarification_runtime.py
+    - test/sdk/core/agents/test_sandbox_system_network.py
+    - test/sdk/core/agents/test_sandbox.py
+    - test/backend/agents/test_sandbox_config.py
     - test/backend/services/test_evolution_generation_budget.py
     - test/backend/services/test_evolution_replay.py
     - test/backend/services/test_evolution_dialogue.py
@@ -61,6 +64,7 @@ change:
     - 模型生成预占次数和时间，超额时不访问模型。迟到回复不能存为候选。启用用量限额后，每次向供应商发请求前预留 token 和费用，收到有效供应商回执后按实际用量结算。
     - 开发重放和模型裁判共享实验模型额度，用量按回执结算。超额、撤销或过期的任务不能继续申请调用。
     - smolagents 收到后台额度拒绝后终止当前运行，不生成后续 ReAct 步骤、工具调用或兜底答案。
+    - Docker 沙箱部署名只接受 Runtime 配置。连接、创建和恢复使用各自的容器和控制网络，保留无部署名时的默认配置。
     - 开发实验在启动前计入所有对照组、固定回归及追问。总时限包括排队，预算不足不提交，到期停派，迟到不能计分。
     - 开发试跑实际发出前再次核对权限、租约和预算。当进程中断时，只重排尚未发出且已清理旧副本的试跑，旧回执不能发送或写回。
     - 会话授权按原始请求生效，重试沿用原授权。

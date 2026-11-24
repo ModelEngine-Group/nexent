@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -81,12 +82,15 @@ class SandboxConfig:
     workspace_mode: str = "legacy"
     container_workspace_root: str = ""
     failure_policy: str = "local"
+    docker_namespace: str = ""
 
     def __post_init__(self) -> None:
         if self.workspace_mode not in {"legacy", "bind"}:
             raise ValueError("Unknown sandbox workspace mode")
         if self.failure_policy not in {"local", "error"}:
             raise ValueError("Unknown sandbox failure policy")
+        if self.docker_namespace and not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?", self.docker_namespace):
+            raise ValueError("Sandbox Docker namespace must be a lowercase name of at most 24 characters")
         if self.workspace_mode == "bind":
             validate_container_root(self.container_workspace_root)
 
@@ -102,6 +106,7 @@ class SandboxConfig:
     @classmethod
     def from_dict(cls, data: Optional[dict[str, Any]]) -> "SandboxConfig":
         """Build a SandboxConfig from a plain dict (e.g. from AgentConfig.sandbox_policy)."""
+        # Docker ownership is configured by the Runtime process, outside the Agent policy.
         if not data:
             return cls()
         host_tool_timeout_raw = data.get("host_tool_timeout_seconds")

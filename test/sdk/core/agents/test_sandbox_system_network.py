@@ -4,6 +4,7 @@
 import logging
 import sys
 from concurrent.futures import CancelledError
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,7 +37,7 @@ def system(monkeypatch):
     monkeypatch.setattr(sb, "_is_containerized_runtime", lambda: False)
     monkeypatch.setattr(sb, "_seed_pnpm_offline_store", lambda container: None)
     return SimpleNamespace(
-        pool=pool, config=config, container=container, run=run, get=get,
+        pool=pool, config=config, container=container, client=client, run=run, get=get,
         logger=logging.getLogger(__name__), scope=sb.RunCancellationScope(),
     )
 
@@ -139,6 +140,52 @@ def test_unrelated_same_name_container_is_not_removed(system):
     s.container.labels = {}
     s.pool._remove_stale_docker_containers(s.config, s.logger)
     s.container.remove.assert_not_called()
+
+
+def test_namespaced_recovery_and_removal_only_select_owned_container(system):
+    s = system
+    config = replace(s.config, docker_namespace="replay")
+    other = s.container
+    owned = MagicMock(
+        name="owned-fixture", attrs=other.attrs, status="running",
+        labels={**other.labels, sb.SANDBOX_NAMESPACE_LABEL: "replay"},
+    )
+    owned.name = f"{sb.SANDBOX_CONTAINER_NAME}-replay"
+    s.client.containers.list = lambda **_: [other, owned]
+
+    assert s.pool._recover_docker_container(config, s.logger, False).container is owned
+    assert s.pool._recover_docker_container(s.config, s.logger, False).container is other
+    owned.labels[sb.SANDBOX_NAMESPACE_LABEL] = "different"
+    assert s.pool._recover_docker_container(config, s.logger, False) is None
+    s.pool._remove_stale_docker_containers(config, s.logger)
+    owned.remove.assert_not_called()
+    owned.labels[sb.SANDBOX_NAMESPACE_LABEL] = "replay"
+    s.pool._remove_stale_docker_containers(config, s.logger)
+    owned.remove.assert_called_once_with(force=True)
+    other.remove.assert_not_called()
+
+
+def test_namespaced_containerized_owner_uses_its_network_and_tls_hostname(system, monkeypatch):
+    s = system
+    namespace = "replay"
+    config = replace(s.config, docker_namespace=namespace)
+    network_name = f"{sb.SANDBOX_NETWORK_NAME}-{namespace}"
+    container_name = f"{sb.SANDBOX_CONTAINER_NAME}-{namespace}"
+    network = MagicMock()
+    s.container.name = container_name
+    s.container.attrs["NetworkSettings"]["Networks"] = {network_name: {}}
+    monkeypatch.setattr(sb, "_is_containerized_runtime", lambda: True)
+    ensure = MagicMock(return_value=network)
+    monkeypatch.setattr(sb, "_ensure_sandbox_control_network", ensure)
+
+    owner = s.pool._build_docker_executor(config, s.logger)
+    kwargs = s.run.call_args.kwargs
+    assert kwargs["name"] == container_name
+    assert kwargs["network"] == network_name
+    assert kwargs["labels"][sb.SANDBOX_NAMESPACE_LABEL] == namespace
+    assert kwargs["command"][3] == container_name
+    assert owner.base_url == f"https://{container_name}:8888"
+    ensure.assert_called_once_with(s.client, network_name)
 
 
 def test_cancel_before_owner_publication_cleans_unpublished_owner(system, monkeypatch):

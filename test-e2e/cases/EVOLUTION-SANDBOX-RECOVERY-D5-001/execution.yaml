@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-SANDBOX-RECOVERY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_docker_sandbox_deployments_recover_independently
+acceptance_bindings:
+  AC-01: [test_docker_sandbox_deployments_recover_independently]
+  AC-02: [test_docker_sandbox_deployments_recover_independently]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The case uses the local Docker daemon and an already loaded Nexent sandbox image. It gives both workers unique names and bind directories, verifies their real receipts, and removes only case-owned resources.

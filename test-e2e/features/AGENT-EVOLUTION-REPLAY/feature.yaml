@@ -24,4 +24,6 @@ feature:
     description: 独立确认从上一个已保存的判分恢复。发出前中断可重试，已可能发出的试跑缺少判分时保留无效结论，清理私有副本并阻止晋升。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-08
     description: 开发评测进程中断后只重排确认尚未发出的试跑。先收回旧副本，再用新回执重排一次。保留已有判分，拒绝过期回执，不自动重发可能已执行的试跑。
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-09
+    description: 同一 Docker 宿主机上，普通会话与离线评测可配置各自的运行沙箱。配置仅由 Runtime 部署提供，复用和清理只作用于各自的沙箱。
   required_test_stages: [D1, D2, D3, D5]

@@ -464,6 +464,8 @@ NEXENT_SANDBOX_DEFAULT_SCOPE = os.getenv('NEXENT_SANDBOX_DEFAULT_SCOPE', 'system
 #    system   = persistent warm pool shared by all runs (lowest cold-start latency).
 NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv('NEXENT_SANDBOX_DOCKER_IMAGE', 'nexent/nexent-sandbox:latest')
 # Docker image used when level is 'docker'.
+NEXENT_SANDBOX_DOCKER_NAMESPACE = os.getenv('NEXENT_SANDBOX_DOCKER_NAMESPACE', '')
+# Optional Runtime deployment name for the system container and Docker control network.
 NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv('NEXENT_SANDBOX_WORKSPACE_VOLUME', 'nexent-agent-workspace')
 # Docker named volume shared by the runtime and the system-scoped sandbox.
 NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv('NEXENT_SANDBOX_MEMORY_LIMIT_MB', '2048'))

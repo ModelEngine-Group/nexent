@@ -2,21 +2,25 @@
 
 """Resolve per-agent sandbox policy without reading deployment environment."""
 
+from dataclasses import replace
 from typing import Any
 
 from contracts.constants import environment
 from infrastructure.sandbox_deployment import default_sandbox_policy
-from nexent.core.agents.sandbox.config import SandboxConfig
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel
 
 
 def resolve_deployed_sandbox(database_policy: dict[str, Any] | None) -> SandboxConfig | None:
-    return resolve_sandbox_config(
+    config = resolve_sandbox_config(
         database_policy,
         default_sandbox_policy(),
         workspace_mode=environment.NEXENT_SANDBOX_WORKSPACE_MODE,
         container_workspace_root=environment.NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
         failure_policy=environment.NEXENT_SANDBOX_FAILURE_POLICY,
     )
+    if config is not None and config.level is SandboxLevel.DOCKER:
+        return replace(config, docker_namespace=environment.NEXENT_SANDBOX_DOCKER_NAMESPACE)
+    return config
 
 
 def resolve_sandbox_config(

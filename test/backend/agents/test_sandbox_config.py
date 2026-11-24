@@ -3,7 +3,8 @@
 """Policy precedence and SDK validation at the backend configuration boundary."""
 
 import pytest
-from runtime.adapters.nexent.sandbox import resolve_sandbox_config
+from contracts.constants import environment
+from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox, resolve_sandbox_config
 from nexent.core.agents.sandbox.config import SandboxLevel, SandboxScope
 
 
@@ -63,3 +64,17 @@ def test_missing_workspace_fields_use_deployment_defaults():
     assert config.workspace_mode == 'bind'
     assert config.container_workspace_root == '/mnt/work'
     assert config.failure_policy == 'error'
+
+
+@pytest.mark.parametrize("level", ["docker", "local"])
+def test_docker_namespace_comes_from_the_runtime(level, monkeypatch):
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DOCKER_NAMESPACE", "replay-1")
+    config = resolve_deployed_sandbox({"level": level, "docker_namespace": "edited-agent"})
+    assert config.docker_namespace == ("replay-1" if level == "docker" else "")
+
+
+@pytest.mark.parametrize("namespace", ["Runtime", "-replay", "replay-", "evaluation/run", "a" * 25])
+def test_invalid_docker_namespace_fails_closed(namespace, monkeypatch):
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DOCKER_NAMESPACE", namespace)
+    with pytest.raises(ValueError, match="Sandbox Docker namespace"):
+        resolve_deployed_sandbox({"level": "docker"})

@@ -23,6 +23,16 @@ kernel isolation, execution and cancellation contracts remain unchanged.
 
 ## Deployment and migration
 
+- Runtime processes on the same Docker host can use distinct system sandboxes.
+  Set `NEXENT_SANDBOX_DOCKER_NAMESPACE` on each dedicated evaluation Runtime
+  and give it its own workspace mount. Named-volume deployments can set
+  `NEXENT_SANDBOX_WORKSPACE_VOLUME` per Runtime and mount that volume into its container.
+  Bind-mode deployments can set a distinct `AGENT_WORKSPACE_ROOT` for each Runtime.
+  The namespace accepts up to 24 lowercase
+  letters, digits and hyphens and must start and end with a letter or digit.
+  An empty value uses the default container and control network. Preserve the
+  configured names across restarts so a process can recover its own container.
+
 - Images must contain `cryptography >= 42` and Jupyter Kernel Gateway with
   `certfile`/`keyfile` support. The SDK now declares the cryptography dependency;
   both repository Dockerfiles install the SDK. A custom older image without it

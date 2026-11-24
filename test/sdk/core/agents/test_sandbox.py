@@ -3642,7 +3642,7 @@ class TestBuildSystemDockerExecutor:
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=mock_get))
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
-        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda c: ["127.0.0.1"])
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda c, **_: ["127.0.0.1"])
 
         executor = pm._build_system_docker_executor(cfg, logger, {"name": "test-sandbox"})
 
@@ -3682,7 +3682,7 @@ class TestBuildSystemDockerExecutor:
             SimpleNamespace(get=MagicMock(side_effect=Exception("never ready"))),
         )
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
-        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda c: ["127.0.0.1"])
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda c, **_: ["127.0.0.1"])
 
         with pytest.raises(RuntimeError, match="Jupyter kernel API"):
             pm._build_system_docker_executor(cfg, logger, {"name": "test-sandbox"})
@@ -5381,7 +5381,7 @@ class TestTargetedSandboxCoverage:
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=get))
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
-        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["first", "second"])
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item, **_: ["first", "second"])
 
         recovered = pool._recover_docker_container(
             SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock(), False
@@ -5402,7 +5402,7 @@ class TestTargetedSandboxCoverage:
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("down"))))
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
-        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["only"])
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item, **_: ["only"])
 
         assert pool._recover_docker_container(
             SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock(), False
@@ -5436,7 +5436,7 @@ class TestTargetedSandboxCoverage:
         ))
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("not ready"))))
-        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["host"])
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item, **_: ["host"])
         import itertools
 
         monotonic = itertools.count(0, 121)
