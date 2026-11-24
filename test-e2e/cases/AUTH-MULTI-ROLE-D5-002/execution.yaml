@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: AUTH-MULTI-ROLE-D5-002
+timeout_seconds: 120
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_ops_page_upgrade_preserves_grants_and_is_repeatable
+acceptance_bindings:
+  AC-01: [test_ops_page_upgrade_preserves_grants_and_is_repeatable]
+  AC-02: [test_ops_page_upgrade_preserves_grants_and_is_repeatable]
+  AC-03: [test_ops_page_upgrade_preserves_grants_and_is_repeatable]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained real PostgreSQL upgrade proof using NEXENT_AUTH_TEST_DSN. The existing disposable_database factory creates and finally drops an owned UUID database; the script disposes its SQLAlchemy pool even on failure and verifies database removal. No shared assets, user accounts or service processes are modified. Ownership inherits the AUTH-MULTI-ROLE system domain.
