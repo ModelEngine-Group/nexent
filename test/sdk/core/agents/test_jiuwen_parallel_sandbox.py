@@ -61,7 +61,7 @@ def test_python_children_use_distinct_workspaces_and_keep_nexent_policy(tmp_path
 def test_child_returns_only_published_artifact_references(mocker):
     info = run_info()
 
-    def complete(run):
+    def complete(run, *, run_scope):
         run.published_child_files = [{"name": "same.txt", "url": "s3://test/workspace/owned/outputs/same.txt"}]
         return "child answer"
 
@@ -78,7 +78,7 @@ async def test_one_native_child_timeout_keeps_parent_and_later_sibling_alive(moc
                                                                               max_queue_size=2)})
     adapter.manager.start()
     adapter._parallel_child_calls = {"slow": "sandbox", "peer": "sandbox"}
-    mocker.patch.object(adapter.events, "tool_call", side_effect=lambda name, arguments, call: arguments["task"])
+    mocker.patch.object(adapter.events, "tool_call", side_effect=lambda name, arguments, call, **_: arguments["task"])
     slow_started, slow_stopped = Event(), Event()
 
     def forward(task):
@@ -118,7 +118,7 @@ async def test_native_python_batch_respects_the_parent_slot_limit(mocker):
     adapter.manager.start()
     tasks = [f"child-{index}" for index in range(5)]
     adapter._parallel_child_calls = dict.fromkeys(tasks, "sandbox")
-    mocker.patch.object(adapter.events, "tool_call", side_effect=lambda name, arguments, call: arguments["task"])
+    mocker.patch.object(adapter.events, "tool_call", side_effect=lambda name, arguments, call, **_: arguments["task"])
     release, full = Event(), Event()
     starts = []
     lock = Lock()

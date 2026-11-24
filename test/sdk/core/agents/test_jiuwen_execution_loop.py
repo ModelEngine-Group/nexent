@@ -155,16 +155,21 @@ def test_shutdown_cancels_owned_tasks_and_waits_for_cleanup_before_thread_finish
 
     owner = get_execution_loop(manager)
     entered, cleaned, cancelled = Event(), Event(), Event()
+    scope = RunCancellationScope(cancelled)
 
     async def blocked():
+        task = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        token = scope.register_closer(lambda: loop.call_soon_threadsafe(task.cancel))
         entered.set()
         try:
             await asyncio.sleep(10)
         finally:
             await asyncio.sleep(0.02)
             cleaned.set()
+            scope.unregister_closer(token)
 
-    run = submit(manager, lambda: owner.run(blocked, cancel=cancelled.set))
+    run = submit(manager, lambda: owner.run(blocked, cancel=scope.cancel))
     assert entered.wait(3)
     owner.stop()
     owner.execution.future.result(timeout=4)

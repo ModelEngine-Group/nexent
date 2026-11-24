@@ -62,7 +62,8 @@ def test_native_guidance_uses_authorized_skill_api_not_guessed_s3_paths(mocker, 
                               content={"name": "docx", "description": "Create documents"})] if authorized_skill else []
     mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_context_items", return_value=items)
     mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_history", return_value=[])
-    info = SimpleNamespace(agent_config=SimpleNamespace(name="files", instructions="Write files", description=""),
+    info = SimpleNamespace(agent_config=SimpleNamespace(name="files", instructions="Write files",
+                                                       description="", response_mode="chat"), parallel_child_mode=None,
                            observer=SimpleNamespace(lang=language))
     adapter = JiuwenAdapter(info)
     prompt = adapter._compile_context()

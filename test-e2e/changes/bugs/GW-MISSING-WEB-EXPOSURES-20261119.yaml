@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: GW-MISSING-WEB-EXPOSURES-20261119
+  change_type: bugfix
+  bug_id: GW-MISSING-WEB-EXPOSURES-20261119
+  title: Restore explicitly declared Web role and creator operations at Gateway
+  description: Register four existing Web operations and correct five conversation operation targets without exposing private or newly declared downstream routes automatically.
+  observed_behavior: Role choices, creation confirmation and target binding receive Gateway 404; creator histories lacks its precise declaration. Branch and four model preference operations target Management although only Runtime mounts their handlers.
+  expected_behavior: Each known Web operation has an exact session-only declaration targeting its owning service; private and undeclared operations remain denied.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing exposure UT and live network D3 omit four Web inputs; old unit assertions incorrectly classify Runtime conversation operations as Management and the network Case does not detect it.
+  feature_contract_changed: false
+  affected_features:
+    existing: [GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [GW-AUTH-D3-001]
+    added: []
+    modified: [GW-AUTH-D3-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Match each restored method and exact path to its owning service, Require session credentials and reject implicit WebSocket exposure, Preserve unknown and internal request denial]
+    reason: Existing match tests lack these inputs; strengthen UT separately from the real loopback forwarding Case.
+    test_selectors: [test/backend/gateway/test_exposure.py, test/backend/gateway/test_central_authentication.py]
+  notes: Lightweight design at nexent-doc/docs/Developing/auth-gateway-route-coverage/design.md. Referenced historical Gateway SPEC unavailable locally. Mount-graph audit identified four missing Web declarations and five wrong service targets; internal/health endpoints and CORS OPTIONS remain private. Existing GW-AUTH-D3-002 owns actual routing evidence and self-contained preparation/cleanup; no new Case or D1 is needed. Runtime implementation and container are outside fix scope.

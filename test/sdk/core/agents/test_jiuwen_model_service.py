@@ -15,6 +15,7 @@ from nexent.core.agents.cores.jiuwen.protocol import JiuwenProtocolError
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from nexent.core.model_service.contracts import (
     AssistantMessage,
+    ModelError,
     ModelEvent,
     TokenUsage,
     ToolCall,
@@ -178,7 +179,8 @@ async def test_stream_completion_contract(saved_profile, variant):
     with pytest.raises(ModelServiceError):
         model = JiuwenServiceModel(service, saved_profile, RunCancellationScope())
         _ = [chunk async for chunk in model.stream(MESSAGES)]
-    closed.assert_called_once()
+    assert closed.call_count == (2 if variant == "missing" else 1)
+    assert model.response_corrections == (1 if variant == "missing" else 0)
 
 
 async def test_consumer_close_releases_stream(saved_profile):
@@ -294,17 +296,23 @@ def test_adapter_requires_trusted_matching_snapshot(saved_profile, variant):
         JiuwenAdapter(info).validate()
 
 
-def test_request_output_budget_cannot_be_silently_ignored(saved_profile):
-    from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
+def test_retired_output_budget_does_not_block_native_core(saved_profile):
+    from threading import Event
+    from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
     from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
-
-    cap = saved_profile.parameter_values.get("max_output_tokens", saved_profile.parameter_values.get("max_tokens"))
-    info = SimpleNamespace(agent_config=SimpleNamespace(requested_output_tokens=None),
-                           context_budget_snapshot=SimpleNamespace(requested_output_tokens=(cap or 0) + 1))
+    model = ModelConfig(cite_name="fixture", model_name="qwen3.5-plus", url="http://fixture/v1",
+        resolved_profile=saved_profile, api_key="fixture-only")
+    info = AgentRunInfo(query="Request", observer=Mock(spec=MessageObserver), stop_event=Event(),
+        tenant_id="tenant", model_config_list=[model],
+        agent_config=AgentConfig(name="fixture", description="Fixture", model_name="fixture", tools=[],
+            requested_output_tokens=8192))
     adapter = JiuwenAdapter(info)
-    adapter.model_config = SimpleNamespace(resolved_profile=saved_profile)
-    with pytest.raises(UnsupportedAgentCoreConfig, match="output budget"):
-        adapter._create_model()
+    adapter.model_config = model
+    adapter.scope = RunCancellationScope(info.stop_event)
+    selected = adapter._create_model()
+    assert selected.profile == saved_profile
+    assert info.agent_config.requested_output_tokens == 8192
 
 
 def test_adapter_freezes_connection_headers_and_credential_scope(saved_profile, mocker):
@@ -390,7 +398,7 @@ def test_context_summary_accepts_shared_chat_messages_and_validates_completion(s
     else:
         assert summary(messages, max_tokens=1000).content == "Summary"
     request, profile = service.invoke.call_args.args
-    assert profile.parameter_values["max_output_tokens"] == 1000
+    assert profile.parameter_values.get("max_output_tokens") == original["parameter_values"].get("max_output_tokens")
     assert profile.parameter_values["enable_thinking"] is False
     assert not request.tools
     assert request.messages[-1].content_parts == [{"type": "text", "text": "Completed fact"}]
@@ -398,7 +406,9 @@ def test_context_summary_accepts_shared_chat_messages_and_validates_completion(s
 
 
 @pytest.mark.parametrize("streaming", [False, True])
-@pytest.mark.parametrize("kind", ["arguments", "empty", "reasoning", "length"])
+@pytest.mark.parametrize("kind", [
+    "arguments", "empty", "reasoning", "length", "tool_finish", "adapter_tool_finish", "malformed_final",
+])
 async def test_logical_recovery_preserves_request_and_separates_counters(saved_profile, streaming, kind):
     values = {"content_parts": [{"type": "text", "text": "Partial" if kind == "length" else ""}],
               "finish_reason": "length" if kind == "length" else "stop"}
@@ -407,12 +417,23 @@ async def test_logical_recovery_preserves_request_and_separates_counters(saved_p
     if kind == "arguments":
         values.update(finish_reason="tool_calls", tool_calls=[ToolCall(provider_call_id="bad", index=0,
             name="add", raw_arguments='{"a":1}', parsed_arguments={"a": 1})])
+    if kind == "tool_finish":
+        values.update(finish_reason="tool_calls")
+    if kind == "malformed_final":
+        values["content_parts"] = [{"type": "text", "text": "<final_answer>unfinished"}]
     bad = AssistantMessage(**values)
     requests, corrections, errors = [], [], []
     responses = [bad, message("Recovered")]
     async def invoke(request, *_args, **_kwargs):
         requests.append(request)
-        return responses.pop(0)
+        result = responses.pop(0)
+        if kind == "adapter_tool_finish" and len(requests) == 1:
+            raise ModelServiceError(ModelError(
+                category="MODEL_PROTOCOL_ERROR", diagnostic_code="MODEL_TOOL_CALL_INVALID",
+                scope="protocol", retryable=False, safe_message="Invalid tool completion",
+                request_id=request.request_id,
+            ))
+        return result
     @asynccontextmanager
     async def stream(request, *_args, **_kwargs):
         async def events():
@@ -511,6 +532,28 @@ async def test_text_code_arguments_use_the_shared_correction_quota(saved_profile
     else:
         assert (await model.invoke(MESSAGES, tools=TOOLS)).tool_calls[0].name == "nexent_execute_block"
     assert len(requests) == 2 and model.argument_corrections == 1 and model.response_corrections == 0
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_incomplete_text_action_is_corrected_before_dispatch(saved_profile, streaming):
+    data = saved_profile.model_dump()
+    data["capabilities"]["tools"]["status"] = "unsupported"
+    profile = type(saved_profile).model_validate(data)
+    invoke = AsyncMock(side_effect=[message("<code>print(9)"), message("Recovered")])
+
+    @asynccontextmanager
+    async def stream(request, *_args, **_kwargs):
+        async def events():
+            yield completion(request, await invoke(request))
+        yield events()
+
+    model = JiuwenServiceModel(SimpleNamespace(ainvoke=invoke, astream=stream), profile, RunCancellationScope())
+    if streaming:
+        result = [chunk async for chunk in model.stream(MESSAGES)][-1]
+    else:
+        result = await model.invoke(MESSAGES)
+    assert result.content == "Recovered" and not result.tool_calls
+    assert invoke.await_count == 2 and model.response_corrections == 1
 
 
 async def test_persistent_bad_code_stops_after_one_correction(saved_profile):

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-TTFT-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-TTFT-20261119
+  title: Measure Agent time to first effective answer independently per execution
+  description: Reuse actual Adapter execution timing and typed public answer events, excluding tools, reasoning, empty responses and SSE replay. Publish measured sums and sample counts through existing Agent views.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/sdk/core/agents/test_agent_first_answer.py, test/backend/ops/test_agent_ttft.py, test/backend/ops/test_agent_monitoring.py, test/backend/ops/test_agent_monitoring_views.py, test/sdk/core/utils/test_observer_final_answers.py, test/sdk/core/agents/test_nexent_agent.py]
+    behaviors:
+    - Measure first nonblank public answer after actual execution starts, once per run, with zero preserved and no sample for missing answers.
+    - Exclude tools, thinking, fallback placeholders, preparation, cleanup and replay; isolate nested and concurrent execution identities.
+    - Validate optional bounded integer timing, merge exact daily sums and sample counts across dates, and preserve old rows without measurements.
+    - Expose nullable average and measured sample count in Agent summary, directory and trends with existing tenant and group permissions.
+    reason: Existing runtime, observer and Agent aggregation tests prove identity and duration but not first-answer timing. Strengthen UT and reuse the real main-child D3 pipeline, source replay and HTTP assertions. No new D1 is needed.

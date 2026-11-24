@@ -11,6 +11,7 @@ from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from nexent.core.agents.contracts.identity import RunRole
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 from nexent.core.utils.observer import MessageObserver
+from nexent.monitor.run_timing import RunTiming
 
 
 class AgentHistory(BaseModel):
@@ -19,6 +20,7 @@ class AgentHistory(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    run_timing: RunTiming | None = Field(default=None, exclude=True, repr=False)
     run_role: RunRole = Field(default="root", exclude=True,
         description="Internal caller-owned run identity; children cannot initiate user clarification")
     parallel_child_mode: Optional[Literal["read_only", "sandbox"]] = Field(default=None, exclude=True,

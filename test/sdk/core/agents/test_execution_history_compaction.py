@@ -138,6 +138,47 @@ def test_ac015_reference_cannot_move_or_collide():
     with pytest.raises(ValueError):store.bind(other,5,2)
 
 
+@pytest.mark.parametrize("message,index,value,error", [
+    (True, 0, "original", ValueError),
+    (0, 0, "original", ValueError),
+    (5, True, "original", ValueError),
+    (5, -1, "original", ValueError),
+    (5, 0, None, ValueError),
+    (5, 0, "conflicting", PermissionError),
+])
+def test_ac010_restore_batch_is_atomic_when_a_reference_is_invalid(message, index, value, error):
+    store = ExecutionHistory()
+    store.restore_results("owner", [(5, 0, "original")])
+    with pytest.raises(error):
+        store.restore_results("owner", [(6, 0, "must not be committed"), (message, index, value)])
+    assert json.loads(store.read("owner", "message:5/unit-index:0"))["text"] == "original"
+    with pytest.raises(PermissionError):
+        store.read("owner", "message:6/unit-index:0")
+
+
+def test_ac010_conflicting_results_in_one_restore_batch_are_not_committed():
+    store = ExecutionHistory()
+    with pytest.raises(PermissionError, match="Conflicting persisted execution reference"):
+        store.restore_results("owner", [(5, 0, "first"), (5, 0, "second")])
+    with pytest.raises(PermissionError):
+        store.read("owner", "message:5/unit-index:0")
+
+
+def test_ac010_restore_cannot_override_a_bound_current_execution():
+    store, key = bound_history({"STDOUT": "original"})
+    with pytest.raises(PermissionError, match="Conflicting persisted execution reference"):
+        store.restore_results("owner", [(5, 2, "forged")])
+    store.restore_results("owner", [(5, 2, store.get(key).text)])
+    assert json.loads(store.read("owner", "message:5/unit-index:2"))["text"] == store.get(key).text
+
+
+def test_ac001_committed_model_view_is_included_in_execution_payload():
+    store, key = bound_history()
+    record = store.get(key)
+    record.model_view = {"preview": "committed preview"}
+    assert record.payload() == {"content": record.text, "model_view": {"preview": "committed preview"}}
+
+
 def test_ac005_selected_action_compacts_and_ac009_recent_loaded_stays_full():
     store,key=bound_history()
     manager=ContextManager(ContextManagerConfig(execution_history=store, effective_input_limit_tokens=20000, compaction_target_tokens=100))
@@ -355,12 +396,14 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
 
     # Keep prompt cost controlled so the small budget tests reader clipping,
     # independently of the SDK's full default instruction/tool template.
+    # The accepted usage plus new output must fit the hard window before recall.
     monkeypatch.setattr("nexent.core.agents.prompt.policies.common_behavior_guidance", lambda language="en": "Shared behavior fixture.")
     templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
     templates['system_prompt'] = 'Execute the requested code and return the final answer.'
     agent, observer, runtime, _ = runtime_agent(prompt_templates=templates)
     store = observer.execution_history
     runtime.context_manager.config.effective_input_limit_tokens = 6000
+    runtime.context_manager.config.chars_per_token = 4
     runtime.context_manager.config.policy_layers = {'request': {'processing_mode': 'passthrough'}}
     old_owner = agent._execution_owner
     publish = observer.add_message
@@ -391,7 +434,8 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
         '<final_answer>done</final_answer>',
     ]
     agent.model.generate = Mock(side_effect=[ChatMessage(role=MessageRole.ASSISTANT, content=body,
-        token_usage=TokenUsage(input_tokens=5000, output_tokens=100)) for body in responses])
+        token_usage=TokenUsage(input_tokens=usage, output_tokens=100))
+        for body, usage in zip(responses, (4000, 5000, 5000))])
     assert str(agent.run('Print a report once, read its original range, then finish.', max_steps=3)) == 'done'
     assert agent._execution_owner != old_owner
     assert agent.tools['read_execution_output'].owner == agent._execution_owner
@@ -404,7 +448,9 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
     assert loaded.owner == original.owner == agent._execution_owner
     bounded = [call.kwargs['max_rendered_chars'] for call in store.reset_read_budget.call_args_list
                if 'max_rendered_chars' in call.kwargs]
-    assert len(bounded) == 2 and all(0 < value < 4000 for value in bounded)
+    assert len(bounded) == 2
+    assert bounded[0] > bounded[1] > 0  # Higher second-response usage leaves less reader space.
+    assert bounded[1] < 4000  # The actual recall is clipped, including its rendered wrappers.
     previous_owner = agent._execution_owner
     agent.model.generate = Mock(return_value=ChatMessage(role=MessageRole.ASSISTANT,
                                                         content='<final_answer>fresh run</final_answer>'))

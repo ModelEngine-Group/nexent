@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-QUERY-20261118
+  change_type: requirement
+  requirement_id: OPS-AGENT-QUERY-20261118
+  title: Read published Agent execution counts and average durations
+  description: Add a tenant-authorized Ops Agent summary with date, initiating group and Agent filters.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_agent_monitoring.py, test/backend/ops/test_agent_monitoring_api.py]
+    behaviors:
+    - Combine exact execution counts and duration samples before computing the weighted average.
+    - Distinguish covered zero, partial coverage, uncovered data and stale publications.
+    - Validate Agent query parameters and preserve model monitoring behavior.
+    reason: Existing tests prove source identity and publication. The new HTTP route needs precise merge, coverage, validation and authorization assertions.
+  notes: Extend the real Agent and Elasticsearch case through the Ops HTTP router. Session identity and business catalog fixtures control the external authorization and inventory sources. Runtime authorization and PostgreSQL and Elasticsearch tenant filters are exercised.

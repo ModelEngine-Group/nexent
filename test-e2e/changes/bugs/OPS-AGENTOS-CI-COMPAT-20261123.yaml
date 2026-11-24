@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENTOS-CI-COMPAT-20261123
+  change_type: bugfix
+  bug_id: OPS-AGENTOS-CI-COMPAT-20261123
+  title: Preserve prepared wire contracts and isolated monitoring startup
+  description: Fix preparation timing on strict transport DTOs, lazy optional monitoring configuration and CI test isolation while preserving schemas and monitoring metrics.
+  observed_behavior: Preparation assigned a process-local clock to strict transport models, minimal shared Web startup loaded monitoring configuration eagerly, and isolated CI subprocesses lacked declared package paths.
+  expected_behavior: Prepared DTOs remain serializable, optional monitoring is lazy, invalid Ops database names fail before engine creation, and isolated tests load the intended source packages.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Targeted regressions omitted production prepared DTO compilers and CI process assumptions; the subsequent full run passed but exposed missing patch-level unit proof for batch replay, publication, ES completeness and worker cleanup.
+  feature_contract_changed: false
+  affected_features:
+    existing: [OPS-MODEL-MONITORING, OPS-AGENT-FACTS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-AGENT-FACTS-D3-001, OPS-MODEL-MONITORING-D3-001, OPS-MODEL-MONITORING-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Keep process-local timing out of strict prepared transport models, Preserve real SDK execution clocks, Start shared health without monitoring dependencies, Reject invalid Ops database names before engine creation, Resolve declared source packages in subprocess tests, Preserve batch replay and publication failure boundaries, Reject incomplete ES reads and mismatched bulk conflicts, Keep store publication guards and worker cleanup]
+    reason: Retain all original failing assertions and the wire-model regression; complete delivery with unit proof of uncovered replay, publication, ES and resource-lifetime contracts already exercised by unchanged formal PG/ES cases.
+    test_selectors: [test/sdk/core/agents/observability/test_phase_capture.py, test/sdk/core/agents/test_main_run_timing.py, test/backend/app/test_agentos_evaluation_compiler.py, test/backend/app/test_agentos_prepared_attachments.py, test/backend/management/test_shared_web_boundary.py, test/backend/management/test_preflight_mcp_passthrough.py, test/backend/ops/test_monitoring_producer.py, test/backend/ops/test_monitoring_defaults.py, test/backend/ops/test_monitoring_writer.py, test/backend/ops/test_monitoring_search.py, test/backend/ops/test_monitoring_store_contracts.py, test/backend/ops/test_monitoring_worker_lifecycle.py]

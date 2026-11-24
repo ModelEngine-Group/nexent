@@ -11,8 +11,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from openjiuwen.core.foundation.tool import ToolCard
 
 from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -21,15 +23,18 @@ from nexent.core.utils.observer import MessageObserver, ProcessType
 
 @pytest.fixture
 def adapter():
-    info = SimpleNamespace(agent_config=AgentConfig(name="fixture", description="Fixture", model_name="model", tools=[],
+    info = AgentRunInfo(query="Latest request", model_config_list=[],
+        agent_config=AgentConfig(name="fixture", description="Fixture", model_name="model", tools=[],
         pre_run_tool_events=[{"type": "tool", "content": "prepared"}]), observer=MessageObserver(),
-        stop_event=Event(), mcp_close_timeout_seconds=2, run_result=None)
+        stop_event=Event(), mcp_close_timeout_seconds=2)
     instance = JiuwenAdapter(info)
     instance.scope = RunCancellationScope(info.stop_event)
     instance.query = "Latest request"
     instance.manager = Mock()
     instance.native_agent = SimpleNamespace(ability_manager=Mock())
-    instance.native_agent.ability_manager.list.return_value = [SimpleNamespace(id="owned-tool")]
+    instance.native_agent.ability_manager.list.return_value = [
+        ToolCard(id="owned-tool", name="owned-tool", description="Owned fixture tool"),
+    ]
     return instance
 
 

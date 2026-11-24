@@ -101,8 +101,6 @@ assert_eq "zh" "$(DEPLOYMENT_LANG="" LC_ALL="zh_CN.UTF-8" LC_MESSAGES="" LANGUAG
 assert_eq "en" "$(DEPLOYMENT_LANG="en" LC_ALL="" LC_MESSAGES="" LANGUAGE="" LANG="zh_CN.UTF-8" deployment_detect_language)" "DEPLOYMENT_LANG should force English"
 assert_eq "zh" "$(DEPLOYMENT_LANG=zh bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache Chinese"
 assert_eq "en" "$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache forced English"
-assert_eq "后端 API 服务" "$(DEPLOYMENT_LANGUAGE=zh deployment_i18n image_build.detail.main)" "image build TUI details should support Chinese"
-assert_eq "backend API service" "$(DEPLOYMENT_LANGUAGE=en deployment_i18n image_build.detail.main)" "image build TUI details should preserve English"
 
 ZH_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$ZH_DEPLOY_HELP" "用法：" "deploy wrapper help should follow Chinese locale"
@@ -241,7 +239,7 @@ deployment_render_helm_values "$PREFIXED_HELM_VALUES"
 PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
 assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-management"' "helm values should use prefixed Management repositories"
-assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-mcp-service"' "helm values should use prefixed MCP backend repositories"
+assert_contains "$(sed -n '/^nexent-mcp:$/,/^[^ ]/p' "$PREFIXED_HELM_VALUES")" 'repository: "registry.local/nexent/nexent/nexent-management"' "the MCP chart should use the prefixed Management image"
 assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-ops"' "helm values should use prefixed Ops repositories"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
 unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
@@ -339,7 +337,7 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
 deployment_render_helm_values "$LOCAL_HELM_VALUES"
 LOCAL_HELM_CONTENT="$(cat "$LOCAL_HELM_VALUES")"
-assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp-service\"" "local-latest should render the MCP backend image"
+assert_contains "$(sed -n '/^nexent-mcp:$/,/^[^ ]/p' "$LOCAL_HELM_VALUES")" 'repository: "nexent/nexent-management"' "local-latest should render the shared Management image for MCP"
 assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-ops\"" "local-latest should render the Ops image"
 assert_contains "$LOCAL_HELM_CONTENT" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
 assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
@@ -1372,8 +1370,9 @@ assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must kee
 assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
 # The host hook delegates to Shell without looking up any Python interpreter.
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
-bash() { printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
+bash() { printf '%s\n' "$NEXENT_IMAGE" "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
 deployment_upgrade_local_accounts docker
+assert_eq "$NEXENT_MANAGEMENT_IMAGE" "$(head -n 1 "$AUTH_HOOK_ARGUMENTS")" "deployment must select Management for the migration worker"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.sh" "deployment must use the Shell migration coordinator"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete migration before rollout"

@@ -32,6 +32,13 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
     accessibleRoutes: state.routes,
     user: state.user,
+    canAccessRoute: (route: string) => {
+      if (!state.routes.includes(route)) return false;
+      if (route !== "/ops/configuration") return true;
+      return state.user?.roles
+        ? state.user.roles.includes("SU")
+        : state.user?.role === "SU";
+    },
   }),
 }));
 vi.mock("@/components/providers/AuthenticationProvider", () => ({
@@ -306,3 +313,15 @@ test.each([
     else expect(link).not.toBeInTheDocument();
   }
 );
+
+test.each([
+  ["OPS", ["OPS"], false],
+  ["SU", ["SU"], true],
+])("gates system configuration for %s", (role, roles, allowed) => {
+  state.user = { role, roles };
+  state.routes = ["/ops/configuration"];
+  render(<SideNavigation />);
+  const item = screen.queryByRole("button", { name: "ops.configuration" });
+  if (allowed) expect(item).toBeInTheDocument();
+  else expect(item).not.toBeInTheDocument();
+});

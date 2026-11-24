@@ -13,6 +13,7 @@ import requests
 from nexent.core.concurrency import run_blocking
 
 from nexent.monitor import record_model_call
+from nexent.monitor.model_fact import suppress_model_attempts
 
 from ...multimodal_adapter import ModelInfo
 from ...registry import register_adapter
@@ -75,12 +76,13 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
             the check fails.
         """
         try:
-            return await run_blocking(
-                "gateway-embedding-connectivity",
-                self.get_embeddings,
-                "Hello, nexent!",
-                timeout=timeout,
-            )
+            with suppress_model_attempts():
+                return await run_blocking(
+                    "gateway-embedding-connectivity",
+                    self.get_embeddings,
+                    "Hello, nexent!",
+                    timeout=timeout,
+                )
         except requests.exceptions.Timeout:
             logging.error(f"OpenAI embedding connection timed out ({timeout}s)")
             return []

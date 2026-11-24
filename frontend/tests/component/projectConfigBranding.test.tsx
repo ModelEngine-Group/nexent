@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { message } from "antd";
-import ProjectConfigTab from "@/app/resource-manage/components/resources/projectConfig";
+import ProjectConfigTab from "@/components/system-config/ProjectConfigTab";
 import {
   useGlobalConfigStore,
   useGlobalConfigStoreAllLanguage,
@@ -26,10 +26,9 @@ vi.mock("react-i18next", () => ({
     },
   }),
 }));
-vi.mock(
-  "@/app/resource-manage/components/resources/PlatformQuotaPanel",
-  () => ({ PlatformQuotaPanel: () => null })
-);
+vi.mock("@/components/quota/PlatformQuotaPanel", () => ({
+  PlatformQuotaPanel: () => null,
+}));
 vi.mock("@/services/api", () => ({
   API_ENDPOINTS: { config: { projectConfig: "/api/config/project-config" } },
   ApiError: class extends Error {
@@ -156,7 +155,7 @@ it("saves optional localized homepage titles and explicit empty system names", a
       target: { value: "Separate homepage" },
     }
   );
-  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
   expect(JSON.parse(body.get("configZh") as string)).toMatchObject({
@@ -177,7 +176,7 @@ it("explicitly resets an existing homepage logo without uploading the system log
     "src",
     "/modelengine-logo.png"
   );
-  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
   expect(body.get("removeHomeLogo")).toBe("true");
@@ -191,7 +190,7 @@ it("keeps an empty homepage title instead of substituting the system name", asyn
   expect(screen.getByRole("textbox", { name: "应用名称" })).toHaveValue(
     "System"
   );
-  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
   expect(JSON.parse(body.get("configZh") as string)).toMatchObject({
@@ -217,11 +216,11 @@ it("uploads a separate image and keeps errors recoverable", async () => {
     status: 400,
     json: async () => ({ message: "invalid image" }),
   } as Response);
-  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
   await waitFor(() => expect(message.error).toHaveBeenCalled());
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
   expect(body.get("homeLogo")).toBe(file);
-  expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: /保\s*存/ })).toBeEnabled();
 });
 
 it("rejects unsupported and oversized images without sending them", async () => {

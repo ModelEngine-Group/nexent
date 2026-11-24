@@ -5,25 +5,12 @@
 from __future__ import annotations
 
 import json
-import logging
-import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
 from .history_facts import turn_execution_text, turn_user_text
 from .llm_summary import LLMSummary
 from .models import ContextItem, ContextItemInput, ContextItemType
-
-
-logger = logging.getLogger("agent_context.history_compression")
-
-
-_FACT_MARKER_RE = re.compile(
-    r"\b(?=[A-Za-z0-9-]*\d)[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){2,}\b"
-)
-_ASSOCIATED_LITERAL_RE = re.compile(
-    r"(?<![\w-])[A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff]*-\d+(?![\w-])"
-)
 
 
 @dataclass(frozen=True)
@@ -114,62 +101,16 @@ class HistorySummaryInput:
         return "\n\n".join(sections)
 
 
-def _protected_fact_literals(source_text: str) -> dict[str, tuple[str, ...]]:
-    """Collect explicit fact identifiers and code-like literals on the same line."""
-    protected: dict[str, set[str]] = {}
-    for line in source_text.splitlines():
-        markers = _FACT_MARKER_RE.findall(line)
-        if not markers:
-            continue
-        literals = {
-            re.sub(r"^.*[为是：:]", "", literal)
-            for literal in _ASSOCIATED_LITERAL_RE.findall(line)
-        }
-        for marker in markers:
-            protected.setdefault(marker, set()).update(literals)
-    return {
-        marker: tuple(sorted(literals))
-        for marker, literals in protected.items()
-    }
-
-
 def _validate_summary_contract(
     text: str,
     section_keys: Sequence[str],
     *,
     source_text: str = "",
 ) -> str | None:
-    """Return canonical Markdown only for the exact seven-section contract."""
-    cleaned = text.strip()
-    top = "# Compact Result of History"
-    if not cleaned.startswith(top):
+    """Accept nonempty text without imposing a summary shape or literal ledger."""
+    if not isinstance(text, str):
         return None
-    headings = re.findall(r"(?m)^(#{1,6})\s+(.+?)\s*$", cleaned)
-    if not headings or headings[0] != ("#", "Compact Result of History"):
-        return None
-    expected = [key.replace("_", " ").title() for key in section_keys]
-    section_headings = [title for level, title in headings[1:] if level == "##"]
-    if section_headings != expected or len(headings) != len(expected) + 1:
-        return None
-    forbidden = re.compile(
-        r"(?im)^\s*(?:word\s*count|character\s*count|token\s*count|"
-        r"as\s+an?\s+(?:ai|model)|i\s+(?:reasoned|thought|was asked)|"
-        r"meta(?:data| commentary)?)\s*[:：]"
-    )
-    if forbidden.search(cleaned):
-        return None
-    parts = re.split(r"(?m)^##\s+.+?\s*$", cleaned)[1:]
-    if len(parts) != len(expected) or any(not part.strip() for part in parts):
-        return None
-    for marker, literals in _protected_fact_literals(source_text).items():
-        if marker not in cleaned or any(literal not in cleaned for literal in literals):
-            logger.warning(
-                "Rejected history summary candidate: protected fact omitted marker=%s literals=%s",
-                marker,
-                literals,
-            )
-            return None
-    return cleaned
+    return text.strip() or None
 
 
 @dataclass(frozen=True)
@@ -221,13 +162,6 @@ class HistoryCompressor:
             if generated.summary_text else None
         )
         if validated is None:
-            logger.warning(
-                "Rejected history summary candidate: headings=%s starts_with_contract=%s",
-                re.findall(r"(?m)^#{1,6}\s+(.+?)\s*$", generated.summary_text or ""),
-                (generated.summary_text or "").lstrip().startswith(
-                    "# Compact Result of History"
-                ),
-            )
             return HistoryCompressionResult(
                 records=tuple(generated.records),
                 fallback_turns=self._safe_fallback(turns),

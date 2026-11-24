@@ -153,11 +153,15 @@ async def test_persists_uploaded_artifact_with_stable_fields_only(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_history_checkpoint_is_included_in_the_terminal_transaction(monkeypatch):
+@pytest.mark.parametrize("with_proofs", [False, True])
+async def test_history_checkpoint_is_included_in_the_terminal_transaction(monkeypatch, with_proofs):
+    proofs = {"structured_source_proofs": [{"source_kind": "user_message",
+        "source_ref": "message:1/user-message", "source_sha256": "a" * 64, "sha256": "b" * 64,
+        "part": 0, "json_path": "/rows", "row_count": 20}]} if with_proofs else {}
     def checkpoint(status):
         content = json.dumps({
             "status": status, "persist_status": "not_configured",
-            "summary": {"markdown": "earlier history"}, "covered_through_message_id": 16,
+            "summary": {"markdown": "earlier history"}, "covered_through_message_id": 16, **proofs,
         })
         return json.dumps({"type": "history_summary", "content": content})
 

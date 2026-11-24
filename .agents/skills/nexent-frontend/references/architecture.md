@@ -1,6 +1,6 @@
 # Frontend architecture
 
-- `app/[locale]/{feature}/page.tsx` is a thin entry for routing, auth/configuration, and feature composition. Substantial feature logic follows the feature's existing internal structure.
+- `app/[locale]/{feature}/page.tsx` is the route entry and the top-level expression of the page. It defines the page's overall structure and coordinates route-level concerns, page-wide state, and interactions between sections. See [Pages](pages.md) for when to extract individual sections.
 - Feature-only UI belongs in `app/[locale]/{feature}/components/`; cross-feature UI belongs in `components/`. Auth UI uses `components/auth/`; providers use `components/providers/`.
 - Feature code must not import another feature's private code. Promote genuine reuse into shared modules.
 - `hooks/{domain}/` owns reusable state/effects; `services/` owns API calls; `lib/` owns utilities. `services/`, `lib/`, and `types/` must not depend on `app/` or `components/`.

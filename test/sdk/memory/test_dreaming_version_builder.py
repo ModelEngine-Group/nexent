@@ -1,4 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from datetime import datetime
+
+import pytest
 
 from nexent.memory.dreaming import (
     DreamingMemoryUnit,
@@ -115,3 +119,40 @@ def test_ac072_fallback_has_one_safe_section_and_no_document_title():
     )
     assert result.markdown.startswith("## 未分类记忆\n\n-")
     assert "# User Memory" not in result.markdown
+
+
+
+@pytest.mark.parametrize(
+    "tolerance, length, heading, feedback",
+    [
+        (5, 10500, "Communication Preferences", None),
+        (5, 10501, "Communication Preferences", "content_over_limit:1"),
+        (0, 10001, "Communication Preferences", "content_over_limit:1"),
+        (5, 10500, "Summary", "generic_section_heading"),
+    ],
+)
+def test_ac006_only_length_validation_uses_tolerance(tolerance, length, heading, feedback):
+    prefix = f"## {heading}\n\n- "
+    output = prefix + "字" * (length - len(prefix))
+    requests = []
+
+    def summarize(request):
+        requests.append(request)
+        return DreamingSummarizationOutput(markdown=output)
+
+    result = build_user_memory_summary(
+        parent_units=[], new_units=[_unit("new", "prefer short answers", new=True)],
+        max_chars=10000, length_tolerance_percent=tolerance, max_attempts=2,
+        summarizer=summarize, backoff_base_seconds=0,
+    )
+
+    assert requests[0].max_chars == 10000
+    if feedback is None:
+        assert len(requests) == 1
+        assert result.summarization_status == "summarized"
+        assert result.markdown == output
+    else:
+        assert len(requests) == 2
+        assert feedback in requests[1].validation_feedback
+        assert result.summarization_status == "mechanical_fallback"
+        assert len(result.markdown) <= 10000

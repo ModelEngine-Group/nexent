@@ -18,7 +18,7 @@ from unittest.mock import Mock
 
 from jiuwen_bridge_fixture import profile_for
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
-from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
@@ -58,12 +58,12 @@ def context_database(monkeypatch):
             raise AssertionError("Isolated history PostgreSQL did not start")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres")
         from infrastructure.rdb import client
-        from infrastructure.rdb.account_record import UserAccount
+        from infrastructure.rdb.account_record import UserAccount, UserTenant
+        from infrastructure.rdb.trajectory.models import TrajectoryExecution, TrajectoryStatistics
         from infrastructure.system_configuration import runtime as configuration_runtime
         from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
         from management.db.conversation import repository as conversation_db
         from management.db.conversation.projection_receipt import ConversationProjectionReceipt
-        from management.db.identity.models import UserTenant
         from management.db.models import (
             AgentInfo,
             ConversationMessage,
@@ -72,7 +72,6 @@ def context_database(monkeypatch):
             ConversationSourceSearch,
             ConversationSourceImage,
         )
-        from management.db.trajectory.models import TrajectoryExecution, TrajectoryStatistics
 
         monkeypatch.setattr(client.db_client, "session_maker", sessionmaker(bind=engine))
 
@@ -102,27 +101,28 @@ def context_database(monkeypatch):
         docker("rm", "-f", name)
 
 
-def seed_agent(engine, core):
+def seed_agent(engine):
     from management.db.models import AgentInfo
     with engine.begin() as connection:
         for version in (0, 1):
-            connection.execute(insert(AgentInfo).values(agent_id=42, version_no=version, agent_core=core,
+            connection.execute(insert(AgentInfo).values(agent_id=42, version_no=version,
                 name="history_agent", description="History fixture", tenant_id="spike-tenant",
                 current_version_no=1, enable_context_manager=False, created_by="owner", delete_flag="N"))
 
 
-def save_configuration(engine, core, cm):
+def save_configuration(engine, cm):
     from management.db.agent.repository import (
         search_agent_info_by_agent_id,
         update_agent_draft_fields,
     )
     from management.db.models import AgentInfo
-    assert update_agent_draft_fields(42, "spike-tenant", {"agent_core": core, "enable_context_manager": cm}) == 1
-    assert search_agent_info_by_agent_id(42, "spike-tenant", 1)["agent_core"] != core
+    assert update_agent_draft_fields(42, "spike-tenant", {"enable_context_manager": cm}) == 1
+    assert search_agent_info_by_agent_id(42, "spike-tenant", 0)["enable_context_manager"] == cm
+    assert search_agent_info_by_agent_id(42, "spike-tenant", 1)["enable_context_manager"] is False
     # Publishing is an existing external boundary: prepare its immutable new snapshot,
     # rather than mutating the old version or testing an unrelated publication workflow.
     with engine.begin() as connection:
-        connection.execute(insert(AgentInfo).values(agent_id=42, version_no=2, agent_core=core,
+        connection.execute(insert(AgentInfo).values(agent_id=42, version_no=2,
             name="history_agent", description="History fixture", tenant_id="spike-tenant",
             enable_context_manager=cm, created_by="owner", delete_flag="N"))
     assert update_agent_draft_fields(42, "spike-tenant", {"current_version_no": 2}) == 1
@@ -135,13 +135,16 @@ def message(conversation, index, role, content, files=None, status="completed"):
 
 
 def record_output(conversation, index, output):
-    from management.db.conversation.repository import create_message_units
+    from contracts.conversation import MessageSource
+    from management.db.conversation.repository import persist_prepared_assistant_projection
+    from management.services.agent.prepared_projection import _collect_checkpoint
     from management.services.agent.stream import serialize_stream_unit_content
+
     answer = "".join(event.get("content", "") for event in output if event.get("type") == "final_answer")
-    mid = message(conversation, index, "assistant", answer)
-    units = []
+    units, checkpoints = [], []
     for event in output:
         if event.get("type") == "history_summary":
+            _collect_checkpoint(checkpoints, event.get("content"))
             continue
         content = event.get("content", "")
         if not isinstance(content, str):
@@ -150,10 +153,12 @@ def record_output(conversation, index, output):
             "unit_index": len(units), "unit_type": event["type"],
             "unit_content": serialize_stream_unit_content(event, content), "unit_status": "completed",
             "tool_call_id": event.get("tool_call_id"), "invocation_id": event.get("invocation_id")})
-    from management.db.conversation.repository import update_message_unit_status
-    for unit_id in create_message_units(units, mid, conversation, "owner"):
-        update_message_unit_status(unit_id, "completed", user_id="owner")
-    return mid
+    return persist_prepared_assistant_projection(
+        projection_run_id=uuid.uuid4().hex, message_index=index, conversation_id=conversation,
+        message_source=MessageSource.CHAT, user_id="owner", tenant_id="spike-tenant",
+        message_content=answer, terminal_status="completed", message_units=units,
+        search_records=[], image_urls=[], skill_files=[], automation_proposals=[], history_checkpoints=checkpoints,
+    )
 
 
 async def run_context_scenario(monkeypatch, engine, original="smolagents", protocol="native", cm=False,
@@ -169,12 +174,15 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
     from nexent.core.agents.cores.smolagents import agent as nexent_agent
     import nexent.core.tools as shared_tool_types
     from management.services.conversation.service import (
+        load_historical_context,
         persist_history_summary_candidate,
     )
+    from infrastructure.agent_core_policy import apply_agent_core_policy
+    from nexent.core.agents.context.authorized_input import build_authorized_context_input
     from smolagents import Tool
 
     changed = "jiuwen" if original == "smolagents" else "smolagents"
-    seed_agent(engine, original)
+    seed_agent(engine)
     conversation = create_conversation("Existing Core conversation", "owner", agent_id=42)["conversation_id"]
     effects, calls, summary_requests, read_errors = [], [], [], []
     phase = {"value": "seed", "stage_calls": 0, "summary_started": False, "closed": False}
@@ -201,7 +209,7 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
                     return
                 source = str(body["messages"])
                 markers = sorted(set(re.findall(r"\b(?=[A-Za-z0-9-]*\d)[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){2,}\b", source)))
-                content, tool_calls = ("Invalid summary" if fault == "invalid_summary" else
+                content, tool_calls = ("" if fault == "invalid_summary" else
                                        markdown + "\nPreserved identifiers: " + " ".join(markers)), []
             else:
                 calls.append((phase["value"], body))
@@ -218,11 +226,13 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
                     content, tool_calls = ("OLD_FACT_ALPHA" if phase["value"] == "seed" else "FOLLOWUP_ALPHA"), []
                     if core == "smolagents":
                         content = "<final_answer>" + content + "</final_answer>"
+            # A completed physical request supplies the authoritative compaction signal.
+            input_tokens = 36000 if phase["value"] == "followup" and not is_summary else 20
             value = {"id": "context-response", "model": body["model"], "object": "chat.completion",
                 "choices": [{"index": 0, "message": {"role": "assistant", "content": content,
                     **({"tool_calls": tool_calls} if tool_calls else {})},
                     "finish_reason": "tool_calls" if tool_calls else "stop"}],
-                "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30}}
+                "usage": {"prompt_tokens": input_tokens, "completion_tokens": 10, "total_tokens": input_tokens + 10}}
             if body.get("stream"):
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
                 delta = value["choices"][0]["message"]
@@ -268,41 +278,39 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
         for name in ("agent-run", "model-tool-io", "mcp-session", "control-io", "sandbox", "background-service")})
     manager.start()
     infos, outputs = [], []
-    async def info_for(query, current_mid):
+    def info_for(query, current_mid, core):
+        from management.services.agent.preparation.compiler import build_agent_context_policy
+
         version = query_current_version_no(42, "spike-tenant")
         saved = search_agent_info_by_agent_id(42, "spike-tenant", version)
-        from management.services.agent.preparation.compiler import build_agent_context_policy
         cm_config = ContextManagerConfig(effective_input_limit_tokens=200000,
             compaction_trigger_threshold_tokens=35000, compaction_target_tokens=30000,
             max_summary_input_tokens=120000,
             max_summary_reduce_tokens=1000, policy_layers=build_agent_context_policy(saved["enable_context_manager"]))
         cm_config.history_summary_sink = lambda candidate: persist_history_summary_candidate(
             conversation, candidate, "owner", "spike-tenant")
+        # Each deployment Core policy compiles a detached config from the saved snapshot.
+        agent_config = apply_agent_core_policy(AgentConfig(
+            name=saved["name"], description=saved["description"], version_no=version,
+            model_name="fixture", max_steps=3, context_manager_config=cm_config,
+            tools=[ToolConfig(name="remember", class_name="RememberTool", source="local", params={})],
+        ), core)
         info = AgentRunInfo(query=query, stop_event=Event(), observer=MessageObserver(lang="en"),
             thread_manager=manager, tenant_id="spike-tenant", user_id="owner", conversation_id=conversation,
+            history=[AgentHistory(role="user", content="UNTRUSTED_CLIENT_HISTORY")],
             model_config_list=[ModelConfig(cite_name="fixture", model_name=profile.identity.request_model_id,
                 url=profile.connection.base_url, api_key="fixture-only", resolved_profile=profile)],
-            agent_config=AgentConfig(name="history_agent", description="History fixture", agent_core=saved["agent_core"],
-                version_no=version, model_name="fixture", max_steps=3, context_manager_config=cm_config,
-                tools=[ToolConfig(name="remember", class_name="RememberTool", source="local", params={})]))
-        from contracts.agent import AgentRequest
-        from contracts.conversation import HistoryItem
-        from management.services.agent import run as application
-        from unittest.mock import AsyncMock
-
-        monkeypatch.setattr(application, "create_agent_run_info", AsyncMock(return_value=info))
-        monkeypatch.setattr(application, "build_memory_context", lambda *a, **k: None)
-        monkeypatch.setattr(application.agent_run_manager, "register_agent_run", lambda *a, **k: None)
-        request = AgentRequest(agent_id=42, conversation_id=conversation, query=query, is_debug=False,
-            history=[HistoryItem(role="user", content="UNTRUSTED_CLIENT_HISTORY")])
-        info, _ = await application.prepare_agent_run(request, "owner", "spike-tenant", language="en")
+            agent_config=agent_config)
+        authorized_history = load_historical_context(conversation, current_mid, "owner", "spike-tenant")
+        assert authorized_history is not None
+        info.context_input = build_authorized_context_input(info, authorized_history)
         infos.append(info)
         return info
     try:
         async with server:
             first = message(conversation, 1, "user", "Perform the original task", files=[{
                 "name": "old.txt", "url": "s3://files/old.txt"}])
-            info = await info_for("Perform the original task", first)
+            info = info_for("Perform the original task", first, original)
             output = [json.loads(chunk) async for chunk in agent_run(info, thread_manager=manager)]
             assert info.attempt_outcome == "completed", output[-2:]
             old_assistant = record_output(conversation, 2, output)
@@ -313,11 +321,11 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
             for index in range(3, 19, 2):
                 message(conversation, index, "user", "Completed earlier request " + "old data " * 500)
                 message(conversation, index + 1, "assistant", "Completed earlier answer " + "old data " * 500)
-            save_configuration(engine, changed, cm)
+            save_configuration(engine, cm)
             before = get_conversation_history(conversation, "owner")
             phase.update(value="followup", stage_calls=0)
             current_mid = message(conversation, 19, "user", "Recall the completed fact; do not repeat tools")
-            info = await info_for("CURRENT_FOLLOWUP_ONLY", current_mid)
+            info = info_for("CURRENT_FOLLOWUP_ONLY", current_mid, changed)
             async def cancel_summary():
                 for _ in range(1000):
                     if phase["summary_started"]:
@@ -356,7 +364,7 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
             fault = None
             phase.update(value="reload", stage_calls=0)
             current_mid = message(conversation, 21, "user", "Continue after reloading")
-            reloaded = await info_for("RELOADED_CURRENT_ONLY", current_mid)
+            reloaded = info_for("RELOADED_CURRENT_ONLY", current_mid, changed)
             result = [json.loads(chunk) async for chunk in agent_run(reloaded, thread_manager=manager)]
             assert reloaded.attempt_outcome == "completed", result[-2:]
             outputs.append(result)

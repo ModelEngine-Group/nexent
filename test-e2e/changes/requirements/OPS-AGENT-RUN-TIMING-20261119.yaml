@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-RUN-TIMING-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-RUN-TIMING-20261119
+  title: Add the shared Agent execution clock before wiring either consumer
+  description: Implement only the pure timing object and unit proof in this increment. The agreed average execution duration will later consume one frozen complete-lifecycle measurement in both monitoring and trajectory, independently of trajectory settings.
+  affected_features:
+    existing: [OPS-AGENT-FACTS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [test/sdk/monitor/test_run_timing.py, test/sdk/monitor/test_duration.py]
+    behaviors:
+    - Start and finish at most once, share the same immutable final result and preserve a measured zero.
+    - Bind an execution identity once and preserve the actual execution date anchor separately from full lifecycle timing.
+    - Use exact integer monotonic elapsed milliseconds and UTC timestamps usable by both consumers without reading time again.
+    - Reject invalid lifecycle use, preserve unavailable negative elapsed observations and remain independent of telemetry imports and configuration.
+    - Serialize concurrent lifecycle transitions and keep separate execution objects isolated.
+    reason: Existing duration UT checks elapsed validation, while Agent and trajectory tests exercise their current separate clocks. This new pure state/value contract belongs in UT. No runtime consumer changes in this increment, so existing formal Cases remain unchanged; the integrated D3 proof is required in the subsequent wiring increment.
+  notes: Preserve the verified bca6c449b baseline and existing metrics. No main or child hooks, event contracts, reducers, endpoints, UI, exports or archive changes in this increment.

@@ -210,6 +210,7 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
             follow_up = info.model_copy(update={
                 "query": "What can you do? CURRENT_TASK_ONLY_MARKER", "observer": MessageObserver(lang="en"),
                 "stop_event": threading.Event(), "cancellation_scope": None,
+                "run_timing": None, "attempt_outcome": None, "run_result": None,
                 "history": [AgentHistory(role="user", content=info.query),
                             AgentHistory(role="assistant", content="native_result_20")],
             })

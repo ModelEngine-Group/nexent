@@ -1,4 +1,4 @@
-name: Docker Build Main Images
+name: Docker Build Backend Images
 
 concurrency:
   group: docker-build-main-dev-${{ github.ref }}
@@ -13,11 +13,14 @@ on:
       - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/images/dockerfiles/main/**'
+      - 'deploy/images/dockerfiles/ops/**'
       - 'deploy/common/**'
       - 'deploy/sql/**'
       - 'deploy/tests/smoke-independent-service-images.sh'
       - 'VERSION'
-      - '.github/workflows/**'
+      - 'deploy/images/build.sh'
+      - '.dockerignore'
+      - '.github/workflows/auto-build-main-dev.yml'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
@@ -25,31 +28,16 @@ on:
       - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/images/dockerfiles/main/**'
+      - 'deploy/images/dockerfiles/ops/**'
       - 'deploy/common/**'
       - 'deploy/sql/**'
       - 'deploy/tests/smoke-independent-service-images.sh'
       - 'VERSION'
-      - '.github/workflows/**'
+      - 'deploy/images/build.sh'
+      - '.dockerignore'
+      - '.github/workflows/auto-build-main-dev.yml'
 
 jobs:
-  build-main-amd64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Build main image (amd64) and load locally
-        run: |
-          docker build --platform linux/amd64 -t nexent/nexent:dev-amd64 -f deploy/images/dockerfiles/main/Dockerfile .
-
-  build-main-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Build main image (arm64) and load locally
-        run: |
-          docker build --platform linux/arm64 -t nexent/nexent:dev-arm64 -f deploy/images/dockerfiles/main/Dockerfile .
-
   build-independent-services:
     name: Build and start independent services (${{ matrix.arch }})
     strategy:
@@ -67,10 +55,8 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          for service in management runtime mcp-service ops; do
-            docker build --target "$service" --platform "linux/$ARCH" \
-              -t "nexent/nexent-$service:dev-$ARCH" -f deploy/images/dockerfiles/main/Dockerfile .
-          done
+          bash deploy/images/build.sh --images management,runtime,ops \
+            --platform "linux/$ARCH" --version "dev-$ARCH" --load
       - name: Start and check independent services
         timeout-minutes: 8
         env:
@@ -78,4 +64,4 @@ jobs:
         run: |
           bash deploy/tests/smoke-independent-service-images.sh \
             "nexent/nexent-management:dev-$ARCH" "nexent/nexent-runtime:dev-$ARCH" \
-            "nexent/nexent-mcp-service:dev-$ARCH" "nexent/nexent-ops:dev-$ARCH"
+            "nexent/nexent-ops:dev-$ARCH"

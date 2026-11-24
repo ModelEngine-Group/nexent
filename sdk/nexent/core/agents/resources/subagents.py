@@ -29,6 +29,8 @@ from nexent.monitor import (
     get_agent_monitoring_context,
     get_monitoring_manager,
 )
+from nexent.monitor.agent_fact import child_run_scope
+from nexent.monitor.run_timing import RunTiming
 
 
 class SubAgentDefinition:
@@ -237,16 +239,22 @@ class SubAgentToolWrapper:
                 agent_display_name=getattr(self._inner, "display_name", None), query=task_text,
                 agent_version_no=self._runtime_identity.get("version_no"),
                 agent_version_name=self._agent_version_name,
+                monitoring_run_id=str(invocation_id),
+                monitoring_parent_run_id=parent.monitoring_run_id,
             )
             attributes = manager.build_agent_run_attributes(metadata, attributes={
                 "subagent.invocation_id": invocation_id,
                 **({"parent.agent.id": parent.agent_id} if parent.agent_id is not None else {}),
                 **({"parent.agent.name": parent.agent_name} if parent.agent_name is not None else {}),
             })
+            timing = RunTiming(run_id=str(invocation_id))
+            timing.start()
             with agent_monitoring_context(metadata), manager.trace_operation(
-                f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT, **attributes
+                f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT,
+                run_timing=timing, **attributes,
             ):
-                yield manager
+                with child_run_scope(metadata, timing):
+                    yield manager
         finally:
             end_kwargs = dict(self._runtime_identity)
             if self._invocation_name is not None:
