@@ -42,6 +42,7 @@ import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
   FILTER_ALL,
   McpDeploymentType,
+  McpHealthStatus,
   McpServiceStatus,
   McpTransportType,
 } from "@/const/mcpTools";
@@ -122,6 +123,20 @@ export function MyMcp({
   const items = useMemo<MineMcpCardItem[]>(() => {
     return getDeduplicatedMineItems(localList.services, myPublished.items);
   }, [localList.services, myPublished.items]);
+
+  // Prefer the live check result; otherwise fall back to the persisted health
+  // status so a service verified as reachable does not show "unchecked" after
+  // a reload.
+  const resolveConnectionStatus = (
+    item: MineMcpCardItem
+  ): McpConnectionStatus => {
+    const live = connectionStatuses[getMineItemKey(item)];
+    if (live) return live;
+    return item.kind === "local" &&
+      item.service.healthStatus === McpHealthStatus.HEALTHY
+      ? "success"
+      : "unchecked";
+  };
 
   const onlineServiceByCommunityId = useMemo(() => {
     const services = new Map<number, CommunityMcpCard>();
@@ -818,7 +833,7 @@ export function MyMcp({
                   }
                   onHealthCheck={handleHealthCheck}
                   healthChecking={refreshingMineKey === getMineItemKey(item)}
-                  connectionStatus={connectionStatuses[key] ?? "unchecked"}
+                  connectionStatus={resolveConnectionStatus(item)}
                   tagRefreshKey={
                     item.kind === "local"
                       ? tagRefreshKeys?.[item.service.mcpId]

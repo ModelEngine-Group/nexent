@@ -10,12 +10,16 @@ from copy import copy
 from types import SimpleNamespace
 
 from nexent.core.agents.context import ContextItem, ContextManager, ContextManagerConfig
+from nexent.core.agents.context.maintenance import complete_agent_context as complete_context
+from nexent.core.agents.context.maintenance import finish_agent_context
 from nexent.core.agents.context.models import CurrentActionContextItem
+from nexent.core.agents.context.usage import ContextUsageBaseline
 from nexent.core.agents.contracts.context import ContextItemInput
 from nexent.core.agents.contracts.output import ContextCapacityObservation
 from nexent.core.agents.cores.jiuwen.messages import _mapping, resource_view
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.core.concurrency.errors import ThreadCapacityExceeded
 from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
 from nexent.core.utils.observer import ProcessType
 
@@ -66,7 +70,7 @@ class SummaryModel:
 class JiuwenContextBridge:
     """Own one run-local CM; persisted facts and checkpoints remain application-owned."""
 
-    def __init__(self, info, scope, manager, model, items):
+    def __init__(self, info, scope, manager, model, items, *, message_format="openai_chat_completions"):
         self.info, self.scope, self.manager = info, scope, manager
         config = copy(info.agent_config.context_manager_config or ContextManagerConfig())
         sink = config.history_summary_sink
@@ -85,11 +89,22 @@ class JiuwenContextBridge:
                                       json.dumps(payload, ensure_ascii=False))
 
         config.history_summary_status_sink = emit_status
-        self.context_manager = ContextManager(config, max_steps=info.agent_config.max_steps)
+        self.context_manager = ContextManager(config, max_steps=info.agent_config.max_steps,
+                                              message_format=message_format,
+                                              request_token_estimator=self._estimate_wire)
         self.summary_model = SummaryModel(model)
         self.context_timeout = 6 * model.profile.connection.timeout_seconds + info.mcp_close_timeout_seconds
         self.executions = []
         self.last_evidence = None
+        self.usage_baseline = ContextUsageBaseline()
+        self._pending_calls = []
+        self._completed_tool_ids = set()
+        self._maintenance_execution = None
+        self._pending_maintenance = None
+        self._maintenance_deadline = None
+        self._finalization_blocked = False
+        self._current_items = []
+        self._tools = []
         base = list(items)
         # Direct SDK callers have no database snapshot; preserve their completed turns.
         if info.context_input is None:
@@ -154,6 +169,11 @@ class JiuwenContextBridge:
         )
         if self.scope.cancelled:
             raise RunTerminated()
+        self._current_items, self._tools = current, definitions
+        local_estimate = self._estimate(context.messages, definitions)
+        model_key = self._model_key()
+        self.usage_baseline.capture(local_estimate, model_key)
+        self.summary_model.model._agent_context = self.context_manager.agent_history_boundary()
         self.last_evidence = context.evidence
         summary = self.context_manager.consume_history_summary_event()
         if summary:
@@ -161,13 +181,145 @@ class JiuwenContextBridge:
                                            json.dumps(summary, ensure_ascii=False))
         return context.messages
 
+    def _model_key(self):
+        profile = self.summary_model.model.profile
+        return (profile.identity.tenant_id, profile.outlet_id, profile.config_revision,
+                profile.identity.request_model_id)
+
+    def _estimate(self, messages, tools):
+        return self.context_manager.estimate_request_tokens(messages, tools)
+
+    def _estimate_wire(self, messages, tools):
+        from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+
+        model = self.summary_model.model
+        definitions = [{"type": "function", "function": {
+            "name": tool["name"], "description": tool.get("description", ""),
+            "parameters": tool.get("input_schema", {})}} for tool in tools or []]
+        request = model.preview_request(messages, definitions)
+        body = OpenAIChatAdapter().prepare_http_request(request, model.profile).json_body
+        return self.context_manager._message_tokens(body["messages"]) + self.context_manager._tools_tokens(body.get("tools"))
+
+    def accepted_response(self, message, native_message):
+        """Remember accepted usage; wait for every matching native tool result."""
+        if self.scope.cancelled:
+            return
+        self._pending_usage = message.usage.input_tokens if message.usage.origin == "provider" else None
+        self._accepted_context_response = message
+        self._pending_calls = list(native_message.tool_calls or ())
+        self._completed_tool_ids.clear()
+        content = "".join(part.get("text", "") for part in message.content_parts)
+        payload = {"role": "assistant", "content": content}
+        if self._pending_calls:
+            payload["tool_calls"] = [{"id": call.id, "type": "function", "function": {
+                "name": call.name, "arguments": call.arguments}} for call in self._pending_calls]
+        self._current_items.append(NativeActionItem(id="jiuwen-accepted-response", type="current_action",
+            content={"messages": [payload]}, metadata={"layout_order": 1000000}))
+        if not self._pending_calls:
+            self._schedule_maintenance()
+
+    def completed_tool(self, name, result, local_id, *, provider_call_id=None, parent_call_id=None):
+        """Nested business calls cannot close an unrelated native tool transaction."""
+        if (self.scope.cancelled or local_id in self._completed_tool_ids or parent_call_id is not None
+                or not isinstance(provider_call_id, str) or not provider_call_id):
+            return
+        matches = [call for call in self._pending_calls if call.name == name
+                   and call.id == provider_call_id]
+        if len(matches) != 1:
+            return
+        call = matches[0]
+        self._completed_tool_ids.add(local_id)
+        self._pending_calls.remove(call)
+        self._current_items.append(NativeActionItem(id="jiuwen-accepted-tool:" + local_id,
+            type="current_action", content={"messages": [{"role": "tool", "tool_call_id": call.id,
+                "content": str(result)}]}, metadata={"layout_order": 1000001 + len(self._completed_tool_ids)}))
+        if not self._pending_calls:
+            self._schedule_maintenance()
+
+    def _schedule_maintenance(self):
+        """Start maintenance at the completed response/tool boundary, never in prepare."""
+        if self.scope.cancelled:
+            return
+        response, usage = self._accepted_context_response, self._pending_usage
+        def work():
+            try:
+                if self.scope.cancelled:
+                    return
+                self.usage_baseline.accept(usage)
+                self.last_run_local_summary = complete_context(manager=self.context_manager, response=response,
+                    model=self.summary_model, cancelled=lambda: self.scope.cancelled)
+                if self.last_run_local_summary is not None:
+                    self.usage_baseline.invalidate()
+            finally:
+                if hasattr(response, "_agent_input"):
+                    response._agent_input = None
+        self._maintenance_deadline = time.monotonic() + self.context_timeout
+        if self.info.model_deadline is not None:
+            self._maintenance_deadline = min(self._maintenance_deadline, self.info.model_deadline)
+        self._pending_maintenance = work
+        if not self._submit_maintenance():
+            logger.warning("event=jiuwen_context_maintenance_deferred lane=model-tool-io reason=capacity")
+
+    def _submit_maintenance(self):
+        try:
+            execution = self.manager.submit(
+                "model-tool-io", ManagedTaskSpec(task_name="jiuwen-context-maintenance", owner=__name__,
+                    run_id=self.summary_model.model.run_id, deadline_monotonic=self._maintenance_deadline),
+                self._pending_maintenance,
+            )
+        except ThreadCapacityExceeded:
+            return False
+        self._pending_maintenance = None
+        self._maintenance_execution = execution
+        self.executions.append(self._maintenance_execution)
+        return True
+
     async def prepare_messages(self, messages, tools):
         if self.scope.cancelled:
             raise RunTerminated()
         deadline = time.monotonic() + self.context_timeout
         if self.info.model_deadline is not None:
             deadline = min(deadline, self.info.model_deadline)
+        if self._maintenance_deadline is not None:
+            deadline = min(deadline, self._maintenance_deadline)
+        backoff = 0.05
+        while self._pending_maintenance is not None:
+            if self.scope.cancelled:
+                raise RunTerminated()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                from nexent.core.model_service.service import ModelServiceError
+
+                from .errors import protocol_error
+
+                logger.warning("event=jiuwen_context_maintenance_timeout phase=admission "
+                               "timeout_seconds=%.3f error_type=ThreadCapacityExceeded", self.context_timeout)
+                raise ModelServiceError(protocol_error("JIUWEN_CONTEXT_BUSY",
+                    request_id=str(self.summary_model.model.run_id), lang=self.info.observer.lang))
+            if not self._submit_maintenance():
+                await asyncio.sleep(min(backoff, remaining))
+                backoff = min(1.0, backoff * 2)
         timeout = max(0.0, deadline - time.monotonic())
+        if self._maintenance_execution is not None:
+            execution = self._maintenance_execution
+            waiting = asyncio.wrap_future(execution.future)
+            loop = asyncio.get_running_loop()
+            token = self.scope.register_closer(lambda: loop.call_soon_threadsafe(waiting.cancel))
+            try:
+                await asyncio.wait_for(waiting, timeout)
+            except (TimeoutError, asyncio.CancelledError, RunTerminated) as error:
+                if isinstance(error, TimeoutError):
+                    logger.warning("event=jiuwen_context_maintenance_timeout phase=queue_or_execution "
+                                   "timeout_seconds=%.3f error_type=TimeoutError", timeout)
+                self.scope.cancel()
+                self.manager.cancel(execution.execution_id, reason="Jiuwen maintenance wait terminated", wait_timeout=0,
+                                    mark_stuck_on_timeout=False)
+                raise
+            finally:
+                self.scope.unregister_closer(token)
+                self._maintenance_execution = None
+                self._maintenance_deadline = None
+            timeout = max(0.0, deadline - time.monotonic())
         execution = self.manager.submit(
             "model-tool-io", ManagedTaskSpec(task_name="jiuwen-context", owner=__name__,
                 run_id=self.summary_model.model.run_id, deadline_monotonic=deadline),
@@ -188,8 +340,46 @@ class JiuwenContextBridge:
                                 mark_stuck_on_timeout=False)
             raise
 
+    def finish_run(self, final_output):
+        """Finalize through the owned bounded lane after all native work completed."""
+        if self._finalization_blocked or self._pending_calls or self.scope.cancelled:
+            return None
+        abandoned = False
+        def work():
+            return finish_agent_context(manager=self.context_manager, run_context=self.run_context,
+                current_items=self._current_items, final_output=final_output, model=self.summary_model,
+                cancelled=lambda: abandoned or self.scope.cancelled)
+        execution = None
+        try:
+            execution = self.manager.submit(
+                "model-tool-io", ManagedTaskSpec(task_name="jiuwen-completed-turn-checkpoint", owner=__name__,
+                    run_id=self.summary_model.model.run_id,
+                    deadline_monotonic=time.monotonic() + self.context_timeout), work)
+            return execution.future.result(timeout=self.context_timeout)
+        except Exception:
+            abandoned = True
+            if execution is not None and not execution.future.done():
+                self.manager.cancel(execution.execution_id, reason="Completed-turn checkpoint abandoned",
+                    wait_timeout=self.info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
+            logger.warning("event=context_completed_turn_checkpoint_failed", exc_info=True)
+            return None
+
     def close(self):
+        if self._pending_maintenance is not None:
+            self._finalization_blocked = True
+        self._pending_maintenance = None
+        if self._maintenance_execution is not None and not self.scope.cancelled:
+            try:
+                self._maintenance_execution.future.result(timeout=self.context_timeout)
+            except Exception:
+                self._finalization_blocked = True
+                logger.warning("event=jiuwen_context_maintenance_close_failed", exc_info=True)
         for execution in self.executions:
             if not execution.future.done():
+                self._finalization_blocked = True
                 self.manager.cancel(execution.execution_id, reason="Jiuwen context cleanup",
                     wait_timeout=self.info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
+
+        response = getattr(self, "_accepted_context_response", None)
+        if hasattr(response, "_agent_input"):
+            response._agent_input = None

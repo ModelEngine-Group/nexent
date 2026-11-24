@@ -146,7 +146,7 @@ def test_runtime_capture_has_no_periodic_maintenance(tmp_path, mocker):
     from contracts.constants import environment as config
     from infrastructure.trace.trajectory_runtime import create_local_processor
 
-    mocker.patch("management.db.trajectory.repository.ExecutionRepository")
+    mocker.patch("infrastructure.rdb.trajectory.repository.ExecutionRepository")
     settings = SimpleNamespace(
         **{name: getattr(config, name) for name in dir(config) if name.isupper()}
     )

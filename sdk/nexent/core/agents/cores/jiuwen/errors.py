@@ -23,6 +23,10 @@ _SOURCES = {
     "a2a": ("A2A 智能体", "A2A agent"),
 }
 _PROTOCOL_MESSAGES = {
+    "JIUWEN_CONTEXT_BUSY": (
+        "上下文维护资源繁忙，等待执行名额超时，请稍后重试。",
+        "Context maintenance resources are busy; admission timed out. Try again later.",
+    ),
     "JIUWEN_UNAUTHORIZED_TOOL": (
         "模型尝试调用未授权的工具，请检查模型生成的工具名称。",
         "The model requested an unauthorized tool. Check the generated tool name.",

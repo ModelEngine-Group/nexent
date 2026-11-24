@@ -13,14 +13,16 @@ def test_roles_union_compatibility_and_operations_boundary(role_runtime):
     assert r.assign("user", ["DEV", "OPS"]).status_code == 200
     profile = r.info("user").json()["data"]["user"]
     assert profile["roles"] == ["DEV", "OPS"]
-    assert set(["/agents", "/ops/dashboard", "/ops/configuration", "/resource-manage"]) <= set(
-        profile["accessibleRoutes"]
+    assert set(["/agents", "ops-dashboard", "/resource-manage"]) <= set(
+        profile["accessiblePages"]
     )
+    assert "ops-configuration" not in profile["accessiblePages"]
     assert len(profile["permissions"]) == len(set(profile["permissions"]))
-    assert len(profile["accessibleRoutes"]) == len(set(profile["accessibleRoutes"]))
+    assert len(profile["accessiblePages"]) == len(set(profile["accessiblePages"]))
     assert r.assign("user", ["OPS"]).status_code == 200
     profile = r.info("user").json()["data"]["user"]
-    assert set(profile["accessibleRoutes"]) == {"/ops/dashboard", "/ops/configuration", "/resource-manage"}
+    assert set(profile["accessiblePages"]) == {"ops-dashboard", "/resource-manage"}
+    assert "accessibleRoutes" not in profile
     inventory = r.client.get("/ops/resources", headers=r.headers("user"))
     assert inventory.status_code == 200
     assert {row["tenant_id"] for row in inventory.json()["data"]["items"]} == {"a"}
@@ -66,7 +68,7 @@ def test_roles_union_compatibility_and_operations_boundary(role_runtime):
         )
     assert r.assign("user", ["ADMIN", "OPS"]).status_code == 200
     profile = r.info("user").json()["data"]["user"]
-    assert "/resource-manage" in profile["accessibleRoutes"]
+    assert "/resource-manage" in profile["accessiblePages"]
     legacy = r.client.put("/users/" + r.users["dev"], headers=r.headers("su"), json={"role": "USER"})
     assert legacy.status_code == 200
     assert r.client.put("/users/" + r.users["user"], headers=r.headers("su"), json={"role": "USER"}).status_code == 409

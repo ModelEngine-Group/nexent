@@ -22,7 +22,7 @@ feature:
     description: Invitation roles are fixed at creation and assigned together on signup;
       issuer revocation does not invalidate a usable invitation.
   - rule_id: AUTH-MULTI-ROLE-RULE-05
-    description: OPS has two operations entry grants plus read-only resource management;
+    description: OPS has operations dashboard and read-only resource management entries;
       SU has equivalent operations grants across all tenants; combined roles retain
       existing grants.
   - rule_id: AUTH-MULTI-ROLE-RULE-06
@@ -44,6 +44,7 @@ feature:
   source:
     requirement_ids:
     - AUTH-MULTI-ROLE-20261031
+    - SYSTEM-CONFIGURATION-20261123
     spec_path: nexent-doc/docs/Developing/auth-multi-role-ops/proposal.md
     notes: OPS administrator permissions are the feature; role arrays and union checks
       are supporting refactors. User authorized an in-project document root. Monitoring/configuration

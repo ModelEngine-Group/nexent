@@ -42,6 +42,7 @@ import { NotificationBell } from "@/components/navigation/NotificationBell";
 import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
 import { useGlobalConfigStore } from "@/stores/global";
 import { AUTH_EVENTS } from "@/const/auth";
+import { OPS_PAGES } from "@/const/navigationPages";
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -53,6 +54,7 @@ import { publicAsset } from "@/lib/publicAsset";
 import { getHomeLogo, getHomeTitle } from "@/lib/projectBranding";
 
 interface RouteConfig {
+  pageId?: string;
   path: string;
   Icon: ComponentType<{ className?: string }>;
   labelKey: string;
@@ -64,14 +66,14 @@ interface RouteConfig {
 
 const ROUTE_CONFIG: RouteConfig[] = [
   {
-    path: "/ops/dashboard",
+    ...OPS_PAGES.dashboard,
     Icon: LineChart,
     labelKey: "ops.dashboard",
     order: 12.5,
     parentKey: null,
   },
   {
-    path: "/ops/configuration",
+    ...OPS_PAGES.configuration,
     Icon: Settings,
     labelKey: "ops.configuration",
     order: 12.6,
@@ -187,14 +189,14 @@ const ROUTE_PREFETCH_DELAY_MS = 50;
 
 function isRouteAccessible(
   route: RouteConfig,
-  accessibleRoutes: string[],
+  canAccessRoute: (route: string) => boolean,
   enableAgentWorkbench: boolean
 ) {
   if (route.path === "/workbench" && !enableAgentWorkbench) {
     return false;
   }
 
-  return accessibleRoutes.includes(route.path);
+  return canAccessRoute(route.path);
 }
 
 interface SideNavigationProps {
@@ -209,7 +211,7 @@ export function SideNavigation({
   isNavigating = false,
 }: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
-  const { accessibleRoutes, user } = useAuthorizationContext();
+  const { accessibleRoutes, user, canAccessRoute } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
   const router = useRouter();
@@ -334,9 +336,15 @@ export function SideNavigation({
         !route.isSection &&
         (route.path !== "/observability" || hasRole(user, "OPS", "SU")) &&
         !(route.path === "/" && hideHomePage) &&
-        isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
+        isRouteAccessible(route, canAccessRoute, enableAgentWorkbench)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage, user]);
+  }, [
+    accessibleRoutes,
+    canAccessRoute,
+    enableAgentWorkbench,
+    hideHomePage,
+    user,
+  ]);
 
   const getRouteNavigationPath = (route: RouteConfig) => {
     const routePath = route.navigationPath || route.path;

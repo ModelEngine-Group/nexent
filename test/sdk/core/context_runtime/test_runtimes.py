@@ -43,6 +43,22 @@ class _ContextManager:
         self._to_json_value = lambda value: value
         self.build_context_messages = lambda items: []
 
+    def _message_tokens(self, messages):
+        from nexent.core.agents.context import ContextManager
+
+        return ContextManager._message_tokens(self, messages)
+
+    def _tools_tokens(self, tools):
+        from nexent.core.agents.context import ContextManager
+
+        return ContextManager._tools_tokens(self, tools)
+
+    @staticmethod
+    def _canonical_tools(tools):
+        from nexent.core.agents.context import ContextManager
+
+        return ContextManager._canonical_tools(tools)
+
     def prepare_items_context(self, *, fallback_system_prompt, items=None):
         self.calls.append(("prepare_items_context", fallback_system_prompt, items))
         return types.SimpleNamespace(
@@ -121,6 +137,10 @@ def test_managed_runtime_is_thin_context_manager_adapter():
             ("assemble_context_items", "final_answer", None),
         ]
         assert final.messages == [{"role": "system", "content": "step"}]
+        assert final.evidence.usage_source == "estimated"
+        assert final.evidence.calibrated_input_estimate == (
+            manager._message_tokens(final.messages) + manager._tools_tokens(final.tools)
+        )
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
         evidence = runtime.finalize_evidence(status="completed")
         assert evidence.model_call_count == 2
@@ -165,20 +185,20 @@ def test_managed_runtime_uses_item_snapshot_without_explicit_prepare_run():
         _restore(snapshot)
 
 
-def test_managed_runtime_forces_compaction_for_both_overflow_recovery_paths():
+def test_managed_runtime_prepares_step_and_final_answer_without_forced_compaction():
     managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
         runtime = managed_module.ManagedContextRuntime(manager)
         memory = _Memory()
 
-        step = runtime.recover_step(
+        step = runtime.prepare_step(
             model=None,
             memory=memory,
             current_run_start_idx=0,
             tools=[{"name": "search"}],
         )
-        final_answer = runtime.recover_final_answer(
+        final_answer = runtime.prepare_final_answer(
             model=None,
             memory=memory,
             current_run_start_idx=0,
@@ -186,7 +206,7 @@ def test_managed_runtime_forces_compaction_for_both_overflow_recovery_paths():
             final_answer_templates={"final_answer": {}},
         )
 
-        assert manager.force_compactions == [True, True]
+        assert manager.force_compactions == [False, False]
         assert step.messages == [{"role": "system", "content": "step"}]
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
         assert runtime.finalize_evidence(status="completed").model_call_count == 2

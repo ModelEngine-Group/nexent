@@ -23,7 +23,7 @@ import {
 import { LoginModal } from "@/components/auth/loginModal";
 import { RegisterModal } from "@/components/auth/registerModal";
 import { FullScreenLoading } from "@/components/ui/loading";
-import { useDeployment } from "./deploymentProvider";
+import { DeploymentProvider, useDeployment } from "./deploymentProvider";
 import { useSessionManager } from "@/hooks/auth/useSessionManager";
 import { AutoHideScrollbars } from "./AutoHideScrollbars";
 import {
@@ -108,13 +108,15 @@ export function RootProvider({ children }: { children: ReactNode }) {
         <App>
           <AutoHideScrollbars />
           <AuthenticationProvider>
-            <AuthorizationProvider>
-              <AppReadyWrapper>
-                <>{children}</>
-              </AppReadyWrapper>
-              <LoginModal />
-              <RegisterModal />
-            </AuthorizationProvider>
+            <DeploymentProvider>
+              <AuthorizationProvider>
+                <AppReadyWrapper>
+                  <>{children}</>
+                </AppReadyWrapper>
+                <LoginModal />
+                <RegisterModal />
+              </AuthorizationProvider>
+            </DeploymentProvider>
           </AuthenticationProvider>
         </App>
       </QueryClientProvider>

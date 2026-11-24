@@ -15,7 +15,7 @@ from nexent.core.concurrency import ManagedTaskSpec
 
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
+from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, NorthboundStopInProgressError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.agent import AgentRequest
 from contracts.tool import ToolParamsRequest
@@ -510,6 +510,7 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
     except (
+        NorthboundStopInProgressError,
         RuntimeServiceTimeoutError,
         RuntimeServiceUnavailableError,
         RuntimeUpstreamError,

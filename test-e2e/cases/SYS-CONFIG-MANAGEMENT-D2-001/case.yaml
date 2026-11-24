@@ -4,9 +4,9 @@ module: SYSTEM-CONFIG
 case:
   case_id: SYS-CONFIG-MANAGEMENT-D2-001
   feature_id: SYSTEM-CONFIGURATION
-  requirement_ids: [SYSTEM-CONFIGURATION-20261110]
+  requirement_ids: [SYSTEM-CONFIGURATION-20261110, SYSTEM-CONFIGURATION-20261123]
   business_rule_ids: [SYS-CONFIG-RULE-01, SYS-CONFIG-RULE-02, SYS-CONFIG-RULE-05, SYS-CONFIG-RULE-06]
-  title: Ops configuration API enforces catalog, authorization and honest save contracts
+  title: SU configuration API enforces catalog, authorization and honest save contracts
   type: API-IT
   priority: P0
   status: active
@@ -14,21 +14,21 @@ case:
   objective: Exercise the actual ops HTTP application with controlled persistence and notification boundaries.
   preconditions: [Python backend dependencies and isolated test doubles for PostgreSQL and Redis are available.]
   test_data:
-    actors: [OPS, SU, ADMIN, USER, anonymous]
+    actors: [SU, OPS, ADMIN, USER, anonymous]
     batches: [valid changed keys, unknown key, wrong type, nonpositive value, malformed body]
   steps:
   - order: 1
     action: Query the catalog with each actor and with the database unavailable.
-    expected: OPS and SU with explicit operations permission return exactly nineteen entries; unauthorized actors receive 401/403 and dependency failure returns a safe 503.
+    expected: Only SU with explicit operations permission returns exactly eighteen entries; OPS and other unauthorized actors receive 401/403 and dependency failure returns a safe 503.
   - order: 2
-    action: Attempt writes as OPS and SU, then save valid, unknown, wrong-type, nonpositive and malformed batches with the explicit update grant, including a notification failure after commit.
-    expected: OPS and SU with the explicit update grant can save; actors without the operations role or grant receive 403 without persistence. Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.
+    action: Attempt writes as SU and OPS, then save valid, unknown, wrong-type, nonpositive and malformed batches with the explicit update grant, including a notification failure after commit.
+    expected: Only SU with the explicit update grant can save; OPS and actors without the update grant receive 403 without persistence. Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.
   - order: 3
     action: Request a recommendation for every current numeric parameter and an unknown key.
     expected: Each managed parameter returns an explicit unavailable reason and no value or draft mutation; unknown keys are rejected.
   expected_results:
   - The actual ops routes enforce explicit authorization and safe error mappings without exposing secrets.
-  - Platform-wide writes require the explicit update grant and the OPS or SU role. Only changed valid keys are saved atomically; responses contain no revision, history, consumer application state or immediate-effect claim.
+  - Platform-wide writes require the explicit update grant and the SU role. Only changed valid keys are saved atomically; responses contain no revision, history, consumer application state or immediate-effect claim.
   - Current parameters have no executable automatic recommendation.
   forbidden_side_effects:
   - No partial writes, permission bypass, secret disclosure or consumer status fabrication.
