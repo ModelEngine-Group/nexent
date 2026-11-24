@@ -161,6 +161,7 @@ def move_aidp_folder_impl(
     parent_folder: str,
     folder_name: str,
     target_folder: str,
+    merge_on_conflict: bool = False,
 ) -> Dict[str, Any]:
     """Move one folder below a target folder using the new target_* fields."""
     source_path = _join_folder_path(parent_folder, folder_name)
@@ -177,7 +178,7 @@ def move_aidp_folder_impl(
             "folder_name": folder_name,
             "target_parent_folder_path": target_folder,
             "target_parent_folder_id": target_id,
-            "merge_on_conflict": False,
+            "merge_on_conflict": merge_on_conflict,
         },
     )
 

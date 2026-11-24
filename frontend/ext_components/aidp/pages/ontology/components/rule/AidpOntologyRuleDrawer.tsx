@@ -31,6 +31,13 @@ import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErro
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import { ruleOperatorLabel } from "@/ext_components/aidp/shared/utils/aidpOntologyRule";
+import {
+  RULE_DESCRIPTION_MAX_BYTES,
+  RULE_NAME_MAX_BYTES,
+  byteCountText,
+  validateRuleDescription,
+  validateRuleName,
+} from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
 import type {
   AidpOntologyRuleActionValue,
   AidpOntologyRuleCondition,
@@ -493,9 +500,27 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                 {question(t("aidpKnowledge.ontologyRulesNameHint"))}
               </span>
             }
-            rules={[{ required: true, whitespace: true }]}
+            rules={[
+              { required: true, whitespace: true },
+              {
+                validator: async (_rule, value: string) => {
+                  const error = validateRuleName(value ?? "");
+                  if (error) throw new Error(error);
+                },
+              },
+            ]}
           >
-            <Input maxLength={128} />
+            <Input
+              maxLength={128}
+              showCount={{
+                formatter: ({ value }) =>
+                  byteCountText(
+                    String(value ?? ""),
+                    RULE_NAME_MAX_BYTES,
+                    t("aidpKnowledge.ontologyBytesUnit")
+                  ),
+              }}
+            />
           </Form.Item>
           <Form.Item
             name="description"
@@ -505,11 +530,26 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                 help={t("aidpKnowledge.ontologyRulesDescriptionHint")}
               />
             }
+            rules={[
+              {
+                validator: async (_rule, value: string) => {
+                  const error = validateRuleDescription(value ?? "");
+                  if (error) throw new Error(error);
+                },
+              },
+            ]}
           >
             <Input.TextArea
               autoSize={{ minRows: 3, maxRows: 6 }}
               maxLength={512}
-              showCount
+              showCount={{
+                formatter: ({ value }) =>
+                  byteCountText(
+                    String(value ?? ""),
+                    RULE_DESCRIPTION_MAX_BYTES,
+                    t("aidpKnowledge.ontologyBytesUnit")
+                  ),
+              }}
             />
           </Form.Item>
           <Form.Item

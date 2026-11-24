@@ -3412,7 +3412,7 @@ class TestFolderAndFilePathRoutes:
         assert calls == [
             ("create", SERVER_URL, API_KEY, "kb-1", "/docs", "new"),
             ("rename", SERVER_URL, API_KEY, "kb-1", "/docs", "new", "renamed"),
-            ("move", SERVER_URL, API_KEY, "kb-1", "/docs", "renamed", "/archive"),
+            ("move", SERVER_URL, API_KEY, "kb-1", "/docs", "renamed", "/archive", False),
             ("delete", SERVER_URL, API_KEY, "kb-1", "/docs/renamed"),
         ]
 

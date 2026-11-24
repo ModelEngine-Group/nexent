@@ -86,6 +86,10 @@ class MoveAidpFolderRequest(BaseModel):
     parent_folder: str = Field(..., description="Current parent folder path")
     folder_name: str = Field(..., min_length=1)
     target_folder: str = Field(..., description="Destination parent folder path")
+    merge_on_conflict: bool = Field(
+        False,
+        description="Merge into an existing same-named folder instead of failing",
+    )
 
     @field_validator("parent_folder", "target_folder")
     @classmethod
@@ -283,6 +287,7 @@ async def move_folder(
         body.parent_folder,
         body.folder_name,
         body.target_folder,
+        body.merge_on_conflict,
         lane="control-io",
         owner="config",
     )

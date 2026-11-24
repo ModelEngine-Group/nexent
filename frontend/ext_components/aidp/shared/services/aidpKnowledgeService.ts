@@ -36,6 +36,7 @@ import type {
   AidpFileMoveResponse,
   AidpFileRenameResponse,
   AidpDocumentItem,
+  AidpIngestedFileListResponse,
 } from "../types/management";
 
 function buildUrl(
@@ -441,7 +442,8 @@ class AidpKnowledgeService {
     id: string,
     parentFolder: string,
     folderName: string,
-    targetFolder: string
+    targetFolder: string,
+    mergeOnConflict: boolean = false
   ): Promise<AidpFolderOperationResult> {
     const response = await fetchWithErrorHandling(
       buildUrl(API_ENDPOINTS.aidpMgmt.kbFolderMove(id), {}),
@@ -455,6 +457,7 @@ class AidpKnowledgeService {
           parent_folder: parentFolder,
           folder_name: folderName,
           target_folder: targetFolder,
+          merge_on_conflict: mergeOnConflict,
         }),
       }
     );
@@ -506,6 +509,37 @@ class AidpKnowledgeService {
     if (response.status === 204) return {};
     const text = await response.text();
     return text ? (JSON.parse(text) as AidpFileRenameResponse) : {};
+  }
+
+  /**
+   * Full-tree keyword search with the pagination metadata the table needs.
+   * The existing listIngestedFiles helper returns only the rows for callers
+   * that do not page through the results.
+   */
+  async listIngestedFilePage(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    signal?: AbortSignal
+  ): Promise<AidpIngestedFileListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count: Number(result.total_count ?? 0),
+      has_more: Boolean(result.has_more),
+      total_reliable: Boolean(result.total_reliable),
+    };
   }
 
   /**

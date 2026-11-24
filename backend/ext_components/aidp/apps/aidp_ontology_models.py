@@ -11,12 +11,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ext_components.aidp.apps.aidp_ontology_validation import (
-    _ENTITY_DESCRIPTION_MAX_CHARS,
+    _ENTITY_NAME_MAX_BYTES,
     _ENTITY_NAME_MAX_CHARS,
     _clean_required,
+    _utf8_size,
     _validate_domain_description,
     _validate_domain_name,
+    _validate_entity_description,
+    _validate_entity_name,
     _validate_field_name,
+    _validate_rule_description,
+    _validate_rule_name,
 )
 
 
@@ -97,6 +102,8 @@ class OntologyEntityCreateRequest(BaseModel):
         api_name = _clean_required(value, "英文标识不能为空")
         if len(api_name) > _ENTITY_NAME_MAX_CHARS:
             raise ValueError(f"英文标识不能超过 {_ENTITY_NAME_MAX_CHARS} 个字符")
+        if _utf8_size(api_name) > _ENTITY_NAME_MAX_BYTES:
+            raise ValueError(f"英文标识不能超过 {_ENTITY_NAME_MAX_BYTES} 字节")
         # Confirmed AIDP rule: letter first, then letters/digits/underscores,
         # and the name must not end with an underscore.
         if not re.match(r"^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$", api_name):
@@ -105,15 +112,15 @@ class OntologyEntityCreateRequest(BaseModel):
             )
         return api_name
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_entity_name(value)
+
     @field_validator("description")
     @classmethod
     def validate_description(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        description = value.strip()
-        if len(description) > _ENTITY_DESCRIPTION_MAX_CHARS:
-            raise ValueError(f"实体描述不能超过 {_ENTITY_DESCRIPTION_MAX_CHARS} 个字符")
-        return description
+        return None if value is None else _validate_entity_description(value)
 
     @model_validator(mode="after")
     def validate_kind_rules(self):
@@ -150,15 +157,15 @@ class OntologyEntityUpdateRequest(BaseModel):
     child_entities: list[str] | None = None
     synonym_entities: list[str] | None = None
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_entity_name(value)
+
     @field_validator("description")
     @classmethod
     def validate_description(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        description = value.strip()
-        if len(description) > _ENTITY_DESCRIPTION_MAX_CHARS:
-            raise ValueError(f"实体描述不能超过 {_ENTITY_DESCRIPTION_MAX_CHARS} 个字符")
-        return description
+        return None if value is None else _validate_entity_description(value)
 
     @model_validator(mode="after")
     def require_change(self):
@@ -214,10 +221,12 @@ class OntologyRulePayload(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("规则名称不能为空")
-        return stripped
+        return _validate_rule_name(value)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        return _validate_rule_description(value)
 
 
 class OntologyRelationRequest(BaseModel):

@@ -65,16 +65,21 @@ export const formatFailureTaskDateTime = (value: unknown): string => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 
-export const formatFileSize = (bytes?: number): string => {
-  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+export const formatFileSize = (bytes?: number | string): string => {
+  // AIDP serializes file_size as a numeric string (e.g. "28753") on both the
+  // upload-task and knowledge-file endpoints, so normalize it before the
+  // numeric guards below.
+  const size =
+    typeof bytes === "string" && bytes.trim() !== "" ? Number(bytes) : bytes;
+  if (typeof size !== "number" || !Number.isFinite(size) || size < 0) {
     return AIDP_UNKNOWN_VALUE;
   }
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
 /** Split a file name into its editable stem and fixed extension.
