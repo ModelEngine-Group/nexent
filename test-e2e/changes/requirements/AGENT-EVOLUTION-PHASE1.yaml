@@ -22,6 +22,7 @@ change:
     - test/backend/database/test_evolution_consent.py
     - test/backend/ops/test_evolution_review.py
     - test/backend/services/test_evolution_online_diagnosis.py
+    - test/backend/services/test_evolution_access.py
     - test/backend/services/test_evolution_suggestion.py
     - test/backend/services/test_evolution_suggestion_actions.py
     - test/backend/services/test_conversation_share_service.py
@@ -46,6 +47,7 @@ change:
     - test/backend/services/test_evolution_examples.py
     - test/backend/services/test_evolution_feedback_handoff.py
     - test/backend/app/test_agentos_prepared_skills.py
+    - test/backend/app/test_agentos_prepared_attachments.py
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/gateway/test_exposure.py
     - test/sdk/core/tools/test_read_skill_md_tool.py
@@ -53,6 +55,7 @@ change:
     - test/sdk/core/agents/test_replay_file_directory.py
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
+    - frontend/tests/component/evolutionAgentChoices.test.tsx
     - test/backend/services/test_evolution_public_benchmarks.py
     - test/backend/services/test_evolution_screening.py
     - test/backend/services/test_evolution_new_skill.py
@@ -63,6 +66,7 @@ change:
     - test/backend/utils/test_logging_utils.py
     - test/backend/services/test_prepared_public_turn.py
     behaviors:
+    - 评测入口按当前已发布智能体的配置编辑权限筛选。只读成员仍可查看自己的改进建议，跨租户资源返回不存在，试跑不能沿用已撤回的编辑权限。
     - 紧急停用同事务标记该已发布版本的活跃执行，保留已完成回执。Runtime 进入运行状态时与同一发布记录同步，不能启动已停用的版本。
     - 按冻结的已发布智能体版本核对历史工具移除记录，并与本次候选移除项合并。禁止调用项仍须有完整运行回执；必须调用项缺调用判失败，未知缺项列为缺证。
     - P3 读取并校验两个已发布条款，仅指定段落可替换。接受单个 JSON 代码块，仍强制核对原文、证据和占位符。
