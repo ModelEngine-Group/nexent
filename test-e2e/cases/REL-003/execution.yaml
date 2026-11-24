@@ -3,13 +3,15 @@ case_id: REL-003
 implementations:
 - framework: pytest
   file: test.py
-  selector: REL-003
+  selector: test_rel_003
 - framework: pytest
   file: test-e2e/infra/automation/d5/scenarios/scenario_security_reliability_deployment.py
   selector: REL-003
-notes: V5 source binding migrated; runtime parity is not yet certified.
+notes: Calls the Runtime startup cleanup entry against an owned temporary directory and removes all fixture data.
 preparation:
   families: []
-  anchors: true
+  anchors: false
   special_assets: false
   d4_groups: []
+acceptance_bindings:
+  AC-01: [test_rel_003]
