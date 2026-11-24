@@ -36,11 +36,20 @@ def test_release_monitoring(runtime):
             "v2.9.0_003_conversation_run_admission.sql",
             "v2.9.0_004_agent_execution.sql",
             "v2.9.0_006_prepared_conversation_turn.sql",
+            "v2.9.0_011_trajectory.sql",
+            "v2.9.0_015_conversation_evolution.sql",
+            "v2.9.0_018_evolution_replay_cases.sql",
+            "v2.9.0_019_evolution_experiments.sql",
+            "v2.9.0_021_evolution_online_reviews.sql",
+            "v2.9.0_022_evolution_suggestions.sql",
+            "v2.9.0_028_evolution_confirmation_suites.sql",
+            "v2.9.0_029_evolution_confirmation_locks.sql",
+            "v2.9.0_030_evolution_confirmation_results.sql",
+            "v2.9.0_031_evolution_session_versions.sql",
+            "v2.9.0_032_evolution_releases.sql",
+            "v2.9.0_040_evolution_release_monitoring.sql",
         ):
             cur.execute((migrations / file).read_text(encoding="utf8"))
-        for n in (11, 15, 18, 19, 21, 22, 28, 29, 30, 31, 32, 40):
-            (file,) = migrations.glob(f"v2.9.0_{n:03d}_*.sql")
-            cur.execute(file.read_text(encoding="utf8"))
     tenant = "tenant-native"
     with db_client.engine.begin() as conn:
 
