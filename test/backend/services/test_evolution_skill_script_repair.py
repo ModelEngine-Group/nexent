@@ -90,7 +90,7 @@ def test_handoff_separates_agent_feedback_and_maintainer_draft(script_feedback, 
     assert repairs._freeze("tenant", "editor", 20, request, spec) == 32
     assert saved["source_case_ids"] == [1, 2] and saved["repeat_receipt"] == "repeated"
     author = Mock(return_value=json.dumps({"replacement": REPLACEMENT}))
-    monkeypatch.setattr(repairs, "invoke_chat_prompt_in_worker", author)
+    monkeypatch.setattr(repairs, "invoke_candidate_model", author)
     model = repairs.draft_script("tenant", "maintainer", 32, ScriptDraftRequest(model_id=5))
     manual = repairs.draft_script("tenant", "maintainer", 32, ScriptDraftRequest(replacement=REPLACEMENT))
     assert model == manual and "+    return value.upper()" in model["diff"]

@@ -10,9 +10,9 @@ from pydantic import ValidationError
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import PromptCandidateRequest, PromptEdit
-from management.clients.model import invoke_chat_prompt_in_worker
 from management.db.evaluation.candidates import get_prompt_candidate, store_prompt_candidate, text_digest
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
+from management.services.evaluation.generation_budget import invoke_candidate_model, source_digest as generation_source
 
 
 METHOD_INSTRUCTIONS = {
@@ -29,7 +29,7 @@ def _released_prompt(tenant_id, agent_id, version_no):
     return agent.get("prompt") or ""
 
 
-def propose_local_edit(request, tenant_id, user_id, source, instruction, *, allow_deletion=False):
+def propose_local_edit(request, tenant_id, user_id, source, instruction, *, source_key, allow_deletion=False):
     if source.count(request.source_passage) != 1:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Choose one unique passage in the source text")
     instructions = (
@@ -39,7 +39,8 @@ def propose_local_edit(request, tenant_id, user_id, source, instruction, *, allo
         "with old (exact passage), new (replacement), reason, and evidence_ids (both supplied example IDs)."
     )
     feedback = request.model_dump()
-    output = invoke_chat_prompt_in_worker(
+    output = invoke_candidate_model(
+        source=source_key,
         model_id=request.model_id, user_id=user_id, tenant_id=tenant_id, system_prompt=instructions,
         user_prompt=json.dumps({key: feedback[key] for key in ("goal", "source_passage", "failure", "protection")},
                                ensure_ascii=False),
@@ -65,6 +66,7 @@ def generate_prompt_candidate(request: PromptCandidateRequest, tenant_id: str, u
     if source_digest is not None and text_digest(source) != source_digest:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The prompt differs from the approved feedback source")
     result, edit = propose_local_edit(request, tenant_id, user_id, source, METHOD_INSTRUCTIONS[request.method],
+                                      source_key=generation_source(request.method, feedback_id, request.agent_id, request.version_no),
                                       allow_deletion=request.method == "P3")
     require_business_agent_edit(request.agent_id, tenant_id, user_id)
     if source != _released_prompt(tenant_id, request.agent_id, request.version_no):

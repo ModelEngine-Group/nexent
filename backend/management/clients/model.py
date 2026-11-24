@@ -53,17 +53,21 @@ async def invoke_chat_messages(
 
 def invoke_chat_prompt_in_worker(
     *, model_id: int, system_prompt: str, user_prompt: str, user_id: str, tenant_id: str,
+    max_output_tokens: int | None = None, timeout_seconds: int | None = None,
 ) -> str:
     """Invoke AgentOS from an existing synchronous job worker."""
-    output = asyncio.run(invoke_chat_prompt(
-        model_id=model_id,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        options=ChatOptions(temperature=0.3, top_p=0.95),
-    ))
-    return remove_think_blocks(output).strip()
+    async def request():
+        async with asyncio.timeout(timeout_seconds):
+            return await invoke_chat_prompt(
+                model_id=model_id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                options=ChatOptions(temperature=0.3, top_p=0.95, max_output_tokens=max_output_tokens),
+            )
+
+    return remove_think_blocks(asyncio.run(request())).strip()
 
 
 async def embed_query(

@@ -14,7 +14,7 @@ from infrastructure.rdb.skill_candidate_records import candidate_skill_row, read
 from infrastructure.rdb.skill_execution_records import effective_skill_description, read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
 from infrastructure.skill_package import encode_skill_package, load_skill_package, released_skill_files, store_skill_package
-from management.clients.model import invoke_chat_prompt_in_worker
+from management.services.evaluation.generation_budget import invoke_candidate_model, source_digest as generation_source
 from management.db.evaluation.candidates import store_skill_candidate
 from management.db.identity.group import query_group_ids_by_user_in_tenant
 from management.db.identity.user_tenant import get_user_role_by_tenant
@@ -72,6 +72,7 @@ def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id:
         "The correct Skill was already loaded. Compare what the same step did in the failure and good example. "
         "Fix the prerequisite, order, or exception for that step only. Preserve the good branch and output format. "
         "Do not introduce commands, tool privileges, new files or fixed case-specific names.",
+        source_key=generation_source("S2", feedback_id, request.skill_id, agent_version),
     )
     updated = {**files, "SKILL.md": (guide[:header.end()] + result).encode("utf-8")}
     current = _editable_skill(tenant_id, user_id, request.skill_id)
@@ -111,7 +112,8 @@ def generate_skill_discovery_candidate(feedback, feedback_id, model_id, tenant, 
     approved_source()
     groups = ("missed", "overused", "correct")
     data = {key: feedback[key] for key in ("goal", "skill_name", "source_text", *groups)}
-    output = invoke_chat_prompt_in_worker(
+    output = invoke_candidate_model(
+        source=generation_source("S1", feedback_id),
         model_id=model_id, user_id=user, tenant_id=tenant,
         system_prompt="Rewrite only the Skill catalog description in its original language. From the missed request "
                       "identify when to choose it, from overuse identify when to skip it, and preserve the correct "

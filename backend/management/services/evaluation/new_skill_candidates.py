@@ -1,22 +1,25 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Generate an isolated candidate package using the existing signed NL2Skill run."""
 
+import asyncio
 import json
 from fastapi.concurrency import contextmanager_in_threadpool
 from contextlib import aclosing
 from pathlib import PurePosixPath
 
 from contracts.agent import NL2SkillRunRequest
+from contracts.constants import environment
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution_sources import normalized_text, task_digest
 from infrastructure.skill_package import encode_skill_package, load_new_skill_package, store_new_skill_package
-from management.db.evaluation import experiments as jobs, new_skills
+from management.db.evaluation import experiments as jobs, generation_attempts, new_skills
 from management.db.evaluation.confirmation_runs import exclusive_job_slot
 from management.db.skill.repository import get_skill_by_name
 from management.services.evaluation.evolution_access import require_business_agent_edit
 from management.services.evaluation.experiments import _io
 from management.services.evaluation.feedback_handoff import require_development_sources
+from management.services.evaluation.generation_budget import finish_generation, source_digest as generation_source
 from management.services.evaluation.new_skill_evidence import check_private, invalid, require_creator
 from management.services.skill.creation import create_nl2skill_stream, prepare_nl2skill_snapshot
 from nexent.skills.skill_loader import SkillLoader
@@ -142,7 +145,14 @@ async def generate_new_skill(tenant, user, fid, model_id):
             payload.model.revision,
         )
         if existing is None:
-            files = await collect_files(create_nl2skill_stream(payload, user, tenant))
+            attempt = await _io("reserve-new-skill-generation", generation_attempts.reserve,
+                                tenant, user, generation_source("S3", fid), model_id)
+            try:
+                async with asyncio.timeout(environment.EVOLUTION_GENERATION_TIMEOUT_SECONDS):
+                    files = await collect_files(create_nl2skill_stream(payload, user, tenant))
+            except TimeoutError as exc:
+                raise AppException(ErrorCode.SYSTEM_TIMEOUT, "Candidate generation exceeded its time budget") from exc
+            await _io("complete-new-skill-generation", finish_generation, tenant, attempt)
 
             def store():
                 approved = _authorized_feedback(tenant, user, fid)

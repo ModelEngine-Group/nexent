@@ -5,7 +5,7 @@ case:
   case_id: EVOLUTION-RUN-BUDGET-D3-001
   feature_id: AGENT-EVOLUTION-REPLAY
   business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-06]
-  title: 开发实验按租户限制并发，到期保留已有判分
+  title: 开发试跑和候选生成按租户限制额度
   type: AGENT-IT
   priority: P0
   status: active
@@ -21,7 +21,10 @@ case:
   - order: 2
     action: 保留一项已完成的判分，在另一项执行中使本实验截止，提交迟到结果并重新领取。
     expected: 已完成结果保留，进行中及排队任务得到超时原因，迟到结果不能改写。
-  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。]
+  - order: 3
+    action: 多个编辑者争抢同一来源的生成额度，再从同租户另一来源和另一租户提交生成。
+    expected: 额度耗尽时在模型调用前拒绝，另一租户继续生成。旧的超时尝试不能补写完成，UTC 次日可重新申请。
+  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。]
   forbidden_side_effects: [单个租户的实验不能占用另一租户的额度。]
   acceptance:
   - id: AC-01
@@ -33,6 +36,10 @@ case:
     description: 跨进程重领和迟到写入均服从已冻结的截止时间。
     steps: [2]
     expected_results: [2]
+  - id: AC-03
+    description: 限额按租户和来源执行，超额请求不会调用模型。
+    steps: [3]
+    expected_results: [3]
   execution:
     profiles:
     - name: mock

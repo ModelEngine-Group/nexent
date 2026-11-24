@@ -25,7 +25,7 @@ def rewrite(monkeypatch):
     check = Mock()
     monkeypatch.setattr(service, "require_business_agent_edit", check)
     monkeypatch.setattr(service, "_released_prompt", lambda *args: source)
-    monkeypatch.setattr(service, "invoke_chat_prompt_in_worker", model)
+    monkeypatch.setattr(service, "invoke_candidate_model", model)
     monkeypatch.setattr(service, "store_prompt_candidate", store)
     return service, request, source, edit, model, store, check
 

@@ -60,7 +60,7 @@ def test_permission_checked_before_and_after_rewrite(monkeypatch):
     monkeypatch.setattr(skill_candidates, "query_skill_instances_by_agent_id", lambda *_: [{"skill_id": 4, "enabled": True}])
     monkeypatch.setattr(skill_candidates, "feedback_skill_files", lambda *_: files)
     monkeypatch.setattr(skill_candidates, "store_skill_package", store)
-    monkeypatch.setattr(skill_candidates, "invoke_chat_prompt_in_worker", model)
+    monkeypatch.setattr(skill_candidates, "invoke_candidate_model", model)
     monkeypatch.setattr(skill_candidates, "_editable_skill", Mock(side_effect=denied))
     with pytest.raises(AppException):
         skill_candidates.generate_skill_discovery_candidate(feedback, 1, 1, "tenant", "user")
