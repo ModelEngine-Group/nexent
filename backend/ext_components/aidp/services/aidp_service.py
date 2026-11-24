@@ -80,7 +80,7 @@ def _extract_upstream_code(response: httpx.Response) -> int | None:
         payload = response.json()
     except ValueError:
         return None
-    return (payload.get("error") or {}).get("code")
+    return payload.get("error", {}).get("code")
 
 
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
