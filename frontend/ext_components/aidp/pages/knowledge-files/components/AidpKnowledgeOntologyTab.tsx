@@ -47,7 +47,7 @@ interface AidpKnowledgeOntologyTabProps {
   bindingType?: string | null;
   /** AIDP KDS detail bind_lib_name. */
   bindingName?: string | null;
-  bindingLoading?: boolean;
+  bindingLoading: boolean;
   onBindingChanged?: () => void;
 }
 
@@ -74,7 +74,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   bindingId,
   bindingType,
   bindingName,
-  bindingLoading = false,
+  bindingLoading,
   onBindingChanged,
 }) => {
   const { t } = useTranslation();

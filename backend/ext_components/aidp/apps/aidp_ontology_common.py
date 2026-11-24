@@ -105,7 +105,6 @@ def _enrich_bindings_sync(
                 )
         enriched.append(
             {
-                "binding_id": row.get("binding_id"),
                 "od_id": row["od_id"],
                 "od_name": domain_names.get(row["od_id"]),
                 "kds_id": row["kds_id"],

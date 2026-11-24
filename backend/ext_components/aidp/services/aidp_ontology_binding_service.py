@@ -31,11 +31,7 @@ def _normalize_binding(item: dict[str, Any]) -> dict[str, Any] | None:
     od_id = item.get("domain_id") or item.get("od_id") or item.get("odId")
     if kds_id is None or od_id is None:
         return None
-    # Confirmed contract exposes no BindingId: a row is addressed by the
-    # (domain_id, kb_id) pair. The legacy id fallback keeps older mocks alive.
-    binding_id = item.get("binding_id")
     return {
-        "binding_id": str(binding_id) if binding_id is not None else None,
         "binding_type": item.get("binding_type") or "ontology",
         "kds_id": str(kds_id),
         "od_id": str(od_id),

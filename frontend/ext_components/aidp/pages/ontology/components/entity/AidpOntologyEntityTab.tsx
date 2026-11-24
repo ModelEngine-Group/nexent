@@ -166,7 +166,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         ...record,
         ...detail,
         entity_id: record.entity_id,
-        detail_loaded: true,
       };
     } catch (error) {
       message.error(

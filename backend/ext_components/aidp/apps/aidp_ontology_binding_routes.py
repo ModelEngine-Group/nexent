@@ -8,10 +8,12 @@ import logging
 from http import HTTPStatus
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.apps.aidp_mgmt_common import _auth, _credentials
 from ext_components.aidp.apps.aidp_ontology_common import (
     _domain_names,
@@ -129,20 +131,20 @@ async def create_domain_binding(
         lane="control-io",
         owner="config",
     )
-    bound_type = (
-        kb_detail.get("bind_lib_type") if isinstance(kb_detail, dict) else None
-    )
-    bound_id = kb_detail.get("bind_lib_id") if isinstance(kb_detail, dict) else None
+    bound_type = kb_detail.get("bind_lib_type")
+    bound_id = kb_detail.get("bind_lib_id")
     if bound_type == "jargon":
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT,
-            detail="该知识库已绑定术语库，请先解绑术语库再绑定本体库",
+        raise AppException(
+            ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+            "The knowledge base is already bound to a jargon library; unbind it before binding an ontology.",
+            details={"reason": "ontology_binding_jargon_conflict"},
         )
     if bound_type == "ontology":
         if str(bound_id) != str(domain_id):
-            raise HTTPException(
-                status_code=HTTPStatus.CONFLICT,
-                detail="该知识库已绑定其他本体库，一个知识库最多绑定一个本体库",
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+                "The knowledge base is already bound to another ontology domain.",
+                details={"reason": "ontology_binding_other_conflict"},
             )
         return JSONResponse(
             status_code=HTTPStatus.OK,
