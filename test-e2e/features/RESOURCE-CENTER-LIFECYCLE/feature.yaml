@@ -17,7 +17,7 @@ feature:
   - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-010
     description: AC-010：旧页面保留并接入共享服务；旧仓库ID只映射唯一授权申请，不伪造仓库ID或混用review_id；首次申请响应不再保证非空仓库ID，依赖该契约的调用方适配后才能上线。
   - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-016
-    description: AC-016：新增审核表，仅迁移pending_review；说明取content、时间取update_time、提交人取资源创建人ID；旧18列仅本地一次性清理，不进入正式迁移，Skill来源列保留；异常回滚、重复执行不重复导入，旧写入者切换前停写。
+    description: AC-016：新增审核表，仅迁移pending_review；说明取content、时间取update_time、提交人取待审通知或可确认的发布者ID，旧待办关联新审核ID；旧18列仅本地一次性清理，不进入正式迁移，Skill来源列保留；异常回滚、重复执行不重复导入，旧写入者切换前停写。
   required_test_stages:
   - D2
   - D3

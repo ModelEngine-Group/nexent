@@ -23,18 +23,18 @@ case:
   steps:
   - order: 1
     action: 准备三类型旧待审、已上架、驳回和历史Skill，执行正式版本迁移
-    expected: 仅待审迁入审核表，content/update_time/来源创建人映射正确；已上架和驳回不补造历史，Skill来源列保留。
+    expected: 仅待审迁入审核表，content/update_time/实际提交人映射正确，旧待办关联新审核 ID；已上架和驳回不补造历史，Skill来源列保留。
   - order: 2
     action: 重复执行迁移并核对结构与记录数量
     expected: 同一历史待审只导入一次；正式脚本不增删旧18列，原仓库内容与ID保留。
   - order: 3
-    action: 构造来源、创建人、时间或快照缺失及重复同源待审，再执行迁移
+    action: 构造来源、提交人、时间或快照缺失及重复同源待审，再执行迁移
     expected: 异常中止并整体回滚，不出现先删列后丢申请，版本不得记成功。
   - order: 4
     action: 核对旧写入者适配、停写备份和前向恢复限制
     expected: 未适配客户端不切新读；不直接退回只读仓库的旧服务，保留审核数据与备份。
   expected_results: &id001
-  - 仅待审迁入审核表，content/update_time/来源创建人映射正确；已上架和驳回不补造历史，Skill来源列保留。
+  - 仅待审迁入审核表，content/update_time/实际提交人映射正确，旧待办关联新审核 ID；已上架和驳回不补造历史，Skill来源列保留。
   - 同一历史待审只导入一次；正式脚本不增删旧18列，原仓库内容与ID保留。
   - 异常中止并整体回滚，不出现先删列后丢申请，版本不得记成功。
   - 未适配客户端不切新读；不直接退回只读仓库的旧服务，保留审核数据与备份。
@@ -57,7 +57,7 @@ case:
     timeout_seconds: 300
   acceptance:
   - id: AC-01
-    description: 仅待审迁入审核表，content/update_time/来源创建人映射正确；已上架和驳回不补造历史，Skill来源列保留。
+    description: 仅待审迁入审核表，content/update_time/实际提交人映射正确，旧待办关联新审核 ID；已上架和驳回不补造历史，Skill来源列保留。
     steps:
     - 1
     expected_results:

@@ -16,7 +16,13 @@ printf '%s\n' "$*" >> "$MIGRATION_LOG"
 case "$1" in
   exec)
     case "$*" in
-      *psql*) cat >/dev/null; case "${FAKE_STATE:-legacy}" in incomplete) echo '{"complete":false,"legacy":true,"account_table":true,"accounts":0,"members":1,"unresolved_ids":["old-user"]}' ;; complete) echo '{"complete":true,"legacy":true,"accounts":1,"members":1,"unresolved_ids":[]}' ;; fresh) echo '{"complete":false,"legacy":false,"accounts":0,"members":0,"unresolved_ids":[]}' ;; *) echo '{"complete":false,"legacy":true,"accounts":0,"members":1,"unresolved_ids":["old-user"]}' ;; esac ;;
+      *psql*) input="$(cat)"
+        if [[ "$input" == *'BEGIN READ ONLY;'* ]]; then
+          [[ "$input" == *'Review upgrade:'* ]] || exit 1
+          if [ "${FAKE_REVIEW_ERROR:-false}" = true ]; then echo 'invalid review listing=43' >&2; exit 1; fi
+          exit 0
+        fi
+        case "${FAKE_STATE:-legacy}" in incomplete) echo '{"complete":false,"legacy":true,"account_table":true,"accounts":0,"members":1,"unresolved_ids":["old-user"]}' ;; complete) echo '{"complete":true,"legacy":true,"accounts":1,"members":1,"unresolved_ids":[]}' ;; fresh) echo '{"complete":false,"legacy":false,"accounts":0,"members":0,"unresolved_ids":[]}' ;; *) echo '{"complete":false,"legacy":true,"accounts":0,"members":1,"unresolved_ids":["old-user"]}' ;; esac ;;
       *PGPORT*) echo 5432 ;;
       *POSTGRES_PASSWORD*) echo source-original-private ;;
     esac ;;
@@ -64,8 +70,13 @@ run_case() {
   : > "$MIGRATION_LOG"
   bash "$MIGRATION" --deployment kubernetes --namespace owned-test --env-file "$temporary/.env" --wait-timeout 1 "$@" > "$temporary/out" 2> "$temporary/error"
 }
+if FAKE_REVIEW_ERROR=true run_case --review-preflight --apply; then
+  echo 'FAIL: invalid review was accepted'; exit 1
+fi
+assert_has "$temporary/error" 'listing=43'
+assert_absent "$MIGRATION_LOG" 'create '
 for state in fresh complete; do
-  FAKE_STATE="$state" run_case --apply
+  FAKE_STATE="$state" run_case --review-preflight --apply
   assert_absent "$MIGRATION_LOG" 'create '
   assert_absent "$MIGRATION_LOG" 'scale '
 done
