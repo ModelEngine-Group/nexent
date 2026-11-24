@@ -2,7 +2,7 @@
 
 """W2 context-budget contract rename + dispatch boundary (SDK-UT, D1).
 
-Covers the V2 ``context_budget_snapshot`` field rename from the legacy
+Covers the current ``context_budget_snapshot`` field rename from the legacy
 ``safe_input_budget_snapshot`` across serialization, parse validation, and the
 trusted provider dispatch boundary. In-memory and controlled HTTP-transport tests; no external network, real
 model or production credentials.
@@ -19,7 +19,6 @@ from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.models.capacity_budget import (
     CONTEXT_BUDGET_RESOLVER_VERSION,
-    CallerMaxTokensOverrideForbidden,
     ContextBudgetCapacityMismatch,
     ContextBudgetSnapshot,
     compute_context_budget_fingerprint,
@@ -30,7 +29,7 @@ from nexent.core.utils.observer import MessageObserver
 
 
 def _snapshot_dict(**overrides):
-    """Build a self-consistent V2 ContextBudgetSnapshot payload dict."""
+    """Build a self-consistent current ContextBudgetSnapshot payload dict."""
     payload = {
         "w1_fingerprint": "w1-fp-0001",
         "provider": "openai",
@@ -181,25 +180,11 @@ def test_w2_context_budget_snapshot_rename_and_dispatch_boundary():
     dispatch_snapshot = _snapshot_dict(requested_output_tokens=2048)
 
     model = _bare_model()
-    with pytest.raises(CallerMaxTokensOverrideForbidden) as exc_info:
-        model._dispatch_chat_completion(
-            context_budget_snapshot=dispatch_snapshot,
-            max_tokens=100,
-        )
-    assert exc_info.value.snapshot_value == 2048
-    assert exc_info.value.caller_value == 100
-
-    model = _bare_model()
-    model._dispatch_chat_completion(context_budget_snapshot=dispatch_snapshot)
-    create_kwargs = model.client.chat.completions.create.call_args.kwargs
-    assert create_kwargs["max_tokens"] == 2048
-
-    model = _bare_model()
-    model._dispatch_chat_completion(
-        context_budget_snapshot=dispatch_snapshot,
-        max_tokens=2048,
-    )
-    assert model.client.chat.completions.create.call_args.kwargs["max_tokens"] == 2048
+    for caller_limit in (None, 100, 2048):
+        model = _bare_model()
+        submitted = {} if caller_limit is None else {"max_tokens": caller_limit}
+        model._dispatch_chat_completion(context_budget_snapshot=dispatch_snapshot, **submitted)
+        assert "max_tokens" not in model.client.chat.completions.create.call_args.kwargs
 
     mismatch_snapshot = _snapshot_dict(
         w1_fingerprint="w1-fp-A",
@@ -264,7 +249,7 @@ def test_w2_context_budget_snapshot_rename_and_dispatch_boundary():
     assert attrs["context.effective_input_limit_tokens"] == trace_snapshot["effective_input_limit_tokens"]
     assert attrs["context.compaction_trigger_threshold_tokens"] == trace_snapshot["compaction_trigger_threshold_tokens"]
     assert attrs["context.compaction_target_tokens"] == trace_snapshot["compaction_target_tokens"]
-    assert attrs["w2.requested_output_tokens"] == trace_snapshot["requested_output_tokens"]
+    assert attrs["w2.requested_output_tokens"] is None
     assert OpenAIModel._context_budget_trace_attributes(None) == {}
 
 
@@ -291,12 +276,11 @@ def test_implicit_output_budget_preserves_context_and_wire_contract(default_rese
     )
     agent = _make_agent_config(budget.model_dump())
     parsed = parse_context_budget_snapshot(agent.model_dump()["context_budget_snapshot"])
-    reserve = 4096 if default_reserve is None else default_reserve
-    assert parsed.requested_output_tokens == reserve
-    assert parsed.effective_input_limit_tokens == 32768 - reserve
-    assert parsed.compaction_trigger_threshold_tokens == int((32768 - reserve) * 0.8)
-    assert parsed.compaction_target_tokens == int((32768 - reserve) * 0.6)
-    assert parsed.uncertainty_reserve_tokens > 0
+    assert parsed.requested_output_tokens is None
+    assert parsed.effective_input_limit_tokens == 32768
+    assert parsed.compaction_trigger_threshold_tokens == 26214
+    assert parsed.compaction_target_tokens == 19660
+    assert parsed.uncertainty_reserve_tokens == 0
     assert parsed.fingerprint == budget.fingerprint
     captured = []
 
@@ -321,8 +305,5 @@ def test_implicit_output_budget_preserves_context_and_wire_contract(default_rese
             model="gpt-4o-mini", messages=[{"role": "user", "content": "hello"}],
         )
     assert response.choices[0].message.content == "ok" and len(captured) == 1
-    if default_reserve is None:
-        assert "max_tokens" not in captured[0]
-    else:
-        assert captured[0]["max_tokens"] == default_reserve
+    assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(captured[0])
     assert model.context_budget_snapshot == parsed

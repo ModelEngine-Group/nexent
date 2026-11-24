@@ -24,10 +24,10 @@ from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
 from nexent.core.model_service.contracts import ModelMessage, ModelRequest, ToolCall, ToolDefinition
+from nexent.core.model_service.errors import model_error_message
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.registry import AuthenticationRegistry
 from nexent.core.model_service.service import ModelService, ModelServiceError
-from nexent.core.model_service.errors import model_error_message
 from nexent.core.models.capacity_budget import parse_context_budget_snapshot
 from nexent.core.models.message_utils import merge_system_messages
 from nexent.core.models.prompt_cache import PromptCacheUsage
@@ -113,6 +113,7 @@ class LegacyChatModel(Model):
             model_id=self.profile.identity.request_model_id, flatten_messages_as_text=flatten_messages_as_text
         )
         self.service = service
+        self._agent_context = None
         self.observer = observer if observer is not None else MessageObserver()
         self.cancellation_scope = cancellation_scope if cancellation_scope is not None else RunCancellationScope()
         self.stop_event = self.cancellation_scope.stop_event
@@ -144,6 +145,11 @@ class LegacyChatModel(Model):
             retry_policy=DEFAULT_MODEL_RETRY,
         )
         return cls(profile, service, observer=observer, cancellation_scope=cancellation_scope)
+
+    @property
+    def supports_stop_parameter(self) -> bool:
+        """Use the outlet's declared wire binding for Agent stop sequences."""
+        return any(rule["key"] == "stop" and rule.get("api_binding") for rule in self.profile.parameter_rules)
 
     @property
     def context_budget_snapshot(self):
@@ -231,9 +237,7 @@ class LegacyChatModel(Model):
             "finish_reason": None, "content_chunk_count": 0, "content_char_count": 0,
             "reasoning_chunk_count": 0, "reasoning_char_count": 0,
             "input_tokens": None, "output_tokens": None,
-            "requested_output_tokens": profile.parameter_values.get(
-                "max_output_tokens", profile.parameter_values.get("max_tokens")
-            ),
+            "requested_output_tokens": None,
             "reasoning_only_budget_exhausted": False,
         }
 
@@ -306,6 +310,7 @@ class LegacyChatModel(Model):
             with self.service.stream(
                 request, profile, scope=self.cancellation_scope, empty_response_policy=empty_response_policy,
                 request_rebuild=rebuild_request if context_rebuild is not None else None,
+                **({"agent_context": self._agent_context} if self._agent_context is not None else {}),
             ) as events:
                 for event in events:
                     if attempt_number != event.attempt:
@@ -386,6 +391,9 @@ class LegacyChatModel(Model):
                 )
                 if message.usage.input_tokens is not None and message.usage.output_tokens is not None:
                     result.token_usage = TokenUsage(message.usage.input_tokens, message.usage.output_tokens)
+                result.provider_input_tokens = (
+                    message.usage.input_tokens if message.usage.origin == "provider" else None
+                )
                 result.model_attempt_id = self.last_attempt_id
                 result.model_attempt_number = event.attempt
                 result.model_attempt_commit_deferred = _defer_attempt_commit and not _suppress_attempt_stream

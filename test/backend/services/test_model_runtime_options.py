@@ -2,7 +2,6 @@
 
 """Management provisioning and request snapshot guards with external I/O isolated."""
 
-import json
 import sys
 from copy import deepcopy
 from types import SimpleNamespace
@@ -10,9 +9,19 @@ from unittest.mock import Mock
 
 import pytest
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+from nexent.core.model_service.contracts import ModelMessage, ModelRequest
 from management.services.model.runtime_options import compile_model_runtime_profile
 from management.services.model.adapter import restore_model_snapshot
 from test.backend.services.model_profile_helpers import legacy_record, canonical_record
+
+
+def assert_no_wire_output_limit(profile):
+    request = ModelRequest(request_id="retired-budget", outlet_id=profile.outlet_id,
+        config_revision=profile.config_revision,
+        messages=[ModelMessage(semantic_role="user", content_parts=[{"type": "text", "text": "Hello"}])])
+    body = OpenAIChatAdapter().prepare_http_request(request, profile).json_body
+    assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(body)
 
 
 @pytest.fixture
@@ -29,7 +38,8 @@ def test_compile_request_values_into_detached_saved_rules(saved):
     config.context_budget_snapshot = SimpleNamespace(requested_output_tokens=128)
     effective = compile_model_runtime_profile(model, config)
     assert effective.parameter_values["temperature"] == .3
-    assert effective.parameter_values["max_output_tokens"] == 128
+    assert effective.parameter_values["max_output_tokens"] == profile.parameter_values["max_output_tokens"]
+    assert_no_wire_output_limit(effective)
     assert effective.extra_api_parameters == [{"path": "/custom_flag", "value": "value"}]
     assert profile.parameter_values["max_output_tokens"] == 256
 
@@ -48,7 +58,7 @@ def test_compile_rejects_protected_extra_fields_and_missing_profile(saved):
         compile_model_runtime_profile(model, config)
 
 
-def test_effective_request_budget_takes_precedence_over_saved_agent_output(saved):
+def test_effective_request_budget_does_not_override_saved_agent_output_or_create_wire_cap(saved):
     from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
     from nexent.core.concurrency import RunCancellationScope
 
@@ -64,7 +74,9 @@ def test_effective_request_budget_takes_precedence_over_saved_agent_output(saved
     adapter = JiuwenAdapter(info)
     adapter.scope = RunCancellationScope()
     adapter.model_config = model
-    assert adapter._create_model().profile.parameter_values["max_output_tokens"] == 128
+    effective = adapter._create_model().profile
+    assert effective.parameter_values["max_output_tokens"] == profile.parameter_values["max_output_tokens"]
+    assert_no_wire_output_limit(effective)
 
 
 def test_custom_output_cannot_override_resolved_budget(saved):
@@ -74,8 +86,10 @@ def test_custom_output_cannot_override_resolved_budget(saved):
         extra_body={"max_tokens": 99}, enable_thinking=False)
     config = SimpleNamespace(context_budget_snapshot=SimpleNamespace(requested_output_tokens=128),
                              requested_output_tokens=None)
-    with pytest.raises(ValueError, match="LEGACY_PARAMETER_CONFLICT"):
-        compile_model_runtime_profile(model, config)
+    effective = compile_model_runtime_profile(model, config)
+    assert effective.parameter_values == profile.parameter_values
+    assert_no_wire_output_limit(effective)
+    assert model.extra_body == {"max_tokens": 99}
 
 
 def test_custom_values_use_saved_bindings_and_preserve_empty_objects(saved):

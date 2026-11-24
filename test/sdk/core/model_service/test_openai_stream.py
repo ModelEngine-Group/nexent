@@ -340,13 +340,16 @@ def test_cumulative_usage_merges_optional_details_without_summing(openai_profile
     {"completion_tokens": -1}, {"completion_tokens": "1"}, {"completion_tokens": True},
     {"completion_tokens_details": {"reasoning_tokens": -1}}, {"prompt_tokens_details": []},
 ])
-def test_invalid_later_usage_still_closes_stream(openai_profile, stream_request, raw):
+def test_invalid_later_usage_preserves_completion_without_usage(openai_profile, stream_request, raw):
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)
     decoder.push(frame({"content": "OK"}, usage={"prompt_tokens": 8, "completion_tokens": 0}))
-    with pytest.raises(ModelAdapterError, match="^MODEL_USAGE_INVALID$"):
-        decoder.push(SSEEvent(json.dumps({"choices": [], "usage": raw})))
-    with pytest.raises(ModelAdapterError, match="^MODEL_STREAM_CLOSED$"):
-        decoder.push(frame(finish="stop"))
+    assert decoder.push(SSEEvent(json.dumps({"choices": [], "usage": raw}))) == []
+    decoder.push(frame(finish="stop"))
+    [event] = decoder.push(SSEEvent("[DONE]"))
+    assert event.type == "message_completed"
+    assert event.message.content_parts == [{"type": "text", "text": "OK"}]
+    assert event.message.usage.origin == "unknown" and event.message.usage.input_tokens is None
+    assert event.message.provider_metadata["usage_diagnostic"] == "MODEL_USAGE_INVALID"
 
 
 def test_provider_usage_correction_uses_last_non_null_values(openai_profile, stream_request):

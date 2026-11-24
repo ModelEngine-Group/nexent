@@ -27,6 +27,9 @@ def _summary_model_call_context(model, *, has_output_override: bool):
     observer = getattr(model, "observer", None)
     budget_snapshot = getattr(model, "context_budget_snapshot", None)
     extra_body = getattr(model, "extra_body", None)
+    agent_context = getattr(model, "_agent_context", None)
+    if hasattr(model, "_agent_context"):
+        model._agent_context = None
     if observer is not None:
         model.observer = MessageObserver(lang=getattr(observer, "lang", "en"))
     # The Agent snapshot is immutable and describes the main request's output
@@ -43,6 +46,8 @@ def _summary_model_call_context(model, *, has_output_override: bool):
     try:
         yield
     finally:
+        if hasattr(model, "_agent_context"):
+            model._agent_context = agent_context
         if observer is not None:
             model.observer = observer
         if hasattr(model, "context_budget_snapshot"):
@@ -85,6 +90,7 @@ class LLMSummary:
         call_type: str = "summary",
         prompt_type: str = "initial",
         max_output_tokens: int | None = None,
+        *, retry_context_error: bool = True,
     ) -> SummaryResult:
         """Generate a summary from text, with retry on context-length errors.
 
@@ -102,7 +108,7 @@ class LLMSummary:
                 text, model, call_type, prompt_type, max_output_tokens
             )
         except Exception as e:
-            if _is_context_length_error(e):
+            if retry_context_error and _is_context_length_error(e):
                 logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
                 shrunk = self._renderer.truncate_text_to_tokens(
                     text, int(self.config.max_summary_input_tokens * 0.66)
@@ -201,6 +207,8 @@ class LLMSummary:
                 if isinstance(block, dict) and block.get("type") == "text"
             )
         if not isinstance(raw_output, str):
+            if call_type.startswith(("history_summary", "history_incremental")):
+                raise ValueError("History summary response must contain text")
             raw_output = str(raw_output)
 
         summary = _strip_code_fences(raw_output)

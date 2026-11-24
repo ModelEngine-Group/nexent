@@ -24,7 +24,7 @@ dependencies = [
     "rapidfuzz>=3.0.0",
     "jsonref>=1.1.0",
     "ruamel-yaml==0.19.1",
-    "redis>=5.0.0",
+    "redis>=5.0.0,<8.0.0",
     "fastmcp>=2.14.2,<3.0",
     "langchain>=0.3.26",
     "numpy>=1.24.0",

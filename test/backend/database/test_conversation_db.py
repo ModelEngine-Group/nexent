@@ -3583,10 +3583,10 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_id = save_history_summary(
-        1, "user-a", "tenant-a", {"task_overview": "done"}, 24,
+        1, "user-a", "tenant-a", {"markdown": "Plain summary without headings or original identifiers."}, 24,
         trigger="compaction_trigger_threshold_exceeded",
         history_tokens_before=9000,
-        history_tokens_after=5000,
+        history_tokens_after=12000,
         compaction_attempts=2,
         compaction_trigger_threshold_tokens=8000,
         compaction_target_tokens=6000,
@@ -3598,10 +3598,11 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     assert fresh_insert_mock["unit_type"] == "history_summary"
     assert fresh_insert_mock["unit_status"] == "completed"
     payload = __import__("json").loads(fresh_insert_mock["unit_content"])
+    assert payload["summary"] == {"markdown": "Plain summary without headings or original identifiers."}
     assert payload["covered_through_message_id"] == 24
     assert payload["trigger"] == "compaction_trigger_threshold_exceeded"
     assert payload["history_tokens_before"] == 9000
-    assert payload["history_tokens_after"] == 5000
+    assert payload["history_tokens_after"] == 12000
     assert payload["compaction_attempts"] == 2
     assert payload["compaction_trigger_threshold_tokens"] == 8000
     assert payload["compaction_target_tokens"] == 6000
