@@ -98,6 +98,55 @@ def test_deploy_changes_fixed_runtime_count_only_through_offline_windows(isolate
     assert len(epochs) == 3
 
 
+@pytest.mark.parametrize(
+    "chart_count,saved_count,previous_chart_count,explicit_count,expected",
+    [
+        ("3", "1", None, None, 3),
+        ("1", "3", "3", None, 1),
+        ("1", "3", None, None, 3),
+        ("3", "2", "3", None, 2),
+        ("3", "1", "1", "2", 2),
+        ("unset", "2", "3", None, 2),
+    ],
+)
+def test_runtime_replica_configuration_precedence(
+    isolated_k8s_project, chart_count, saved_count, previous_chart_count, explicit_count, expected,
+):
+    project, env, mock_log = isolated_k8s_project
+    env.update({"MOCK_APP_EXISTS": "true", "MOCK_INFRA_EXISTS": "true", "MOCK_CHART_RUNTIME_REPLICAS": chart_count})
+    options = project / "deploy/k8s/deploy.options"
+    saved_options = f"k8s:\n  runtimeReplicas: {saved_count}\n"
+    if previous_chart_count is not None:
+        saved_options += f'  runtimeChartReplicas: "{previous_chart_count}"\n'
+    options.write_text(saved_options, encoding="utf-8")
+
+    command = _deploy_command(project, scope="nexent")
+    if explicit_count is not None:
+        command.extend(["--runtime-replicas", explicit_count])
+    result = _run(command, check=False, env=env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    upgrades = [line for line in mock_log.read_text(encoding="utf-8").splitlines()
+                if line.startswith("helm upgrade --install nexent ")]
+    assert len(upgrades) == 2
+    assert all(f"nexent-runtime.replicaCount={expected}" in line for line in upgrades)
+    saved = options.read_text(encoding="utf-8")
+    assert f"runtimeReplicas: {expected}" in saved
+    assert f'runtimeChartReplicas: "{chart_count}"' in saved
+
+
+def test_invalid_runtime_chart_count_fails_before_stopping_business(isolated_k8s_project):
+    project, env, mock_log = isolated_k8s_project
+    env["MOCK_CHART_RUNTIME_REPLICAS"] = "invalid"
+
+    result = _run(_deploy_command(project, scope="nexent"), check=False, env=env)
+
+    assert result.returncode == 1
+    assert "nexent-runtime.replicaCount in values.yaml" in result.stderr
+    assert not mock_log.exists()
+    assert not (project / "deploy/k8s/deploy.options").exists()
+
+
 @pytest.mark.parametrize("job_state", ["failed", "absent", "running", "foreign"])
 def test_maintenance_retry_reuses_paused_epoch_without_touching_an_unowned_job(isolated_k8s_project, job_state):
     project, env, mock_log = isolated_k8s_project
@@ -181,7 +230,21 @@ def test_existing_rwx_claims_are_checked_before_pause_and_bootstrap_writes(isola
                 assert '{range .spec.accessModes[*]}{@}{","}{end}' in line
 
 
-@pytest.mark.parametrize("mode,failure", [("dynamic", "hostpath"), ("dynamic", "local"),
+@pytest.mark.parametrize("mode", ["dynamic", "existing"])
+def test_rwx_hostpath_pv_allows_multi_replica_activation(isolated_k8s_project, mode):
+    project, env, mock_log = isolated_k8s_project
+    env.update({"MOCK_APP_EXISTS": "true", "MOCK_INFRA_EXISTS": "true", "MOCK_RUNTIME_STORAGE": "hostpath"})
+    result = _run([*_deploy_command(project, scope="nexent"), "--persistence-mode", mode, "--runtime-replicas", "3"],
+                  check=False, env=env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = mock_log.read_text(encoding="utf-8").splitlines()
+    activated, = [line for line in commands if line.startswith("helm upgrade --install nexent ")
+                  and "global.businessPaused=false" in line]
+    assert "nexent-runtime.replicaCount=3" in activated
+
+
+@pytest.mark.parametrize("mode,failure", [("dynamic", "local"),
                                           ("dynamic", "wrong-pv-mode"), ("dynamic", "unavailable"),
                                           ("dynamic", "pv-block"), ("existing", "pvc-block"),
                                           ("existing", "pv-block"), ("existing", "rwo"),

@@ -1,11 +1,11 @@
 # Default values for nexent helm chart.
 global:
   # Kubernetes SYSTEM execution is opt-in.
-  sandboxProvider: "docker"
+  sandboxProvider: "kubernetes"
   # Only for local verification; sandbox Pods stay on the Runtime node.
-  sandboxSingleNodeDevelopment: false
+  sandboxSingleNodeDevelopment: true
   # Confirm only after the target cluster passes the network-policy negative probe.
-  sandboxNetworkPolicyVerified: false
+  sandboxNetworkPolicyVerified: true
   # Deployment scripts keep business Pods stopped until bootstrap and Runtime maintenance succeed.
   businessPaused: false
   maintenanceEpoch: ""
@@ -122,7 +122,7 @@ nexent-ops:
   enabled: true
 nexent-runtime:
   enabled: true
-  replicaCount: 1
+  replicaCount: 3
 nexent-mcp:
   enabled: true
 nexent-gateway:

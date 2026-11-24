@@ -67,6 +67,7 @@ LOCAL_PATH="/var/lib/nexent-data"
 LOCAL_NODE_NAME=""
 EXISTING_CLAIM_PREFIX=""
 RUNTIME_REPLICAS="1"
+SAVED_RUNTIME_CHART_REPLICAS=""
 RUNTIME_MAINTENANCE_RETRY_EPOCH=""
 K8S_WAIT_TIMEOUT_SECONDS="${NEXENT_K8S_WAIT_TIMEOUT_SECONDS:-600}"
 
@@ -235,6 +236,9 @@ apply_deployment_common_config() {
     esac
 
     validate_persistence_mode || return 1
+    if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        resolve_runtime_replicas || return 1
+    fi
     validate_runtime_replica_options || return 1
     deployment_print_summary k8s
     echo "Helm release scope: $RELEASE_SCOPE"
@@ -338,9 +342,50 @@ validate_persistence_mode() {
   esac
 }
 
+read_runtime_chart_replicas() (
+    local reader_chart
+    reader_chart=$(mktemp -d) || return 1
+    trap 'rm -rf -- "$reader_chart"' EXIT
+    mkdir "$reader_chart/templates" || return 1
+    printf 'apiVersion: v2\nname: nexent-runtime-values\nversion: 0.1.0\n' > "$reader_chart/Chart.yaml" || return 1
+    cat > "$reader_chart/templates/replicas.yaml" <<'EOF' || return 1
+{{- $runtime := get .Values "nexent-runtime" -}}
+{{- if not (hasKey .Values "nexent-runtime") }}
+replicaCount: unset
+{{- else if not (kindIs "map" $runtime) }}
+replicaCount: invalid
+{{- else if not (hasKey $runtime "replicaCount") }}
+replicaCount: unset
+{{- else }}
+{{- $count := get $runtime "replicaCount" | toJson }}
+replicaCount: {{ ternary $count "invalid" (and (regexMatch "^[1-9][0-9]{0,9}$" $count) (le (int64 $count) 2147483647)) }}
+{{- end }}
+EOF
+    local rendered
+    rendered=$(helm template nexent-runtime-values "$reader_chart" -f "$APPLICATION_CHART_DIR/values.yaml") || return 1
+    sed -n 's/^replicaCount: //p' <<< "$rendered"
+)
+
+resolve_runtime_replicas() {
+    local chart_replicas
+    chart_replicas=$(read_runtime_chart_replicas) || return 1
+    if [ -z "$chart_replicas" ]; then
+        echo "Error: unable to read nexent-runtime.replicaCount from the application chart values.yaml." >&2
+        return 1
+    fi
+    # Keep the previous chart count separate from the effective count saved by the deployment.
+    # Older options predate this field and use the original chart default as their baseline.
+    local previous_chart_replicas="${SAVED_RUNTIME_CHART_REPLICAS:-1}"
+    if [ -z "${K8S_RUNTIME_REPLICAS_EXPLICIT:-}" ] && [ "$chart_replicas" != "unset" ] &&
+        { [ "$chart_replicas" = "invalid" ] || [ "$chart_replicas" != "$previous_chart_replicas" ]; }; then
+        RUNTIME_REPLICAS="$chart_replicas"
+    fi
+    SAVED_RUNTIME_CHART_REPLICAS="$chart_replicas"
+}
+
 validate_runtime_replica_options() {
     if [[ ! "$RUNTIME_REPLICAS" =~ ^[1-9][0-9]{0,9}$ ]] || [ "$RUNTIME_REPLICAS" -gt 2147483647 ]; then
-        echo "Error: --runtime-replicas must be a positive integer no greater than 2147483647." >&2
+        echo "Error: Runtime replica count (--runtime-replicas or nexent-runtime.replicaCount in values.yaml) must be a positive integer no greater than 2147483647." >&2
         return 1
     fi
     if ! release_scope_includes_nexent || ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
@@ -522,6 +567,9 @@ persist_deploy_options() {
     printf '  localPath: %s\n' "$(yaml_quote "$LOCAL_PATH")"
     printf '  existingClaimPrefix: %s\n' "$(yaml_quote "$EXISTING_CLAIM_PREFIX")"
     printf '  runtimeReplicas: %s\n' "$RUNTIME_REPLICAS"
+    if [ -n "$SAVED_RUNTIME_CHART_REPLICAS" ]; then
+      printf '  runtimeChartReplicas: %s\n' "$(yaml_quote "$SAVED_RUNTIME_CHART_REPLICAS")"
+    fi
   } >> "$DEPLOY_OPTIONS_FILE"
 }
 
@@ -566,6 +614,9 @@ apply_loaded_deploy_option() {
       ;;
     RUNTIME_REPLICAS|runtimeReplicas)
       [ -n "${K8S_RUNTIME_REPLICAS_EXPLICIT:-}" ] || RUNTIME_REPLICAS="$value"
+      ;;
+    runtimeChartReplicas)
+      SAVED_RUNTIME_CHART_REPLICAS="$value"
       ;;
   esac
 }
@@ -947,7 +998,7 @@ require_paused_runtime_epoch() {
 }
 
 require_runtime_rwx_claim() {
-    local claim="$1" pvc pv volume pvc_modes pv_modes volume_mode phase host_path local_path
+    local claim="$1" pvc pv volume pvc_modes pv_modes volume_mode phase local_path
     if ! pvc=$(kubectl get pvc "$claim" -n "$NAMESPACE" -o \
         'jsonpath={.status.phase}:{.spec.volumeName}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}'); then
         echo "Error: cannot inspect shared Runtime claim $NAMESPACE/$claim." >&2
@@ -960,14 +1011,18 @@ require_runtime_rwx_claim() {
         return 1
     fi
     if ! pv=$(kubectl get pv "$volume" -o \
-        'jsonpath={.status.phase}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}:{.spec.hostPath.path}:{.spec.local.path}'); then
+        'jsonpath={.status.phase}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}:{.spec.local.path}'); then
         echo "Error: cannot inspect volume $volume bound to Runtime claim $NAMESPACE/$claim." >&2
         return 1
     fi
-    IFS=: read -r phase pv_modes volume_mode host_path local_path <<< "$pv"
+    IFS=: read -r phase pv_modes volume_mode local_path <<< "$pv"
     if [ "$phase" != "Bound" ] || [[ ",$pv_modes" != *,ReadWriteMany,* ]] || \
-        [ "${volume_mode:-Filesystem}" != "Filesystem" ] || [ -n "$host_path$local_path" ]; then
-        echo "Error: Runtime volume $volume must be Bound, ReadWriteMany, Filesystem, and backed by shared storage rather than hostPath or local storage." >&2
+        [ "${volume_mode:-Filesystem}" != "Filesystem" ]; then
+        echo "Error: Runtime volume $volume must be Bound with ReadWriteMany access and Filesystem volume mode." >&2
+        return 1
+    fi
+    if [ -n "$local_path" ]; then
+        echo "Error: Runtime volume $volume uses spec.local. Select a shared RWX volume." >&2
         return 1
     fi
 }
@@ -1809,7 +1864,7 @@ print_usage() {
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
         echo "  --persistence-mode MODE    local、dynamic 或 existing"
-        echo "  --runtime-replicas COUNT   停机维护后启动的 Runtime 副本数（默认：1）"
+        echo "  --runtime-replicas COUNT   显式覆盖停机维护后的 Runtime 副本数"
         echo "  --retry-runtime-maintenance UUID   重试仍处于暂停状态的 Runtime 维护批次"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
         echo "  --local-path PATH          本地 PV 基础路径"
@@ -1845,7 +1900,7 @@ print_usage() {
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
-    echo "  --runtime-replicas COUNT   Fixed Runtime replicas after offline maintenance (default: 1)"
+    echo "  --runtime-replicas COUNT   Explicit override of Runtime replicas after offline maintenance"
     echo "  --retry-runtime-maintenance UUID   Retry a paused Runtime maintenance batch"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"

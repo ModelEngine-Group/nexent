@@ -40,6 +40,7 @@ change:
     - NL2Agent 接纳后的真实执行可通过 MCP 的 Gateway 委托校验；MCP 绑定已发布的 Gateway 服务地址和共享签名配置，不降级为非委托鉴权。
     - Redis 轮次、可重放 SSE 游标、Unicode 文本后缀、丢帧和尾部读取、截断回退、未授权控制和断开订阅不取消执行。
     - 固定 Runtime 副本数边界、暂停时为零、共享存储预检、失败不激活与停机回退。
+    - 支持满足绑定、RWX 和文件系统条件的 hostPath 卷用于单节点部署，继续拒绝 spec.local。
     - 多调度器启动不误恢复、租约与失租、忙碌/misfire；工作区路径/归属及非 Run 保留。
     - 调度执行接纳与收尾使用 PostgreSQL 时钟核对租约，过期 owner 在新实例领取前后均不能提交结果。
     - 调度续租与错过周期写入在获得任务行锁后使用 PostgreSQL 实时时钟；等待行锁期间过期时不得写入。
@@ -87,5 +88,5 @@ change:
     - frontend/tests/workbench/ConversationResumeBranch.test.tsx
     - frontend/tests/workbench/UnifiedOutputStream.test.ts
   notes: 已接入停机批次、维护 Job、固定副本数和共享存储预检；Agent、Workbench、自动任务、北向、持久化评测、NL2Agent 和 NL2Skill 已接入预约。停止和共享回放已验证组件行为；Agent/Workbench 和北向支持显式游标，Web 恢复固定原 assistant 分支。Feature 保持 planned，Case 保持 blocked；尚无真实 Kubernetes 部署、跨节点共享、指定 Pod 或稳定代理的正式验收证据。
-    test/deploy 下的命令回归覆盖默认/显式 Filesystem 放行、已有裸块卷不暂停、动态卷预检失败不写入或激活；不计入后端传统 UT selector 或真实集群 Case 执行。
+    test/deploy 下的命令回归覆盖动态/已有 hostPath 卷、默认/显式 Filesystem 放行、已有裸块卷不暂停、动态卷预检失败不写入或激活。跨节点共享仍由 RUNTIME-SHARED-STORAGE-D3-001 验证真实读写。
     默认责任 runtime；停机部署、共享存储、HPA Case 归 deployment，调度 Case 归 task。未增加 D1；D4 无新增用户流程。

@@ -147,6 +147,10 @@ def isolated_k8s_project(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     _write_executable(
         mock_bin / "helm",
         """#!/bin/bash
+if [ "$1" = "template" ] && [ "$2" = "nexent-runtime-values" ]; then
+  printf 'replicaCount: %s\\n' "${MOCK_CHART_RUNTIME_REPLICAS:-1}"
+  exit 0
+fi
 printf 'helm %s\\n' "$*" >> "$MOCK_LOG"
 case "$1" in
   status)
@@ -202,12 +206,16 @@ if [ "$1" = "get" ] && [ "$2" = "pv" ] && [[ "$3" == pv-* ]]; then
   else
     field=''
   fi
+  if [[ "$*" == *'.spec.hostPath.path'* ]]; then
+    host_path=''
+    if [ "${MOCK_RUNTIME_STORAGE:-}" = "hostpath" ]; then host_path='/var/lib/nexent'; fi
+    field="$field:$host_path"
+  fi
   case "${MOCK_RUNTIME_STORAGE:-}" in
-    hostpath) printf 'Bound:ReadWriteMany,%s:/var/lib/nexent:' "$field" ;;
-    local) printf 'Bound:ReadWriteMany,%s::/var/lib/nexent' "$field" ;;
-    wrong-pv-mode) printf 'Bound:ReadWriteOnce,%s::' "$field" ;;
+    local) printf 'Bound:ReadWriteMany,%s:/var/lib/nexent' "$field" ;;
+    wrong-pv-mode) printf 'Bound:ReadWriteOnce,%s:' "$field" ;;
     unavailable) exit 1 ;;
-    *) printf 'Bound:ReadWriteMany,%s::' "$field" ;;
+    *) printf 'Bound:ReadWriteMany,%s:' "$field" ;;
   esac
   exit 0
 fi

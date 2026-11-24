@@ -2,15 +2,99 @@
 
 """Pause/bootstrap/activate sequencing without mutating a Kubernetes cluster."""
 
+import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
+import yaml
 
 from .test_workbench_publication import BASH, shell_function
 
 
 def run(script):
     return subprocess.run([BASH, "-c", script], check=False, capture_output=True, text=True, timeout=20)
+
+
+def test_config_deployment_launches_as_python_module():
+    helm = shutil.which("helm")
+    assert helm, "Helm is required for Kubernetes deployment template tests"
+    chart = Path(__file__).resolve().parents[3] / "deploy/k8s/helm/nexent"
+    result = subprocess.run(
+        [helm, "template", "nexent", str(chart),
+         "--show-only", "charts/nexent-config/templates/deployment.yaml",
+         "--set", "nexent-runtime.replicaCount=1",
+         "--set-string", "nexent-common.secrets.jwtSecret=test-config-launch"],
+        check=False, capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    config = yaml.safe_load(result.stdout)["spec"]["template"]["spec"]["containers"][0]
+    assert config["command"] == [
+        "/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.config_service"
+    ]
+
+
+@pytest.mark.parametrize(
+    "previous,chart,saved,explicit,expected",
+    [
+        ("", "3", "1", "", "3"),
+        ("", "1", "3", "", "3"),
+        ("3", "1", "3", "", "1"),
+        ("3", "3", "2", "", "2"),
+        ("3", "unset", "2", "", "2"),
+        ("1", "3", "2", "true", "2"),
+        ("1", "invalid", "1", "", "invalid"),
+        ("invalid", "invalid", "1", "", "invalid"),
+        ("1", "invalid", "2", "true", "2"),
+        ("1", "", "1", "", ""),
+    ],
+)
+def test_resolve_runtime_replicas_from_chart_and_saved_options(previous, chart, saved, explicit, expected):
+    result = subprocess.run(
+        [BASH, "-c", shell_function("k8s", "resolve_runtime_replicas") + r'''
+SAVED_RUNTIME_CHART_REPLICAS="$1"
+RUNTIME_REPLICAS="$3"
+K8S_RUNTIME_REPLICAS_EXPLICIT="$4"
+candidate="$2"
+read_runtime_chart_replicas() { printf '%s\n' "$candidate"; }
+resolve_runtime_replicas && printf '%s:%s\n' "$RUNTIME_REPLICAS" "$SAVED_RUNTIME_CHART_REPLICAS"
+''', "replica-resolution", previous, chart, saved, explicit],
+        check=False, capture_output=True, text=True, timeout=20,
+    )
+    if not expected:
+        assert result.returncode == 1
+        assert "unable to read nexent-runtime.replicaCount" in result.stderr
+        return
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"{expected}:{chart}"
+
+
+@pytest.mark.parametrize("source,expected", [("hostPath", 0), ("local", 1)])
+def test_runtime_volume_source_validation(source, expected):
+    result = subprocess.run(
+        [BASH, "-c", shell_function("k8s", "require_runtime_rwx_claim") + r'''
+NAMESPACE=nexent
+source_type="$1"
+kubectl() {
+    if [ "$2" = pvc ]; then
+        printf 'Bound:workspace-pv:ReadWriteMany,:Filesystem'
+        return
+    fi
+    printf 'Bound:ReadWriteMany,:Filesystem:'
+    if [[ "$*" == *'.spec.hostPath.path'* ]]; then
+        if [ "$source_type" = hostPath ]; then printf '/mnt/k8s-shared'; fi
+        printf ':'
+    fi
+    if [ "$source_type" = local ]; then printf '/var/lib/nexent'; fi
+    return 0
+}
+require_runtime_rwx_claim nexent-workspace
+''', "volume-validation", source],
+        check=False, capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == expected, result.stderr
+    if source == "local":
+        assert "uses spec.local" in result.stderr
 
 
 @pytest.mark.parametrize(

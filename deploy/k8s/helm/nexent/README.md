@@ -130,18 +130,24 @@ Before pausing the release, the script also checks for unfinished bootstrap or m
 
 ### Fixed Runtime Replicas
 
-To change the fixed Runtime count on an application release already using shared storage, run the deployment script in a maintenance window:
+To change the fixed Runtime count on an application release already using shared storage, edit `nexent-runtime.replicaCount` in this chart's `values.yaml` and run the deployment script in a maintenance window:
+
+```bash
+bash deploy.sh k8s --release-scope nexent --defaults
+```
+
+You can also set the count explicitly for a deployment:
 
 ```bash
 bash deploy.sh k8s --release-scope nexent --defaults --runtime-replicas 3 \
   --persistence-mode dynamic --storage-class my-rwx-storage
 ```
 
-Use the release's current persistence settings; this option does not migrate data or claims. The count is saved in `deploy/k8s/deploy.options`. Use the same command with `--runtime-replicas 2` or `--runtime-replicas 1` to change it again or roll back. Each invocation stops business workloads while it runs bootstrap and maintenance. No HPA or KEDA controller is created.
+An explicit `--runtime-replicas` takes precedence. Without it, a changed count in `values.yaml` takes precedence over the saved `runtimeReplicas` in `deploy/k8s/deploy.options`. Subsequent deployments reuse the saved count while the chart value is unchanged. For older saved options, the script treats `1` as the previous chart value. Use the release's current persistence settings. To roll back, set the count to `1` and deploy during a maintenance window. Each invocation stops business workloads while it runs bootstrap and maintenance. Changing the count does not migrate data or claims. No HPA or KEDA controller is created.
 
-More than one Runtime replica requires `dynamic` with an explicit RWX-capable StorageClass, or `existing` with precreated shared PVCs. The deployment identity needs read access to the Runtime PVCs and their bound PVs. The script checks the workspace, skills, memory-plugin, logs, and trajectory volumes before starting bootstrap writes. It rejects unbound claims, volumes that do not declare `ReadWriteMany`, and native `hostPath` or `local` PVs. These checks do not prove that a storage driver shares data across nodes: verify cross-node reads and writes on the target storage before deploying. For existing storage, the workspace, skills, and logs claim names honor `--existing-claim-prefix`; the memory-plugin and trajectory claims use `nexent-memory-plugins` and `nexent-trajectory`.
+More than one Runtime replica requires `dynamic` with an explicit RWX-capable StorageClass, or `existing` with precreated PVCs. The deployment identity needs read access to the Runtime PVCs and their bound PVs. Before starting bootstrap writes, the script requires the workspace, skills, memory-plugin, logs, and trajectory volumes to be `Bound` with `ReadWriteMany` access and `Filesystem` volume mode. PVs with `spec.local` remain unsupported. A `hostPath` PV that meets these checks can be used for single-node deployments. For multi-node deployments, verify cross-node reads and writes on the backing storage. With existing storage, the workspace, skills, and logs claim names honor `--existing-claim-prefix`. The memory-plugin and trajectory claims use `nexent-memory-plugins` and `nexent-trajectory`.
 
-Budget threads, database and Redis connections, object storage, and downstream model traffic for the total number of Runtime processes. Do not use local `hostPath` for multi-replica Runtime.
+Budget threads, database and Redis connections, object storage, and downstream model traffic for the total number of Runtime processes.
 
 ## Deploy Options
 
@@ -160,7 +166,7 @@ Budget threads, database and Redis connections, object storage, and downstream m
 | `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
 | `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
-| `--runtime-replicas` | Fixed Runtime replica count after offline maintenance | Positive integer, default `1` |
+| `--runtime-replicas` | Explicit override of the fixed Runtime replica count after offline maintenance | Positive integer |
 | `--retry-runtime-maintenance` | Retry a paused Runtime maintenance batch | Batch UUID; use with `--release-scope nexent` |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |

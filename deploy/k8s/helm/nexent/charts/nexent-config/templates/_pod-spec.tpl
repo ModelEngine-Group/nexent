@@ -18,7 +18,8 @@ containers:
     command:
       - /opt/nexent/scripts/start-backend.sh
       - python
-      - backend/http/config_service.py
+      - -m
+      - backend.http.config_service
     envFrom:
       - configMapRef:
           name: nexent-config
