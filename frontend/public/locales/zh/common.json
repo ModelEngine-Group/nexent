@@ -6386,7 +6386,6 @@
   "chat.agentLanding.unfavorite": "取消收藏",
   "chat.agentLanding.emptyFavorites": "还没有收藏的智能体",
   "chat.agentLanding.emptyFavoritesHint": "点击卡片右上角的「···」即可收藏感兴趣的智能体",
-  "chat.agentLanding.defaultTag": "医疗",
   "chat.sidebar.discoverAgents": "发现智能体",
   "chat.agentLanding.newSession": "创建新会话",
   "chat.agentLanding.search": "搜索",
