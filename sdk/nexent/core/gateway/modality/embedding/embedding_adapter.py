@@ -327,12 +327,14 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
             return await run_blocking(
                 "gateway-multimodal-embedding-invoke",
                 self.get_multimodal_embeddings, request.inputs,
-                with_metadata=request.with_metadata, timeout=request.timeout, **worker_options,
+                with_metadata=request.with_metadata, timeout=request.timeout,
+                retries=request.retries, retry_timeout_step=request.retry_timeout_step, **worker_options,
             )
         return await run_blocking(
             "gateway-text-embedding-invoke",
             self.get_embeddings, request.inputs,
-            with_metadata=request.with_metadata, timeout=request.timeout, **worker_options,
+            with_metadata=request.with_metadata, timeout=request.timeout,
+            retries=request.retries, retry_timeout_step=request.retry_timeout_step, **worker_options,
         )
 
 

@@ -1263,7 +1263,8 @@ def test_delete_documents_success(elasticsearch_core_instance):
         mock_delete.assert_called_once()
 
 
-def test_create_chunk_success(elasticsearch_core_instance):
+@pytest.mark.parametrize("refresh", ["wait_for", False])
+def test_create_chunk_success(elasticsearch_core_instance, refresh):
     """Test creating a single chunk document."""
     elasticsearch_core_instance.client = MagicMock()
     elasticsearch_core_instance.client.index.return_value = {
@@ -1273,11 +1274,13 @@ def test_create_chunk_success(elasticsearch_core_instance):
     }
 
     payload = {"id": "chunk-1", "content": "A"}
-    result = elasticsearch_core_instance.create_chunk("kb-index", payload)
+    options = {} if refresh == "wait_for" else {"refresh": refresh}
+    result = elasticsearch_core_instance.create_chunk("kb-index", payload, **options)
 
     assert result["id"] == "es-id-1"
     assert result["result"] == "created"
     elasticsearch_core_instance.client.index.assert_called_once()
+    assert elasticsearch_core_instance.client.index.call_args.kwargs["refresh"] == refresh
 
 
 def test_update_chunk_success(elasticsearch_core_instance):

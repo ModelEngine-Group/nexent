@@ -32,6 +32,14 @@ config_thread_manager = ThreadManager(
             cancel_grace_seconds=5,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
         ),
+        "memory-read": LanePolicy(
+            name="memory-read", max_workers=16, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=2, shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
+        "memory-write": LanePolicy(
+            name="memory-write", max_workers=8, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=2, shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "model-tool-io": LanePolicy(
             name="model-tool-io",
             max_workers=6,
