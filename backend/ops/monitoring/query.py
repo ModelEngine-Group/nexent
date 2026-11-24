@@ -9,7 +9,7 @@ from sqlalchemy import select
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
-from management.db.skill.models import SkillInfo
+from infrastructure.rdb.skill_execution_records import SkillInfo
 from management.utils.serialization import convert_string_to_list
 from ops.monitoring.agent import summarize_agent
 from ops.monitoring.model import summarize
