@@ -2,11 +2,10 @@
 
 """Regression coverage for history replay at the native model boundary."""
 
-import sys
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from threading import Event
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -127,6 +126,9 @@ def test_history_preserves_native_tool_calls_and_structured_content(dictionary_i
 
 
 def test_native_prompt_and_retry_configuration(monkeypatch, saved_profile):
+    from openjiuwen.harness import factory as harness_factory
+    from openjiuwen.harness.rails import model_anomaly_detection_rail
+
     from nexent.core.agents.cores.jiuwen import adapter as jiuwen
 
     adapter = adapter_with_history([AgentHistory(role="user", content="Analyze an old image")], saved_profile)
@@ -138,14 +140,9 @@ def test_native_prompt_and_retry_configuration(monkeypatch, saved_profile):
         _prepare_file_workspace=lambda query: query,
     ))
     factory = Mock()
-    factory_module = ModuleType("openjiuwen.harness.factory")
-    factory_module.create_deep_agent = factory
-    monkeypatch.setitem(sys.modules, "openjiuwen.harness.factory", factory_module)
-    retry_rail = SimpleNamespace()
-    retry_factory = Mock(return_value=retry_rail)
-    retry_module = ModuleType("openjiuwen.harness.rails.model_anomaly_detection_rail")
-    retry_module.ModelAnomalyDetectionRail = retry_factory
-    monkeypatch.setitem(sys.modules, retry_module.__name__, retry_module)
+    retry_factory = Mock()
+    monkeypatch.setattr(harness_factory, "create_deep_agent", factory)
+    monkeypatch.setattr(model_anomaly_detection_rail, "ModelAnomalyDetectionRail", retry_factory)
     adapter.prepare()
     bind_executor.assert_called_once_with()
     options = factory.call_args.kwargs
