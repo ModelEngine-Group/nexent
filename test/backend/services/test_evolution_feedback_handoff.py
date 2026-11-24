@@ -54,6 +54,41 @@ def test_resource_editor_generation_uses_referenced_target_and_provenance(monkey
     assert generate.call_args.kwargs == {"agent_version":(45,2), "feedback_id":19, "source_digest":"d"*64}
 
 
+def test_scoped_step_reads_pinned_package_and_keeps_header_and_references(monkeypatch):
+    from contracts.errors.exceptions import AppException
+    from contracts.evolution import LocalEditRequest
+    from management.services.evaluation import skill_candidates as service
+
+    source = {"name": "meeting-guide", "candidate_id": 87, "digest": "a" * 64}
+    header = b"---\nname: meeting-guide\ndescription: Extract actions\n---\n"
+    files = {"SKILL.md": header + b"Only include named tasks.", "references/actions.txt": b"Reference"}
+    feedback = {"agent_id": 12, "version_no": 2, "released_guide_candidate_id": 87, "source_digest": source["digest"]}
+    request = LocalEditRequest(model_id=3, goal="Include unassigned open tasks", source_passage="Only include named tasks.",
+        failure={"example_id":"failure", "observed":"none", "expected":"one"},
+        protection={"example_id":"protection", "observed":"one", "expected":"one"})
+    authorize = Mock()
+    read = Mock(return_value=(source, files))
+    upload = Mock(return_value="b" * 64)
+    save = Mock(return_value=17)
+    edit = {"new": "Include all open tasks."}
+    monkeypatch.setattr(service, "require_business_agent_edit", authorize)
+    monkeypatch.setattr(service, "scoped_guide_files", read)
+    monkeypatch.setattr(service, "propose_local_edit", Mock(return_value=(edit["new"], Mock(model_dump=lambda:edit))))
+    monkeypatch.setattr(service, "store_new_skill_package", upload)
+    monkeypatch.setattr(service, "store_scoped_skill_candidate", save)
+    result = service.generate_scoped_skill_step(request, "tenant", "editor", 19, feedback)
+    assert result["candidate_id"] == 17 and result["released_guide_candidate_id"] == 87
+    read.assert_called_once_with("tenant", 12, 2, 87)
+    assert authorize.call_count == 2
+    upload.assert_called_once_with("tenant", 12, {**files, "SKILL.md":header + edit["new"].encode()})
+    assert save.call_args.args[:6] == ("tenant", "editor", 12, 2, source, "b" * 64)
+
+    upload.reset_mock()
+    with pytest.raises(AppException, match="approved feedback"):
+        service.generate_scoped_skill_step(request, "tenant", "editor", 19, {**feedback, "source_digest":"c" * 64})
+    upload.assert_not_called()
+
+
 def test_conflict_handoff_keeps_the_approved_related_clause(monkeypatch):
     from management.services.evaluation import feedback_handoff as service
 

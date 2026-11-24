@@ -92,3 +92,31 @@ def store_skill_candidate(tenant_id, skill, user_id, base, result, feedback):
                     AND base_digest=:base AND result_digest=:result AND created_by=:creator AND feedback_digest=:digest
             """), values).scalar_one()
         return candidate
+
+
+def store_scoped_skill_candidate(tenant, user, agent, version, guide, result, feedback):
+    encoded = json.dumps(feedback, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    values = dict(tenant=tenant, agent=agent, version=version, guide=guide["candidate_id"],
+                  name=guide["name"], creator=user, base=guide["digest"], result=result,
+                  digest=text_digest(encoded), feedback=encoded)
+    with get_db_session() as session:
+        candidate = session.scalar(text("""
+            INSERT INTO nexent.evolution_skill_candidate_t
+                (tenant_id, source_agent_id, source_version_no, released_guide_candidate_id, skill_name,
+                 base_digest, result_digest, created_by, feedback_digest, feedback)
+            SELECT :tenant, :agent, :version, :guide, :name, :base, :result, :creator, :digest, CAST(:feedback AS jsonb)
+             WHERE EXISTS (SELECT 1 FROM nexent.evolution_release_guide_t g WHERE g.tenant_id=:tenant
+               AND g.agent_id=:agent AND g.version_no=:version AND g.candidate_id=:guide AND g.name=:name AND g.digest=:base)
+            ON CONFLICT DO NOTHING RETURNING candidate_id
+        """), values)
+        if candidate is None:
+            candidate = session.scalar(text("""
+                SELECT c.candidate_id FROM nexent.evolution_skill_candidate_t c
+                  JOIN nexent.evolution_release_guide_t g ON g.tenant_id=c.tenant_id AND g.agent_id=c.source_agent_id
+                    AND g.version_no=c.source_version_no AND g.candidate_id=c.released_guide_candidate_id
+                    AND g.name=c.skill_name AND g.digest=c.base_digest
+                 WHERE c.tenant_id=:tenant AND c.source_agent_id=:agent AND c.source_version_no=:version
+                   AND c.released_guide_candidate_id=:guide AND c.base_digest=:base AND c.result_digest=:result
+                   AND c.created_by=:creator AND c.feedback_digest=:digest
+            """), values)
+        return candidate

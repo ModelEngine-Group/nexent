@@ -10,16 +10,21 @@ from contracts.constants.constants import PERMISSION_EDIT
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import SkillStepCandidateRequest
+from infrastructure.rdb.released_skill_guides import read_released_guides
 from infrastructure.rdb.skill_candidate_records import candidate_skill_row, read_bound_skill_candidate
 from infrastructure.rdb.skill_execution_records import effective_skill_description, read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
-from infrastructure.skill_package import encode_skill_package, load_skill_package, released_skill_files, store_skill_package
+from infrastructure.skill_package import (
+    encode_skill_package, load_new_skill_package, load_skill_package, released_skill_files, store_new_skill_package,
+    store_skill_package,
+)
 from management.services.evaluation.generation_budget import invoke_candidate_model, source_digest as generation_source
-from management.db.evaluation.candidates import store_skill_candidate
+from management.db.evaluation.candidates import store_scoped_skill_candidate, store_skill_candidate
 from management.db.identity.group import query_group_ids_by_user_in_tenant
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from management.services.evaluation.prompt_candidates import propose_local_edit
+from management.services.evaluation.evolution_access import require_business_agent_edit
 from management.services.skill.permission import resolve_skill_permission
 
 
@@ -45,8 +50,6 @@ def feedback_skill_files(tenant, name, agent_version):
         agent, version = agent_version
         matches = [row for row in read_bound_skills(agent, version, tenant) if row["name"] == name]
         if not matches:
-            from infrastructure.rdb.released_skill_guides import read_released_guides
-            from infrastructure.skill_package import load_new_skill_package
             pinned = next((ref for ref in read_released_guides(tenant, agent, version) if ref["name"] == name), None)
             if pinned:
                 return load_new_skill_package(tenant, agent, pinned["digest"])
@@ -57,12 +60,7 @@ def feedback_skill_files(tenant, name, agent_version):
     return capture_skill_files(tenant, name)
 
 
-def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id: str, user_id: str, *,
-                                 feedback_id=None, source_digest=None, agent_version=None):
-    skill = _editable_skill(tenant_id, user_id, request.skill_id)
-    files = feedback_skill_files(tenant_id, skill["name"], agent_version)
-    if source_digest is not None and sha256(encode_skill_package(files)).hexdigest() != source_digest:
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The Skill differs from the approved feedback source")
+def _revise_guide_body(request, tenant_id, user_id, files, source_key):
     guide = files["SKILL.md"].decode("utf-8")
     header = re.match(r"\A---[ \t]*\r?\n.*?^---[ \t]*(?:\r?\n|\Z)", guide, re.MULTILINE | re.DOTALL)
     if not header:
@@ -72,9 +70,20 @@ def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id:
         "The correct Skill was already loaded. Compare what the same step did in the failure and good example. "
         "Fix the prerequisite, order, or exception for that step only. Preserve the good branch and output format. "
         "Do not introduce commands, tool privileges, new files or fixed case-specific names.",
-        source_key=generation_source("S2", feedback_id, request.skill_id, agent_version),
+        source_key=source_key,
     )
     updated = {**files, "SKILL.md": (guide[:header.end()] + result).encode("utf-8")}
+    return updated, edit.model_dump()
+
+
+def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id: str, user_id: str, *,
+                                 feedback_id=None, source_digest=None, agent_version=None):
+    skill = _editable_skill(tenant_id, user_id, request.skill_id)
+    files = feedback_skill_files(tenant_id, skill["name"], agent_version)
+    if source_digest is not None and sha256(encode_skill_package(files)).hexdigest() != source_digest:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The Skill differs from the approved feedback source")
+    updated, edit = _revise_guide_body(request, tenant_id, user_id, files,
+                                      generation_source("S2", feedback_id, request.skill_id, agent_version))
     current = _editable_skill(tenant_id, user_id, request.skill_id)
     if current["name"] != skill["name"] or feedback_skill_files(tenant_id, current["name"], agent_version) != files:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The source Skill changed during generation")
@@ -82,10 +91,34 @@ def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id:
     candidate = store_skill_package(tenant_id, request.skill_id, updated)
     _editable_skill(tenant_id, user_id, request.skill_id)
     candidate_id = store_skill_candidate(tenant_id, skill, user_id, base, candidate,
-        {"method": "S2", "generator_revision": 1, "development_feedback": request.model_dump(), "edit": edit.model_dump(),
+        {"method": "S2", "generator_revision": 1, "development_feedback": request.model_dump(), "edit": edit,
          **({"feedback_id": feedback_id} if feedback_id is not None else {})})
     return {"candidate_id": candidate_id, "method": "S2", "skill_id": request.skill_id,
-            "base_digest": base, "result_digest": candidate, "edit": edit.model_dump()}
+            "base_digest": base, "result_digest": candidate, "edit": edit}
+
+
+def scoped_guide_files(tenant, agent, version, guide_id):
+    guide = next((row for row in read_released_guides(tenant, agent, version) if row["candidate_id"] == guide_id), None)
+    if guide is None:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "The released Skill is outside this Agent version")
+    return guide, load_new_skill_package(tenant, agent, guide["digest"])
+
+
+def generate_scoped_skill_step(request, tenant, user, feedback_id, feedback):
+    agent, version, guide_id = (feedback[key] for key in ("agent_id", "version_no", "released_guide_candidate_id"))
+    require_business_agent_edit(agent, tenant, user)
+    guide, files = scoped_guide_files(tenant, agent, version, guide_id)
+    if guide["digest"] != feedback["source_digest"]:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The released Skill differs from the approved feedback")
+    updated, edit = _revise_guide_body(request, tenant, user, files, generation_source("S2", feedback_id))
+    require_business_agent_edit(agent, tenant, user)
+    result = store_new_skill_package(tenant, agent, updated)
+    candidate = store_scoped_skill_candidate(tenant, user, agent, version, guide, result,
+        {"method": "S2", "generator_revision": 1, "feedback_id": feedback_id, "edit": edit})
+    if candidate is None:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The source Skill changed during generation")
+    return {"candidate_id": candidate, "method": "S2", "released_guide_candidate_id": guide_id,
+            "base_digest": guide["digest"], "result_digest": result, "edit": edit}
 
 
 class DiscoveryEdit(BaseModel):

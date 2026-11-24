@@ -4,6 +4,7 @@
 from sqlalchemy import func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 
+from contracts.agentos import ScopedSkillStepTrial
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution_sources import task_digest
@@ -11,6 +12,7 @@ from contracts.releases import supports_release
 from contracts.roles import has_any_role
 from infrastructure.rdb.agent_execution import request_version_stop
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.skill_candidate_records import read_scoped_skill_candidate
 from infrastructure.rdb.skill_execution_records import SkillInfo, effective_skill_description, release_skill
 from infrastructure.skill_execution import skill_execution_revision
 from management.db.agent.release_tools import publish_tool_selection
@@ -332,7 +334,19 @@ def publish(
                 _pin(session, tenant, agent, base, pin, "base")
                 _pin(session, tenant, agent, version, pin, "result")
             added_guide = _confirmed_new_guide(session, tenant, agent, base, ctx, expected_guide)
-            publish_guides(session, tenant, agent, base, version, added_guide)
+            revisions = []
+            if isinstance(expected_guide, list):
+                recipe = ctx["recipe"]
+                steps = {part["candidate_id"] for part in (recipe.get("components") or [recipe])
+                         if part["candidate_type"] == "skill_step"}
+                for trial in expected_guide:
+                    if trial["candidate_id"] not in steps:
+                        reject("The scoped Skill was not part of the confirmed comparison")
+                    row = read_scoped_skill_candidate(tenant, agent, base, trial["candidate_id"], session=session)
+                    if not row or ScopedSkillStepTrial.from_binding(row, "result").model_dump() != trial:
+                        reject("The scoped Skill has changed since confirmation")
+                    revisions.append((trial["source"], trial["result_digest"]))
+            publish_guides(session, tenant, agent, base, version, added_guide, revised=revisions)
             publish_tool_selection(session, tenant, agent, base, version, removed)
             session.add(
                 AgentVersion(

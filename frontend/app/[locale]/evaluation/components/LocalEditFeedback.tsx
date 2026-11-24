@@ -11,7 +11,7 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
 }) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
-  const [form] = Form.useForm<LocalFeedback>();
+  const [form] = Form.useForm<LocalFeedback & { skill_target?: string }>();
   const method = Form.useWatch("method", form);
   const failed = Form.useWatch(["failure", "case_id"], form);
   const good = Form.useWatch(["protection", "case_id"], form);
@@ -31,10 +31,17 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
   const parameters = Object.keys(failure.data?.task.tool_use?.rules.find(r => r.name === tool)?.arguments || {});
   const fileChecks = isTool && !!report.pairs[String(failed)]?.base.result?.file_state &&
     !!report.pairs[String(good)]?.base.result?.file_state;
+  const skillOptions = [
+    ...(workspace.skills ?? []).map(s => ({ value: `catalog:${s.skill_id}`, label: s.name })),
+    ...(workspace.released_guides ?? []).map(s => ({ value: `guide:${s.candidate_id}`, label: s.name })),
+  ];
   const submit = useMutation({ mutationFn: async () => {
-    const data = await form.validateFields();
+    const { skill_target, ...data } = await form.validateFields();
+    const [targetKind, targetId] = (skill_target ?? "").split(":");
     return api.shareLocalEdit(report.experiment_id, {
-      ...data, tool_name: isTool ? data.tool_name : undefined, skill_id: method === "S2" ? data.skill_id : undefined,
+      ...data, tool_name: isTool ? data.tool_name : undefined,
+      skill_id: method === "S2" && targetKind === "catalog" ? Number(targetId) : undefined,
+      released_guide_candidate_id: method === "S2" && targetKind === "guide" ? Number(targetId) : undefined,
       related_passage: method === "P3" ? data.related_passage?.trim() || undefined : undefined,
       failure: { ...data.failure, observed: data.failure.observed ?? "" },
       protection: { ...data.protection, observed: data.protection.observed ?? "" },
@@ -53,8 +60,8 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
           <Select options={["P1","P3","T1","T2","S2"].map(value => ({ value, label: t(`evolution.method.${value}`) }))}
             onChange={() => form.setFieldValue("share_file_state", false)} />
         </Form.Item>
-        {method === "S2" && <Form.Item name="skill_id" label={t("evolution.targetSkill")} rules={[{ required: true }]}>
-          <Select options={workspace.skills?.map(s => ({ value: s.skill_id, label: s.name }))} />
+        {method === "S2" && <Form.Item name="skill_target" preserve={false} label={t("evolution.targetSkill")} rules={[{ required: true }]}>
+          <Select options={skillOptions} />
         </Form.Item>}
         <Form.Item name="goal" label={t("evolution.editGoal")} rules={[{ required: true, whitespace: true }]}><Input maxLength={1500} /></Form.Item>
         <Form.Item name="source_passage" label={t("evolution.sourcePassage")} rules={[{ required: true, whitespace: true }]}>

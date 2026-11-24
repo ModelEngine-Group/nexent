@@ -7,7 +7,7 @@ import re
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, SkillStepCandidateRequest
+from contracts.evolution import DevelopmentExperimentRequest, LocalEditRequest, PromptCandidateRequest, SkillStepCandidateRequest
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
 from infrastructure.skill_package import encode_skill_package
 from management.db.evaluation import experiments as jobs
@@ -21,7 +21,10 @@ from management.db.evaluation.candidates import selectable_tool_names
 from management.services.evaluation.example_candidates import generate_example_candidates
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, prompt_conflict_context
 from management.services.evaluation.replay_cases import get_development_case
-from management.services.evaluation.skill_candidates import bound_catalog_description, feedback_skill_files, generate_skill_discovery_candidate, generate_skill_step_candidate
+from management.services.evaluation.skill_candidates import (
+    bound_catalog_description, feedback_skill_files, generate_scoped_skill_step, generate_skill_discovery_candidate,
+    generate_skill_step_candidate, scoped_guide_files,
+)
 
 
 def _approved_excerpt(excerpt, required_status, trial, task):
@@ -164,7 +167,16 @@ def _prepare_handoff(tenant, user, eid, request):
                 "issues": issues[:8], **file_evidence}, ensure_ascii=False)
             if len(feedback[field]["tool_evidence"]) > 5000:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Reduce the selected argument evidence")
-    if request.method == "S2":
+    if request.method == "S2" and request.released_guide_candidate_id:
+        guide, files = scoped_guide_files(tenant, agent_id, version, request.released_guide_candidate_id)
+        selected = [trials[request.failure.case_id], trials[request.protection.case_id]]
+        if plan["request"]["candidate_type"] != "baseline" or not all(
+            t["result"].get("guide_reads", {}).get(guide["name"], 0) > 0 for t in selected
+        ):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "S2 requires both baseline tasks to read the released guide")
+        feedback.update(released_guide_candidate_id=guide["candidate_id"], source_digest=guide["digest"])
+        source = files["SKILL.md"].decode("utf-8")
+    elif request.method == "S2":
         provenance = plan["request"]
         bindings = query_skill_instances_by_agent_id(agent_id, tenant, version)
         if not any(row["skill_id"] == request.skill_id and row["enabled"] for row in bindings):
@@ -295,6 +307,8 @@ def generate_from_handoff(tenant, user, feedback_id, model_id):
     common = {key: feedback[key] for key in ("goal", "source_passage", "failure", "protection")}
     provenance = {"feedback_id": feedback_id, "source_digest": feedback["source_digest"]}
     if feedback["method"] == "S2":
+        if feedback.get("released_guide_candidate_id"):
+            return generate_scoped_skill_step(LocalEditRequest(model_id=model_id, **common), tenant, user, feedback_id, feedback)
         request = SkillStepCandidateRequest(model_id=model_id, skill_id=feedback["skill_id"], **common)
         return generate_skill_step_candidate(request, tenant, user, agent_version=(feedback["agent_id"], feedback["version_no"]), **provenance)
     request = PromptCandidateRequest(model_id=model_id, agent_id=feedback["agent_id"],

@@ -34,8 +34,15 @@ def read_released_guides(tenant, agent, version):
         return guides_for_version(session, tenant, agent, version)
 
 
-def publish_guides(session, tenant, agent, base, version, added):
+def publish_guides(session, tenant, agent, base, version, added, *, revised=()):
     guides = guides_for_version(session, tenant, agent, base)
+    if revised:
+        if any(source not in guides for source, _ in revised):
+            raise ValueError("The source Skill no longer belongs to this version")
+        digests = {source["name"]: digest for source, digest in revised}
+        if len(digests) != len(revised):
+            raise ValueError("A release cannot revise one Skill twice")
+        guides = [{**row, "digest": digests.get(row["name"], row["digest"])} for row in guides]
     if added:
         if any(row["name"] == added["name"] for row in guides):
             raise ValueError("A released Skill already has this name")

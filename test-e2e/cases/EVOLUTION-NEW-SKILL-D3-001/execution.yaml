@@ -6,6 +6,7 @@ implementations:
   selector: test_new_skill_over_agentos
 acceptance_bindings:
   AC-01: [test_new_skill_over_agentos]
+  AC-02: [test_new_skill_over_agentos]
 preparation:
   families: []
   anchors: false

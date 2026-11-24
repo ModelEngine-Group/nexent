@@ -18,13 +18,21 @@ case:
   - order: 1
     action: 通过签名 AgentOS 请求分别试跑原版、使用候选、跳过候选，随后篡改候选文件再试跑。
     expected: 原版无该指南。候选组可以读取，越界任务没有读取，未授予脚本工具。错误摘要无法产生有效回执。
-  expected_results: [验证包摘要、实际文件读取及两组归属。]
+  - order: 2
+    action: 在已有指南的发布版上分别试跑旧指南、修订指南和移除指南，随后用其他租户签名重放。
+    expected: 三组返回各自的正文和读取次数，未挂载组无文件和读取权限。其他租户请求被拒。
+  expected_results: [验证包摘要、实际文件读取及两组归属。, 验证已发布指南的局部修订、移除对照和租户隔离。]
   forbidden_side_effects: [不得写入业务共享目录。]
   acceptance:
   - id: AC-01
     description: 签名请求下核对候选文件、原版、跳过和包变更。
     steps: [1]
     expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 已发布指南的三组试跑核对文件摘要、读回执、移除和跨租户拒绝。
+    steps: [2]
+    expected_results: [2]
     forbidden_side_effects: [1]
   execution:
     profiles:

@@ -55,7 +55,7 @@ def submit(tenant, user, request, plan):
         if request.suggestion_id is not None:
             link = {**params, "sid": request.suggestion_id, "eid": eid}
             suggestion = session.execute(text("""
-                SELECT s.experiment_id FROM nexent.evolution_suggestion_t s
+                SELECT s.experiment_id, s.released_guide_candidate_id FROM nexent.evolution_suggestion_t s
                 JOIN nexent.conversation_record_t c ON c.conversation_id=s.conversation_id
                     AND c.created_by=s.submitter_id AND c.delete_flag='N'
                 WHERE s.suggestion_id=:sid AND s.tenant_id=:tenant AND s.agent_id=:agent AND s.version_no=:version
@@ -67,6 +67,8 @@ def submit(tenant, user, request, plan):
                     WHERE experiment_id=:previous AND status IN ('running','pending'))
             """), {"previous":suggestion.experiment_id})):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Suggestion unavailable or already being evaluated")
+            if suggestion.released_guide_candidate_id is not None and suggestion.released_guide_candidate_id != plan.get("released_guide_candidate_id"):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The candidate must revise the Skill named by this suggestion")
             session.execute(text("""UPDATE nexent.evolution_suggestion_t SET experiment_id=:eid,update_time=now()
                 WHERE suggestion_id=:sid"""), link)
         session.execute(text("""
@@ -283,7 +285,8 @@ def workspace_choices(tenant, agent_id, version):
                 AND i.enabled AND i.delete_flag='N' AND s.delete_flag='N' ORDER BY s.skill_name
         """,
         "suggestions": """
-            SELECT s.suggestion_id, s.expected_behavior, s.skill_id, s.experiment_id FROM nexent.evolution_suggestion_t s
+            SELECT s.suggestion_id, s.expected_behavior, s.skill_id, s.released_guide_candidate_id, s.experiment_id
+            FROM nexent.evolution_suggestion_t s
             JOIN nexent.conversation_record_t c ON c.conversation_id=s.conversation_id AND c.created_by=s.submitter_id
             WHERE s.tenant_id=:tenant AND s.agent_id=:agent AND s.version_no=:version AND s.status='submitted'
                 AND c.delete_flag='N'
@@ -305,9 +308,13 @@ def workspace_choices(tenant, agent_id, version):
                 s.skill_name, s.create_time FROM nexent.evolution_skill_candidate_t s
             WHERE s.tenant_id=:tenant AND (s.feedback->>'method' IS DISTINCT FROM 'S4' OR
                 (s.feedback->'script_build'->>'agent'=CAST(:agent AS text)
-                 AND s.feedback->'script_build'->>'version'=CAST(:version AS text))) AND EXISTS (
+                 AND s.feedback->'script_build'->>'version'=CAST(:version AS text))) AND (EXISTS (
                 SELECT 1 FROM nexent.ag_skill_instance_t i WHERE i.skill_id=s.skill_id AND i.tenant_id=:tenant
-                AND i.agent_id=:agent AND i.version_no=:version AND i.enabled AND i.delete_flag='N')
+                AND i.agent_id=:agent AND i.version_no=:version AND i.enabled AND i.delete_flag='N') OR (
+                s.source_agent_id=:agent AND s.source_version_no=:version AND EXISTS (
+                    SELECT 1 FROM nexent.evolution_release_guide_t g WHERE g.tenant_id=s.tenant_id AND g.agent_id=s.source_agent_id
+                    AND g.version_no=s.source_version_no AND g.candidate_id=s.released_guide_candidate_id
+                    AND g.name=s.skill_name AND g.digest=s.base_digest)))
             UNION ALL
             SELECT c.candidate_id, 'skill_new', c.name, c.created_at FROM nexent.evolution_new_skill_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.version_no=:version

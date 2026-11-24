@@ -26,7 +26,13 @@ export interface Workspace {
   fixed_regression?: { source_case_id: number; source_version: number; digest: string; family: string; query: string;
     rubric?: { name: string; version_no: number } }[];
   skills?: { skill_id: number; name: string }[];
-  suggestions?: { suggestion_id: number; expected_behavior: string; skill_id: number; experiment_id: number | null }[];
+  suggestions?: {
+    suggestion_id: number;
+    expected_behavior: string;
+    skill_id: number | null;
+    released_guide_candidate_id?: number | null;
+    experiment_id: number | null;
+  }[];
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[];
     diagnosis?: { status: "needs_review" | "needs_evidence" | "no_issue"; reason: string; missing?: string[] } }[];
   review_batches?: ReviewBatch[];
@@ -360,6 +366,7 @@ export interface LocalFeedback {
   related_passage?: string;
   tool_name?: string;
   skill_id?: number;
+  released_guide_candidate_id?: number;
   share_expected_arguments?: string[];
   share_file_state?: boolean;
   failure: { case_id: number; expected: string; observed: string; input_excerpt?: string };

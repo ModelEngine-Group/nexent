@@ -71,6 +71,7 @@ from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import (
     mount_released_guides, mount_new_skill_trial, verify_new_skill_mount, materialize_skill_tools, observe_trial_guide_choices, root_without_target_skill, skill_stage_path, skill_trial_observation,
+    scoped_skill_observation,
 )
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
@@ -175,7 +176,8 @@ def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
     root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
-    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None, new_skill_trial=None, script_trial=False,
+    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None,
+    new_skill_trial=None, scoped_skill_trials=(), script_trial=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -207,8 +209,8 @@ def _materialize_agent(
         public_reference=public_reference, workbench_version=workbench_version,
         debug_run_id=workbench_debug_run_id, **({"script_trial": True} if script_trial else {}),
     )
-    if resource.released_skill_guides:
-        visible = mount_released_guides(visible, actor, workspace_path, local_tools, language)
+    if resource.released_skill_guides or scoped_skill_trials:
+        visible = mount_released_guides(visible, actor, workspace_path, local_tools, language, trials=scoped_skill_trials)
     if new_skill_trial:
         visible = mount_new_skill_trial(visible, actor, workspace_path, local_tools, new_skill_trial, language)
     try:
@@ -415,6 +417,8 @@ def prepare_run_snapshot(
                    and payload.replay_trial_id else {}),
                 **({"new_skill_trial": payload.new_skill_trial}
                    if isinstance(payload, PreparedEvaluationRun) and payload.new_skill_trial else {}),
+                **({"scoped_skill_trials": payload.scoped_skill_trials}
+                   if isinstance(payload, PreparedEvaluationRun) and payload.scoped_skill_trials else {}),
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None or turn_generation is not None else None,
@@ -483,7 +487,8 @@ def prepare_run_snapshot(
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
 
-    if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices or payload.new_skill_trial) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
+    if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices or payload.new_skill_trial
+            or payload.scoped_skill_trials) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
     if payload.watch_skill_process and "run_skill_script" not in (payload.watch_tool_arguments or {}):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SCRIPT_CHECK_REQUIRES_TOOL"})
@@ -585,6 +590,9 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
                                              for name, check in (payload.watch_mcp_replies or {}).items()})
             info.observer.replay_tool_recorder = recorder
         if payload.replay_trial_id:
+            for trial in payload.scoped_skill_trials:
+                observations.append(await run_blocking("observe-scoped-skill", scoped_skill_observation, info, actor.tenant_id,
+                    trial, lane="control-io", owner="runtime"))
             for ref in payload.resource.skill_refs:
                 if ref.package_candidate_id:
                     observations.append(await run_blocking("observe-trial-skill", skill_trial_observation,

@@ -22,10 +22,18 @@ def validate_turn(spec, receipt, attempt, expected_names):
         return {"error": "unsuccessful_runtime", "runtime_outcome": receipt.outcome}
     skills = [receipt.skill] if receipt.skill else (receipt.skills or [])
     targets = {ref.package_candidate_id: ref for ref in spec.resource.skill_refs if ref.package_candidate_id}
-    if (len(skills) != len(targets) or {s.candidate_id for s in skills} != set(targets)
+    scoped_trials = {trial.candidate_id: trial for trial in getattr(spec, "scoped_skill_trials", ())}
+    expected_candidates = set(targets) | set(scoped_trials)
+    if (len(skills) != len(expected_candidates) or {s.candidate_id for s in skills} != expected_candidates
             or receipt.skill and receipt.skills):
         return {"error": "skill_observation_mismatch"}
     for skill in skills:
+        if scoped := scoped_trials.get(skill.candidate_id):
+            if (skill.released_guide_candidate_id != scoped.source.candidate_id or skill.variant != scoped.arm
+                    or skill.mounted_revision != scoped.mounted_digest or skill.listed != (scoped.mounted_digest is not None)
+                    or scoped.arm == "no_skill" and skill.guide_reads):
+                return {"error": "skill_observation_mismatch"}
+            continue
         target = targets[skill.candidate_id]
         omitted = spec.omit_root_skill_candidate_id == skill.candidate_id
         if (skill.instance_id != target.instance_id or skill.variant != ("no_skill" if omitted else target.package_variant)

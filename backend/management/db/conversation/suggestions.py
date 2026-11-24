@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from sqlalchemy import select, text
 
 from infrastructure.rdb.account_access import get_user_role_by_tenant, query_group_ids_by_user_in_tenant
+from infrastructure.rdb.released_skill_guides import guides_for_version
 from infrastructure.rdb.skill_execution_records import SkillInfo, SkillInstance, bound_skill_predicates
 from infrastructure.workbench_skill_execution import can_view_skill
 from management.utils.suggestion_intent import BEHAVIOR, BUSINESS, CHANGE, FUTURE, NUMBER, SKILL, choose_target, future_request, intent
@@ -26,8 +27,22 @@ def _visible_skills(session, scope, binding):
         SkillInstance, SkillInstance.skill_id == SkillInfo.skill_id).where(
         *bound_skill_predicates(scope["agent"], scope["version"], tenant),
         SkillInstance.skill_instance_id.in_(binding["instances"]))
-    return [dict(skill) for skill in session.execute(query).mappings()
-            if can_view_skill(skill=skill, user_id=owner, user_role=roles, user_group_ids=groups)]
+    visible = [dict(skill) for skill in session.execute(query).mappings()
+               if can_view_skill(skill=skill, user_id=owner, user_role=roles, user_group_ids=groups)]
+    guide_ids = set(binding.get("released_guide_ids", ()))
+    if guide_ids:
+        visible.extend({"name": guide["name"], "released_guide_candidate_id": guide["candidate_id"]}
+                       for guide in guides_for_version(session, tenant, scope["agent"], scope["version"])
+                       if guide["candidate_id"] in guide_ids)
+    return visible
+
+
+def _pending_target(skills, pending):
+    for key in ("skill_id", "released_guide_candidate_id"):
+        value = pending.get(key)
+        if value is not None:
+            return next((skill for skill in skills if skill.get(key) == value), None)
+    return None
 
 
 def _development_progress(session, scope, sid, experiment_id):
@@ -172,21 +187,23 @@ def record_intent(session, turn, source, user_turn):
     expected = pending["expected_behavior"] if continuing and action != "detail" else future_request(query)
     target = choose_target(query, skills)
     if continuing and not target:
-        target = next((s for s in skills if s["skill_id"] == pending["skill_id"]), None)
+        target = _pending_target(skills, pending)
     specific = bool(BEHAVIOR.search(expected))
     requested_edit = SKILL.search(expected) and CHANGE.search(expected) and specific and not mixed
     permanent = bool(FUTURE.search(expected) or action == "confirm" or "提交" in expected or requested_edit)
     status = "submitted" if target and permanent and specific else "clarifying"
-    fields = {**scope, "skill": target["skill_id"] if target else None, "expected": expected, "status": status}
+    fields = {**scope, "skill": (target or {}).get("skill_id"), "guide": (target or {}).get("released_guide_candidate_id"),
+              "expected": expected, "status": status}
     if continuing:
         sid = pending["suggestion_id"]
-        session.execute(text("""UPDATE nexent.evolution_suggestion_t SET skill_id=:skill,status=:status,expected_behavior=:expected,
+        session.execute(text("""UPDATE nexent.evolution_suggestion_t SET skill_id=:skill,released_guide_candidate_id=:guide,
+            status=:status,expected_behavior=:expected,
             last_message_id=:source,update_time=now() WHERE suggestion_id=:sid"""), {**fields, "sid":sid})
     else:
         sid = session.scalar(text("""INSERT INTO nexent.evolution_suggestion_t
-            (tenant_id,submitter_id,conversation_id,source_message_id,agent_id,version_no,skill_id,
+            (tenant_id,submitter_id,conversation_id,source_message_id,agent_id,version_no,skill_id,released_guide_candidate_id,
              expected_behavior,status,last_message_id)
-            VALUES (:tenant,:owner,:cid,:source,:agent,:version,:skill,:expected,:status,:source)
+            VALUES (:tenant,:owner,:cid,:source,:agent,:version,:skill,:guide,:expected,:status,:source)
             RETURNING suggestion_id"""), fields)
     if not target:
         names = "、".join(s["name"] for s in skills[:12])

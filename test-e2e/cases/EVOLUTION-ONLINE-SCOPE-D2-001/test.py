@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -21,6 +22,7 @@ def test_online_scope_http(runtime):
     from infrastructure.system_configuration.runtime import load_system_configuration
     from management.api.conversation.conversation_management import router as chats
     from management.api.evaluation.evolution import router as evaluation
+    from management.db.conversation.suggestions import record_intent
     from management.thread_management import config_thread_manager
     from nexent.core.concurrency import clear_default_thread_manager, set_default_thread_manager
 
@@ -38,7 +40,8 @@ def test_online_scope_http(runtime):
                      "025_evolution_regression_cases", "028_evolution_confirmation_suites", "020_evolution_feedback_handoff",
                      "034_evolution_new_skill_candidates", "039_evolution_tool_builds", "041_evolution_generation_attempts",
                      "043_evolution_model_charges", "046_evolution_online_diagnosis",
-                     "049_evolution_review_workspace_indexes"):
+                     "035_evolution_release_guides", "049_evolution_review_workspace_indexes",
+                     "050_evolution_scoped_skill_suggestions", "051_evolution_scoped_skill_candidates"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         session.add(models.UserTenant(user_id="other", tenant_id="tenant-native", user_role="USER", delete_flag="N"))
@@ -86,6 +89,19 @@ def test_online_scope_http(runtime):
                 source_message_id,agent_id,version_no,skill_id,expected_behavior,status,last_message_id)
                 VALUES ('tenant-native',:owner,17,:mid,7,:v,3,:expected,:status,:mid)"""),
                 dict(owner=owner, mid=mid, v=v, expected=expected, status=status))
+        session.execute(text("""INSERT INTO nexent.evolution_release_guide_t
+            (tenant_id,agent_id,version_no,name,candidate_id,digest) VALUES
+            ('tenant-native',7,2,'meeting-guide',29,repeat('a',64)),
+            ('tenant-native',8,2,'other-guide',30,repeat('b',64)),
+            ('another-tenant',7,2,'tenant-guide',31,repeat('c',64))"""))
+        turn = SimpleNamespace(tenant_id="tenant-native", user_id=owner, reference=SimpleNamespace(conversation_id=17))
+        query = "以后这个 Skill 要保留没有负责人的待办。"
+        scope = {"agent":7, "version":2, "language":"zh", "instances":[], "released_guide_ids":[29,30,31]}
+        assert "meeting-guide" in record_intent(session, turn, 17, {"query":query, "suggestion_scope":scope})["message"]
+        old_scope = {**scope, "version":1}
+        assert "没有你可提出改进建议" in record_intent(session, turn, 18, {"query":query, "suggestion_scope":old_scope})["message"]
+        unbound_scope = {**scope, "released_guide_ids":[30,31]}
+        assert "没有你可提出改进建议" in record_intent(session, turn, 19, {"query":query, "suggestion_scope":unbound_scope})["message"]
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(chats, prefix="/api")
@@ -125,6 +141,9 @@ def test_online_scope_http(runtime):
             second_version = client.get(workspace.replace("versions/1", "versions/2"), headers=headers)
             assert second_version.status_code == 200, second_version.text
             assert [row["batch_id"] for row in second_version.json()["data"]["review_batches"]] == [other_version_batch]
+            [scoped] = [row for row in second_version.json()["data"]["suggestions"] if row["released_guide_candidate_id"]]
+            assert scoped["released_guide_candidate_id"] == 29 and scoped["skill_id"] is None
+            assert "没有负责人的待办" in scoped["expected_behavior"]
             draft_path = base + str(turn_ids[17]) + "/case-draft"
             own = client.get(draft_path, headers=headers)
             assert own.status_code == 200 and "no-store" in own.headers["Cache-Control"], own.text

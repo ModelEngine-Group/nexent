@@ -61,6 +61,8 @@ def _materials(tenant, ctx, prepared):
     prompt = None
     targets = {}
     removed = ()
+    scoped_old = {part.candidate_id: part for part in prepared["base"].scoped_skill_trials}
+    scoped_new = {part.candidate_id: part for part in prepared["result"].scoped_skill_trials}
     parts = recipe["components"] if kind == "combination" else [recipe]
     if not supports_release(kind, recipe.get("components")):
         releases.reject("This candidate does not have a publishable resource binding")
@@ -91,6 +93,13 @@ def _materials(tenant, ctx, prepared):
                 releases.reject("Independent results do not identify a single new Skill package")
             load_new_skill_package(tenant, agent, new_ref.digest)
         elif part_kind in {"skill_step", "skill_discovery", "skill_script"}:
+            scoped = scoped_new.get(candidate_id) if part_kind == "skill_step" else None
+            if scoped:
+                old = scoped_old.get(candidate_id)
+                if not old or old.arm != "base" or scoped.arm != "result" or old.model_copy(update={"arm": "result"}) != scoped:
+                    releases.reject("The tested scoped Skill revisions differ from the confirmed binding")
+                load_new_skill_package(tenant, agent, scoped.result_digest)
+                continue
             target = read_bound_skill_candidate(tenant, agent, version, candidate_id)
             if not target or target["method"] != {"skill_step": "S2", "skill_discovery": "S1", "skill_script": "S4"}[part_kind]:
                 releases.reject("The independently tested Skill candidate is unavailable")
@@ -167,6 +176,7 @@ def _materials(tenant, ctx, prepared):
     ]
     if kind == "skill_new":
         baseline.new_skill_trial = None
+    baseline.scoped_skill_trials = []
     if any(part["candidate_type"] in {"skill_new", "skill_discovery"} for part in parts):
         baseline.observe_root_skill_choices = None
     baseline.tool_set_check = None
@@ -186,7 +196,8 @@ async def promote(tenant, actor, lock, request):
     if recipe != ctx["recipe"]:
         releases.reject("The tested candidate can no longer be reproduced")
     pins, prompt, baseline, removed = await _io("verify-release-packages", _materials, tenant, ctx, prepared)
-    guide = prepared["result"].new_skill_trial.model_dump(exclude={"arm"}) if recipe["candidate_type"] == "skill_new" else None
+    guide = (prepared["result"].new_skill_trial.model_dump(exclude={"arm"}) if recipe["candidate_type"] == "skill_new"
+             else [trial.model_dump() for trial in prepared["result"].scoped_skill_trials] or None)
     return await _io(
         "publish-evolution-version",
         releases.publish,

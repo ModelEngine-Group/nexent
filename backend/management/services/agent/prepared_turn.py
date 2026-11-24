@@ -228,6 +228,7 @@ async def start_turn(
                 "agent": snapshot.resource.agent_id, "version": snapshot.resource.version_no,
                 "language": payload.language,
                 "instances": [ref.instance_id for ref in snapshot.resource.skill_refs],
+                "released_guide_ids": [ref.candidate_id for ref in snapshot.resource.released_skill_guides],
             }
             snapshot = snapshot.model_copy(update={"await_evolution_reply": True})
         if request.annotations is not None:

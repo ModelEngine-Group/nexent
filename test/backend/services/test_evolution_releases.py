@@ -57,12 +57,10 @@ def test_feedback_reads_published_skill_and_rejects_missing_binding(monkeypatch)
     assert skill_candidates.feedback_skill_files("tenant", "meeting", (2, 3)) == pinned.return_value
     pinned.assert_called_once_with("tenant", 2, 3, binding)
     rows.return_value = []
-    from infrastructure import skill_package
-    from infrastructure.rdb import released_skill_guides
     scoped = Mock(return_value=[{"name":"new-guide", "digest":"d"*64}])
     read_guide = Mock(return_value={"SKILL.md": b"approved guide"})
-    monkeypatch.setattr(released_skill_guides,"read_released_guides",scoped)
-    monkeypatch.setattr(skill_package,"load_new_skill_package",read_guide)
+    monkeypatch.setattr(skill_candidates,"read_released_guides",scoped)
+    monkeypatch.setattr(skill_candidates,"load_new_skill_package",read_guide)
     assert skill_candidates.feedback_skill_files("tenant","new-guide",(2,3)) == read_guide.return_value
     read_guide.assert_called_once_with("tenant",2,"d"*64)
     with pytest.raises(AppException):
@@ -190,7 +188,7 @@ def test_combined_skill_release_keeps_each_tested_instance_and_rollback_metadata
                 revision=revision("t", 4, 1, {**row, "description": "new" if i==1 and arm=="result" else "old"},
                                   {"SKILL.md":targets[i+40][arm+"_digest"]})) for i,row in enumerate(rows,1)]
         resource = SimpleNamespace(skill_refs=refs, released_skill_guides=[], subagents=[], external_a2a=[])
-        prepared[arm] = SimpleNamespace(resource=resource, observe_root_skill_choices=True)
+        prepared[arm] = SimpleNamespace(resource=resource, observe_root_skill_choices=True, scoped_skill_trials=[])
     prepared["base"].model_copy = lambda **kwargs: deepcopy(prepared["base"])
     session = Mock()
     session.execute.return_value.all.return_value = [(1, 101), (2, 102)]

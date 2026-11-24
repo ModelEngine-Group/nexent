@@ -47,6 +47,7 @@ def test_remote_check_requires_a_bound_root_mcp_tool_and_replay(monkeypatch):
             omit_root_skill_candidate_id=None,
             observe_root_skill_choices=False,
             new_skill_trial=None,
+            scoped_skill_trials=[],
             watch_skill_process=None,
             watch_tool_arguments=fields,
             watch_mcp_replies={"receipt": {"kind": "structured"}},

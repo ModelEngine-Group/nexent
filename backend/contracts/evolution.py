@@ -364,6 +364,7 @@ class FeedbackHandoffRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     method: Literal["P1", "P3", "T1", "T2", "S2"]
     skill_id: int | None = Field(default=None, gt=0)
+    released_guide_candidate_id: int | None = Field(default=None, gt=0)
     goal: str = Field(min_length=1, max_length=1500)
     source_passage: str = Field(min_length=1, max_length=2000)
     related_passage: str | None = Field(default=None, min_length=1, max_length=2000)
@@ -383,8 +384,9 @@ class FeedbackHandoffRequest(BaseModel):
             raise ValueError("Select a tool only for a tool-call improvement")
         if self.share_expected_arguments and (self.method != "T2" or not self.tool_name):
             raise ValueError("Choose a tool parameter improvement to share expected argument values")
-        if (self.method == "S2") != (self.skill_id is not None):
-            raise ValueError("Select a bound Skill only for an S2 handoff")
+        skill_targets = sum(target is not None for target in (self.skill_id, self.released_guide_candidate_id))
+        if skill_targets != int(self.method == "S2"):
+            raise ValueError("Select exactly one bound Skill for an S2 handoff")
         if self.failure.case_id == self.protection.case_id:
             raise ValueError("Failure and protection tasks must be distinct")
         return self

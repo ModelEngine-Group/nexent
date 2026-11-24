@@ -241,14 +241,27 @@ def mount_new_skill_trial(resource, actor, workspace_path, tools, trial, languag
     )
 
 
-def mount_released_guides(resource, actor, workspace_path, tools, language):
+def mount_released_guides(resource, actor, workspace_path, tools, language, *, trials=()):
     from infrastructure.rdb.released_skill_guides import read_released_guides
 
     pins = read_released_guides(actor.tenant_id, resource.agent_id, resource.version_no)
     if pins != [ref.model_dump() for ref in resource.released_skill_guides]:
+        if trials:
+            raise HTTPException(409, detail={"code": "AGENTOS_SCOPED_SKILL_BINDING_MISMATCH"})
         raise ValueError("Released Skill references differ from this Agent version")
+    changes = {}
+    for trial in trials:
+        row = skill_candidate_records.read_scoped_skill_candidate(
+            actor.tenant_id, resource.agent_id, resource.version_no, trial.candidate_id)
+        if (not row or trial != type(trial).from_binding(row, trial.arm) or trial.source not in resource.released_skill_guides
+                or trial.source.name in changes):
+            raise HTTPException(409, detail={"code": "AGENTOS_SCOPED_SKILL_BINDING_MISMATCH"})
+        changes[trial.source.name] = trial.mounted_digest
     for ref in resource.released_skill_guides:
-        resource = _mount_guide(resource, actor, workspace_path, tools, ref, language, True)
+        digest = changes.get(ref.name, ref.digest)
+        if digest is not None:
+            resource = _mount_guide(resource, actor, workspace_path, tools,
+                                    ref.model_copy(update={"digest": digest}), language, True)
     return resource
 
 
@@ -328,21 +341,35 @@ def _mount_guide(resource, actor, workspace_path, tools, ref, language, enabled,
     return resource.model_copy(update={"tools": bindings, "evaluation_options": options})
 
 
-def verify_new_skill_mount(info, tenant, trial):
-    """Read the actual root catalog, reader authorization and staged package before collecting observations."""
+def _verify_guide_mount(info, tenant, name, digest):
+    """Check the actual catalog, reader permissions and staged package together."""
     from hashlib import sha256
     from infrastructure.skill_package import encode_skill_package
 
     config = info.agent_config
-    listed = any(item.type == "skill" and item.content.get("name") == trial.name for item in config.context_items or [])
+    listed = any(item.type == "skill" and item.content.get("name") == name for item in config.context_items or [])
     reader = next((t for t in config.tools if t.name == EvaluationSkillTool.GUIDE), None)
-    allowed = bool(reader and trial.name in reader.params["authorized_skill_names"])
-    directory = (Path(reader.params["local_skills_dir"]) / skill_path_segment(tenant) / skill_path_segment(trial.name)) if reader else None
+    allowed = bool(reader and name in reader.params["authorized_skill_names"])
+    directory = (Path(reader.params["local_skills_dir"]) / skill_path_segment(tenant) / skill_path_segment(name)) if reader else None
     mounted = bool(directory and directory.is_dir())
-    if any(value != (trial.arm == "result") for value in (listed, allowed, mounted)):
+    if any(value != (digest is not None) for value in (listed, allowed, mounted)):
         raise HTTPException(409, detail={"code": "AGENTOS_NEW_SKILL_MOUNT_MISMATCH"})
     if mounted:
         files = {p.relative_to(directory).as_posix(): p.read_bytes() for p in directory.rglob("*") if p.is_file()}
-        if sha256(encode_skill_package(files)).hexdigest() != trial.digest:
+        if sha256(encode_skill_package(files)).hexdigest() != digest:
             raise HTTPException(409, detail={"code": "AGENTOS_NEW_SKILL_REVISION_MISMATCH"})
+    return directory / "SKILL.md" if mounted else None
+
+
+def verify_new_skill_mount(info, tenant, trial):
+    _verify_guide_mount(info, tenant, trial.name, trial.digest if trial.arm == "result" else None)
     return trial
+
+
+def scoped_skill_observation(info, tenant, trial):
+    from contracts.agentos import SkillTrialObservation
+
+    path = _verify_guide_mount(info, tenant, trial.source.name, trial.mounted_digest)
+    return SkillTrialObservation(candidate_id=trial.candidate_id, released_guide_candidate_id=trial.source.candidate_id,
+                                 variant=trial.arm, listed=path is not None, mounted_revision=trial.mounted_digest,
+                                 guide_reads=0), path

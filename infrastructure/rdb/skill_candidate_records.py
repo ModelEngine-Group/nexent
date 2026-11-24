@@ -25,6 +25,20 @@ def read_bound_skill_candidate(tenant_id, agent_id, version_no, candidate_id):
         return dict(row) if row else None
 
 
+def read_scoped_skill_candidate(tenant, agent, version, candidate, *, session=None):
+    with get_db_session(db_session=session) as session:
+        row = session.execute(text("""
+            SELECT c.candidate_id, c.result_digest, g.name, g.candidate_id AS source_candidate_id, g.digest AS source_digest
+              FROM nexent.evolution_skill_candidate_t c
+              JOIN nexent.evolution_release_guide_t g ON g.tenant_id=c.tenant_id AND g.agent_id=c.source_agent_id
+               AND g.version_no=c.source_version_no AND g.candidate_id=c.released_guide_candidate_id
+               AND g.name=c.skill_name AND g.digest=c.base_digest
+             WHERE c.tenant_id=:tenant AND c.source_agent_id=:agent AND c.source_version_no=:version
+               AND c.candidate_id=:candidate AND c.feedback->>'method'='S2'
+        """), dict(tenant=tenant, agent=agent, version=version, candidate=candidate)).mappings().one_or_none()
+        return dict(row) if row else None
+
+
 def candidate_skill_row(row, bound, variant):
     if bound.get("method") == "S4":
         build = bound["script_build"]

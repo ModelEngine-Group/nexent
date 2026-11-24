@@ -55,6 +55,18 @@ def test_target_must_be_unique_and_long_term_scope_excludes_current_delivery():
     assert future_request("以后这个 Skill 要保留来源，这次先补上编号 123。") == "以后这个 Skill 要保留来源"
 
 
+def test_continue_clarification_preserves_the_kind_of_skill_target():
+    from management.db.conversation.suggestions import _pending_target
+
+    shared = {"skill_id": 7, "name": "shared"}
+    scoped = {"released_guide_candidate_id": 7, "name": "local"}
+    skills = [shared, scoped]
+    assert _pending_target(skills, {"skill_id": 7}) == shared
+    assert _pending_target(skills, {"skill_id": None, "released_guide_candidate_id": 7}) == scoped
+    assert _pending_target(skills, {"skill_id": None}) is None
+    assert _pending_target([shared], {"released_guide_candidate_id": 7}) is None
+
+
 def test_linked_experiment_requires_target_and_protection_preserves_old_submission_digest():
     args = dict(request_id="request", agent_id=7, version_no=1, candidate_id=4, candidate_type="skill_step",
                 case_ids=[3], evaluator_id=1)

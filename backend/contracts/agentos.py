@@ -784,6 +784,23 @@ class NewSkillTrial(RunSpecModel):
     arm: Literal["base", "result"]
 
 
+class ScopedSkillStepTrial(RunSpecModel):
+    candidate_id: PositiveInt
+    source: ReleasedSkillGuide
+    result_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    arm: Literal["base", "result", "no_skill"]
+
+    @classmethod
+    def from_binding(cls, row, arm):
+        return cls(candidate_id=row["candidate_id"], result_digest=row["result_digest"], arm=arm,
+                   source=ReleasedSkillGuide(name=row["name"], candidate_id=row["source_candidate_id"],
+                                             digest=row["source_digest"]))
+
+    @property
+    def mounted_digest(self):
+        return {"base": self.source.digest, "result": self.result_digest, "no_skill": None}[self.arm]
+
+
 class MCPReplyProbe(RunSpecModel):
     kind: Literal["text", "structured"]
     initial_digest: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = Field(default=None, exclude_if=lambda v: v is None)
@@ -796,6 +813,7 @@ class PreparedEvaluationRun(AgentRunSpec):
     replay_trial_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
     evaluation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     new_skill_trial: NewSkillTrial | None = Field(default=None, exclude_if=lambda v: v is None)
+    scoped_skill_trials: list[ScopedSkillStepTrial] = Field(default_factory=list, max_length=2, exclude_if=lambda v: not v)
     omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
     watch_mcp_replies: dict[str, MCPReplyProbe] | None = Field(
@@ -817,11 +835,18 @@ class PreparedEvaluationRun(AgentRunSpec):
 
 class SkillTrialObservation(RunSpecModel):
     candidate_id: PositiveInt
-    instance_id: PositiveInt
+    instance_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
+    released_guide_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     variant: Literal["no_skill", "base", "result"]
     listed: bool
     mounted_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     guide_reads: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def one_skill_target(self):
+        if (self.instance_id is None) == (self.released_guide_candidate_id is None):
+            raise ValueError("Identify exactly one Skill binding")
+        return self
 
 
 ScriptHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]

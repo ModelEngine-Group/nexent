@@ -10,7 +10,7 @@ from collections import Counter
 from contextlib import ExitStack, asynccontextmanager
 
 from backend.http.client import create_httpx_client
-from contracts.agentos import EvaluationAgentRun, NewSkillTrial, ToolSetCheck
+from contracts.agentos import EvaluationAgentRun, NewSkillTrial, ScopedSkillStepTrial, ToolSetCheck
 from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -18,7 +18,7 @@ from contracts.evolution import DevelopmentExperimentRequest, DevelopmentRunBudg
 from contracts.evolution_metering import evaluation_budget
 from contracts.evaluation_answer import has_completed_root_answer
 from infrastructure.agentos_client import AgentOSClient
-from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial
+from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial, read_scoped_skill_candidate
 from management.db.conversation.evolution_review import recent_review_batches, recent_reviews
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import prompt_example_sources
@@ -72,13 +72,23 @@ async def _snapshot(request, tenant, user, variant):
     if request.components:
         return await _combination_snapshot(request, tenant, user, variant)
     options = {}
+    scoped = None
     if request.candidate_type in {"skill_step", "skill_discovery", "skill_script"}:
-        options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
+        if request.candidate_type == "skill_step":
+            scoped = await _io("read-scoped-skill-candidate", read_scoped_skill_candidate, tenant, request.agent_id,
+                               request.version_no, request.candidate_id)
+        if not scoped:
+            options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
     elif request.candidate_type == "prompt" and variant == "result":
         options = {"prompt_candidate_id": request.candidate_id}
     spec = await prepare_evaluation_snapshot(
         EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query=""), user, tenant,
         language=request.language, **options)
+    if scoped:
+        trial = ScopedSkillStepTrial.from_binding(scoped, variant)
+        if trial.source not in spec.resource.released_skill_guides:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The scoped Skill version changed while preparing the trial")
+        return spec.model_copy(update={"scoped_skill_trials": [trial]})
     if request.candidate_type == "tool_build":
         from management.services.evaluation.tool_build_candidate import pin_build
         return await _io("pin-reviewed-tool-build", pin_build, spec, tenant, request.candidate_id, variant)
@@ -127,8 +137,19 @@ async def _combination_snapshot(request, tenant, user, arm):
             if changed:
                 options["excluded_root_tools"] = frozenset(removed)
     spec = await prepare_evaluation_snapshot(run, user, tenant, language=request.language, **options)
+    scoped_trials = []
     for part, variant in skill_parts:
+        scoped = await _io("read-scoped-skill-candidate", read_scoped_skill_candidate, tenant, request.agent_id,
+                           request.version_no, part.candidate_id) if part.candidate_type == "skill_step" else None
+        if scoped:
+            trial = ScopedSkillStepTrial.from_binding(scoped, variant)
+            if trial.source not in spec.resource.released_skill_guides:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The scoped Skill version changed while preparing the trial")
+            scoped_trials.append(trial)
+            continue
         await _io("pin-combined-skill", pin_skill_candidate, spec.resource, tenant, part.candidate_id, variant)
+    if scoped_trials:
+        spec = spec.model_copy(update={"scoped_skill_trials": scoped_trials})
     if tool_check:
         spec = spec.model_copy(update={"tool_set_check": tool_check})
     if any(part.candidate_type == "skill_discovery" for part, _ in skill_parts):
@@ -137,7 +158,7 @@ async def _combination_snapshot(request, tenant, user, arm):
 
 
 async def _check_components(request, tenant, user):
-    skill_instances = set()
+    skill_targets = set()
     for part in request.components:
         plan = await _io("load-single-component", jobs.read_plan, tenant, part.experiment_id, True)
         source = (plan or {}).get("request", {})
@@ -161,9 +182,13 @@ async def _check_components(request, tenant, user):
         if part.candidate_type.startswith("skill_"):
             binding = await _io("check-combined-skill-binding", read_bound_skill_candidate, tenant, request.agent_id,
                                 request.version_no, part.candidate_id)
-            if not binding or binding["instance_id"] in skill_instances:
+            scoped = await _io("read-scoped-skill-candidate", read_scoped_skill_candidate, tenant, request.agent_id,
+                               request.version_no, part.candidate_id) if not binding and plan.get("released_guide_candidate_id") else None
+            binding_key = (("instance", binding["instance_id"]) if binding else
+                           ("guide", scoped["source_candidate_id"]) if scoped else None)
+            if not binding_key or binding_key in skill_targets:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select two different resource bindings")
-            skill_instances.add(binding["instance_id"])
+            skill_targets.add(binding_key)
         for arm in ("base", "result"):
             compiled = await _snapshot(DevelopmentExperimentRequest.model_validate(source), tenant, user, arm)
             if source.get("language", "zh") != request.language or snapshot_digest(compiled) != plan["snapshots"][arm]:
@@ -220,11 +245,15 @@ async def create_experiment(request, tenant, user):
     if request.components:
         await _check_components(request, tenant, user)
     script_build = None
+    scoped = None
     if request.candidate_type in {"skill_step", "skill_discovery", "skill_script"}:
         bound = await _io("verify-skill-method", read_bound_skill_candidate, tenant, request.agent_id,
                           request.version_no, request.candidate_id)
         method = {"skill_discovery": "S1", "skill_step": "S2", "skill_script": "S4"}[request.candidate_type]
-        if not bound or bound["method"] != method:
+        if not bound and method == "S2":
+            scoped = await _io("read-scoped-skill-candidate", read_scoped_skill_candidate, tenant, request.agent_id,
+                               request.version_no, request.candidate_id)
+        if not scoped and (not bound or bound["method"] != method):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose the experiment matching the Skill candidate")
         if method == "S4":
             script_build = bound["script_build"]
@@ -302,6 +331,8 @@ async def create_experiment(request, tenant, user):
         if request.candidate_type in {"tool_mapping", "tool_build"}:
             bindings_by_arm[variant] = spec.resource
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
+    if scoped:
+        plan["released_guide_candidate_id"] = scoped["source_candidate_id"]
     plan["budget"] = {**budget.model_dump(), "planned_replay_turns": planned_turns}
     if allowance:
         if any(str(model) not in allowance.models for model in billable_models):

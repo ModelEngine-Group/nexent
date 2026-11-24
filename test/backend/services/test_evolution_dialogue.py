@@ -16,7 +16,7 @@ from management.services.evaluation.tool_use import judge_dialogue_tools
 @pytest.mark.parametrize("failure", ["receipt_id", "outcome", "missing_final", "private_bucket", "followup_revoked", None])
 @pytest.mark.asyncio
 async def test_followup_receives_only_this_arms_completed_answer(failure):
-    spec = Mock(new_skill_trial=None, confirmation_bucket="private" if failure == "private_bucket" else None,
+    spec = Mock(new_skill_trial=None, scoped_skill_trials=[], confirmation_bucket="private" if failure == "private_bucket" else None,
                 resource=SimpleNamespace(skill_refs=[]), observe_root_skill_choices=False, tool_set_check=None)
     spec.model_copy.side_effect = lambda update: SimpleNamespace(**update)
     job = {"receipt_id": "3" * 32, "trial_id": 44}
