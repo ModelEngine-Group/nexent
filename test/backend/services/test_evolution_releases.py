@@ -90,6 +90,7 @@ def test_changed_shared_metadata_aborts_publication():
         ({"new_version": 3}, "本租户智能体 #7 发布 V3"),
         ({"new_version": 3, "rollback_at": "now"}, "已回退"),
         ({"new_version": 3, "disabled": True}, "已紧急停用"),
+        ({"lock_id": None, "experiment_id": None, "has_candidate": True}, "已生成候选"),
     ],
 )
 def test_submitter_receipt_tracks_release_state(state, message):
@@ -106,12 +107,15 @@ def test_submitter_receipt_tracks_release_state(state, message):
         disabled=False,
         rollback_at=None,
         stopped=False,
+        has_candidate=False,
     )
     session.execute.return_value.mappings.return_value.all.return_value = [{**row, **state}]
     actual = _status_reply(
-        session, {"tenant": "tenant", "owner": "submitter", "cid": 8}, "S-11", lambda zh, en: zh
+        session, {"tenant": "tenant", "owner": "submitter", "cid": 8}, "S-11",
+        lambda zh, en, *, suggestion_id: {"message": zh, "suggestion_id": suggestion_id},
     )
-    assert message in actual
+    assert message in actual["message"]
+    assert actual["suggestion_id"] == 11
 
 
 def tool_comparison(base_names, result_names):
