@@ -12,7 +12,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
+    added: [EVOLUTION-RUN-BUDGET-D3-001, EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
     modified: []
     retired: []
   traditional_ut:
@@ -30,6 +30,7 @@ change:
     - test/backend/services/test_evolution_tool_use.py
     - test/backend/services/test_evolution_tool_sets.py
     - test/backend/services/test_evolution_combinations.py
+    - test/backend/services/test_evolution_run_budget.py
     - test/backend/services/test_evolution_replay.py
     - test/backend/services/test_evolution_dialogue.py
     - test/backend/services/test_evolution_file_state.py
@@ -50,6 +51,7 @@ change:
     - test/backend/services/test_evolution_confirmation.py
     - test/backend/services/test_prepared_public_turn.py
     behaviors:
+    - 开发实验在启动前计入所有对照组、固定回归及追问。总时限包括排队，预算不足不提交，到期停派，迟到不能计分。
     - 会话授权按原始请求生效，重试沿用原授权。
     - 撤回或到期后重试不能沿用旧授权，缺证轮次与没有发现问题的轮次分别统计。
     - 只有人工原话中的明确改进意图可以登记；一次性交付和引用内容不能代替提交授权。

@@ -18,4 +18,6 @@ feature:
     description: 工具参数格式改动须用同一模型入参验证传输实参已纠正，正常值继续通过，正式版本只装载已确认的映射。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-05
     description: Skill 脚本专项题以沙箱实际运行的脚本、输入、退出码和输出判分，缺证不能计为通过。
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-06
+    description: 开发实验冻结全部重放轮数和总时限，按租户限制并发，到期保留已有结果，缺少有效判分时不能提名。
   required_test_stages: [D1, D2, D3]

@@ -211,6 +211,8 @@ function Experiments({
   const [caseIds, setCases] = useState<number[]>([]);
   const [screen, setScreen] = useState(false);
   const [chosenMetric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
+  const [turnLimit, setTurnLimit] = useState<number | null>(1000);
+  const [elapsedLimit, setElapsedLimit] = useState<number | null>(3600);
   const [minimum, setMinimum] = useState<number | null>(1);
   const [targets, setTargets] = useState<number[]>([]);
   const [candidate, setCandidate] = useState<string>();
@@ -272,6 +274,7 @@ function Experiments({
         suggestion_target_case_id: suggestion ? targetCase : undefined,
         case_ids: caseIds,
         screening: screen && kind !== "baseline" ? { metric, minimum: minimum!, target_case_ids: targets } : undefined,
+        budget: { max_replay_turns: turnLimit!, max_elapsed_seconds: elapsedLimit! },
         evaluator_id: evaluatorId!,
         judge_model_id: needsJudge ? judge : undefined,
         language: i18n.language.startsWith("zh") ? "zh" : "en",
@@ -404,6 +407,12 @@ function Experiments({
               {t("evolution.newCase")}
             </Button>
           </Flex>
+          <Flex gap={12} wrap>
+            <label>{t("evolution.budget.turns")} <InputNumber value={turnLimit} onChange={setTurnLimit}
+              aria-label={t("evolution.budget.turns")} min={1} max={10000} precision={0} /></label>
+            <label>{t("evolution.budget.elapsed")} <InputNumber value={elapsedLimit} onChange={setElapsedLimit}
+              aria-label={t("evolution.budget.elapsed")} min={1} max={604800} precision={0} /></label>
+          </Flex>
           {candidate && candidate !== "baseline" && <>
             <Checkbox checked={screen} onChange={e => setScreen(e.target.checked)}>{t("evolution.screen.enable")}</Checkbox>
             {screen && <Flex gap={8} wrap>
@@ -459,7 +468,7 @@ function Experiments({
             <Button
               type="primary"
               disabled={
-                !candidate || (!!proposed && scopeLabels.size !== 2) ||
+                !turnLimit || !elapsedLimit || !candidate || (!!proposed && scopeLabels.size !== 2) ||
                 (candidate !== "baseline" && screen && (!targets.length || !minimum ||
                   (metric !== "input_token_reduction_pct" && minimum > targets.length) ||
                   targets.some(id => !caseIds.includes(id) || fixedDigests.has(choices.cases.find(c => c.case_id === id)?.digest ?? "")))) ||
@@ -508,6 +517,10 @@ function Experiments({
             {report.data.components && <Typography.Text>{t("evolution.quartets", {
               valid: report.data.valid_quartets, total: report.data.total_tasks,
               a: report.data.components[0].experiment_id, b: report.data.components[1].experiment_id,
+            })}</Typography.Text>}
+            {report.data.budget && <Typography.Text>{t("evolution.budget.report", {
+              planned: report.data.budget.planned_replay_turns, limit: report.data.budget.max_replay_turns,
+              deadline: new Date(report.data.budget.deadline).toLocaleString(), expired: report.data.budget.expired_trials,
             })}</Typography.Text>}
             {report.data.fixed_regression && <Typography.Text>{t("evolution.fixedCoverage", {
               total: report.data.fixed_regression.case_ids.length,

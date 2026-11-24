@@ -74,7 +74,13 @@ export interface ScreeningCriteria {
   target_case_ids: number[];
 }
 
+interface DevelopmentRunBudget {
+  max_replay_turns: number;
+  max_elapsed_seconds: number;
+}
+
 export interface ExperimentReport {
+  budget?: DevelopmentRunBudget & { planned_replay_turns: number; deadline: string; expired_trials: number };
   script_source_cases?: number[];
   screening?: { status: "eligible" | "failed" | "incomplete"; criteria: ScreeningCriteria; gain: number | null;
     failures: Record<string, number[]>; missing: Record<string, number[]> };
@@ -185,6 +191,7 @@ export const evolutionService = {
       preceding_turns?: number };
   }) => read<{ case_id: number }>(`${root}/development-cases`, body),
   submit: (body: {
+    budget?: DevelopmentRunBudget;
     components?: EvaluatedCandidate[];
     suggestion_id?: number;
     suggestion_target_case_id?: number;

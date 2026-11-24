@@ -1,0 +1,42 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-RUN-BUDGET-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-06]
+  title: 开发实验按租户限制并发，到期保留已有判分
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 在真实数据库验证多个 worker 争抢额度、租户隔离及截止后拒收迟到结果。
+  preconditions: [可创建临时数据库的 PostgreSQL 实例。]
+  test_data:
+    profile: 两个租户，第一组有多个排队任务，第二组有独立任务。
+  steps:
+  - order: 1
+    action: 多个 worker 同时领取第一租户的工作并尝试领取第二租户任务。
+    expected: 第一租户的运行数不超过限额。第二租户可以独立领取。
+  - order: 2
+    action: 保留一项已完成的判分，在另一项执行中使本实验截止，提交迟到结果并重新领取。
+    expected: 已完成结果保留，进行中及排队任务得到超时原因，迟到结果不能改写。
+  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。]
+  forbidden_side_effects: [单个租户的实验不能占用另一租户的额度。]
+  acceptance:
+  - id: AC-01
+    description: 多 worker 同时申请额度且其他租户可运行。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 跨进程重领和迟到写入均服从已冻结的截止时间。
+    steps: [2]
+    expected_results: [2]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary: [Management 的实验提交、数据库领取及完成事务使用独立 PostgreSQL 测试库。]
+  observations: [运行回执、终态、错误原因及保留的判分。]
+  cleanup: [销毁临时数据库。]

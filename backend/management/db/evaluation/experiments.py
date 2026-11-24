@@ -2,14 +2,23 @@
 """Atomic submission, claim, completion and cancellation of development experiments."""
 
 import json
+import time
 from uuid import uuid4
 
 from sqlalchemy import text
 
+from contracts.constants.environment import EVOLUTION_MAX_RUNNING_TRIALS_PER_TENANT
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from infrastructure.rdb.client import get_db_session
 from management.db.evaluation.replay_cases import task_digest
+
+
+# Prior experiments have no overall deadline. PostgreSQL is the clock shared by all workers.
+_DEADLINE = "e.create_time + make_interval(secs => (e.plan->'budget'->>'max_elapsed_seconds')::integer)"
+_RUNNING = """SELECT count(*) FROM nexent.evolution_trial_t active
+              JOIN nexent.evolution_experiment_t owner USING (experiment_id)
+              WHERE active.status='running' AND owner.tenant_id=e.tenant_id"""
 
 
 def previous_submission(tenant, user, request):
@@ -68,13 +77,13 @@ def submit(tenant, user, request, plan):
 
 def scope(tenant, eid):
     with get_db_session() as session:
-        row = session.execute(text("""
-            SELECT agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
+        row = session.execute(text(f"""
+            SELECT e.plan->'budget' AS budget, {_DEADLINE} AS deadline, agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
                    plan->'script_build'->'source_cases' AS script_source_cases,
                    plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
                    ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
                    ARRAY(SELECT jsonb_object_keys(plan->'snapshots')) AS planned_arms
-              FROM nexent.evolution_experiment_t WHERE tenant_id=:tenant AND experiment_id=:eid
+              FROM nexent.evolution_experiment_t e WHERE tenant_id=:tenant AND experiment_id=:eid
         """), dict(tenant=tenant, eid=eid)).mappings().one_or_none()
         return dict(row) if row else None
 
@@ -102,24 +111,47 @@ def cancel(tenant, eid):
 
 def claim(experiment_id=None):
     with get_db_session() as session:
+        session.execute(text(f"""
+            UPDATE nexent.evolution_trial_t t SET status='error', lease_until=NULL,
+                   result=jsonb_build_object('error', 'experiment_time_budget_exceeded')
+              FROM nexent.evolution_experiment_t e
+             WHERE t.experiment_id=e.experiment_id AND t.status IN ('pending','running')
+               AND {_DEADLINE} <= statement_timestamp()
+        """))
         session.execute(text("""
             UPDATE nexent.evolution_trial_t SET status='error', lease_until=NULL,
                 result='{"error":"worker_interrupted"}'::jsonb WHERE status='running' AND lease_until < now()
         """))
-        row = session.execute(text("""
+        params = {"eid": experiment_id, "limit": EVOLUTION_MAX_RUNNING_TRIALS_PER_TENANT}
+        row = session.execute(text(f"""
             SELECT t.trial_id, t.case_id, t.variant, e.experiment_id, e.tenant_id, e.created_by, e.plan
             FROM nexent.evolution_trial_t t JOIN nexent.evolution_experiment_t e USING (experiment_id)
-            WHERE t.status='pending' AND NOT e.cancelled
+            WHERE t.status='pending' AND NOT e.cancelled AND ({_RUNNING}) < :limit
                 AND (CAST(:eid AS bigint) IS NULL OR e.experiment_id=:eid) ORDER BY trial_id
             LIMIT 1 FOR UPDATE OF t SKIP LOCKED
-        """), {"eid": experiment_id}).mappings().one_or_none()
+        """), params).mappings().one_or_none()
         if not row:
             return None
         job = {**row, "receipt_id": uuid4().hex}
-        session.execute(text("""
-            UPDATE nexent.evolution_trial_t SET status='running', lease_until=now()+interval '120 seconds',
-                receipt_id=:receipt_id, cleanup_due=now()+interval '3 minutes' WHERE trial_id=:trial_id
+        # Serialize admission, then count again in a new READ COMMITTED statement.
+        admitted = session.scalar(text("""
+            SELECT pg_try_advisory_xact_lock(hashtextextended('evolution-trial:' || :tenant_id, 0))
         """), job)
+        if not admitted:
+            return None
+        claim_time = time.monotonic()
+        claimed = session.execute(text(f"""
+            UPDATE nexent.evolution_trial_t t SET status='running', lease_until=now()+interval '120 seconds',
+                receipt_id=:receipt_id, cleanup_due=now()+interval '3 minutes'
+            FROM nexent.evolution_experiment_t e WHERE t.experiment_id=e.experiment_id AND t.trial_id=:trial_id
+                AND NOT e.cancelled AND ({_RUNNING}) < :limit
+                AND ({_DEADLINE} IS NULL OR {_DEADLINE} > statement_timestamp())
+            RETURNING extract(epoch FROM ({_DEADLINE} - statement_timestamp()))::float8 AS remaining_seconds
+        """), {**job, "limit": params["limit"]}).mappings().one_or_none()
+        if not claimed:
+            return None
+        if claimed.remaining_seconds is not None:
+            job["monotonic_deadline"] = claim_time + claimed.remaining_seconds
         return job
 
 
@@ -226,9 +258,14 @@ def workspace_choices(tenant, agent_id, version):
 
 def finish(job, status, result):
     with get_db_session() as session:
-        return bool(session.execute(text("""
-            UPDATE nexent.evolution_trial_t SET status=:status, result=CAST(:result AS jsonb), lease_until=NULL
-            WHERE trial_id=:trial_id AND receipt_id=:receipt_id AND status='running' AND lease_until >= now()
+        return bool(session.execute(text(f"""
+            UPDATE nexent.evolution_trial_t t SET
+                status=CASE WHEN {_DEADLINE} <= statement_timestamp() THEN 'error' ELSE :status END,
+                result=CASE WHEN {_DEADLINE} <= statement_timestamp()
+                            THEN jsonb_build_object('error','experiment_time_budget_exceeded') ELSE CAST(:result AS jsonb) END,
+                lease_until=NULL
+            FROM nexent.evolution_experiment_t e WHERE t.experiment_id=e.experiment_id
+                AND t.trial_id=:trial_id AND t.receipt_id=:receipt_id AND t.status='running' AND t.lease_until >= now()
         """), {**job, "status": status, "result": json.dumps(result, ensure_ascii=False, allow_nan=False)}).rowcount)
 
 

@@ -260,6 +260,14 @@ class DevelopmentScreening(BaseModel):
         return self
 
 
+class DevelopmentRunBudget(BaseModel):
+    """Limits for one submitted development experiment, including fixed regression tasks."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    max_replay_turns: int = Field(default=1000, ge=1, le=10000)
+    max_elapsed_seconds: int = Field(default=3600, ge=1, le=604800)
+
+
 class DevelopmentExperimentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     suggestion_id: int | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
@@ -276,6 +284,8 @@ class DevelopmentExperimentRequest(BaseModel):
     language: Literal["en", "zh"] = "zh"
     timeout_seconds: int = Field(default=300, ge=1, le=3600)
     screening: DevelopmentScreening | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    budget: DevelopmentRunBudget | None = Field(default=None, exclude_if=lambda value: value is None)
 
     def evaluates_skill_choices(self):
         return self.candidate_type in {"skill_discovery", "skill_new"} or any(

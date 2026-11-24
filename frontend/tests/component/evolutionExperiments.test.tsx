@@ -170,6 +170,7 @@ it("selects a published scope and opens its paired results with the original sta
   fireEvent.click(compare);
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
+    budget: { max_replay_turns: 1000, max_elapsed_seconds: 3600 },
     screening: { target_case_ids:[10], metric:"tasks_fixed", minimum:1 },
   })));
 });

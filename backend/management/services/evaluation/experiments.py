@@ -14,7 +14,7 @@ from contracts.agentos import EvaluationAgentRun, NewSkillTrial, ToolSetCheck
 from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from contracts.evolution import DevelopmentExperimentRequest
+from contracts.evolution import DevelopmentExperimentRequest, DevelopmentRunBudget
 from contracts.evaluation_answer import has_completed_root_answer
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial
@@ -230,6 +230,7 @@ async def create_experiment(request, tenant, user):
     if set(source_cases).intersection([*request.case_ids, *map(int, fixed)]):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Keep original script examples separate from fresh tasks and regression")
     cases = {}
+    replay_turns = 0
     trace_baseline_digest = None
     development_sources, fixed_sources = set(), set()
     proposed_name = (await _new_skill_proposal(request, tenant))["name"] if request.candidate_type == "skill_new" else None
@@ -237,6 +238,7 @@ async def create_experiment(request, tenant, user):
     for case_id in dict.fromkeys([*request.case_ids, *map(int, fixed), *source_cases]):
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
+        replay_turns += 1 + len(case["task"].get("followups") or [])
         sources = example_source_keys(case["task"])
         if request.candidate_type != "baseline" and str(case_id) not in fixed and case["task"].get("trace_source"):
             if trace_baseline_digest is None:
@@ -268,6 +270,11 @@ async def create_experiment(request, tenant, user):
     arms = {"baseline": ("base",), "skill_step": ("base", "result", "no_skill"),
             "combination": ("base", "only_a", "only_b", "result")}.get(
         request.candidate_type, ("base", "result"))
+    budget = request.budget or DevelopmentRunBudget()
+    planned_turns = replay_turns * len(arms)
+    if planned_turns > budget.max_replay_turns:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
+                           f"Experiment requires {planned_turns} replay turns; budget allows {budget.max_replay_turns}")
     mapping_arms = {}
     for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
@@ -275,6 +282,7 @@ async def create_experiment(request, tenant, user):
         if request.candidate_type == "tool_mapping":
             mapping_arms[variant] = spec.resource
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
+    plan["budget"] = {**budget.model_dump(), "planned_replay_turns": planned_turns}
     if script_build:
         plan["script_build"] = script_build
     if mapping_arms:
@@ -381,6 +389,9 @@ def experiment_report(tenant, user, eid, *, cancel=False):
         decision["screening"] = screen_development(plan, pairs, cancelled=scope["cancelled"] or cancel)
     return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
             **decision,
+            **({"budget": {**scope["budget"], "deadline": scope["deadline"],
+                           "expired_trials": sum((row.get("result") or {}).get("error") == "experiment_time_budget_exceeded"
+                                                 for row in rows)}} if scope.get("budget") else {}),
             **({"script_source_cases": scope["script_source_cases"]} if scope.get("script_source_cases") else {}),
             **({"fixed_regression": regression_coverage(fixed, pairs, ("base", "only_a", "only_b", "result")
                                                        if scope.get("components") else ("base", "result"))}
@@ -575,7 +586,14 @@ async def run_verified_arm(request, job, case, spec, client, stage_input):
 
 async def _work_one(job):
     budget = DevelopmentExperimentRequest.model_validate(job["plan"]["request"]).timeout_seconds
-    trial = asyncio.create_task(asyncio.wait_for(execute_trial(job), timeout=budget))
+    remaining = job.get("monotonic_deadline")
+    if remaining is not None:
+        remaining -= time.monotonic()
+        if remaining <= 0:
+            await _io("expire-development-trial", jobs.finish, job, "error", {"error": "experiment_time_budget_exceeded"})
+            return
+    overall_limit = remaining is not None and remaining <= budget
+    trial = asyncio.create_task(asyncio.wait_for(execute_trial(job), timeout=remaining if overall_limit else budget))
     try:
         while not trial.done():
             done, _ = await asyncio.wait({trial}, timeout=20)
@@ -583,7 +601,7 @@ async def _work_one(job):
                 return
         status, result = trial.result()
     except TimeoutError:
-        status, result = "error", {"error": "time_budget_exceeded"}
+        status, result = "error", {"error": "experiment_time_budget_exceeded" if overall_limit else "time_budget_exceeded"}
     except Exception as exc:
         status, result = "error", {"error": type(exc).__name__}
         logger.warning("Development trial %s failed (%s)", job["trial_id"], type(exc).__name__)
