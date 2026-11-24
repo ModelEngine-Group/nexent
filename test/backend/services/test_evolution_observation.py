@@ -64,3 +64,19 @@ def test_score_range_comes_from_the_rule_and_threshold_is_inclusive():
 def test_unbound_rule_rejected_before_scoring(requirements):
     with pytest.raises(ValueError, match="evidence"):
         grade({1: code_rule("1/0")}, requirements)
+
+
+@pytest.mark.parametrize("scope,expected", [({}, "fail"), ({"invocation_id": "child-run", "depth": 1}, "pass")])
+def test_trial_does_not_use_fallback_to_pass_root_step_budget(scope, expected):
+    from management.services.evaluation.experiments import _grade
+
+    rule = code_rule("{'score': int(expected == actual)}")
+    job = {"tenant_id": "tenant", "created_by": "editor", "plan": {"evaluator": rule}}
+    request = SimpleNamespace(evaluator_id=3, language="en", judge_model_id=None)
+    observed = SimpleNamespace(answer="FIN", events=[
+        {"type": "max_steps_reached", **scope}, {"type": "final_answer", "answer_phase": "complete", "content": "FIN"},
+    ])
+    judgment = _grade(request, job, {"query": "Route a refund ticket", "expected": "FIN"}, observed)
+    assert judgment["status"] == expected
+    if expected == "fail":
+        assert judgment["reason"] == "task_step_budget_exhausted"
