@@ -141,7 +141,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                     attempt,
                     arm_measurement(
                         status, details, task=task, require_selection=req.evaluates_skill_choices(), step_ids=step_ids, mapping=plan.get("tool_mapping"),
-                        script_build=plan.get("script_build"), arm=arm
+                        script_build=plan.get("script_build"), arm=arm, tool_build=plan.get("tool_build")
                     ),
                 )
             measured[arm] = observation
@@ -154,6 +154,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
         require_guide=req.candidate_type == "skill_step",
         require_new_skill=req.candidate_type == "skill_new",
         required_step_ids=step_ids, require_script=req.candidate_type == "skill_script", require_mapping=req.candidate_type == "tool_mapping",
+        require_tool_build=req.candidate_type == "tool_build",
     )
     return await _io(
         "record-independent-result", confirmation_runs.finalize, tenant, curator, protocol, summary

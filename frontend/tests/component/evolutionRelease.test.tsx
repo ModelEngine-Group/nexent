@@ -151,7 +151,20 @@ it("shows the approved script and the sandbox image verified before release", as
   expect(screen.getByText(image)).toBeInTheDocument();
 });
 
-it.each(["skill_new","skill_discovery","skill_script","tool_mapping","combination"])(
+it("shows both independently verified MCP images before publishing", async () => {
+  const original = "sha256:" + "1".repeat(64);
+  const candidate = "sha256:" + "2".repeat(64);
+  vi.mocked(api.release).mockResolvedValue({
+    ...passed,
+    candidate_type: "tool_build",
+    tool_build: { tool: "record_receipt", base: { image: original }, result: { image: candidate } },
+  });
+  open();
+  expect(await screen.findByText(original)).toBeInTheDocument();
+  expect(screen.getByText(candidate)).toBeInTheDocument();
+});
+
+it.each(["skill_new","skill_discovery","skill_script","tool_mapping","tool_build","combination"])(
   "submits a supported %s release after the owner supplies a reason", async kind => {
     vi.mocked(api.release).mockResolvedValue({...passed,candidate_type:kind});
     open();

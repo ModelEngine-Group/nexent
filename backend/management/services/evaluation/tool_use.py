@@ -141,3 +141,29 @@ def script_effect(base, result):
             or not result["passed"]):
         return None
     return "protected" if base["passed"] else "corrected"
+
+
+
+def observed_build_call(result, build):
+    grade = result.get("tool_use") or {}
+    calls = [call for call in grade.get("mcp_evidence", ()) if call["tool"] == build["tool"]]
+    if len(calls) != 1:
+        return None
+    call = calls[0]
+    if not call["input_matches"] or not call.get("before") or type(call.get("state_matches")) is not bool:
+        return None
+    allowed = {"wrong_mcp_reply", "wrong_mcp_state", "mcp_remote_error"}
+    if call["error"]:
+        allowed.add("raised")
+    if any(issue["tool"] != build["tool"] or issue["reason"] not in allowed for issue in grade["issues"]):
+        return None
+    return {
+        "request": [call["remote"], call["kind"], call["inputs"], call["before"]],
+        "passed": call["reply_matches"] and call["state_matches"],
+    }
+
+
+def build_effect(old, new):
+    if not old or not new or old["request"] != new["request"] or not new["passed"]:
+        return None
+    return "protected" if old["passed"] else "corrected"

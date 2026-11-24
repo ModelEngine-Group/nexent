@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 def supports_release(candidate_type, components=None):
-    single = {"prompt", "tool_set", "tool_mapping", "skill_step", "skill_discovery", "skill_new", "skill_script"}
+    single = {"prompt", "tool_set", "tool_mapping", "tool_build", "skill_step", "skill_discovery", "skill_new", "skill_script"}
     if candidate_type == "combination":
         return len(components or []) == 2 and all(
             part["candidate_type"] in {"prompt", "tool_set", "skill_step", "skill_discovery"} for part in components

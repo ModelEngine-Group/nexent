@@ -2,7 +2,9 @@
 """Decide whether a development candidate can be submitted for independent confirmation."""
 
 from management.services.evaluation.confirmation_results import new_skill_use
-from management.services.evaluation.tool_use import mapping_effect, observed_mapping, observed_script, script_effect
+from management.services.evaluation.tool_use import (
+    build_effect, mapping_effect, observed_build_call, observed_mapping, observed_script, script_effect,
+)
 
 
 def _verified(row, case_digest, arm_digest, rubric):
@@ -69,6 +71,7 @@ def screen_development(plan, pairs, *, cancelled):
     skill_uses = set()
     mapping_effects = set()
     script_effects = set()
+    build_effects = set()
     choices_fixed = 0
     fixed = base_tokens = candidate_tokens = 0
 
@@ -105,6 +108,17 @@ def screen_development(plan, pairs, *, cancelled):
                     mapping_effects.add(effect)
             if effect == "protected" and base["status"] == "pass":
                 mapping_effects.add(effect)
+        if request["candidate_type"] == "tool_build" and "base" in verified and result["status"] == "pass":
+            base = pair["base"]
+            build = plan["tool_build"]
+            effect = build_effect(observed_build_call(base["result"], build), observed_build_call(evidence, build))
+            if cid in targets and base["status"] == "fail":
+                if effect != "corrected":
+                    gaps.setdefault("tool_build_unproven_gain", []).append(cid)
+                else:
+                    build_effects.add(effect)
+            if effect == "protected" and base["status"] == "pass":
+                build_effects.add(effect)
         if request["candidate_type"] == "skill_script" and "base" in verified:
             build = plan["script_build"]
             base = pair["base"]
@@ -166,6 +180,8 @@ def screen_development(plan, pairs, *, cancelled):
         gaps["script_scope_coverage"] = []
     if request["candidate_type"] == "tool_mapping" and mapping_effects != {"corrected", "protected"}:
         gaps["mapping_scope_coverage"] = []
+    if request["candidate_type"] == "tool_build" and build_effects != {"corrected", "protected"}:
+        gaps["tool_build_scope_coverage"] = []
     if request["candidate_type"] == "combination" and not gaps:
         _measure_combination(criteria, request["components"], targets, pairs, gaps, failures)
     if request["candidate_type"] == "skill_new" and not {"used", "skipped"} <= skill_uses:

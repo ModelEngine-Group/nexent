@@ -38,6 +38,7 @@ def create_tool(tool_info, version_no: int = 0):
     """
     tool_info_dict = tool_info.copy()
     tool_info_dict.pop("released_argument_formats", None)
+    tool_info_dict.pop("released_mcp_implementation", None)
     tool_info_dict.setdefault("version_no", version_no)
 
     with get_db_session() as session:
@@ -78,6 +79,7 @@ def create_or_update_tool_by_tool_info(
         tool_info_dict["params"] = {k: v for k, v in tool_info_dict["params"].items() if v is not None}
 
     tool_info_dict.pop("released_argument_formats", None)
+    tool_info_dict.pop("released_mcp_implementation", None)
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
         # Note: Do not filter by user_id to avoid creating duplicate instances

@@ -84,6 +84,11 @@ export default function ReleasePage() {
                 {data.script_build.name} · <code>{data.script_build.path}</code> · <code>{data.script_build.function}</code>
                 <br/>{t("evolution.verifiedImage")} <code>{data.script_build.image}</code>
               </Typography.Paragraph>}
+              {data.tool_build && <Typography.Paragraph>
+                {t("evolution.kind.tool_build")} · {data.tool_build.tool}
+                <br/><del><code>{data.tool_build.base.image}</code></del>
+                <br/><ins><code>{data.tool_build.result.image}</code></ins>
+              </Typography.Paragraph>}
               {data.tool_mapping && <Typography.Text>
                 {data.tool_mapping.tool}.{data.tool_mapping.field} · {t(`evolution.mapping.${data.tool_mapping.proposed[data.tool_mapping.field].kind}`)}
               </Typography.Text>}

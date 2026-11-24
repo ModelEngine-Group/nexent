@@ -110,6 +110,7 @@ class ToolInstance(TableBase):
     agent_id = Column(Integer, doc="Agent ID")
     params = Column(JSON, doc="Parameter configuration")
     released_argument_formats = Column(JSON(none_as_null=True), doc="Confirmed public MCP argument formats for this agent version")
+    released_mcp_implementation = Column(JSONB(none_as_null=True), doc="Verified deployment for this released MCP tool")
     user_id = Column(String(100), doc="User ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, doc="Enabled")
@@ -123,7 +124,8 @@ def read_bound_mcp_tools(agent_id: int, version_no: int, tenant_id: str, names: 
     tool, instance = ToolInfo, ToolInstance
     with get_db_session() as session:
         rows = session.execute(select(
-            instance.tool_instance_id, instance.params.label("instance_params"), instance.released_argument_formats, tool.name, tool.class_name,
+            instance.tool_instance_id, instance.params.label("instance_params"),
+            instance.released_argument_formats, instance.released_mcp_implementation, tool.name, tool.class_name,
             tool.usage, tool.origin_name, tool.params, tool.description, tool.inputs, tool.output_type,
         ).join(instance, instance.tool_id == tool.tool_id).where(
             instance.agent_id == agent_id, instance.version_no == version_no, instance.tenant_id == tenant_id,

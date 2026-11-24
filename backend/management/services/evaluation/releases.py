@@ -72,6 +72,10 @@ def _materials(tenant, ctx, prepared):
             prompt = resolve_prompt_candidate(
                 tenant, ctx["submitted_by"], agent, version, candidate_id
             )["result_text"]
+        elif part_kind == "tool_build":
+            from management.services.evaluation.tool_build_candidate import build_difference
+            if build_difference(base, new) != ctx["plan"].get("tool_build"):
+                releases.reject("The independently tested MCP build changed")
         elif part_kind == "tool_mapping" and kind == "tool_mapping":
             from management.services.evaluation.tool_mapping_candidates import mapping_difference
             if mapping_difference(base, new) != ctx["plan"].get("tool_mapping"):
@@ -199,6 +203,7 @@ async def promote(tenant, actor, lock, request):
         removed,
         guide,
         ctx["plan"].get("tool_mapping") if recipe["candidate_type"] == "tool_mapping" else None,
+        ctx["plan"].get("tool_build") if recipe["candidate_type"] == "tool_build" else None,
     )
 
 

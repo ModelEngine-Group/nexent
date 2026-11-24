@@ -21,7 +21,10 @@ case:
   - order: 2
     action: 在普通 V1 请求中夹带映射，在 V2 请求中省略已发布映射，再在另一个租户读取。
     expected: 三次均拒绝装载。
-  expected_results: [日期及其两处摘要与受测版本一致。, 旧版、新版和租户边界不能被请求改写。]
+  - order: 3
+    action: 固定新旧版本的 MCP 镜像，分别装配普通会话、开发试跑和独立确认。普通会话再尝试夹带新版镜像。
+    expected: 各版本和评测阶段装载对应独立地址，普通会话只能使用该版本发布时固定的构建。
+  expected_results: [日期及其两处摘要与受测版本一致。, 旧版、新版和租户边界不能被请求改写。, 工具版本在 Runtime 按已发布版本和评测环境装载。]
   forbidden_side_effects: [模型不能写入受保护的身份字段或替换其他租户的绑定。]
   acceptance:
   - id: AC-01
@@ -32,6 +35,11 @@ case:
     description: 拒绝越过发布绑定。
     steps: [2]
     expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: 同一个 MCP 工具按智能体版本和用途选择固定部署。
+    steps: [3]
+    expected_results: [3]
     forbidden_side_effects: [1]
   execution:
     profiles:

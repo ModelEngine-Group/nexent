@@ -502,8 +502,14 @@ class MCPBindingReference(RunSpecModel):
     argument_overrides: dict[str, JsonValue] | None = None
 
 
+class MCPImplementation(RunSpecModel):
+    image: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    deployment_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class MCPExecutionBinding(MCPBindingReference):
     instance_id: PositiveInt
+    implementation: MCPImplementation | None = Field(default=None, exclude_if=lambda value: value is None)
     argument_formats: dict[str, dict[str, JsonValue]] | None = Field(default=None, max_length=32, exclude_if=lambda value: value is None)
 
 

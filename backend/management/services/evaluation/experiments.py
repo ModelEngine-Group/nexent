@@ -78,6 +78,9 @@ async def _snapshot(request, tenant, user, variant):
     spec = await prepare_evaluation_snapshot(
         EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query=""), user, tenant,
         language=request.language, **options)
+    if request.candidate_type == "tool_build":
+        from management.services.evaluation.tool_build_candidate import pin_build
+        return await _io("pin-reviewed-tool-build", pin_build, spec, tenant, request.candidate_id, variant)
     if request.candidate_type == "tool_mapping":
         from management.services.evaluation.tool_mapping_candidates import pin_mapping
         return await _io("pin-tool-mapping", pin_mapping, spec, tenant, request.candidate_id, snapshot_digest(spec), variant)
@@ -175,6 +178,11 @@ async def _new_skill_proposal(request, tenant):
 
 
 async def _excluded_sources(request, tenant):
+    if request.candidate_type == "tool_build":
+        from management.services.evaluation.tool_build_candidate import verified_build
+        _, feedback = await _io("read-verified-build-sources", verified_build, tenant, request.agent_id,
+                                request.version_no, request.candidate_id)
+        return set(feedback["source_keys"])
     if request.candidate_type == "tool_mapping":
         return await _io("mapping-example-sources", prompt_example_sources, tenant, request.agent_id,
                          request.version_no, request.candidate_id, "agent.tool_format", "T2_MAPPING")
@@ -275,19 +283,22 @@ async def create_experiment(request, tenant, user):
     if planned_turns > budget.max_replay_turns:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
                            f"Experiment requires {planned_turns} replay turns; budget allows {budget.max_replay_turns}")
-    mapping_arms = {}
+    bindings_by_arm = {}
     for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
-        if request.candidate_type == "tool_mapping":
-            mapping_arms[variant] = spec.resource
+        if request.candidate_type in {"tool_mapping", "tool_build"}:
+            bindings_by_arm[variant] = spec.resource
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
     plan["budget"] = {**budget.model_dump(), "planned_replay_turns": planned_turns}
     if script_build:
         plan["script_build"] = script_build
-    if mapping_arms:
+    if request.candidate_type == "tool_mapping":
         from management.services.evaluation.tool_mapping_candidates import mapping_difference
-        plan["tool_mapping"] = mapping_difference(mapping_arms["base"], mapping_arms["result"])
+        plan["tool_mapping"] = mapping_difference(bindings_by_arm["base"], bindings_by_arm["result"])
+    if request.candidate_type == "tool_build":
+        from management.services.evaluation.tool_build_candidate import build_difference
+        plan["tool_build"] = build_difference(bindings_by_arm["base"], bindings_by_arm["result"])
     if request.screening:
         plan["judges"] = await _io("freeze-development-judges", judges_for_plan, tenant, rule, request, fixed)
     if request.candidate_type != "baseline":

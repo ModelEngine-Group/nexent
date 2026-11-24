@@ -266,7 +266,7 @@ def _confirmed_new_guide(session, tenant, agent, base, ctx, expected):
 
 
 def publish(
-    tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed, expected_guide=None, mapping=None
+    tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed, expected_guide=None, mapping=None, tool_build=None
 ):
     try:
         with get_db_session() as session:
@@ -304,10 +304,22 @@ def publish(
                 bindings = [r for r in rows[ToolInstance] if r["tool_instance_id"] == mapping["instance_id"] and r["enabled"]]
                 if len(bindings) != 1 or (bindings[0]["released_argument_formats"] or {}) != mapping["previous"]:
                     reject("The source MCP tool mapping changed during publication")
+            if tool_build:
+                bindings = [r for r in rows[ToolInstance] if r["tool_instance_id"] == tool_build["instance_id"] and r["enabled"]]
+                if len(bindings) != 1 or bindings[0]["released_mcp_implementation"] not in (None, tool_build["base"]):
+                    reject("The source MCP implementation changed during publication")
+                session.execute(
+                    ToolInstance.__table__.update().where(
+                        ToolInstance.tenant_id == tenant, ToolInstance.agent_id == agent,
+                        ToolInstance.version_no == base, ToolInstance.tool_instance_id == tool_build["instance_id"],
+                    ).values(released_mcp_implementation=tool_build["base"])
+                )
             for model, records in rows.items():
                 for row in records:
                     data = {k: v for k, v in row.items() if k not in {"create_time", "update_time"}}
                     data.update(version_no=version, updated_by=actor)
+                    if model is ToolInstance and tool_build and row["tool_instance_id"] == tool_build["instance_id"]:
+                        data["released_mcp_implementation"] = tool_build["result"]
                     if model is ToolInstance and mapping and row["tool_instance_id"] == mapping["instance_id"]:
                         data["released_argument_formats"] = mapping["proposed"]
                     if model is AgentInfo:
@@ -393,6 +405,7 @@ def release_view(tenant, actor, lock):
             SELECT e.agent_id,e.version_no AS base_version,e.experiment_id,c.digest AS candidate_digest,
                    c.recipe->'components' AS components,
                    e.plan->'tool_mapping' AS tool_mapping,
+                   e.plan->'tool_build' AS tool_build,
                    CASE WHEN e.plan ? 'script_build' THEN jsonb_build_object(
                        'name',e.plan->'script_build'->>'name','path',e.plan->'script_build'->>'path',
                        'function',e.plan->'script_build'->>'function','image',e.plan->'script_build'->>'image')

@@ -148,6 +148,7 @@ export const evolutionService = {
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
     candidate_digest: string; candidate_type: string; supported_type: boolean; paused: boolean; excluded_tools?: string[];
     script_build?: {name: string; path: string; function: string; image: string} | null;
+    tool_build?: {tool: string; base: {image: string}; result: {image: string}} | null;
     tool_mapping?: {tool: string; field: string; proposed: Record<string, {kind: string; values?: string[]}>} | null;
     components?: {experiment_id: number; candidate_type: string; candidate_id: number}[] | null;
     skill_description?: {name: string; previous: string; proposed: string} | null;

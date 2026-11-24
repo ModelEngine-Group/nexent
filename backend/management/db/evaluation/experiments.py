@@ -235,6 +235,16 @@ def workspace_choices(tenant, agent_id, version):
             UNION ALL
             SELECT c.candidate_id, 'skill_new', c.name, c.created_at FROM nexent.evolution_new_skill_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.version_no=:version
+            UNION ALL
+            SELECT b.build_id, 'tool_build', f.feedback->>'tool_name', b.created_at
+            FROM nexent.evolution_tool_build_t b
+            JOIN nexent.evolution_feedback_handoff_t f ON f.feedback_id=b.feedback_id AND f.tenant_id=b.tenant_id
+            JOIN LATERAL (
+                SELECT report->>'status' AS status FROM nexent.evolution_tool_build_run_t r
+                WHERE r.build_id=b.build_id ORDER BY run_id DESC LIMIT 1
+            ) latest ON latest.status='passed'
+            WHERE b.tenant_id=:tenant AND f.feedback->>'method'='T4'
+              AND f.feedback->>'agent_id'=CAST(:agent AS text) AND f.feedback->>'version_no'=CAST(:version AS text)
             ORDER BY create_time DESC LIMIT 200
         """,
         "experiments": """

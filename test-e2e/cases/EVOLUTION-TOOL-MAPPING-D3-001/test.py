@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,7 @@ from local_auth_http import native_runtime, runtime
 
 @pytest.mark.case_id("EVOLUTION-TOOL-MAPPING-D3-001")
 @pytest.mark.stage("D3")
-def test_versioned_mapping(runtime):
+def test_versioned_mapping(runtime, monkeypatch):
     from fastapi import HTTPException
     from contracts.agentos import ToolBinding
     from infrastructure.mcp_execution import build_mcp_tool, mcp_execution_revision, select_mcp_server
@@ -62,3 +63,37 @@ def test_versioned_mapping(runtime):
     with pytest.raises(HTTPException) as denied:
         PreparedMCP(SimpleNamespace(tenant_id="another")).materialize(resource(2,mapping))
     assert denied.value.status_code == 404
+
+    # Verify that the same directly bound tool reaches a different endpoint by version and execution purpose.
+    from contracts.constants import environment
+    from infrastructure.mcp_implementations import managed_deployment
+
+    sid = resource(1, None).tools[0].parameters["server_id"]
+    routes = [
+        dict(tenant_id=tenant, server_id=sid, image="sha256:" + letter * 64,
+             production=f"http://127.0.0.1:{port}/mcp", development=f"http://127.0.0.1:{port + 2}/mcp",
+             confirmation=f"http://127.0.0.1:{port + 4}/mcp")
+        for letter, port in (("a", 19976), ("b", 19977))
+    ]
+    monkeypatch.setattr(environment, "EVOLUTION_MCP_DEPLOYMENTS", json.dumps(routes))
+    monkeypatch.setattr(environment, "EVOLUTION_CONFIRMATION_BUCKET", "")
+    pins = [managed_deployment(tenant, sid, record["image"]).pin().model_dump() for record in routes]
+    with get_db_session() as session:
+        for version, pin in enumerate(pins, 1):
+            session.query(ToolInstance).filter_by(agent_id=agent, version_no=version).one().released_mcp_implementation = pin
+
+    def check(version, candidate, mode):
+        data = resource(version, None if version == 1 else mapping)
+        data.tools[0].parameters["implementation"] = pins[candidate]
+        mcp = PreparedMCP(actor, mapping_trial=mode != "production")
+        mcp.materialize(data)
+        assert next(iter(mcp.hosts.values()))["url"] == routes[candidate][mode]
+
+    check(1, 0, "production")
+    check(2, 1, "production")
+    check(1, 1, "development")
+    monkeypatch.setattr(environment, "EVOLUTION_CONFIRMATION_BUCKET", "private")
+    check(1, 1, "confirmation")
+    with pytest.raises(HTTPException) as mismatched:
+        check(1, 1, "production")
+    assert mismatched.value.status_code == 409

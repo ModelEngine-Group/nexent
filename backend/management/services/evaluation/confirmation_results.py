@@ -4,7 +4,9 @@
 from collections import Counter
 from math import ceil
 
-from management.services.evaluation.tool_use import mapping_effect, observed_mapping, observed_script, script_effect
+from management.services.evaluation.tool_use import (
+    build_effect, mapping_effect, observed_build_call, observed_mapping, observed_script, script_effect,
+)
 
 
 def new_skill_use(evidence):
@@ -22,7 +24,7 @@ def new_skill_use(evidence):
     return "skipped" if not selection["reads"].get(name) else "incorrect"
 
 
-def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=(), mapping=None, script_build=None, arm=None):
+def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=(), mapping=None, script_build=None, arm=None, tool_build=None):
     task = task or {}
     file_grade = result.get("file_state") or {}
     tool_grade = result.get("tool_use") or {}
@@ -51,6 +53,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False, step_
     return {
         **({"script_observation": observed_script(result, script_build, arm)} if script_build else {}),
         **({"mapping_observation": observed_mapping(result, mapping)} if mapping else {}),
+        **({"build_observation": observed_build_call(result, tool_build)} if tool_build else {}),
         **({"read_step_ids": sorted({
             skill["candidate_id"] for skill in (result.get("skills") or [result.get("skill") or {}])
             if skill.get("candidate_id") in step_ids and skill.get("guide_reads", 0) > 0
@@ -71,7 +74,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False, step_
     }
 
 
-def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=(), require_script=False, require_mapping=False):
+def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=(), require_script=False, require_mapping=False, require_tool_build=False):
     # Private family names and individual task outcomes never appear in the returned object.
     valid, families, timings, token_pairs = [], Counter(), [], []
     failed, missing = [], []
@@ -122,6 +125,19 @@ def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=
                 effects.add(effect)
         if effects != {"corrected", "protected"}:
             missing.append("mapping_scope_coverage")
+    if require_tool_build:
+        effects = set()
+        for _, old, new in pairs:
+            if old["status"] not in {"pass", "fail"} or new["status"] != "pass":
+                continue
+            effect = build_effect(old.get("build_observation"), new.get("build_observation"))
+            if old["status"] == "fail" and effect != "corrected":
+                missing.append("tool_build_unproven_gain")
+                break
+            if (old["status"], effect) in {("fail", "corrected"), ("pass", "protected")}:
+                effects.add(effect)
+        if effects != {"corrected", "protected"}:
+            missing.append("tool_build_scope_coverage")
     if required_step_ids:
         exercised = set()
         for _, old, new in pairs:

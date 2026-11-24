@@ -5,11 +5,12 @@ from hmac import compare_digest
 
 from fastapi import HTTPException
 
-from contracts.agentos import MCPExecutionBinding, SkillDerivedMCPBinding
+from contracts.agentos import MCPExecutionBinding, MCPImplementation, SkillDerivedMCPBinding
 from contracts.errors.exceptions import ValidationError
 from infrastructure.mcp_execution import (
     apply_mcp_argument_overrides, build_mcp_tool, registered_argument_format, mcp_binding_identity, mcp_execution_revision, select_mcp_server,
 )
+from infrastructure.mcp_implementations import implementation_host
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
 )
@@ -75,16 +76,23 @@ class PreparedMCP:
             )
             if server_id != binding.server_id or not compare_digest(revision, binding.revision):
                 raise HTTPException(status_code=409, detail={"code": "AGENTOS_MCP_REVISION_MISMATCH"})
-            target = (server_id, origin_name)
+            pin = self._implementation(row, binding, server_id, version)
+            if pin is not None:
+                try:
+                    host = implementation_host(tenant_id, server_id, pin, replay=self.mapping_trial)
+                except ValueError as exc:
+                    raise HTTPException(status_code=409, detail={"code": "AGENTOS_MCP_REVISION_MISMATCH"}) from exc
+            endpoint = (server_id, pin.image) if pin is not None else server_id
+            target = (endpoint, origin_name)
             if self._tool_servers.setdefault(tool.class_name, target) != target:
                 raise ValueError("Ambiguous MCP callable")
-            if server_id not in self.hosts:
+            if endpoint not in self.hosts:
                 if server_id is None:
                     from backend.http.client import create_httpx_client
 
                     host["httpx_client_factory"] = create_httpx_client
-                self.hosts[server_id] = {**host, "allowed_tools": {}}
-            allowed = self.hosts[server_id]["allowed_tools"]
+                self.hosts[endpoint] = {**host, "allowed_tools": {}}
+            allowed = self.hosts[endpoint]["allowed_tools"]
             if allowed.setdefault(origin_name, tool.class_name) != tool.class_name:
                 raise ValueError("Ambiguous MCP tool name")
             effective = apply_mcp_argument_overrides(tool, binding.argument_overrides)
@@ -100,6 +108,16 @@ class PreparedMCP:
                     effective = effective.model_copy(update={"argument_formats": formats})
             tools.append(effective)
         return tools
+
+    def _implementation(self, row, binding, server_id, version):
+        if version != "1":
+            return None
+        saved = row.get("released_mcp_implementation")
+        expected = MCPImplementation.model_validate(saved) if saved else None
+        proposed = binding.implementation
+        if proposed != expected and not (self.mapping_trial and proposed is not None and server_id is not None):
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_MCP_REVISION_MISMATCH"})
+        return proposed
 
     @staticmethod
     def _reference(binding):

@@ -275,7 +275,7 @@ class DevelopmentExperimentRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
-    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "skill_new", "skill_script", "baseline", "tool_set", "tool_mapping", "combination"]
+    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "skill_new", "skill_script", "baseline", "tool_set", "tool_mapping", "tool_build", "combination"]
     candidate_id: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
     components: list[EvaluatedCandidate] | None = Field(default=None, min_length=2, max_length=2, exclude_if=lambda v: v is None)
     case_ids: list[int] = Field(min_length=1, max_length=100)

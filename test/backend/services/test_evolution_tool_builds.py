@@ -129,3 +129,47 @@ def test_coverage_is_invalidated_after_caller_editor_loses_access(monkeypatch):
     monkeypatch.setattr(builds, "require_business_agent_edit", revoked)
     _, changed, fresh = builds.verification_plan("tenant", 30)
     assert changed["uncovered"] == [[9, 1, 9, 1, "ledger"]] and len(changed["checks"]) == 2 and fresh != digest
+
+
+
+def test_managed_endpoints_are_distinct_and_pins_reject_changed_registry(monkeypatch):
+    import json
+    from infrastructure import mcp_implementations as deployments
+
+    config = dict(tenant_id="tenant", server_id=1, image="sha256:" + "a" * 64,
+                  production="http://127.0.0.1:6001/mcp", development="http://localhost:6002/mcp",
+                  confirmation="http://127.0.0.1:6003/mcp")
+    monkeypatch.setattr(deployments.environment, "EVOLUTION_MCP_DEPLOYMENTS", json.dumps([config]))
+    monkeypatch.setattr(deployments.environment, "EVOLUTION_CONFIRMATION_BUCKET", "")
+    pin = deployments.managed_deployment("tenant", 1, config["image"]).pin()
+    assert deployments.implementation_host("tenant", 1, pin)["url"] == config["production"]
+    assert deployments.implementation_host("tenant", 1, pin, replay=True)["url"] == config["development"]
+    monkeypatch.setattr(deployments.environment, "EVOLUTION_CONFIRMATION_BUCKET", "private")
+    assert deployments.implementation_host("tenant", 1, pin, replay=True)["url"] == config["confirmation"]
+    with pytest.raises(ValueError, match="No operator-managed deployment"):
+        deployments.implementation_host("other-tenant", 1, pin)
+    with pytest.raises(ValueError, match="separate"):
+        deployments.deployment_manifest(json.dumps([{**config, "confirmation": "http://localhost:6001/sse"}]))
+    monkeypatch.setattr(deployments.environment, "EVOLUTION_MCP_DEPLOYMENTS", json.dumps([
+        {**config, "confirmation": "http://127.0.0.1:6004/mcp"}
+    ]))
+    with pytest.raises(ValueError, match="differs from"):
+        deployments.implementation_host("tenant", 1, pin)
+
+
+def test_tool_repair_requires_equal_tool_input_and_business_initial_state():
+    from management.services.evaluation.tool_use import build_effect, observed_build_call
+
+    def observe(**changes):
+        raw = dict(tool="ledger", remote="ledger", kind="text", inputs="approved", before="initial",
+                   input_matches=True, reply_matches=True, state_matches=True, error=False)
+        return observed_build_call({"tool_use": {"mcp_evidence": [{**raw, **changes}], "issues": []}},
+                                   {"tool": "ledger"})
+
+    old = observe(state_matches=False)
+    assert build_effect(old, observe()) == "corrected"
+    assert build_effect(observe(), observe()) == "protected"
+    assert build_effect(old, observe(before="new initial")) is None
+    assert build_effect(old, observe(inputs="different input")) is None
+    assert build_effect(old, observe(input_matches=False)) is None
+    assert build_effect(old, observe(state_matches=None)) is None

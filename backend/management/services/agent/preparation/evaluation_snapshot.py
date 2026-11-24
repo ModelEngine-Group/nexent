@@ -21,7 +21,7 @@ from contracts.agentos import (
     ANALYSIS_TOOL_BINDING_PREFIX,
     KNOWLEDGE_TOOL_BINDING_PREFIX,
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
-    ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
+    ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, MCPImplementation, ModelBindings, ParallelExecutorBinding,
     PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunAttachmentHistory, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     PreparedMemorySearch, SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
     WorkbenchSkillBinding, memory_context_requires_search,
@@ -49,6 +49,7 @@ from infrastructure.agent_tool_config import (
 from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
 )
+from infrastructure.mcp_implementations import implementation_host
 from infrastructure.mcp_execution import (
     MCP_ARGUMENT_OVERRIDES, apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity,
     mcp_execution_revision, select_mcp_server,
@@ -579,8 +580,12 @@ def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_server
             or apply_mcp_argument_overrides(persisted, overrides) != tool.model_copy(update={"metadata": None})):
         raise ValueError("MCP tool differs from its persisted binding")
     server_id, host = select_mcp_server(servers, persisted.usage, tenant_id)
+    implementation = None
+    if row.get("released_mcp_implementation"):
+        implementation = MCPImplementation.model_validate(row["released_mcp_implementation"])
+        implementation_host(tenant_id, server_id, implementation)
     origin_name = row["origin_name"] or persisted.class_name
-    target = (server_id, origin_name)
+    target = (server_id, origin_name, implementation.image if implementation else None)
     if tool_servers.setdefault(tool.class_name, target) != target:
         raise ValueError("Ambiguous MCP callable")
     revision = mcp_execution_revision(
@@ -596,6 +601,8 @@ def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_server
     else:
         if row.get("released_argument_formats"):
             common["argument_formats"] = row["released_argument_formats"]
+        if implementation is not None:
+            common["implementation"] = implementation
         reference = MCPExecutionBinding(instance_id=row["tool_instance_id"], **common)
         version = "1"
     return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json", exclude_unset=True))
