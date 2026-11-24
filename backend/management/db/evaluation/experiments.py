@@ -78,7 +78,7 @@ def submit(tenant, user, request, plan):
 def scope(tenant, eid):
     with get_db_session() as session:
         row = session.execute(text(f"""
-            SELECT e.plan->'budget' AS budget, {_DEADLINE} AS deadline, agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
+            SELECT e.plan->'budget' AS budget, e.plan->'metering' AS metering, {_DEADLINE} AS deadline, agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
                    plan->'script_build'->'source_cases' AS script_source_cases,
                    plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
                    ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
@@ -122,11 +122,17 @@ def claim(experiment_id=None):
             UPDATE nexent.evolution_trial_t SET status='error', lease_until=NULL,
                 result='{"error":"worker_interrupted"}'::jsonb WHERE status='running' AND lease_until < now()
         """))
+        session.execute(text("""
+            UPDATE nexent.evolution_trial_t t SET status='invalid', lease_until=NULL,
+                   result=jsonb_build_object('error', e.budget_stop_reason)
+              FROM nexent.evolution_experiment_t e
+             WHERE t.experiment_id=e.experiment_id AND t.status='pending' AND e.budget_stop_reason IS NOT NULL
+        """))
         params = {"eid": experiment_id, "limit": EVOLUTION_MAX_RUNNING_TRIALS_PER_TENANT}
         row = session.execute(text(f"""
             SELECT t.trial_id, t.case_id, t.variant, e.experiment_id, e.tenant_id, e.created_by, e.plan
             FROM nexent.evolution_trial_t t JOIN nexent.evolution_experiment_t e USING (experiment_id)
-            WHERE t.status='pending' AND NOT e.cancelled AND ({_RUNNING}) < :limit
+            WHERE t.status='pending' AND NOT e.cancelled AND e.budget_stop_reason IS NULL AND ({_RUNNING}) < :limit
                 AND (CAST(:eid AS bigint) IS NULL OR e.experiment_id=:eid) ORDER BY trial_id
             LIMIT 1 FOR UPDATE OF t SKIP LOCKED
         """), params).mappings().one_or_none()
@@ -144,7 +150,7 @@ def claim(experiment_id=None):
             UPDATE nexent.evolution_trial_t t SET status='running', lease_until=now()+interval '120 seconds',
                 receipt_id=:receipt_id, cleanup_due=now()+interval '3 minutes'
             FROM nexent.evolution_experiment_t e WHERE t.experiment_id=e.experiment_id AND t.trial_id=:trial_id
-                AND NOT e.cancelled AND ({_RUNNING}) < :limit
+                AND NOT e.cancelled AND e.budget_stop_reason IS NULL AND ({_RUNNING}) < :limit
                 AND ({_DEADLINE} IS NULL OR {_DEADLINE} > statement_timestamp())
             RETURNING extract(epoch FROM ({_DEADLINE} - statement_timestamp()))::float8 AS remaining_seconds
         """), {**job, "limit": params["limit"]}).mappings().one_or_none()
@@ -153,6 +159,57 @@ def claim(experiment_id=None):
         if claimed.remaining_seconds is not None:
             job["monotonic_deadline"] = claim_time + claimed.remaining_seconds
         return job
+
+
+
+def authorize_model_attempt(job, max_seconds):
+    with get_db_session() as session:
+        return session.scalar(text(f"""
+            INSERT INTO nexent.evolution_generation_attempt_t
+                (tenant_id,source_digest,model_id,created_by,lease_until,metering_revision,
+                 experiment_id,trial_id,trial_receipt)
+            SELECT e.tenant_id, repeat('0',64), NULL, e.created_by,
+                   LEAST({_DEADLINE},clock_timestamp()+make_interval(secs=>:seconds)),
+                   e.plan->'metering'->>'revision', e.experiment_id, t.trial_id, t.receipt_id
+            FROM nexent.evolution_experiment_t e
+            JOIN nexent.evolution_trial_t t USING(experiment_id)
+            WHERE e.tenant_id=:tenant_id AND t.trial_id=:trial_id AND t.receipt_id=:receipt_id
+              AND t.status='running' AND t.lease_until > clock_timestamp()
+              AND NOT e.cancelled AND e.budget_stop_reason IS NULL AND e.plan ? 'metering'
+              AND {_DEADLINE} > clock_timestamp()
+            RETURNING attempt_id
+        """), {**job, "seconds": max_seconds})
+
+
+def model_budget_report(tenant, eid):
+    with get_db_session() as session:
+        row = session.execute(text("""
+            SELECT e.budget_stop_reason AS stopped_reason,
+                   count(c.charge_id) AS calls, count(c.reported_input) AS reported_calls,
+                   COALESCE(sum(c.reported_input),0) AS reported_input_tokens,
+                   COALESCE(sum(c.reported_output),0) AS reported_output_tokens,
+                   COALESCE(sum(c.reported_micros),0) AS reported_micros,
+                   COALESCE(sum(c.reserved_input+c.reserved_output) FILTER (WHERE c.reported_input IS NULL),0)
+                     AS unsettled_tokens,
+                   COALESCE(sum(c.reserved_micros) FILTER (WHERE c.reported_micros IS NULL),0) AS unsettled_micros
+            FROM nexent.evolution_experiment_t e LEFT JOIN nexent.evolution_model_charge_t c
+              ON c.experiment_id=e.experiment_id AND c.tenant_id=e.tenant_id
+            WHERE e.tenant_id=:tenant AND e.experiment_id=:eid AND e.plan ? 'metering'
+            GROUP BY e.experiment_id
+        """), dict(tenant=tenant,eid=eid)).mappings().one_or_none()
+        return {key: int(value) if key != "stopped_reason" else value for key, value in row.items()} if row else None
+
+
+
+def stop_model_budget(job):
+    with get_db_session() as session:
+        session.execute(text("""
+            UPDATE nexent.evolution_experiment_t e SET budget_stop_reason='experiment_model_budget_exceeded'
+            FROM nexent.evolution_trial_t t WHERE e.experiment_id=t.experiment_id AND e.tenant_id=:tenant_id
+              AND t.trial_id=:trial_id AND t.receipt_id=:receipt_id AND t.status='running'
+              AND t.lease_until > clock_timestamp() AND NOT e.cancelled AND e.budget_stop_reason IS NULL
+              AND e.plan ? 'metering'
+        """), job)
 
 
 def heartbeat(job):

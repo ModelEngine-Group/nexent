@@ -27,7 +27,10 @@ case:
   - order: 4
     action: 代入供应商用量前先申请模型额度，分别尝试耗尽 token 和费用额度，再提交真实回执、越界回执与下一次请求。
     expected: 按预留金额拦截超额请求。实际用量结算后可以重用余额。越界回执保留实际值并停止本次生成。
-  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。, 模型费用和 token 分别预留并按回执结算。]
+  - order: 5
+    action: 用同一个实验额度为重放和模型裁判分别申请模型调用，保留首项评分，再耗尽额度。尝试继续领取任务或沿用已完成的试跑。
+    expected: 原有评分保留，未领取任务标记预算中止，已结束试跑不能继续计费。
+  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。, 模型费用和 token 分别预留并按回执结算。, 重放与模型裁判共享同一个实验的模型预算，停止后不再派发。]
   forbidden_side_effects: [单个租户的实验不能占用另一租户的额度。]
   acceptance:
   - id: AC-01
@@ -47,6 +50,10 @@ case:
     description: 供应商额度预占、真实用量和费用均持久化。
     steps: [4]
     expected_results: [4]
+  - id: AC-05
+    description: 冻结的预算同时覆盖重放与裁判，达到上限后停止派发并保留已完成判分。
+    steps: [5]
+    expected_results: [5]
   execution:
     profiles:
     - name: mock

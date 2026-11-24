@@ -121,7 +121,11 @@ class _Call:
         })
         body = json.loads(self.prepared.body_bytes)
         budget = model_wire_budget.get()
-        self.settle_usage = budget(body) if budget is not None else None
+        if budget is not None:
+            model_id = self.profile.outlet_id or self.profile.connection.credential_ref.model_id
+            self.settle_usage = budget(body, model_id)
+        else:
+            self.settle_usage = None
         prepared = replace(
             self.prepared,
             headers=dict(self.prepared.headers),

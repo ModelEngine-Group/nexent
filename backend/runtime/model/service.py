@@ -21,7 +21,7 @@ from nexent.core.gateway.modality.llm.openai import OpenAILLMAdapter
 from nexent.core.models.wire_budget import ModelWireBudgetExceeded
 from nexent.core.gateway.modality.rerank.rerank_adapter import RerankRequest
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from runtime.model.evolution_meter import meter_generation
+from runtime.model.evolution_meter import meter_evaluation, meter_generation
 
 
 class ModelAccessError(Exception):
@@ -83,12 +83,20 @@ class ModelService:
             options = payload.options.model_dump(exclude_none=True) if payload.options else {}
             adapter = self.build_adapter(record, "llm", "llm", actor.tenant_id, stream=False, **options)
             try:
-                if payload.generation_attempt is not None and not isinstance(adapter, OpenAILLMAdapter):
+                if payload.generation_attempt is not None and payload.evaluation_attempt is not None:
+                    raise ModelAccessError(422, "INVALID_EVOLUTION_METERING_SCOPE")
+                if (payload.generation_attempt is not None or payload.evaluation_attempt is not None) and not isinstance(
+                    adapter, OpenAILLMAdapter
+                ):
                     raise ModelWireBudgetExceeded("This model adapter has no provider metering")
-                with meter_generation(payload.generation_attempt, payload.model_id, actor):
+                meter = (meter_evaluation(payload.evaluation_attempt, actor, payload.model_id)
+                         if payload.evaluation_attempt is not None
+                         else meter_generation(payload.generation_attempt, payload.model_id, actor))
+                with meter:
                     output = await adapter.invoke(LLMRequest([message.model_dump() for message in payload.input]))
             except ModelWireBudgetExceeded as exc:
-                raise ModelAccessError(429, "EVOLUTION_GENERATION_BUDGET") from exc
+                code = "EVOLUTION_EVALUATION_BUDGET" if payload.evaluation_attempt else "EVOLUTION_GENERATION_BUDGET"
+                raise ModelAccessError(429, code) from exc
             output = {"content": output.content}
         elif isinstance(payload, EmbeddingInvocation):
             modality = metadata.model_type

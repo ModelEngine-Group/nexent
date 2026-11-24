@@ -72,6 +72,8 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
         attempt = root if index == len(followups) else sha256(f"{root}/{index}".encode()).hexdigest()[:32]
         current = current.model_copy(update={"history": list(history)})
         updates = {"input": current, "conversation_id": -job["trial_id"], "replay_trial_id": attempt}
+        if job.get("evaluation_attempt"):
+            updates["evaluation_attempt"] = job["evaluation_attempt"]
         if watch:
             replies = {}
             for rule in watch["rules"]:
@@ -89,6 +91,8 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
         try:
             observed = await client.run_prepared_evaluation(spec.model_copy(update=updates), user, tenant)
         except RuntimeUpstreamError as exc:
+            if exc.status_code == 429 and b'"EVOLUTION_EVALUATION_BUDGET"' in exc.content:
+                return [], records, {"error": "experiment_model_budget_exceeded", "turn": index+1}
             if files is None or exc.status_code != 422:
                 raise
             try:

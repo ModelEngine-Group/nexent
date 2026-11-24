@@ -221,6 +221,7 @@ class OpenAIModel(OpenAIServerModel):
                  pool_timeout_seconds: float = 10.0,
                  diagnostic_chunks_enabled: bool = False,
                  explicit_sampling: Optional[List[str]] = None,
+                 catalog_model_id: Optional[int] = None,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -341,6 +342,7 @@ class OpenAIModel(OpenAIServerModel):
             kwargs["client_kwargs"] = client_kwargs
 
         super().__init__(*args, **kwargs)
+        self.catalog_model_id = catalog_model_id
 
         # Wrap the OpenAI client with monitoring interceptor
         model_type = _detect_model_type(self)
@@ -620,7 +622,7 @@ class OpenAIModel(OpenAIServerModel):
                     nonlocal settle_usage
                     budget = model_wire_budget.get()
                     if budget is not None:
-                        settle_usage = budget(dispatch_kwargs)
+                        settle_usage = budget(dispatch_kwargs, self.catalog_model_id)
 
                 current_request = self._dispatch_chat_completion(
                     context_budget_snapshot=trusted_budget_snapshot,

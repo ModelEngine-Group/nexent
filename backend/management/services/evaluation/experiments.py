@@ -15,6 +15,7 @@ from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest, DevelopmentRunBudget
+from contracts.evolution_metering import evaluation_budget
 from contracts.evaluation_answer import has_completed_root_answer
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial
@@ -283,14 +284,34 @@ async def create_experiment(request, tenant, user):
     if planned_turns > budget.max_replay_turns:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
                            f"Experiment requires {planned_turns} replay turns; budget allows {budget.max_replay_turns}")
+    allowance = evaluation_budget(tenant)
+    if allowance is None and (budget.max_model_tokens is not None or budget.max_model_micros is not None):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Configure evaluation model tariffs before setting model budgets")
+    billable_models = set()
+    if allowance:
+        if rule["evaluator_type"] != "code":
+            billable_models.add(request.judge_model_id)
+        billable_models.update(member["scoring"]["judge_model_id"] for member in fixed.values()
+                               if member["scoring"]["evaluator"]["evaluator_type"] != "code")
     bindings_by_arm = {}
     for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
+        if allowance:
+            billable_models.update(ref.model_id for ref in [spec.models.llm, *spec.models.additional_llms])
         if request.candidate_type in {"tool_mapping", "tool_build"}:
             bindings_by_arm[variant] = spec.resource
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
     plan["budget"] = {**budget.model_dump(), "planned_replay_turns": planned_turns}
+    if allowance:
+        if any(str(model) not in allowance.models for model in billable_models):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Configure billing ceilings for every replay and judge model")
+        plan["metering"] = dict(
+            revision=allowance.revision(),
+            max_model_tokens=min(allowance.daily_tokens, budget.max_model_tokens or allowance.daily_tokens),
+            max_model_micros=min(allowance.daily_micros,
+                                 allowance.daily_micros if budget.max_model_micros is None else budget.max_model_micros),
+        )
     if script_build:
         plan["script_build"] = script_build
     if request.candidate_type == "tool_mapping":
@@ -398,6 +419,12 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     if scope.get("screening"):
         plan = jobs.read_plan(tenant, eid)
         decision["screening"] = screen_development(plan, pairs, cancelled=scope["cancelled"] or cancel)
+    if scope.get("metering"):
+        meter = scope["metering"]
+        decision["model_budget"] = {
+            **{k: meter[k] for k in ("max_model_tokens", "max_model_micros")},
+            **(jobs.model_budget_report(tenant, eid) or {}),
+        }
     return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
             **decision,
             **({"budget": {**scope["budget"], "deadline": scope["deadline"],
@@ -426,6 +453,7 @@ def workspace_choices(tenant, user, agent_id, version):
             rule = scoring["evaluator"]
             member["rubric"] = {"name": rule["name"], "version_no": rule["version_no"]}
     return {**jobs.workspace_choices(tenant, agent_id, version), "fixed_regression": fixed,
+            "model_budget_available": evaluation_budget(tenant) is not None,
             "reviews": recent_reviews(tenant, agent_id, version)}
 
 
@@ -449,6 +477,7 @@ def _grade(request, job, task, observed):
         {eid: rule}, tenant_id=job["tenant_id"], user_id=job["created_by"], query=task["query"],
         expected=task["expected"], actual=observed.answer if closed else None, runtime_events=observed.events,
         required_evidence={eid: {"actual", "expected"}}, judge_model_id=judge_model_id, judge_system_prompt=system,
+        **({"evaluation_attempt": job["evaluation_attempt"]} if job.get("evaluation_attempt") else {}),
     )[eid]
     if not judge_matches():
         return changed
@@ -505,6 +534,11 @@ async def execute_trial(job):
     spec = await _snapshot(request, tenant, user, job["variant"])
     if case["digest"] != job["plan"]["cases"][str(job["case_id"])] or snapshot_digest(spec) != digest:
         return "invalid", {"error": "frozen_input_changed"}
+    if job["plan"].get("metering"):
+        attempt = await _io("authorize-trial-model-budget", jobs.authorize_model_attempt, job, request.timeout_seconds)
+        if not attempt:
+            return "invalid", {"error": "experiment_model_budget_unavailable"}
+        job = {**job, "evaluation_attempt": attempt}
     client = AgentOSClient(EVOLUTION_REPLAY_RUNTIME_URL, create_httpx_client)
     return await run_verified_arm(request, job, case, spec, client, lambda index: stage_case_input(
         *args, job["receipt_id"], index))
@@ -549,6 +583,10 @@ async def run_verified_arm(request, job, case, spec, client, stage_input):
         grading_task = {**task, "query": json.dumps(messages[:-1], ensure_ascii=False)}
     grade = await run_blocking("grade-development-trial", _grade, request, job, grading_task,
                                final.model_copy(update={"events": events}), lane="evaluation", owner="management")
+    if job.get("evaluation_attempt") and grade["status"] == "invalid":
+        usage = await _io("read-trial-budget-state", jobs.model_budget_report, tenant, job["experiment_id"])
+        if usage and usage["stopped_reason"]:
+            return "invalid", {"error": usage["stopped_reason"], "judgment": grade, **dialogue}
     receipts = [obs.replay_receipt for obs in observations]
     receipt = receipts[-1]
     skills, reads = skill_evidence(receipts)
@@ -620,6 +658,8 @@ async def _work_one(job):
         if not trial.done():
             trial.cancel()
             await asyncio.gather(trial, return_exceptions=True)
+    if result.get("error") == "experiment_model_budget_exceeded":
+        await _io("stop-metered-experiment", jobs.stop_model_budget, job)
     await _io("finish-development-trial", jobs.finish, job, status, result)
 
 

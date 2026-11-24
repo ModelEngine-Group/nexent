@@ -213,6 +213,8 @@ function Experiments({
   const [chosenMetric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
   const [turnLimit, setTurnLimit] = useState<number | null>(1000);
   const [elapsedLimit, setElapsedLimit] = useState<number | null>(3600);
+  const [modelTokenLimit, setModelTokenLimit] = useState<number | null>(null);
+  const [modelDollarLimit, setModelDollarLimit] = useState<number | null>(null);
   const [minimum, setMinimum] = useState<number | null>(1);
   const [targets, setTargets] = useState<number[]>([]);
   const [candidate, setCandidate] = useState<string>();
@@ -274,7 +276,13 @@ function Experiments({
         suggestion_target_case_id: suggestion ? targetCase : undefined,
         case_ids: caseIds,
         screening: screen && kind !== "baseline" ? { metric, minimum: minimum!, target_case_ids: targets } : undefined,
-        budget: { max_replay_turns: turnLimit!, max_elapsed_seconds: elapsedLimit! },
+        budget: {
+          max_replay_turns: turnLimit!,
+          max_elapsed_seconds: elapsedLimit!,
+          ...(workspace.data?.model_budget_available && modelTokenLimit !== null ? { max_model_tokens: modelTokenLimit } : {}),
+          ...(workspace.data?.model_budget_available && modelDollarLimit !== null
+            ? { max_model_micros: Math.round(modelDollarLimit * 1_000_000) } : {}),
+        },
         evaluator_id: evaluatorId!,
         judge_model_id: needsJudge ? judge : undefined,
         language: i18n.language.startsWith("zh") ? "zh" : "en",
@@ -412,6 +420,13 @@ function Experiments({
               aria-label={t("evolution.budget.turns")} min={1} max={10000} precision={0} /></label>
             <label>{t("evolution.budget.elapsed")} <InputNumber value={elapsedLimit} onChange={setElapsedLimit}
               aria-label={t("evolution.budget.elapsed")} min={1} max={604800} precision={0} /></label>
+            {choices.model_budget_available && <>
+              <label>{t("evolution.budget.modelTokens")} <InputNumber value={modelTokenLimit}
+                onChange={setModelTokenLimit} aria-label={t("evolution.budget.modelTokens")} min={1} max={10 ** 12} precision={0} /></label>
+              <label>{t("evolution.budget.modelCost")} <InputNumber value={modelDollarLimit}
+                onChange={setModelDollarLimit} aria-label={t("evolution.budget.modelCost")} min={0} max={10 ** 9}
+                step={0.01} precision={6} /></label>
+            </>}
           </Flex>
           {candidate && candidate !== "baseline" && <>
             <Checkbox checked={screen} onChange={e => setScreen(e.target.checked)}>{t("evolution.screen.enable")}</Checkbox>
@@ -522,6 +537,17 @@ function Experiments({
               planned: report.data.budget.planned_replay_turns, limit: report.data.budget.max_replay_turns,
               deadline: new Date(report.data.budget.deadline).toLocaleString(), expired: report.data.budget.expired_trials,
             })}</Typography.Text>}
+            {report.data.model_budget && <Typography.Text>{t("evolution.budget.modelUsage", {
+              tokens: report.data.model_budget.reported_input_tokens + report.data.model_budget.reported_output_tokens,
+              tokenLimit: report.data.model_budget.max_model_tokens,
+              dollars: (report.data.model_budget.reported_micros / 1_000_000).toFixed(6),
+              dollarLimit: (report.data.model_budget.max_model_micros / 1_000_000).toFixed(6),
+              pending: report.data.model_budget.calls - report.data.model_budget.reported_calls,
+              reservedTokens: report.data.model_budget.unsettled_tokens,
+              reservedCost: (report.data.model_budget.unsettled_micros / 1_000_000).toFixed(6),
+            })}</Typography.Text>}
+            {report.data.model_budget?.stopped_reason && <Alert type="warning" showIcon
+              title={t("evolution.budget.modelStopped")} />}
             {report.data.fixed_regression && <Typography.Text>{t("evolution.fixedCoverage", {
               total: report.data.fixed_regression.case_ids.length,
               failed: report.data.fixed_regression.failed.join(", ") || "—",

@@ -3,7 +3,7 @@
 
 from collections.abc import Callable
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Protocol
 
 
 class ModelWireBudgetExceeded(RuntimeError):
@@ -11,6 +11,7 @@ class ModelWireBudgetExceeded(RuntimeError):
 
 
 SettleUsage = Callable[[int, int], None]
-AdmitModelCall = Callable[[dict[str, Any]], SettleUsage | None]
+class AdmitModelCall(Protocol):
+    def __call__(self, wire: dict[str, Any], model_id: int | None = None) -> SettleUsage | None: ...
 
 model_wire_budget: ContextVar[AdmitModelCall | None] = ContextVar("model_wire_budget", default=None)

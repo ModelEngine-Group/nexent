@@ -60,6 +60,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         kwargs = dict(
             observer=ctx.observer,
             model_id=ctx.model_name,
+            catalog_model_id=ctx.catalog_model_id,
             api_base=self._base_url,
             api_key=self._api_key,
             ssl_verify=self._ssl_verify,

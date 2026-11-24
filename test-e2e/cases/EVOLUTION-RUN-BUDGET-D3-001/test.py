@@ -20,10 +20,11 @@ def test_distributed_budget(runtime, monkeypatch):
     engine = db_client.engine
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        for name in ("018_evolution_replay_cases", "019_evolution_experiments"):
+        for name in ("018_evolution_replay_cases", "019_evolution_experiments", "041_evolution_generation_attempts",
+                     "043_evolution_model_charges", "044_evolution_evaluation_metering"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
 
-    def submit(tenant, count):
+    def submit(tenant, count, metering=None):
         with engine.begin() as conn:
             ids = [conn.scalar(text("""INSERT INTO nexent.evolution_replay_case_t
                 (tenant_id,agent_id,version_no,digest,task,created_by)
@@ -34,6 +35,8 @@ def test_distributed_budget(runtime, monkeypatch):
             budget={"max_replay_turns":count, "max_elapsed_seconds":300})
         plan = {"cases":{str(i):str(i) for i in ids}, "snapshots":{"base":"digest"},
                 "request":request.model_dump(), "budget":{**request.budget.model_dump(), "planned_replay_turns":count}}
+        if metering:
+            plan["metering"] = metering
         eid = jobs.submit(tenant, "editor", request, plan)
         assert jobs.previous_submission(tenant, "editor", request) == eid
         return eid
@@ -64,6 +67,7 @@ def test_distributed_budget(runtime, monkeypatch):
 
     _verify_candidate_budget(monkeypatch)
     _verify_provider_quota(monkeypatch)
+    _verify_experiment_quota(monkeypatch, submit)
 
 
 def _verify_candidate_budget(monkeypatch):
@@ -75,11 +79,6 @@ def _verify_candidate_budget(monkeypatch):
     from management.services.evaluation import generation_budget
 
     engine = db_client.engine
-    migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
-    with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        for name in ("041_evolution_generation_attempts", "043_evolution_model_charges"):
-            cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf8"))
-
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_CONCURRENCY", 1)
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_SOURCE_ATTEMPTS", 1)
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_DAILY_ATTEMPTS", 2)
@@ -165,15 +164,16 @@ def _verify_provider_quota(monkeypatch):
         actor = SimpleNamespace(tenant_id=tenant, user_id="creator")
         attempt = reserve(tenant, actor.user_id, "d" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
         assert not complete(tenant, attempt), "A metered job cannot complete without a wire reservation"
-        with meter_generation(attempt, 1, actor):
+        with pytest.raises(ModelWireBudgetExceeded), meter_generation(attempt, 1, actor):
             charge = model_wire_budget.get()
             wire = {"max_tokens": 99}
             settle = charge(wire)
             assert wire["max_tokens"] == 50
+            # Even when a driver catches a refusal, the scope must stop the job.
             with pytest.raises(ModelWireBudgetExceeded):
                 charge({})
-            # The uncertain second dispatch was rejected. An earlier response can still settle.
-            settle(3, 1)
+        # The previous accepted dispatch may report its usage after another was refused.
+        settle(3, 1)
         assert stopped(tenant, attempt) and not complete(tenant, attempt)
         retry = reserve(tenant, actor.user_id, "e" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
         with meter_generation(retry, 1, actor):
@@ -182,18 +182,64 @@ def _verify_provider_quota(monkeypatch):
 
     revision_actor = SimpleNamespace(tenant_id="stale", user_id="creator")
     mismatched = reserve("stale", revision_actor.user_id, "g" * 64, 1, metering_revision="x" * 64)
-    with meter_generation(mismatched, 1, revision_actor), pytest.raises(ModelWireBudgetExceeded):
+    with pytest.raises(ModelWireBudgetExceeded), meter_generation(mismatched, 1, revision_actor):
         model_wire_budget.get()({})
 
     actor = SimpleNamespace(tenant_id="overflow", user_id="creator")
     attempt = reserve("overflow", actor.user_id, "f" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
-    with meter_generation(attempt, 1, actor):
-        settle = model_wire_budget.get()({})
-        with pytest.raises(ModelWireBudgetExceeded, match="exceeds"):
-            settle(101, 4)
+    with pytest.raises(ModelWireBudgetExceeded, match="exceeds"), meter_generation(attempt, 1, actor):
+        model_wire_budget.get()({})(101, 4)
     assert stopped("overflow", attempt)
     with db_client.engine.connect() as conn:
         row = conn.execute(text("""SELECT reserved_input, reserved_output, reserved_micros,
             reported_input, reported_output, reported_micros FROM nexent.evolution_model_charge_t
             WHERE tenant_id='overflow'""")).one()
         assert tuple(row) == (100, 50, 350, 101, 4, 214)
+
+
+
+def _verify_experiment_quota(monkeypatch, submit):
+    import json
+    from types import SimpleNamespace
+
+    from contracts.constants import environment
+    from contracts.evolution_metering import evaluation_budget
+    from management.db.evaluation import experiments as jobs, generation_attempts
+    from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
+    from runtime.model.evolution_meter import meter_evaluation
+
+    tenant = "metered-replay"
+    plan = dict(daily_tokens=900, daily_micros=900, models={
+        str(model): dict(max_input_tokens=40, max_output_tokens=20, input_micros_per_million=1_000_000,
+                         output_micros_per_million=1_000_000) for model in (2, 3)
+    })
+    monkeypatch.setattr(environment, "EVOLUTION_EVALUATION_METERING", json.dumps({tenant: plan}))
+    actor = SimpleNamespace(tenant_id=tenant, user_id="editor")
+    eid = submit(tenant, 3, dict(revision=evaluation_budget(tenant).revision(),
+                                 max_model_tokens=900, max_model_micros=70))
+    first = jobs.claim(eid)
+    first_id = jobs.authorize_model_attempt(first, 30)
+    with meter_evaluation(first_id, actor):
+        model_wire_budget.get()({}, 2)(5, 4)
+    assert jobs.finish(first, "pass", {"answer": "graded"})
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(first_id, actor, model=3):
+        model_wire_budget.get()({})
+    second = jobs.claim(eid)
+    second_id = jobs.authorize_model_attempt(second, 30)
+    with meter_evaluation(second_id, actor, model=3):
+        model_wire_budget.get()({})(4, 3)
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(second_id, actor, model=3):
+        model_wire_budget.get()({})
+    assert jobs.finish(second, "invalid", {"error": "experiment_model_budget_exceeded"})
+    assert jobs.claim(eid) is None
+    rows = jobs.trials(tenant, eid)
+    assert [row["status"] for row in rows] == ["pass", "invalid", "invalid"]
+    assert rows[0]["result"] == {"answer": "graded"}
+    assert rows[2]["result"] == {"error": "experiment_model_budget_exceeded"}
+    budget = jobs.model_budget_report(tenant, eid)
+    assert (budget["reported_micros"], budget["calls"], budget["reported_calls"]) == (16, 2, 2)
+    assert budget["stopped_reason"] == "experiment_model_budget_exceeded"
+    # A replay entitlement cannot debit the generation pool, and vice versa.
+    ordinary = generation_attempts.reserve(tenant, actor.user_id, "a"*64, 3)
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(ordinary, actor, model=3):
+        model_wire_budget.get()({})

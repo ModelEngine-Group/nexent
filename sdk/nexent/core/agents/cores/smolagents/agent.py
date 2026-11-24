@@ -139,6 +139,8 @@ class NexentAgent(AgentResources):
                 str(model_config.model_factory or "unknown"),
                 str(model_config.model_name),
             )
+        if model_config.catalog_model_id is not None:
+            model_kwargs["catalog_model_id"] = model_config.catalog_model_id
         model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model

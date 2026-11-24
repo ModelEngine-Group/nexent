@@ -266,6 +266,8 @@ class DevelopmentRunBudget(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     max_replay_turns: int = Field(default=1000, ge=1, le=10000)
     max_elapsed_seconds: int = Field(default=3600, ge=1, le=604800)
+    max_model_tokens: int | None = Field(default=None, gt=0, le=10**12, exclude_if=lambda v: v is None)
+    max_model_micros: int | None = Field(default=None, ge=0, le=10**15, exclude_if=lambda v: v is None)
 
 
 class DevelopmentExperimentRequest(BaseModel):

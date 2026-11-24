@@ -433,6 +433,9 @@ def prepare_run_snapshot(
             raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
 
         models = [_materialize_model(binding, actor, payload.resource) for binding in bindings]
+        if isinstance(payload, PreparedEvaluationRun) and payload.evaluation_attempt is not None:
+            models = [model.model_copy(update={"catalog_model_id": binding.model_id})
+                      for model, binding in zip(models, bindings, strict=True)]
         if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
             header_metadata = payload.mcp_header_metadata if isinstance(payload, PreparedAgentRun) else None
             apply_bound_mcp_headers(
@@ -534,7 +537,13 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
     from contracts.constants import environment
 
+    from nexent.core.models.wire_budget import ModelWireBudgetExceeded
+    from runtime.model.evolution_meter import meter_evaluation
+
     private_bucket = environment.EVOLUTION_CONFIRMATION_BUCKET
+    evaluation_attempt = getattr(payload, "evaluation_attempt", None)
+    if evaluation_attempt is not None and (not payload.replay_trial_id or private_bucket):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_EVOLUTION_METERING_SCOPE"})
     if private_bucket or payload.confirmation_bucket:
         if (not private_bucket or payload.confirmation_bucket != private_bucket
                 or environment.MINIO_DEFAULT_BUCKET != private_bucket or environment.ENABLE_TELEMETRY
@@ -577,8 +586,9 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
                 if ref.package_candidate_id:
                     observations.append(await run_blocking("observe-trial-skill", skill_trial_observation,
                         payload, info, actor, ref.package_candidate_id, lane="control-io", owner="runtime"))
-        with observe_trial_guide_choices(info, actor.tenant_id, [path for _, path in observations],
-                                        payload.observe_root_skill_choices) as (reads, all_reads):
+        with (meter_evaluation(evaluation_attempt, actor),
+              observe_trial_guide_choices(info, actor.tenant_id, [path for _, path in observations],
+                                          payload.observe_root_skill_choices) as (reads, all_reads)):
             result = await collect_observer_output(info, agent_run, runtime_thread_manager)
         status = info.attempt_outcome or "completed"
         if payload.replay_trial_id is not None:
@@ -595,6 +605,8 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
                 root_guide_reads={name: read.count for name, read in all_reads.items() if read.count}
                 if payload.observe_root_skill_choices else None)
         return result
+    except ModelWireBudgetExceeded as exc:
+        raise HTTPException(status_code=429, detail={"code": "EVOLUTION_EVALUATION_BUDGET"}) from exc
     except asyncio.CancelledError:
         status = "stopped"
         raise

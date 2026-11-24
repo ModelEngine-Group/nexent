@@ -557,3 +557,31 @@ it("opens a maintainer brief by number and clears examples when the selected num
   fireEvent.change(field,{target:{value:"36"}});
   expect(screen.queryByText(/FIX1/)).toBeNull();
 });
+
+
+it("shows provider model limits and the stopped status on a metered experiment", async () => {
+  const date = "2026-11-23T00:00:00Z";
+  vi.mocked(evolutionService.agents).mockResolvedValue([{agent_id:7,name:"Meeting agent"}]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{version_no:1,version_name:"Pilot"}]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({
+    model_budget_available:true, cases:[], candidates:[], experiments:[{experiment_id:42,create_time:date}],
+  });
+  vi.mocked(evolutionService.report).mockResolvedValue({
+    experiment_id:42, status:"finished", total_pairs:0, valid_pairs:0, pairs:{},
+    model_budget: {
+      max_model_tokens:5000, max_model_micros:4450,
+      calls:3, reported_calls:2, reported_input_tokens:280, reported_output_tokens:120,
+      reported_micros:520, unsettled_tokens:2948, unsettled_micros:3848,
+      stopped_reason:"experiment_model_budget_exceeded",
+    },
+  });
+  render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
+  await choose("agentEvaluation.agentLabel", "Meeting agent");
+  await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  expect(await screen.findByRole("spinbutton", {name:"evolution.budget.modelTokens"})).toBeInTheDocument();
+  expect(screen.getByRole("spinbutton", {name:"evolution.budget.modelCost"})).toBeInTheDocument();
+  await choose("evolution.history", "#42 · " + new Date(date).toLocaleString());
+  expect(await screen.findByText("evolution.budget.modelUsage")).toBeInTheDocument();
+  expect(screen.getByText("evolution.budget.modelStopped")).toBeInTheDocument();
+});

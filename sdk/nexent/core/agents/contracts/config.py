@@ -52,6 +52,7 @@ PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    catalog_model_id: Optional[int] = Field(default=None, exclude=True)
     http_headers: Dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
     resolved_profile: Optional[ResolvedModelProfile] = Field(default=None, repr=False)
     diagnostic_chunks_enabled: bool = Field(

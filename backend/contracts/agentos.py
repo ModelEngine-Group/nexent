@@ -765,6 +765,7 @@ class PreparedEvaluationRun(AgentRunSpec):
 
     conversation_id: Annotated[int, Field(le=0)] = 0
     replay_trial_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
+    evaluation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     new_skill_trial: NewSkillTrial | None = Field(default=None, exclude_if=lambda v: v is None)
     omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
@@ -999,6 +1000,7 @@ class ChatOptions(BaseModel):
 
 class ChatInvocation(ModelInvokeBase):
     operation: Literal["chat"] = "chat"
+    evaluation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     generation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     input: Annotated[list[ChatMessage], Field(min_length=1)]
     options: ChatOptions | None = None

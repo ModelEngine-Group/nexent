@@ -586,6 +586,7 @@ def _call_one_llm_evaluator(
     *,
     user_id: str,
     strict: bool = False,
+    evaluation_attempt: int | None = None,
 ) -> tuple:
     """Call a single LLM evaluator — submitted to the thread pool.
 
@@ -606,6 +607,7 @@ def _call_one_llm_evaluator(
         system_prompt=judge_system_prompt,
         user_id=user_id,
         tenant_id=tenant_id,
+        **({"evaluation_attempt": evaluation_attempt} if evaluation_attempt else {}),
     )
     invalid = None if strict else 0.0
     if not isinstance(response, str) or not response.strip():
@@ -709,6 +711,7 @@ def _score_with_evaluators(
     *,
     user_id: str,
     strict: bool = False,
+    evaluation_attempt: int | None = None,
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
     LLM evaluators run in the Management model lane, separately from the evaluation worker."""
@@ -749,6 +752,7 @@ def _score_with_evaluators(
             conversation_history,
             user_id=user_id,
             strict=strict,
+            **({"evaluation_attempt": evaluation_attempt} if evaluation_attempt else {}),
         ).future: eid
         for eid, ev in llm_evals.items()
     }
@@ -772,6 +776,7 @@ def grade_observed_case(
     judge_system_prompt: str,
     context_window: int = 4096,
     history: list[dict] | None = None,
+    evaluation_attempt: int | None = None,
 ) -> dict[int, dict]:
     """Grade an authorized observation without executing the business Agent or its tools."""
     evidence = {"actual": actual, "expected": expected, "runtime_events": runtime_events}
@@ -794,6 +799,7 @@ def grade_observed_case(
         scores, reasons = _score_with_evaluators(
             ready, judge_system_prompt, tenant_id, query, expected or "", actual or "",
             judge_model_id, runtime_events, context_window, history, user_id=user_id, strict=True,
+            **({"evaluation_attempt": evaluation_attempt} if evaluation_attempt else {}),
         )
         for eid, evaluator in ready.items():
             key = str(eid)

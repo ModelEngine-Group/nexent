@@ -20,6 +20,7 @@ interface Rule {
   status: string;
 }
 export interface Workspace {
+  model_budget_available?: boolean;
   released_guides?: {name: string; candidate_id: number; digest: string}[];
   fixed_regression?: { source_case_id: number; source_version: number; digest: string; family: string; query: string;
     rubric?: { name: string; version_no: number } }[];
@@ -77,10 +78,24 @@ export interface ScreeningCriteria {
 interface DevelopmentRunBudget {
   max_replay_turns: number;
   max_elapsed_seconds: number;
+  max_model_tokens?: number;
+  max_model_micros?: number;
 }
 
 export interface ExperimentReport {
   budget?: DevelopmentRunBudget & { planned_replay_turns: number; deadline: string; expired_trials: number };
+  model_budget?: {
+    max_model_tokens: number;
+    max_model_micros: number;
+    calls: number;
+    reported_calls: number;
+    reported_input_tokens: number;
+    reported_output_tokens: number;
+    reported_micros: number;
+    unsettled_tokens: number;
+    unsettled_micros: number;
+    stopped_reason: string | null;
+  };
   script_source_cases?: number[];
   screening?: { status: "eligible" | "failed" | "incomplete"; criteria: ScreeningCriteria; gain: number | null;
     failures: Record<string, number[]>; missing: Record<string, number[]> };

@@ -19,7 +19,7 @@ def reserve(tenant, user, source, model, *, metering_revision=None):
         daily, source_daily = session.execute(text("""
             SELECT count(*), count(*) FILTER (WHERE source_digest=:source)
             FROM nexent.evolution_generation_attempt_t
-            WHERE tenant_id=:tenant
+            WHERE tenant_id=:tenant AND experiment_id IS NULL
               AND create_time >= date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
         """), params).one()
         if (daily >= environment.EVOLUTION_GENERATION_DAILY_ATTEMPTS
@@ -27,7 +27,7 @@ def reserve(tenant, user, source, model, *, metering_revision=None):
             raise AppException(ErrorCode.COMMON_RATE_LIMIT_EXCEEDED, "Candidate generation attempt limit reached")
         active = session.scalar(text("""
             SELECT count(*) FROM nexent.evolution_generation_attempt_t
-            WHERE tenant_id=:tenant AND completed_at IS NULL AND lease_until > clock_timestamp()
+            WHERE tenant_id=:tenant AND experiment_id IS NULL AND completed_at IS NULL AND lease_until > clock_timestamp()
         """), params)
         if active >= environment.EVOLUTION_GENERATION_CONCURRENCY:
             raise AppException(ErrorCode.COMMON_RATE_LIMIT_EXCEEDED, "Candidate generation is at its concurrency limit")
