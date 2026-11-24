@@ -187,7 +187,7 @@ it("submits an eligible candidate only when its editor requests independent conf
   vi.mocked(evolutionService.confirmationResults).mockResolvedValue([
     {lock_id:1,summary:{decision:"passed",valid_pairs:3,total_pairs:3,regressed:0,quality_gain_pp:100/3}},
     {lock_id:2,summary:{decision:"insufficient",valid_pairs:1,total_pairs:3,regressed:0,quality_gain_pp:100,
-      missing:["confirmation_model_budget_exceeded"],
+      missing:["confirmation_model_budget_exceeded","confirmation_arm_interrupted"],
       model_usage:{input_tokens:9,output_tokens:7,cost_micros:16,unsettled_tokens:0,unsettled_micros:0}}},
   ]);
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
@@ -201,6 +201,7 @@ it("submits an eligible candidate only when its editor requests independent conf
   expect(evolutionService.nominate).toHaveBeenCalledWith(41);
   expect(await screen.findByText(/evolution.confirmation.passed/)).toBeInTheDocument();
   expect(screen.getByText(/evolution.confirmation.modelUsage/)).toHaveTextContent("evolution.confirmation.modelStopped");
+  expect(screen.getByText(/evolution.confirmation.modelUsage/)).toHaveTextContent("evolution.confirmation.interrupted");
   expect(screen.getByRole("link", {name:"evolution.release.open"})).toHaveAttribute("href", "/zh/evaluation/releases/1");
 });
 

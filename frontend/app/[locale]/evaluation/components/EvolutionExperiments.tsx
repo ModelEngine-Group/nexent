@@ -587,6 +587,9 @@ function Experiments({
                   {summary?.missing?.includes("confirmation_model_budget_exceeded") && <>
                     {" · "}{t("evolution.confirmation.modelStopped")}
                   </>}
+                  {summary?.missing?.includes("confirmation_arm_interrupted") && <>
+                    {" · "}{t("evolution.confirmation.interrupted")}
+                  </>}
                   {summary?.decision === "passed" && <> · <a href={`/${i18n.language.startsWith("zh") ? "zh" : "en"}/evaluation/releases/${lock_id}`}>
                     {t("evolution.release.open")}
                   </a></>}

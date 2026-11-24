@@ -20,7 +20,7 @@ from management.db.evaluation.confirmation_locks import locked_protocol
 from management.services.evaluation import experiments
 from management.services.evaluation.confirmation import verified_recipe
 from management.services.evaluation.confirmation_results import arm_measurement, comparison_summary
-from management.services.evaluation.replay_cases import stage_verified_input
+from management.services.evaluation.replay_cases import remove_trial_inputs, stage_verified_input
 from nexent.core.concurrency import run_blocking
 from nexent.monitor.private_logging import private_evaluation_logging
 
@@ -48,17 +48,28 @@ def private_settings(path):
     return bucket, state / "confirmation.sqlite3"
 
 
-def checkpoint(path, attempt, value=None):
+def checkpoint(path, attempt, value=None, phase=None):
     # The deployment owns this directory; it is never supplied or modified by the suite author.
     with closing(sqlite3.connect(path)) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS measured (attempt TEXT PRIMARY KEY, result TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS in_progress (attempt TEXT PRIMARY KEY, phase TEXT NOT NULL)")
+        if phase is not None:
+            db.execute("""
+                INSERT INTO in_progress (attempt,phase)
+                SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM measured WHERE attempt=?)
+                ON CONFLICT DO UPDATE SET phase=excluded.phase WHERE in_progress.phase='staging'
+            """, (attempt, phase, attempt))
         if value is not None:
             db.execute(
                 "INSERT INTO measured (attempt,result) VALUES (?,?) ON CONFLICT DO NOTHING",
                 (attempt, json.dumps(value, allow_nan=False)),
             )
+            db.execute("DELETE FROM in_progress WHERE attempt=?", (attempt,))
         found = db.execute("SELECT result FROM measured WHERE attempt=?", (attempt,)).fetchone()
-    return json.loads(found[0]) if found else None
+        pending = db.execute("SELECT phase FROM in_progress WHERE attempt=?", (attempt,)).fetchone()
+    if found:
+        return json.loads(found[0])
+    return {"pending_phase": pending[0]} if pending else None
 
 
 async def _run_locked(tenant, lock_id, path, bucket, ledger):
@@ -88,6 +99,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
     if allowance is not None:
         await _io("freeze-independent-model-budget", confirmation_runs.freeze_model_metering,
                   tenant, curator, protocol, allowance)
+        await _io("retire-interrupted-model-leases", confirmation_runs.close_interrupted_attempts, tenant, lock_id)
     client = AgentOSClient(environment.EVOLUTION_CONFIRMATION_RUNTIME_URL, create_httpx_client)
     step_ids = {part.candidate_id for part in req.components or () if part.candidate_type == "skill_step"}
     pairs = []
@@ -111,6 +123,14 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                 raise ValueError("The runtime resource binding differs from the locked comparison")
             attempt = task_digest([protocol["digest"], digest, arm])[:32]
             observation = await _io("read-private-checkpoint", checkpoint, ledger, attempt)
+            if observation and observation.get("pending_phase"):
+                await _io("remove-interrupted-private-inputs", remove_trial_inputs, editor, attempt, task["attachments"])
+                if observation["pending_phase"] == "dispatched":
+                    interrupted = {**arm_measurement("invalid", {}, task=task), "interrupted": True}
+                    await _io("recheck-independent-grant", locked_protocol, tenant, curator, lock_id)
+                    observation = await _io("save-interrupted-private-checkpoint", checkpoint, ledger, attempt, interrupted)
+                else:
+                    observation = None
             if observation is None:
                 job = {
                     "plan": plan,
@@ -125,6 +145,11 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                 def stage(turn):
                     return stage_verified_input(tenant, editor, task, attempt, turn, read_material)
 
+                async def before_dispatch():
+                    if await _io("recheck-independent-grant", locked_protocol, tenant, curator, lock_id) != protocol:
+                        raise ValueError("Independent authority changed")
+                    await _io("mark-private-dispatch", checkpoint, ledger, attempt, None, "dispatched")
+
                 model_attempt = None
                 if allowance is not None:
                     model_attempt = await _io(
@@ -136,6 +161,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                         continue
                     job["evaluation_attempt"] = model_attempt
                 try:
+                    await _io("mark-private-staging", checkpoint, ledger, attempt, None, "staging")
                     status, details = await asyncio.wait_for(
                         experiments.run_verified_arm(
                             req,
@@ -144,6 +170,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                             spec.model_copy(update={"confirmation_bucket": bucket}),
                             client,
                             stage,
+                            before_dispatch=before_dispatch,
                         ),
                         req.timeout_seconds,
                     )

@@ -91,10 +91,7 @@ def authorize_model_attempt(tenant, curator, protocol, editor, max_seconds):
         if locked_protocol(tenant, curator, lock_id, transaction=session) != protocol:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Independent protocol changed")
         # The runner holds the execution slot. Replace a lease left behind by an interrupted worker.
-        session.execute(text("""
-            UPDATE nexent.evolution_generation_attempt_t SET completed_at=clock_timestamp()
-            WHERE tenant_id=:tenant AND confirmation_lock_id=:id AND completed_at IS NULL
-        """), {"tenant": tenant, "id": lock_id})
+        _retire_open_attempts(session, tenant, lock_id)
         return session.scalar(text("""
             INSERT INTO nexent.evolution_generation_attempt_t
                 (tenant_id,source_digest,model_id,created_by,lease_until,metering_revision,confirmation_lock_id)
@@ -114,6 +111,19 @@ def close_model_attempt(tenant, lock_id, attempt):
             UPDATE nexent.evolution_generation_attempt_t SET completed_at=clock_timestamp()
             WHERE tenant_id=:tenant AND confirmation_lock_id=:id AND attempt_id=:attempt AND completed_at IS NULL
         """), {"tenant": tenant, "id": lock_id, "attempt": attempt})
+
+
+def close_interrupted_attempts(tenant, lock_id):
+    with get_db_session() as session:
+        lock_model_charges(session, tenant)
+        _retire_open_attempts(session, tenant, lock_id)
+
+
+def _retire_open_attempts(session, tenant, lock_id):
+    session.execute(text("""
+        UPDATE nexent.evolution_generation_attempt_t SET completed_at=clock_timestamp()
+        WHERE tenant_id=:tenant AND confirmation_lock_id=:id AND completed_at IS NULL
+    """), {"tenant": tenant, "id": lock_id})
 
 
 def _add_model_usage(session, tenant, lock_id, summary):

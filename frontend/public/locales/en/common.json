@@ -64,6 +64,7 @@
   "evolution.confirmation.pairs": "{{valid}}/{{total}} valid pairs, {{regressed}} regressions",
   "evolution.confirmation.modelUsage": "{{tokens}} billed model tokens (${{dollars}}), {{reservedTokens}} reserved pending settlement (${{reservedCost}})",
   "evolution.confirmation.modelStopped": "Confirmation budget reached. Remaining trials were stopped.",
+  "evolution.confirmation.interrupted": "A trial was interrupted before its result was saved. This confirmation cannot be used for release.",
   "evolution.confirmation.submit": "Submit candidate for independent evaluation",
   "evolution.confirmation.receipt": "Candidate submitted. Share experiment {{id}} and this digest with the independent evaluator.",
   "evolution.screen.skill_selection": "Candidate missed or selected an incorrect Skill",

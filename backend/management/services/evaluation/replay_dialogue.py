@@ -61,7 +61,7 @@ def validate_turn(spec, receipt, attempt, expected_names):
     return None
 
 
-async def run_turns(client, spec, task, load_input, job, user, tenant):
+async def run_turns(client, spec, task, load_input, job, user, tenant, *, before_dispatch=None):
     history, observations, records = [], [], []
     followups = task.get("followups", [])
     watch = task.get("tool_use")
@@ -88,6 +88,8 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
             updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
         if files is not None:
             updates["replay_files"] = files
+        if index == 0 and before_dispatch is not None:
+            await before_dispatch()
         try:
             observed = await client.run_prepared_evaluation(spec.model_copy(update=updates), user, tenant)
         except RuntimeUpstreamError as exc:

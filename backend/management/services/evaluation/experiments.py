@@ -544,7 +544,7 @@ async def execute_trial(job):
         *args, job["receipt_id"], index))
 
 
-async def run_verified_arm(request, job, case, spec, client, stage_input):
+async def run_verified_arm(request, job, case, spec, client, stage_input, *, before_dispatch=None):
     """Execute and grade one verified arm; the caller owns the evidence and storage scope."""
     tenant, user = job["tenant_id"], job["created_by"]
     digest = job["plan"]["snapshots"][job["variant"]]
@@ -565,7 +565,9 @@ async def run_verified_arm(request, job, case, spec, client, stage_input):
                      for rule in task["tool_use"]["rules"]]
             task = {**task, "tool_use": {**task["tool_use"], "rules": rules}}
         started = time.monotonic_ns()
-        observations, turns, error = await run_turns(client, spec, task, load_input, job, user, tenant)
+        observations, turns, error = await run_turns(
+            client, spec, task, load_input, job, user, tenant, before_dispatch=before_dispatch,
+        )
         execution_ms = (time.monotonic_ns() - started + 999999) // 1000000
     finally:
         await _io("release-development-input", stack.close)

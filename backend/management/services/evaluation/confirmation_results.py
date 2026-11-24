@@ -78,6 +78,8 @@ def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=
     # Private family names and individual task outcomes never appear in the returned object.
     valid, families, timings, token_pairs = [], Counter(), [], []
     failed, missing = [], []
+    if any(base.get("interrupted") or candidate.get("interrupted") for _, base, candidate in pairs):
+        missing.append("confirmation_arm_interrupted")
     forbidden = sum(candidate["forbidden"] for _, _, candidate in pairs)
     if forbidden:
         failed.append("forbidden_action")

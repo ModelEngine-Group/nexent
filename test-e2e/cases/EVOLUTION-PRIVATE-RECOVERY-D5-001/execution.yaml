@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-PRIVATE-RECOVERY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_private_confirmation_resumes_after_worker_exit
+acceptance_bindings:
+  AC-01: [test_private_confirmation_resumes_after_worker_exit]
+  AC-02: [test_private_confirmation_resumes_after_worker_exit]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The case uses a disposable PostgreSQL database. Each variant owns its lock, private directory and subprocess lifecycle. The fixture substitutes resource assembly, object transport and the Runtime execution boundary.

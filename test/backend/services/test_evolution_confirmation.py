@@ -69,6 +69,11 @@ def test_private_worker_requires_separate_state_and_reuses_only_first_measuremen
     _, ledger = private_settings(suite)
     assert checkpoint(ledger,"arm") is None
     assert checkpoint(ledger,"arm",{"status":"fail"}) == checkpoint(ledger,"arm",{"status":"pass"}) == {"status":"fail"}
+    assert checkpoint(ledger, "other", phase="staging") == {"pending_phase": "staging"}
+    assert checkpoint(ledger, "other", phase="dispatched") == {"pending_phase": "dispatched"}
+    assert checkpoint(ledger, "other", phase="staging") == {"pending_phase": "dispatched"}
+    assert checkpoint(ledger, "other", {"status": "invalid", "interrupted": True})["interrupted"]
+    assert checkpoint(ledger, "other", phase="dispatched") == {"status": "invalid", "interrupted": True}
     monkeypatch.setattr(environment,"EVOLUTION_CONFIRMATION_STATE_DIR",str(suite.parent/"state"))
     with pytest.raises(ValueError,match="state"):
         private_settings(suite)

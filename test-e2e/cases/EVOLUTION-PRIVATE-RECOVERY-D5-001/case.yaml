@@ -1,0 +1,45 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-PRIVATE-RECOVERY-D5-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-07]
+  title: 独立确认进程中断后清理附件并避免重复试跑
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 在真实进程异常退出后重新启动独立确认，区分尚未发出与可能已执行的试跑。
+  preconditions: [可创建临时数据库的 PostgreSQL 实例，独占私有评测目录与可控的附件和 Runtime 边界。]
+  test_data:
+    profile: 已锁定的合成候选，三道私有任务，首题已有可判结果。
+  steps:
+  - order: 1
+    action: 运行独立确认，在第二题附件复制完成而 Runtime 请求尚未发出时终止 worker，再启动同一确认。
+    expected: 旧附件副本被清理，首题判分复用，第二题可安全试跑，其余任务继续。
+  - order: 2
+    action: 在第二题 Runtime 已收到试跑并产生回执而逐题判分尚未持久化时终止 worker。重启并再次运行该确认。
+    expected: 可能已经运行的组标为无效，剩余组继续。已保存判分不重跑，公开报告保留汇总和中断原因，禁止晋升。
+  expected_results: [发出前的中断恢复正常对照，且附件回收。, 发出后的中断不会重复执行，其他判分与重复查询保持一致。]
+  forbidden_side_effects: [同一组重复请求或凭不完整的确认通过发布。, 将题面、附件名称或单题运行标识写入共享数据库结果。]
+  acceptance:
+  - id: AC-01
+    description: 进程退出后清理预备副本，复用已写判分，并继续尚未发出的组。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 已发出但未确认的试跑不会重发，不完整的比较不能用于发布。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1, 2]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: RELIABILITY
+  risk: 突然退出造成重复执行、附件残留或不完整比较被晋升。
+  condition: [隔离数据库、私有文件目录及 Runtime 替身，两个故障点由真实子进程退出触发。]
+  metrics: [各对照组发出次数、已判组复用、临时对象残留、发布资格。]
+  thresholds: [每个对照组实际发出最多一次、完成后临时对象数为零、证据缺失的候选可晋升数为零。]
+  recovery_expectations: [重启后同一锁继续执行，复用已判分并保留中断原因，测试结束后收回环境。]
