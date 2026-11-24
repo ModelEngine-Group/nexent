@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.dialects import postgresql
 
+from infrastructure.rdb.trajectory import repository as trajectory_repository
 from management.db.conversation import repository as db
 
 
@@ -64,7 +65,7 @@ def test_retention_propagates_delete_failure(session, mocker):
 
 
 def test_cascade_reuses_callers_transaction_and_audits_all_children(session, mocker):
-    summaries = mocker.patch("management.db.trajectory.repository.delete_summaries")
+    summaries = mocker.patch.object(trajectory_repository, "delete_summaries")
     session.execute.return_value.all.return_value = [(4,)]
     assert db.delete_conversations_batch([4, 999], "owner", session=session) == [4]
     summaries.assert_called_once_with(session, [4], "owner")
@@ -82,7 +83,7 @@ def test_cascade_reuses_callers_transaction_and_audits_all_children(session, moc
 @pytest.mark.parametrize("kind", ["agent", "skill"])
 def test_creation_enforces_retention_before_returning_new_conversation(session, mocker, kind):
     mocker.patch.object(db, "_enforce_user_conversation_limit")
-    mocker.patch("management.db.trajectory.repository.seed_conversation")
+    mocker.patch.object(trajectory_repository, "seed_conversation")
     retain = mocker.patch.object(db, "retain_creator_histories")
     target = {"type": kind, "id": 201}
     session.execute.return_value.fetchone.return_value = SimpleNamespace(
