@@ -10,4 +10,6 @@ feature:
   business_rules:
   - rule_id: AGENT-EVOLUTION-RELEASE-RULE-01
     description: 会话首次提交与服务端选版一致，切换默认版本后续聊和重试沿用已绑定版本。
-  required_test_stages: [D3]
+  - rule_id: AGENT-EVOLUTION-RELEASE-RULE-02
+    description: 发布负责人按实际版本核对线上运行量、失败、诊断覆盖和操作历史，授权撤回后业务信号随即更新。
+  required_test_stages: [D2, D3]

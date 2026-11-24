@@ -3,6 +3,7 @@
 
 from sqlalchemy import select
 
+from contracts.releases import supports_release
 from contracts.agentos import EvaluationAgentRun
 from contracts.errors.exceptions import AppException, SnapshotCompilationError
 from infrastructure.rdb.client import get_db_session
@@ -61,8 +62,8 @@ def _materials(tenant, ctx, prepared):
     targets = {}
     removed = ()
     parts = recipe["components"] if kind == "combination" else [recipe]
-    if kind == "combination" and len(parts) != 2:
-        releases.reject("A combined release requires two confirmed revisions")
+    if not supports_release(kind, recipe.get("components")):
+        releases.reject("This candidate does not have a publishable resource binding")
     for part in parts:
         part_kind, candidate_id = part["candidate_type"], part["candidate_id"]
         if part_kind == "prompt":

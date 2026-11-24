@@ -1,0 +1,32 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-RELEASE-MONITOR-D2-001
+  feature_id: AGENT-EVOLUTION-RELEASE
+  business_rule_ids: [AGENT-EVOLUTION-RELEASE-RULE-02]
+  title: 发布后按实际版本核对业务执行和诊断覆盖
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 发布负责人可区分新旧版本、执行失败、缺证和用户纠正，授权撤回后同步更新。
+  preconditions: [本地 PostgreSQL 可创建隔离数据库。]
+  test_data:
+    profile: 已发布后回退的业务智能体，两个版本的会话，含自动任务、授权诊断与缺少轨迹的执行。
+  steps:
+  - order: 1
+    action: 以尚未取得发布权限的用户请求指标，授权后查看两个版本的执行。
+    expected: 未授权返回 403。普通会话按实际运行版本统计，自动任务及观察期外的运行排除，版本缺证单独计数。
+  - order: 2
+    action: 核对已知实际时延和已知为零的 Token，再撤回诊断授权并重读。
+    expected: 无用量显示缺证、确有零用量正常计入。撤权清除诊断计数，版本执行量及发布回退记录仍可查。
+  expected_results: [两版有独立分母并明确时段。, 缺证与零可区分且诊断权限即时生效。]
+  forbidden_side_effects: [报告不返回会话正文、原始诊断、单题材料或会话标识。]
+  acceptance:
+  - {id: AC-01, description: 发布权限与版本归属, steps: [1], expected_results: [1]}
+  - {id: AC-02, description: 缺证及撤权, steps: [2], expected_results: [2], forbidden_side_effects: [1]}
+  contract:
+    protocol: HTTP API
+    request_expectations: [使用原生登录会话。]
+    response_expectations: [只提供授权范围内的聚合指标和发布操作历史。]

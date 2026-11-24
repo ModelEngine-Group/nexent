@@ -2,4 +2,5 @@
 
 此页由结构化用例生成，不手工编辑。
 
+- D2 [EVOLUTION-RELEASE-MONITOR-D2-001](../../cases/EVOLUTION-RELEASE-MONITOR-D2-001/case.yaml) · active
 - D3 [EVOLUTION-SESSION-VERSION-D3-001](../../cases/EVOLUTION-SESSION-VERSION-D3-001/case.yaml) · active

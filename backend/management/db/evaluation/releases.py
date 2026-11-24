@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution_sources import task_digest
+from contracts.releases import supports_release
 from contracts.roles import has_any_role
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.skill_execution_records import SkillInfo, effective_skill_description, release_skill
@@ -450,7 +451,7 @@ def release_view(tenant, actor, lock):
                     WHERE tenant_id=:t AND agent_id=:a AND version_no=:v AND candidate_id=:c
                 """), dict(t=tenant,a=row["agent_id"],v=row["base_version"],c=cid)).mappings().one_or_none()
                 data["added_guide"] = dict(name) if name else None
-        return {**data, "release": receipt}
+        return {**data, "release": receipt, "supported_type": supports_release(data["candidate_type"], data["components"])}
 
 
 def restore(tenant, actor, lock, request, ready):

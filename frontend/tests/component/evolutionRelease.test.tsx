@@ -17,7 +17,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 vi.mock("@/services/evolutionService", () => ({
-  evolutionService: { release: vi.fn(), promote: vi.fn(), rollback: vi.fn() },
+  evolutionService: { releaseMonitoring: vi.fn(), release: vi.fn(), promote: vi.fn(), rollback: vi.fn() },
 }));
 
 const passed: Awaited<ReturnType<typeof api.release>> = {
@@ -28,6 +28,7 @@ const passed: Awaited<ReturnType<typeof api.release>> = {
   paused: false,
   candidate_digest: "a".repeat(64),
   candidate_type: "skill_step",
+  supported_type: true,
   release: null,
   summary: { decision: "passed", valid_pairs: 3, total_pairs: 3, regressed: 0 },
 };
@@ -148,4 +149,35 @@ it("shows the approved script and the sandbox image verified before release", as
   expect(await screen.findByText("scripts/weekly.py")).toBeInTheDocument();
   expect(screen.getByText("normalize")).toBeInTheDocument();
   expect(screen.getByText(image)).toBeInTheDocument();
+});
+
+it.each(["skill_new","skill_discovery","skill_script","tool_mapping","combination"])(
+  "submits a supported %s release after the owner supplies a reason", async kind => {
+    vi.mocked(api.release).mockResolvedValue({...passed,candidate_type:kind});
+    open();
+    fireEvent.change(await screen.findByRole("textbox"),{target:{value:"verified scope"}});
+    expect(screen.getByRole("button",{name:"evolution.release.publish"})).toBeEnabled();
+    fireEvent.click(screen.getByRole("button",{name:"evolution.release.publish"}));
+    await waitFor(()=>expect(api.promote).toHaveBeenCalledWith(8,2,passed.candidate_digest,"verified scope"));
+  }
+);
+
+it("keeps unknown candidate types closed and distinguishes absent samples from zero", async () => {
+  vi.mocked(api.release).mockResolvedValue({...passed,supported_type:false,candidate_type:"unbound"});
+  const view=render(<QueryClientProvider client={new QueryClient()}><ReleasePage/></QueryClientProvider>);
+  fireEvent.change(await screen.findByRole("textbox"),{target:{value:"not bound"}});
+  expect(screen.getByRole("button",{name:"evolution.release.publish"})).toBeDisabled();
+  view.unmount();
+  vi.mocked(api.release).mockResolvedValue({...passed,current_version:3,release:{new_version:3,disabled:false,rollback_at:null}});
+  vi.mocked(api.releaseMonitoring).mockResolvedValue({
+    since:"2026-01-01T00:00:00Z",until:"2026-01-02T00:00:00Z",versions:[{
+      version_no:3,sessions:1,executions:2,unverified:0,binding_mismatches:0,failed:0,stopped:0,timed:2,p90_ms:150.6,metered:0,mean_tokens:null,
+      reviewed:0,tool_errors:0,corrected:0,disliked:0,missing_files:0}],
+    events:[{action:"publish",actor:"publisher",reason:"validated cases",created_at:"2026-01-01T00:00:00Z"}]});
+  open();
+  fireEvent.click(await screen.findByRole("button",{name:"evolution.monitor.open"}));
+  expect(await screen.findByText("151 ms")).toBeInTheDocument();
+  expect(screen.getByText(/validated cases/)).toBeInTheDocument();
+  expect(screen.getAllByText("—").length).toBeGreaterThan(1);
+  expect(api.releaseMonitoring).toHaveBeenCalledWith(8);
 });

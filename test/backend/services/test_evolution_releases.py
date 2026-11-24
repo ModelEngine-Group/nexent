@@ -211,3 +211,14 @@ def test_combined_skill_release_keeps_each_tested_instance_and_rollback_metadata
     targets[42]["instance_id"] = 1
     with pytest.raises(AppException):
         releases._materials("t", ctx, prepared)
+
+
+def test_release_capabilities_cover_confirmed_resource_types():
+    from contracts.releases import supports_release
+
+    for kind in ("skill_new", "skill_discovery", "skill_script", "tool_mapping", "prompt", "tool_set", "skill_step"):
+        assert supports_release(kind)
+    assert supports_release("combination", [{"candidate_type":"prompt"},{"candidate_type":"tool_set"}])
+    assert not supports_release("combination", [{"candidate_type":"prompt"},{"candidate_type":"tool_mapping"}])
+    assert not supports_release("combination", [])
+    assert not supports_release("baseline")

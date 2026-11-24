@@ -140,7 +140,7 @@ async function read<T>(url: string, body?: unknown): Promise<T> {
 export const evolutionService = {
   release: (id: number) => read<{
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
-    candidate_digest: string; candidate_type: string; paused: boolean; excluded_tools?: string[];
+    candidate_digest: string; candidate_type: string; supported_type: boolean; paused: boolean; excluded_tools?: string[];
     script_build?: {name: string; path: string; function: string; image: string} | null;
     tool_mapping?: {tool: string; field: string; proposed: Record<string, {kind: string; values?: string[]}>} | null;
     components?: {experiment_id: number; candidate_type: string; candidate_id: number}[] | null;
@@ -149,6 +149,13 @@ export const evolutionService = {
     summary: null | {decision: "passed" | "insufficient" | "failed"; valid_pairs: number; total_pairs: number; regressed: number};
     release: null | {new_version: number; rollback_at: string | null; disabled: boolean};
   }>(`${root}/confirmation-locks/${id}/release`),
+  releaseMonitoring: (id: number) => read<{
+    since: string; until: string;
+    versions: {version_no: number; sessions: number; executions: number; unverified: number; binding_mismatches: number; failed: number; stopped: number;
+      timed: number; p90_ms: number | null; metered: number; mean_tokens: number | null; reviewed: number;
+      corrected: number; tool_errors: number; missing_files: number; disliked: number}[];
+    events: {action: string; actor: string; reason: string; created_at: string}[];
+  }>(`${root}/confirmation-locks/${id}/release/monitoring`),
   promote: (id: number, expected_version: number, candidate_digest: string, reason: string) =>
     read(`${root}/confirmation-locks/${id}/promote`, {expected_version,candidate_digest,reason}),
   rollback: (id: number, expected_version: number, reason: string, emergency: boolean) =>

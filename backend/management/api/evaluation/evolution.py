@@ -21,6 +21,7 @@ from management.db.evaluation.experiments import read_handoff
 from management.services.evaluation.new_skill_candidates import generate_new_skill, preview_new_skill
 from management.services.evaluation.new_skill_evidence import share_new_skill_brief
 from management.db.evaluation.releases import release_view, set_publisher
+from management.db.evaluation.release_monitoring import release_monitoring
 from management.services.evaluation.releases import promote, rollback
 from management.db.evaluation.candidates import text_digest
 from management.db.evaluation.confirmation import register_suite, set_curator
@@ -62,6 +63,13 @@ async def change_release_owner(
 async def promote_release(lock_id: int, request: PromotionRequest, authorization: str | None = Header(None)):
     user, tenant = get_current_user_id(authorization)
     return {"data": await promote(tenant, user, lock_id, request)}
+
+
+@router.get("/confirmation-locks/{lock_id}/release/monitoring")
+async def read_release_monitoring(lock_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await run_blocking("read-release-monitoring", release_monitoring, tenant, user, lock_id,
+                                       lane="evaluation", owner="management")}
 
 
 @router.get("/confirmation-locks/{lock_id}/release")

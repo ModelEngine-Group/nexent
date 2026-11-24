@@ -4,16 +4,19 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Checkbox, Flex, Input, Typography } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { evolutionService as api } from "@/services/evolutionService";
+
+import ReleaseMonitoring from "./ReleaseMonitoring";
 
 export default function ReleasePage() {
   const { t } = useTranslation("common");
   const { lockId } = useParams<{ lockId: string }>();
   const { user } = useAuthorizationContext();
   const lock = Number(lockId);
+  const cache = useQueryClient();
   const [reason, setReason] = useState("");
   const [emergency, setEmergency] = useState(false);
   const report = useQuery({
@@ -22,7 +25,7 @@ export default function ReleasePage() {
     enabled: !!user && Number.isSafeInteger(lock) && lock > 0,
     retry: false,
   });
-  const data = report.data;
+  const data = report.error ? undefined : report.data;
   const action = useMutation({
     mutationFn: async () => {
       if (!data || !reason.trim()) return;
@@ -43,14 +46,14 @@ export default function ReleasePage() {
     },
     onSettled: () => report.refetch(),
     onSuccess: () => {
+      void cache.invalidateQueries({queryKey:["release-monitoring",user?.tenantId,user?.id,lock]});
       setReason("");
       setEmergency(false);
     },
   });
   const error = action.error || report.error;
   const release = data?.release;
-  const supported =
-    data && ["prompt", "skill_step", "tool_set"].includes(data.candidate_type);
+  const supported = data?.supported_type;
   const canAct =
     data &&
     (release
@@ -139,6 +142,7 @@ export default function ReleasePage() {
                   )}
                 </Typography.Text>
               )}
+              {release && user && <ReleaseMonitoring lock={lock} tenant={user.tenantId} viewer={user.id}/>}
               {!release && !supported && (
                 <Alert
                   type="info"
