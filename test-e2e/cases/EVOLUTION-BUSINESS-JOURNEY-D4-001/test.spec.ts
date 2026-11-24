@@ -62,6 +62,8 @@ journey(ID, async (scenario) => {
   let publisher: Page;
   let oldChat: Page;
   let newChat: Page;
+  let oldSession: number;
+  let newSession: number;
   let experiment: number;
   let confirmation: number;
   let published: number;
@@ -107,9 +109,11 @@ journey(ID, async (scenario) => {
     return next;
   }
 
-  async function openChat(target: Page) {
-    await target.goto(config.origin + "/zh/newchat?agent_id=" + config.agent, { waitUntil: "domcontentloaded" });
+  async function openChat(target: Page, conversation?: number) {
+    const params = conversation ? "conversation_id=" + conversation : "agent_id=" + config.agent;
+    await target.goto(config.origin + "/zh/newchat?" + params, { waitUntil: "domcontentloaded" });
     await expect(target.getByText("pilot-fixture", { exact: true }).first()).toBeVisible();
+    if (conversation) await expect(target.locator(ANSWER).first()).toBeVisible();
   }
 
   async function send(target: Page, query: string, answer: string | RegExp) {
@@ -122,13 +126,21 @@ journey(ID, async (scenario) => {
     expect(response.status()).toBe(200);
     const message = target.locator(ANSWER).nth(count);
     await expect(message.getByText(answer).first()).toBeVisible();
-    return { message, execution: await response.headerValue("x-agentos-run-id") };
+    return { message, execution: await response.headerValue("x-agentos-run-id"),
+      conversation: Number(await response.headerValue("conversation_id")),
+      requestedConversation: response.request().postDataJSON()?.conversation_id };
   }
 
-  async function evaluate(ticket: Page, version: number, expected: string) {
+  async function evaluate(ticket: Page, version: number, expected: string, conversation?: number) {
     const reply = await send(ticket, "请核对交接。事项编号=U570；负责人=未指定。", expected);
     expect(reply.execution).toMatch(/^[a-zA-Z0-9_-]{10,128}$/);
+    expect(reply.conversation).toBeGreaterThan(0);
+    if (conversation) {
+      expect(Number(reply.requestedConversation)).toBe(conversation);
+      expect(reply.conversation).toBe(conversation);
+    }
     executions.push({ id: reply.execution!, version });
+    return reply.conversation;
   }
 
   async function release(action: "promote" | "rollback") {
@@ -200,7 +212,10 @@ journey(ID, async (scenario) => {
         await expect(own.message.getByRole("button", { name: "编辑候选" })).toHaveCount(0);
         const ownCandidate = await generate(Number(ownId), suggestion.expected_behavior);
         const refreshed = await send(editor, `S-${ownId}`, /已生成候选，等待对比评测/);
-        await refreshed.message.getByRole("button", { name: "编辑候选" }).click();
+        expect(refreshed.conversation).toBeGreaterThan(0);
+        await openChat(editor, refreshed.conversation);
+        const savedReceipt = editor.locator(ANSWER).filter({ hasText: "已生成候选，等待对比评测" }).last();
+        await savedReceipt.getByRole("button", { name: "编辑候选" }).click();
         const dialog = editor.getByRole("dialog", { name: "编辑候选" });
         const replacement = ownCandidate.edit.new + "\n保留原有的事项编号。";
         await expect(dialog.getByRole("textbox", { name: "修改后的步骤" })).toHaveValue(ownCandidate.edit.new);
@@ -214,7 +229,7 @@ journey(ID, async (scenario) => {
         expect(revised).not.toBe(ownCandidate.candidate_id);
         await expect(dialog.getByText(`已保存候选 #${revised}，可以重新对比评测。`)).toBeVisible();
         await dialog.getByRole("button", { name: "关闭", exact: true }).last().click();
-        const compare = refreshed.message.getByRole("link", { name: "对比评测" });
+        const compare = savedReceipt.getByRole("link", { name: "对比评测" });
         await expect(compare).toHaveAttribute("href", new RegExp(`candidate_id=${revised}(?:&|$)`));
         await compare.click();
         await expect(editor.getByRole("combobox", { name: "选择候选" })).toBeVisible();
@@ -274,7 +289,7 @@ journey(ID, async (scenario) => {
       async () => {
         oldChat = await separatePage(config.reader);
         await openChat(oldChat);
-        await evaluate(oldChat, 1, "无已分配事项");
+        oldSession = await evaluate(oldChat, 1, "无已分配事项");
         await publisher.goto(config.origin + "/zh/evaluation/releases/" + confirmation, { waitUntil: "domcontentloaded" });
         published = (await release("promote")).new_version;
         expect(published).toBeGreaterThan(1);
@@ -282,8 +297,9 @@ journey(ID, async (scenario) => {
         await send(page, sid, new RegExp("发布 V" + published));
         newChat = await separatePage(config.reader);
         await openChat(newChat);
-        await evaluate(newChat, published, "U570 待分配");
-        await evaluate(oldChat, 1, "无已分配事项");
+        newSession = await evaluate(newChat, published, "U570 待分配");
+        await openChat(oldChat, oldSession);
+        await evaluate(oldChat, 1, "无已分配事项", oldSession);
         return "publisher promoted the tested version; new and existing chat outputs followed their bindings";
       },
       async () => {
@@ -295,7 +311,8 @@ journey(ID, async (scenario) => {
         const restored = await separatePage(config.reader);
         await openChat(restored);
         await evaluate(restored, 1, "无已分配事项");
-        await evaluate(newChat, published, "U570 待分配");
+        await openChat(newChat, newSession);
+        await evaluate(newChat, published, "U570 待分配", newSession);
         return "publisher rolled back; new chats used V1, and existing chats kept the published version";
       },
     ],
