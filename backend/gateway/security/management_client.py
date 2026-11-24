@@ -5,7 +5,7 @@ import json
 
 import httpx
 
-from gateway.security.identity import IdentityError, sign_lookup
+from gateway.identity.protocol import IdentityError, sign_lookup
 
 
 class IdentityUnavailable(RuntimeError):

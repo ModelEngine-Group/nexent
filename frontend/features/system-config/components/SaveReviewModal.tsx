@@ -37,7 +37,7 @@ export function SaveReviewModal({
       confirmLoading={saving}
       okText={t("systemConfig.save.confirm")}
       cancelText={t("systemConfig.cancel")}
-      width={680}
+      width={620}
       title={t("systemConfig.save.title")}
     >
       <p className="text-[13px] leading-6 text-[var(--color-text-secondary)]">
@@ -55,9 +55,6 @@ export function SaveReviewModal({
               </th>
               <th className="w-[120px] px-3 py-2 font-normal">
                 {t("systemConfig.save.to")}
-              </th>
-              <th className="w-[190px] px-3 py-2 font-normal">
-                {t("systemConfig.save.effect")}
               </th>
             </tr>
           </thead>
@@ -78,17 +75,11 @@ export function SaveReviewModal({
                 <td className="px-3 py-2.5 font-medium text-[var(--color-brand)]">
                   {formatConfigValue(change.item, change.to, t)}
                 </td>
-                <td className="px-3 py-2.5 text-[var(--color-text-secondary)]">
-                  {t(change.item.effect_key)}
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="mt-4 text-[12px] text-[var(--color-text-secondary)]">
-        {t("systemConfig.save.note")}
-      </p>
     </Modal>
   );
 }

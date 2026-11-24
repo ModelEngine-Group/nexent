@@ -580,6 +580,15 @@ class AgentRunSpec(RunSpecModel):
 
 
 class HistoryCheckpointCandidate(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_source_extensions(cls, value):
+        """Read older persisted checkpoints without activating withdrawn source catalogs."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items()
+                    if key not in {"structured_source_proofs", "execution_sources"}}
+        return value
+
     summary: dict[str, JsonValue]
     covered_through_message_id: PositiveInt
     previous_summary_unit_id: PositiveInt | None = None
@@ -591,18 +600,38 @@ class HistoryCheckpointCandidate(RunSpecModel):
     compaction_target_tokens: int | None = Field(default=None, ge=0)
 
 
+class CompletedTurnHistoryCheckpointCandidate(RunSpecModel):
+    """A root Runtime proposal whose final boundary is assigned only by Management."""
+
+    coverage_scope: Literal["current_completed_turn"]
+    summary: dict[str, JsonValue]
+    history_tail_message_id: PositiveInt | None = None
+    previous_summary_unit_id: PositiveInt | None = None
+    trigger: Literal["completed_turn"] = "completed_turn"
+
+
 class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
 
 
 class PreparedHistoryExecutionRecord(RunSpecModel):
-    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact"]
+    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result"]
+    unit_index: int | None = Field(default=None, strict=True, ge=0)
     content: str | None
-    tool_call_id: str | None
-    invocation_id: str | None
+    tool_call_id: str | None = None
+    invocation_id: str | None = None
+    execution_event: dict[str, JsonValue] | None = None
 
 
 class PreparedHistoryTurn(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_user_original(cls, value):
+        """Keep older Prepared turns readable without a second user-original channel."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "user_source_content"}
+        return value
+
     user_message: str
     assistant_final_answer: str
     user_message_id: PositiveInt
@@ -864,6 +893,8 @@ class ChatInvocation(ModelInvokeBase):
 class EmbeddingInvocation(ModelInvokeBase):
     operation: Literal["embedding"] = "embedding"
     input: Annotated[list[str], Field(min_length=1)]
+    # Automatic Memory only; other model callers retain their existing policy.
+    memory_timeout_seconds: Annotated[float, Field(gt=0, le=10)] | None = None
 
 
 class RerankInput(BaseModel):

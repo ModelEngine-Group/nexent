@@ -110,6 +110,7 @@ def test_passthrough_uses_checkpoint_without_creating_a_new_one(monkeypatch):
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
     model = _SummaryModel()
     result = manager.assemble_final_context(
+        maintenance=True,
         model=model, memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert model.calls == []
@@ -122,7 +123,7 @@ def test_adaptive_incrementally_compresses_only_summary_and_completed_turns(monk
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     persisted = []
     manager = ContextManager(ContextManagerConfig(
-        soft_input_budget_tokens=20, hard_input_budget_tokens=100,
+        effective_input_limit_tokens=2000, compaction_trigger_threshold_tokens=20, compaction_target_tokens=1000, hard_input_budget_tokens=100,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
         history_summary_sink=persisted.append,
     ))
@@ -130,6 +131,7 @@ def test_adaptive_incrementally_compresses_only_summary_and_completed_turns(monk
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
     model = _SummaryModel()
     result = manager.assemble_final_context(
+        maintenance=True,
         model=model, memory=memory, current_run_start_idx=0, run_context=run,
     )
     prompt = " ".join(
@@ -182,6 +184,7 @@ def test_proactive_compaction_uses_previous_result_and_persists_only_final(monke
     model = ShrinkingModel()
     run = manager.prepare_run_context(_Memory([]), "", large_turns)
     result = manager.assemble_final_context(
+        maintenance=True,
         model=model, memory=_Memory([]), current_run_start_idx=0, run_context=run,
     )
 
@@ -200,7 +203,7 @@ def test_summary_two_uses_summary_one_and_only_turns_after_its_coverage(monkeypa
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     summary_two_model = _SummaryModel()
     manager = ContextManager(ContextManagerConfig(
-        soft_input_budget_tokens=20, hard_input_budget_tokens=100,
+        effective_input_limit_tokens=2000, compaction_trigger_threshold_tokens=200, compaction_target_tokens=100, hard_input_budget_tokens=100,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
     ))
     inputs = [
@@ -218,6 +221,7 @@ def test_summary_two_uses_summary_one_and_only_turns_after_its_coverage(monkeypa
     memory = _Memory([TaskStep(task="CURRENT RUN")])
     run = manager.prepare_run_context(memory, "", inputs)
     result = manager.assemble_final_context(
+        maintenance=True,
         model=summary_two_model, memory=memory, current_run_start_idx=0,
         run_context=run,
     )
@@ -254,6 +258,7 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
     ))
     run = manager.prepare_run_context(memory, "", [])
     result = manager.assemble_final_context(
+        maintenance=True,
         model=None, memory=memory, current_run_start_idx=0, run_context=run,
     )
 
@@ -311,6 +316,7 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
 
     run = manager.prepare_run_context(memory, "", [])
     result = manager.assemble_final_context(
+        maintenance=True,
         model=None, memory=memory, current_run_start_idx=0, run_context=run,
     )
     rendered = _rendered_text(result.messages)
@@ -328,15 +334,18 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
     assert "Observation:" not in summary_rendered
 
 
-def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
+@pytest.mark.parametrize("content", ["plain summary without required identifiers", "", "   ", None])
+def test_summary_adopts_nonempty_text_and_preserves_history_on_empty_or_failure(monkeypatch, content):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     class PlainModel:
         def __call__(self, messages, stop_sequences=None):
-            return type("Response", (), {"content": "lossy fallback", "token_usage": None})()
+            if content is None:
+                raise RuntimeError("summary failed")
+            return type("Response", (), {"content": content, "token_usage": None})()
     persisted = []
     statuses = []
     manager = ContextManager(ContextManagerConfig(
-        soft_input_budget_tokens=20, max_summary_reduce_tokens=20,
+        effective_input_limit_tokens=2000, compaction_trigger_threshold_tokens=20, compaction_target_tokens=1000, max_summary_reduce_tokens=20,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
         history_summary_sink=persisted.append,
         history_summary_status_sink=statuses.append,
@@ -344,15 +353,23 @@ def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
     memory = _Memory([TaskStep(task="current")])
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
     result = manager.assemble_final_context(
+        maintenance=True,
         model=PlainModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
-    assert persisted == []
-    assert statuses == [{"status": "compacting"}, {"status": "idle"}]
-    assert result.evidence.summary_persist_status == "not_attempted"
-    assert result.evidence.new_summary_coverage is None
-    rendered = str(result.messages)
-    assert "history limited" in rendered
+    if content and content.strip():
+        assert len(persisted) == 1
+        assert persisted[0].summary == {"markdown": content}
+        assert result.evidence.summary_persist_status == "succeeded"
+        assert result.evidence.new_summary_coverage == 22
+    else:
+        assert persisted == []
+        assert statuses == [{"status": "compacting"}, {"status": "idle"}]
+        assert result.evidence.summary_persist_status == "not_attempted"
+        assert result.evidence.new_summary_coverage is None
+        assert "new question" in str(result.messages)
+    assert "history limited" not in str(result.messages)
     assert _summary_and_turns()[1].content["user_message"] == "new question " * 100
+
 
 
 def test_current_action_compaction_does_not_mutate_agent_memory(monkeypatch):
@@ -372,6 +389,7 @@ def test_current_action_compaction_does_not_mutate_agent_memory(monkeypatch):
     _bind_execution_history(manager, memory)
     run = manager.prepare_run_context(memory, "", [])
     result = manager.assemble_final_context(
+        maintenance=True,
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert [(action.observations, action.model_output) for action in actions] == before
@@ -409,6 +427,7 @@ def test_compact_stages_old_actions_before_other_items(monkeypatch):
 
     monkeypatch.setattr(manager, "_estimate_items", stage_observer)
     result = manager.assemble_final_context(
+        maintenance=True,
         model=_SummaryModel(), memory=memory, current_run_start_idx=0,
         run_context=run,
     )
@@ -440,6 +459,7 @@ def test_recent_actions_are_compacted_as_last_resort(monkeypatch):
     run = manager.prepare_run_context(memory, "", [])
 
     result = manager.assemble_final_context(
+        maintenance=True,
         model=_SummaryModel(), memory=memory, current_run_start_idx=0,
         run_context=run,
     )
@@ -454,13 +474,14 @@ def test_persistence_failure_does_not_block_current_context(monkeypatch):
     def fail(_candidate):
         raise RuntimeError("db unavailable")
     manager = ContextManager(ContextManagerConfig(
-        soft_input_budget_tokens=20,
+        effective_input_limit_tokens=2000, compaction_trigger_threshold_tokens=20, compaction_target_tokens=1000,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
         history_summary_sink=fail,
     ))
     memory = _Memory([TaskStep(task="current")])
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
     result = manager.assemble_final_context(
+        maintenance=True,
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert result.messages
@@ -477,6 +498,7 @@ def test_input_limit_excess_is_evidence_and_does_not_drop_required_content(monke
     memory = _Memory([TaskStep(task="required current task " * 50)])
     run = manager.prepare_run_context(memory, "", [])
     result = manager.assemble_final_context(
+        maintenance=True,
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert "required current task" in str(result.messages)
@@ -488,7 +510,7 @@ def test_new_history_summary_event_is_consumed_once(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     statuses = []
     manager = ContextManager(ContextManagerConfig(
-        soft_input_budget_tokens=20, hard_input_budget_tokens=100,
+        effective_input_limit_tokens=2000, compaction_trigger_threshold_tokens=20, compaction_target_tokens=1000, hard_input_budget_tokens=100,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
         history_summary_status_sink=statuses.append,
     ))
@@ -496,6 +518,7 @@ def test_new_history_summary_event_is_consumed_once(monkeypatch):
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
 
     manager.assemble_final_context(
+        maintenance=True,
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
 
@@ -508,7 +531,8 @@ def test_new_history_summary_event_is_consumed_once(monkeypatch):
     assert manager.consume_history_summary_event() is None
 
 
-def test_target_sized_checkpoint_is_not_recompressed_for_fixed_context(monkeypatch):
+@pytest.mark.parametrize("fixed", ["short task", "fixed request context " * 1000])
+def test_existing_checkpoint_without_uncovered_turns_is_not_recompressed(monkeypatch, fixed):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     manager = ContextManager(ContextManagerConfig(
         effective_input_limit_tokens=1000,
@@ -516,19 +540,20 @@ def test_target_sized_checkpoint_is_not_recompressed_for_fixed_context(monkeypat
     ))
     inputs = [ContextItemInput(id="summary:10", type="history_summary", content={
         "unit_id": 10,
-        "summary": {"markdown": _Response.content},
+        "summary": {"markdown": _Response.content * 100},
         "covered_through_message_id": 20,
     })]
-    memory = _Memory([TaskStep(task="fixed request context " * 1000)])
+    memory = _Memory([TaskStep(task=fixed)])
     run = manager.prepare_run_context(memory, "", inputs)
     model = _SummaryModel()
 
     result = manager.assemble_final_context(
+        maintenance=True,
         model=model, memory=memory, current_run_start_idx=0, run_context=run,
     )
 
     assert model.calls == []
-    assert result.evidence.compaction_stop_reason == "history_target_reached"
+    assert result.evidence.compaction_stop_reason == "no_uncovered_turns"
     assert result.evidence.history_compression_triggered is False
 
 
@@ -551,11 +576,12 @@ def test_small_increment_is_not_recompressed_when_fixed_context_makes_target_unr
             "assistant_message_id": 22,
         }),
     ]
-    memory = _Memory([TaskStep(task="fixed request context " * 55)])
+    memory = _Memory([TaskStep(task="fixed request context " * 45)])
     run = manager.prepare_run_context(memory, "", inputs)
     model = _SummaryModel()
 
     result = manager.assemble_final_context(
+        maintenance=True,
         model=model, memory=memory, current_run_start_idx=0, run_context=run,
     )
 
@@ -612,6 +638,7 @@ def test_summary_call_uses_isolated_dynamic_output_budget(monkeypatch):
     run = manager.prepare_run_context(_Memory([]), "", _summary_and_turns())
 
     manager.assemble_final_context(
+        maintenance=True,
         model=model, memory=_Memory([]), current_run_start_idx=0, run_context=run,
     )
 
@@ -631,12 +658,12 @@ def test_summary_call_uses_isolated_dynamic_output_budget(monkeypatch):
     lambda text: text + "\n\nWord count: 42",
     lambda text: text.replace("context", "As an AI: I thought about this"),
 ])
-def test_summary_contract_rejects_noncanonical_output(mutate):
+def test_summary_contract_accepts_noncanonical_nonempty_output(mutate):
     keys = tuple(ContextManagerConfig().summary_json_schema)
-    assert _validate_summary_contract(mutate(_Response.content), keys) is None
+    assert _validate_summary_contract(mutate(_Response.content), keys) == mutate(_Response.content).strip()
 
 
-def test_summary_contract_rejects_omitted_protected_fact_literal():
+def test_summary_contract_accepts_omitted_identifiers_and_literals():
     keys = tuple(ContextManagerConfig().summary_json_schema)
     source = (
         "验证事实 E2E-3-063：巡检码为星河-324。\n"
@@ -646,7 +673,7 @@ def test_summary_contract_rejects_omitted_protected_fact_literal():
         "context",
         "E2E-3-063 through E2E-3-064 use 星河 codes; for example E2E-3-063=星河-324",
     )
-    assert _validate_summary_contract(lossy, keys, source_text=source) is None
+    assert _validate_summary_contract(lossy, keys, source_text=source) == lossy
 
 
 def test_summary_contract_accepts_compact_protected_fact_ledger():

@@ -2,10 +2,10 @@
 """External credential verification without business or persistence imports."""
 
 import jwt
-from gateway.security.token_codec import decode_session
+from gateway.identity.token_codec import decode_session
 
-from gateway.security.policy import canonical_path, is_public_request
-from gateway.security.identity import IdentityError, bearer_token
+from gateway.identity.policy import canonical_path, is_public_request
+from gateway.identity.protocol import IdentityError, bearer_token
 from gateway.security.management_client import IdentityUnavailable
 
 

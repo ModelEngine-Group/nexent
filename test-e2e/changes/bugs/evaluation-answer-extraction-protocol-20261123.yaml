@@ -1,0 +1,86 @@
+schema_version: '1.0'
+change:
+  change_id: EVALUATION-ANSWER-EXTRACTION-PROTOCOL-20261123
+  change_type: bugfix
+  bug_id: BUG-EVAL-EMPTY-ANSWER-FAKE-PASS
+  title: Rebuild evaluation answer extraction on the final_answer delta/complete protocol
+  description: >-
+    The final-answer protocol split (#4077) turned the complete trailer into an empty-string marker whose
+    authoritative answer lives in observer state, but the evaluation consumer still concatenated raw
+    final_answer event content. Runs with streamed answers produced an empty "actual" for the judge,
+    which scored empty air into phantom passes; code evaluators failed json.loads("") with JSON format
+    errors; no-set dispatch failures were persisted as a fixed "Failed to generate test queries" string
+    that the evaluation UI never rendered. The runtime collector now extracts per invocation with the
+    accepted_answer/complete/reclassify precedence, the observer advertises accepted_answer on the
+    trailer, empty answers short-circuit the judges into a zero-score FAIL, runtime 401 auth windows are
+    retried with a bounded backoff, and failure reasons are transparent end to end.
+  observed_behavior: >-
+    Evaluation runs on v2.8.4 could complete with score 1.0 while predict.answer was empty; format
+    evaluators reported JSON format errors on every case; no-set runs failed with no visible reason
+    (run 9/10/12 field evidence).
+  expected_behavior: >-
+    A run whose agent produced a final answer reports the real answer in predict and scores normally.
+    A run with no final answer marks every evaluator 0.0 with an explicit "Agent produced no final answer"
+    reason and lands in fail_count. Runtime dispatch failures persist an error_message carrying the HTTP
+    status and body excerpt, and the run detail page renders the failure reason below the status tag when
+    FAILED. Transient 401 auth windows (TOKEN_EXPIRED body) are retried up to ~47s; any other 401 fails
+    fast.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      The existing D4 browser case asserts the happy path over a fixed evaluation set and cannot observe
+      which event shape supplied predict.answer, and no UT pinned the collector to the answer_phase
+      protocol. The legacy join kept passing because pre-#4077 events carried full bodies in content, so
+      the protocol regression escaped review.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+      - V5-PW-EVAL-RUN-01
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - The observer's complete trailer carries accepted_answer metadata for streamed, rewritten and
+        reclassified answers.
+      - The runtime collector rebuilds the answer per invocation with accepted_answer > non-empty
+        complete content > reclassify body rebuild > delta join, and legacy no-phase events still join.
+      - Straggler messages flushed after the runner ends flow through the same extraction instead of
+        being dropped.
+      - An empty or whitespace answer skips the judges entirely, returning zero scores with the explicit
+        empty-answer reason for every evaluator.
+      - No-set setup failures persist a RuntimeUpstreamError-specific dispatch message and a generic
+        message suffixed with the exception type and detail.
+      - Evaluation runtime calls retry 401 TOKEN_EXPIRED responses with the configured backoff and fail
+        fast for any other upstream error.
+    test_selectors:
+      - test/sdk/core/utils/test_observer_final_answers.py::test_complete_trailer_carries_accepted_answer_metadata
+      - test/backend/app/test_agent_evaluation_answer_extraction.py
+      - test/backend/services/test_agent_evaluation_service.py::TestEvaluateQuery::test_empty_answer_skips_judges_and_fails
+      - test/backend/services/test_agent_evaluation_service.py::TestEvaluateQuery::test_whitespace_answer_skips_judges
+      - test/backend/services/test_agent_evaluation_service.py::TestSetupNoSetAndExecute::test_failure_marks_run_failed_with_exception_detail
+      - test/backend/services/test_agent_evaluation_service.py::TestSetupNoSetAndExecute::test_runtime_upstream_failure_reports_dispatch_detail
+      - test/backend/services/test_evaluation_runtime_auth_retry.py
+    reason: >-
+      The defect is a protocol-consumption contract between the observer and the runtime collector, so
+      traditional UT at that boundary is the proof that can feed every event shape deterministically. The
+      retry and empty-answer guards are branching service behavior whose failure modes (phantom pass,
+      silent fail) are only reproducible with controlled fixtures.
+  no_case_change_reason: >-
+    The existing D4 case PW-EVAL-RUN-01 already proves the visible run lifecycle end to end (create,
+    try-it-out, run, terminal state, detail page) over a real judge and evaluators; the fix changes what
+    the pipeline computes, not the user-visible flow. Unit-proof suffices at the SDK/UT boundary per the
+    admission rules, so no new D1 Case is manufactured.
+  notes: >-
+    Baseline develop 7fb390831. v2.8.4 field sites keep their container hotfix path; develop carries the
+    structural fix. Known follow-up consumers with the same protocol gap (a2a service _extract_final_answer,
+    sdk/benchmark agent_runner) are intentionally out of scope and tracked separately. The 401 retry budget
+    (~47s) stays below the internal token TTL (30s re-signed per attempt) and only matches bodies carrying
+    TOKEN_EXPIRED, which is how the develop gateway renders internal-token rejections.

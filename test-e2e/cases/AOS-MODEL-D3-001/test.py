@@ -21,7 +21,7 @@ from contracts.agentos import ChatInvocation, ChatMessage, ChatOptions, Embeddin
 from contracts.constants import environment
 from contracts.model_administration import ModelHealthcheck, ModelRegistration, ModelTenantDeactivation
 from contracts.errors.exceptions import RuntimeUpstreamError
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.identity.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
 from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from management.services.memory.extraction import AgentOSMemoryExtractionModel
@@ -287,7 +287,10 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert provider_input["temperature"] == 0.3
     assert provider_input["top_p"] == 0.95
     assert provider_input["messages"][-1]["content"] == "verify model"
-    assert provider_input["max_tokens"] == 700
+    output_limits = {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+    for _, body in calls:
+        assert output_limits.isdisjoint(body)
+        assert output_limits.isdisjoint(body.get("extra_body") or {})
     assert embed_calls == [
         ("Bearer provider-secret", {"model": "test-embedding", "input": [query]})
         for query in ("search", "recall", "store memory", "updated memory")

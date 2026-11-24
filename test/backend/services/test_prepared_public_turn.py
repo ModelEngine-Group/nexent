@@ -11,7 +11,10 @@ from starlette.responses import StreamingResponse
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentLegacyResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.exceptions import (
+    AppException, NorthboundStopInProgressError, RuntimeMetadataVersionConflict,
+    RuntimeServiceUnavailableError, RuntimeUpstreamError,
+)
 from management.services.agent import prepared_turn, runtime_client
 
 
@@ -415,7 +418,9 @@ async def test_first_prepared_turn_compiles_before_creating_a_conversation(flow,
     assert compile_snapshot.await_args.kwargs["new_conversation"] is True
     assert response.headers["conversation_id"] == str(REFERENCE.conversation_id)
     output = b"".join([part async for part in response.body_iterator])
-    assert b'"type":"conversation_created"' in output and output.endswith(b"data: answer\n\n")
+    created = json.loads(output.split(b"\n\n", 1)[0].removeprefix(b"data: "))
+    assert created == {"type": "conversation_created", "content": {"conversation_id": REFERENCE.conversation_id}}
+    assert output.endswith(b"data: answer\n\n")
     client.find_active_run.assert_not_awaited()
 
 
@@ -500,15 +505,18 @@ async def test_northbound_translates_and_closes_legacy_admission_conflict(mocker
 @pytest.mark.asyncio
 async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
     pending = SimpleNamespace(reference=REFERENCE, user_id=ACTOR[0], tenant_id=ACTOR[1])
-    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=pending)
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", side_effect=[pending, pending, None])
+    reconcile = mocker.patch.object(prepared_turn, "reconcile_turn")
     client = SimpleNamespace(
         stop=AsyncMock(), stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+        find_active_run=AsyncMock(return_value=None),
     )
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
 
-    find.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
+    assert find.await_args_list == [mocker.call(REFERENCE.conversation_id, *ACTOR)] * 3
+    reconcile.assert_awaited_once_with(pending, client)
     client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
     client.stop.assert_not_awaited()
     assert result["message"] == "successfully stopped agent run for user_id actor, run_id 42"
@@ -516,19 +524,55 @@ async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
 
 @pytest.mark.asyncio
 async def test_northbound_stop_targets_registered_run_without_legacy_stop(mocker):
-    mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
     client = SimpleNamespace(
-        find_active_run=AsyncMock(return_value=REFERENCE.run_id), stop=AsyncMock(),
+        find_active_run=AsyncMock(side_effect=[REFERENCE.run_id, REFERENCE.run_id, "b" * 32]), stop=AsyncMock(),
+        stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(runtime_client, "_NORTHBOUND_STOP_POLL_SECONDS", 0)
+
+    result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+
+    assert client.find_active_run.await_args_list == [mocker.call(REFERENCE.conversation_id, *ACTOR)] * 3
+    assert find.await_count == 2
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
+    client.stop.assert_not_awaited()
+    assert result == {"status": "success", "message": "successfully stopped agent run for user_id actor, run_id 42"}
+
+
+@pytest.mark.asyncio
+async def test_northbound_stop_times_out_while_runtime_still_owns_run(mocker):
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    client = SimpleNamespace(
+        find_active_run=AsyncMock(return_value=REFERENCE.run_id),
+        stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(runtime_client, "_NORTHBOUND_STOP_WAIT_SECONDS", 0.02)
+
+    with pytest.raises(NorthboundStopInProgressError):
+        await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+
+    find.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
+    assert client.find_active_run.await_count >= 2
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
+
+
+@pytest.mark.asyncio
+async def test_northbound_stop_propagates_release_lookup_failure(mocker):
+    mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    failure = RuntimeServiceUnavailableError("Runtime unavailable")
+    client = SimpleNamespace(
+        find_active_run=AsyncMock(side_effect=[REFERENCE.run_id, failure]),
         stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
     )
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
-    result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+    with pytest.raises(RuntimeServiceUnavailableError) as result:
+        await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
 
-    client.find_active_run.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
-    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
-    client.stop.assert_not_awaited()
-    assert result == {"status": "success", "message": "successfully stopped agent run for user_id actor, run_id 42"}
+    assert result.value is failure
 
 
 @pytest.mark.asyncio

@@ -11,13 +11,13 @@ from unittest.mock import Mock
 import pytest
 from smolagents.agents import EMPTY_PROMPT_TEMPLATES
 from smolagents.memory import ActionStep, TaskStep, ToolCall
-from smolagents.models import ChatMessage, Model
+from smolagents.models import ChatMessage, Model, get_clean_message_list, tool_role_conversions
 from smolagents.monitoring import Timing
 from smolagents.tools import Tool
 from smolagents.utils import AgentExecutionError
 from test_guardrail_checkpoints import KEYWORD, _make_step_agent, _msg
 
-from nexent.core.agents.contracts.config import GuardrailRule
+from nexent.core.agents.contracts.config import AgentVerificationConfig, GuardrailRule
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.context.execution_history import ExecutionHistory, summarize_record
 from nexent.core.agents.context.models import ContextItem, ContextItemInput
@@ -281,7 +281,10 @@ def test_failed_execution_screens_partial_output_before_history_and_recall(backe
 
 @pytest.mark.parametrize("history_mode", ["none", "missing_key", "missing_record"])
 @pytest.mark.parametrize("long_output", [False, True])
-def test_no_record_action_compacts_only_above_threshold_without_fake_reference(history_mode, long_output):
+@pytest.mark.parametrize("result_protocol", [False, True])
+def test_no_record_action_compacts_only_above_threshold_without_fake_reference(
+    history_mode, long_output, result_protocol,
+):
     original = "head\n" + ("middle sentinel\n" * 5000 if long_output else "short\n") + "tail"
     step = ActionStep(step_number=1, timing=Timing(start_time=0),
                       tool_calls=[ToolCall(name="python_interpreter", arguments="print(data)", id="call")],
@@ -292,17 +295,36 @@ def test_no_record_action_compacts_only_above_threshold_without_fake_reference(h
     history = None if history_mode == "none" else ExecutionHistory()
     manager = ContextManager(ContextManagerConfig(
         execution_history=history, effective_input_limit_tokens=10000,
+        compaction_trigger_threshold_tokens=10000, compaction_target_tokens=7500,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
     ))
+    manager.use_result_observations = result_protocol
     memory = SimpleNamespace(system_prompt=None, steps=[TaskStep(task="task"), step])
     model = Mock(side_effect=AssertionError("Unrecoverable results must not request an LLM summary"))
+    run_context = manager.prepare_run_context(memory, "", [])
+    before = manager.assemble_final_context(
+        model=model, memory=memory, current_run_start_idx=0, run_context=run_context,
+    )
+    assert before.evidence.current_action_compact_count == 0
+    if long_output:
+        assert "middle sentinel" in str(before.messages)
+    # The caller invokes maintenance only after accepting the response/tool step.
     result = manager.assemble_final_context(
         model=model, memory=memory, current_run_start_idx=0,
-        run_context=manager.prepare_run_context(memory, "", []),
+        run_context=run_context, maintenance=True,
     )
     rendered = '\n'.join(part['text'] for message in result.messages for part in message['content'])
     assert "head" in rendered and "tail" in rendered
-    assert "recorded_error:\nknown failure" in rendered
+    if result_protocol:
+        next_request = manager.assemble_final_context(
+            model=model, memory=memory, current_run_start_idx=0, run_context=run_context,
+        )
+        assert next_request.messages == result.messages
+        wire = get_clean_message_list(next_request.messages, role_conversions=tool_role_conversions)
+        assert wire[-1]["role"] == "user"
+        assert "<RESULT>" in rendered and "<ERROR>known failure</ERROR>" in rendered
+    else:
+        assert "recorded_error:\nknown failure" in rendered
     assert "OUTPUT_REF" not in rendered and "SUMMARIED_RESULT" not in rendered
     assert rendered.count("print(data)") == 1
     assert step.observations == original
@@ -323,3 +345,85 @@ def test_external_legacy_action_without_history_keeps_deterministic_compaction()
     assert compact.content["error"] == "known failure"
     assert len(action.content["observations"]) == 20000
     assert "output_ref" not in compact.content
+
+
+
+@pytest.mark.parametrize("execution_failed", [False, True])
+def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed):
+    calls = []
+    raw_responses = []
+    code = "1 / 0" if execution_failed else "print('runtime result: no error: all good; Executed action: quoted data')"
+
+    class CaptureModel(Model):
+        def generate(self, messages, stop_sequences=None, **kwargs):
+            wire = get_clean_message_list(messages, role_conversions=tool_role_conversions)
+            calls.append((wire, stop_sequences))
+            self.last_finish_reason = "stop"
+            content = (f"<code>\n```python\n{code}\n```\n</code>"
+                       if len(calls) == 1 else "<FINAL_ANSWER>done</FINAL_ANSWER>")
+            raw_responses.append(content)
+            return ChatMessage(role="assistant", content=content)
+
+    templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
+    templates["system_prompt"] = "Use tool results to answer."
+    agent = CoreAgent(
+        observer=MessageObserver(lang="en"), model=CaptureModel(model_id="unit"), tools=[],
+        prompt_templates=templates, context_runtime=ManagedContextRuntime(ContextManager()),
+        enable_protocol_repair_retry=True, max_steps=2, verbosity_level=0,
+        verification_config=AgentVerificationConfig(enabled=True, llm_verification_enabled=False),
+    )
+    verify_final = Mock(wraps=agent.verification_controller.verify_final_answer)
+    agent.verification_controller.verify_final_answer = verify_final
+
+    assert agent.run("Run one action before finishing") == "done"
+    assert verify_final.call_args.kwargs["execution_failed"] is execution_failed
+    assert [stop for _, stop in calls] == [["<RESULT>"]] * 2
+    assert len(agent.memory.steps[1].tool_calls) == 1
+    second_request = calls[1][0]
+    assert second_request[-2]["role"] == "assistant"
+    assert second_request[-2]["content"][0]["text"] == f"<code>{code}</code>"
+    assert not any(part["text"].startswith("Executed action:") for message in second_request
+                   for part in message["content"])
+    assert sum(part["text"] == f"<code>{code}</code>" for message in second_request
+               if message["role"] == "assistant" for part in message["content"]) == 1
+    assert agent.memory.steps[1].model_output_message.content == raw_responses[0]
+    assert second_request[-1]["role"] == "user"
+    result = second_request[-1]["content"][0]["text"]
+    assert result.startswith("<RESULT>\n")
+    result_body, separator, _ = result.partition("\n</RESULT>")
+    assert separator
+    assert ("<ERROR>" in result_body) is execution_failed
+    assert getattr(agent.memory.steps[1], "execution_failed", False) is execution_failed
+    if not execution_failed:
+        assert "runtime result: no error: all good" in result
+
+
+def test_strict_verification_allows_silent_preparation_and_template_answer():
+    requests = []
+    responses = iter([
+        "<code>value = 42</code>",
+        "<code>print(value)</code>",
+        "<final_answer>Template example: {{value}}</final_answer>",
+    ])
+
+    class CaptureModel(Model):
+        def generate(self, messages, **kwargs):
+            requests.append(get_clean_message_list(messages, role_conversions=tool_role_conversions))
+            return ChatMessage(role="assistant", content=next(responses))
+
+    agent = CoreAgent(
+        observer=MessageObserver(lang="en"), model=CaptureModel(model_id="unit"), tools=[],
+        prompt_templates=deepcopy(EMPTY_PROMPT_TEMPLATES),
+        context_runtime=ManagedContextRuntime(ContextManager()),
+        enable_protocol_repair_retry=True, max_steps=3, verbosity_level=-1,
+        verification_config=AgentVerificationConfig(
+            enabled=True, strictness="strict", llm_verification_enabled=False,
+        ),
+    )
+
+    assert agent.run("Prepare a value and show the template.") == "Template example: {{value}}"
+    assert len(requests) == 3
+    steps = [step for step in agent.memory.steps if isinstance(step, ActionStep)]
+    assert all(not step.error for step in steps)
+    assert steps[0].tool_calls and steps[1].tool_calls
+    assert "42" in steps[1].observations

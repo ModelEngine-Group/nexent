@@ -298,3 +298,12 @@ def test_terminal_agent_error_uses_shared_http_diagnostic():
     terminal = LegacyChatModel._terminal(error)
     assert "(400) top_p must be 0.95" in terminal.safe_message("zh")
     assert terminal.error_code == ModelErrorCode.INVALID_REQUEST
+
+
+@pytest.mark.parametrize("origin", ["provider", "unknown"])
+def test_provider_usage_marker_discloses_origin_even_when_counts_are_present(setup, origin):
+    model, state, _calls, _observer = setup
+    state["usage"] = TokenUsage(input_tokens=1800, output_tokens=10, origin=origin)
+    result = model([{"role": "user", "content": "hello"}])
+    assert result.token_usage.input_tokens == 1800
+    assert result.provider_input_tokens == (1800 if origin == "provider" else None)
