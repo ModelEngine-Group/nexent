@@ -12,6 +12,20 @@ export const modelInput = JSON.stringify({
   ],
 });
 
+export const modelOutput = JSON.stringify({
+  model: "DeepSeek",
+  choices: [
+    {
+      index: 0,
+      message: {
+        role: "assistant",
+        content: "### Storage recommendation\n\nKeep the records for **30 days**.",
+      },
+      finish_reason: "stop",
+    },
+  ],
+});
+
 /** Owned HTTP boundary; the product page and its state/rendering remain real. */
 export async function installTrajectoryFixture(
   page: Page,
@@ -99,6 +113,12 @@ export async function installTrajectoryFixture(
     {
       ...makeNode("model", "storage", "model", "DeepSeek", 700),
       input: body(modelInput),
+      output: body(modelOutput),
+      reasoning: body(
+        JSON.stringify([
+          { type: "text", text: "**Compare retention policies**" },
+        ]),
+      ),
     },
     makeNode("tool", "storage", "tool", "policy.check", 900),
     makeNode("security", "root", "agent", "安全审查", 500),

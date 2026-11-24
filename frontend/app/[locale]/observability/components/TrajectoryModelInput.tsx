@@ -1,44 +1,23 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { Table } from "antd";
 import { useTranslation } from "react-i18next";
-import { TrajectoryMarkdown } from "./TrajectoryMarkdown";
+import {
+  TrajectoryModelTable,
+  TrajectoryModelText,
+} from "./TrajectoryModelTable";
 
 type ModelInputMessage = {
   key: number;
-  role: string;
+  label: string;
   content: string;
   nonTextParts: number;
   toolCalls: number;
 };
 
-type ModelInputRow = { label: string } & (
+type ModelInputRow = { key: string; label: string } & (
   | { kind: "messages"; messages: ModelInputMessage[] }
   | { kind: "parameter"; value: string }
 );
-
-const tableProps = {
-  size: "small",
-  pagination: false,
-  showHeader: false,
-  rowHoverable: false,
-  tableLayout: "fixed",
-  styles: {
-    body: { cell: { verticalAlign: "top", overflowWrap: "anywhere" } },
-  },
-} as const;
-
-const labelColumn = {
-  rowScope: "row",
-  width: "28%",
-  onCell: () => ({
-    style: {
-      background: "transparent",
-      color: "inherit",
-      fontWeight: "normal",
-    },
-  }),
-} as const;
 
 const MAX_REQUEST_LENGTH = 1024 * 1024;
 const MAX_CONTENT_LENGTH = 128 * 1024;
@@ -100,7 +79,7 @@ export function modelInputRows(source: string): ModelInputRow[] | null {
     if (previewLength > MAX_CONTENT_LENGTH) return null;
     messageRows.push({
       key: messageRows.length,
-      role: message.role,
+      label: message.role,
       content,
       nonTextParts,
       toolCalls: Array.isArray(message.tool_calls)
@@ -109,11 +88,17 @@ export function modelInputRows(source: string): ModelInputRow[] | null {
     });
   }
   const rows: ModelInputRow[] = [
-    { label: "messages", kind: "messages", messages: messageRows },
+    {
+      key: "messages",
+      label: "messages",
+      kind: "messages",
+      messages: messageRows,
+    },
   ];
   try {
     for (const [name, value] of parameterEntries) {
       rows.push({
+        key: name,
         label: name,
         kind: "parameter",
         value: JSON.stringify(value),
@@ -128,36 +113,29 @@ export function modelInputRows(source: string): ModelInputRow[] | null {
 function ModelInputMessages({ messages }: { messages: ModelInputMessage[] }) {
   const { t } = useTranslation();
   return (
-    <Table
-      {...tableProps}
-      aria-label={t("trajectory.modelInputMessages")}
-      dataSource={messages}
-      bordered
-      columns={[
-        { ...labelColumn, dataIndex: "role" },
-        {
-          dataIndex: "content",
-          render: (content: string, { nonTextParts, toolCalls }) => {
-            const hasText = Boolean(content.trim());
-            return (
-              <div className="markdown-body trajectory-model-input-content">
-                {hasText && <TrajectoryMarkdown text={content} />}
-                {nonTextParts > 0 && (
-                  <div>
-                    {t("trajectory.modelInputNonText", { count: nonTextParts })}
-                  </div>
-                )}
-                {toolCalls > 0 && (
-                  <div>
-                    {t("trajectory.modelInputToolCalls", { count: toolCalls })}
-                  </div>
-                )}
-                {!hasText && !nonTextParts && !toolCalls && "—"}
+    <TrajectoryModelTable
+      name={t("trajectory.modelInputMessages")}
+      rows={messages}
+      nested
+      renderValue={({ content, nonTextParts, toolCalls }) => {
+        const hasText = Boolean(content.trim());
+        return (
+          <>
+            {hasText && <TrajectoryModelText text={content} />}
+            {nonTextParts > 0 && (
+              <div>
+                {t("trajectory.modelInputNonText", { count: nonTextParts })}
               </div>
-            );
-          },
-        },
-      ]}
+            )}
+            {toolCalls > 0 && (
+              <div>
+                {t("trajectory.modelInputToolCalls", { count: toolCalls })}
+              </div>
+            )}
+            {!hasText && !nonTextParts && !toolCalls && "—"}
+          </>
+        );
+      }}
     />
   );
 }
@@ -165,25 +143,18 @@ function ModelInputMessages({ messages }: { messages: ModelInputMessage[] }) {
 export function TrajectoryModelInput({ rows }: { rows: ModelInputRow[] }) {
   const { t } = useTranslation();
   return (
-    <Table
-      {...tableProps}
-      aria-label={t("trajectory.modelInput")}
-      dataSource={rows}
-      rowKey="label"
-      columns={[
-        { ...labelColumn, dataIndex: "label" },
-        {
-          key: "value",
-          render: (_value, row) =>
-            row.kind === "messages" ? (
-              <div>
-                <ModelInputMessages messages={row.messages} />
-              </div>
-            ) : (
-              <code>{row.value}</code>
-            ),
-        },
-      ]}
+    <TrajectoryModelTable
+      name={t("trajectory.modelInput")}
+      rows={rows}
+      renderValue={(row) =>
+        row.kind === "messages" ? (
+          <div>
+            <ModelInputMessages messages={row.messages} />
+          </div>
+        ) : (
+          <code>{row.value}</code>
+        )
+      }
     />
   );
 }

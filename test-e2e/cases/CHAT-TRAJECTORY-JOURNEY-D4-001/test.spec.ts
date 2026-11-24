@@ -2,7 +2,7 @@
 
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
-import { installTrajectoryFixture, modelInput } from "./fixture";
+import { installTrajectoryFixture, modelInput, modelOutput } from "./fixture";
 
 journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   const state = await installTrajectoryFixture(page);
@@ -213,7 +213,31 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(input.locator("pre code")).toHaveText(modelInput);
     await modes.getByText("表格", { exact: true }).click();
     await expect(modelMessages).toBeVisible();
+    const nodeDetail = page.locator(".trajectory-node-detail");
+    const reasoning = nodeDetail.getByRole("table", {
+      name: "模型思考",
+      exact: true,
+    });
+    await expect(reasoning.locator("strong")).toHaveText(
+      "Compare retention policies",
+    );
+    const output = nodeDetail.locator(".trajectory-body").filter({
+      has: page.getByRole("button", { name: "输出", exact: true }),
+    });
+    const response = output.getByRole("table", { name: "输出", exact: true });
+    await expect(
+      response
+        .getByRole("table", { name: "choices", exact: true })
+        .getByRole("heading", { name: "Storage recommendation" }),
+    ).toBeVisible();
+    const outputModes = output.getByRole("radiogroup");
+    await outputModes.getByText("文本", { exact: true }).click();
+    await expect(output.locator("pre code")).toHaveText(modelOutput);
+    await outputModes.getByText("表格", { exact: true }).click();
+    await expect(response).toBeVisible();
     await page.getByRole("treeitem", { name: /policy.check/ }).click();
+    await expect(output.getByRole("radio")).toHaveCount(2);
+    await expect(output.getByRole("table")).toHaveCount(0);
     await expect(
       page.locator(".trajectory-node-detail").getByText(/智能体版本/),
     ).toHaveCount(0);

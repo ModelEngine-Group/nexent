@@ -15,19 +15,18 @@ import { trajectoryService } from "@/services/trajectoryService";
 import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
 import type { ContentReference } from "@/types/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
-import { TrajectoryMarkdown } from "./TrajectoryMarkdown";
 import { modelInputRows, TrajectoryModelInput } from "./TrajectoryModelInput";
 import {
-  outputMarkdown,
-  type MarkdownOutputKind,
-} from "./trajectoryOutputMarkdown";
+  modelResultRows,
+  TrajectoryModelResult,
+} from "./TrajectoryModelResult";
 
-type BodyMode = "text" | "json" | "markdown" | "table";
+type BodyMode = "text" | "json" | "table";
 
 interface TrajectoryBodyProps {
   reference: ContentReference;
   slot: string;
-  previewKind?: MarkdownOutputKind | "modelInput";
+  model?: boolean;
   conversationId: string;
   nodeId: string;
   cache: BodyCache;
@@ -42,7 +41,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
         props.conversationId,
         props.nodeId,
         props.slot,
-        props.previewKind,
+        props.model,
         props.reference.content_id,
         props.reference.availability,
         props.reference.complete,
@@ -55,7 +54,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
 function TrajectoryBodyContent({
   reference,
   slot,
-  previewKind,
+  model,
   conversationId,
   nodeId,
   cache,
@@ -66,9 +65,7 @@ function TrajectoryBodyContent({
   const { message } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [preferredMode, setMode] = useState<BodyMode>(
-    previewKind === "modelInput" ? "table" : previewKind ? "markdown" : "json"
-  );
+  const [preferredMode, setMode] = useState<BodyMode>(model ? "table" : "json");
   const [wordWrap, setWordWrap] = useState(false);
   const [chunk, setChunk] = useState<{
     offset: number;
@@ -95,55 +92,42 @@ function TrajectoryBodyContent({
   const text = chunk?.text ?? reference.text ?? reference.preview ?? "";
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
-  const markdown = useMemo(() => {
-    if (
-      !previewKind ||
-      previewKind === "modelInput" ||
-      !complete ||
-      reference.availability !== "available"
-    )
-      return "";
-    return outputMarkdown(text, previewKind, {
-      field: t("trajectory.markdownField"),
-      value: t("trajectory.markdownValue"),
-      index: t("trajectory.markdownIndex"),
-      logs: t("trajectory.markdownLogs"),
-    });
-  }, [complete, previewKind, reference.availability, t, text]);
-  const modelRows = useMemo(
-    () =>
-      previewKind === "modelInput" &&
-      complete &&
-      reference.availability === "available"
-        ? modelInputRows(text)
-        : null,
-    [complete, previewKind, reference.availability, text]
-  );
-  const mode =
-    (preferredMode === "markdown" && !markdown) ||
-    (preferredMode === "table" && !modelRows)
-      ? "json"
-      : preferredMode;
-  const tableRows = mode === "table" ? modelRows : null;
-  const isMarkdown = mode === "markdown";
+  const table = useMemo(() => {
+    if (!model || !complete || reference.availability !== "available")
+      return null;
+    if (slot === "input") {
+      const rows = modelInputRows(text);
+      return rows && <TrajectoryModelInput rows={rows} />;
+    }
+    if (slot === "output" || slot === "reasoning") {
+      const rows = modelResultRows(text, slot);
+      return (
+        rows && (
+          <TrajectoryModelResult rows={rows} name={t(`trajectory.${slot}`)} />
+        )
+      );
+    }
+    return null;
+  }, [complete, model, reference.availability, slot, t, text]);
+  const mode = preferredMode === "table" && !table ? "json" : preferredMode;
+  const tablePreview = mode === "table" ? table : null;
   const formatted = useMemo(() => {
-    if (mode === "markdown") return markdown;
     if (mode !== "json") return text;
     try {
       return JSON.stringify(JSON.parse(text), null, 2);
     } catch {
       return JSON.stringify({ content: text }, null, 2);
     }
-  }, [text, mode, markdown]);
+  }, [text, mode]);
   const lineNumbers = useMemo(
     () =>
-      isMarkdown || tableRows
+      tablePreview
         ? ""
         : Array.from(
             { length: Math.min(formatted.split("\n").length, 10000) },
             (_, index) => index + 1
           ).join("\n"),
-    [formatted, isMarkdown, tableRows]
+    [formatted, tablePreview]
   );
   const load = useCallback(
     async (offset: number) => {
@@ -263,19 +247,16 @@ function TrajectoryBodyContent({
             options={[
               { label: t("trajectory.text"), value: "text" },
               { label: "JSON", value: "json" },
-              ...(markdown
-                ? [{ label: "Markdown", value: "markdown" as const }]
-                : []),
-              ...(modelRows
+              ...(table
                 ? [{ label: t("trajectory.table"), value: "table" as const }]
                 : []),
             ]}
           />
-          {!collapsed && tableRows && copyButton}
+          {!collapsed && tablePreview && copyButton}
         </div>
       </header>
-      {!collapsed && tableRows && <TrajectoryModelInput rows={tableRows} />}
-      {!collapsed && !tableRows && (
+      {!collapsed && tablePreview}
+      {!collapsed && !tablePreview && (
         <>
           {reference.availability !== "available" ? (
             <p className="p-3 text-xs text-gray-500">
@@ -288,7 +269,7 @@ function TrajectoryBodyContent({
               {!awaitingFirstChunk && (
                 <div className="trajectory-code-card">
                   <div className="trajectory-code-toolbar">
-                    <span>{isMarkdown ? "Markdown" : mode.toUpperCase()}</span>
+                    <span>{mode.toUpperCase()}</span>
                     <span
                       className="trajectory-code-meta"
                       title={t(
@@ -308,26 +289,24 @@ function TrajectoryBodyContent({
                         count: reference.char_count ?? Array.from(text).length,
                       })}
                       <span className="trajectory-code-actions">
-                        {!isMarkdown && (
-                          <Button
-                            type={wordWrap ? "primary" : "text"}
-                            size="small"
-                            icon={<WrapText size={14} />}
-                            aria-label={t(
-                              wordWrap
-                                ? "trajectory.unwrapLines"
-                                : "trajectory.wrapLines"
-                            )}
-                            title={t(
-                              wordWrap
-                                ? "trajectory.unwrapLines"
-                                : "trajectory.wrapLines"
-                            )}
-                            aria-pressed={wordWrap}
-                            disabled={reference.availability !== "available"}
-                            onClick={() => setWordWrap((value) => !value)}
-                          />
-                        )}
+                        <Button
+                          type={wordWrap ? "primary" : "text"}
+                          size="small"
+                          icon={<WrapText size={14} />}
+                          aria-label={t(
+                            wordWrap
+                              ? "trajectory.unwrapLines"
+                              : "trajectory.wrapLines"
+                          )}
+                          title={t(
+                            wordWrap
+                              ? "trajectory.unwrapLines"
+                              : "trajectory.wrapLines"
+                          )}
+                          aria-pressed={wordWrap}
+                          disabled={reference.availability !== "available"}
+                          onClick={() => setWordWrap((value) => !value)}
+                        />
                         {copyButton}
                         <button
                           className="trajectory-icon-button"
@@ -347,38 +326,26 @@ function TrajectoryBodyContent({
                       </span>
                     </span>
                   </div>
-                  {isMarkdown ? (
-                    <div
-                      className={`markdown-body trajectory-markdown-body ${expanded ? "trajectory-body-full" : "trajectory-body-preview"}`}
-                      role="region"
-                      aria-label={t(`trajectory.${slot}`)}
+                  <div className="trajectory-code-scroll">
+                    <pre
                       tabIndex={0}
+                      onScroll={(event) => loadAtBottom(event.currentTarget)}
+                      onWheel={(event) => {
+                        if (event.deltaY > 0) loadAtBottom(event.currentTarget);
+                      }}
+                      className={[
+                        expanded
+                          ? "trajectory-body-full"
+                          : "trajectory-body-preview",
+                        wordWrap ? "is-wrapped" : "",
+                      ].join(" ")}
                     >
-                      <TrajectoryMarkdown text={markdown} />
-                    </div>
-                  ) : (
-                    <div className="trajectory-code-scroll">
-                      <pre
-                        tabIndex={0}
-                        onScroll={(event) => loadAtBottom(event.currentTarget)}
-                        onWheel={(event) => {
-                          if (event.deltaY > 0)
-                            loadAtBottom(event.currentTarget);
-                        }}
-                        className={[
-                          expanded
-                            ? "trajectory-body-full"
-                            : "trajectory-body-preview",
-                          wordWrap ? "is-wrapped" : "",
-                        ].join(" ")}
-                      >
-                        <span className="trajectory-line-numbers" aria-hidden>
-                          {lineNumbers}
-                        </span>
-                        <code>{formatted || t("trajectory.emptyBody")}</code>
-                      </pre>
-                    </div>
-                  )}
+                      <span className="trajectory-line-numbers" aria-hidden>
+                        {lineNumbers}
+                      </span>
+                      <code>{formatted || t("trajectory.emptyBody")}</code>
+                    </pre>
+                  </div>
                 </div>
               )}
               {showLoading && (

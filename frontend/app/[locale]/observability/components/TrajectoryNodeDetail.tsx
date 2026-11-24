@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { BodyCache, formatMetric } from "@/lib/trajectory";
 import type { TrajectoryNode } from "@/types/trajectory";
 import { TrajectoryBody } from "./TrajectoryBody";
-import { isMarkdownOutputKind } from "./trajectoryOutputMarkdown";
 import { AgentVersion } from "./AgentVersion";
 import {
   CopyTraceId,
@@ -228,13 +227,7 @@ export function TrajectoryNodeDetail({
             key={`${node.id}:${slot}`}
             reference={node[slot]}
             slot={slot}
-            previewKind={
-              slot === "input" && node.kind === "model"
-                ? "modelInput"
-                : slot === "output" && isMarkdownOutputKind(node.kind)
-                  ? node.kind
-                  : undefined
-            }
+            model={node.kind === "model"}
             conversationId={conversationId}
             nodeId={node.id}
             cache={cache}

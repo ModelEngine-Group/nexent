@@ -803,18 +803,18 @@
 .trajectory-body-full {
   max-height: 60vh;
 }
-.trajectory-body .trajectory-markdown-body {
-  padding: 12px;
-  overflow: auto;
+.trajectory-model-nested-table .ant-table {
+  /* Override Ant Design's nested table offsets inside value cells. */
+  margin: 0 !important;
+}
+.markdown-body.trajectory-model-content {
+  padding: 0;
   overflow-wrap: anywhere;
 }
-.markdown-body.trajectory-model-input-content {
-  padding: 0;
-}
-.trajectory-model-input-content pre {
+.trajectory-model-content pre {
   white-space: pre-wrap;
 }
-.trajectory-model-input-content > :last-child {
+.trajectory-model-content > :last-child {
   margin-bottom: 0;
 }
 .trajectory-segment-navigation {
