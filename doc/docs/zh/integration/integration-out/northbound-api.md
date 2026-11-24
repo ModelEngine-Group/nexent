@@ -260,7 +260,7 @@ curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
 
 ### 普通停止与兼容性
 
-仍使用 `GET /nb/v1/chat/stop/{conversation_id}`。成功表示停止已受理，在途 worker 实际退出前继续占用运行位置。若下一次发送收到 `X-Stream-Status: conflict`，应保留用户输入并提示稍后再发送，不自动重试。用户停止后的新 query 可读取原始任务、停止说明和已保存的部分结果；停止不会回滚已发生的外部操作。
+使用 `GET /nb/v1/chat/stop/{conversation_id}` 停止当前运行。收到 HTTP 200 后，旧运行已释放会话占用，可以用原会话 ID 发送下一轮。新 query 可以读取原始任务、停止说明和已保存的部分结果。停止不会回滚已发生的外部操作。
 
 旧 HITL 专属路由、审批、暂停续跑、四表运行依赖和密钥配置已移除。北向 `/chat/run` 若收到 `enable_hitl`、`hitl_run_id` 或 `hitl_after_event`，明确返回 `400`；字段即使为 false、null 或零也不能继续发送。Web 与 runtime 应同步更新。普通身份、权限、附件、元数据及错误响应保持原有约定。
 
@@ -310,6 +310,8 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/attachments/upload" \
 将返回的 `s3_url` 作为 `/nb/v1/chat/run` 接口中 `attachments` 字段的值。
 
 ## ⏹️ 停止对话
+
+请求取消后，接口最多等待 5 秒，确认目标任务退出并释放会话占用。HTTP 200 表示目标占用已经释放，或者会话本来就空闲。如果到期仍未释放，接口返回 HTTP 409，错误码为 `NORTHBOUND_STOP_IN_PROGRESS`，并携带 `Retry-After: 1`。取消仍在继续，请保留新消息，等确认停止后再发送。同一会话的并发启动请求仍可能发生冲突。
 
 终止正在进行的对话（流式响应）。
 
