@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: WORKBENCH-AUTOMATION-MODEL-20261124
+  change_type: bugfix
+  bug_id: WORKBENCH-AUTOMATION-MODEL-20261124
+  title: Preserve the requested model in Workbench automation proposals
+  description: Stage the request's model choice with the automation metadata at prepared turn admission.
+  observed_behavior: Workbench staged its resolved execution model even when the request selected a different model or omitted the selection.
+  expected_behavior: The proposal inherits the explicit request model. An omitted model remains unset for automation defaults.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Workbench admission tests asserted staging and confirmation but did not inspect automation model provenance.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-129]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Verify the public Workbench send stages the requested model even if the execution snapshot resolves a different model.
+    - Verify an omitted request model stays unset and the prepared turn still reaches Runtime confirmation.
+    reason: The ASGI regression exercises public request dispatch and the actual staging logic with controlled persistence and Runtime boundaries.
+    test_selectors:
+    - test/backend/services/test_agent_run_workbench_coverage.py
+  notes: Existing proposal cases cover downstream task flows. The staging bug requires checking the payload at the Workbench admission boundary.
