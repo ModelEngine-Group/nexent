@@ -35,7 +35,7 @@ from management.db.identity.models import (
     UserTenant,
 )
 from infrastructure.rdb.orm import as_dict
-from management.db.trajectory.repository import detach_owner
+from infrastructure.rdb.trajectory.repository import detach_owner
 from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger(__name__)

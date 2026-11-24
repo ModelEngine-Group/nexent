@@ -81,37 +81,18 @@ jobs:
         if: ${{ inputs.build_full_sandbox }}
         run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-sandbox-full:${{ github.event.inputs.app_version }} -t nexent/nexent-sandbox-full -f deploy/images/dockerfiles/sandbox-full/Dockerfile .
 
-  build-mcp:
-    runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Build MCP image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-mcp:${{ github.event.inputs.app_version }} -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
-
   deploy:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    needs: [ build-data-process, build-web, build-docs, build-sandbox, build-mcp ]
+    needs: [ build-data-process, build-web, build-docs, build-sandbox ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Build Gateway image on the deployment runner
+      - name: Build backend and MCP proxy images on the deployment runner
         env:
           APP_VERSION: ${{ inputs.app_version }}
         run: |
-          docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple \
-            -t "nexent/nexent-gateway:$APP_VERSION" -t nexent/nexent-gateway:latest \
-            -f deploy/images/dockerfiles/gateway/Dockerfile .
-      - name: Build independent backend images on the deployment runner
-        env:
-          APP_VERSION: ${{ inputs.app_version }}
-        run: |
-          set -euo pipefail
-          for service in management runtime mcp-service ops; do
-            docker build --target "$service" \
-              --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua \
-              -t "nexent/nexent-$service:$APP_VERSION" -f deploy/images/dockerfiles/main/Dockerfile .
-          done
+          bash deploy/images/build.sh --images management,runtime,ops,gateway,mcp \
+            --version "$APP_VERSION" --registry mainland --load
       - name: Copy project to $HOME/nexent
         run: |
           rm -rf $HOME/nexent

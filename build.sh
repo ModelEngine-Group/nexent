@@ -21,11 +21,9 @@ Usage:
 Image builds are forwarded to: deploy/images/build.sh
 Offline package builds are forwarded to: deploy/offline/build_offline_package.sh
 
-Available images (use --images LIST with comma-separated names, or matching flags):
-  main          nexent/nexent
+Available image names for --images LIST:
   management    nexent/nexent-management
   runtime       nexent/nexent-runtime
-  mcp-service   nexent/nexent-mcp-service
   ops           nexent/nexent-ops
   gateway       nexent/nexent-gateway
   web           nexent/nexent-web
@@ -35,12 +33,12 @@ Available images (use --images LIST with comma-separated names, or matching flag
   docs          nexent/nexent-docs
   sandbox       nexent/nexent-sandbox
   sandbox-full  nexent/nexent-sandbox-full
-  all           Build the images above, excluding optional sandbox-full
+  all           Build the images above, excluding sandbox-full
 
 Examples:
-  bash build.sh --main --version latest --dry-run
+  bash build.sh --all --version latest --dry-run
   bash build.sh --images runtime,management --version latest --load
-  bash build.sh --images mcp-service,ops --version latest --load
+  bash build.sh --mcp --ops --version latest --load  # MCP backend, proxy and Ops
   bash build.sh --package --version latest --target docker --dry-run
 
 More options:

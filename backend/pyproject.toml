@@ -74,6 +74,23 @@ management = [
     "matplotlib>=3.9.0,<3.12",
     "reportlab>=4.2.0,<5.1",
 ]
+ops = [
+    "bcrypt>=4.2,<6",
+    "elasticsearch==8.17.2",
+    "fastapi>=0.115.12,<=0.141.1",
+    "greenlet<3.5.0",
+    "opentelemetry-exporter-otlp>=1.20",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+    "psycopg2-binary>=2.9.9",
+    "pydantic[email]>=2.11.1",
+    "PyJWT>=2.8",
+    "python-dotenv>=1.1",
+    "python-multipart>=0.0.20",
+    "redis>=5",
+    "sqlalchemy~=2.0.37",
+    "uvicorn>=0.34",
+]
 
 [tool.setuptools]
 packages = []

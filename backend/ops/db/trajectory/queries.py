@@ -8,8 +8,8 @@ from sqlalchemy import bindparam, text
 # isort: split
 from contracts.errors.trajectory import QueryError
 from management.db.agent.models import AgentInfo
-from management.db.trajectory.models import TrajectoryStatistics
-from management.db.trajectory.repository import scope_uuid
+from infrastructure.rdb.trajectory.models import TrajectoryStatistics
+from infrastructure.rdb.trajectory.repository import scope_uuid
 from ops.db.trajectory.catalog import _session
 
 READABLE = "('success','error','cancelled','partial')"

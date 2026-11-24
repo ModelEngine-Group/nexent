@@ -6,8 +6,8 @@ import pytest
 
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings
-from gateway.security.context import trusted_identity
-from gateway.security.identity import IDENTITY_HEADER, sign_identity
+from gateway.identity.context import trusted_identity
+from gateway.identity.protocol import IDENTITY_HEADER, sign_identity
 from ops.api import application as ops_application
 from ops.api import system_configurations
 
@@ -17,9 +17,9 @@ ACTOR = {"kind": "session", "user_id": "user-1", "tenant_id": "tenant-1", "roles
 
 @pytest.mark.asyncio
 async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(monkeypatch):
-    monkeypatch.setattr("gateway.downstream.middleware.enabled", lambda: True)
-    monkeypatch.setattr("gateway.downstream.middleware.signing_key", lambda: SECRET)
-    monkeypatch.setattr("gateway.downstream.identity.signing_key", lambda: SECRET)
+    monkeypatch.setattr("gateway.identity.middleware.enabled", lambda: True)
+    monkeypatch.setattr("gateway.identity.middleware.signing_key", lambda: SECRET)
+    monkeypatch.setattr("gateway.identity.downstream.signing_key", lambda: SECRET)
     monkeypatch.setattr(ops_application, "trajectory_enabled", lambda: False)
     ops = ops_application.create_app()
 
@@ -71,9 +71,9 @@ async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(m
 
 @pytest.mark.asyncio
 async def test_gateway_reaches_real_system_configuration_routes(monkeypatch, mocker):
-    monkeypatch.setattr("gateway.downstream.middleware.enabled", lambda: True)
-    monkeypatch.setattr("gateway.downstream.middleware.signing_key", lambda: SECRET)
-    monkeypatch.setattr("gateway.downstream.identity.signing_key", lambda: SECRET)
+    monkeypatch.setattr("gateway.identity.middleware.enabled", lambda: True)
+    monkeypatch.setattr("gateway.identity.middleware.signing_key", lambda: SECRET)
+    monkeypatch.setattr("gateway.identity.downstream.signing_key", lambda: SECRET)
     monkeypatch.setattr(ops_application, "trajectory_enabled", lambda: False)
 
     async def resolve(request, **kwargs):

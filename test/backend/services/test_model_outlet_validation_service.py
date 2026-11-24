@@ -91,7 +91,7 @@ def probe(monkeypatch, outlet_database):
     db, _ = outlet_database
     db.update_model_outlet_connectivity = Mock()
     from contracts.agentos import ModelAdministrationOperation
-    from gateway.security.context import identity_context
+    from gateway.identity.context import identity_context
     from management.clients.agentos import AgentOSClient
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
     from runtime.model.profile_probe import probe_model_profile
