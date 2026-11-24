@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Alert, Tag } from "antd";
 import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -35,7 +35,8 @@ export function TrajectoryNodeDetail({
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
   const [info, setInfo] = useState(true);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    container.current?.style.removeProperty("--trajectory-mode-scroll-padding");
     container.current?.scrollTo?.(0, 0);
   }, [node.id]);
   const metrics = [
@@ -67,7 +68,22 @@ export function TrajectoryNodeDetail({
   const input = node.usage?.input ?? known?.input;
   const output = node.usage?.output ?? known?.output;
   return (
-    <div className="trajectory-node-detail" ref={container}>
+    <div
+      className="trajectory-node-detail"
+      ref={container}
+      onScroll={({ currentTarget: detail }) => {
+        const padding = parseFloat(
+          detail.style.getPropertyValue("--trajectory-mode-scroll-padding")
+        );
+        if (
+          padding &&
+          detail.scrollTop <=
+            Math.max(0, detail.scrollHeight - detail.clientHeight - padding)
+        ) {
+          detail.style.removeProperty("--trajectory-mode-scroll-padding");
+        }
+      }}
+    >
       <header className="trajectory-node-heading">
         <div className="trajectory-node-title">
           <NodeIcon kind={node.kind} name={node.name} large />

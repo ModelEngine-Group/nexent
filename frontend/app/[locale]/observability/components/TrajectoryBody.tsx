@@ -1,6 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { App, Button, Segmented, Spin } from "antd";
 import {
   ChevronDown,
@@ -67,6 +74,8 @@ function TrajectoryBodyContent({
   const [expanded, setExpanded] = useState(false);
   const [preferredMode, setMode] = useState<BodyMode>(model ? "table" : "json");
   const [wordWrap, setWordWrap] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const modeScroll = useRef<{ detail: HTMLElement; top: number } | null>(null);
   const [chunk, setChunk] = useState<{
     offset: number;
     next: number;
@@ -110,6 +119,40 @@ function TrajectoryBodyContent({
     return null;
   }, [complete, model, reference.availability, slot, t, text]);
   const mode = preferredMode === "table" && !table ? "json" : preferredMode;
+  const changeMode = (value: BodyMode) => {
+    if (model && value !== mode) {
+      const detail = section.current?.closest<HTMLElement>(
+        ".trajectory-node-detail"
+      );
+      if (detail) modeScroll.current = { detail, top: detail.scrollTop };
+    }
+    setMode(value);
+  };
+  useLayoutEffect(() => {
+    const saved = modeScroll.current;
+    if (!saved) return;
+    modeScroll.current = null;
+    const { detail, top } = saved;
+    detail.style.removeProperty("--trajectory-mode-scroll-padding");
+    // A shorter representation can make the previous position unreachable.
+    const missing = top - (detail.scrollHeight - detail.clientHeight);
+    if (missing > 0) {
+      const viewportBottom =
+        detail.getBoundingClientRect().top + detail.clientHeight;
+      const contentBottom =
+        detail.lastElementChild?.getBoundingClientRect().bottom ??
+        viewportBottom;
+      const unused = Math.max(
+        0,
+        viewportBottom - contentBottom - detail.scrollTop
+      );
+      detail.style.setProperty(
+        "--trajectory-mode-scroll-padding",
+        `${Math.ceil(missing + unused)}px`
+      );
+    }
+    detail.scrollTop = top;
+  }, [mode]);
   const tablePreview = mode === "table" ? table : null;
   const formatted = useMemo(() => {
     if (mode !== "json") return text;
@@ -230,7 +273,7 @@ function TrajectoryBodyContent({
     </button>
   );
   return (
-    <section className="trajectory-body" aria-busy={showLoading}>
+    <section className="trajectory-body" ref={section} aria-busy={showLoading}>
       <header>
         <button
           aria-expanded={!collapsed}
@@ -243,7 +286,7 @@ function TrajectoryBodyContent({
           <Segmented<BodyMode>
             size="small"
             value={mode}
-            onChange={setMode}
+            onChange={changeMode}
             options={[
               { label: t("trajectory.text"), value: "text" },
               { label: "JSON", value: "json" },

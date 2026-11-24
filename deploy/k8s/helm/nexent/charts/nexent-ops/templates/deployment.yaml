@@ -1,7 +1,7 @@
 {{- $global := default dict .Values.global -}}
 {{- $monitoring := default dict $global.monitoring -}}
 {{- $localCapture := ternary (get $monitoring "localFileEnabled") true (hasKey $monitoring "localFileEnabled") | toString | lower -}}
-{{- $trajectory := or (eq (toString $monitoring.trajectoryReadEnabled | lower) "true") (eq (default "otlp" $monitoring.provider) "local_file") (eq $localCapture "true") -}}
+{{- $trajectory := or (eq (toString $monitoring.trajectoryReadEnabled | lower) "true") (eq $localCapture "true") -}}
 {{- $logs := dig "sharedStorage" "logs" (dict) $global -}}
 apiVersion: apps/v1
 kind: Deployment

@@ -231,10 +231,24 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         .getByRole("heading", { name: "Storage recommendation" }),
     ).toBeVisible();
     const outputModes = output.getByRole("radiogroup");
+    await nodeDetail.evaluate((detail) => {
+      detail.scrollTop = detail.scrollHeight;
+    });
+    await outputModes.scrollIntoViewIfNeeded();
+    const scrollTop = () => nodeDetail.evaluate((detail) => detail.scrollTop);
+    const before = await scrollTop();
+    expect(before).toBeGreaterThan(0);
     await outputModes.getByText("文本", { exact: true }).click();
     await expect(output.locator("pre code")).toHaveText(modelOutput);
+    await expect.poll(scrollTop).toBe(before);
+    await outputModes.getByText("JSON", { exact: true }).click();
+    await expect(
+      outputModes.getByRole("radio", { name: "JSON" }),
+    ).toBeChecked();
+    await expect.poll(scrollTop).toBe(before);
     await outputModes.getByText("表格", { exact: true }).click();
     await expect(response).toBeVisible();
+    await expect.poll(scrollTop).toBe(before);
     await page.getByRole("treeitem", { name: /policy.check/ }).click();
     await expect(output.getByRole("radio")).toHaveCount(2);
     await expect(output.getByRole("table")).toHaveCount(0);

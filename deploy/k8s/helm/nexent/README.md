@@ -119,7 +119,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
-| `--monitoring-provider` | Provider when `monitoring` is selected | `local_file`, `otlp`, `phoenix`, `langfuse`, `langsmith` |
+| `--monitoring-provider` | Remote provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith` |
 | `--use-local-config` | Reuse saved local deployment config | Flag |
 | `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
 | `--config` | Open the interactive deployment configuration | Flag |
@@ -325,6 +325,12 @@ component and select a provider in the deployment script. Local capture keeps it
 own setting. With both enabled, Runtime records full traces locally and applies
 the existing remote sampling and content settings to the third-party export.
 Omit the `monitoring` component to turn off remote export.
+
+If a saved deployment profile used the former `local_file` option, the script
+loads it with remote export off and uses `LOCAL_FILE_MONITORING_ENABLED` for
+local capture. For direct Helm upgrades from `global.monitoring.provider=local_file`,
+set `global.monitoring.provider=otlp`, `global.monitoring.enabled=false`,
+`nexent-monitoring.enabled=false`, and `global.monitoring.localFileEnabled=true`.
 
 ```bash
 bash deploy.sh docker --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix

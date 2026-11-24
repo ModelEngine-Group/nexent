@@ -518,6 +518,7 @@
   min-width: 0;
   min-height: 0;
   scrollbar-gutter: stable;
+  padding-bottom: var(--trajectory-mode-scroll-padding, 0px);
 }
 .trajectory-node-heading {
   padding: 14px 18px 10px;

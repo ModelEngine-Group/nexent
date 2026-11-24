@@ -5,6 +5,7 @@ case:
   case_id: CHAT-TRAJECTORY-DEPLOYMENT-D5-001
   feature_id: CHAT-TRAJECTORY
   requirement_ids:
+  - CHAT-TRAJECTORY-MONITORING-DISPLAY-20261124
   - CHAT-LOCAL-TRAJECTORY-20261103
   - CHAT-TRAJECTORY-LOCAL-DEFAULT-20261124
   business_rule_ids:
@@ -30,8 +31,9 @@ case:
   steps:
   - order: 1
     action: 记录PG定义和原监控行为，通过environment→bootstrap→MonitoringConfig验证默认本地、环境开关与部署组件的四种组合及非法目标；本地模式关闭Metrics，使用single_node持久卷归档后重建容器，再以默认目录自动初始化启动读取并对账PG。
+      检查部署交互菜单和命令参数，加载旧local_file部署配置，验证本地环境变量取值及远端组件是否启用。
       经environment验证TRAJECTORY_CLEANUP_ENABLED、TRAJECTORY_RETENTION_DAYS、TRAJECTORY_CLEANUP_INTERVAL_SECONDS默认值和覆盖；测试天数0/负数/3651/小数以及周期小于60，查看环境示例。
-    expected: 默认启用本地采集，环境变量和部署脚本分别控制本地和远端，两路可单开或同时启用；目标注入SDK且非法值明确配置错误；纯本地Trace/Metrics配置不连接远端。容器重建后OTLP及目录可冷读，PG结构/序列复用；默认目录/mnt/nexent-data/trajectory自动初始化且无需根UUID，查询扫描预算固定30秒，存储依赖不以临时目录替代，原聊天兼容。 定期默认true/30/3600，天数1～3650且周期至少60秒；非法配置启动时报错，读取集中environment.py并注入。停止新采集后，独立清理开关仍能回收历史；部署示例布尔和数字字符串符合兼容要求。
+    expected: 默认启用本地采集，两路可单开或同时启用；远端目标注入SDK且非法值明确配置错误。菜单仅提供远端目标，local_file命令参数报错，旧本地部署配置从环境变量读取本地开关且不启动远端。纯本地Trace/Metrics配置不连接远端。容器重建后OTLP及目录可冷读，PG结构/序列复用；默认目录/mnt/nexent-data/trajectory自动初始化且无需根UUID，查询扫描预算固定30秒，存储依赖不以临时目录替代，原聊天兼容。 定期默认true/30/3600，天数1～3650且周期至少60秒；非法配置启动时报错，读取集中environment.py并注入。停止新采集后，独立清理开关仍能回收历史；部署示例布尔和数字字符串符合兼容要求。
   - order: 2
     action: 在shared_directory启动两个实例，A追加并刷盘OTLP、B读取已发布执行，进行双向探针；竞争实际运行文件锁及稳定owner/会话锁，持锁实例超时后尝试接管，释放后校验已确认前缀，检查smolagents Core注入。 两实例以不同根Agent同时首次采集同一owner/会话。 在两实例触发同存储根定时与手动清理，随后退出lifespan并检查受管清理lane。
     expected: 实际访问同一持久文件，跨实例锁保证单执行单写入者、meta.json串行原子提交；超时不绕过实际锁，不可靠锁的卷拒绝多实例写入。SDK仅接参数，配置依赖保持持久目录。 稳定.locks/<user_id>/<conversation_id>.lock使首次定位/登记串行，只产生一份固定storage_agent_id和会话meta；正文清理保留仍被持有/等待的锁inode。
@@ -43,7 +45,7 @@ case:
     action: 恢复本地存储配置和卷，关闭本地采集，分别保留和关闭otlp导出，保持历史读取并运行原聊天及监控回归。
     expected: 本地采集目标与历史读取分别受控，显式远端导出、原有聊天和历史冷读可用；配置注入、切换、环境还原、回归及owned cleanup有证据，共享卷保持。
   expected_results:
-  - 默认启用本地采集，环境变量和部署脚本分别控制本地和远端，两路可单开或同时启用；目标注入SDK且非法值明确配置错误；纯本地Trace/Metrics配置不连接远端。容器重建后OTLP及目录可冷读，PG结构/序列复用；默认目录/mnt/nexent-data/trajectory自动初始化且无需根UUID，查询扫描预算固定30秒，存储依赖不以临时目录替代，原聊天兼容。 定期默认true/30/3600，天数1～3650且周期至少60秒；非法配置启动时报错，读取集中environment.py并注入。停止新采集后，独立清理开关仍能回收历史；部署示例布尔和数字字符串符合兼容要求。
+  - 默认启用本地采集，两路可单开或同时启用；远端目标注入SDK且非法值明确配置错误。菜单仅提供远端目标，local_file命令参数报错，旧本地部署配置从环境变量读取本地开关且不启动远端。纯本地Trace/Metrics配置不连接远端。容器重建后OTLP及目录可冷读，PG结构/序列复用；默认目录/mnt/nexent-data/trajectory自动初始化且无需根UUID，查询扫描预算固定30秒，存储依赖不以临时目录替代，原聊天兼容。 定期默认true/30/3600，天数1～3650且周期至少60秒；非法配置启动时报错，读取集中environment.py并注入。停止新采集后，独立清理开关仍能回收历史；部署示例布尔和数字字符串符合兼容要求。
   - 实际访问同一持久文件，跨实例锁保证单执行单写入者、meta.json串行原子提交；超时不绕过实际锁，不可靠锁的卷拒绝多实例写入。SDK仅接参数，配置依赖保持持久目录。 稳定.locks/<user_id>/<conversation_id>.lock使首次定位/登记串行，只产生一份固定storage_agent_id和会话meta；正文清理保留仍被持有/等待的锁inode。
     共享.locks/cleanup.lock按批互斥，清理lane有界且lifespan退出释放资源；扫描预算和固定元信息归属有效。
   - 错挂载通过部署交叉读写校验发现，不能将相同路径名当成共享证据；故障不返回假空轨迹。
@@ -53,7 +55,7 @@ case:
   - 不得将配置文本或 Mock 启动成功当作共享存储/灾难恢复已通过。
   acceptance:
   - id: AC-01
-    description: 默认启用本地采集，环境变量和部署脚本分别控制本地和远端，两路可单开或同时启用；目标注入SDK且非法值明确配置错误；纯本地Trace/Metrics配置不连接远端。容器重建后OTLP及目录可冷读，PG结构/序列复用；默认目录/mnt/nexent-data/trajectory自动初始化且无需根UUID，查询扫描预算固定30秒，存储依赖不以临时目录替代，原聊天兼容。 定期默认true/30/3600，天数1～3650且周期至少60秒；非法配置启动时报错，读取集中environment.py并注入。停止新采集后，独立清理开关仍能回收历史；部署示例布尔和数字字符串符合兼容要求。
+    description: 默认启用本地采集，两路可单开或同时启用；远端目标注入SDK且非法值明确配置错误。菜单仅提供远端目标，local_file命令参数报错，旧本地部署配置从环境变量读取本地开关且不启动远端。纯本地Trace/Metrics配置不连接远端。容器重建后OTLP及目录可冷读，PG结构/序列复用；默认目录/mnt/nexent-data/trajectory自动初始化且无需根UUID，查询扫描预算固定30秒，存储依赖不以临时目录替代，原聊天兼容。 定期默认true/30/3600，天数1～3650且周期至少60秒；非法配置启动时报错，读取集中environment.py并注入。停止新采集后，独立清理开关仍能回收历史；部署示例布尔和数字字符串符合兼容要求。
     steps:
     - 1
     expected_results:
