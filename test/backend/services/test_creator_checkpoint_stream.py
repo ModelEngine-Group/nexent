@@ -84,6 +84,16 @@ async def test_structured_content_is_saved_as_json_without_losing_card_identity(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("subtype", ["requirement_resources", "prompt_generation"])
+async def test_server_card_identity_survives_checkpoint_persistence_and_wire_delivery(writes, subtype):
+    card = {"subtype": subtype, "agent_id": 42, "card_id": "server-card", "state_version": 7}
+    output = [json.loads(item[6:]) async for item in checkpoint(source(frame({"type": "nl2a", "content": card})))]
+    assert json.loads(output[0]["content"]) == card
+    saved = [unit for call in writes.call_args_list for unit in call.args[3]]
+    assert json.loads(saved[0]["unit_content"]) == card
+
+
+@pytest.mark.asyncio
 async def test_explicit_error_keeps_the_answer_failed_even_if_more_text_arrives(writes):
     events = source(frame({"type": "error", "content": "service unavailable"}),
                     frame({"type": "final_answer", "content": "partial answer"}))

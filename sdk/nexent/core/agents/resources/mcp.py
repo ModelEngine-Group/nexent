@@ -128,13 +128,14 @@ class ManagedMCPToolCollection:
         async with AsyncExitStack() as stack:
             connections = []
             for parameters in self.server_parameters:
-                parameters = parameters.copy()
-                allowed_tools = parameters.pop("allowed_tools", None)
+                transport_parameters = dict(parameters)
+                on_tool_result = transport_parameters.pop("on_tool_result", None)
+                allowed_tools = transport_parameters.pop("allowed_tools", None)
                 try:
                     connection = await asyncio.wait_for(
                         stack.enter_async_context(
                             session_factory(
-                                parameters,
+                                transport_parameters,
                                 client_session_timeout_seconds=None,
                             )
                         ),
@@ -153,10 +154,10 @@ class ManagedMCPToolCollection:
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
                     ) from exc
-                connections.append((*connection, allowed_tools))
+                connections.append((*connection, on_tool_result, allowed_tools))
 
             tools = []
-            for session, mcp_tools, allowed_tools in connections:
+            for session, mcp_tools, on_tool_result, allowed_tools in connections:
                 matched = set()
                 for mcp_tool in mcp_tools:
                     if allowed_tools is not None and mcp_tool.name not in allowed_tools:
@@ -166,8 +167,17 @@ class ManagedMCPToolCollection:
                         arguments=None,
                         __session=session,
                         __name=mcp_tool.name,
+                        __on_tool_result=on_tool_result,
                     ):
-                        return self._call_tool(__session, __name, arguments)
+                        result = self._call_tool(__session, __name, arguments)
+                        if (
+                            __on_tool_result is not None
+                            and not self._close_requested.is_set()
+                            and not self.cancellation_scope.cancelled
+                            and not result.isError
+                        ):
+                            __on_tool_result(__name, result.meta)
+                        return result
 
                     tool = adapter.adapt(call_tool, mcp_tool)
                     raw_schema = getattr(mcp_tool, "inputSchema", None)
@@ -449,6 +459,8 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
 
+        if callable(mcp_host_item.get("on_tool_result")):
+            result["on_tool_result"] = mcp_host_item["on_tool_result"]
         if "allowed_tools" in mcp_host_item:
             result["allowed_tools"] = mcp_host_item["allowed_tools"]
 

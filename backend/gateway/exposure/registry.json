@@ -924,6 +924,50 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent/nl2agent/knowledge_recommendations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-2e6097a0a63eb8d3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-0b0c7d19b4ff9733",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installation_attempts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-9bb4d46c7b7f0a77",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_links",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-4d4c5dee4c60bea6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent/nl2agent/run",
       "transport": "http",
       "target": "management",
@@ -6853,5 +6897,5 @@
       ]
     }
   ],
-  "revision": "2026-11-23.agentos-ops-monitoring"
+  "revision": "2026-11-24.nl2agent-ops-monitoring"
 }

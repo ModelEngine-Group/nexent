@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import smtplib
@@ -15,7 +17,7 @@ class SendEmailTool(Tool):
     name = "send_email"
     description = "Send email to specified recipients. Supports only HTML formatted email content, and can add multiple recipients, CC, and BCC."
 
-    description_zh = "向指定收件人发送 HTML 格式邮件，支持添加多个收件人、抄送和密送。"
+    description_zh = "发送邮件：向指定收件人发送 HTML 格式邮件，支持添加多个收件人、抄送和密送。"
 
     inputs = {
         "to": {

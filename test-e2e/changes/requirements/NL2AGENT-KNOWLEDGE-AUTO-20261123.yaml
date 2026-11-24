@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-KNOWLEDGE-AUTO-20261123
+  change_type: requirement
+  requirement_id: NL2AGENT-KNOWLEDGE-AUTO-20261123
+  title: Recommend selectable knowledge metadata in the unified resource card
+  description: A separate authorized card-scoped configuration request recommends knowledge metadata using lexical and cached semantic retrieval. Restrict local knowledge to current embedding models, seed only frontend selection drafts and preserve saved/user choices.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001, NL2A-WORKFLOW-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Current card, actor, tool visibility, selectable model, empty knowledge, reauthorization and stale-model boundaries precede disclosure.
+    - Metadata-only lexical/semantic matching caches embeddings, uses text fallback, caps suggestions and never changes resource coverage or persisted bindings.
+    - Recommended selections seed once, saved/user selections win including explicit empty selection, shared tools configure once and stale responses do not overwrite edits.
+    reason: New service/API and UI state need UT; existing real HTTP/Redis/ES D3 and browser D4 prove runtime and interaction. No duplicate D1 or separate D2/D5 is necessary because D3 includes the public authorized route and deployment mode is unchanged.
+    test_selectors:
+    - test/backend/services/test_nl2agent_knowledge_auto.py
+    - test/backend/app/test_nl2agent_resource_operations.py
+    - frontend/tests/workbench/Nl2AgentKnowledgeDialog.test.tsx
+    - frontend/tests/workbench/Nl2AgentKnowledgeAuto.test.ts
+  notes: 'Baseline: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/. F-045 owns agent_config. D3 owns temporary PostgreSQL/Redis/ES and listeners; D4 owns browser fixtures/context with no persistent writes. KB metadata uses existing rebuildable resource projections, namespaced knowledge references and current model fingerprints. No document re-vectorization.'

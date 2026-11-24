@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-BILINGUAL-RECALL-20261111
+  change_type: bugfix
+  bug_id: NL2AGENT-BILINGUAL-RECALL-20261111
+  title: Recall NL2Agent candidates through Chinese and English expressions
+  description: Prepare equivalent bilingual expressions, union independently ranked candidates, and retain model coverage verification.
+  observed_behavior: Chinese web-search requirements scored below the lexical threshold for available English-named web tools before model verification.
+  expected_behavior: Either language route admits candidates at the existing threshold; merged scores use the maximum, and edits invalidate translations while coverage remains model-verified.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests covered short email queries but not cross-language recall or refreshing bilingual expressions after card edits.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_bilingual_recall.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/backend/services/test_nl2agent_resource_input.py
+    behaviors:
+      - Recall either language independently at the existing threshold, retain per-route candidates, deduplicate and use maximum scores.
+      - Prepare missing translations without catalog access, preserve authoritative text and unchanged evidence, reject invalid or stale query updates.
+      - Refresh an unlinked legacy gap without translations on confirmation, while reusing current bilingual rejection results without a search loop.
+      - Validate bounded complete bilingual input and preserve verification pagination and rejected-candidate behavior.
+    reason: Unit proof owns scoring and validation; the existing runtime D3 case proves the model-tool-state boundary and cleanup without adding a redundant D1.
+  notes: >-
+    SPEC: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md sections 7.2-7.3; tasks.md owns local evidence.
+    NL2A-COVERAGE-D3-001 inherits Agent configuration routing and retains its declared self-contained preparation and owned cleanup.

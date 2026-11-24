@@ -120,6 +120,7 @@ export const RequirementClarificationCard: FC<{
     <ClarificationCard
       key={JSON.stringify([sourceMessageId ?? reactId, payload, submission])}
       dataSlot="aui-requirement-clarification"
+      rowLayout
       title={t(
         "nl2agent.requirementClarification.title",
         "Clarify requirements"

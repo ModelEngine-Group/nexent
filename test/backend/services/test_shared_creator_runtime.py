@@ -58,7 +58,7 @@ async def test_each_turn_keeps_shared_identity_but_fresh_resources_and_target(pr
         assert (info.agent_config.agent_id, info.agent_config.version_no) == (77, 3)
         assert info.agent_config.context_items[0].content["text"] == build_nl2agent_system_prompt(language)
         assert info.agent_config.context_items[1].content["text"] == f"{actor.tenant_id}:{target}"
-        tool = info.agent_config.tools[0].metadata
+        tool = next(tool.metadata for tool in info.agent_config.tools if tool.name == "nl2a_search_installed_resources")
         assert tool.invoke({"agent_id": target + 10, "requirements": []})["code"] == "agent_context_mismatch"
         before = callback.call_count
         assert tool.invoke({"agent_id": target, "requirements": []}) == {"status": "ok"}

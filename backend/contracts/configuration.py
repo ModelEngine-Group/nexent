@@ -46,6 +46,14 @@ def parse_positive_float(raw_value: object, name: str, default: float) -> float:
     return parsed
 
 
+def parse_similarity_threshold(raw_value: object, name: str, default: float) -> float:
+    """Parse a finite similarity threshold in the interval (0, 1]."""
+    value = parse_positive_float(raw_value, name, default)
+    if value > 1:
+        raise ValueError(f"{name} must be at most 1")
+    return value
+
+
 def _parse_otlp_headers(headers_str: str) -> dict:
     """Parse OTLP headers string into dict. Format: 'key1=value1,key2=value2'"""
     if not headers_str:

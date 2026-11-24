@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: NL2A-HISTORY-D4-001
+  feature_id: SYS-AGENT-LIFECYCLE
+  requirement_ids: [NL2A-HISTORY-20261119]
+  business_rule_ids: [SYS-AGENT-LIFECYCLE-RULE-005]
+  title: Agent editor resumes the latest of three histories and respects explicit new sessions
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove editor entry and conversation runtime collaborate without manual history selection.
+  preconditions: [Local frontend with controlled authorized editor and creator HTTP fixtures.]
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open the editor with three ordered creator histories.
+    expected: Latest history is restored automatically, the list shows three records with no load-more button, requests only kind and target_id, and recommends continued optimization.
+  - order: 2
+    action: Send an optimization request, explicitly start a new session and refresh the history list.
+    expected: Optimization uses the restored ID; new session stays empty after refresh and a new request has no previous conversation ID.
+  expected_results:
+  - Latest history resumes automatically and all three retained records remain selectable without pagination.
+  - Explicit new sessions remain selected and do not reuse the previous conversation ID.
+  forbidden_side_effects:
+  - No real model request, persistent Agent write or resource creation outside browser-local fixtures.
+  actor: Authorized controlled tenant user
+  journey: [Open editor, Resume latest, Continue optimization, Start new session, Refresh list]
+  final_business_result: [The user continues the existing optimization or explicitly starts a new session.]
+  failure_evidence: [Browser assertions and failed-step screenshot]
+  acceptance:
+  - id: AC-ENTRY
+    description: Entry restores the latest and displays three histories without pagination.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-CONTINUE
+    description: Continuation reuses the restored ID and explicit new sessions do not.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
