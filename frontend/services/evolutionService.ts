@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { API_BASE_URL, API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { getAuthHeaders } from "@/lib/auth";
+import type { ReviewBatch } from "@/types/evolutionReview";
 
 const root = `${API_BASE_URL}/agent-evolution`;
 
@@ -28,6 +29,7 @@ export interface Workspace {
   suggestions?: { suggestion_id: number; expected_behavior: string; skill_id: number; experiment_id: number | null }[];
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[];
     diagnosis?: { status: "needs_review" | "needs_evidence" | "no_issue"; reason: string; missing?: string[] } }[];
+  review_batches?: ReviewBatch[];
   candidates: { candidate_id: number; kind: string; name: string }[];
   cases: { case_id: number; digest?: string; family: string; query: string; expected_skill_names?: string[] | null }[];
   experiments: { experiment_id: number; create_time: string; candidate_type?: string;

@@ -37,30 +37,47 @@ def test_online_scope_http(runtime):
                      "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
                      "025_evolution_regression_cases", "028_evolution_confirmation_suites", "020_evolution_feedback_handoff",
                      "034_evolution_new_skill_candidates", "039_evolution_tool_builds", "041_evolution_generation_attempts",
-                     "043_evolution_model_charges", "046_evolution_online_diagnosis"):
+                     "043_evolution_model_charges", "046_evolution_online_diagnosis",
+                     "049_evolution_review_workspace_indexes"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         session.add(models.UserTenant(user_id="other", tenant_id="tenant-native", user_role="USER", delete_flag="N"))
-        for cid, user in [(17,owner),(18,"other")]:
-            args = dict(user=user,cid=cid,uuid=str(uuid4()),run=uuid4().hex)
+        batches = session.execute(text("""INSERT INTO nexent.evolution_review_batch_t
+            (tenant_id,agent_id,agent_version_no,status,result) VALUES
+            ('tenant-native',7,1,'completed',jsonb_build_object('private_stale_summary',true)),
+            ('tenant-native',7,1,'pending',NULL),
+            ('tenant-native',7,2,'completed',jsonb_build_object('private_other_version',true)) RETURNING batch_id""")).scalars().all()
+        finished_batch, pending_batch, other_version_batch = batches
+        for cid in range(17, 24):
+            user = owner if cid == 17 else "other"
+            args = dict(user=user,cid=cid,uuid=str(uuid4()),run=uuid4().hex,
+                        version=2 if cid == 23 else 1,
+                        batch={22: pending_batch, 23: other_version_batch}.get(cid, finished_batch))
             session.add(ConversationRecord(conversation_id=cid,created_by=user,delete_flag="N"))
             session.execute(text("""INSERT INTO nexent.evolution_review_turn_t
                 (tenant_id,owner_id,agent_id,agent_version_no,conversation_id,source_message_id,trajectory_id,run_id,
-                 grant_epoch,valid_until,observation_state,observation) VALUES ('tenant-native',:user,7,1,:cid,
-                 :cid,:uuid,:run,0,now()+interval '1 day','observed',
-                 '{"coverage":"complete","signals":[],"case_outline":{"tool_count": 1,"tools":[]}}')"""), args)
+                 grant_epoch,valid_until,batch_id,observation_state,observation,diagnosis) VALUES ('tenant-native',:user,7,:version,:cid,
+                 :cid,:uuid,:run,0,now()+interval '1 day',:batch,
+                 CASE WHEN :cid=22 THEN 'reading' WHEN :cid=21 THEN 'missing' ELSE 'observed' END,
+                 CASE WHEN :cid=22 THEN NULL WHEN :cid=21 THEN '{"coverage":"partial","signals":[]}'::jsonb
+                   WHEN :cid IN (19,20) THEN '{"coverage":"complete","signals":[],"successful_tool_steps":["read_ticket"],
+                       "case_outline":{"tool_count": 1,"tools":[]}}'::jsonb
+                   ELSE '{"coverage":"complete","signals":["tool_error"],"case_outline":{"tool_count": 1,"tools":[]}}'::jsonb END,
+                 CASE WHEN :cid=22 THEN NULL WHEN :cid=21 THEN '{"status":"needs_evidence","reason":"incomplete_trace"}'::jsonb
+                   WHEN :cid IN (19,20) THEN '{"status":"no_issue","reason":"no_signal"}'::jsonb
+                   ELSE '{"status":"needs_review","direction":"tool","reason":"tool_failure"}'::jsonb END)"""), args)
             session.execute(text("""INSERT INTO nexent.conversation_run_admission_t (scope_sha256,tenant_id,run_id,
                 request_sha256,conversation_id,created_by,updated_by,evolution_source_message_id,
                 evolution_grant_epoch,evolution_valid_until,delete_flag)
                 VALUES (:run,'tenant-native',:run,:run,:cid,:user,:user,:cid,0,now()+interval '1 day','N')"""), args)
             session.execute(text("""INSERT INTO nexent.trajectory_execution_t (trajectory_id,conversation_id,turn_no,
                 agent_id,agentos_run_id,agent_version_no,status,created_by,updated_by,delete_flag)
-                VALUES (:uuid,:cid,1,7,:run,1,'success',:user,:user,'N')"""), args)
+                VALUES (:uuid,:cid,1,7,:run,:version,'success',:user,:user,'N')"""), args)
             session.execute(text("""INSERT INTO nexent.conversation_message_t (message_id,conversation_id,message_role,
                 message_content,minio_files,created_by,updated_by,delete_flag) VALUES (:cid,:cid,'user',
                 'private meeting text','[{"name":"private-notes.txt","object_name":"private/storage"}]',:user,:user,'N')"""), args)
         for agent,user in [(7,owner),(8,"other")]:
-            for version in (0,1):
+            for version in range(3 if agent == 7 else 2):
                 session.add(models.AgentInfo(agent_id=agent,version_no=version,tenant_id="tenant-native",
                     name=f"scope-{agent}",created_by=user,updated_by=user,delete_flag="N",ingroup_permission="PRIVATE"))
                 session.flush()
@@ -85,6 +102,29 @@ def test_online_scope_http(runtime):
             with get_db_session() as session:
                 turn_ids = dict(session.execute(text("SELECT conversation_id,turn_id FROM nexent.evolution_review_turn_t")).all())
             base = "/api/agent-evolution/agents/7/versions/1/reviews/"
+            workspace = "/api/agent-evolution/agents/7/versions/1/workspace"
+
+            def workbench():
+                result = client.get(workspace, headers=headers)
+                assert result.status_code == 200 and "no-store" in result.headers["Cache-Control"], result.text
+                assert "private" not in result.text
+                data = result.json()["data"]
+                assert [s["expected_behavior"] for s in data["suggestions"]] == ["target"]
+                assert [batch["batch_id"] for batch in data["review_batches"]] == [pending_batch, finished_batch]
+                assert data["review_batches"][0] == {"batch_id": pending_batch, "state": "pending"}
+                return data["review_batches"][1]
+
+            completed = workbench()
+            assert completed["state"] == "completed" and completed["reviewed"] == 5 and completed["missing"] == 1
+            assert completed["findings"] == [{"direction": "tool", "reason": "tool_failure",
+                                               "turn_ids": [turn_ids[18], turn_ids[17]]}]
+            assert completed["reference_workflows"] == [{"tools": ["read_ticket"],
+                                                           "turn_ids": [turn_ids[20], turn_ids[19]]}]
+            assert {row["turn_id"] for row in completed["draft_turns"]} == {turn_ids[cid] for cid in (17,18,19,20)}
+            assert client.get(workspace.replace("agents/7","agents/8"),headers=headers).status_code == 403
+            second_version = client.get(workspace.replace("versions/1", "versions/2"), headers=headers)
+            assert second_version.status_code == 200, second_version.text
+            assert [row["batch_id"] for row in second_version.json()["data"]["review_batches"]] == [other_version_batch]
             draft_path = base + str(turn_ids[17]) + "/case-draft"
             own = client.get(draft_path, headers=headers)
             assert own.status_code == 200 and "no-store" in own.headers["Cache-Control"], own.text
@@ -120,11 +160,13 @@ def test_online_scope_http(runtime):
             assert client.get(draft_path, headers=headers).status_code == 404
             assert client.post(cases_path, headers=headers, json=form).status_code == 404
             assert client.delete(path.replace("17","18"), headers=headers).status_code == 404 and has_evidence(18)
-            workspace = "/api/agent-evolution/agents/7/versions/1/workspace"
-            result = client.get(workspace, headers=headers)
-            assert result.status_code == 200, result.text
-            assert [s["expected_behavior"] for s in result.json()["data"]["suggestions"]] == ["target"]
-            assert client.get(workspace.replace("agents/7","agents/8"),headers=headers).status_code == 403
+            with get_db_session() as session:
+                session.execute(text("UPDATE nexent.trajectory_execution_t SET status='expired' WHERE conversation_id=19"))
+            current = workbench()
+            assert current["findings"][0]["turn_ids"] == [turn_ids[18]] and current["excluded"] == 2
+            assert current["reviewed"] == 3 and current["reference_workflows"] == []
+            assert {row["turn_id"] for row in current["draft_turns"]} == {turn_ids[18], turn_ids[20]}
+            assert client.get(base + str(turn_ids[19]) + "/case-draft", headers=headers).status_code == 404
     finally:
         clear_default_thread_manager(config_thread_manager)
         asyncio.run(config_thread_manager.shutdown(timeout=5))

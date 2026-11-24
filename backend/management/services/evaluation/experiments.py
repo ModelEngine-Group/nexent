@@ -19,7 +19,7 @@ from contracts.evolution_metering import evaluation_budget
 from contracts.evaluation_answer import has_completed_root_answer
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial
-from management.db.conversation.evolution_review import recent_reviews
+from management.db.conversation.evolution_review import recent_review_batches, recent_reviews
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import prompt_example_sources
 from management.db.evaluation.evaluator import get_evaluator
@@ -454,7 +454,8 @@ def workspace_choices(tenant, user, agent_id, version):
             member["rubric"] = {"name": rule["name"], "version_no": rule["version_no"]}
     return {**jobs.workspace_choices(tenant, agent_id, version), "fixed_regression": fixed,
             "model_budget_available": evaluation_budget(tenant) is not None,
-            "reviews": recent_reviews(tenant, agent_id, version)}
+            "reviews": recent_reviews(tenant, agent_id, version),
+            "review_batches": recent_review_batches(tenant, agent_id, version)}
 
 
 def _grade(request, job, task, observed):

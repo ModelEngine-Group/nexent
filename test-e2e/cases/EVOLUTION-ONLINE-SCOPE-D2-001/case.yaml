@@ -4,7 +4,7 @@ module: V5-BASELINE
 case:
   case_id: EVOLUTION-ONLINE-SCOPE-D2-001
   feature_id: AGENT-EVOLUTION-ONLINE
-  business_rule_ids: [AGENT-EVOLUTION-ONLINE-RULE-01, AGENT-EVOLUTION-ONLINE-RULE-02]
+  business_rule_ids: [AGENT-EVOLUTION-ONLINE-RULE-01, AGENT-EVOLUTION-ONLINE-RULE-02, AGENT-EVOLUTION-ONLINE-RULE-04]
   title: 使用真实会话身份撤回证据和读取当前版本的建议
   type: API-IT
   priority: P1
@@ -24,8 +24,11 @@ case:
   - order: 3
     action: 读取本人和他人的同版本出题草稿。缺少必要附件、工具初态待核实、确认材料齐全、撤回授权后分别提交业务题。
     expected: 仅本人草稿返回原问题及文件名，响应禁止缓存。缺材料和初态时拒绝保存；可登记可复位文本初态与预期，矛盾的保护要求被拒；撤回后不能使用旧草稿。
-  expected_results: [撤回立即清除相应的诊断。, 编辑者能看到提交给本版本的一条建议。, 题面和附件在授权范围内展示，逐项确认后才能入库。]
-  forbidden_side_effects: [他人会话的授权与证据未受影响。, 工作台不泄露其他版本的建议或仅在澄清中的原话。]
+  - order: 4
+    action: 用编辑者读取待处理批次和已完成批次。撤回一个问题轮次，过期一个成功轮次后再次读取并尝试从旧轮次出题。
+    expected: 工作台分组显示仍获授权的问题和重复成功工具顺序，待处理批次暂不显示归因。撤权或过期后刷新时立即排除原轮次；相关出题入口拒绝旧请求。
+  expected_results: [撤回立即清除相应的诊断。, 编辑者能看到提交给本版本的一条建议。, 题面和附件在授权范围内展示，逐项确认后才能入库。, 复盘展示按当前证据授权重算的批次总结与可出题来源。]
+  forbidden_side_effects: [他人会话的授权与证据未受影响。, 工作台不泄露其他版本的建议或仅在澄清中的原话。, 工作台不返回其他版本的汇总、缓存的失效归因或原始对话正文。]
   acceptance:
   - id: AC-01
     description: 本人开关、撤回接口与数据库记录一致；相同凭据无法撤回他人会话。
@@ -41,7 +44,12 @@ case:
     description: HTTP 出题入口执行真实权限、证据和材料核对。
     steps: [3]
     expected_results: [3]
+  - id: AC-04
+    description: 工作台批次展示、来源定位及历史授权撤回后的重算。
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [3]
   contract:
     protocol: HTTP API
     request_expectations: [使用原生用户登录会话调用会话设置和评测工作台接口。]
-    response_expectations: [设置返回 enabled；成功的工作台返回 suggestions，拒绝时不含建议正文。]
+    response_expectations: [设置返回 enabled；成功的工作台返回 suggestions 与 review_batches，禁止缓存，拒绝时不含诊断或建议正文。]

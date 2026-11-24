@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_state import tenant_membership_matches
+from infrastructure.rdb.evolution_review_authority import authorized_review_turn
 
 
 def enqueue_review_batches():
@@ -101,13 +102,17 @@ def review_rows(session, predicate, params, *, limit):
     # Callers supply fixed predicates. Membership and grant expiry must also be checked at display time.
     rows = session.execute(text(f"""
         SELECT r.turn_id, r.batch_id, r.owner_id, r.tenant_id, r.observation_state, r.observation,
-            CASE WHEN r.diagnosis_source_turn_id IS NULL OR
-                 (source.valid_until > clock_timestamp() AND source.observation_state='observed')
-                 THEN r.diagnosis END AS diagnosis,
-            r.valid_until > clock_timestamp() AND r.grant_epoch=c.evolution_grant_epoch
-              AND r.owner_id=c.created_by AND c.delete_flag='N' AS authorized
+            r.diagnosis, r.diagnosis_source_turn_id,
+            LEAST(r.valid_until,a.evolution_valid_until) > clock_timestamp()
+              AND r.grant_epoch=c.evolution_grant_epoch AND r.owner_id=c.created_by AND c.delete_flag='N'
+              AND a.run_id IS NOT NULL AND t.status<>'expired' AS authorized
         FROM nexent.evolution_review_turn_t r LEFT JOIN nexent.conversation_record_t c USING (conversation_id)
-        LEFT JOIN nexent.evolution_review_turn_t source ON source.turn_id=r.diagnosis_source_turn_id
+        LEFT JOIN nexent.conversation_run_admission_t a ON a.run_id=r.run_id AND a.tenant_id=r.tenant_id
+          AND a.conversation_id=r.conversation_id AND a.created_by=r.owner_id AND a.delete_flag='N'
+          AND a.evolution_source_message_id=r.source_message_id AND a.evolution_grant_epoch=r.grant_epoch
+        LEFT JOIN nexent.trajectory_execution_t t ON t.trajectory_id=r.trajectory_id AND t.agentos_run_id=a.run_id
+          AND t.conversation_id=r.conversation_id AND t.created_by=r.owner_id AND t.delete_flag='N'
+          AND t.agent_id=r.agent_id AND t.agent_version_no=r.agent_version_no
         WHERE {predicate} ORDER BY r.turn_id DESC LIMIT :limit
     """), {**params, "limit": limit}).mappings().all()
     members = {}
@@ -115,7 +120,18 @@ def review_rows(session, predicate, params, *, limit):
         key = row["owner_id"], row["tenant_id"]
         if row["authorized"] and key not in members:
             members[key] = tenant_membership_matches(session, *key)
-        yield {**row, "authorized": row["authorized"] and members.get(key, False)}
+        authorized = row["authorized"] and members.get(key, False)
+        diagnosis = row["diagnosis"]
+        source = row["diagnosis_source_turn_id"]
+        if authorized and diagnosis and source and not authorized_review_turn(
+            session, row["tenant_id"], row["owner_id"], source
+        ):
+            diagnosis = None
+        yield {**row, "authorized": authorized, "diagnosis": diagnosis}
+
+
+def _available(row):
+    return row["authorized"] and row["observation_state"] not in {"revoked", "expired"}
 
 
 def recent_reviews(tenant, agent, version):
@@ -126,24 +142,63 @@ def recent_reviews(tenant, agent, version):
         return [{"turn_id": row["turn_id"], "batch_id": row["batch_id"], "state": row["observation_state"],
                  "signals": (row["observation"] or {}).get("signals", []),
                  **({"diagnosis": row["diagnosis"]} if row["diagnosis"] else {})}
-                for row in rows if row["authorized"] and row["observation_state"] not in {"revoked", "expired"}]
+                for row in rows if _available(row)]
+
+
+def recent_review_batches(tenant, agent, version):
+    """Project current authorized evidence instead of returning cached batch summaries."""
+    with get_db_session() as session:
+        params = {"tenant": tenant, "agent": agent, "version": version}
+        batches = {batch: [] for batch in session.scalars(text("""
+            SELECT batch_id FROM nexent.evolution_review_batch_t
+            WHERE tenant_id=:tenant AND agent_id=:agent AND agent_version_no=:version
+            ORDER BY batch_id DESC LIMIT 5
+        """), params)}
+        if not batches:
+            return []
+        rows = review_rows(session, "r.batch_id=ANY(:batches) AND r.tenant_id=:tenant AND r.agent_id=:agent"
+                           " AND r.agent_version_no=:version", {**params, "batches": list(batches)}, limit=25)
+        for row in rows:
+            batches[row["batch_id"]].append(row)
+        return [summary for batch, rows in batches.items() if (summary := _batch_view(batch, rows)) is not None]
+
+
+def _batch_view(batch, rows):
+    available = [row for row in rows if _available(row)]
+    if not available:
+        return None
+    if any(row["observation_state"] in {"pending", "reading"} or row["diagnosis"] is None for row in available):
+        return {"batch_id": batch, "state": "pending"}
+    summary = summarize_batch(rows)
+    draft_turns = []
+    for row in available:
+        observation = row["observation"] or {}
+        if row["observation_state"] == "observed" and observation.get("coverage") == "complete" and (
+            observation.get("case_outline") is not None
+        ):
+            draft_turns.append({"turn_id": row["turn_id"],
+                                "use_previous_task": row["diagnosis_source_turn_id"] is not None})
+    return {"batch_id": batch, "state": "completed", "reviewed": summary["reviewed"],
+            "excluded": summary["excluded"], "missing": summary["missing"],
+            "findings": summary.get("findings", []), "reference_workflows": summary.get("reference_workflows", []),
+            "draft_turns": draft_turns}
 
 
 def summarize_batch(rows):
     result = {"reviewed": 0, "excluded": 0, "missing": 0, "signals": {}, "no_signal_turn_ids": []}
     findings, steps = {}, {}
     for row in rows:
-        if not row["authorized"] or row["observation_state"] in {"revoked", "expired"}:
+        if not _available(row):
             result["excluded"] += 1
             continue
         facts = row["observation"] or {}
+        diagnosis = row.get("diagnosis") or {}
         result["reviewed"] += 1
-        if facts.get("coverage") != "complete":
+        if facts.get("coverage") != "complete" or diagnosis.get("status") == "needs_evidence":
             result["missing"] += 1
         signals = facts.get("signals", [])
         for signal in signals:
             result["signals"].setdefault(signal, []).append(row["turn_id"])
-        diagnosis = row.get("diagnosis") or {}
         if diagnosis.get("status") == "needs_review":
             findings.setdefault((diagnosis["direction"], diagnosis["reason"]), []).append(row["turn_id"])
         if facts.get("successful_tool_steps"):

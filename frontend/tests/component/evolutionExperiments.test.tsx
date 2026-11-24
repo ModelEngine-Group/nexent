@@ -24,8 +24,11 @@ vi.mock("@/hooks/model/useModelList", () => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, args?: { experiment: number }) =>
-      key === "evolution.sourceExperiment" ? key + "#" + args?.experiment : key,
+    t: (key: string, args?: { experiment?: number; id?: number }) => {
+      if (key === "evolution.sourceExperiment") return key + "#" + args?.experiment;
+      if (key === "evolution.makeBatchCase") return key + "#" + args?.id;
+      return key;
+    },
     i18n: { language: "zh" },
   }),
 }));
@@ -271,6 +274,38 @@ it("requires a business expectation before freezing a trace draft, then selects 
       inputs_reviewed: true, tools_require_no_reset: false, unused_attachment_slots: [], use_previous_task: false },
   })));
   expect(await screen.findByText("evolution.baselineSelection")).toBeInTheDocument();
+});
+
+it("refreshes five-turn groups and opens a draft only for an available source", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting agent" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  const batch = {
+    batch_id: 2, state: "completed" as const, reviewed: 5, excluded: 0, missing: 1,
+    findings: [{ direction: "prompt", reason: "requirements_missed", turn_ids: [3, 4] }],
+    reference_workflows: [{ tools: ["read_ticket", "summarize"], turn_ids: [7, 8] }],
+    draft_turns: [{ turn_id: 3, use_previous_task: true }, { turn_id: 4, use_previous_task: false }],
+  };
+  const emptyWorkspace = { candidates: [], cases: [], experiments: [] };
+  vi.mocked(evolutionService.workspace).mockResolvedValueOnce({ ...emptyWorkspace,
+    review_batches: [{ batch_id: 3, state: "pending" }, batch],
+  }).mockResolvedValue({ ...emptyWorkspace, review_batches: [{ ...batch, reviewed: 4, excluded: 1,
+    findings: [{ ...batch.findings[0], turn_ids: [3] }], draft_turns: [batch.draft_turns[0]],
+  }] });
+  vi.mocked(evolutionService.traceCaseDraft).mockResolvedValue({ turn_id: 3, draft_digest: "a".repeat(64),
+    trajectory_id: "scope-run", attachment_count: 0, tool_count: 0, tools: [], signals: [], query: "Original task" });
+  render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
+  await choose("agentEvaluation.agentLabel", "Meeting agent");
+  await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  fireEvent.click(await screen.findByText("evolution.recentReviewBatches"));
+  expect(screen.getByText(/evolution.batchProcessing/)).toBeInTheDocument();
+  expect(screen.getByText("evolution.batchReferenceWorkflow")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "evolution.makeBatchCase#7" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "evolution.makeBatchCase#4" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.refreshReviewBatches" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "evolution.makeBatchCase#4" })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "evolution.makeBatchCase#3" }));
+  expect(await screen.findByDisplayValue("Original task")).toBeInTheDocument();
+  expect(evolutionService.traceCaseDraft).toHaveBeenCalledWith(7, 1, 3, true, 0);
 });
 
 it("combines two finished single experiments in selection order and shows the four outcomes", async () => {

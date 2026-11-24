@@ -8,6 +8,7 @@ acceptance_bindings:
   AC-01: [test_online_scope_http]
   AC-02: [test_online_scope_http]
   AC-03: [test_online_scope_http]
+  AC-04: [test_online_scope_http]
 preparation:
   families: []
   anchors: false

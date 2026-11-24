@@ -11,7 +11,7 @@ feature:
   - rule_id: AGENT-EVOLUTION-ONLINE-RULE-01
     description: 关闭开关保留已授权记录，撤回后排除本会话已有记录，其他用户无法代为操作。
   - rule_id: AGENT-EVOLUTION-ONLINE-RULE-02
-    description: 编辑者的评测工作台只显示本租户所选智能体版本的正式建议。
+    description: 编辑者的评测工作台只显示本租户所选智能体版本的正式建议和获准复盘的摘要。
   - rule_id: AGENT-EVOLUTION-ONLINE-RULE-03
     description: 同一租户和发布版本每五个获准业务轮次跨会话复盘一次，明确纠正可先做当轮诊断。
   - rule_id: AGENT-EVOLUTION-ONLINE-RULE-04

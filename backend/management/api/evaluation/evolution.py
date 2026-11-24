@@ -175,10 +175,11 @@ async def seal_confirmation_suite(request: ConfirmationManifest, authorization: 
 
 
 @router.get("/agents/{agent_id}/versions/{version_no}/workspace")
-async def read_workspace(agent_id: int, version_no: int, authorization: str | None = Header(None)):
+async def read_workspace(agent_id: int, version_no: int, response: Response, authorization: str | None = Header(None)):
     user_id, tenant_id = get_current_user_id(authorization)
     result = await run_blocking("read-development-workspace", workspace_choices, tenant_id, user_id, agent_id,
                                 version_no, lane="control-io", owner="management")
+    response.headers["Cache-Control"] = "private, no-store"
     return {"data": result}
 
 

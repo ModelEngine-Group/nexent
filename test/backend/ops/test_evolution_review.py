@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from ops.services.trajectory.evolution import observation
-from management.db.conversation.evolution_review import summarize_batch
+from management.db.conversation.evolution_review import _batch_view, summarize_batch
 
 
 def test_evidence_minimization_and_incomplete_coverage():
@@ -36,3 +36,20 @@ def test_case_outline_retains_tool_identity_without_argument_or_result_bodies():
     assert "private" not in str(facts)
     facts = observation({}, [{**node, "attributes": {"nexent.invocation_id": "bad id with a private value"}}], "complete")
     assert "invocation_id" not in facts["case_outline"]["tools"][0]
+
+
+def test_batch_view_waits_for_diagnosis_and_drops_revoked_rows():
+    facts = {"coverage": "complete", "signals": ["user_correction"], "case_outline": {"tools": []}}
+    visible = {"turn_id": 11, "authorized": True, "observation_state": "observed", "observation": facts,
+               "diagnosis_source_turn_id": 10, "diagnosis": None}
+    revoked = {**visible, "turn_id": 12, "authorized": False,
+               "diagnosis": {"status": "needs_review", "direction": "tool", "reason": "tool_failure"}}
+    assert _batch_view(3, [revoked]) is None
+    assert _batch_view(3, [visible, revoked]) == {"batch_id": 3, "state": "pending"}
+    visible["diagnosis"] = {"status": "needs_review", "direction": "prompt", "reason": "requirements_missed"}
+    result = _batch_view(3, [visible, revoked])
+    assert result["state"] == "completed" and result["reviewed"] == result["excluded"] == 1
+    assert result["findings"] == [{"direction": "prompt", "reason": "requirements_missed", "turn_ids": [11]}]
+    assert result["draft_turns"] == [{"turn_id": 11, "use_previous_task": True}]
+    visible["diagnosis"] = {"status": "needs_evidence", "reason": "model_unavailable"}
+    assert _batch_view(3, [visible])["missing"] == 1

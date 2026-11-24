@@ -32,6 +32,7 @@ import ToolMappingCandidate from "./ToolMappingCandidate";
 import ToolSetCandidates from "./ToolSetCandidates";
 import FixedRegressionCases from "./FixedRegressionCases";
 import PublicBenchmarkReports from "./PublicBenchmarkReports";
+import ReviewBatchResults from "./ReviewBatchResults";
 
 function CaseForm({
   agent,
@@ -359,6 +360,9 @@ function Experiments({
           <FixedRegressionCases agent={agent} version={version} workspace={choices} refresh={workspace.refetch}
             rubrics={(rules.data || []).filter(r => r.status === "PUBLISHED")}
             models={availableLlmModels.map(m => ({ value: m.id, label: m.displayName || m.name }))} />
+          {!!choices.review_batches?.length && <ReviewBatchResults batches={choices.review_batches}
+            refreshing={workspace.isFetching} refresh={() => void workspace.refetch()}
+            onDraft={(turn, previous) => { setPreceding(0); setPreviousTask(previous); setAdding(turn); }} />}
           {!!choices.reviews?.length && (
             <details>
               <summary>{t("evolution.recentObservations")}</summary>

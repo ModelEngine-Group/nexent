@@ -23,6 +23,7 @@ def _authorized_source(session, tenant, agent, version, turn):
           JOIN nexent.trajectory_execution_t t ON t.trajectory_id=r.trajectory_id AND t.agentos_run_id=a.run_id
                AND t.conversation_id=c.conversation_id AND t.agent_id=r.agent_id
                AND t.agent_version_no=r.agent_version_no AND t.created_by=r.owner_id AND t.delete_flag='N'
+               AND t.status<>'expired'
           JOIN nexent.conversation_message_t m ON m.message_id=r.source_message_id AND m.conversation_id=c.conversation_id
                AND m.created_by=r.owner_id AND m.message_role='user' AND m.message_source='CHAT' AND m.delete_flag='N'
          WHERE r.tenant_id=:tenant AND r.agent_id=:agent AND r.agent_version_no=:version AND r.turn_id=:turn
