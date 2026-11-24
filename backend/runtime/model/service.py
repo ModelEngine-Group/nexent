@@ -23,7 +23,7 @@ from nexent.core.gateway.modality.llm.openai import OpenAILLMAdapter
 from nexent.core.models.wire_budget import ModelWireBudgetExceeded
 from nexent.core.gateway.modality.rerank.rerank_adapter import RerankRequest
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from runtime.model.evolution_meter import meter_diagnosis, meter_evaluation, meter_generation
+from runtime.model.evolution_meter import limit_output_tokens, meter_diagnosis, meter_evaluation, meter_generation
 
 
 class ModelAccessError(Exception):
@@ -92,10 +92,13 @@ class ModelService:
                 raise ModelAccessError(422, "INVALID_EVOLUTION_METERING_SCOPE")
             attempts = [a for a in (payload.generation_attempt, payload.evaluation_attempt, payload.diagnosis_attempt)
                         if a is not None]
-            if len(attempts) > 1:
+            output_limit = payload.evolution_output_limit
+            if len(attempts) > 1 or output_limit is not None and (private or payload.evaluation_attempt is not None):
                 raise ModelAccessError(422, "INVALID_EVOLUTION_METERING_SCOPE")
             options = payload.options.model_dump(exclude_none=True) if payload.options else {}
             adapter = self.build_adapter(record, "llm", "llm", actor.tenant_id, stream=False, **options)
+            if output_limit is not None and not isinstance(adapter, OpenAILLMAdapter):
+                raise ModelAccessError(422, "MODEL_OUTPUT_LIMIT_UNSUPPORTED")
             try:
                 if attempts and not isinstance(adapter, OpenAILLMAdapter):
                     raise ModelWireBudgetExceeded("This model adapter has no provider metering")
@@ -105,9 +108,11 @@ class ModelService:
                     meter = meter_evaluation(payload.evaluation_attempt, actor, payload.model_id, confirmation=private)
                 else:
                     meter = meter_generation(payload.generation_attempt, payload.model_id, actor)
-                with meter:
+                with meter, limit_output_tokens(output_limit):
                     output = await adapter.invoke(LLMRequest([message.model_dump() for message in payload.input]))
             except ModelWireBudgetExceeded as exc:
+                if not attempts:
+                    raise ModelAccessError(422, "MODEL_OUTPUT_LIMIT_UNSUPPORTED") from exc
                 code = ("EVOLUTION_DIAGNOSIS_BUDGET" if payload.diagnosis_attempt else
                         "EVOLUTION_EVALUATION_BUDGET" if payload.evaluation_attempt else "EVOLUTION_GENERATION_BUDGET")
                 raise ModelAccessError(429, code) from exc

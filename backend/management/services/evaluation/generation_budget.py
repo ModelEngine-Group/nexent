@@ -43,7 +43,7 @@ def invoke_candidate_model(*, source, model_id, system_prompt, user_prompt, user
             user_prompt=user_prompt,
             user_id=user_id,
             tenant_id=tenant_id,
-            max_output_tokens=environment.EVOLUTION_GENERATION_MAX_OUTPUT_TOKENS,
+            evolution_output_limit=environment.EVOLUTION_GENERATION_MAX_OUTPUT_TOKENS,
             timeout_seconds=environment.EVOLUTION_GENERATION_TIMEOUT_SECONDS,
             **({"generation_attempt": attempt} if metered else {}),
         )

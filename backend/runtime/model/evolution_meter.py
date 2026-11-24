@@ -20,6 +20,41 @@ def meter_diagnosis(attempt, actor, model):
     return _meter(attempt, model, actor, evaluation=False, diagnosis=True)
 
 
+def _apply_output_limit(wire, limit):
+    # Reject ambiguous billable multiplicities and fields that could shadow the wire limit.
+    extra = wire.get("extra_body") or {}
+    cap_keys = ("max_tokens", "max_completion_tokens")
+    supplied = [key for key in cap_keys if key in wire]
+    if (extra.get("n", wire.get("n", 1)) != 1 or len(supplied) > 1
+            or any(key in extra for key in (*cap_keys, "max_output_tokens"))
+            or "max_output_tokens" in wire):
+        raise ModelWireBudgetExceeded("Cannot verify this model's output limit")
+    cap_key = supplied[0] if supplied else "max_tokens"
+    configured = wire.get(cap_key)
+    output = min(configured, limit) if type(configured) is int and configured > 0 else limit
+    wire[cap_key] = output
+    return output
+
+
+@contextmanager
+def limit_output_tokens(limit):
+    """Apply a trusted job limit to each physical request, before quota reservation."""
+    if limit is None:
+        yield
+        return
+    meter = model_wire_budget.get()
+
+    def admit(wire, model_id=None):
+        _apply_output_limit(wire, limit)
+        return meter(wire, model_id) if meter is not None else None
+
+    context = model_wire_budget.set(admit)
+    try:
+        yield
+    finally:
+        model_wire_budget.reset(context)
+
+
 @contextmanager
 def _meter(attempt, model, actor, *, evaluation, confirmation=False, diagnosis=False):
     if attempt is None:
@@ -40,19 +75,11 @@ def _meter(attempt, model, actor, *, evaluation, confirmation=False, diagnosis=F
         if tariff is None or model is not None and actual_model != model:
             denied = True
             raise ModelWireBudgetExceeded("No billing ceiling for the selected model")
-        # Reject ambiguous billable multiplicities and output caps that could shadow the wire field.
-        extra = wire.get("extra_body") or {}
-        cap_keys = ("max_tokens", "max_completion_tokens")
-        supplied = [key for key in cap_keys if key in wire]
-        if (extra.get("n", wire.get("n", 1)) != 1 or len(supplied) > 1
-                or any(key in extra for key in (*cap_keys, "max_output_tokens"))
-                or "max_output_tokens" in wire):
+        try:
+            output = _apply_output_limit(wire, tariff.max_output_tokens)
+        except ModelWireBudgetExceeded:
             denied = True
-            raise ModelWireBudgetExceeded("Cannot verify this model's output billing limit")
-        cap_key = supplied[0] if supplied else "max_tokens"
-        configured = wire.get(cap_key)
-        output = min(configured, tariff.max_output_tokens) if type(configured) is int and configured > 0 else tariff.max_output_tokens
-        wire[cap_key] = output
+            raise
         charge = reserve_model_call(
             actor.tenant_id, actor.user_id, actual_model, attempt, allowance, tariff, output,
             evaluation=evaluation, confirmation=confirmation, diagnosis=diagnosis,

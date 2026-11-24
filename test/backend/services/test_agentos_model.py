@@ -17,6 +17,7 @@ from contracts.agentos import (
     RerankOptions,
 )
 from infrastructure.agentos_identity import ServicePrincipal
+from nexent.core.models.wire_budget import model_wire_budget
 from runtime.model.service import ModelAccessError, ModelService
 
 _ACTOR = ServicePrincipal("user", "tenant")
@@ -148,6 +149,49 @@ async def test_private_judge_requires_and_forwards_a_confirmation_lease(mocker, 
         assert (await service.invoke(payload, _ACTOR)).output == {"content": "measured"}
         meter.assert_called_once_with(attempt, _ACTOR, 1, confirmation=True)
         adapter.invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [None, 32])
+async def test_explicit_job_output_limit_reaches_wire_only_for_that_invocation(mocker, limit):
+    from runtime.model import service as model_service
+
+    mocker.patch.object(model_service.environment, "EVOLUTION_CONFIRMATION_BUCKET", "")
+    wire = {}
+
+    async def invoke(_request):
+        admit = model_wire_budget.get()
+        if admit:
+            admit(wire, 1)
+        return SimpleNamespace(content="answer")
+
+    adapter = Mock(spec=model_service.OpenAILLMAdapter, invoke=AsyncMock(side_effect=invoke))
+    build = Mock(return_value=adapter)
+    payload = ChatInvocation(
+        model_id=1, input=[ChatMessage(role="user", content="question")],
+        options=ChatOptions(temperature=0.3), evolution_output_limit=limit,
+    )
+    result = await ModelService(Mock(return_value=_record()), build).invoke(payload, _ACTOR)
+    assert result.output == {"content": "answer"}
+    assert wire == ({} if limit is None else {"max_tokens": limit})
+    assert build.call_args.kwargs == {"stream": False, "temperature": 0.3}
+    assert model_wire_budget.get() is None
+
+
+@pytest.mark.asyncio
+async def test_evolution_output_limit_cannot_override_an_evaluation_lease(mocker):
+    from runtime.model import service as model_service
+
+    mocker.patch.object(model_service.environment, "EVOLUTION_CONFIRMATION_BUCKET", "")
+    build = Mock()
+    payload = ChatInvocation(
+        model_id=1, input=[ChatMessage(role="user", content="question")],
+        evaluation_attempt=5, evolution_output_limit=32,
+    )
+    with pytest.raises(ModelAccessError) as exc:
+        await ModelService(Mock(return_value=_record()), build).invoke(payload, _ACTOR)
+    assert (exc.value.status, exc.value.code) == (422, "INVALID_EVOLUTION_METERING_SCOPE")
+    build.assert_not_called()
 
 
 @pytest.mark.parametrize("options", [{"temperature": -1}, {"top_p": 2}, {"api_key": "secret"}])

@@ -158,7 +158,7 @@ def _verify_provider_quota(monkeypatch):
     from infrastructure.rdb.client import db_client
     from management.db.evaluation.generation_attempts import complete, reserve, stopped
     from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
-    from runtime.model.evolution_meter import meter_generation
+    from runtime.model.evolution_meter import limit_output_tokens, meter_generation
 
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_CONCURRENCY", 2)
     tariff = dict(max_input_tokens=100, max_output_tokens=50, input_micros_per_million=2_000_000,
@@ -166,7 +166,8 @@ def _verify_provider_quota(monkeypatch):
     token_limit = dict(daily_tokens=180, daily_micros=1000, models={"1": tariff})
     fee_limit = dict(daily_tokens=1000, daily_micros=360, models={"1": tariff})
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_METERING",
-                        json.dumps({"meter": token_limit, "fee": fee_limit, "overflow": token_limit, "stale": token_limit}))
+                        json.dumps({"meter": token_limit, "fee": fee_limit, "overflow": token_limit,
+                                    "stale": token_limit, "cap": fee_limit}))
     for tenant in ("meter", "fee"):
         actor = SimpleNamespace(tenant_id=tenant, user_id="creator")
         attempt = reserve(tenant, actor.user_id, "d" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
@@ -202,6 +203,23 @@ def _verify_provider_quota(monkeypatch):
             reported_input, reported_output, reported_micros FROM nexent.evolution_model_charge_t
             WHERE tenant_id='overflow'""")).one()
         assert tuple(row) == (100, 50, 350, 101, 4, 214)
+
+    with limit_output_tokens(17):
+        wire = {}
+        assert model_wire_budget.get()(wire, 1) is None
+        assert wire == {"max_tokens": 17}
+    assert model_wire_budget.get() is None
+    actor = SimpleNamespace(tenant_id="cap", user_id="creator")
+    attempt = reserve("cap", actor.user_id, "j" * 64, 1, metering_revision=generation_budget("cap").revision())
+    with meter_generation(attempt, 1, actor), limit_output_tokens(17):
+        wire = {}
+        settle = model_wire_budget.get()(wire, 1)
+        assert wire == {"max_tokens": 17}
+        settle(5, 3)
+    assert complete("cap", attempt) and model_wire_budget.get() is None
+    with db_client.engine.connect() as conn:
+        assert conn.scalar(text("""SELECT reserved_output FROM nexent.evolution_model_charge_t
+            WHERE tenant_id='cap' AND attempt_id=:attempt"""), {"attempt": attempt}) == 17
 
 
 

@@ -31,7 +31,7 @@ def test_reserves_before_call_and_forwards_output_and_time_limits(calls):
     reserve, invoke, complete = calls
     invoke.side_effect = lambda **kwargs: reserve.assert_called_once_with("tenant", "editor", ARGS["source"], 4) or "ok"
     assert generation_budget.invoke_candidate_model(**ARGS) == "ok"
-    assert invoke.call_args.kwargs["max_output_tokens"] == generation_budget.environment.EVOLUTION_GENERATION_MAX_OUTPUT_TOKENS
+    assert invoke.call_args.kwargs["evolution_output_limit"] == generation_budget.environment.EVOLUTION_GENERATION_MAX_OUTPUT_TOKENS
     assert invoke.call_args.kwargs["timeout_seconds"] == generation_budget.environment.EVOLUTION_GENERATION_TIMEOUT_SECONDS
     complete.assert_called_once_with("tenant", 42)
 

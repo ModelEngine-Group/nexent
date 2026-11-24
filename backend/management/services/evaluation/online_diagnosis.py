@@ -122,7 +122,7 @@ async def diagnose_one(job):
                 raw = await invoke_chat_prompt(
                     model_id=allowance.model_id, system_prompt=SYSTEM, user_prompt=prompt,
                     user_id=job["owner_id"], tenant_id=job["tenant_id"], diagnosis_attempt=attempt,
-                    options=ChatOptions(temperature=0, max_output_tokens=512),
+                    options=ChatOptions(temperature=0), evolution_output_limit=512,
                 )
             result = model_finding(raw, items, clipped=evidence["clipped"])
         except ValueError:
