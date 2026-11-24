@@ -185,7 +185,7 @@ async def start_turn(
             automation = {
                 "agent_id": snapshot.resource.agent_id,
                 "agent_version_no": snapshot.resource.version_no,
-                "model_id": snapshot.models.llm.model_id if workbench is not None else request.model_id,
+                "model_id": request.model_id,
                 "tool_params": tool_params.model_dump(mode="json") if tool_params else None,
                 "has_attachments": bool(request.minio_files),
             }

@@ -1137,7 +1137,7 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 @pytest.fixture(autouse=True)
 def active_local_account(monkeypatch):
     # These units exercise the explicitly disabled-boundary session adapter.
-    monkeypatch.setattr("gateway.downstream.identity.enabled", lambda: False)
+    monkeypatch.setattr("gateway.identity.downstream.enabled", lambda: False)
     # Credential/account-state integration is proved separately by native auth tests.
     monkeypatch.setattr(au, "JWT_ISSUER", "nexent")
     from management.services.permission.identity import northbound as northbound_auth

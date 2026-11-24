@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.http import mcp_service as service
-from gateway.security.context import identity_context
-from gateway.security.identity import IdentityError
+from gateway.identity.context import identity_context
+from gateway.identity.protocol import IdentityError
 
 
 @pytest.mark.asyncio

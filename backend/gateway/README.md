@@ -12,7 +12,7 @@ Every lookup uses a read-only repeatable-read transaction with finite acquire/qu
 
 The image packages Gateway, its launcher, the shared security protocol, and the read-only RDB identity adapter. Its six direct dependencies are FastAPI, Uvicorn, HTTPX, websockets, PyJWT and asyncpg. Gateway configuration reads injected environment only and never loads .env.
 
-Gateway owns request signing, path normalization, the public-entry policy, and MCP credential delegation. The MCP process binds the Gateway-owned tenant router to its local app registry and supplies its own Gateway URL and signing key. Downstream apps use the adapters in `gateway/downstream/` to load backend configuration and verify signatures. The standalone Gateway image packages only the edge modules and pure protocol code.
+Gateway authenticates external credentials, signs forwarded requests, and serves MCP credential delegation. `gateway/identity/` contains the shared identity protocol, token codecs, request context, and downstream adapters. Downstream apps load the adapters to verify signatures with backend configuration. The Gateway process uses the protocol with its own settings. MCP owns its tenant router and uses the Gateway delegation endpoint to resolve external credentials.
 
 ## Database configuration
 

@@ -17,7 +17,6 @@ def resources(monkeypatch):
     if os.name == "nt":
         # File locking belongs to the writer. This fixture exercises shutdown orchestration.
         monkeypatch.setitem(sys.modules, "fcntl", ModuleType("fcntl"))
-    from infrastructure.trace import bootstrap
     from runtime.api import application
 
     manager = Mock(state=ManagerState.CREATED, run=AsyncMock(), shutdown=AsyncMock())
@@ -26,7 +25,7 @@ def resources(monkeypatch):
     streams = AsyncMock(return_value=[])
     stop_configuration = AsyncMock()
     clear_default = Mock()
-    monkeypatch.setattr(bootstrap, "local_trajectory_processor", processor)
+    monkeypatch.setattr(application, "local_trajectory_processor", processor)
     monkeypatch.setattr(SandboxPoolManager, "_instance", sandbox)
     monkeypatch.setattr(application, "runtime_thread_manager", manager)
     monkeypatch.setattr(application, "runtime_state_service", Mock())
