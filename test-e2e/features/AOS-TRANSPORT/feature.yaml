@@ -11,6 +11,10 @@ feature:
   - rule_id: AOS-TRANSPORT-RULE-01
     description: Accept a service principal only with the matching audience, operation,
       and exact signed request body; retain streaming compatibility.
+  - rule_id: AOS-TRANSPORT-RULE-02
+    description: Northbound stop confirms release of the targeted run's Runtime execution
+      and Management admission before returning success. A bounded wait returns an
+      explicit conflict when release is still pending.
   required_test_stages:
   - D3
   source:
