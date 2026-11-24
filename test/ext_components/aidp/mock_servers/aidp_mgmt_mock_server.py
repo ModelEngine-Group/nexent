@@ -2344,6 +2344,19 @@ def get_knowledge_base(
     # Match AIDP's detail response: file counts come from the Count endpoint
     # and configuration fields stay inside kms_config_str / graph_config.
     result = _public_kb_detail(kb)
+    binding = next(
+        (row for row in _ONTOLOGY_BINDINGS if row.get("kds_id") == kds_id),
+        None,
+    )
+    if binding:
+        domain = _ONTOLOGY_DOMAINS.get(str(binding["od_id"])) or {}
+        result["bind_lib_id"] = binding["od_id"]
+        result["bind_lib_type"] = "ontology"
+        result["bind_lib_name"] = domain.get("name") or ""
+    else:
+        result["bind_lib_id"] = 0
+        result["bind_lib_type"] = "none"
+        result["bind_lib_name"] = ""
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)

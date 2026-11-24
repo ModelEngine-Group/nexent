@@ -31,7 +31,6 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -86,7 +85,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   const [visibleColumns, setVisibleColumns] = useState({
     kind: true,
     description: true,
-    extended: true,
     parent: true,
     synonym: true,
     child: true,
@@ -154,6 +152,45 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       queryKey: [...scope.key, "ontology-entities", domainId],
     });
   }, [domainId, queryClient, scope.key]);
+
+  const loadEntityDetail = async (
+    record: AidpOntologyEntity
+  ): Promise<AidpOntologyEntity | null> => {
+    if (!record.entity_id) return record;
+    try {
+      const detail = await aidpOntologyService.getEntity(
+        domainId,
+        record.entity_id
+      );
+      return {
+        ...record,
+        ...detail,
+        entity_id: record.entity_id,
+        detail_loaded: true,
+      };
+    } catch (error) {
+      message.error(
+        getAidpErrorMessage(
+          error,
+          t,
+          t("aidpKnowledge.ontologyEntityLoadFailed")
+        )
+      );
+      return null;
+    }
+  };
+
+  const openDetail = async (record: AidpOntologyEntity) => {
+    const detail = await loadEntityDetail(record);
+    if (detail) setDetailEntity(detail);
+  };
+
+  const openEdit = async (record: AidpOntologyEntity) => {
+    const detail = await loadEntityDetail(record);
+    if (!detail) return;
+    setEditing(detail);
+    setDrawerOpen(true);
+  };
 
   const handleDelete = (entity: AidpOntologyEntity) => {
     if (!entity.entity_id) {
@@ -296,7 +333,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         <button
           type="button"
           className={entityStyles.nameButton}
-          onClick={() => setDetailEntity(record)}
+          onClick={() => void openDetail(record)}
         >
           {value || record.api_name}
         </button>
@@ -334,46 +371,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
                 <span className={styles.ellipsis}>{value || "—"}</span>
               </Tooltip>
             ),
-          },
-        ]
-      : []),
-    ...(visibleColumns.extended
-      ? [
-          {
-            title: headerHint(
-              t("aidpKnowledge.ontologyEntityExtended"),
-              t("aidpKnowledge.ontologyEntityExtendedHint")
-            ),
-            key: "extended",
-            width: 140,
-            render: (_value: unknown, record: AidpOntologyEntity) => {
-              const properties = record.properties ?? [];
-              if (properties.length === 0) {
-                return <span className={entityStyles.muted}>—</span>;
-              }
-              return (
-                <Popover
-                  trigger="hover"
-                  placement="topLeft"
-                  content={
-                    <div className={entityStyles.popoverList}>
-                      {properties.map((property, index) => (
-                        <span key={`${property.api_name}-${index}`}>
-                          {property.display_name || property.api_name}:{" "}
-                          {property.value || "—"}
-                        </span>
-                      ))}
-                    </div>
-                  }
-                >
-                  <span className={entityStyles.relationTrigger}>
-                    {t("aidpKnowledge.ontologyEntityExtendedCount", {
-                      count: properties.length,
-                    })}
-                  </span>
-                </Popover>
-              );
-            },
           },
         ]
       : []),
@@ -448,10 +445,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
               type="link"
               size="small"
               disabled={!canManage || !record.entity_id}
-              onClick={() => {
-                setEditing(record);
-                setDrawerOpen(true);
-              }}
+              onClick={() => void openEdit(record)}
             >
               {t("aidpKnowledge.ontologyEdit")}
             </Button>
@@ -483,7 +477,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       display_name: 1.3,
       kind: 1.3,
       description: 1.8,
-      extended: 1.1,
       parents: 1,
       synonyms: 1,
       children: 1,
@@ -656,22 +649,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
                   ),
                 },
                 {
-                  key: "extended",
-                  label: (
-                    <Checkbox
-                      checked={visibleColumns.extended}
-                      onChange={(event) =>
-                        setVisibleColumns((previous) => ({
-                          ...previous,
-                          extended: event.target.checked,
-                        }))
-                      }
-                    >
-                      {t("aidpKnowledge.ontologyEntityExtended")}
-                    </Checkbox>
-                  ),
-                },
-                {
                   key: "parent",
                   label: (
                     <Checkbox
@@ -747,9 +724,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
           </Dropdown>
         </div>
       </div>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyEntityRelationScanGap")}
-      </AidpOntologyGapNote>
       {query.isError && entities.length > 0 && (
         <div className={styles.inlineError} role="alert">
           {errorMessage}
