@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SELECTOR-INTERACTION-20261110
+  change_type: bugfix
+  bug_id: CHAT-SELECTOR-INTERACTION-20261110
+  title: Keep model parameter menus readable and consistent after reset
+  description: Repair compact reasoning presentation and nested advanced sampling controls without persisting display defaults.
+  observed_behavior: Recorded effort labels truncate and become blank after reset; unset sampling renders an inert track. Browser reproduction must distinguish real overflow and nested interaction defects from recording crop.
+  expected_behavior: Show complete choices, consistent inherited or service-default reasoning and effective sampling; keep controls reachable by pointer and keyboard, with reset deleting only overrides.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing reset fixtures supply an effort default and browser journeys use wide viewports with explicit sampling defaults; unset values and nested panels at viewport edges lack assertions.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Strengthen React field, summary, reset and async/error regressions; exercise Top P write and dispatch boundaries without copying service defaults into persisted values.
+    behaviors:
+    - Reset with no inherited degree displays service default without creating an override; summary and picker agree.
+    - Quick controls recover after nested panel dismissal and save failure or refetch.
+    - Temperature preserves explicit zero. Top P excludes zero at save and dispatch, keeps valid typed precision, and clears to inheritance or request omission.
+    - Explicit Temperature 0 is retained. An empty Temperature inherits, or is omitted when the outlet is unset.
+    - Missing sampling values show the allowed range with an operable numeric stepper, without filling saved values.
+    test_selectors:
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
+    - frontend/tests/component/modelParameterLayers.test.tsx
+    - frontend/tests/component/modelSamplingControls.test.tsx
+    - frontend/tests/workbench/ModelParameterSettings.test.tsx
+    - test/backend/services/test_model_profile_service.py
+    - test/sdk/core/models/test_openai_sampling_controls.py
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-MODEL-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [CHAT-MODEL-CONTROLS-D2-001, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D4-002]
+    added: []
+    retired: []
+  notes: Approved SPEC in nexent-doc/docs/Developing/model-access-native-agent/followups/20261110-selector-interaction-fixes. D4-002 step 5 covers the shared menu at the affected viewport in Chinese and English using page-local HTTP fixtures and browser teardown. Component tests cover sampling edits and step boundaries, and the existing Workbench browser flow covers saved preference reset. D2-001 and D3-001 cover acceptance and dispatch rules.

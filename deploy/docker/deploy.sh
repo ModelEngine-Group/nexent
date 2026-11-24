@@ -1153,6 +1153,9 @@ prepare_core_service_deployment() {
 
   for service in "$@"; do
     case "$service" in
+      nexent-config|nexent-mcp) image="${NEXENT_MANAGEMENT_IMAGE:-}" ;;
+      nexent-runtime) image="${NEXENT_RUNTIME_IMAGE:-}" ;;
+      nexent-ops) image="${NEXENT_OPS_IMAGE:-}" ;;
       nexent-gateway) image="${NEXENT_GATEWAY_IMAGE:-}" ;;
       nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
       nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
@@ -1254,6 +1257,17 @@ publish_shared_workbench() {
     sh -c 'python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
     echo "Error: shared Workbench initialization or publication failed." >&2
     return 1
+  fi
+}
+
+migrate_legacy_index_gateway() {
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application ||
+      ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" data-process; then
+    return 0
+  fi
+
+  if [ "$(deployment_get_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE)" = "http://nexent-config:5010/api" ]; then
+    deployment_update_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE "http://nexent-gateway:5013/api"
   fi
 }
 
@@ -2007,6 +2021,9 @@ main_deploy() {
     fi
     exit 1
   }
+
+  # Migrate the previous full-stack indexing endpoint before starting the worker.
+  migrate_legacy_index_gateway || exit 1
 
   # Start core services
   deploy_core_services || {

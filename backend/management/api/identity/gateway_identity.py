@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 
 from management.thread_management import config_thread_manager
-from gateway.downstream.identity import IdentityError, verify_lookup
+from gateway.identity.downstream import IdentityError, verify_lookup
 from management.services.permission.identity.gateway_lookup import resolve_gateway_identity
 from nexent.core.concurrency import ManagedTaskSpec
 

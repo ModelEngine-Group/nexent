@@ -216,6 +216,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 
 ## 环境变量
 
+部署脚本从所选镜像源读取 `MINIO_IMAGE`，供 Nexent 和 Langfuse 的 MinIO 服务共用。
+
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
@@ -247,7 +249,6 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
 | `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
 | `LANGFUSE_CLICKHOUSE_VERSION` | `26.3-alpine` | 本地 Langfuse ClickHouse 镜像版本 |
-| `LANGFUSE_MINIO_VERSION` | `RELEASE.2023-12-20T01-00-02Z` | 本地 Langfuse MinIO 镜像版本 |
 | `LANGFUSE_REDIS_VERSION` | `alpine` | 本地 Langfuse Redis 镜像版本 |
 | `GRAFANA_VERSION` | `12.4` | 本地 Grafana 镜像版本 |
 | `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |

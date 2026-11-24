@@ -4,6 +4,7 @@ FastAPI application factory with common configurations and exception handlers.
 """
 
 import logging
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -11,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from management.utils.exception_handlers import register_exception_handlers
+from backend.http.server.exception_handlers import register_exception_handlers
 from backend.http.server.health import install_health_contract
 
 try:
@@ -20,6 +21,19 @@ except ImportError:
     monitoring_manager = None
 
 logger = logging.getLogger(__name__)
+
+
+def _with_ops_monitoring(lifespan):
+    @asynccontextmanager
+    async def combined(app):
+        from infrastructure.monitoring.runtime import producer_lifespan
+
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(producer_lifespan())
+            state = await stack.enter_async_context(lifespan(app)) if lifespan is not None else None
+            yield state
+
+    return combined
 
 
 def create_app(
@@ -53,6 +67,12 @@ def create_app(
     Returns:
         Configured FastAPI application
     """
+    if enable_monitoring:
+        from contracts.constants.environment import OPS_MONITORING_ENABLED
+
+        if OPS_MONITORING_ENABLED:
+            lifespan = _with_ops_monitoring(lifespan)
+
     app = FastAPI(
         title=title,
         description=description,
@@ -70,7 +90,7 @@ def create_app(
         allow_headers=["*"],
     )
     if gateway_identity_audience:
-        from gateway.downstream.middleware import GatewayIdentityMiddleware
+        from gateway.identity.middleware import GatewayIdentityMiddleware
 
         app.add_middleware(
             GatewayIdentityMiddleware,

@@ -147,6 +147,24 @@ def test_manage_model_requests_preserve_capacity_fields(request_type, required_f
     assert {field: dumped[field] for field in capacity_values} == capacity_values
 
 
+@pytest.mark.parametrize(
+    ("request_type", "required"),
+    [
+        (model_consts_model.ModelProbeRequest, {"model_name": "test", "model_type": "llm"}),
+        (model_consts_model.ManageTenantModelCreateRequest, {"tenant_id": "test", "model_name": "test", "model_type": "llm"}),
+        (model_consts_model.ManageTenantModelUpdateRequest, {"tenant_id": "test", "current_display_name": "Test"}),
+    ],
+)
+def test_legacy_sampling_requests_convert_numeric_strings(request_type, required):
+    request = request_type(**required, temperature="0", top_p="0.995")
+    assert request.temperature == 0.0
+    assert request.top_p == 0.995
+    assert request_type(**required, temperature=None, top_p=None).top_p is None
+    for invalid in ({"top_p": "0"}, {"top_p": True}, {"temperature": "2.1"}, {"temperature": "invalid"}):
+        with pytest.raises(ValidationError):
+            request_type(**required, **invalid)
+
+
 def test_capacity_suggestion_response_has_required_fields():
     """Pin ModelCapacitySuggestionResponse schema so a downstream rename
     (e.g. suggested_provider -> canonical_provider) trips a test instead

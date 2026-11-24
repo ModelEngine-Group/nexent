@@ -60,14 +60,14 @@ class RuntimeThreadManager:
         return {"service_name": "runtime", "active_count": 0}
 
 
-def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch):
+def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.configuration.runtime",
+        "infrastructure.system_configuration.runtime",
         _module(
-            "management.configuration.runtime",
+            "infrastructure.system_configuration.runtime",
             start_system_configuration=start_configuration,
             stop_system_configuration=stop_configuration,
         ),
@@ -78,27 +78,37 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
         _module("contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1),
     )
     manager = RuntimeThreadManager()
+    shutdown_streams = AsyncMock(return_value=[])
     monkeypatch.setitem(
         sys.modules,
         "runtime.thread_management",
-        _module("runtime.thread_management", runtime_thread_manager=manager),
+        _module("runtime.thread_management", runtime_thread_manager=manager,
+                shutdown_agent_stream_tasks=shutdown_streams),
     )
 
-    automation = _module("management.api.automation.agent_automation")
-    automation.conversation_automation_router = object()
-    automation.router = object()
-    monkeypatch.setitem(sys.modules, automation.__name__, automation)
     for name, attribute in (
-        ("management.api.conversation.conversation_management", "router"),
-        ("management.api.conversation.conversation_share", "router"),
-        ("management.api.conversation.workbench_pins", "router"),
-        ("runtime.api.agent.execution", "agent_runtime_router"),
-        ("runtime.api.evaluation.execution", "router"),
-        ("runtime.api.file.upload", "file_management_runtime_router"),
-        ("runtime.api.skill.creation", "skill_creator_router"),
+        ("runtime.agentos.memory", "create_memory_store_router"),
+        ("runtime.agentos.model", "create_model_router"),
+        ("runtime.agentos.model_administration", "create_model_administration_router"),
+        ("runtime.agentos.prepared_run", "create_prepared_run_router"),
+        ("runtime.agentos.resume", "create_run_lifecycle_router"),
+        ("runtime.agentos.ephemeral", "create_ephemeral_run_router"),
+        ("runtime.agentos.evaluation", "create_evaluation_router"),
+        ("runtime.model.service", "ModelService"),
+        ("runtime.agentos.middleware", "AgentOSMiddleware"),
+        ("runtime.agentos.debug", "stop_agentos_debug"),
         ("runtime.api.voice.streaming", "voice_runtime_router"),
+        ("infrastructure.model_adapter", "get_adapter_from_config"),
     ):
-        monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: object()}))
+        monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: MagicMock()}))
+
+    recover_models = MagicMock()
+    monkeypatch.setitem(
+        sys.modules,
+        "infrastructure.rdb.model_records",
+        _module("infrastructure.rdb.model_records", fail_detecting_models_on_startup=recover_models,
+                get_model_by_model_id=MagicMock()),
+    )
 
     runtime_state = MagicMock()
     monkeypatch.setitem(
@@ -136,10 +146,10 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     conversation_deleted = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "infrastructure.trace.bootstrap",
+        "runtime.trajectory",
         _module(
-            "infrastructure.trace.bootstrap",
-            local_trajectory_processor=trajectory_processor,
+            "runtime.trajectory",
+            configure_runtime_trajectory=MagicMock(return_value=trajectory_processor),
         ),
     )
     monkeypatch.setitem(
@@ -152,34 +162,17 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     )
 
     recover = MagicMock()
+    watch = AsyncMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.recovery",
-        _module("management.recovery", recover_runtime_tasks=recover),
-    )
-    scheduler = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.automation.scheduler",
-        _module("management.services.automation.scheduler", agent_automation_scheduler=scheduler),
+        "runtime.recovery",
+        _module("runtime.recovery", recover_streaming_runs=recover, watch_executions=watch),
     )
     cleanup = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "services.workspace_cleanup_service",
-        _module("services.workspace_cleanup_service", cleanup_orphaned_agent_workspaces=cleanup),
-    )
-    shutdown_streams = AsyncMock(return_value=[])
-    shutdown_creators = AsyncMock(return_value=0)
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.conversation.creator_runtime",
-        _module("management.services.conversation.creator_runtime", shutdown_creator_streams=shutdown_creators),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "management.services.agent.execution",
-        _module("management.services.agent.execution", shutdown_agent_stream_tasks=shutdown_streams),
+        "runtime.workspace_cleanup",
+        _module("runtime.workspace_cleanup", cleanup_orphaned_agent_workspaces=cleanup),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -193,7 +186,6 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     spec.loader.exec_module(application)
 
     shutdown_order = MagicMock()
-    shutdown_order.attach_mock(shutdown_creators, "creators")
     shutdown_order.attach_mock(shutdown_streams, "agents")
     shutdown_order.attach_mock(trajectory_processor.shutdown, "trajectory")
     shutdown_order.attach_mock(stop_configuration, "configuration")
@@ -218,17 +210,15 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     )
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
-    scheduler.start.assert_awaited_once_with()
+    recover_models.assert_called_once_with()
+    recover.assert_called_once_with()
     cleanup.assert_called_once_with()
-    scheduler.stop.assert_awaited_once_with()
-    shutdown_creators.assert_awaited_once()
-    assert 0 <= shutdown_creators.await_args.kwargs["timeout"] <= 1
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()
     manager.shutdown.assert_awaited_once()
     assert 0 <= manager.shutdown.await_args.kwargs["timeout"] <= 1
     assert [call[0] for call in shutdown_order.mock_calls] == [
-        "creators", "agents", "trajectory", "configuration", "thread_manager",
+        "agents", "trajectory", "configuration", "thread_manager",
     ]
     clear_default.assert_called_once_with(manager)

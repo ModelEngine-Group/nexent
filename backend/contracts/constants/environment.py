@@ -18,6 +18,9 @@ NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
+OPS_MONITORING_ENABLED = (os.getenv('OPS_MONITORING_ENABLED') or 'true').lower() == 'true'
+OPS_MONITORING_TIMEZONE = os.getenv('OPS_MONITORING_TIMEZONE', 'UTC')
+OPS_MONITORING_REPLICAS = int(os.getenv('OPS_MONITORING_REPLICAS', '0'))
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
@@ -28,6 +31,8 @@ ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
+MANAGEMENT_AGENTOS_URL = os.getenv('MANAGEMENT_AGENTOS_URL', 'http://nexent-config:5010').rstrip('/')
+AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS = parse_positive_float(os.getenv('AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS'), 'AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS', 60.0)
 # Downstream verification settings; Gateway owns its upstream configuration.
 # Staged compatibility flag; shipped deployment and the standalone image enable it.
 GATEWAY_AUTH_ENABLED = _require_choice(os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower(), ('true', 'false'), 'GATEWAY_AUTH_ENABLED must be true or false') == 'true'
@@ -220,6 +225,9 @@ NEXENT_POSTGRES_PASSWORD = os.getenv('NEXENT_POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
+# Ops reuses the Nexent PostgreSQL connection and changes only the database name.
+OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_ops"
+
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_BACKEND_URL = os.getenv('REDIS_BACKEND_URL')
@@ -329,6 +337,7 @@ MIN_RECALL_COUNT = int(os.getenv('MIN_RECALL_COUNT', '3'))
 MIN_UNIQUE_QUERIES = int(os.getenv('MIN_UNIQUE_QUERIES', '3'))
 DREAMING_SOURCE_LIMIT = int(os.getenv('DREAMING_SOURCE_LIMIT', '10'))
 DREAMING_LONG_TERM_MAX_CHARS = int(os.getenv('DREAMING_LONG_TERM_MAX_CHARS', '10000'))
+DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT = 5
 DREAMING_SUMMARIZATION_MAX_ATTEMPTS = int(os.getenv('DREAMING_SUMMARIZATION_MAX_ATTEMPTS', '2'))
 DREAMING_SCHEDULER_POLL_SECONDS = float(os.getenv('DREAMING_SCHEDULER_POLL_SECONDS', '5.0'))
 DREAMING_SCHEDULER_LEASE_SECONDS = float(os.getenv('DREAMING_SCHEDULER_LEASE_SECONDS', '120.0'))
@@ -397,6 +406,9 @@ MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv('MONITORING_FASTAPI_EXCLUDE_SPANS',
 MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv('MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS', 'search,indices.stats,indices.get_settings,indices.get_alias,bulk,indices.exists,indices.delete')
 MONITORING_EXCLUDED_SPAN_NAMES = os.getenv('MONITORING_EXCLUDED_SPAN_NAMES', 'knowledge.process.submit,knowledge.upload.batch')
 MONITORING_PROJECT_NAME = os.getenv('MONITORING_PROJECT_NAME', '')
+ENABLE_MODEL_MONITORING = os.getenv('ENABLE_MODEL_MONITORING', 'true').lower() == 'true'
+MODEL_MONITORING_BATCH_SIZE = int(os.getenv('MODEL_MONITORING_BATCH_SIZE', '100'))
+MODEL_MONITORING_FLUSH_INTERVAL_SECONDS = int(os.getenv('MODEL_MONITORING_FLUSH_INTERVAL_SECONDS', '30'))
 MONITORING_DASHBOARD_URL = os.getenv('MONITORING_DASHBOARD_URL', '')
 MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU')
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
@@ -405,6 +417,13 @@ MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
 TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
 TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
 TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
+# ZIP exchange budgets shared by temporary and saved trajectory imports.
+TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES', 33554432)
+TRAJECTORY_EXCHANGE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_BYTES', 134217728)
+TRAJECTORY_EXCHANGE_MAX_META_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_META_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_META_BYTES', 8388608)
+TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES', 134217728)
+TRAJECTORY_EXCHANGE_MAX_FILES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_FILES'), 'TRAJECTORY_EXCHANGE_MAX_FILES', 10000)
+TRAJECTORY_EXCHANGE_SECONDS = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_SECONDS'), 'TRAJECTORY_EXCHANGE_SECONDS', 30)
 TRAJECTORY_ROOT_DIR = os.getenv('TRAJECTORY_ROOT_DIR') or '/mnt/nexent-data/trajectory'
 TRAJECTORY_STORAGE_MODE = _require_choice(os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower(), ('single_node', 'shared_directory'), 'TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
 TRAJECTORY_RETENTION_DAYS = parse_positive_int(os.getenv('TRAJECTORY_RETENTION_DAYS'), 'TRAJECTORY_RETENTION_DAYS', 30)

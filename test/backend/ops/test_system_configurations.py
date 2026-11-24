@@ -1,13 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP and authorization contracts for ops system configuration."""
 
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
 from management.services.permission.identity.session import authenticate
-from management.configuration.catalog import (
+from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,
 )
@@ -80,8 +81,8 @@ def test_explicit_operations_permission_returns_exact_catalog(mocker):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 19
-    assert len(payload["items"]) == 19
+    assert payload["total"] == 18
+    assert len(payload["items"]) == 18
     assert {item["key"] for item in payload["items"]} == set(EXPECTED_DEFAULTS)
     assert all(item["recommendation_available"] is False for item in payload["items"])
 
@@ -142,7 +143,7 @@ def test_patch_permission_denied_uses_safe_error(mocker):
 
     mocker.patch(
         "ops.api.system_configurations.authorize_configuration_write",
-        side_effect=HTTPException(status_code=403, detail="Operations permission required"),
+        side_effect=HTTPException(status_code=403, detail="private authorization state"),
     )
 
     response = _request("PATCH",
@@ -151,7 +152,9 @@ def test_patch_permission_denied_uses_safe_error(mocker):
     )
 
     assert response.status_code == 403
-    assert response.json()["detail"]["code"] == "FORBIDDEN"
+    assert response.json()["detail"] == {
+        "code": "FORBIDDEN", "message": "Operations permission required",
+    }
 
 
 def test_patch_database_failure_is_a_safe_503(mocker):
@@ -176,7 +179,7 @@ def test_patch_database_failure_is_a_safe_503(mocker):
 
 @pytest.mark.parametrize(
     "role,expected_status",
-    [("OPS", 200), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
+    [("SU", 200), ("OPS", 403), ("ADMIN", 403), ("USER", 403)],
 )
 def test_standard_operations_scope_controls_catalog_access(mocker, role, expected_status):
     user = CurrentUser("actor", "tenant", role, roles=(role,))
@@ -200,7 +203,7 @@ def test_standard_operations_scope_controls_catalog_access(mocker, role, expecte
 
 @pytest.mark.parametrize(
     "role,expected_status",
-    [("OPS", 200), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
+    [("SU", 200), ("OPS", 403), ("ADMIN", 403), ("USER", 403)],
 )
 def test_platform_configuration_write_requires_operations_role(
     mocker, role, expected_status
@@ -225,7 +228,7 @@ def test_platform_configuration_write_requires_operations_role(
         save.assert_not_called()
 
 
-@pytest.mark.parametrize("role", ["OPS", "SU"])
+@pytest.mark.parametrize("role", ["SU"])
 def test_platform_configuration_write_requires_update_grant(mocker, role):
     user = CurrentUser("actor", "tenant", role, roles=(role,))
     mocker.patch("permissions.operations.has_permission", return_value=False)
@@ -341,7 +344,7 @@ def test_authorizer_requires_explicit_route_permission(mocker):
         authorize_operations,
     )
 
-    user = CurrentUser("user", "tenant", "USER", roles=("USER",))
+    user = CurrentUser("user", "tenant", "SU", roles=("SU",))
     scope = mocker.patch(
         "ops.services.authorization.operations_scope",
         side_effect=HTTPException(status_code=403, detail="Operations permission required"),
@@ -359,9 +362,21 @@ def test_authorizer_returns_user_for_operations_role(mocker):
         "ops.services.authorization.operations_scope",
         return_value=None,
     )
+    user = CurrentUser("su-user", "ops-tenant", "SU", roles=("SU",))
 
-    assert authorize_operations(OPS_USER, "ops.configuration:update") == "ops-user"
-    scope.assert_called_once_with(OPS_USER, None, "ops.configuration:update")
+    assert authorize_operations(user, "ops.configuration:update") == "su-user"
+    scope.assert_called_once_with(user, None, "ops.configuration:update")
+
+
+def test_authorizer_rejects_ops_before_scope_check(mocker):
+    from fastapi import HTTPException
+    from ops.services.authorization import authorize_operations
+
+    scope = mocker.patch("ops.services.authorization.operations_scope")
+
+    with pytest.raises(HTTPException, match="Super administrator role required"):
+        authorize_operations(OPS_USER)
+    scope.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -383,3 +398,54 @@ async def test_configuration_io_uses_the_ops_control_lane(mocker):
     assert fn is operation
     assert changes == {"MAX_TENANT_COUNT": 5}
     assert manager.run.await_args.kwargs == {"actor": "su-user"}
+
+
+def test_authorization_shares_the_control_io_thread_with_persistence(mocker):
+    seen = {}
+
+    def authorize(user):
+        seen["authorization"] = threading.current_thread().name
+        return "ops-user"
+
+    def query():
+        seen["persistence"] = threading.current_thread().name
+        return _items()
+
+    mocker.patch(
+        "ops.api.system_configurations.authorize_operations", side_effect=authorize
+    )
+    mocker.patch(
+        "ops.api.system_configurations.list_system_configurations", side_effect=query
+    )
+
+    response = _request("GET", "/system_configurations")
+
+    assert response.status_code == 200
+    assert seen["authorization"] == seen["persistence"]
+
+
+def test_write_authorization_shares_the_control_io_thread_with_save(mocker):
+    seen = {}
+
+    def authorize(user):
+        seen["authorization"] = threading.current_thread().name
+        return "ops-user"
+
+    def save(changes, *, actor):
+        seen["persistence"] = threading.current_thread().name
+        return {"items": [_items()[0]], "notification": "published"}
+
+    mocker.patch(
+        "ops.api.system_configurations.authorize_configuration_write",
+        side_effect=authorize,
+    )
+    mocker.patch(
+        "ops.api.system_configurations.save_system_configurations", side_effect=save
+    )
+
+    response = _request(
+        "PATCH", "/system_configurations", json={"changes": {"MAX_TENANT_COUNT": 5}}
+    )
+
+    assert response.status_code == 200
+    assert seen["authorization"] == seen["persistence"]

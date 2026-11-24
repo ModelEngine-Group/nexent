@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-TOKENS-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-TOKENS-20261119
+  title: Read Agent Token usage from published attributed model statistics
+  description: Reuse actual model attempt usage and published model daily rows to expose input, output and total Tokens with independent publication status on Agent summary, directory and daily trends.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_agent_tokens.py, test/backend/ops/test_agent_token_api.py, test/sdk/core/agents/test_model_token_identity.py, test/backend/ops/test_agent_monitoring_views.py]
+    behaviors:
+    - Model facts inherit the current main or child Agent identity and execution ID, preserving known zero and missing provider usage.
+    - Merge attributed model daily rows by tenant, initiating groups, model request start date and actual Agent without parent rollup or orphan requests.
+    - Reuse model Token value, known_count, eligible_count and coverage_rate rules, including missing, zero and exact large integers.
+    - Return Token-specific publication time, coverage and stale state independently of Agent execution publication.
+    - Preserve existing authorization, execution metrics and per-resource paging while including attributed usage absent from the Agent fact catalog.
+    reason: Existing UT proves model usage and Agent queries. Extend identity and published-read tests and the existing real main/child execution D3 through model facts, publication and Agent Token views.
+  notes: The existing Ops Feature responsibility, isolated stores and owned model peer are reused. No new source or daily storage schema is needed.

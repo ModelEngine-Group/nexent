@@ -1,196 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from test.common.contract_stubs import install_shared_contract_stub
-from test.common.contract_stubs import install_business_constant_stubs
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+import inspect
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import MagicMock, patch
 
-
-# First mock the consts module to avoid ModuleNotFoundError
-consts_mock = MagicMock()
-consts_mock.const = MagicMock()
-consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
-consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
-consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
-consts_mock.const.MINIO_REGION = "us-east-1"
-consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
-consts_mock.const.POSTGRES_HOST = "localhost"
-consts_mock.const.POSTGRES_USER = "test_user"
-consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
-consts_mock.const.POSTGRES_DB = "test_db"
-consts_mock.const.POSTGRES_PORT = 5432
-consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
-
-sys.modules['consts'] = consts_mock
-sys.modules['contracts.constants.environment'] = consts_mock.const
-install_business_constant_stubs(consts_mock.const)
-
-# Mock database client
-client_mock = MagicMock()
-client_mock.MinioClient = MagicMock()
-client_mock.PostgresClient = MagicMock()
-client_mock.db_client = MagicMock()
-client_mock.get_db_session = MagicMock()
-client_mock.as_dict = MagicMock()
-client_mock.filter_property = MagicMock()
-
-sys.modules['infrastructure.rdb.client'] = client_mock
-sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
-from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.rdb.client"])
-from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.rdb.client"])
-sys.modules['infrastructure.rdb.client'] = client_mock
-sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
-from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.rdb.client"])
-
-
-# Create mock classes that work with SQLAlchemy query
-class MockUserTokenInfo:
-    """Mock UserTokenInfo for testing."""
-    _instances = []
-    
-    def __init__(self, token_id=1, access_key="nexent-abc123", user_id="user123",
-                 delete_flag="N", create_time=None, update_time=None, created_by=None, updated_by=None):
-        self.token_id = token_id
-        self.access_key = access_key
-        self.user_id = user_id
-        self.delete_flag = delete_flag
-        self.create_time = create_time
-        self.update_time = update_time
-        self.created_by = created_by or user_id
-        self.updated_by = updated_by or user_id
-        MockUserTokenInfo._instances.append(self)
-    
-    @property
-    def token_id(self):
-        return self._token_id
-    
-    @token_id.setter
-    def token_id(self, value):
-        self._token_id = value
-    
-    @property
-    def user_id(self):
-        return self._user_id
-    
-    @user_id.setter
-    def user_id(self, value):
-        self._user_id = value
-    
-    @property
-    def access_key(self):
-        return self._access_key
-    
-    @access_key.setter
-    def access_key(self, value):
-        self._access_key = value
-    
-    @property
-    def delete_flag(self):
-        return self._delete_flag
-    
-    @delete_flag.setter
-    def delete_flag(self, value):
-        self._delete_flag = value
-    
-    @property
-    def create_time(self):
-        return self._create_time
-    
-    @create_time.setter
-    def create_time(self, value):
-        self._create_time = value
-    
-    @classmethod
-    def reset(cls):
-        cls._instances = []
-
-
-class MockUserTokenUsageLog:
-    """Mock UserTokenUsageLog for testing."""
-    _instances = []
-    
-    def __init__(self, token_usage_id=1, token_id=1, call_function_name="run_chat",
-                 related_id=123, created_by="user123", meta_data=None, create_time=None,
-                 delete_flag="N", updated_by=None, update_time=None):
-        self.token_usage_id = token_usage_id
-        self.token_id = token_id
-        self.call_function_name = call_function_name
-        self.related_id = related_id
-        self.created_by = created_by
-        self.meta_data = meta_data
-        self.create_time = create_time
-        self.delete_flag = delete_flag
-        self.updated_by = updated_by or created_by
-        self.update_time = update_time
-        MockUserTokenUsageLog._instances.append(self)
-    
-    @classmethod
-    def reset(cls):
-        cls._instances = []
-
-
-# Set class attributes for SQLAlchemy filter operations
-MockUserTokenInfo.token_id = 1
-MockUserTokenInfo.access_key = "test"
-MockUserTokenInfo.user_id = "test"
-MockUserTokenInfo.delete_flag = "N"
-
-# Mock the create_time attribute with a mock that supports .desc()
-class MockColumn:
-    def desc(self):
-        return "desc"
-
-    def asc(self):
-        return "asc"
-
-    def in_(self, values):
-        return ("in", tuple(values))
-
-    def label(self, name):
-        return f"label_{name}"
-
-MockUserTokenInfo.create_time = MockColumn()
-
-MockUserTokenUsageLog.token_usage_id = 1
-MockUserTokenUsageLog.token_id = MockColumn()
-MockUserTokenUsageLog.call_function_name = "test"
-MockUserTokenUsageLog.related_id = 1
-MockUserTokenUsageLog.create_time = MockColumn()
-MockUserTokenUsageLog.delete_flag = "N"
-MockUserTokenUsageLog.updated_by = "test"
-
-db_models_mock = MagicMock()
-db_models_mock.UserTokenInfo = MockUserTokenInfo
-db_models_mock.UserTokenUsageLog = MockUserTokenUsageLog
-db_models_mock.UserTenant = MagicMock()
-sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.models'] = db_models_mock
-
-# Mock exceptions
-exceptions_mock = MagicMock()
-install_shared_contract_stub(exceptions_mock, 'exceptions')
-install_shared_contract_stub(exceptions_mock, 'exceptions')
-
-# Mock sqlalchemy
-sqlalchemy_mock = MagicMock()
-sqlalchemy_mock.exc.SQLAlchemyError = type("SQLAlchemyError", (Exception,), {})
-sqlalchemy_mock.func = MagicMock()
-sqlalchemy_mock.orm = MagicMock()
-sqlalchemy_mock.orm.aliased = MagicMock()
-sys.modules['sqlalchemy'] = sqlalchemy_mock
-sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
-sys.modules['sqlalchemy.orm'] = sqlalchemy_mock.orm
-
-
-# Import the module under test
 from management.db.identity import token as token_db
+from management.db.identity.models import UserTokenInfo, UserTokenUsageLog
 
 
 class MockQuery:
@@ -227,8 +43,6 @@ class MockSession:
     """Mock database session for testing."""
     def __init__(self):
         self.added_objects = []
-        MockUserTokenInfo.reset()
-        MockUserTokenUsageLog.reset()
         self._tokens = []
         self._usage_logs = []
         self._user_tenants = []
@@ -241,10 +55,10 @@ class MockSession:
 
     def add(self, obj):
         self.added_objects.append(obj)
-        if isinstance(obj, MockUserTokenInfo):
+        if isinstance(obj, UserTokenInfo):
             obj.token_id = len(self._tokens) + 1
             self._tokens.append(obj)
-        if isinstance(obj, MockUserTokenUsageLog):
+        if isinstance(obj, UserTokenUsageLog):
             obj.token_usage_id = len(self._usage_logs) + 1
             self._usage_logs.append(obj)
 
@@ -252,9 +66,9 @@ class MockSession:
         pass
 
     def query(self, model_class):
-        if model_class == MockUserTokenInfo:
+        if model_class == UserTokenInfo:
             return MockQuery(model_class, self._tokens)
-        if model_class == MockUserTokenUsageLog:
+        if model_class == UserTokenUsageLog:
             return MockQuery(model_class, self._usage_logs)
         return MockQuery(model_class, [])
 
@@ -328,8 +142,8 @@ class TestListTokensByUser:
     def test_list_tokens_by_user_success(self, mock_db_session):
         """Test successful token listing masks keys by default."""
         # Add some tokens
-        token1 = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
-        token2 = MockUserTokenInfo(token_id=2, access_key="nexent-key2", user_id="user123")
+        token1 = UserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
+        token2 = UserTokenInfo(token_id=2, access_key="nexent-key2", user_id="user123")
         mock_db_session._tokens.extend([token1, token2])
 
         result = token_db.list_tokens_by_user("user123")
@@ -347,7 +161,7 @@ class TestListTokensByUser:
         """
         stored_key = "nexent-1234567890abcdef"
         mock_db_session._tokens.append(
-            MockUserTokenInfo(token_id=1, access_key=stored_key, user_id="user123")
+            UserTokenInfo(token_id=1, access_key=stored_key, user_id="user123")
         )
 
         result = token_db.list_tokens_by_user("user123", mask=False)
@@ -366,7 +180,7 @@ class TestGetTokenById:
 
     def test_get_token_by_id_success(self, mock_db_session):
         """Test successful token retrieval by ID."""
-        token = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
+        token = UserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
         mock_db_session._tokens.append(token)
 
         result = token_db.get_token_by_id(1)
@@ -383,7 +197,7 @@ class TestGetTokenByAccessKey:
 
     def test_get_token_by_access_key_success(self, mock_db_session):
         """Test successful token retrieval by access key."""
-        token = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123", delete_flag="N")
+        token = UserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123", delete_flag="N")
         mock_db_session._tokens.append(token)
 
         result = token_db.get_token_by_access_key("nexent-key1")
@@ -402,8 +216,8 @@ class TestDeleteToken:
 
     def test_delete_token_success(self, mock_db_session):
         """Test successful token deletion."""
-        token = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123", delete_flag="N")
-        usage_log = MockUserTokenUsageLog(token_usage_id=1, token_id=1, created_by="user123")
+        token = UserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123", delete_flag="N")
+        usage_log = UserTokenUsageLog(token_usage_id=1, token_id=1, created_by="user123")
         mock_db_session._tokens.append(token)
         mock_db_session._usage_logs.append(usage_log)
 
@@ -419,12 +233,12 @@ class TestDeleteToken:
         assert result is False
 
 
-class TestSoftDeleteTokensByUser:
+class TestSoftDeleteTokenUsageByUser:
     """Tests for deleting all API keys and usage logs owned by a user."""
 
     def test_soft_delete_tokens_also_soft_deletes_usage_logs(self, mock_db_session):
-        token = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
-        usage_log = MockUserTokenUsageLog(token_usage_id=1, token_id=1, created_by="user123")
+        token = UserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
+        usage_log = UserTokenUsageLog(token_usage_id=1, token_id=1, created_by="user123")
         mock_db_session._tokens.append(token)
         mock_db_session._usage_logs.append(usage_log)
 
@@ -451,7 +265,6 @@ class TestListActiveTokensByTenant:
 
     def test_list_active_tokens_by_tenant_signature(self):
         """Test that the function has the expected signature."""
-        import inspect
         sig = inspect.signature(token_db.list_active_tokens_by_tenant)
         params = list(sig.parameters.keys())
         assert 'tenant_id' in params
@@ -461,7 +274,6 @@ class TestListActiveTokensByTenant:
 
     def test_list_active_tokens_by_tenant_default_parameters(self):
         """Test that default parameters work correctly."""
-        import inspect
         sig = inspect.signature(token_db.list_active_tokens_by_tenant)
         params = sig.parameters
         assert params['page'].default == 1
@@ -495,8 +307,8 @@ class TestSoftDeleteTokensByUser:
 
     def test_soft_delete_tokens_returns_count(self, mock_db_session):
         """Test that soft_delete_tokens_by_user returns the number of deleted tokens."""
-        token1 = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
-        token2 = MockUserTokenInfo(token_id=2, access_key="nexent-key2", user_id="user123")
+        token1 = UserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
+        token2 = UserTokenInfo(token_id=2, access_key="nexent-key2", user_id="user123")
         mock_db_session._tokens.extend([token1, token2])
 
         deleted_count = token_db.soft_delete_tokens_by_user("user123", "admin456")
@@ -545,7 +357,7 @@ class TestGetLatestUsageMetadata:
 
     def test_get_latest_usage_metadata_success(self, mock_db_session):
         """Test successful metadata retrieval."""
-        usage_log = MockUserTokenUsageLog(
+        usage_log = UserTokenUsageLog(
             token_usage_id=1,
             token_id=1,
             call_function_name="run_chat",

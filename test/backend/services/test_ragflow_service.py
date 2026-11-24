@@ -14,11 +14,8 @@ import pytest
 _mock_nexent_utils = types.ModuleType("nexent.utils")
 _mock_nexent_utils_http = types.ModuleType("nexent.utils.http_client_manager")
 _mock_nexent_utils_http.http_client_manager = MagicMock()
-_mock_nexent = types.ModuleType("nexent")
-_mock_nexent.utils = _mock_nexent_utils
 
 _MODULE_STUBS = {
-    "nexent": _mock_nexent,
     "nexent.utils": _mock_nexent_utils,
     "nexent.utils.http_client_manager": _mock_nexent_utils_http,
 }

@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-THINKING-STORAGE-20261120
+  change_type: bugfix
+  bug_id: JIUWEN-THINKING-STORAGE-20261120
+  title: Coalesce Jiuwen thinking units in conversation storage
+  description: Persist native model text with the established Nexent thinking unit type and consolidate chunks within each model step.
+  observed_behavior: AgentOS persistence inserts a model_output row per Jiuwen model delta. The live and historical display already translate those events to the public thinking type.
+  expected_behavior: Fresh Jiuwen messages store one model_output_thinking unit per step and invocation. Native deep reasoning keeps its separate type, and previous records and replay receipts remain readable.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing live acceptance checks public output and persisted clarification identity, but does not inspect the stored model text unit types and cardinality.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-OUTPUT, JIUWEN-MODEL-BRIDGE]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-CLARIFICATION-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Store ordered native chunks once per step, block, invocation and attempt using the established unit type and the first unit index.
+    - Preserve existing replay receipts, other unit indexes and historical answer reclassification.
+    - Preserve legacy model output and native units whose identity cannot be grouped.
+    reason: Repository tests cover the actual write payload and retry boundary. The real D4 verifies raw storage in PostgreSQL alongside history reload and clarification.
+    test_selectors:
+    - test/backend/database/test_conversation_projection_receipt.py::test_native_thinking_groups_at_write_without_changing_receipt_input
+    - test/backend/database/test_conversation_projection_receipt.py::test_projection_keeps_unmergeable_model_output_units
+    - test/backend/utils/test_nexent_output.py::test_compacted_native_history_matches_legacy_chunks
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md.
+    The existing D4 owns its assistant clone, conversations and temporary authentication, so it needs no shared preparation families. Native content, canonical types, and row counts are asserted from PostgreSQL after real submissions. No new D1 is required.

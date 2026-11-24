@@ -15,7 +15,7 @@ from management.db.identity.membership import (
     lock_tenants,
     locked_members,
 )
-from management.db.models import UserAccount, UserTenant
+from management.db.identity.models import UserAccount, UserTenant
 from infrastructure.rdb.orm import as_dict
 
 

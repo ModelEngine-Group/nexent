@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-LIST-SORT-20261120
+  change_type: requirement
+  requirement_id: OPS-AGENT-LIST-SORT-20261120
+  title: Sort Agent directory by published total Tokens and success rate
+  description: Extend the existing list sort selector after authorization, tenant/group/date/Agent filtering and resource aggregation, before pagination. Retain nullable published values and exact integer ordering.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/ops/test_agent_list_sorting.py
+    - test/backend/ops/test_agent_monitoring_views.py::test_view_parameter_validation
+    - test/backend/ops/test_agent_token_api.py
+    behaviors:
+    - Accept total_tokens and success_rate on the existing Agent list without changing default sorts or routes.
+    - Sort numerically in either direction, including exact Token integers beyond floating-point precision and observed zero.
+    - Keep missing usage and no-success-denominator values null and last in both directions; preserve coverage and status.
+    - Resolve ties by tenant ID and Agent ID, sort all filtered resource aggregates before slicing pages, and reject unauthorized scopes before data reads.
+    reason: Existing HTTP tests prove count/duration sorting and filter forwarding but reject success_rate and do not read Token values for sorting. Strengthen UT and the existing real SQL/ES publication/query D3; no new D1 or collection/runtime changes are needed.
+  notes: Starts at 58a35dd11 on codex/ops-monitoring-agent-sync. No Top 5, northbound authentication, collection, timing, model module changes, baseline sync or push.

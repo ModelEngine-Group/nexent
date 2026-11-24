@@ -299,6 +299,73 @@ def test_ut_sdk_tlm_032_run_cancel_cancels_active_call_future():
     asyncio.run(manager.shutdown(timeout=1))
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_prepared_mcp_discovery_only_exposes_names_authorized_for_each_server(missing):
+    """Lazy sessions keep develop's per-server authorization guards.
+
+    Connections open at first tool call, allowed_tools never reach the
+    session factory, and a server whose discovery lost an authorized name
+    fails exactly the tools that route to it — other servers stay usable.
+    """
+    from contextlib import asynccontextmanager
+
+    manager = _manager()
+    seen_parameters = []
+
+    class _RecordingSession:
+        async def call_tool(self, name, arguments):
+            return (name, arguments)
+
+    @asynccontextmanager
+    async def sessions(parameters, **_kwargs):
+        assert "allowed_tools" not in parameters
+        seen_parameters.append(parameters["url"])
+        first = parameters["url"] == "http://first.invalid/mcp"
+        names = ["own-first", "own_second"] if first else ["own-first"]
+        if not first and not missing:
+            names.append("own_second")
+        discovered = [
+            mcp.types.Tool(name=name, description=parameters["url"], inputSchema={"type": "object", "properties": {}})
+            for name in names
+        ]
+        yield _RecordingSession(), discovered
+
+    scope = RunCancellationScope()
+    try:
+        collection = ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[
+                {"url": "http://first.invalid/mcp", "allowed_tools": {"own-first": "own_first"}},
+                {"url": "http://second.invalid/mcp", "allowed_tools": {"own_second": "own_second"}},
+            ],
+            cancellation_scope=scope, tool_timeout_seconds=1, close_timeout_seconds=0.5,
+            session_context_factory=sessions, tool_builder=_fake_builder,
+        )
+        first_tool = collection.create_tool(
+            _tool_config(class_name="own_first", origin_name="own-first", usage="http://first.invalid/mcp")
+        )
+        second_tool = collection.create_tool(
+            _tool_config(class_name="own_second", origin_name="own_second", usage="http://second.invalid/mcp")
+        )
+        # Entering the collection opens no connections; tools are inert.
+        with collection:
+            assert collection.tools == [first_tool, second_tool]
+            assert seen_parameters == []
+            assert first_tool.forward({}) == ("own-first", {})
+            if missing:
+                # The second server's discovery lost the authorized name, so
+                # only tools routed to it fail; the first server is unaffected.
+                with pytest.raises(ValueError, match="missing from discovery"):
+                    second_tool.forward({})
+                assert seen_parameters == ["http://first.invalid/mcp", "http://second.invalid/mcp"]
+            else:
+                assert second_tool.forward({}) == ("own_second", {})
+                assert seen_parameters == ["http://first.invalid/mcp", "http://second.invalid/mcp"]
+        assert manager.snapshot().active_count == 0
+    finally:
+        asyncio.run(manager.shutdown(timeout=1))
+
+
 class _FailingConnectContext:
     async def __aenter__(self):
         raise ConnectionRefusedError("[Errno 111] Connection refused")

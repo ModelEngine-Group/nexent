@@ -14,7 +14,7 @@ from management.services.conversation import creation_history
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.utils.observer import ProcessType
-from services.nl2agent_service import _Nl2AgentBoundaryObserver
+from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
 
 @pytest.mark.asyncio

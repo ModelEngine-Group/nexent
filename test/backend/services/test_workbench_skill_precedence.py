@@ -3,14 +3,17 @@
 """Unit regression for complete-resource Skill precedence and snapshot safety."""
 
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from contracts.agentos import EvaluationSkillTool
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import WorkbenchError
+from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent import workbench
-from management.services.agent.preparation.inputs import _materialize_runtime_skill_snapshot
+from runtime.agentos import prepared_skills
 
 
 DEFAULT_NAMES = ("pdf", "docx", "xlsx", "pptx", "canvas-design", "analyze-image")
@@ -125,10 +128,27 @@ def test_different_skills_can_share_the_same_tool_identity(catalog):
     catalog[3].assert_called_once_with([10])
 
 
-def test_snapshot_duplicate_names_fail_before_any_file_write(tmp_path):
-    snapshot = [{"name": "same", "files": [("SKILL.md", body)]} for body in (b"default", b"tenant")]
-    before = deepcopy(snapshot)
-    with pytest.raises(WorkbenchError, match="RUNTIME_SKILL_NAME_CONFLICT"):
-        _materialize_runtime_skill_snapshot(snapshot, str(tmp_path), "tenant")
+def test_snapshot_duplicate_names_fail_before_any_file_write(tmp_path, mocker):
+    rows = {
+        skill_id: {"name": "same", "description": str(skill_id), "config": {}}
+        for skill_id in (1, 2)
+    }
+    before = deepcopy(rows)
+    resource = SimpleNamespace(
+        agent_id=7, version_no=2, origin="SYSTEM", evaluation_options=None, skill_refs=[],
+        workbench_skill_refs=[SimpleNamespace(skill_id=key) for key in rows],
+        tools=[SimpleNamespace(tool_id=tool) for tool in EvaluationSkillTool],
+    )
+    mocker.patch.object(prepared_skills, "fetch_workbench_skill_mounts", return_value={})
+    mocker.patch.object(prepared_skills, "read_workbench_skill_rows", return_value=rows)
+    stage = mocker.patch.object(prepared_skills, "skill_stage_path", return_value=tmp_path)
+    capture = mocker.patch.object(prepared_skills, "capture_skill_files")
+
+    with pytest.raises(ValueError, match="Duplicate evaluation skill name"):
+        prepared_skills.materialize_skill_tools(
+            resource, ServicePrincipal("viewer", "tenant"), str(tmp_path), debug_run_id="a" * 32,
+        )
+    stage.assert_not_called()
+    capture.assert_not_called()
     assert list(tmp_path.iterdir()) == []
-    assert snapshot == before
+    assert rows == before

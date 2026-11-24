@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-SHARED-COLLECTOR-20261123
+  change_type: refactor
+  title: Extract shared monitoring ingestion from Ops
+  description: Preserve event and storage contracts while removing Ops dependencies from producer services and their images.
+  feature_contract_changed: false
+  affected_features:
+    existing: [OPS-MODEL-MONITORING, OPS-AGENT-FACTS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-BOOTSTRAP-D1-001, OPS-MODEL-MONITORING-D5-001]
+    added: []
+    modified: [OPS-MODEL-MONITORING-D3-001, OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Reject Ops dependencies in producer imports and images, Preserve event validation and grouping, Retry stable batches and drain on shutdown, Release producer resources]
+    reason: Existing protocol and aggregation tests remain applicable; add dependency and producer lifetime regressions instead of duplicating formal cases.
+    test_selectors: [test/backend/ops/test_monitoring_producer.py, test/backend/ops/test_monitoring.py, test/backend/ops/test_agent_monitoring.py, test/backend/deploy/test_service_image_sources.py, test/backend/deploy/test_service_image_smoke.py]

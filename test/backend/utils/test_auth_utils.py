@@ -17,6 +17,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "sdk"))
 
+# Import the real ORM models BEFORE the sqlalchemy stub below.  pytest imports
+# every test module into a single process, so stubbing ``sqlalchemy`` here would
+# otherwise poison any later ``import management.db.models`` (other test files,
+# e.g. test_local_account_cli.py, need the real UserTenant/TenantConfig).
+try:
+    import management.db.models  # noqa: F401
+except Exception:  # pragma: no cover - only when optional runtime deps are absent
+    pass
+
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
 
@@ -110,6 +119,12 @@ sys.modules['management.db.identity.user_tenant'] = MagicMock(
 # Stub management.db.identity.token to avoid real DB interactions (used by auth_utils)
 sys.modules['management.db.identity.token'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
+
+# NOTE: ``management.db.models`` must NOT be stubbed at module scope — pytest
+# imports every test module during collection, so a global sys.modules entry
+# here leaks into unrelated test files (e.g. test_local_account_cli.py fails
+# with "cannot import name 'UserTenant'").  The tests that need a fake
+# TenantConfig patch it locally via monkeypatch.setitem instead.
 
 # Mock contracts.constants.environment but provide real LANGUAGE values for tests.
 # We must keep the real ``UnauthorizedError``/``SignatureValidationError``/
@@ -940,9 +955,57 @@ class TestResolveTenantIdFromUserTenantRecord:
         record = {"tenant_id": "", "user_role": "ASSET_OWNER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.ASSET_OWNER_TENANT_ID
 
-    def test_empty_tenant_other_role_falls_back_to_default(self):
+    def test_empty_tenant_db_has_real_tenant_uses_it(self, monkeypatch):
+        """Runtime guard: when DB has a real tenant it wins over DEFAULT_TENANT_ID."""
+        set_import_attribute(monkeypatch, au, "_lookup_first_active_tenant",
+                            lambda: "real-tenant-from-db")
+        record = {"tenant_id": None, "user_role": "USER", "user_id": "suadmin"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == "real-tenant-from-db"
+
+    def test_empty_tenant_db_lookup_falls_back_to_default(self, monkeypatch):
+        """When DB lookup returns None (no real tenant yet) we land on DEFAULT_TENANT_ID."""
+        set_import_attribute(monkeypatch, au, "_lookup_first_active_tenant",
+                            lambda: None)
         record = {"tenant_id": None, "user_role": "USER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID
+
+
+class TestLookupFirstActiveTenant:
+    """Tests for _lookup_first_active_tenant — DB-side runtime guard."""
+
+    def setup_method(self):
+        au.DEFAULT_TENANT_ID = "tenant_id"
+        au.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+    def test_returns_first_real_tenant_from_db(self, monkeypatch):
+        """Happy path: session.execute returns a real tenant_id that filters pass."""
+        session = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = "fe7f7c1e-e113-4976-8a48-773b1304b00b"
+        session.execute.return_value = result
+
+        ctx_mgr = MagicMock()
+        ctx_mgr.__enter__.return_value = session
+        get_db_session = MagicMock(return_value=ctx_mgr)
+
+        # _lookup_first_active_tenant imports get_db_session lazily from
+        # infrastructure.rdb.client — patch that module attribute before the
+        # lazy import fires.
+        import infrastructure.rdb.client as _dbc
+        monkeypatch.setattr(_dbc, "get_db_session", get_db_session)
+
+        tid = au._lookup_first_active_tenant()
+        assert tid == "fe7f7c1e-e113-4976-8a48-773b1304b00b"
+
+    def test_db_lookup_exception_returns_none(self, monkeypatch):
+        """try/except swallow any DB failure and return None so caller can fallback."""
+        import infrastructure.rdb.client as _dbc
+        monkeypatch.setattr(
+            _dbc, "get_db_session",
+            MagicMock(side_effect=RuntimeError("db down")),
+        )
+
+        assert au._lookup_first_active_tenant() is None
 
 
 class TestGetCurrentUserContext:
@@ -1074,7 +1137,7 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 @pytest.fixture(autouse=True)
 def active_local_account(monkeypatch):
     # These units exercise the explicitly disabled-boundary session adapter.
-    monkeypatch.setattr("gateway.downstream.identity.enabled", lambda: False)
+    monkeypatch.setattr("gateway.identity.downstream.enabled", lambda: False)
     # Credential/account-state integration is proved separately by native auth tests.
     monkeypatch.setattr(au, "JWT_ISSUER", "nexent")
     from management.services.permission.identity import northbound as northbound_auth

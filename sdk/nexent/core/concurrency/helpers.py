@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import threading
@@ -31,6 +33,7 @@ def get_fallback_thread_manager():
                     for name, workers, queue_size in (
                         ("agent-run", 4, 16),
                         ("model-tool-io", 4, 16),
+                        ("model-embedding", 4, 16),
                         ("control-io", 16, 8),
                         ("evaluation", 2, 8),
                         ("background-service", 12, 4),

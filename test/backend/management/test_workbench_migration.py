@@ -129,7 +129,13 @@ def test_initialization_prepares_shared_local_catalog_and_official_files(mocker,
     local_tools = [object()]
     scan = mocker.patch.object(configuration, "get_local_tools", return_value=local_tools)
     save = mocker.patch.object(repository, "update_tool_table_from_scan_tool_list")
-    install = mocker.patch.object(transfer, "install_skills_from_zip_for_tenant")
+    events = []
+    load = mocker.patch.object(
+        initialize, "load_system_configuration", side_effect=lambda: events.append("load_config")
+    )
+    install = mocker.patch.object(
+        transfer, "install_skills_from_zip_for_tenant", side_effect=lambda **kwargs: events.append("install")
+    )
     provider = MagicMock()
     provider.release_manifest.official_skill_names = ("pdf",)
     provider.get_workbench_default_skills.return_value = [{"skill_id": 1}]
@@ -137,7 +143,9 @@ def test_initialization_prepares_shared_local_catalog_and_official_files(mocker,
     assert initialize.prepare_shared_resources(provider) == ([{"tool_id": 2}], [{"skill_id": 1}])
     scan.assert_called_once_with()
     save.assert_called_once_with(ASSET_OWNER_TENANT_ID, "system", local_tools)
+    load.assert_called_once_with()
     install.assert_called_once_with(skill_names=["pdf"], tenant_id=ASSET_OWNER_TENANT_ID, user_id="system")
+    assert events == ["load_config", "install"]
 
 
 def test_missing_migrated_skill_files_abort_initialization(mocker, tmp_path):
@@ -147,6 +155,7 @@ def test_missing_migrated_skill_files_abort_initialization(mocker, tmp_path):
     from management.db.tool import repository as tool_repository
     mocker.patch.object(configuration, "get_local_tools", return_value=[])
     mocker.patch.object(tool_repository, "update_tool_table_from_scan_tool_list")
+    mocker.patch.object(initialize, "load_system_configuration")
     mocker.patch.object(transfer, "install_skills_from_zip_for_tenant", return_value=[])
     manager = mocker.patch.object(files, "get_skill_manager").return_value
     manager.resolve_skill_dir.return_value = str(tmp_path / "missing")

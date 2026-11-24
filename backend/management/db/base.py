@@ -27,13 +27,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 
-from sqlalchemy.orm import DeclarativeBase
-
-
 from sqlalchemy.sql import func
 
-
-SCHEMA = "nexent"
+from infrastructure.rdb.base import SCHEMA as SCHEMA, SimpleTableBase as SimpleTableBase, TableBase as TableBase
 
 
 _PRIMARY_KEY_DOC = "Primary key, auto-increment"
@@ -52,19 +48,3 @@ _MCP_NAME_DOC = "MCP name"
 
 
 _INGROUP_PERMISSION_DOC = "In-group permission: EDIT, READ_ONLY, PRIVATE"
-
-
-class SimpleTableBase(DeclarativeBase):
-    pass
-
-
-class TableBase(DeclarativeBase):
-    create_time = Column(TIMESTAMP(timezone=False),
-                         server_default=func.now(), doc="Creation time")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(
-    ), onupdate=func.now(), doc="Update time")
-    created_by = Column(String(100), doc="Creator")
-    updated_by = Column(String(100), doc="Updater")
-    delete_flag = Column(String(1), default="N",
-                         doc="Whether it is deleted. Optional values: Y/N")
-    pass

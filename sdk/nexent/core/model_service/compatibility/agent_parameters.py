@@ -4,6 +4,8 @@
 
 from copy import deepcopy
 
+from nexent.core.models.sampling import without_unset_sampling
+
 from nexent.core.model_service.profiles.protocol_parameters import OUTLET_TOKEN_LIMIT_KEYS, without_outlet_token_limits
 
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
@@ -24,7 +26,7 @@ def read_agent_parameter_entry(entry, *, profile=None):
         if any(key in entry for key in (*AGENT_PARAMETER_KEYS, "extra_params")):
             raise ParameterValidationError("PARAMETER_UPDATE_CONFLICT", "/model_params_override")
         result = deepcopy(entry)
-        result["parameter_values"] = without_outlet_token_limits(result["parameter_values"])
+        result["parameter_values"] = without_unset_sampling(without_outlet_token_limits(result["parameter_values"]))
         for key in OUTLET_TOKEN_LIMIT_KEYS:
             result.pop(key, None)
         if isinstance(result.get("custom_overrides"), dict):
@@ -48,6 +50,10 @@ def _normalize_legacy_parameters(entry, profile):
     """Interpret old omission and body aliases using the saved outlet only."""
     values = entry["parameter_values"]
     rules = {rule["key"]: rule for rule in profile.parameter_rules}
+    if values.get("enable_thinking") is False and "enable_thinking" not in rules:
+        # Historical snapshots stored false for outlets that cannot toggle
+        # thinking; the value only meant "inherit the outlet".
+        values.pop("enable_thinking")
     effort = rules.get("reasoning_effort", {})
     controls = profile.capabilities.reasoning.controls or ()
     explicit_auto = "auto" in effort.get("schema", {}).get("enum", ()) or any(

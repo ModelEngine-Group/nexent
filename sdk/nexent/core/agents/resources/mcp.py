@@ -163,6 +163,9 @@ class ManagedMCPToolCollection:
         session factory; cores with native clients override this method.
         """
         session_factory = self._session_factory()
+        # allowed_tools is a Nexent authorization binding, not a session
+        # factory option; strip it before handing parameters over.
+        parameters = {key: value for key, value in parameters.items() if key != "allowed_tools"}
         try:
             connection = await asyncio.wait_for(
                 self._stack.enter_async_context(
@@ -205,6 +208,16 @@ class ManagedMCPToolCollection:
                 return existing
             parameters = self._servers[server_key]
             session, live_names = await self._connect_server(parameters)
+            # Keep the eager-era binding guard: every authorized tool the run
+            # declares for this server must exist in live discovery, otherwise
+            # the saved binding no longer matches the server. Lazy tools are
+            # built from the binding itself (no discovery adaptation), so the
+            # per-call name check in _ensure_and_call_coro covers the mapping.
+            allowed_tools = parameters.get("allowed_tools")
+            if live_names is not None and allowed_tools is not None:
+                missing = set(allowed_tools) - live_names
+                if missing:
+                    raise ValueError("Authorized MCP tool is missing from discovery")
             self._sessions[server_key] = session
             self._live_tool_names[server_key] = live_names
             return session
@@ -546,6 +559,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             result["headers"] = {"Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
+
+        if "allowed_tools" in mcp_host_item:
+            result["allowed_tools"] = mcp_host_item["allowed_tools"]
 
         if "httpx_client_factory" in mcp_host_item:
             httpx_client_factory = mcp_host_item["httpx_client_factory"]

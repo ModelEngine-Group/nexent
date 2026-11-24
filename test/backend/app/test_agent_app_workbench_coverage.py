@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException, Request
 
-from test.backend.app import test_agent_app as legacy
-
-
-from runtime.api.agent import execution as runtime_agent
-
-agent_app = __import__("management.api.agent.agent", fromlist=["get_workbench_bootstrap_api"])
+from contracts.agent import AgentRequest
+from contracts.errors.exceptions import WorkbenchConfigVersionConflict, WorkbenchError
+from management.api.agent import agent as agent_app
+from management.api.agent import conversation_run
+from management.api.agent import creator as creator_api
+from management.services.agent import conversation_submission, prepared_turn, runtime_client
 
 
 @pytest.mark.asyncio
@@ -94,40 +94,56 @@ async def test_capability_preview_is_hidden_when_disabled(monkeypatch):
     ("error", "status", "detail"),
     [
         (
-            runtime_agent.WorkbenchError("WORKBENCH_DISABLED", status_code=404),
+            WorkbenchError("WORKBENCH_DISABLED", status_code=404),
             404,
             {"code": "WORKBENCH_DISABLED"},
         ),
         (
-            runtime_agent.WorkbenchConfigVersionConflict(7),
+            WorkbenchConfigVersionConflict(7),
             409,
             {"code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": 7},
         ),
     ],
 )
 async def test_agent_run_maps_workbench_errors(monkeypatch, error, status, detail):
-    monkeypatch.setattr(runtime_agent, "run_agent_stream", AsyncMock(side_effect=error))
-    request = runtime_agent.AgentRequest(query="hello", agent_id=7)
+    async def submit(payload, owner, tenant, dispatch, **_options):
+        return await dispatch(payload.model_copy(update={"claimed_run_id": "a" * 32}), owner, tenant)
+
+    monkeypatch.setattr(conversation_submission, "submit_conversation", submit)
+    monkeypatch.setattr(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
+    client = MagicMock()
+    client.start_prepared_run = AsyncMock()
+    monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+    prepare = AsyncMock(side_effect=error)
+    monkeypatch.setattr(prepared_turn, "_prepare_workbench", prepare)
+    reject = AsyncMock()
+    monkeypatch.setattr(prepared_turn, "reject_unstaged_turn", reject)
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda _token: ("user-a", "tenant-a"))
+    request = AgentRequest(
+        query="hello", agent_id=7, entrypoint="workbench", workbench={"mode": "generic_chat"},
+    )
 
     with pytest.raises(HTTPException) as caught:
-        await runtime_agent.agent_run_api(
+        await conversation_run.run_conversation(
             request,
             Request(scope={"type": "http", "headers": []}),
-            "Bearer token",
         )
     assert caught.value.status_code == status
     assert caught.value.detail == detail
+    prepare.assert_awaited_once()
+    reject.assert_awaited_once()
+    client.start_prepared_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_history_is_hidden_when_workbench_disabled(monkeypatch):
-    monkeypatch.setattr(runtime_agent, "ENABLE_AGENT_WORKBENCH", False)
-    request = runtime_agent.NL2AgentRunRequest(
-        query="Create an agent", agent_id=7, persist_history=True, workbench_config={"mode": "agent_create"}
+    monkeypatch.setattr(creator_api, "ENABLE_AGENT_WORKBENCH", False)
+    request = creator_api.NL2AgentRunRequest(
+        query="Create an agent", agent_id=7, persist_history=True, workbench_config={"mode": "agent_create"},
     )
 
     with pytest.raises(HTTPException) as caught:
-        await runtime_agent.nl2agent_run_api(
+        await creator_api.nl2agent_run_api(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",

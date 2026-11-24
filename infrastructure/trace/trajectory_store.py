@@ -21,9 +21,9 @@ from .trajectory_io import (
     Directory,
     TrajectoryConflict,
     TrajectoryCorrupt,
-    _lock_exclusive,
     digest,
     json_chunks,
+    lock_exclusive,
     prefix_hash,
     write_all,
 )
@@ -207,7 +207,8 @@ class TrajectoryFileStore:
             return self._locate(root, identity)
         return matches[0] if matches else None
 
-    def _validate_manifest(self, meta, identity, tenant, agent):
+    @staticmethod
+    def _validate_manifest(meta, identity, tenant, agent):
         if not isinstance(meta, dict):
             raise TrajectoryCorrupt("Trajectory manifest must be an object")
         if (meta.get("tenant_id"), meta.get("owner_user_id"), meta.get("conversation_id")) != (
@@ -378,7 +379,7 @@ class TrajectoryFileStore:
                 raise TrajectoryConflict("Trajectory execution is already registered")
             fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR | os.O_CREAT | os.O_EXCL)
             try:
-                _lock_exclusive(fd, blocking=False)
+                lock_exclusive(fd, blocking=False)
                 os.fsync(fd)
                 os.fsync(directory.fd)
                 meta["runs"].append(
@@ -478,7 +479,7 @@ class TrajectoryFileStore:
                 raise TrajectoryCorrupt("Registered trajectory file is missing") from error
             with os.fdopen(fd, "rb", closefd=True):
                 try:
-                    _lock_exclusive(fd, blocking=False)
+                    lock_exclusive(fd, blocking=False)
                 except BlockingIOError as error:
                     raise TrajectoryConflict("Trajectory execution still has a writer") from error
                 try:
@@ -633,7 +634,7 @@ class TrajectoryFileStore:
                     fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR)
                 try:
                     try:
-                        _lock_exclusive(fd, blocking=False)
+                        lock_exclusive(fd, blocking=False)
                     except BlockingIOError:
                         result["pending_runs"] += 1
                         continue

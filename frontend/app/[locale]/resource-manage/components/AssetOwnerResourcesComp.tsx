@@ -13,12 +13,11 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import UserList from "./resources/UserList";
 import ModelList from "./resources/ModelList";
 import TagList from "./resources/TagList";
-import { PlatformQuotaPanel } from "./resources/PlatformQuotaPanel";
+import { PlatformQuotaPanel } from "@/components/quota/PlatformQuotaPanel";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
-import ProjectConfigTab from "./resources/projectConfig";
 
 export default function AssetOwnerResourcesComp() {
   const { t } = useTranslation("common");
@@ -138,4 +137,4 @@ export default function AssetOwnerResourcesComp() {
   .asset-owner-tabs .ant-tabs-nav {
     flex-shrink: 0;
   }
-`}</style>
+`}</style>;

@@ -10,9 +10,15 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def _migration() -> str:
-    paths = list((ROOT / "deploy/sql/migrations").glob("*system_configuration.sql"))
-    assert len(paths) == 1
-    return paths[0].read_text(encoding="utf-8")
+    path = ROOT / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
+    assert path.is_file()
+    return path.read_text(encoding="utf-8")
+
+
+def _su_migration() -> str:
+    path = ROOT / "deploy/sql/migrations/v2.9.0_014_su_system_configuration.sql"
+    assert path.is_file()
+    return path.read_text(encoding="utf-8")
 
 
 def test_sql_seed_matches_the_shared_catalog_exactly():
@@ -20,7 +26,7 @@ def test_sql_seed_matches_the_shared_catalog_exactly():
     seeds = dict(re.findall(r"\('([A-Z_]+)',\s*'([^']+)'::jsonb\)", sql))
     expected = {
         key: str(value).lower() if isinstance(value, bool) else str(value)
-        for key, value in EXPECTED_DEFAULTS.items()
+        for key, value in {**EXPECTED_DEFAULTS, "MAX_SUPER_ADMIN_COUNT": 1}.items()
     }
 
     assert seeds == expected
@@ -61,8 +67,19 @@ def test_migration_defines_one_audited_scalar_table_and_safe_seed_protocol():
     assert "'/system-config'" not in sql
 
 
+def test_su_migration_retires_key_and_revokes_only_ops_configuration_grants():
+    sql = _su_migration()
+
+    assert "configuration_key = 'MAX_SUPER_ADMIN_COUNT'" in sql
+    assert "delete_flag = 'Y'" in sql
+    assert "user_role = 'OPS'" in sql
+    assert "permission_type = 'OPS.CONFIGURATION'" in sql
+    assert "permission_subtype = '/ops/configuration'" in sql
+    assert "user_role = 'SU'" not in sql
+
+
 def test_model_matches_migration_shape():
-    from management.configuration.models import SystemConfiguration
+    from infrastructure.system_configuration.models import SystemConfiguration
 
     table = SystemConfiguration.__table__
     assert table.name == "sys_configuration_t"

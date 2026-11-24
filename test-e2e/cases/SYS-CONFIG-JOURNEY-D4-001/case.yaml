@@ -4,9 +4,9 @@ module: SYSTEM-CONFIG
 case:
   case_id: SYS-CONFIG-JOURNEY-D4-001
   feature_id: SYSTEM-CONFIGURATION
-  requirement_ids: [SYSTEM-CONFIGURATION-20261110]
+  requirement_ids: [SYSTEM-CONFIGURATION-20261110, SYSTEM-CONFIGURATION-20261123]
   business_rule_ids: [SYS-CONFIG-RULE-01, SYS-CONFIG-RULE-02, SYS-CONFIG-RULE-05, SYS-CONFIG-RULE-06]
-  title: Operations administrator edits and saves configuration without losing drafts
+  title: Super administrator uses three configuration tabs and edits parameters without losing drafts
   type: E2E
   priority: P1
   status: active
@@ -18,21 +18,21 @@ case:
     outcomes: [saved, notification degraded, database failure, delayed query and delayed save]
   steps:
   - order: 1
-    action: Open the authorized page, open the same operations actor's personal profile with only the system-configuration grant, search and group nineteen parameters in both locales and inspect a denied actor.
-    expected: The personal profile remains accessible as a signed-in self-service page; configuration names, keys, descriptions, types, units, ranges and database values are visible; the denied actor has no configuration entry or API data and no recommendation/version/consumer status appears.
+    action: Open the authorized page as SU, inspect the three tabs, search and group eighteen parameters in both locales, open a parameter detail modal and inspect an OPS actor.
+    expected: The SU sees system configuration, platform quota overview and system parameters tabs in that order; configuration names, keys, descriptions, types, units, ranges and database values are visible; column widths support pointer and keyboard resizing; details open in a modal; OPS has no configuration entry or API data and no recommendation/version/consumer status appears.
   - order: 2
     action: Edit values, reset one default, discard another edit and save while editing the same field again before the response completes.
     expected: The save bar shares the configuration content's left and right edges; only changed keys are submitted; the saved baseline advances while the later draft remains, and the message says saved with automatic consumer refresh.
   - order: 3
-    action: Repeat with notification degradation, database failure, background query and attempted page exit.
-    expected: Degradation remains an honest save, failures and queries preserve drafts, and unsaved exit requires confirmation.
+    action: Repeat with notification degradation, database failure, background query and attempted page exit through links and browser Back/Forward.
+    expected: Degradation remains an honest save, failures and queries preserve drafts, and every unsaved navigation path requires confirmation before state can be discarded.
   expected_results:
   - Authorized localized browsing and denied configuration access follow explicit permission, while every signed-in role retains the personal-profile self-service route.
   - The save bar aligns with the configuration content, and changed-key save, default reset, discard and edit-during-save preserve the correct baseline and drafts.
   - Failure and navigation behavior never claim all consumers applied or discard unsaved edits.
   forbidden_side_effects:
   - No browser-local ops port, executable recommendation, revision conflict, application polling or secret displayed.
-  actor: OPS for read, personal-profile and platform-write checks, SU coverage in D2, and a denied non-operations user
+  actor: SU for read and platform-write checks, and an OPS actor denied by both navigation and direct API access
   journey: [Open system configuration, open personal profile, filter and edit drafts, confirm changed-key save, exercise failures and leave protection, restore original values]
   final_business_result: [Database changes are confirmed honestly while all unsaved newer drafts remain intact.]
   failure_evidence: [Playwright screenshots, traces and sanitized proxied request/response assertions]
@@ -42,7 +42,7 @@ case:
       required_services: []
   acceptance:
   - id: AC-01
-    description: Localized catalog and explicit configuration permission are visible through the real page, and the operations actor can open personal profile without an additional navigation grant.
+    description: Localized three-tab catalog and detail modal are visible to SU through the real page, while OPS cannot see the entry or retrieve configuration through the API.
     steps: [1]
     expected_results: [1]
     forbidden_side_effects: [1]

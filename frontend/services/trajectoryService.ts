@@ -2,6 +2,10 @@
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type {
+  ImportedTrajectory,
+  SavedTrajectory,
+  SavedTrajectoriesPage,
+  SavedImportsSort,
   CleanupResult,
   CleanupSchedule,
   ConversationPage,
@@ -33,6 +37,80 @@ async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const trajectoryService = {
+  savedImports: (
+    page: number,
+    pageSize: number,
+    signal?: AbortSignal,
+    sorting?: SavedImportsSort
+  ) =>
+    read<SavedTrajectoriesPage>(
+      queryUrl(API_ENDPOINTS.trajectory.imports, {
+        page,
+        page_size: pageSize,
+        ...sorting,
+      }),
+      signal
+    ),
+  savedImport: (id: string, signal?: AbortSignal) =>
+    read<SavedTrajectory>(API_ENDPOINTS.trajectory.savedImport(id), signal),
+  async saveImport(file: File, signal?: AbortSignal): Promise<SavedTrajectory> {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.imports,
+      {
+        method: "POST",
+        body,
+        signal,
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as SavedTrajectory;
+  },
+  async deleteImport(
+    id: string,
+    signal?: AbortSignal
+  ): Promise<{ deleted: boolean }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.savedImport(id),
+      {
+        method: "DELETE",
+        signal,
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as { deleted: boolean };
+  },
+  async exportArchive(
+    row: TrajectoryRecord,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const response = await fetchWithErrorHandling(
+      queryUrl(API_ENDPOINTS.trajectory.exportArchive(row.conversation_id), {
+        tenant_id: row.tenant_id,
+        target_user_id: row.user_id,
+      }),
+      { method: "POST", signal, cache: "no-store" }
+    );
+    return response.blob();
+  },
+  async importArchive(
+    file: File,
+    signal?: AbortSignal
+  ): Promise<ImportedTrajectory> {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.importArchive,
+      {
+        method: "POST",
+        body,
+        signal,
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as ImportedTrajectory;
+  },
   cleanupSchedule: (
     tenantId?: string,
     signal?: AbortSignal,

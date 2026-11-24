@@ -16,9 +16,9 @@ from pathlib import Path
 import psycopg2
 import pytest
 import redis
-from management.configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
-from management.configuration.repository import SystemConfigurationRepository
-from management.configuration.runtime import CONFIGURATION_CHANNEL
+from infrastructure.system_configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
+from infrastructure.system_configuration.repository import SystemConfigurationRepository
+from infrastructure.system_configuration.runtime import CONFIGURATION_CHANNEL
 from psycopg2.extensions import parse_dsn
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
@@ -26,9 +26,12 @@ from sqlalchemy.orm import Session
 
 DATABASE_URL = os.environ["NEXENT_SYSTEM_CONFIG_TEST_DATABASE_URL"]
 REDIS_URL = os.environ["NEXENT_SYSTEM_CONFIG_TEST_REDIS_URL"]
-MIGRATION = (
-    Path(__file__).resolve().parents[3]
-    / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
+MIGRATIONS = tuple(
+    sorted(
+        (Path(__file__).resolve().parents[3] / "deploy/sql/migrations").glob(
+            "*system_configuration*.sql"
+        )
+    )
 )
 
 
@@ -41,7 +44,10 @@ def _apply_migration(extra_sql=""):
     try:
         connection.autocommit = True
         with connection.cursor() as cursor:
-            cursor.execute(MIGRATION.read_text(encoding="utf-8") + extra_sql)
+            cursor.execute(
+                "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS)
+                + extra_sql
+            )
     finally:
         connection.close()
 
@@ -219,7 +225,14 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
                 "FROM nexent.sys_configuration_t WHERE delete_flag = 'N'"
             )
         ).one()
-    assert (count, tenant_limit) == (19, 100)
+    assert (count, tenant_limit) == (18, 100)
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT delete_flag FROM nexent.sys_configuration_t "
+                "WHERE configuration_key = 'MAX_SUPER_ADMIN_COUNT'"
+            )
+        ).scalar_one() == "Y"
 
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM nexent.sys_configuration_t"))
@@ -498,9 +511,9 @@ def test_subsequent_business_checks_use_refreshed_snapshot():
 @pytest.mark.stage("D3")
 @pytest.mark.asyncio
 async def test_database_lock_timeout_preserves_snapshot_and_recovers(monkeypatch):
-    from management.configuration import database as database_module
-    from management.configuration.database import ConfigurationDatabase
-    from management.configuration.runtime import SystemConfigurationRuntime
+    from infrastructure.system_configuration import database as database_module
+    from infrastructure.system_configuration.database import ConfigurationDatabase
+    from infrastructure.system_configuration.runtime import SystemConfigurationRuntime
 
     parameters = parse_dsn(DATABASE_URL)
     for name, value in {

@@ -52,6 +52,10 @@ def test_run_message_adapter_uses_atomic_creator_and_preserves_history(monkeypat
     monkeypatch.setattr(conversation, "save_message", save)
     monkeypatch.setattr(conversation, "save_message_unit", unit)
     adapter = conversation.AutomationConversationAdapter()
+    from types import SimpleNamespace
+    monkeypatch.setattr(conversation, "read_saved_user_turn_by_id", lambda *args: SimpleNamespace(
+        message_id=101, message_index=2, message_source="AUTOMATION",
+    ))
     result = adapter.append_run_prompt(9, "scheduled question", "owner", "tenant", run_id=77)
     assert result["user_message_id"] == 101
     assert [item.content for item in result["history"]] == ["old question", "old answer"]

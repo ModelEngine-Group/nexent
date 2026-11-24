@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-VIEWS-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-VIEWS-20261119
+  title: Agent directory, daily trends and exact rankings
+  description: Extend published Agent queries with current inventory, searchable sorted pages, daily trends and exact top five execution counts.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_agent_monitoring_views.py, test/backend/ops/test_agent_monitoring_api.py]
+    behaviors:
+    - Read active draft metadata once per Agent, scoped to the authorized tenant and optional Agent ID.
+    - Merge historical metrics by tenant and Agent, preserve exact counts and weighted duration samples, and distinguish known zero from unknown.
+    - Fill inclusive daily trends with correct partial coverage and isolate cross-tenant resource identities.
+    - Search both names, order deterministically with nulls last, paginate and take the exact top five.
+    - Validate requests and reject unauthorized tenant access on every added endpoint.
+    reason: Existing UT covers summary arithmetic and selection. Existing D3 proves real Agent capture and publication. Extend that proof through the new HTTP read surfaces without creating duplicate D1 cases.
+  notes: Primary responsibility remains the existing Ops Feature domain. The D3 case owns isolated ES and Ops PG data, executes current catalog SQL against an owned table and controls identity at the external session boundary. Northbound authentication and unconfirmed success and Token metrics retain their existing later-stage acceptance obligations.

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: DEPLOYMENT-VERSION-AUTH-20261120
+  change_type: bugfix
+  bug_id: DEPLOYMENT-VERSION-AUTH-20261120
+  title: Defer deployment configuration until authentication
+  description: Load deployment metadata through the protected route once the frontend has a session.
+  observed_behavior: The global provider receives a 401 on its initial anonymous request and does not fetch again after login.
+  expected_behavior: Guest UI renders with defaults and sends no version request. Login or session restoration triggers the request. A failed request releases authenticated startup with defaults.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: The Gateway integration case covers credential enforcement but does not exercise frontend request timing. A provider regression covers the auth transition and request lifecycle.
+  feature_contract_changed: false
+  affected_features:
+    existing: [GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [GW-AUTH-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Guests render with default configuration and issue no deployment-version request.
+    - A new or restored session loads and applies deployment metadata.
+    - A failed request falls back to defaults, and a response from a previous session is discarded.
+    reason: The defect is in frontend provider state and request timing. The existing D3 case retains Gateway credential-boundary coverage.
+    test_selectors:
+    - frontend/tests/component/deploymentProvider.test.tsx
+  notes: 'Baseline: nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-gateway-independent-image/use-case-spec.md, GW-AUTH (68da44242 code snapshot). Frontend regression uses a controlled auth context and request boundary. GW-AUTH-D3-001 is a protocol regression only.'

@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Explicit exposure preserves registered APIs and denies accidental publication."""
 
+import ast
 import json
 from pathlib import Path
 
@@ -62,13 +63,43 @@ def test_snapshot_keeps_all_original_northbound_contracts():
 
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"), ("POST", "/api/users/list", "management"),
-    ("POST", "/api/agent/run", "runtime"), ("GET", "/api/conversation/list", "runtime"),
-    ("POST", "/api/file/storage", "runtime"), ("GET", "/api/file/storage", "management"),
+    ("POST", "/api/skills/nl2skill/run", "management"),
+    ("POST", "/api/agent/nl2agent/run", "management"),
+    ("POST", "/api/agent/run", "management"), ("GET", "/api/conversation/list", "management"),
+    ("GET", "/api/agent/stop/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "management"),
+    ("GET", "/api/conversation/workbench_pins", "management"),
+    ("PUT", "/api/conversation/42/workbench_pin", "management"),
+    ("POST", "/api/share/conversation/42", "management"),
+    ("GET", "/api/share/token", "management"),
+    ("GET", "/api/share/token/assets/file/download", "management"),
+    ("GET", "/api/share/token/assets/file/preview", "management"),
+    ("POST", "/api/internal/agentos/v1/compat/agent/run", None),
+    ("POST", "/api/internal/agentos/v1/compat/agent/background", None),
+    ("POST", "/api/internal/agentos/v1/compat/agent/inspect", None),
+    ("POST", "/api/internal/agentos/v1/memory/stored", None),
+    ("POST", "/api/agent/automations/42/run", "management"),
+    ("POST", "/api/agent/automations/runs/42/cancel", "management"),
+    ("GET", "/api/conversation/42/automation", "management"),
+    ("POST", "/api/file/storage", "management"), ("GET", "/api/file/storage", "management"),
     ("POST", "/nb/v1/chat/run", "northbound"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])
 def test_regular_backend_and_northbound_have_explicit_targets(method, path, target):
     assert select_upstream(method, path) == target
+
+
+def test_conversation_share_and_pins_are_mounted_by_management():
+    root = Path(__file__).resolve().parents[3] / "backend"
+    owners = {"workbench_pins_router", "conversation_share_router"}
+    for service, expected in (("management", owners), ("runtime", set())):
+        tree = ast.parse((root / service / "api/application.py").read_text(encoding="utf-8"))
+        mounted = {
+            node.args[0].id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "include_router" and node.args and isinstance(node.args[0], ast.Name)
+        }
+        assert mounted & owners == expected
 
 
 @pytest.mark.parametrize("method,path", [
@@ -78,16 +109,71 @@ def test_regular_backend_and_northbound_have_explicit_targets(method, path, targ
     ("POST", "/api/model/outlet_validations"),
     ("POST", "/api/model/outlets"),
     ("PATCH", "/api/model/outlets/7"),
-    ("POST", "/api/conversation/branch"),
-    ("GET", "/api/conversation/1/model_preferences"),
-    ("PATCH", "/api/conversation/1/model_preferences/7"),
     ("GET", "/api/ops/authorization"),
     ("GET", "/api/ops/scope"),
+    ("GET", "/api/indices/kb/documents/error-info"),
 ])
 def test_web_features_are_exposed_only_to_sessions(method, path):
     match = default_registry().match(method, path)
     assert match.target == "management"
     assert match.credential_kinds == ("session",)
+
+
+WEB_CREATOR_OPERATIONS = [
+    ("GET", "/api/users/{user_id}/assignable_roles", "management"),
+    ("POST", "/api/conversation/{conversation_id}/creation_mode_responses", "management"),
+    ("GET", "/api/conversation/creator_histories", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/target", "management"),
+    ("POST", "/api/conversation/branch", "management"),
+    ("GET", "/api/conversation/{conversation_id}/model_preferences", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/model_preferences", "management"),
+    ("GET", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "management"),
+]
+
+
+@pytest.mark.parametrize("method,template,target", WEB_CREATOR_OPERATIONS)
+def test_web_creator_operations_have_precise_session_exposures(method, template, target):
+    path = template.format(user_id="member", conversation_id=42, model_id=7)
+    registry = default_registry()
+    match = registry.match(method, path)
+    assert match is not None
+    assert (match.path, match.target, match.credential_kinds) == (template, target, ("session",))
+    assert registry.match("HEAD", path) is None
+    assert registry.match("GET", path, transport="websocket") is None
+
+
+@pytest.mark.parametrize("method,template,target", WEB_CREATOR_OPERATIONS)
+@pytest.mark.asyncio
+async def test_web_creator_operations_reject_anonymous_before_upstream(method, template, target):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Anonymous operation reached identity storage")
+
+    def upstream(request):
+        pytest.fail("Anonymous operation reached a business handler")
+
+    app = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret="fixture"),
+                             identity_lookup=forbidden, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
+            response = await client.request(method, template.format(user_id="member", conversation_id=42, model_id=7))
+            assert response.status_code == 401
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/api/trajectory/conversations/123/export"),
+    ("POST", "/api/trajectory/import"),
+    ("GET", "/api/trajectory/imports"),
+    ("POST", "/api/trajectory/imports"),
+    ("GET", "/api/trajectory/imports/123"),
+    ("DELETE", "/api/trajectory/imports/123"),
+])
+def test_trajectory_archives_are_routed_to_ops_only_for_sessions(method, path):
+    match = default_registry().match(method, path)
+    assert match is not None
+    assert match.target == "ops"
+    assert match.credential_kinds == ("session",)
+    assert default_registry().match("PATCH", path) is None
 
 
 def test_http_and_websocket_do_not_share_an_implicit_get_grant():
