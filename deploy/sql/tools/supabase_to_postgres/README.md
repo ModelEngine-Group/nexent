@@ -77,7 +77,7 @@ runtime, `v2.9.0_001_local_user_accounts.sql`, and
 `v2.9.0_010_account_and_ops_roles.sql`. The worker applies the account schema changes
 inside the credential transaction. The startup SQL runner also applies invitation
 roles and operations grants. Standard deployment selects the image automatically.
-Preload it for offline deployment. The migration worker uses the main backend image.
+Preload it for offline deployment. The migration worker uses the Management image.
 
 `migrate.sh` is the host entry point for both Docker and Kubernetes.
 `migrate_docker.py` runs inside the worker container or Job. Recovery defaults
@@ -160,7 +160,7 @@ Run before application/bootstrap SQL against the original business PostgreSQL.
 The host uses the same Shell entry for both deployment types:
 
 ```bash
-export NEXENT_IMAGE='nexent/nexent:<matching-version>'
+export NEXENT_IMAGE='nexent/nexent-management:<matching-version>'
 # Docker preview, then apply:
 bash deploy/sql/tools/supabase_to_postgres/migrate.sh
 bash deploy/sql/tools/supabase_to_postgres/migrate.sh --apply

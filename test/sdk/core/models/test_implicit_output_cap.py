@@ -9,7 +9,6 @@ import pytest
 from openai import BadRequestError
 
 from nexent.core.models.capacity_budget import (
-    CallerMaxTokensOverrideForbidden,
     CapacityReservePolicy,
     ContextBudgetCalculator,
     ContextBudgetCapacityMismatch,
@@ -54,7 +53,7 @@ def model():
     (None, "request", None, 8192),
     (None, "model_default", 4096, 4096),
 ])
-def test_dispatch_omits_only_implicit_caps(default, source, caller, expected):
+def test_dispatch_omits_all_output_caps(default, source, caller, expected):
     capacity, budget, projection = contract(default, source)
     client = model()
     before = budget.model_dump()
@@ -62,33 +61,28 @@ def test_dispatch_omits_only_implicit_caps(default, source, caller, expected):
     client._dispatch_chat_completion(context_budget_snapshot=budget, capacity_snapshot=projection,
                                      messages=[], **supplied)
     sent = client.client.chat.completions.create.call_args.kwargs
-    if expected is None:
-        assert "max_tokens" not in sent
-    else:
-        assert sent["max_tokens"] == expected
+    assert "max_tokens" not in sent
     assert budget.model_dump() == before
-    assert budget.effective_input_limit_tokens == 32768 - budget.requested_output_tokens
+    assert budget.effective_input_limit_tokens == 32768
+    assert budget.requested_output_tokens is None
     assert budget.compaction_target_tokens < budget.compaction_trigger_threshold_tokens
     assert budget.compaction_trigger_threshold_tokens < budget.effective_input_limit_tokens
     assert budget.w1_fingerprint == capacity.fingerprint
 
 
 @pytest.mark.parametrize("projection", [None, {}, {"provider": "test", "model_name": "test-model"}])
-def test_legacy_missing_reserve_metadata_keeps_snapshot_cap(projection):
+def test_legacy_missing_reserve_metadata_cannot_restore_cap(projection):
     _, budget, _ = contract()
     client = model()
     client._dispatch_chat_completion(context_budget_snapshot=budget, capacity_snapshot=projection, messages=[])
-    assert client.client.chat.completions.create.call_args.kwargs["max_tokens"] == 4096
+    assert "max_tokens" not in client.client.chat.completions.create.call_args.kwargs
 
 
-@pytest.mark.parametrize("failure", ["caller", "fingerprint", "model"])
+@pytest.mark.parametrize("failure", ["fingerprint", "model"])
 def test_omission_does_not_bypass_trusted_budget_checks(failure):
     _, budget, projection = contract()
     kwargs = {}
-    if failure == "caller":
-        kwargs["max_tokens"] = 8192
-        error = CallerMaxTokensOverrideForbidden
-    elif failure == "model":
+    if failure == "model":
         projection["model_name"] = "other-model"
         error = ContextBudgetCapacityMismatch
     else:
@@ -208,7 +202,7 @@ def test_resolved_budget_keeps_history_compaction_and_final_fit(default):
         ]
     )
     summarize = MagicMock(return_value=SimpleNamespace(content=summary, token_usage=None))
-    final = manager.assemble_final_context(model=summarize, memory=memory, current_run_start_idx=0, run_context=run)
+    final = manager.assemble_final_context(model=summarize, memory=memory, current_run_start_idx=0, run_context=run, maintenance=True)
     assert final.evidence.history_compression_triggered is True
     assert final.evidence.new_summary_coverage is not None
     assert final.evidence.final_token_estimate <= budget.effective_input_limit_tokens
@@ -218,5 +212,5 @@ def test_resolved_budget_keeps_history_compaction_and_final_fit(default):
     client._dispatch_chat_completion(context_budget_snapshot=budget, capacity_snapshot=projection,
                                      messages=final.messages)
     sent = client.client.chat.completions.create.call_args.kwargs
-    assert ("max_tokens" in sent) is (default is not None)
+    assert "max_tokens" not in sent
     assert len(sent["messages"]) > 0

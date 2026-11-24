@@ -62,7 +62,6 @@ from management.db.conversation.models import (
     ConversationSourceImage,
     ConversationSourceSearch,
 )
-from management.db.identity.models import UserTenant
 from management.db.knowledge_base.models import KnowledgeRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 from infrastructure.rdb.orm import as_dict
@@ -73,35 +72,12 @@ def load_execution_result_content(
 ) -> str:
     """Load one execution unit in the caller's current conversation scope."""
 
-    membership = select(UserTenant.user_id).where(
-        UserTenant.user_id == user_id,
-        UserTenant.tenant_id == tenant_id,
-        UserTenant.delete_flag == "N",
-    ).exists()
-    statement = (
-        select(ConversationMessageUnit.unit_content)
-        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
-        .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-        .where(
-            membership,
-            ConversationRecord.created_by == user_id,
-            ConversationRecord.conversation_id == conversation_id,
-            ConversationRecord.delete_flag == "N",
-            ConversationMessage.message_id == message_id,
-            ConversationMessage.delete_flag == "N",
-            ConversationMessageUnit.conversation_id == conversation_id,
-            ConversationMessageUnit.unit_index == unit_index,
-            ConversationMessageUnit.unit_type == "execution_result",
-            ConversationMessageUnit.delete_flag == "N",
-        )
-    )
-    with get_db_session() as session:
-        rows = session.execute(statement).scalars().all()
-    if not rows:
+    from infrastructure.rdb.conversation_state import load_execution_result_record
+
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] != "execution_result":
         raise PermissionError("Execution result is unavailable or not authorized")
-    if len(rows) != 1:
-        raise ValueError("Ambiguous execution result reference")
-    payload = json.loads(rows[0])
+    payload = json.loads(record["content"])
     if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
         raise ValueError("Invalid persisted execution content")
     return payload["content"]
@@ -335,7 +311,7 @@ def create_conversation(
         )
 
         record = session.execute(stmt).fetchone()
-        from management.db.trajectory.repository import seed_conversation
+        from infrastructure.rdb.trajectory.repository import seed_conversation
         seed_conversation(session, record.conversation_id, user_id, agent_id)
 
         # Convert to dictionary and ensure timestamps are integers
@@ -1101,6 +1077,37 @@ def branch_conversation(
         }
 
 
+def _completed_turn_checkpoint(session, parent, checkpoint):
+    """Resolve a Runtime proposal only inside its authorized completed projection transaction."""
+    from contracts.agentos import CompletedTurnHistoryCheckpointCandidate
+
+    candidate = CompletedTurnHistoryCheckpointCandidate.model_validate(checkpoint)
+    prior = session.scalar(select(ConversationMessage.message_id).where(
+        ConversationMessage.conversation_id == parent.conversation_id,
+        ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index)).limit(1))
+    if prior != candidate.history_tail_message_id:
+        raise HistorySummaryPersistenceError("completed-turn history boundary changed")
+    checkpoints = session.execute(select(ConversationMessageUnit.unit_id, ConversationMessageUnit.unit_content,
+                                         ConversationMessage.message_id)
+        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
+        .where(ConversationMessageUnit.conversation_id == parent.conversation_id,
+            ConversationMessage.conversation_id == parent.conversation_id,
+            ConversationMessageUnit.unit_type == HISTORY_SUMMARY_UNIT_TYPE,
+            ConversationMessageUnit.unit_status == "completed", ConversationMessageUnit.delete_flag == "N",
+            ConversationMessage.status == "completed", ConversationMessage.delete_flag == "N",
+            ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))).all()
+    latest = next((row.unit_id for row in checkpoints
+                   if (parsed := _parse_history_summary_content(row.unit_content))
+                   and parsed["covered_through_message_id"] == row.message_id), None)
+    if latest != candidate.previous_summary_unit_id:
+        raise HistorySummaryPersistenceError("completed-turn previous checkpoint changed")
+    return {"summary": candidate.summary, "covered_through_message_id": parent.message_id,
+            "previous_summary_unit_id": candidate.previous_summary_unit_id, "trigger": candidate.trigger}
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,
@@ -1319,20 +1326,26 @@ def persist_assistant_run_batch(
                 ensure_ascii=False,
             )
 
-        for checkpoint in history_checkpoints or ():
-            try:
-                with session.begin_nested():
-                    save_history_summary(
-                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
-                    )
-            except (HistorySummaryPersistenceError, SQLAlchemyError) as exc:
-                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
-                               conversation_id, type(exc).__name__)
-
         parent.message_content = message_content or ""
         parent.status = terminal_status
         parent.updated_by = user_id
         parent.update_time = func.current_timestamp()
+        if history_checkpoints:
+            session.flush()
+        for checkpoint in history_checkpoints or ():
+            try:
+                with session.begin_nested():
+                    if checkpoint.get("coverage_scope") == "current_completed_turn":
+                        if terminal_status != "completed" or any(
+                                unit.get("unit_type") == "human_interaction" for unit in message_units):
+                            continue
+                        checkpoint = _completed_turn_checkpoint(session, parent, checkpoint)
+                    save_history_summary(
+                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
+                    )
+            except (HistorySummaryPersistenceError, SQLAlchemyError, ValueError) as exc:
+                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
+                               conversation_id, type(exc).__name__)
 
         if message_content or any(
             unit.get("unit_type") not in {HISTORY_SUMMARY_UNIT_TYPE, "history_summary_candidate"}
@@ -2205,7 +2218,7 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if conversation_result.rowcount == 0:
             return False
 
-        from management.db.trajectory.repository import delete_summaries
+        from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, [conversation_id], user_id)
 
         # 2. Mark related messages as deleted
@@ -2295,7 +2308,7 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
             .values(update_data)
         )
 
-        from management.db.trajectory.repository import delete_summaries
+        from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, owned_ids, user_id)
 
         # 2. Mark related messages as deleted
@@ -2358,7 +2371,7 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             .values(update_data)
         )
 
-        from management.db.trajectory.repository import delete_summaries
+        from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, conv_ids, user_id)
 
         # 3) Mark messages as deleted
@@ -3548,22 +3561,29 @@ def get_historical_context(
             records = session.execute(select(
                 ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
                 ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
-                ConversationMessageUnit.invocation_id,
+                ConversationMessageUnit.invocation_id, ConversationMessageUnit.unit_index,
             ).where(
                 ConversationMessageUnit.conversation_id == conversation_id,
                 ConversationMessageUnit.message_id.in_(assistant_ids),
                 ConversationMessageUnit.unit_type.in_([
-                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result",
                 ]),
                 ConversationMessageUnit.unit_status == "completed",
                 ConversationMessageUnit.delete_flag == "N",
             ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
             by_message = {}
+            from nexent.core.agents.context.native_history import decode_history_event
+
             for record in records:
-                by_message.setdefault(record.message_id, []).append({
+                history_record = {
                     "record_type": record.unit_type, "content": record.unit_content,
                     "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
-                })
+                    "unit_index": record.unit_index,
+                }
+                event = decode_history_event(history_record)
+                if event is not None:
+                    history_record["execution_event"] = event
+                by_message.setdefault(record.message_id, []).append(history_record)
             for turn in turns:
                 if turn["assistant_message_id"] in by_message:
                     turn["execution_records"] = by_message[turn["assistant_message_id"]]
@@ -3572,7 +3592,8 @@ def get_historical_context(
         if summary_record and summary_payload:
             summary_result = {
                 "unit_id": summary_record.unit_id,
-                **summary_payload,
+                **{key: value for key, value in summary_payload.items()
+                   if key not in {"structured_source_proofs", "execution_sources"}},
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
                 "current_user_message_index": before_message_index}

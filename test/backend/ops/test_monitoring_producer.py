@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from runpy import run_path
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
@@ -15,13 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_application_factory_has_no_ops_dependency():
-    collect = run_path(str(ROOT / "deploy/images/dockerfiles/main/copy_service_sources.py"))["collect_sources"]
-    files = collect(ROOT, ("backend.http.server.app_factory",))
-    assert not any(path.as_posix().startswith("backend/ops/") for path in files)
-
-
-def test_producer_import_does_not_load_service_implementations():
+def test_application_factory_and_producer_import_without_service_implementations():
     environment = {**os.environ, "PYTHONPATH": os.pathsep.join(
         (str(ROOT), str(ROOT / "backend"), str(ROOT / "sdk"), os.environ.get("PYTHONPATH", "")))}
     result = subprocess.run([sys.executable, "-c", """
@@ -30,9 +23,11 @@ import sys
 class RejectServices(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {'ops', 'management', 'runtime'}:
-            raise AssertionError('Producer imported ' + fullname)
+            raise AssertionError('Shared code imported ' + fullname)
 sys.meta_path.insert(0, RejectServices())
+from backend.http.server.app_factory import create_app
 from infrastructure.monitoring.runtime import Producer
+assert create_app()
 assert Producer.__module__ == 'infrastructure.monitoring.runtime'
 """], cwd=ROOT, env=environment, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr

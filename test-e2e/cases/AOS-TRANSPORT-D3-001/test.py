@@ -23,8 +23,8 @@ from contracts.agentos import (
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
-from gateway.downstream.middleware import GatewayIdentityMiddleware
-from gateway.security.context import trusted_identity
+from gateway.identity.middleware import GatewayIdentityMiddleware
+from gateway.identity.context import trusted_identity
 from infrastructure import agentos_identity
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
@@ -851,11 +851,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
     skill_tools = [
         ToolConfig(
             class_name=class_name, name=name, source="builtin", usage="builtin", metadata=skill_metadata,
-            params={"local_skills_dir": str(skill_root), **params},
+            params={"local_skills_dir": str(skill_root), "authorized_skill_names": ["summarize"], **params},
         )
         for class_name, name, params in [
             ("RunSkillScriptTool", "run_skill_script",
-             {"workspace_path": None, "isolated_skills_root": False, "authorized_skill_names": ["summarize"]}),
+             {"workspace_path": None, "isolated_skills_root": False}),
             ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False}),
             ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": skill["config"]}}),
         ]
@@ -1977,7 +1977,7 @@ def _serve_workbench_aidp_images():
 
 async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, provider_url, provider_calls):
     from contracts.agentos import EvaluationSkillTool, ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
-    from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+    from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
     from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
     from infrastructure.local_tool_execution import build_local_tool
@@ -2321,7 +2321,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                     "index_names": ["kb-one"], "document_paths": ["report.txt"],
                 }
             assert turn["automation"] == {
-                "agent_id": 7, "agent_version_no": 2, "model_id": 11 if use_workbench else None,
+                # Automation retains the requested model. This request leaves model selection to the Agent.
+                "agent_id": 7, "agent_version_no": 2, "model_id": None,
                 "tool_params": automation_params,
                 "has_attachments": False,
             }
@@ -2565,7 +2566,17 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert first.headers["X-Workbench-Config-Version"] == "4"
         if metadata is not None:
             assert first.headers["X-Runtime-Metadata-Version"] == str(metadata_version)
-        assert first.text.startswith(prefix)
+        def frame_fields(frame):
+            fields = []
+            for line in frame.splitlines():
+                name, separator, value = line.partition(": ")
+                assert separator
+                fields.append((name, json.loads(value) if name == "data" else value))
+            return fields
+
+        expected_frames = prefix.split("\n\n")[:-1]
+        actual_frames = first.text.split("\n\n")[:len(expected_frames)]
+        assert [frame_fields(frame) for frame in actual_frames] == [frame_fields(frame) for frame in expected_frames]
         assert "agentos_terminal" in first.text
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id
         assert retry.json()["conversation_id"] == reference.conversation_id

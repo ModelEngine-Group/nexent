@@ -194,6 +194,8 @@ export function useAuthorization(): AuthorizationContextType {
   const isSystemConfigAlias =
     cleanPath === "/system-config" &&
     accessibleRoutes.includes("/ops/configuration");
+  const isSystemConfigRoute =
+    cleanPath === "/ops/configuration" || isSystemConfigAlias;
 
   // Support prefix matching so nested routes such as /evaluation/{id} are
   // covered by /evaluation.
@@ -201,13 +203,15 @@ export function useAuthorization(): AuthorizationContextType {
     (route) => route !== "/" && cleanPath.startsWith(route + "/")
   );
 
-  const hasAccess =
+  const hasRouteAccess =
     cleanPath === "/" ||
     isSharePage ||
     isUserProfilePage ||
     isSystemConfigAlias ||
     accessibleRoutes.includes(cleanPath) ||
     isWithinAccessiblePrefix;
+  const hasAccess =
+    hasRouteAccess && (!isSystemConfigRoute || hasRole(user, "SU"));
 
   // Route guard
   useLayoutEffect(() => {
@@ -273,9 +277,14 @@ export function useAuthorization(): AuthorizationContextType {
 
   const canAccessRoute = useCallback(
     (route: string): boolean => {
+      if (route === "/ops/configuration" || route === "/system-config") {
+        return (
+          accessibleRoutes.includes("/ops/configuration") && hasRole(user, "SU")
+        );
+      }
       return accessibleRoutes.includes(route);
     },
-    [accessibleRoutes]
+    [accessibleRoutes, user]
   );
 
   // Internal group list query - fetches all groups for the user's tenant
