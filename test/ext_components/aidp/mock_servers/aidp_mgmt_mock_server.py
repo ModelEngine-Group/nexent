@@ -1318,6 +1318,24 @@ def _active_documents(kds_id: str) -> List[Dict[str, Any]]:
     ]
 
 
+def _tree_documents(kds_id: str) -> List[Dict[str, Any]]:
+    """Return every file still present in the folder tree.
+
+    Folders/Tree lists files in all HistoryStatus states, not only completed
+    ones; rows past their removal window are hidden here while History keeps
+    the audit record.
+    """
+    now = time.time()
+    return [
+        doc
+        for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if not (
+            isinstance(doc.get("_deleted_at"), (int, float))
+            and doc["_deleted_at"] <= now
+        )
+    ]
+
+
 def _normalize_mock_folder_path(path: Optional[str]) -> str:
     """Normalize one mock folder path to the AIDP relative form."""
     normalized = (path or "/").strip().replace("\\", "/")
@@ -2513,7 +2531,7 @@ def get_folder_tree(
     if include_files:
         documents = [
             document
-            for document in _active_documents(kds_id)
+            for document in _tree_documents(kds_id)
             if (document.get("folder_path") or "/") == normalized_path
         ]
         normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
