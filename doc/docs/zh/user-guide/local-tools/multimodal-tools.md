@@ -46,7 +46,7 @@ title: 多模态工具
 ## ⚙️ 前置配置
 
 - 确保已在平台配置可用的存储客户端（如 MinIO/S3）及数据处理服务地址，保证能下载文件。
-- 为 `analyze_text_file` 配置可用的 LLM；为 `analyze_image` 配置可用的视觉语言模型；为 `analyze_video` 和 `analyze_audio` 配置可用的视频理解模型（需支持音视频输入，如 Qwen3-Omni 系列模型）。
+- 为 `analyze_text_file` 配置可用的 LLM；为 `analyze_image` 配置可用的视觉语言模型；为 `analyze_video` 配置可用的视频理解模型，为 `analyze_audio` 配置可用的音频理解模型（均需支持音视频输入，如 Qwen3-Omni 系列模型）。
 
 ## 🛠️ 操作指引
 
