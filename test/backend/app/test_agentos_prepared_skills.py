@@ -116,6 +116,20 @@ def test_evaluation_skill_snapshot_authorizes_and_pins_local_files(skill_snapsho
     runtime_read.assert_called_once_with(7, 2, actor.tenant_id)
 
 
+def test_evaluation_skill_snapshot_uses_bound_skill_id_for_regular_agent(skill_snapshot, mocker):
+    agent, binding, _, row, _ = skill_snapshot
+    bound = {**row, "skill_id": 53}
+    mocker.patch.object(evaluation_snapshot, "read_bound_skills", return_value=[bound])
+    for tool in agent.tools:
+        if tool.name in {"run_skill_script", "read_skill_md"}:
+            tool.params["skill_name_to_id"] = {"summarize": 53}
+
+    snapshot = evaluation_snapshot.export_snapshot(
+        agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+    )
+    assert snapshot is not None
+
+
 def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot):
     agent, binding, *_ = skill_snapshot
     agent.tools[1].params["local_skills_dir"] = "/wrong-source"
