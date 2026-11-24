@@ -4,6 +4,7 @@ FastAPI application factory with common configurations and exception handlers.
 """
 
 import logging
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +23,19 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _with_ops_monitoring(lifespan):
+    @asynccontextmanager
+    async def combined(app):
+        from infrastructure.monitoring.runtime import producer_lifespan
+
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(producer_lifespan())
+            state = await stack.enter_async_context(lifespan(app)) if lifespan is not None else None
+            yield state
+
+    return combined
+
+
 def create_app(
     title: str = "Nexent API",
     description: str = "",
@@ -32,6 +46,7 @@ def create_app(
     enable_monitoring: bool = True,
     lifespan=None,
     gateway_identity_audience=None,
+    internal_runtime_request=None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -45,10 +60,18 @@ def create_app(
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
         lifespan: Optional FastAPI lifespan context manager
+        gateway_identity_audience: Expected audience for signed Gateway identities
+        internal_runtime_request: Optional predicate for scoped Runtime service requests
 
     Returns:
         Configured FastAPI application
     """
+    if enable_monitoring:
+        from contracts.constants.environment import OPS_MONITORING_ENABLED
+
+        if OPS_MONITORING_ENABLED:
+            lifespan = _with_ops_monitoring(lifespan)
+
     app = FastAPI(
         title=title,
         description=description,
@@ -66,9 +89,12 @@ def create_app(
         allow_headers=["*"],
     )
     if gateway_identity_audience:
-        from gateway.downstream.middleware import GatewayIdentityMiddleware
+        from gateway.identity.middleware import GatewayIdentityMiddleware
 
-        app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
+        app.add_middleware(
+            GatewayIdentityMiddleware, audience=gateway_identity_audience,
+            internal_runtime_request=internal_runtime_request,
+        )
 
     # Register exception handlers
     register_exception_handlers(app)

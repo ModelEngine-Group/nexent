@@ -37,6 +37,30 @@ def local_spans(spans, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("traced", [False, True])
+async def test_preparation_keeps_strict_wire_models_serializable(local_spans, monkeypatch, traced):
+    from pydantic import BaseModel, ConfigDict
+
+    manager, exporter = local_spans
+    monkeypatch.setattr(manager._config, "enable_telemetry", traced)
+
+    class PreparedWireRun(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        query: str
+
+    @capture_preparation
+    async def prepare():
+        with trace_phase("prepare.wire"):
+            return PreparedWireRun(query="task")
+
+    result = await prepare()
+    assert result.model_dump() == {"query": "task"}
+    assert result.model_dump_json() == '{"query":"task"}'
+    assert not hasattr(result, "run_timing") and not hasattr(result, "preparation_trace")
+    assert not exporter.get_finished_spans()
+
+
+@pytest.mark.asyncio
 async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     local_spans, monkeypatch
 ):
@@ -61,7 +85,7 @@ async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     info.model_config_list = []
     info.history = []
     info.attempt_outcome = "completed"
-    monkeypatch.setattr(module, "_agent_run_thread", lambda _: calls.append("run"))
+    monkeypatch.setattr(module, "_agent_run_thread", lambda _, **kwargs: calls.append("run"))
     module.agent_run_thread(info)
     nodes = {s.name: s for s in exporter.get_finished_spans()}
     root, preparation, search = (
@@ -71,7 +95,8 @@ async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     )
     assert search.parent.span_id == preparation.context.span_id
     assert preparation.parent.span_id == root.context.span_id
-    assert root.start_time <= search.start_time < search.end_time <= root.end_time
+    # Shared UTC boundaries retain microseconds; phase records retain nanoseconds.
+    assert root.start_time // 1000 <= search.start_time // 1000 <= search.end_time // 1000 <= root.end_time // 1000
     assert (
         search.start_time == record["started_at_ns"]
         and search.end_time == record["finished_at_ns"]
@@ -80,7 +105,7 @@ async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     assert "private" not in search.attributes["input.value"]
     assert "结果" in search.attributes["output.value"]
     assert (
-        root.attributes["nexent.duration_ms"] >= search.attributes["nexent.duration_ms"]
+        root.attributes["nexent.duration_ms"] >= int(search.attributes["nexent.duration_ms"])
     )
     assert info.preparation_trace == [] and calls == ["search", "run"]
 

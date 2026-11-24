@@ -3786,7 +3786,7 @@ def _isolated_imports(monkeypatch):
 def isolated_trajectory_projection(monkeypatch):
     """Keep the new persistence collaborator outside this legacy SQL-double unit."""
     projection = types.SimpleNamespace(seed_conversation=MagicMock(), delete_summaries=MagicMock())
-    monkeypatch.setitem(sys.modules, "management.db.trajectory.repository", projection)
+    monkeypatch.setitem(sys.modules, "infrastructure.rdb.trajectory.repository", projection)
     return projection
 
 

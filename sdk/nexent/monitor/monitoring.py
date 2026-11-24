@@ -201,6 +201,10 @@ class AgentRunMetadata:
     agent_display_name: Optional[str] = None
     agent_version_no: Optional[int] = None
     agent_version_name: Optional[str] = None
+    monitoring_group_ids: Optional[tuple[int, ...]] = None
+    monitoring_run_id: Optional[str] = None
+    monitoring_root_run_id: Optional[str] = None
+    monitoring_parent_run_id: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""
@@ -908,6 +912,7 @@ class MonitoringManager:
         operation_name: str = "agent.run",
         *,
         start_time: Optional[int] = None,
+        run_timing=None,
     ) -> Iterator[Optional[Any]]:
         """Create the SDK-owned top-level Agent span."""
         agent_metadata = _coerce_agent_run_metadata(metadata)
@@ -934,6 +939,7 @@ class MonitoringManager:
                         operation_name,
                         OPENINFERENCE_SPAN_KIND_AGENT,
                         start_time=start_time,
+                        **({"run_timing": run_timing} if run_timing is not None else {}),
                         **attributes,
                     ) as span:
                         with agent_trace_name_scope(span, trace_name, parent_span):
@@ -993,6 +999,7 @@ class MonitoringManager:
         operation_name: str,
         span_kind: str = OPENINFERENCE_SPAN_KIND_CHAIN,
         start_time: Optional[int] = None,
+        run_timing=None,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """Trace a non-LLM operation using OpenInference span kind semantics."""
@@ -1019,11 +1026,15 @@ class MonitoringManager:
             span_attrs.update(self._trace_payload_attributes("output", output_value))
 
         span_attrs.update(attributes)
+        if run_timing is not None:
+            start_time = run_timing.started_at_ns
+            span_attrs["nexent.agent_run_id"] = run_timing.run_id
 
         with self._tracer.start_as_current_span(
             operation_name,
             attributes=span_attrs,
             start_time=start_time,
+            **({"end_on_exit": False} if run_timing is not None else {}),
         ) as span:
             try:
                 yield span
@@ -1034,6 +1045,20 @@ class MonitoringManager:
                 raise
             else:
                 span.set_status(Status(StatusCode.OK))
+            finally:
+                if run_timing is not None:
+                    result = run_timing.finish()
+                    try:
+                        if result.duration_ms is None:
+                            span.set_attribute("nexent.availability.duration_ms", "unavailable")
+                        else:
+                            span.set_attribute("nexent.duration_ms", result.duration_ms)
+                    except Exception:
+                        logger.debug("Unable to attach shared Agent timing", exc_info=True)
+                    try:
+                        span.end(end_time=result.ended_at_ns)
+                    except Exception:
+                        logger.debug("Unable to archive completed Agent span", exc_info=True)
 
     def set_openinference_output(
         self,
@@ -2021,6 +2046,7 @@ class LLMTokenTracker:
         self.token_count = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.attempt_observation = None
         # Snapshot context at creation time (caller's async scope) so that
         # downstream code running in a different thread can still access it.
         self._context_snapshot: Dict[str, Any] = get_monitoring_context()
@@ -2029,7 +2055,11 @@ class LLMTokenTracker:
         """Publish the first nonempty output immediately, including partial failures."""
         if not getattr(self.manager, "is_enabled", False) or self.first_token_time is not None:
             return
-        ttft = valid_ttft(time.perf_counter() - self._start_monotonic)
+        if self.attempt_observation is None:
+            ttft = valid_ttft(time.perf_counter() - self._start_monotonic)
+        else:
+            milliseconds = self.attempt_observation.ttft_ms
+            ttft = milliseconds / 1000 if milliseconds is not None else None
         if ttft is None:
             return
         self.ttft_seconds = ttft
@@ -2083,7 +2113,7 @@ class LLMTokenTracker:
             "llm.model_name": self.model_name})
 
         # Add span attributes using OpenInference naming
-        if self.span:
+        if self.span and self.attempt_observation is None:
             usage_details = {
                 "input": input_tokens,
                 "output": output_tokens,
@@ -2335,6 +2365,18 @@ class RecordModelCallContext:
             pass
 
 
+def read_openai_token_counts(usage) -> dict | None:
+    """Read provider usage once while preserving explicit zero and absence."""
+    if usage is None:
+        return None
+    read = usage.get if isinstance(usage, dict) else lambda field: getattr(usage, field, None)
+    return {
+        "input_tokens": read("prompt_tokens"),
+        "output_tokens": read("completion_tokens"),
+        "total_tokens": read("total_tokens"),
+    }
+
+
 class _MonitoredStreamIterator:
 
     def __init__(self, stream, start_time: float, model_name: str, model_type: str, *, start_monotonic=None):
@@ -2352,6 +2394,7 @@ class _MonitoredStreamIterator:
         self._closed = False
         self._aborted = False
         self._finalized = False
+        self.attempt_observation = None
 
     def __iter__(self):
         return self
@@ -2400,27 +2443,38 @@ class _MonitoredStreamIterator:
             self._error = self._error or exc
             raise
         finally:
+            if self.attempt_observation is not None:
+                self.attempt_observation.finish(self._error or GeneratorExit())
             self._finalize()
 
     def __next__(self):
         try:
             chunk = next(self._stream)
-            if self._first_chunk_time is None and stream_token_basis(chunk) is not None:
+            basis = stream_token_basis(chunk)
+            if self._first_chunk_time is None and basis is not None:
                 elapsed = valid_ttft(time.perf_counter() - self._start_monotonic)
                 if elapsed is not None:
                     self._ttft_seconds = elapsed
                     self._first_chunk_time = time.time()
-            if hasattr(chunk, "usage") and chunk.usage is not None:
-                self._input_tokens = getattr(
-                    chunk.usage, "prompt_tokens", 0) or 0
-                self._output_tokens = getattr(
-                    chunk.usage, "completion_tokens", 0) or 0
+            counts = read_openai_token_counts(getattr(chunk, "usage", None))
+            if self.attempt_observation is not None:
+                self.attempt_observation.record_provider_counts(counts)
+                if basis is not None:
+                    self.attempt_observation.content()
+            if counts is not None:
+                self._input_tokens = counts["input_tokens"] or 0
+                self._output_tokens = counts["output_tokens"] or 0
             return chunk
         except StopIteration:
+            if self.attempt_observation is not None:
+                self.attempt_observation.complete(None)
+                self.attempt_observation.finish()
             self._finalize()
             raise
         except Exception as exc:
             self._error = exc
+            if self.attempt_observation is not None:
+                self.attempt_observation.finish(exc)
             self._finalize()
             raise
 
@@ -2465,34 +2519,55 @@ class _MonitoredChatCompletions:
         self._original = original
         self._model_name = model_name
         self._model_type = model_type
+        self.catalog_identity = None
 
-    def create(self, **kwargs):
+    def create(self, *, _trajectory_capture=None, **kwargs):
         stream = kwargs.get("stream", False)
         start_time = time.time()
         start_monotonic = time.perf_counter()
+        observation = self._observe_dispatch(_trajectory_capture)
         try:
             response = self._original.create(**kwargs)
         except Exception as exc:
-            self._record_non_streaming(start_time, error=exc)
+            self._record_non_streaming(start_time, error=exc, observation=observation)
             raise
 
         if stream:
-            return _MonitoredStreamIterator(
+            iterator = _MonitoredStreamIterator(
                 response, start_time, self._model_name, self._model_type, start_monotonic=start_monotonic
             )
+            if observation is not None:
+                iterator.attempt_observation = observation
+            return iterator
         else:
-            self._record_non_streaming(start_time, response=response)
+            self._record_non_streaming(start_time, response=response, observation=observation)
             return response
 
-    def _record_non_streaming(self, start_time: float, response=None, error: Optional[Exception] = None):
+    def _observe_dispatch(self, capture):
+        if _monitoring_operation.get() in {"connectivity_check", "tool_validation", "model_validation"}:
+            return None
+        from nexent.monitor.model_fact import AttemptObservation
+
+        identity = self.catalog_identity or (None, None, self._model_type)
+        observation = AttemptObservation.for_client(*identity, trace_enabled=capture is not None and capture.enabled)
+        if observation is not None:
+            if capture is not None:
+                capture.bind_observation(observation)
+            observation.dispatch()
+        return observation
+
+    def _record_non_streaming(self, start_time: float, response=None, error: Optional[Exception] = None,
+                              observation=None):
         try:
             request_duration_ms = int((time.time() - start_time) * 1000)
-            input_tokens = 0
-            output_tokens = 0
-            if response is not None and hasattr(response, "usage") and response.usage:
-                input_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-                output_tokens = getattr(
-                    response.usage, "completion_tokens", 0) or 0
+            counts = read_openai_token_counts(getattr(response, "usage", None))
+            if observation is not None:
+                observation.record_provider_counts(counts)
+                if error is None:
+                    observation.complete(None)
+                observation.finish(error)
+            input_tokens = (counts or {}).get("input_tokens") or 0
+            output_tokens = (counts or {}).get("output_tokens") or 0
 
             _enqueue_client_monitoring_record(
                 model_name=self._model_name,

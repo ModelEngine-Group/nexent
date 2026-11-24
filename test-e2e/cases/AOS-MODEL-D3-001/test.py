@@ -21,7 +21,7 @@ from contracts.agentos import ChatInvocation, ChatMessage, ChatOptions, Embeddin
 from contracts.constants import environment
 from contracts.model_administration import ModelHealthcheck, ModelRegistration, ModelTenantDeactivation
 from contracts.errors.exceptions import RuntimeUpstreamError
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.identity.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
 from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from management.services.memory.extraction import AgentOSMemoryExtractionModel

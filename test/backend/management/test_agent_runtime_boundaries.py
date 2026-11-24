@@ -6,12 +6,49 @@ import importlib.util
 import os
 import subprocess
 import sys
-from pathlib import Path
 import tokenize
+from pathlib import Path
+from textwrap import indent
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def _run_source_check(script):
+    # Resolving a dotted SDK patch initializes its NLP package before the patch takes effect.
+    # Isolate external resource preparation before importing any project module.
+    bootstrap = """
+from unittest.mock import patch
+with (
+    patch("requests.get", side_effect=OSError("External downloads disabled in source-isolation tests")),
+    patch("jieba.posseg.lcut", return_value=[]),
+):
+""" + indent(script, "    ")
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    return subprocess.run(
+        [sys.executable, "-c", bootstrap], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+    )
+
+
+def test_source_checks_do_not_download_or_preload_nlp_resources():
+    script = """
+import sys
+
+network_events = []
+def observe_network(event, args):
+    if event in {"socket.connect", "socket.getaddrinfo"}:
+        network_events.append(event)
+
+sys.addaudithook(observe_network)
+import jieba
+import nexent.core.nlp
+
+assert not network_events, network_events
+assert not jieba.dt.initialized, "Source-isolation checks must not preload the NLP dictionary"
+"""
+    completed = _run_source_check(script)
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_retired_in_process_execution_chain_is_removed():
@@ -331,7 +368,5 @@ async def verify():
         assert result.status_code==200 and result.json()=={"status":"alive"}
 asyncio.run(verify())
 """
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
-    result = subprocess.run([sys.executable, "-c", script], cwd=ROOT, env=env,
-                            capture_output=True, text=True, timeout=30)
+    result = _run_source_check(script)
     assert result.returncode == 0, result.stderr

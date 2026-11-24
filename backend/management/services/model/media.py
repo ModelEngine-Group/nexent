@@ -28,7 +28,7 @@ def _get_model_config_by_id(tenant_id, model_id, expected_model_type):
     return model_config
 
 
-def _build_vlm_model(vlm_model_config):
+def _build_vlm_model(vlm_model_config, tenant_id=None):
     if not vlm_model_config:
         return None
     return OpenAIVLModel(
@@ -45,6 +45,7 @@ def _build_vlm_model(vlm_model_config):
         ssl_verify=vlm_model_config.get("ssl_verify", True),
         model_factory=vlm_model_config.get("model_factory"),
         display_name=vlm_model_config.get("display_name"),
+        monitoring_identity=(tenant_id, vlm_model_config.get("model_id"), vlm_model_config.get("model_type") or "vlm"),
     )
 
 
@@ -60,7 +61,7 @@ def get_vlm_model(tenant_id: str, model_id: Optional[int] = None):
         vlm_model_config = tenant_config_manager.get_model_config(
             key=MODEL_CONFIG_MAPPING["vlm"], tenant_id=tenant_id
         )
-    return _build_vlm_model(vlm_model_config)
+    return _build_vlm_model(vlm_model_config, tenant_id)
 
 
 def get_image_understanding_model(tenant_id: str):
@@ -75,7 +76,7 @@ def get_video_understanding_model(tenant_id: str, model_id: Optional[int] = None
         vlm_model_config = tenant_config_manager.get_model_config(
             key=MODEL_CONFIG_MAPPING["vlm3"], tenant_id=tenant_id
         )
-    return _build_vlm_model(vlm_model_config)
+    return _build_vlm_model(vlm_model_config, tenant_id)
 
 
 def get_llm_model(tenant_id: str, model_id: Optional[int] = None):

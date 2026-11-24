@@ -1,10 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Compose operations APIs while preserving minimal health startup."""
 
-from contracts.constants.environment import APP_VERSION
 from fastapi import FastAPI
+
+from contracts.constants.environment import APP_VERSION, OPS_MONITORING_ENABLED
 from backend.http.server.exception_handlers import register_exception_handlers
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.identity.middleware import GatewayIdentityMiddleware
 from management.api.permission.ops_access import router as access_router
 from ops.api.health import router as health_router
 from ops.api.system_configurations import router as system_configuration_router
@@ -35,6 +36,10 @@ def create_app() -> FastAPI:
         from ops.api.trajectory import imports_router
 
         application.include_router(imports_router, prefix="/trajectory")
+    if OPS_MONITORING_ENABLED:
+        from ops.api.monitoring import ops_router
+
+        application.include_router(ops_router)
     return application
 
 
