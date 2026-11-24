@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
@@ -27,6 +28,23 @@ from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
 from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
+
+
+@pytest_asyncio.fixture
+async def memory_read_manager(monkeypatch):
+    from infrastructure import memory_io
+
+    manager = ThreadManager("memory-policy-test", {"memory-read": LanePolicy(
+        name="memory-read", max_workers=1, max_queue_size=0, queue_timeout_seconds=0,
+        cancel_grace_seconds=0, shutdown_grace_seconds=1,
+    )})
+    manager.start()
+    monkeypatch.setattr(memory_io, "get_current_thread_manager", lambda: None)
+    monkeypatch.setattr(memory_io, "get_default_thread_manager", lambda: manager)
+    try:
+        yield manager
+    finally:
+        await manager.shutdown(timeout=1)
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -663,9 +681,10 @@ async def test_prepared_conversation_scope_is_checked_before_compilation(mocker)
 
 
 @pytest.mark.asyncio
-async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mocker):
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mocker, memory_read_manager, enabled):
     mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={})
-    memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=True)
+    memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=enabled)
     compile_run = mocker.patch.object(run, "create_agent_run_info")
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
@@ -674,8 +693,8 @@ async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mo
         request, reference, "actor", "tenant",
     ) is compile_run.return_value
     memory.assert_called_once_with("actor")
-    assert compile_run.await_args.kwargs["allow_memory_search"] is True
-    assert compile_run.await_args.kwargs["prepared_conversation"].memory_enabled is True
+    assert compile_run.await_args.kwargs["allow_memory_search"] is enabled
+    assert compile_run.await_args.kwargs["prepared_conversation"].memory_enabled is (True if enabled else None)
 
 
 @pytest.mark.asyncio
