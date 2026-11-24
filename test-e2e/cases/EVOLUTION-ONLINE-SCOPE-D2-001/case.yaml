@@ -27,6 +27,9 @@ case:
   - order: 4
     action: 用编辑者读取待处理批次和已完成批次。撤回一个问题轮次，过期一个成功轮次后再次读取并尝试从旧轮次出题。
     expected: 工作台显示获授权的归因和重复成功工具顺序。撤权的轮次排除；正文过期但授权仍有效时只显示缺证原因。两者均不可出题或参与参考流程。
+  - order: 5
+    action: 将原操作人切换到另一个租户并重新登录为管理员。按原编号访问智能体评测工作台，提交一次评测。
+    expected: 两个请求均返回 404，原租户和当前租户都没有新增实验。
   expected_results: [撤回立即清除相应的诊断。, 编辑者能看到提交给本版本的普通 Skill 和新 Skill 建议，旧版不能登记未挂载的新 Skill。, 题面和附件在授权范围内展示，逐项确认后才能入库。, 复盘展示按当前证据授权重算的批次总结与可出题来源。]
   forbidden_side_effects: [他人会话的授权与证据未受影响。, 工作台不泄露其他版本的建议或仅在澄清中的原话。, 工作台不返回其他版本的汇总、缓存的失效归因或原始对话正文。]
   acceptance:
@@ -49,6 +52,9 @@ case:
     steps: [4]
     expected_results: [4]
     forbidden_side_effects: [3]
+  - id: AC-05
+    description: 其他租户管理员不能读取工作台或创建评测。
+    steps: [5]
   contract:
     protocol: HTTP API
     request_expectations: [使用原生用户登录会话调用会话设置和评测工作台接口。]

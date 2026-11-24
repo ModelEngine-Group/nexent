@@ -14,7 +14,7 @@ def require_business_agent_edit(agent_id: int, tenant_id: str, user_id: str) -> 
     try:
         draft = authorize_debug_version(agent_id, 0, user_id, tenant_id)
     except AgentNotFoundError as exc:
-        raise AppException(ErrorCode.AGENTSPACE_AGENT_NOT_FOUND) from exc
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND) from exc
     except ForbiddenError as exc:
         raise AppException(ErrorCode.COMMON_FORBIDDEN) from exc
     if draft.get("agent_origin") == "SYSTEM":

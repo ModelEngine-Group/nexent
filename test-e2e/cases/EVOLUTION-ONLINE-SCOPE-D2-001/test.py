@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from local_auth_http import bearer, native_runtime, register, runtime
+from local_auth_http import bearer, native_runtime, register, runtime, seed_membership_roles
 
 
 @pytest.mark.case_id("EVOLUTION-ONLINE-SCOPE-D2-001")
@@ -230,6 +230,22 @@ def test_online_scope_http(runtime):
             assert current["reviewed"] == 4 and current["missing"] == 2 and current["reference_workflows"] == []
             assert {row["turn_id"] for row in current["draft_turns"]} == {turn_ids[18], turn_ids[20]}
             assert client.get(base + str(turn_ids[19]) + "/case-draft", headers=headers).status_code == 404
+
+            # A migrated user is now an administrator of a different tenant.
+            with get_db_session() as session:
+                session.execute(text("UPDATE nexent.user_tenant_t SET tenant_id='tenant-outside' WHERE user_id=:owner"), {"owner": owner})
+            seed_membership_roles(owner, ["ADMIN"])
+            signed = identity.post("/api/user/signin", json={"email": actor["user"]["email"], "password": "Password123"})
+            assert signed.status_code == 200
+            foreign = bearer(signed.json()["data"]["session"]["access_token"])
+            assert client.get(workspace, headers=foreign).status_code == 404
+            denied = client.post("/api/agent-evolution/experiments", headers=foreign, json={
+                "request_id": uuid4().hex, "agent_id": 7, "version_no": 1, "case_ids": [file_case],
+                "candidate_type": "baseline", "evaluator_id": 1,
+            })
+            assert denied.status_code == 404 and "experiment_id" not in denied.text
+            with get_db_session() as session:
+                assert session.scalar(text("SELECT count(*) FROM nexent.evolution_experiment_t")) == 0
     finally:
         clear_default_thread_manager(config_thread_manager)
         asyncio.run(config_thread_manager.shutdown(timeout=5))
