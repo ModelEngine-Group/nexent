@@ -179,7 +179,7 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     await expect(
       ops.page.getByRole("navigation").getByRole("button"),
-    ).toHaveCount(3);
+    ).toHaveCount(2);
     opsEntries = await ops.page
       .getByRole("navigation")
       .getByRole("button")
@@ -191,6 +191,10 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
         name: "System configuration",
         exact: true,
       }),
+    ).toHaveCount(0);
+    await ops.page.goto(`${baseURL}/en/ops/configuration`);
+    await expect(
+      ops.page.getByText("No access", { exact: true }),
     ).toBeVisible();
     await ops.page.goto(`${baseURL}/en/resource-manage`);
     await expect(
@@ -201,10 +205,16 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     const search = ops.page.getByPlaceholder("Search email");
     await search.fill(fixture.emails.user);
-    await expect(ops.page.getByRole("row").filter({ hasText: fixture.emails.user })).toBeVisible();
-    await expect(ops.page.getByRole("row").filter({ hasText: fixture.emails.admin1 })).toHaveCount(0);
+    await expect(
+      ops.page.getByRole("row").filter({ hasText: fixture.emails.user }),
+    ).toBeVisible();
+    await expect(
+      ops.page.getByRole("row").filter({ hasText: fixture.emails.admin1 }),
+    ).toHaveCount(0);
     await ops.page.getByRole("tab", { name: "Models", exact: true }).click();
-    await expect(ops.page.getByText("Owned model", { exact: true })).toBeVisible();
+    await expect(
+      ops.page.getByText("Owned model", { exact: true }),
+    ).toBeVisible();
     await expect(
       ops.page.getByRole("button", { name: /Edit|Delete|Create/ }),
     ).toHaveCount(0);
@@ -223,6 +233,19 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     const su = await login("su");
     await su.page.goto(`${baseURL}/en/ops/configuration`);
+    await expect(
+      su.page.getByRole("heading", {
+        name: "System Configuration",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      su.page.getByRole("tab", {
+        name: "Platform Quota Overview",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await su.page.goto(`${baseURL}/en/ops/dashboard`);
     await expect(su.page.getByLabel("Tenant", { exact: true })).toBeVisible();
     await expect(
       su.page.getByText("All tenants", { exact: true }).first(),
@@ -310,11 +333,7 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
   await contract.assertion(assertions[1], async () => {
     expect(invitationRoles).toEqual(["ADMIN", "OPS"]);
     expect(opsEntries.sort()).toEqual(
-      [
-        "Operations dashboard",
-        "Resource Management",
-        "System configuration",
-      ].sort(),
+      ["Operations dashboard", "Resource Management"].sort(),
     );
   });
   await contract.assertion(assertions[2], async () => {
