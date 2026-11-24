@@ -29,7 +29,12 @@ const AIDP_BINDING_REASON_KEYS: Record<string, string> = {
   ontology_binding_other_conflict: "aidpKnowledge.ontologyBindingOtherConflict",
 };
 
-/** Resolve errors for a caller-owned inline state or notification. */
+/** Resolve errors for a caller-owned inline state or notification.
+ *
+ * Only upstream AIDP business codes are translated. Without one, the backend
+ * message is authoritative; the Nexent transport code (for example 130501)
+ * must not replace the upstream reason with a generic label.
+ */
 export const getAidpErrorMessage = (
   error: unknown,
   translate: (key: string, options: { defaultValue: string }) => string,
@@ -50,7 +55,7 @@ export const getAidpErrorMessage = (
   if (upstreamCode) {
     return translate(`errorCode.${upstreamCode}`, { defaultValue: message });
   }
-  return translate(`errorCode.${error.code}`, { defaultValue: message });
+  return message;
 };
 
 /**
