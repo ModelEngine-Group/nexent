@@ -12,6 +12,8 @@ from functools import lru_cache
 
 import redis
 
+from infrastructure.memory_io import run_memory_io
+
 from contracts.constants.environment import (
     MEMORY_EMBEDDING_COOLDOWN_SECONDS, REDIS_BACKEND_URL, RUNTIME_STATE_REDIS_URL,
 )
@@ -54,10 +56,12 @@ def _admit_local(key):
         return "local"
 
 
-def admit_embedding(key):
+def admit_embedding(key, *, shared=True):
     """Return a probe token, an empty token for normal traffic, or None if open."""
     if not MEMORY_EMBEDDING_COOLDOWN_SECONDS:
         return ""
+    if not shared:
+        return _admit_local(key)
     with _local_lock:
         state = _local.get(key)
         if state is not None and time.monotonic() < state[0]:
@@ -79,7 +83,7 @@ def admit_embedding(key):
         return _admit_local(key)
 
 
-def record_embedding_failure(key):
+def record_embedding_failure(key, *, shared=True):
     cooldown = MEMORY_EMBEDDING_COOLDOWN_SECONDS
     if not cooldown:
         return
@@ -88,6 +92,8 @@ def record_embedding_failure(key):
         _local.move_to_end(key)
         if len(_local) > _MAX_LOCAL_CIRCUITS:
             _local.popitem(last=False)
+    if not shared:
+        return
     try:
         client = _client()
         if client is not None:
@@ -96,10 +102,10 @@ def record_embedding_failure(key):
         logger.debug("event=memory_circuit_shared_unavailable")
 
 
-def record_embedding_success(key, token):
+def record_embedding_success(key, token, *, shared=True):
     if not token:
         return
-    if token != "local":
+    if shared and token != "local":
         try:
             client = _client()
             if client is not None:
@@ -112,3 +118,15 @@ def record_embedding_success(key, token):
             logger.debug("event=memory_circuit_shared_unavailable")
     with _local_lock:
         _local.pop(key, None)
+
+
+async def run_embedding_health(operation, *args, deadline):
+    """Bound shared health I/O on managed workers, falling back to local state."""
+    try:
+        return await run_memory_io(
+            "memory-embedding-health", operation, *args,
+            deadline=min(deadline, time.monotonic() + 0.2), lane="control-io",
+        )
+    except Exception:
+        logger.debug("event=memory_circuit_shared_unavailable")
+        return operation(*args, shared=False)

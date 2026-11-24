@@ -2488,15 +2488,15 @@ class TestCreateAgentConfig:
         assert all(event["attributes"]["agent.name"] == "test_agent" for event in events)
         assert all(event["attributes"]["agent.display_name"] == "知识助手" for event in events)
         assert [event["name"] for event in events] == [
-            "memory.initialize", "memory.presearch", "memory.initialize", "memory.load_context",
+            "memory.presearch", "memory.initialize", "memory.load_context", "memory.initialize",
         ]
-        assert events[0]["error"] == "RuntimeError"
-        assert events[2]["output"] == {"service": "context", "ready": True}
-        assert events[3]["error"] == ("RuntimeError" if fail else None)
-        assert events[3]["output"] == (None if fail else [])
-        assert events[1]["input"] == {"query": "test query", "top_k": 5}
-        assert events[1]["error"] is None
-        assert events[1]["output"] == "Vector memory unavailable. Continuing with other available context."
+        assert events[3]["error"] == "RuntimeError"
+        assert events[1]["output"] == {"service": "context", "ready": True}
+        assert events[2]["error"] == ("RuntimeError" if fail else None)
+        assert events[2]["output"] == (None if fail else [])
+        assert events[0]["input"] == {"query": "test query", "top_k": 5}
+        assert events[0]["error"] is None
+        assert events[0]["output"] == "Vector memory unavailable. Continuing with other available context."
         mocks["agent_config"].assert_called_once()
 
     @pytest.mark.asyncio
@@ -7569,3 +7569,93 @@ class TestDeepSeekRuntimeLanguage:
             assert "max_content_chars" not in actual
             assert actual["only_high_quality"] is True
             assert params["language"] == "zh"
+
+
+@pytest.fixture
+def recursive_memory_compiler(monkeypatch):
+    compiler = preparation_compiler
+    real_create = compiler.create_agent_config
+    monkeypatch.setattr(compiler, 'search_agent_info_by_agent_id', lambda **kw: {
+        'name': str(kw['agent_id']), 'description': '', 'prompt': '', 'model_ids': [],
+    })
+    monkeypatch.setattr(compiler, 'query_sub_agent_relations', lambda **kw: (
+        [{'selected_agent_id': 2, 'selected_agent_version_no': 0}] if kw['main_agent_id'] == 1 else []
+    ))
+    monkeypatch.setattr(compiler, 'resolve_sub_agent_version_no', lambda **kw: 0)
+    monkeypatch.setattr(compiler, '_get_external_a2a_agents', lambda *_: [])
+    monkeypatch.setattr(compiler, 'create_tool_config_list', AsyncMock(return_value=[]))
+    monkeypatch.setattr(compiler, '_get_skills_for_template', lambda *_, **kw: [])
+    monkeypatch.setattr(compiler, '_get_skill_script_tools', lambda *_, **kw: [])
+    monkeypatch.setattr(compiler, '_select_agent_model_id', lambda *_: None)
+    monkeypatch.setattr(compiler, '_resolve_context_budget', lambda **kw: None)
+    monkeypatch.setattr(compiler, '_build_effective_knowledge_base_summary', lambda *_, **kw: ([], []))
+    monkeypatch.setattr(compiler, 'build_context_inputs', lambda **kw: [])
+    monkeypatch.setattr(compiler, 'build_agent_context_policy', Mock())
+    monkeypatch.setattr(compiler, 'resolve_policy', Mock())
+    monkeypatch.setattr(compiler, 'ContextManagerConfig', Mock())
+    monkeypatch.setattr(compiler, 'AgentConfig', lambda **kw: types.SimpleNamespace(**kw))
+    monkeypatch.setattr(compiler, '_build_runtime_store_tool', lambda *_, **kw: types.SimpleNamespace(name='store_memory'))
+    async def policy(_label, callback, *args, **kw):
+        return callback(*args)
+    monkeypatch.setattr(compiler, 'optional_memory_io', policy)
+    return compiler, real_create
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mounted', [False, True])
+@pytest.mark.parametrize('disabled,call_enabled', [([1], True), ([2], True), ([], False), ([1, 2], True), (None, True)])
+async def test_recursive_agent_memory_switch_is_local(recursive_memory_compiler, monkeypatch, disabled, call_enabled, mounted):
+    compiler, create = recursive_memory_compiler
+    personal_enabled = disabled is not None
+    disabled = disabled or []
+    context = Mock(user_config=Mock(memory_switch=personal_enabled, external_provider_top_k=5,
+                                   disable_agent_ids=[str(x) for x in disabled], disable_user_agent_ids=[]))
+    monkeypatch.setattr(compiler, 'build_memory_context', lambda *_: context)
+    prepare = AsyncMock(return_value=([], 'No relevant memories found.'))
+    monkeypatch.setattr(compiler, '_prepare_runtime_memory', prepare)
+    kwargs = {}
+    if mounted:
+        monkeypatch.setattr(compiler, 'query_sub_agent_relations', lambda **kw: [])
+        kwargs['runtime_sub_agent_mounts'] = [{'agent_id': 2, 'version_no': 0}]
+    root = await create(1, 't', 'u', 'en', 'query', allow_memory_search=call_enabled, **kwargs)
+    for agent_id, agent in zip([1, 2], [root, *root.worker_agents]):
+        enabled = call_enabled and personal_enabled and agent_id not in disabled
+        assert any(t.name == 'store_memory' for t in agent.tools) is enabled
+    assert {int(c.kwargs['agent_id']) for c in prepare.await_args_list} == (
+        {1, 2} - set(disabled) if call_enabled and personal_enabled else set()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [None, 'error', 'cancel'])
+async def test_parent_memory_starts_before_child_and_is_cleaned_up(recursive_memory_compiler, monkeypatch, failure):
+    compiler, create = recursive_memory_compiler
+    root_started, root_finished = asyncio.Event(), asyncio.Event()
+    context = Mock(user_config=Mock(memory_switch=True, external_provider_top_k=5,
+                                   disable_agent_ids=[], disable_user_agent_ids=[]))
+    monkeypatch.setattr(compiler, 'build_memory_context', lambda *_: context)
+    async def prepare(**kw):
+        if kw['agent_id'] == '1':
+            root_started.set()
+            try:
+                if failure:
+                    await asyncio.Future()
+                return [{'memory': 'healthy parent fact', 'memory_level': 'user'}], None
+            finally:
+                root_finished.set()
+        await asyncio.wait_for(root_started.wait(), .15)
+        if failure == 'error':
+            raise ValueError('child compile failed')
+        if failure == 'cancel':
+            raise asyncio.CancelledError()
+        return [], None
+    monkeypatch.setattr(compiler, '_prepare_runtime_memory', prepare)
+    contexts = Mock(return_value=[])
+    monkeypatch.setattr(compiler, 'build_context_inputs', contexts)
+    if failure:
+        with pytest.raises(ValueError if failure == 'error' else asyncio.CancelledError):
+            await create(1, 't', 'u', 'en', 'query')
+        assert root_finished.is_set()
+    else:
+        await create(1, 't', 'u', 'en', 'query')
+        assert contexts.call_args.kwargs['long_term_memory_items'][0]['memory'] == 'healthy parent fact'

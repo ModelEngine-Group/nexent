@@ -125,12 +125,15 @@ async def test_invalid_embedding_opens_shared_circuit_and_recovery_is_probed(cac
     embedding_health.record_embedding_success(key, token)
     assert embedding_health.admit_embedding(key) == ""
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(autouse=True)
 async def memory_thread_manager(monkeypatch):
     manager = ThreadManager(
         "test-memory",
         {"memory-read": LanePolicy(
             name="memory-read", max_workers=4, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=0, shutdown_grace_seconds=1,
+        ), "control-io": LanePolicy(
+            name="control-io", max_workers=4, max_queue_size=0, queue_timeout_seconds=0,
             cancel_grace_seconds=0, shutdown_grace_seconds=1,
         )},
     )
@@ -201,7 +204,7 @@ def test_embedding_circuit_retains_local_cooldown_during_redis_outage(cache, mon
     embedding_health.record_embedding_success("library", "local")
     assert embedding_health.admit_embedding("library") == ""
 
-@pytest.mark.parametrize(("status", "opens_circuit"), [(503, True), (401, False)])
+@pytest.mark.parametrize(("status", "opens_circuit"), [(503, True), (408, True), (429, True), (401, False)])
 @pytest.mark.asyncio
 async def test_only_transient_http_failures_open_embedding_circuit(cache, monkeypatch, status, opens_circuit):
     model = EmbeddingModelInfo("test", 2, "http://localhost", "test")
@@ -419,3 +422,66 @@ async def test_non_openai_adapter_uses_one_attempt_and_shares_cooldown(cache):
     assert request.retries == 0
     assert request.worker_lane == "model-embedding"
     assert 0 < request.timeout <= 1
+
+
+@pytest.mark.parametrize("transport_timeout", [False, True])
+@pytest.mark.asyncio
+async def test_caller_budget_does_not_open_cooldown_for_healthy_slower_model(cache, transport_timeout):
+    _, shared = cache
+    model = EmbeddingModelInfo("healthy", 2, "", "", model_id=7)
+
+    async def respond(_content, *, timeout):
+        if transport_timeout and timeout < .15:
+            await asyncio.sleep(timeout)
+            raise httpx.ReadTimeout("caller-selected read deadline")
+        await asyncio.sleep(.15)
+        return [[.25, .75]]
+
+    client = SimpleNamespace(get_embeddings_with_deadline=respond)
+    assert await runtime_embedding.compute_runtime_embedding(
+        "write", model, tenant_id="t", client=client, deadline=monotonic() + .12,
+    ) is None
+    embedding_health._local.clear()
+    assert shared == {}
+    assert await runtime_embedding.compute_runtime_embedding(
+        "query", model, tenant_id="t", client=client, deadline=monotonic() + 1,
+    ) == [.25, .75]
+
+
+@pytest.mark.asyncio
+async def test_slow_shared_health_does_not_block_other_coroutines(cache):
+    shared, _ = cache
+    shared.get.side_effect = lambda _key: Event().wait(.3)
+    model = EmbeddingModelInfo("healthy", 2, "", "")
+    client = SimpleNamespace(get_embeddings_with_deadline=AsyncMock(return_value=[[.25, .75]]))
+    tasks = [asyncio.create_task(runtime_embedding.compute_runtime_embedding(
+        "query", model, tenant_id=str(i), client=client, deadline=monotonic() + 1,
+    )) for i in range(8)]
+    start = monotonic()
+    await asyncio.sleep(.02)
+    elapsed = monotonic() - start
+    results = await asyncio.gather(*tasks)
+    assert elapsed < .15, 'Redis blocked the event loop'
+    assert all(result == [.25, .75] for result in results)
+
+
+@pytest.mark.parametrize("healthy_probe", [False, True])
+@pytest.mark.asyncio
+async def test_shared_health_writes_are_also_bounded_and_off_event_loop(cache, healthy_probe):
+    shared, data = cache
+    model = EmbeddingModelInfo("healthy", 2, "", "")
+    key = embedding_health.embedding_circuit_key("t", model)
+    if healthy_probe:
+        data[key] = '0'
+        shared.eval.side_effect = lambda *_: Event().wait(.3)
+    else:
+        shared.set.side_effect = lambda *_args, **_kw: Event().wait(.3)
+    client = SimpleNamespace(get_embeddings_with_deadline=AsyncMock(return_value=[[.25, .75]] if healthy_probe else None))
+    start = monotonic()
+    task = asyncio.create_task(runtime_embedding.compute_runtime_embedding(
+        "query", model, tenant_id="t", client=client, deadline=start + 1,
+    ))
+    await asyncio.sleep(.02)
+    assert monotonic() - start < .15
+    assert await task == ([.25, .75] if healthy_probe else None)
+    assert monotonic() - start < .28

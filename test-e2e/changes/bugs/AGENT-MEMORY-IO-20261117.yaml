@@ -30,10 +30,13 @@ change:
     - Share a five-minute cooldown and permit one recovery probe.
     - Preserve signed AgentOS model and store boundaries, durable unindexed receipts, and idempotent writes.
     - Acknowledge automatic indexing without waiting for refresh; preserve committed receipts on index timeout.
+    - Keep shared Redis health I/O off the event loop and exclude caller budget expiry from model cooldown.
+    - Prepare parent memory before waiting for children and evaluate each Agent switch independently.
     test_selectors:
     - test/backend/app/test_agentos_memory_store.py
     - test/backend/services/test_agentos_model.py
     - test/backend/services/test_memory_stream_no_presearch.py
+    - test/backend/agents/test_create_agent_info.py
     - test/backend/services/test_memory_record_unchanged.py
     - test/backend/services/test_memory_backend_adapter.py
     - test/backend/services/test_memory_external_provider_service.py

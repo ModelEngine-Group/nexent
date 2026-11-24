@@ -118,7 +118,6 @@ async def create_agent_config(
             "memory-policy", _load_authorized_memory_context, user_id, tenant_id, agent_id,
             deadline=memory_query_deadline,
         )
-    allow_memory_search = memory_context is not None
 
     # create sub agent
     child_tool_params = normalized_tool_params
@@ -140,95 +139,117 @@ async def create_agent_config(
                 if name not in managed_names
             }
         child_knowledge_context = None
-    sub_agent_relations = query_sub_agent_relations(
-        main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
-    )
-    worker_agents = []
-    for rel in sub_agent_relations:
-        sub_agent_id = rel["selected_agent_id"]
-        sub_agent_version_no = resolve_sub_agent_version_no(
-            selected_agent_id=sub_agent_id,
-            selected_agent_version_no=rel.get("selected_agent_version_no"),
-            tenant_id=tenant_id,
-        )
-        sub_agent_config = await create_agent_config(
-            agent_id=sub_agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            language=language,
-            last_user_query=last_user_query,
-            allow_memory_search=allow_memory_search,
-            memory_query_deadline=memory_query_deadline,
-            version_no=sub_agent_version_no,
-            override_model_id=None,
-            tool_params=child_tool_params,
-            conversation_id=conversation_id,
-            include_automation_tool=False,
-            runtime_knowledge_context=child_knowledge_context,
-            runtime_file_context=runtime_file_context,
-            # Workbench overlays replace Skills on the effective root only.
-            runtime_skill_snapshot=None,
-            **portable_options,
-            runtime_model_records=runtime_model_records,
-        )
-        # Persisted Agent relations are rendered into the manager prompt by
-        # their configured business name. Keep the callable registered in the
-        # Python executor under that same name; the generic runtime identity
-        # assigned by the recursive builder is only appropriate for roots and
-        # Workbench-selected dynamic children.
-        sub_agent_config.invocation_name = sub_agent_config.name
-        worker_agents.append(sub_agent_config)
-
-    # Workbench-selected Agents are request-scoped children. They are built
-    # from pinned published versions but never persisted as Agent relations.
-    used_invocation_names = {
-        str(agent.invocation_name or agent.name) for agent in worker_agents
+    memory_phase_attributes = {
+        "agent.id": str(agent_id), "agent.name": agent_info.get("name", ""),
     }
-    for mount in runtime_sub_agent_mounts or []:
-        sub_agent_id = int(mount["agent_id"])
-        sub_agent_version_no = int(mount["version_no"])
-        if sub_agent_id == int(agent_id) and sub_agent_version_no == int(version_no):
-            raise WorkbenchError("WORKBENCH_AGENT_CYCLE")
-        sub_agent_config = await create_agent_config(
-            agent_id=sub_agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            language=language,
-            last_user_query=last_user_query,
-            allow_memory_search=allow_memory_search,
-            memory_query_deadline=memory_query_deadline,
-            version_no=sub_agent_version_no,
-            override_model_id=None,
-            tool_params=child_tool_params,
-            conversation_id=conversation_id,
-            include_automation_tool=False,
-            runtime_knowledge_context=child_knowledge_context,
-            runtime_file_context=runtime_file_context,
-            runtime_skill_snapshot=None,
-            runtime_model_records=runtime_model_records,
-            runtime_knowledge_tools=None,
-            runtime_sub_agent_mounts=None,
-            **portable_options,
+    display_name = agent_info.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        memory_phase_attributes["agent.display_name"] = display_name.strip()
+    # Start this Agent's optional context before awaiting recursive compilation.
+    memory_task = asyncio.create_task(_prepare_traced_runtime_memory(
+        tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
+        conversation_id=str(conversation_id) if conversation_id is not None else None,
+        query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
+        deadline=memory_query_deadline, phase_attributes=memory_phase_attributes,
+    )) if memory_context is not None else None
+    prepared_memory = ([], None)
+    try:
+        sub_agent_relations = query_sub_agent_relations(
+            main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
         )
-        invocation_name = str(
-            mount.get("invocation_name")
-            or f"agent_{sub_agent_id}_v{sub_agent_version_no}"
-        )
-        if invocation_name in used_invocation_names:
-            raise WorkbenchError("WORKBENCH_AGENT_NAME_CONFLICT")
-        used_invocation_names.add(invocation_name)
-        sub_agent_config.name = invocation_name
-        sub_agent_config.invocation_name = invocation_name
-        sub_agent_config.runtime_ref = str(
-            mount.get("runtime_ref") or f"agent:{sub_agent_id}:v{sub_agent_version_no}"
-        )
-        sub_agent_config.display_name = str(
-            mount.get("display_name")
-            or sub_agent_config.display_name
-            or invocation_name
-        )
-        sub_agent_config.origin = "PERSISTED"
-        worker_agents.append(sub_agent_config)
+        worker_agents = []
+        for rel in sub_agent_relations:
+            sub_agent_id = rel["selected_agent_id"]
+            sub_agent_version_no = resolve_sub_agent_version_no(
+                selected_agent_id=sub_agent_id,
+                selected_agent_version_no=rel.get("selected_agent_version_no"),
+                tenant_id=tenant_id,
+            )
+            sub_agent_config = await create_agent_config(
+                agent_id=sub_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                language=language,
+                last_user_query=last_user_query,
+                allow_memory_search=allow_memory_search,
+                memory_query_deadline=memory_query_deadline,
+                version_no=sub_agent_version_no,
+                override_model_id=None,
+                tool_params=child_tool_params,
+                conversation_id=conversation_id,
+                include_automation_tool=False,
+                runtime_knowledge_context=child_knowledge_context,
+                runtime_file_context=runtime_file_context,
+                # Workbench overlays replace Skills on the effective root only.
+                runtime_skill_snapshot=None,
+                **portable_options,
+                runtime_model_records=runtime_model_records,
+            )
+            # Persisted Agent relations are rendered into the manager prompt by
+            # their configured business name. Keep the callable registered in the
+            # Python executor under that same name; the generic runtime identity
+            # assigned by the recursive builder is only appropriate for roots and
+            # Workbench-selected dynamic children.
+            sub_agent_config.invocation_name = sub_agent_config.name
+            worker_agents.append(sub_agent_config)
+
+        # Workbench-selected Agents are request-scoped children. They are built
+        # from pinned published versions but never persisted as Agent relations.
+        used_invocation_names = {
+            str(agent.invocation_name or agent.name) for agent in worker_agents
+        }
+        for mount in runtime_sub_agent_mounts or []:
+            sub_agent_id = int(mount["agent_id"])
+            sub_agent_version_no = int(mount["version_no"])
+            if sub_agent_id == int(agent_id) and sub_agent_version_no == int(version_no):
+                raise WorkbenchError("WORKBENCH_AGENT_CYCLE")
+            sub_agent_config = await create_agent_config(
+                agent_id=sub_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                language=language,
+                last_user_query=last_user_query,
+                allow_memory_search=allow_memory_search,
+                memory_query_deadline=memory_query_deadline,
+                version_no=sub_agent_version_no,
+                override_model_id=None,
+                tool_params=child_tool_params,
+                conversation_id=conversation_id,
+                include_automation_tool=False,
+                runtime_knowledge_context=child_knowledge_context,
+                runtime_file_context=runtime_file_context,
+                runtime_skill_snapshot=None,
+                runtime_model_records=runtime_model_records,
+                runtime_knowledge_tools=None,
+                runtime_sub_agent_mounts=None,
+                **portable_options,
+            )
+            invocation_name = str(
+                mount.get("invocation_name")
+                or f"agent_{sub_agent_id}_v{sub_agent_version_no}"
+            )
+            if invocation_name in used_invocation_names:
+                raise WorkbenchError("WORKBENCH_AGENT_NAME_CONFLICT")
+            used_invocation_names.add(invocation_name)
+            sub_agent_config.name = invocation_name
+            sub_agent_config.invocation_name = invocation_name
+            sub_agent_config.runtime_ref = str(
+                mount.get("runtime_ref") or f"agent:{sub_agent_id}:v{sub_agent_version_no}"
+            )
+            sub_agent_config.display_name = str(
+                mount.get("display_name")
+                or sub_agent_config.display_name
+                or invocation_name
+            )
+            sub_agent_config.origin = "PERSISTED"
+            worker_agents.append(sub_agent_config)
+        if memory_task is not None:
+            prepared_memory = await memory_task
+    finally:
+        if memory_task is not None:
+            if not memory_task.done():
+                memory_task.cancel()
+            await asyncio.gather(memory_task, return_exceptions=True)
 
     # create external A2A agents (synchronous function, no await needed)
     external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
@@ -299,12 +320,6 @@ async def create_agent_config(
     long_term_memory_items = []
     pre_run_tool_events = []
     if memory_context is not None:
-        memory_phase_attributes = {
-            "agent.id": str(agent_id), "agent.name": agent_info.get("name", ""),
-        }
-        display_name = agent_info.get("display_name")
-        if isinstance(display_name, str) and display_name.strip():
-            memory_phase_attributes["agent.display_name"] = display_name.strip()
         store_tool = _build_runtime_store_tool(
             memory_context, tenant_id=tenant_id, user_id=user_id, agent_id=str(agent_id),
             version_no=version_no, conversation_id=conversation_id,
@@ -312,17 +327,7 @@ async def create_agent_config(
         )
         if store_tool is not None:
             tool_list.append(store_tool)
-        with trace_phase(
-            "memory.presearch", input_value={"query": last_user_query or "", "top_k": 5},
-            attributes=memory_phase_attributes,
-        ) as phase:
-            long_term_memory_items, fixed_search_result = await _prepare_runtime_memory(
-                tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
-                conversation_id=str(conversation_id) if conversation_id is not None else None,
-                query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
-                deadline=memory_query_deadline, phase_attributes=memory_phase_attributes,
-            )
-            phase.set_output(fixed_search_result)
+        long_term_memory_items, fixed_search_result = prepared_memory
         if fixed_search_result:
             pre_run_tool_events = [
                 {"type": "tool", "content": "", "tool_name": "search_memory",
@@ -527,7 +532,7 @@ async def create_agent_config(
         context_items=context_items,
         prompt_tool_policy_snapshot=prompt_tool_policy_snapshot,
         pre_run_tool_events=pre_run_tool_events,
-        automatic_memory_enabled=allow_memory_search,
+        automatic_memory_enabled=memory_context is not None,
         capacity_snapshot=capacity_snapshot,
         context_budget_snapshot=context_budget_snapshot,
         verification_config=verification_config,
@@ -605,6 +610,16 @@ def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, v
         "memory_service": memory_service,
     }
     return build_store_memory_tool(memory_metadata)
+
+
+async def _prepare_traced_runtime_memory(**kwargs):
+    with trace_phase(
+        "memory.presearch", input_value={"query": kwargs["query"], "top_k": 5},
+        attributes=kwargs["phase_attributes"],
+    ) as phase:
+        result = await _prepare_runtime_memory(**kwargs)
+        phase.set_output(result[1])
+        return result
 
 
 async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline,
