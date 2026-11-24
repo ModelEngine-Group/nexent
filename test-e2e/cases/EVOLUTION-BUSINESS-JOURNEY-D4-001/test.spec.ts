@@ -41,7 +41,7 @@ function fixture(): Fixture {
   return value;
 }
 
-async function choose(page: Page, label: string, option: string) {
+async function choose(page: Page, label: string, option: string | RegExp) {
   const input = page.getByRole("combobox", { name: label, exact: true });
   await input.focus();
   await input.press("ArrowDown");
@@ -189,10 +189,10 @@ journey(ID, async (scenario) => {
         await editor.goto(config.origin + "/zh/evaluation", { waitUntil: "domcontentloaded" });
         await editor.getByText("候选对比", { exact: true }).first().click();
         for (const [label, value] of [
-          ["智能体", config.display], ["版本", "V1"], ["关联业务用户的建议（需选目标题和保护题）", sid + " ·"],
+          ["智能体", config.display], ["版本", /^V1(?:\s|$)/], ["关联业务用户的建议（需选目标题和保护题）", sid + " ·"],
           ["选择候选", "#" + candidate.candidate_id + " · " + config.skill],
           ["业务题", config.target], ["业务题", config.guard], ["建议的目标题（其他已选题用于回归）", "新交接"],
-        ]) await choose(editor, label, value);
+        ] as const) await choose(editor, label, value);
         await editor.getByRole("checkbox", { name: "按预设条件筛选候选" }).check();
         await choose(editor, "选择要改善的专项题", config.target);
         await choose(editor, "选择已发布评估器", config.rule);
@@ -201,6 +201,7 @@ journey(ID, async (scenario) => {
         const response = await submitted;
         expect(response.status()).toBe(202);
         const request = response.request().postDataJSON();
+        expect(request.version_no).toBe(1);
         expect(request.suggestion_id).toBe(Number(sid.slice(2)));
         expect(request.suggestion_target_case_id).toBe(config.targetId);
         experiment = (await response.json()).data.experiment_id;
