@@ -118,7 +118,7 @@ class TestCreateApp:
         monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
         monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
         monkeypatch.setattr(
-            "gateway.downstream.internal_tokens.verify_internal_runtime_jwt",
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
             lambda _authorization: ("fixture-user", "fixture-tenant"),
         )
         app = create_app(
