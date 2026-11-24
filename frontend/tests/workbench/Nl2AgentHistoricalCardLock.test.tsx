@@ -100,7 +100,7 @@ it.each(["clarification", "installation", "binding"])(
   }
 );
 
-it("keeps the binding card focused on resources and places return in the footer", () => {
+it("keeps legacy binding history read-only and offers a new search instead of resuming old actions", () => {
   const requirementId = "93acd043ea294c6e9a6041a73443d454";
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -156,9 +156,10 @@ it("keeps the binding card focused on resources and places return in the footer"
     screen.getByText("Look up train tickets").closest("[data-resource-ref]")
   ).toHaveAttribute("data-resource-ref", "skill:17");
   expect(screen.queryByText(requirementId)).toBeNull();
-  const back = screen.getByRole("button", { name: "Return to requirements" });
-  expect(back.closest("footer")?.querySelector("button")).toBe(back);
-  expect(back.querySelector("svg.lucide-arrow-left")).not.toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Return to requirements" })
+  ).toBeNull();
+  expect(screen.getByText("nl2agent.unified.legacy")).toBeVisible();
 });
 
 it.each(["clarification", "installation", "binding"])(

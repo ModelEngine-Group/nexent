@@ -603,8 +603,10 @@ function AgentSetupContent({
                     }}
                     onOptimizePrompt={() => {
                       setIsGenerationVisible(true);
-                      nl2AgentChatPanelRef.current?.fillPrompt(
-                        t("nl2agent.optimization.prompt.input")
+                      return (
+                        nl2AgentChatPanelRef.current?.fillPrompt(
+                          t("nl2agent.optimization.prompt.input")
+                        ) ?? false
                       );
                     }}
                     onPublished={handleAgentPublished}

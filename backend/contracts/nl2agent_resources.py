@@ -20,7 +20,7 @@ RequirementQuery = Annotated[str, StringConstraints(strip_whitespace=True, min_l
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 SearchQuery = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 ResourcePurpose = Literal["recommend", "bind", "generate"]
-ResourceCardType = Literal["resource_recommendation", "requirement_coverage", "requirement_clarification",
+ResourceCardType = Literal["requirement_resources", "requirement_clarification",
                            "installed_resource_binding"]
 
 
@@ -95,6 +95,14 @@ class ResourceInstallationRequest(ResourceCardAction):
     conversation_id: int = Field(strict=True, gt=0)
     requirement_id: Identifier
     candidate_ref: Identifier
+
+
+class KnowledgeRecommendationsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_id: int = Field(strict=True, gt=0)
+    conversation_id: int = Field(strict=True, gt=0)
+    card_id: Identifier
+    state_version: int = Field(strict=True, ge=1)
 
 
 class ResourceInstallationAttemptRequest(ResourceInstallationRequest):

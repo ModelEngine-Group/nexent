@@ -46,6 +46,16 @@ def serve(app):
 async def test_gateway_exposure_network_boundary():
     management, runtime = FastAPI(), FastAPI()
     reached, closed = [], []
+    card_paths = [f"/api/agent/nl2agent/{operation}" for operation in (
+        "knowledge_recommendations", "resource_installations", "resource_installation_attempts", "resource_links")]
+
+    async def card_operation(request: Request):
+        assert await request.json() == {"agent_id": 7, "conversation_id": 8, "card_id": "fixture", "state_version": 1}
+        reached.append(("management", request.url.path, request.scope["query_string"]))
+        return {"service": "management", "path": request.url.path}
+
+    for path in card_paths:
+        management.add_api_route(path, card_operation, methods=["POST"])
 
     @management.get("/api/model/list")
     async def models(request: Request):
@@ -57,10 +67,10 @@ async def test_gateway_exposure_network_boundary():
         reached.append(("northbound", "/nb/v1/agents", b""))
         return {"service": "northbound"}
 
-    @runtime.post("/api/agent/run")
+    @management.post("/api/agent/run")
     async def execute(request: Request):
         assert await request.body() == b'{"input":"fixture"}'
-        reached.append(("runtime", request.url.path, request.scope["query_string"]))
+        reached.append(("management", request.url.path, request.scope["query_string"]))
 
         async def stream():
             try:
@@ -90,12 +100,17 @@ async def test_gateway_exposure_network_boundary():
                 assert response.status_code == 200 and response.json() == {"service": "management"}
                 response = await client.get(gateway_url + "/nb/v1/agents")
                 assert response.status_code == 200 and response.json() == {"service": "northbound"}
+                for path in card_paths:
+                    response = await client.post(gateway_url + path, json={
+                        "agent_id": 7, "conversation_id": 8, "card_id": "fixture", "state_version": 1})
+                    assert response.status_code == 200 and response.json() == {"service": "management", "path": path}
                 async with client.stream("POST", gateway_url + "/api/agent/run?q=x%2Fy&q=2",
                                          content=b'{"input":"fixture"}') as response:
                     assert response.status_code == 200
                     assert await anext(response.aiter_bytes()) == b"data: first\n\n"
                 baseline = list(reached)
                 for method, path in [("GET", "/api/newly-added-backend-route"),
+                                     ("GET", card_paths[0]),
                                      ("POST", "/api/model/list"), ("GET", "/nb/v1/chat/run"),
                                      ("POST", "/api/agent/internal/northbound/run"),
                                      ("GET", "/api/internal/thread-capacity"), ("GET", "/api/voice/stt/ws")]:
@@ -119,5 +134,6 @@ async def test_gateway_exposure_network_boundary():
             assert sorted(closed) == ["sse", "ws"]
     assert reached == [("management", "/api/model/list", b"q=a%2Fb&q=2"),
                        ("northbound", "/nb/v1/agents", b""),
-                       ("runtime", "/api/agent/run", b"q=x%2Fy&q=2"),
+                       *[("management", path, b"") for path in card_paths],
+                       ("management", "/api/agent/run", b"q=x%2Fy&q=2"),
                        ("runtime", "/api/voice/stt/ws", b"")]

@@ -25,6 +25,7 @@ EXPECTED_DEFAULTS = {
     "LLM_INCLUDE_LOGPROBS": False,
     "MAX_SKILLS_PER_TENANT": 1000,
     "MAX_SKILL_UPLOAD_SIZE_MB": 10,
+    "NL2AGENT_RESOURCE_DENYLIST": (),
 }
 
 
@@ -44,7 +45,7 @@ def test_catalog_contains_exact_frozen_defaults():
     catalog = _catalog()
 
     assert set(catalog.defaults) == set(EXPECTED_DEFAULTS)
-    assert len(catalog.definitions) == 19
+    assert len(catalog.definitions) == 20
     assert catalog.defaults == EXPECTED_DEFAULTS
     assert all(item.recommendation_rule is None for item in catalog.definitions)
 
@@ -104,6 +105,24 @@ def test_unknown_and_unmanaged_keys_are_rejected():
         _catalog().validate_changes(EXPECTED_DEFAULTS, {"UNKNOWN": 1})
     with pytest.raises(_validation_error(), match="MAX_AGENTS_PER_TENANT"):
         _catalog().validate_changes(EXPECTED_DEFAULTS, {"MAX_AGENTS_PER_TENANT": 1})
+
+
+@pytest.mark.parametrize("value", [
+    "tool:1", {"tool:1": True}, [1], ["tool:0"], ["name:search"], ["tool:1", "tool:1"],
+    ["skill:1 "], ["nexent_official_skill:%zz"], [f"tool:{i}" for i in range(1, 202)],
+])
+def test_denylist_rejects_invalid_resource_refs(value):
+    with pytest.raises(_validation_error(), match="NL2AGENT_RESOURCE_DENYLIST"):
+        _catalog().validate_changes(EXPECTED_DEFAULTS, {"NL2AGENT_RESOURCE_DENYLIST": value})
+
+
+def test_denylist_is_normalized_and_immutable():
+    refs = ["tool:2", "skill:1", "nexent_official_skill:%E6%96%87"]
+    snapshot = _catalog().validate_changes(EXPECTED_DEFAULTS, {"NL2AGENT_RESOURCE_DENYLIST": refs})
+    refs.clear()
+    assert snapshot.get("NL2AGENT_RESOURCE_DENYLIST") == (
+        "nexent_official_skill:%E6%96%87", "skill:1", "tool:2",
+    )
 
 
 def test_changes_are_validated_against_the_merged_snapshot():

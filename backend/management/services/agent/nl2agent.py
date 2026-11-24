@@ -19,6 +19,7 @@ from management.db.agent.repository import query_all_agent_info_by_tenant_id, up
 from management.db.skill.repository import query_enabled_skill_instances
 from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
 from management.services.agent.authorization import require_agent_draft_edit
+from management.services.agent.runtime_inputs import runtime_input_contract as _runtime_input_contract
 from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
 )
@@ -1102,6 +1103,7 @@ async def recommend_installed_resources_impl(
     user_id: str,
     include_knowledge_recommendations: bool = True,
     catalog: list[dict[str, Any]] | None = None,
+    binding_facts: dict[str, dict[str, Any]] | None = None,
 ) -> RecommendResourcesOutput:
     """Resolve model-selected refs into current tenant-owned card data."""
 
@@ -1120,6 +1122,12 @@ async def recommend_installed_resources_impl(
         for instance in bound_instances
         if isinstance(instance.get("tool_id"), int)
     }
+    bound_skill_params = {}
+    if binding_facts is not None and any(item.resource_type == "skill" for item in candidates):
+        bound_skill_params = {
+            f"skill:{instance['skill_id']}": instance.get("config_values")
+            for instance in query_enabled_skill_instances(agent_id=agent_id, tenant_id=tenant_id, version_no=0)
+        }
     knowledge_catalogs: dict[str, list[dict]] = {}
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
@@ -1222,6 +1230,13 @@ async def recommend_installed_resources_impl(
                 raise Nl2AgentResourceError(
                     "knowledge_search_failed", retryable=True
                 ) from exc
+        if binding_facts is not None:
+            saved_params = bound_skill_params if actual["resource_type"] == "skill" else bound_tool_params
+            exists = supplied.candidate_ref in saved_params
+            ready = exists and _bound_config_ready(actual, saved_params[supplied.candidate_ref])
+            binding_facts[supplied.candidate_ref] = {
+                "is_bound": exists, "readiness": "ready" if ready else "not_ready" if exists else "unbound",
+            }
         resources.append(resource)
     return RecommendResourcesOutput(resources=resources)
 
@@ -1285,33 +1300,6 @@ def _requires_policy_clarification(query: str) -> bool:
     ))
     return mentions_retry and not names_policy
 
-
-def _runtime_input_contract(resource: dict, injected: set[str]) -> list[dict]:
-    """Expose only task inputs. Configuration metadata and defaults stay private."""
-    inputs = resource["inputs"]
-    properties = inputs.get("properties")
-    if not isinstance(properties, dict):
-        properties = inputs
-    required = inputs.get("required")
-    required_names = set(required) if isinstance(required, list) else set()
-    private_names = injected | {
-        entry["name"] for entry in resource["config"] if isinstance(entry, dict) and "name" in entry
-    } | {"kds_list", "index_names", "headers", "authorization"}
-    result = []
-    for name, spec in properties.items():
-        normalized = str(name).casefold().replace("_", "").replace("-", "")
-        if name in private_names or any(marker in normalized for marker in ("password", "secret", "token", "apikey")):
-            continue
-        if isinstance(spec, str):
-            spec = {"type": spec}
-        if not isinstance(spec, dict) or not isinstance(spec.get("type"), str):
-            continue
-        result.append({
-            "name": name, "type": spec["type"],
-            "required": name in required_names or spec.get("required") is True,
-            **({"description": spec["description"]} if isinstance(spec.get("description"), str) else {}),
-        })
-    return result
 
 
 def _bound_config_ready(resource: dict, values: Any) -> bool:

@@ -73,6 +73,7 @@ const fixture = vi.hoisted(() => {
       }>,
       total: 3,
       pending: false,
+      ready: false,
       failed: false,
       fetchingMore: false,
       hasMore: false,
@@ -172,11 +173,106 @@ beforeEach(() => {
   fixture.history.items = [];
   fixture.history.total = 3;
   fixture.history.failed = false;
+  fixture.history.ready = false;
+  fixture.history.pending = false;
   fixture.history.hasMore = false;
   fixture.getById.mockReset();
   fixture.historyLoad.mockResolvedValue({ messages: [] });
   fixture.controls.canCreate = true;
   fixture.controls.canSend = true;
+});
+
+it("automatically restores the latest session once and keeps an explicit new session after refresh", async () => {
+  fixture.locale = "zh";
+  fixture.history.ready = true;
+  fixture.history.items = [12, 11, 10].map((id) => ({
+    conversation_id: id,
+    conversation_title: `Session ${id}`,
+    create_time: id,
+    update_time: id,
+  }));
+  fixture.getById.mockResolvedValue({
+    agent_system_key: "nl2agent_main",
+    target: { type: "agent", id: 42 },
+  });
+  const panel = render(<Nl2AgentChatPanel agentId={42} />);
+  await waitFor(() =>
+    expect(fixture.runtime.thread.import).toHaveBeenCalledOnce()
+  );
+  expect(fixture.getById).toHaveBeenCalledExactlyOnceWith("12");
+  fireEvent.click(screen.getByRole("button", { name: "历史 3" }));
+  expect(
+    await screen.findByText(
+      "保留最近 3 条会话，建议在已有会话中持续优化智能体。"
+    )
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "新会话" }));
+  await waitFor(() =>
+    expect(fixture.runtime.thread.reset).toHaveBeenCalledOnce()
+  );
+  fixture.history.items = [...fixture.history.items];
+  panel.rerender(<Nl2AgentChatPanel agentId={42} />);
+  expect(fixture.getById).toHaveBeenCalledTimes(1);
+});
+
+it("waits for history and retries a failed list before restoring the latest", async () => {
+  fixture.history.pending = true;
+  const ref = createRef<Nl2AgentChatPanelHandle>();
+  const panel = render(<Nl2AgentChatPanel ref={ref} agentId={42} />);
+  expect(ref.current!.fillPrompt("optimize")).toBe(false);
+  fixture.history.pending = false;
+  fixture.history.failed = true;
+  panel.rerender(<Nl2AgentChatPanel ref={ref} agentId={42} />);
+  expect(fixture.getById).not.toHaveBeenCalled();
+  fixture.history.failed = false;
+  fixture.history.ready = true;
+  fixture.history.items = [
+    {
+      conversation_id: 12,
+      conversation_title: "Latest",
+      create_time: 1,
+      update_time: 2,
+    },
+  ];
+  fixture.getById.mockResolvedValue({
+    agent_system_key: "nl2agent_main",
+    target: { type: "agent", id: 42 },
+  });
+  panel.rerender(<Nl2AgentChatPanel ref={ref} agentId={42} />);
+  await waitFor(() =>
+    expect(fixture.runtime.thread.import).toHaveBeenCalledOnce()
+  );
+});
+
+it("ignores a pending automatic restore after changing targets", async () => {
+  fixture.history.ready = true;
+  fixture.history.items = [
+    {
+      conversation_id: 12,
+      conversation_title: "Old target",
+      create_time: 1,
+      update_time: 2,
+    },
+  ];
+  let resolve!: (value: unknown) => void;
+  fixture.getById.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      })
+  );
+  const panel = render(<Nl2AgentChatPanel agentId={42} />);
+  await waitFor(() => expect(fixture.getById).toHaveBeenCalledWith("12"));
+  fixture.history.items = [];
+  panel.rerender(<Nl2AgentChatPanel agentId={99} />);
+  await act(async () => {
+    resolve({
+      agent_system_key: "nl2agent_main",
+      target: { type: "agent", id: 42 },
+    });
+  });
+  expect(fixture.runtime.thread.import).not.toHaveBeenCalled();
 });
 
 it.each(["", "Existing agent"])(
@@ -329,7 +425,9 @@ it.each(["zh", "en"] as const)(
     const copy = locale === "zh" ? zh : en;
     const prompt = copy["nl2agent.optimization.prompt.input"];
     render(<Nl2AgentChatPanel ref={ref} agentId={42} />);
-    act(() => ref.current!.fillPrompt(prompt));
+    act(() => {
+      expect(ref.current!.fillPrompt(prompt)).toBe(true);
+    });
     expect(
       fixture.runtime.thread.composer.setText
     ).toHaveBeenCalledExactlyOnceWith(prompt);
@@ -337,6 +435,36 @@ it.each(["zh", "en"] as const)(
     expect(fixture.remoteRun).not.toHaveBeenCalled();
   }
 );
+
+it("highlights a filled composer for two seconds, renews the timer, and resets for another agent", () => {
+  vi.useFakeTimers();
+  try {
+    const ref = createRef<Nl2AgentChatPanelHandle>();
+    const view = render(<Nl2AgentChatPanel ref={ref} agentId={42} />);
+    const highlighted = () =>
+      view.container.querySelector('[data-prompt-highlighted="true"]');
+    act(() => {
+      ref.current!.fillPrompt("optimize");
+    });
+    expect(highlighted()).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1500));
+    act(() => {
+      ref.current!.fillPrompt("optimize again");
+    });
+    act(() => vi.advanceTimersByTime(500));
+    expect(highlighted()).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1500));
+    expect(highlighted()).toBeNull();
+    act(() => {
+      ref.current!.fillPrompt("optimize");
+    });
+    view.rerender(<Nl2AgentChatPanel ref={ref} agentId={43} />);
+    expect(highlighted()).toBeNull();
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it.each(["disabled", "running", "blank"])(
   "does not replace the composer when the prompt action is %s",
@@ -350,9 +478,14 @@ it.each(["disabled", "running", "blank"])(
         disabled={condition === "disabled"}
       />
     );
-    act(() =>
-      ref.current!.fillPrompt(condition === "blank" ? " \n\t " : "optimize")
-    );
+    act(() => {
+      expect(
+        ref.current!.fillPrompt(condition === "blank" ? " \n\t " : "optimize")
+      ).toBe(false);
+    });
+    expect(
+      document.querySelector('[data-prompt-highlighted="true"]')
+    ).toBeNull();
     expect(fixture.runtime.thread.composer.setText).not.toHaveBeenCalled();
     expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
     expect(fixture.remoteRun).not.toHaveBeenCalled();

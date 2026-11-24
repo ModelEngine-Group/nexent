@@ -83,7 +83,7 @@ async def test_each_stage_reuses_catalog_and_next_stage_rereads(workflow, reposi
     reader.reset_mock()
     card = await flow.show_card(scope)
     assert reader.await_count == 1
-    assert card["subtype"] == ("requirement_coverage" if repository else "installed_resource_binding")
+    assert card["subtype"] == ("requirement_resources" if repository else "requirement_resources")
     assert "catalogs" not in card and "catalogs" not in state
     assert "catalog-only-secret" not in repr(card) + repr(state)
     if not repository:

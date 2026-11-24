@@ -4,6 +4,7 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 from uuid import uuid4
 
@@ -24,6 +25,8 @@ from contracts.nl2agent_resources import (
     ResourcePurpose,
     VerificationCheck,
 )
+from infrastructure.system_configuration.catalog import NL2AGENT_RESOURCE_DENYLIST
+from infrastructure.system_configuration.runtime import ConfigurationNotReadyError, get_config_snapshot
 from management.services.agent import nl2agent as legacy
 from services import nl2agent_semantic_retrieval as semantic
 from services.nl2agent_retrieval_progress import ProgressPublisher
@@ -49,6 +52,41 @@ async def _progress(publisher, stage):
 
 def _new_requirement(row: RequirementInput) -> dict:
     return {"query": row.query, "required": True}
+
+
+def resource_denylist() -> frozenset[str]:
+    try:
+        snapshot = get_config_snapshot()
+    except ConfigurationNotReadyError as exc:
+        raise ResourceStateError("resource_configuration_unavailable", retryable=True) from exc
+    return frozenset(snapshot.get(NL2AGENT_RESOURCE_DENYLIST))
+
+
+def _blocked_requirements(state: ResourceState, blocked: frozenset[str]) -> set[str]:
+    if not blocked:
+        return set()
+    return {
+        key for key, row in state["requirements"].items()
+        if any(item["candidate_ref"] in blocked
+               for pool in ("installed", "installable") for item in row.get(pool, []))
+    }
+
+
+def _reset_blocked_requirements(state: ResourceState, affected: set[str]) -> ResourceState:
+    if not affected:
+        return state
+    requirements = dict(state["requirements"])
+    for key in affected:
+        requirements[key] = {
+            field: value for field, value in requirements[key].items()
+            if field in {"query", "required", "search_query", "search_queries", "linked_refs", "repository_tool_refs"}
+        }
+    return {**state, "requirements": requirements, "batch": None, "submitted_batches": {}}
+
+
+def require_recommendation_current(state: ResourceState) -> None:
+    if _blocked_requirements(state, resource_denylist()):
+        raise ResourceStateError("resource_recommendation_changed", retryable=True)
 
 
 def apply_requirement_edits(state: ResourceState, edits: list[RequirementEdit]) -> dict:
@@ -176,6 +214,7 @@ def coverage_rows(state: ResourceState) -> list[dict]:
         rows.append({
             "requirement_id": requirement_id,
             "query": row["query"],
+            **({"search_queries": row["search_queries"]} if row.get("search_queries") else {}),
             "required": True,
             "coverage_status": status,
             "covered_resources": installed,
@@ -215,6 +254,7 @@ async def _authorized_batch_result(
     scope: ResourceScope, state: ResourceState, *, catalogs: dict[str, list[dict]] | None = None,
 ) -> dict:
     """Cached batches must pass current source authorization before disclosure."""
+    require_recommendation_current(state)
     result = _batch_result(state)
     rows = [item for row in result["requirements"]
             for field in ("installed_candidates", "installable_candidates",
@@ -246,6 +286,7 @@ async def _authorized_batch_result(
             {semantic.resource_revision(latest[item["candidate_ref"]])} != revisions[item["candidate_ref"]])
            for item in rows):
         raise ResourceStateError("resource_evidence_changed", retryable=True)
+    require_recommendation_current(state)
     return result
 
 
@@ -255,6 +296,7 @@ async def discover(
 ) -> dict:
     if requirements is not None and search_queries is not None:
         raise ResourceStateError("invalid_search_queries")
+    blocked = resource_denylist()
     if requirements is not None:
         def begin(previous):
             if previous and previous["run_id"] == scope.run_id:
@@ -280,6 +322,15 @@ async def discover(
         state = require_current_run(await read_resource_state(scope), scope)
     if state["card"] is not None:
         raise ResourceStateError("resource_card_waiting")
+    if _blocked_requirements(state, blocked):
+        def reset(current):
+            current = require_current_run(current, scope)
+            if current["card"] is not None:
+                raise ResourceStateError("resource_card_waiting")
+            updated = _reset_blocked_requirements(current, _blocked_requirements(current, blocked))
+            return {**updated, "version": current["version"] + 1} if updated is not current else current
+
+        state = await update_resource_state(scope, reset)
     if search_queries is not None:
         def enrich(current):
             current = require_current_run(current, scope)
@@ -325,6 +376,8 @@ async def discover(
         legacy._load_installed_resource_catalog(**identity),
         legacy._load_internal_uninstalled_resource_catalog(**identity),
     )
+    installed = [item for item in installed if item["candidate_ref"] not in blocked]
+    installable = [item for item in installable if item["candidate_ref"] not in blocked]
     original_revisions = {item["candidate_ref"]: semantic._text(item)
                           for item in [*installed, *installable]}
     semantic_results = None
@@ -425,6 +478,8 @@ async def discover(
 
     def store(current):
         current = require_current_run(current, scope)
+        if resource_denylist() != blocked:
+            raise ResourceStateError("resource_recommendation_changed", retryable=True)
         if current["version"] != state["version"]:
             raise ResourceStateError("resource_state_conflict")
         if current["batch"] is not None:
@@ -483,6 +538,8 @@ def _verification_signature(checks: list[VerificationCheck], offered_refs: dict[
 
 async def verify(scope: ResourceScope, batch_id: str, checks: list[VerificationCheck]) -> dict:
     snapshot = require_current_run(await read_resource_state(scope), scope)
+    if _blocked_requirements(snapshot, resource_denylist()):
+        return await discover(scope, None, snapshot["purpose"])
     previous = snapshot.get("submitted_batches", {}).get(batch_id)
     if previous is not None:
         if previous != _verification_signature(checks, {entry[0]: entry[1] for entry in previous}):
@@ -517,6 +574,7 @@ async def verify(scope: ResourceScope, batch_id: str, checks: list[VerificationC
 
     def store(current):
         state = require_current_run(current, scope)
+        require_recommendation_current(state)
         previous_result = state.get("submitted_batches", {}).get(batch_id)
         if previous_result is not None:
             if previous_result != signature:
@@ -586,10 +644,11 @@ async def _repository_tools_to_recheck(
 ) -> dict[str, list[str]]:
     """Resume coverage for unchanged rows when actual tools from a verified MCP appear."""
     retained = {edit.requirement_id: edit.query for edit in edits}
+    blocked = resource_denylist()
     refs_by_requirement = {
         row["requirement_id"]: [
             item["candidate_ref"] for item in row["installable_resources"]
-            if item["source"] == "TENANT_MCP_REPOSITORY"
+            if item["source"] == "TENANT_MCP_REPOSITORY" and item["candidate_ref"] not in blocked
         ]
         for row in coverage_rows(state)
         if retained.get(row["requirement_id"]) == row["query"]
@@ -609,6 +668,7 @@ async def _repository_tools_to_recheck(
         tools = [
             item for item in catalog
             if item["source"] == "MCP_TOOL" and item.get("mcp_service_name") in names
+            and item["candidate_ref"] not in blocked
         ]
         candidates = _rank(key, row["query"], tools, search_query=row.get("search_query"), minimum_score=0,
                            search_queries=row.get("search_queries"))
@@ -622,10 +682,10 @@ async def _repository_tools_to_recheck(
 def card_payload(scope: ResourceScope, state: ResourceState, rows: list[dict] | None = None) -> dict:
     return {
         "protocol_version": 2, "agent_id": scope.agent_id, "conversation_id": scope.conversation_id,
-        "run_id": state["run_id"], "subtype": state["card"]["subtype"],
+        "run_id": state["run_id"], "subtype": state["card"]["subtype"], "purpose": state["purpose"],
         "card_id": state["card"]["id"], "state_version": state["version"],
+        **({"previous_card_id": state["previous_card_id"]} if state.get("previous_card_id") else {}),
         "requirements": coverage_rows(state) if rows is None else rows,
-        **({"questions": []} if state["card"]["subtype"] == "requirement_clarification" else {}),
     }
 
 
@@ -638,11 +698,7 @@ async def show_card(scope: ResourceScope) -> dict | None:
     rows = coverage_rows(state)
     if not rows and state["purpose"] != "recommend":
         return None
-    subtype = (
-        "resource_recommendation" if state["purpose"] == "recommend" else
-        "requirement_coverage" if any(row["coverage_status"] != "covered" for row in rows) else
-        "installed_resource_binding"
-    )
+    subtype = "requirement_resources"
     statuses = await _repository_mcp_installation_status(
         scope, [item for row in rows for item in row["installable_resources"]],
     )
@@ -654,7 +710,7 @@ async def show_card(scope: ResourceScope) -> dict | None:
         ]
 
     resources = []
-    if subtype == "installed_resource_binding":
+    if rows:
         candidates: dict[str, ResourceCandidate] = {}
         recommended = set()
         for row in rows:
@@ -672,16 +728,19 @@ async def show_card(scope: ResourceScope) -> dict | None:
                         knowledge_queries=[row["query"]],
                     )
         if candidates:
+            binding_facts = {}
             output = await legacy.recommend_installed_resources_impl(
                 agent_id=scope.agent_id, candidates=list(candidates.values()), recommended_refs=list(recommended),
                 tenant_id=scope.tenant_id, user_id=scope.user_id,
                 include_knowledge_recommendations=False,
-                catalog=catalogs["installed"],
+                catalog=catalogs["installed"], binding_facts=binding_facts,
             )
             resources = [
                 {
                     **resource.model_dump(mode="json", exclude={"installation_options", "default_option_id"}),
+                    **binding_facts.get(resource.candidate.candidate_ref, {}),
                     "config": [], "has_config": bool(resource.config),
+                    "configuration_revision": hashlib.sha256(json.dumps([{k: v for k, v in param.items() if k not in {"value", "default"}} for param in resource.config], sort_keys=True).encode()).hexdigest(),
                 }
                 for resource in output.resources
             ]
@@ -690,16 +749,26 @@ async def show_card(scope: ResourceScope) -> dict | None:
         current = require_current_run(current, scope)
         if current["version"] != state["version"] or current["card"] is not None:
             raise ResourceStateError("resource_state_conflict")
+        require_recommendation_current(current)
         return issue_card(current, subtype)
 
     updated = await update_resource_state(scope, publish)
-    return {**card_payload(scope, updated, rows), **({"resources": resources} if subtype == "installed_resource_binding" else {})}
+    return {**card_payload(scope, updated, rows), "resources": resources}
 
 
 async def apply_card_action(
     scope: ResourceScope, subtype: str, action: str, data: ResourceCardAction, *, resume_confirmation: bool = False,
+    validate_only: bool = False,
 ) -> dict:
-    if subtype == "installed_resource_binding" and action == "retry_generation":
+    if subtype != "requirement_resources":
+        raise ResourceStateError("resource_card_stale")
+    if action == "return_requirements":
+        raise ResourceStateError("invalid_resource_action")
+    if action in {"continue", "retry_generation"}:
+        current_state = await read_resource_state(scope)
+        if current_state and current_state.get("purpose") == "recommend":
+            raise ResourceStateError("invalid_resource_action")
+    if subtype == "requirement_resources" and action == "retry_generation":
         def retry(current):
             if not current or current["conversation_id"] != scope.conversation_id or current["card"] is not None:
                 raise ResourceStateError("resource_card_stale")
@@ -707,13 +776,16 @@ async def apply_card_action(
                 raise ResourceStateError("resource_card_stale")
             return {**current, "run_id": scope.run_id}
 
+        if validate_only:
+            retry(await read_resource_state(scope))
+            return {"validated": True}
         updated = await update_resource_state(scope, retry)
         return {"purpose": updated["purpose"], "action": "continue", "retry_prompt": True,
                 "confirmed_requirements": updated.get("confirmed_requirements", [])}
     state = await read_resource_state(scope)
     if (
         resume_confirmation and action == "confirm_requirements"
-        and subtype in {"requirement_coverage", "requirement_clarification"}
+        and subtype == "requirement_resources"
         and state and state["card"] is None
     ):
         def resume(current):
@@ -723,15 +795,22 @@ async def apply_card_action(
                 raise ResourceStateError("resource_card_stale")
             return {**current, "run_id": scope.run_id}
 
+        if validate_only:
+            resume(state)
+            return {"validated": True}
         updated = await update_resource_state(scope, resume)
         return await _continue_confirmed_requirements(scope, updated, action)
 
     state = require_current_card(state, scope, subtype, data)
+    affected = _blocked_requirements(state, resource_denylist())
     repository_rechecks = (
         await _repository_tools_to_recheck(scope, state, data.requirements)
         if action == "confirm_requirements" and data.requirements else {}
     )
-    if subtype == "installed_resource_binding" and action == "continue":
+    if subtype == "requirement_resources" and action == "continue" and not affected:
+        await _authorized_batch_result(scope, state)
+        if any("accepted" not in row or row.get("needs_link_verification") for row in state["requirements"].values()):
+            raise ResourceStateError("verification_incomplete")
         if data.selected_resource_refs is None:
             raise ResourceStateError("invalid_resource_action")
         rows = coverage_rows(state)
@@ -753,10 +832,9 @@ async def apply_card_action(
 
     def accept(current):
         current = require_current_card(current, scope, subtype, data)
+        refresh = affected | _blocked_requirements(current, resource_denylist())
         current = {**current, "run_id": scope.run_id}
-        if subtype == "installed_resource_binding" and action == "return_requirements":
-            return issue_card(current, "requirement_clarification")
-        if subtype in {"requirement_coverage", "requirement_clarification"} and action == "confirm_requirements":
+        if subtype == "requirement_resources" and action == "confirm_requirements":
             if data.requirements is None:
                 raise ResourceStateError("invalid_resource_action")
             current = apply_requirement_edits(current, data.requirements)
@@ -765,19 +843,25 @@ async def apply_card_action(
                 row["repository_tool_refs"] = refs
                 for field in ("accepted", "installed", "installable"):
                     row.pop(field, None)
-        elif subtype == "resource_recommendation" and action == "use_recommendation":
+        elif subtype == "requirement_resources" and action == "use_recommendation":
+            if current["purpose"] != "recommend":
+                raise ResourceStateError("invalid_resource_action")
             current = {**current, "purpose": "bind"}
-        elif subtype == "installed_resource_binding" and action == "continue":
+        elif subtype == "requirement_resources" and action == "continue" and not refresh:
             current = {**current, "continuation": {"id": data.card_id, "version": data.state_version},
                        "confirmed_requirements": confirmed_requirements}
-        else:
+        elif action != "continue":
             raise ResourceStateError("invalid_resource_action")
-        return {**current, "card": None, "submitted_batches": {}, "version": current["version"] + 1}
+        current = _reset_blocked_requirements(current, refresh.intersection(current["requirements"]))
+        return {**current, "previous_card_id": data.card_id, "card": None, "submitted_batches": {}, "version": current["version"] + 1}
 
+    if validate_only:
+        accept(state)
+        return {"validated": True}
     updated = await update_resource_state(scope, accept)
-    if action == "return_requirements":
-        return {"card": card_payload(scope, updated)}
-    if action in {"confirm_requirements", "use_recommendation"}:
+    if action in {"confirm_requirements", "use_recommendation"} or any(
+        "accepted" not in row for row in updated["requirements"].values()
+    ):
         return await _continue_confirmed_requirements(scope, updated, action)
     return {"purpose": updated["purpose"], "action": action,
             **({"confirmed_requirements": updated["confirmed_requirements"]} if action == "continue" else {})}
@@ -795,6 +879,11 @@ async def _continue_confirmed_requirements(scope: ResourceScope, state: Resource
     return {"purpose": state["purpose"], "action": action}
 
 
+def _require_recommendable_ref(candidate_ref: str) -> None:
+    if candidate_ref in resource_denylist():
+        raise ResourceStateError("resource_recommendation_changed", retryable=True)
+
+
 def _installable_candidate(state: ResourceState, requirement_id: str, candidate_ref: str) -> dict:
     for row in coverage_rows(state):
         if row["requirement_id"] != requirement_id:
@@ -806,9 +895,13 @@ def _installable_candidate(state: ResourceState, requirement_id: str, candidate_
 
 
 async def installation_details(scope: ResourceScope, request: ResourceInstallationRequest) -> dict:
-    state = require_current_card(await read_resource_state(scope), scope, "requirement_coverage", request)
+    state = require_current_card(await read_resource_state(scope), scope, "requirement_resources", request)
+    if state["purpose"] == "recommend":
+        raise ResourceStateError("invalid_resource_action")
+    _require_recommendable_ref(request.candidate_ref)
     candidate = _installable_candidate(state, request.requirement_id, request.candidate_ref)
     statuses = await _repository_mcp_installation_status(scope, [candidate])
+    _require_recommendable_ref(request.candidate_ref)
     if status := statuses.get(request.candidate_ref):
         return {"subtype": "suggested_resource_installation", "agent_id": scope.agent_id,
                 "resources": [], "installation_status": status}
@@ -821,6 +914,7 @@ async def installation_details(scope: ResourceScope, request: ResourceInstallati
         recommended_refs=[request.candidate_ref],
         tenant_id=scope.tenant_id, user_id=scope.user_id,
     )
+    _require_recommendable_ref(request.candidate_ref)
     return {"subtype": "suggested_resource_installation", "agent_id": scope.agent_id,
             "resources": [resource.model_dump(mode="json") for resource in result.resources]}
 
@@ -859,9 +953,11 @@ async def installation_attempt(scope: ResourceScope, request: ResourceInstallati
     """Only the first authorized claim can start a write. Recovery is read-only."""
     from nexent.core.concurrency import run_blocking
 
-    state = require_current_card(await read_resource_state(scope), scope, "requirement_coverage", request)
+    state = require_current_card(await read_resource_state(scope), scope, "requirement_resources", request)
     candidate = _installable_candidate(state, request.requirement_id, request.candidate_ref)
     key = request.candidate_ref
+    if request.operation != "release":
+        _require_recommendable_ref(key)
     previous = state.get("installation_attempts", {}).get(key)
     if previous is None and request.operation != "claim":
         return {"status": "not_started"}
@@ -876,6 +972,8 @@ async def installation_attempt(scope: ResourceScope, request: ResourceInstallati
         "nl2agent-installation-lookup", _lookup_installation, scope, candidate, target_name,
         lane="control-io", owner="services.nl2agent_resource_flow",
     )
+    if request.operation != "release":
+        _require_recommendable_ref(key)
     if result:
         if previous is None and candidate["source"] != "NEXENT_OFFICIAL_SKILL" and request.target_name:
             raise ResourceStateError("installation_name_conflict")
@@ -885,7 +983,9 @@ async def installation_attempt(scope: ResourceScope, request: ResourceInstallati
     claim_id = uuid4().hex
 
     def reserve(current):
-        current = require_current_card(current, scope, "requirement_coverage", request)
+        current = require_current_card(current, scope, "requirement_resources", request)
+        if request.operation != "release":
+            _require_recommendable_ref(key)
         attempts = dict(current.get("installation_attempts", {}))
         existing = attempts.get(key)
         if request.operation == "release":
@@ -909,12 +1009,15 @@ async def link_installed_resource(scope: ResourceScope, request: ResourceLinkReq
 
     def validate_target(current):
         subtype = (current.get("card") or {}).get("subtype") if current else None
-        if subtype not in {"requirement_coverage", "requirement_clarification"}:
+        if subtype != "requirement_resources":
             raise ResourceStateError("resource_card_stale")
         current = require_current_card(current, scope, subtype, request)
+        if current["purpose"] == "recommend":
+            raise ResourceStateError("invalid_resource_action")
         if request.requirement_id is not None and request.requirement_id not in current["requirements"]:
             raise ResourceStateError("unknown_requirement")
         if request.candidate_ref is not None:
+            _require_recommendable_ref(request.candidate_ref)
             candidate = _installable_candidate(current, request.requirement_id, request.candidate_ref)
             if candidate["resource_type"] != request.resource_type:
                 raise ResourceStateError("invalid_resource_link")

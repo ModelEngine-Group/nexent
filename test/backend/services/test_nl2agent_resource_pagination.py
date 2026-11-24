@@ -10,7 +10,7 @@ from management.services.agent import nl2agent as nl2agent_service
 @pytest.fixture
 def repository_pages(mocker):
     mocker.patch("management.services.skill.transfer.get_official_skills_with_status", return_value=[])
-    skill_pages = mocker.patch("services.skill_repository_service.list_skill_repository_listings_impl")
+    skill_pages = mocker.patch("management.services.skill.skill_repository.list_skill_repository_listings_impl")
     mcp_pages = mocker.patch("management.services.repository.mcp.service.list_community_mcp_services")
     return skill_pages, mcp_pages
 

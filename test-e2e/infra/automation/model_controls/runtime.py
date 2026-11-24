@@ -17,7 +17,6 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from runtime.api.agent import execution as agent_app_execution
 from management.api.agent import creator as agent_creator_api, nl2agent_callback as callback_api
 from management.services.agent import nl2agent_callback
 from runtime.agentos import prepared_agent_creator
@@ -136,15 +135,19 @@ def _bind_case_mcp(monkeypatch, mcp_url, *consumers):
 
 
 @contextmanager
-def runtime_fixture(monkeypatch):
+def runtime_fixture(monkeypatch, *, creator_only=False):
+    agent_app_execution = None
+    if not creator_only:
+        from runtime.api.agent import execution as agent_app_execution
     provider = Provider()
     try:
         with database_fixture(monkeypatch, provider) as storage, mcp_server() as mcp_url, TemporaryDirectory(prefix="model-controls-workspaces-") as workspace:
-            from management.services.agent.preparation import inputs
-            monkeypatch.setattr(inputs, "AGENT_WORKSPACE_ROOT", workspace)
+            from runtime.agentos import prepared_evaluation
+            monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", workspace)
             manager = ThreadManager("model-controls-case", runtime_thread_manager._policies)
             manager.start()
-            monkeypatch.setattr(agent_app_execution, "runtime_thread_manager", manager)
+            if agent_app_execution is not None:
+                monkeypatch.setattr(agent_app_execution, "runtime_thread_manager", manager)
             monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
             for name, module in list(sys.modules.items()):
                 if name.startswith(("services.", "management.", "tool_collection.")) and getattr(module, "runtime_thread_manager", None) is runtime_thread_manager:
@@ -165,27 +168,32 @@ def runtime_fixture(monkeypatch):
             rbac.init_rbac()
             # Ordinary Agent preparation resolves MCP through this imported
             # boundary as well. Never fall back to a developer's deployment URL.
-            _bind_case_mcp(monkeypatch, mcp_url, agent_preparation)
+            if not creator_only:
+                _bind_case_mcp(monkeypatch, mcp_url, agent_preparation)
             monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
-            from management.services.agent import execution as ordinary
+            modules = [ephemeral]
+            if not creator_only:
+                from management.services.agent import execution as ordinary
+                modules.append(ordinary)
             runs = []
-            for module in (ephemeral, ordinary):
+            for module in modules:
                 original = module.agent_run
                 async def observe(run_info, *args, _original=original, **kwargs):
                     runs.append(run_info)
                     async for event in _original(run_info, *args, **kwargs):
                         yield event
                 monkeypatch.setattr(module, "agent_run", observe)
-            original_run = agent_app_execution.run_agent_stream
-            async def traced_run(*args, **kwargs):
-                try:
-                    return await original_run(*args, **kwargs)
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
-                    raise
-            monkeypatch.setattr(agent_app_execution, "run_agent_stream", traced_run)
+            if agent_app_execution is not None:
+                original_run = agent_app_execution.run_agent_stream
+                async def traced_run(*args, **kwargs):
+                    try:
+                        return await original_run(*args, **kwargs)
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+                        raise
+                monkeypatch.setattr(agent_app_execution, "run_agent_stream", traced_run)
 
             def respond(body):
                 messages = json.dumps(body["messages"])
@@ -200,7 +208,8 @@ def runtime_fixture(monkeypatch):
             provider.responder = respond
             app = FastAPI()
             install_fixture_gateway_session(app, owner, tenant)
-            app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+            if agent_app_execution is not None:
+                app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
             app.include_router(agent_creator_api.router, prefix="/api")
             app.include_router(callback_api.router, prefix="/api")
             grants = {}

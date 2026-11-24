@@ -12,6 +12,8 @@ export function formatConfigValue(
   if (value === null) return t("systemConfig.emptyValue");
   if (typeof value === "boolean")
     return value ? t("systemConfig.on") : t("systemConfig.off");
+  if (Array.isArray(value))
+    return value.length ? value.join(", ") : t("systemConfig.emptyResourceRefs");
   return item.kind === "number"
     ? String(Number(value.toFixed(2)))
     : String(value);

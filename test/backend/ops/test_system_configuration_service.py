@@ -32,7 +32,7 @@ def test_list_returns_shared_catalog_and_saved_database_values(mocker):
 
     items = system_configuration.list_system_configurations()
 
-    assert len(items) == len(DEFAULT_CATALOG.definitions) == 19
+    assert len(items) == len(DEFAULT_CATALOG.definitions) == 20
     assert items[0]["value"] == 5
     assert items[0]["default_value"] == 100
     assert all(item["recommendation_available"] is False for item in items)

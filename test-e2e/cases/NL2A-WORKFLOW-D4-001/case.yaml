@@ -4,58 +4,216 @@ module: NL2A-WORKFLOW
 case:
   case_id: NL2A-WORKFLOW-D4-001
   feature_id: F-045
-  requirement_ids: [NL2AGENT-WORKFLOW-PROGRESS-20261113]
-  business_rule_ids: [F-045-RULE-02, F-045-RULE-11]
-  title: NL2Agent shows fixed workflow steps from trusted facts across matching, waiting and replay
+  requirement_ids:
+  - NL2AGENT-WORKFLOW-PROGRESS-20261113
+  - NL2AGENT-UNIFIED-CARD-20261120
+  business_rule_ids:
+  - F-045-RULE-02
+  - F-045-RULE-11
+  - F-045-RULE-07
+  title: NL2Agent shows fixed workflow steps from trusted facts across matching, waiting
+    and replay
   type: E2E
   priority: P1
   status: active
   automation: automated
-  objective: Verify the real editor panel projects trusted execution and historical facts without model-generated progress or business writes.
+  objective: Verify the real editor panel projects trusted execution and historical
+    facts without model-generated progress or business writes.
   preconditions:
-    - Local frontend is available with isolated authorized editor API fixtures and controlled creator SSE/history responses.
+  - Local frontend is available with isolated authorized editor API fixtures and controlled
+    creator SSE/history responses.
   test_data:
-    profile: controlled browser APIs, editable draft, fuzzy and hybrid runs, trusted cards and completion receipts
+    profile: controlled browser APIs, editable draft, fuzzy and hybrid runs, trusted
+      cards and completion receipts
   steps:
-    - order: 1
-      action: Open the Agent editor, submit a request, return fuzzy matching progress and a coverage card.
-      expected: No step card appears before an actual creation run. During creation four steps stay above the scroll region, coverage waits, and fuzzy matching has no semantic failure warning.
-    - order: 2
-      action: Start a hybrid run, return index/search/verification progress and a binding card, then return to requirement clarification.
-      expected: Matching details reflect trusted stages, binding waits without a spinner, and returning requirements moves the current step back without duplicate tool calls. The higher-scoring DataMate alternative appears before the native knowledge tool and starts selected; the user can select the lower-scoring native tool without an automatic binding write.
-    - order: 3
-      action: Return generation saves, a controlled generation failure, and then a trusted completion receipt in a subsequent turn.
-      expected: Saves alone do not mark complete, failure remains retryable, only completion marks the final step complete.
-    - order: 4
-      action: Restore a creator conversation and start a new conversation; inspect a narrow panel and scroll the chat.
-      expected: Creation history restores the correct step; inactive historical resource cards retain their recorded installation status without querying the latest status. New conversation hides the card, optimization of an existing draft stays hidden, and active creation fits narrow panels without overflow.
+  - order: 1
+    action: Open the Agent editor, submit a request, return fuzzy matching progress
+      and a coverage card.
+    expected: No step card appears before an actual creation run. During creation
+      four steps stay above the scroll region, coverage waits, and fuzzy matching
+      has no semantic failure warning.
+  - order: 2
+    action: Return a unified card, choose alternatives and edit requirements inside
+      the card.
+    expected: Matching follows trusted stages. Higher-scoring candidates appear first.
+      Editing pauses binding, cancel restores selections and saving updates affected
+      requirements without automatic binding.
+  - order: 3
+    action: Return generation saves, a controlled generation failure, and then a trusted
+      completion receipt in a subsequent turn.
+    expected: Saves alone do not mark complete, failure remains retryable, only completion
+      marks the final step complete.
+  - order: 4
+    action: Restore a creator conversation and start a new conversation; inspect a
+      narrow panel and scroll the chat.
+    expected: Creation history restores the correct step; inactive historical resource
+      cards retain their recorded installation status without querying the latest
+      status. New conversation hides the card, optimization of an existing draft stays
+      hidden, and active creation fits narrow panels without overflow.
+  - order: 5
+    action: Review shared and unmatched requirements, inspect binding eligibility,
+      edit and cancel, then save a real query change. Render the current ready binding
+      snapshot and inspect the unchanged requirement list and unbound alternative.
+      Load an Agent with an already-saved shared Skill while the recommendation card
+      still says it is unbound.
+    expected: Per-requirement choices stay independent while a shared resource counts
+      once. Gaps block continuation but not binding eligibility. Editing keeps resources
+      visible and disables operations; cancel restores selections and saving updates
+      the query without a binding write. Status summaries and requirement rows use
+      compact icons; row status text is not repeated. Edit/delete are visible without
+      hover. Detail toggles have a 28px target and hide all resource actions when
+      collapsed. Each expanded row offers Skill/MCP creation, and unmatched rows show
+      a dedicated explanation. The arrow sits beside the bilingual subtitle; the title
+      aligns with the resource card. Numeric relevance uses success color. Matched
+      rows use text creation links; unmatched rows retain orange alert styling and
+      creation buttons. Mixed coverage stays at the coverage step despite bindable
+      candidates. Completing every requirement advances to binding, and a later gap
+      returns to coverage. Knowledge configuration opens one real drawer from either
+      occurrence of a shared tool; cancellation restores card operations without a
+      resource write. Concrete recommended knowledge appears beneath the tool description
+      and is preselected in configuration. Saved and user choices, including an explicit
+      empty choice, override defaults; errors retain manual configuration. Ready rows
+      remain visible at their original positions, bound resources retain checked disabled
+      boxes, the ready-group footer is absent, an optional unbound resource can still
+      be toggled, and Continue is enabled after complete ready binding. The saved
+      Skill is checked and disabled under every matching requirement and is excluded
+      from the bind count without another binding write.
   expected_results:
-    - Steps and matching details accurately reflect trusted current workflow facts and explicit waiting states.
-    - Completion, rollback and historical replay preserve user control without false success or stale progress.
-    - The header is fixed outside chat scrolling and fits desktop and narrow panels.
-    - Server recommendation order and defaults are rendered faithfully while manual resource choice remains under user control.
+  - Steps and matching details accurately reflect trusted current workflow facts and
+    explicit waiting states.
+  - Completion, rollback and historical replay preserve user control without false
+    success or stale progress.
+  - The header is fixed outside chat scrolling and fits desktop and narrow panels.
+  - Server recommendation order and defaults are rendered faithfully while manual
+    resource choice remains under user control.
+  - Per-requirement choices stay independent while a shared resource counts once.
+    Gaps block continuation but not binding eligibility. Editing keeps resources visible
+    and disables operations; cancel restores selections and saving updates the query
+    without a binding write. Compact status icons, visible edit/delete actions, accessible
+    detail toggles, creation actions and dedicated no-match explanations remain available
+    without hover. Ready requirements remain in the original list with immutable checked
+    bindings and selectable alternatives. Saved Skill bindings supersede stale card
+    flags.
   forbidden_side_effects:
-    - No extra model progress fields, calls, Agent update or persistent resource creation is introduced by the step display.
-    - Assistant text or cross-target state does not advance the steps.
+  - No extra model progress fields, calls, Agent update or persistent resource creation
+    is introduced by the step display.
+  - Assistant text or cross-target state does not advance the steps.
   actor: Authorized controlled tenant user
-  journey: [Open editor, Discover resources, Review coverage, Bind resources, Return requirements, Generate, Restore history, Start new conversation]
+  journey:
+  - Open editor
+  - Discover resources
+  - Review coverage
+  - Bind resources
+  - Return requirements
+  - Generate
+  - Restore history
+  - Start new conversation
   final_business_result:
-    - The user can tell the current step and required next action while the existing creator workflow remains authoritative.
-    - The binding card preserves score-based defaults and optional native knowledge selection under user control.
-  failure_evidence: [Browser assertions, failed-step screenshot and trace]
+  - The user can tell the current step and required next action while the existing
+    creator workflow remains authoritative.
+  - The binding card preserves score-based defaults and optional native knowledge
+    selection under user control.
+  failure_evidence:
+  - Browser assertions
+  - failed-step screenshot and trace
   acceptance:
-    - id: AC-KNOWLEDGE-CHOICE
-      description: The binding card renders the higher-scoring DataMate tool first and selected, retains the lower-scoring native tool as an alternative, and allows manual changes without a binding write.
-      steps: [2]
-      expected_results: [4]
-      forbidden_side_effects: [1]
-    - id: AC-STEPS
-      description: Fixed workflow and matching details follow current trusted facts and waiting states.
-      steps: [1, 2]
-      expected_results: [1, 3]
-      forbidden_side_effects: [1, 2]
-    - id: AC-REPLAY
-      description: Generation completion, returning requirements and replay/reset do not fabricate or leak progress. Inactive historical cards retain recorded installation status and make no latest-status request.
-      steps: [2, 3, 4]
-      expected_results: [2, 3]
-      forbidden_side_effects: [1, 2]
+  - id: AC-KNOWLEDGE-AUTO
+    description: Recommendations are visible and preselected, manual edits persist
+      across reopen, and saved selections are not overwritten.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-KNOWLEDGE-CHOICE
+    description: The binding card renders the higher-scoring DataMate tool first and
+      selected, retains the lower-scoring native tool as an alternative, and allows
+      manual changes without a binding write.
+    steps:
+    - 2
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+  - id: AC-STEPS
+    description: Fixed workflow and matching details follow current trusted facts
+      and waiting states.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-REPLAY
+    description: Generation completion, returning requirements and replay/reset do
+      not fabricate or leak progress. Inactive historical cards retain recorded installation
+      status and make no latest-status request.
+    steps:
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-UNIFIED-CARD
+    description: Per-requirement choices stay independent while a shared resource
+      counts once. Gaps block continuation but not binding eligibility. Editing keeps
+      resources visible and disables operations; cancel restores selections and saving
+      updates the query without a binding write. Status icons, visible row actions,
+      accessible collapse controls, creation actions and dedicated no-match explanations
+      are rendered in the real browser.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+  - id: AC-COVERAGE-STAGE
+    description: A gap keeps unified cards in coverage; full installed coverage enters
+      binding and a later gap rolls back.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-KNOWLEDGE-DIALOG
+    description: Knowledge configuration opens and closes one drawer for shared resources
+      without binding or persistent writes.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-BOUND-LIST
+    description: Ready requirements remain visible without a separate group; bound
+      boxes are checked and disabled, optional alternatives stay selectable, and complete
+      ready bindings enable Continue.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-SKILL-SYNC
+    description: A saved Agent Skill supersedes stale card flags, including shared
+      occurrences, without an additional binding write.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2

@@ -111,3 +111,15 @@ def test_invalid_batch_performs_no_updates():
 
     assert not [item for item in session.statements if "UPDATE" in item[0].upper()]
     session.rollback.assert_not_called()
+
+
+def test_save_resource_refs_writes_a_canonical_json_array():
+    key = "NL2AGENT_RESOURCE_DENYLIST"
+    session = _Session(_rows())
+    snapshot = _repository().save_changes(session, {key: ["tool:9", "skill:2"]}, actor="ops")
+    assert snapshot.get(key) == ("skill:2", "tool:9")
+    assert len(session.statements) == 2
+
+    unchanged = _Session(_rows({**EXPECTED_DEFAULTS, key: ["skill:2", "tool:9"]}))
+    _repository().save_changes(unchanged, {key: ["tool:9", "skill:2"]}, actor="ops")
+    assert len(unchanged.statements) == 1

@@ -6,10 +6,10 @@ feature:
   feature_id: SYSTEM-CONFIGURATION
   name: Operations-managed hot system configuration
   status: active
-  description: Manage nineteen non-secret hot-update settings through ops with database persistence and shared consumer refresh.
+  description: Manage twenty non-secret hot-update settings through ops with database persistence and shared consumer refresh.
   business_rules:
   - rule_id: SYS-CONFIG-RULE-01
-    description: Only the frozen nineteen-key catalog is readable and writable through ops; unknown or invalid batches are rejected atomically.
+    description: The fixed configuration catalog includes a validated exact-reference list for NL2Agent resource recommendations. Unknown or invalid batches are rejected atomically.
   - rule_id: SYS-CONFIG-RULE-02
     description: Page and API access require an explicit ops.configuration grant; role identity alone never bypasses permission checks.
   - rule_id: SYS-CONFIG-RULE-03

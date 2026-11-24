@@ -108,7 +108,7 @@ async def verify_requirements(verification_batch_id: str, checks: list[dict]) ->
     except ValidationError:
         return ToolResult(content=json.dumps(_error("invalid_verification")))
     scope, result = await _run(flow.verify, verification_batch_id, parsed)
-    if scope is None or result.get("verification_batch_id") is not None:
+    if scope is None or result.get("verification_batch_id") is not None or result.get("next_step"):
         return ToolResult(content=json.dumps(result, ensure_ascii=False))
     return await show_resource_card()
 

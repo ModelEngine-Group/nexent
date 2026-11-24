@@ -169,7 +169,7 @@ def _prepare(tenant_id, model, queries, installed, installable, progress, budget
     return dimension, documents, queries_by_text, groups, remaining, emit, started, len(pending)
 
 
-async def _search(tenant_id, fingerprint, prepared, queries):
+async def _search(tenant_id, fingerprint, prepared, queries, minimum_similarity=None):
     dimension, documents, vectors, groups, remaining, emit, started, pending = prepared
 
     def jobs():
@@ -202,7 +202,7 @@ async def _search(tenant_id, fingerprint, prepared, queries):
             for query in _query_routes(value):
                 unique, _ = groups[query, label]
                 for score, ref in ranked_groups.get((query, label), []):
-                    if score >= NL2AGENT_EMBEDDING_MIN_SIMILARITY:
+                    if score >= (NL2AGENT_EMBEDDING_MIN_SIMILARITY if minimum_similarity is None else minimum_similarity):
                         if ref not in selected or score > selected[ref][0]:
                             selected[ref] = (score, unique[ref])
             result[key][label] = sorted(selected.values(), key=lambda row: (-row[0], row[1]["candidate_ref"]))
@@ -211,7 +211,7 @@ async def _search(tenant_id, fingerprint, prepared, queries):
     return result
 
 
-async def retrieve(tenant_id, model, queries, installed, installable, progress):
+async def retrieve(tenant_id, model, queries, installed, installable, progress, *, minimum_similarity=None):
     stopped = Event()
     budget = _PhaseBudget(PREPARATION_TIMEOUT, stopped)
     phase, threshold = "preparation", PREPARATION_TIMEOUT
@@ -228,7 +228,9 @@ async def retrieve(tenant_id, model, queries, installed, installable, progress):
         # Preparation has finished; its closures now share a fresh search budget.
         budget.deadline = time.monotonic() + RETRIEVAL_TIMEOUT
         async with asyncio.timeout(RETRIEVAL_TIMEOUT):
-            return await _search(tenant_id, model[1], prepared, queries)
+            if minimum_similarity is None:
+                return await _search(tenant_id, model[1], prepared, queries)
+            return await _search(tenant_id, model[1], prepared, queries, minimum_similarity=minimum_similarity)
     except ThreadQueueTimedOut:
         raise
     except TimeoutError as exc:

@@ -46,6 +46,59 @@ const project = (messages: unknown[], isRunning = false) =>
     phase: "idle",
   });
 
+const unifiedCard = (statuses: string[]) => ({
+  subtype: "requirement_resources",
+  resources: [{ candidate: { candidate_ref: "tool:1" } }],
+  requirements: statuses.map((coverage_status, index) => ({
+    requirement_id: `r${index}`,
+    coverage_status,
+    covered_resources:
+      coverage_status === "covered" ? [{ candidate_ref: "tool:1" }] : [],
+    installable_resources:
+      coverage_status === "installable"
+        ? [{ candidate_ref: "skill_repository:1" }]
+        : [],
+  })),
+});
+
+it.each(["uncovered", "installable", "pending"])(
+  "keeps unified cards with a %s requirement in coverage despite other bindable resources",
+  (status) => {
+    expect(
+      project([message([], unifiedCard(["covered", status]))])
+    ).toMatchObject({
+      current: 1,
+      status: "waiting",
+      detail: "resolveGaps",
+    });
+  }
+);
+
+it("advances to binding only when every retained requirement has verified installed coverage", () => {
+  expect(
+    project([message([], unifiedCard(["covered", "covered"]))])
+  ).toMatchObject({
+    current: 2,
+    status: "waiting",
+    detail: "selectResources",
+  });
+  const invalid = unifiedCard(["covered"]);
+  invalid.requirements[0].covered_resources = [];
+  expect(project([message([], invalid)]).current).toBe(1);
+  expect(project([message([], unifiedCard([]))]).current).toBe(1);
+});
+
+it("replays complete coverage, rolls back for a new gap and returns to binding after it is resolved", () => {
+  const complete = message([], unifiedCard(["covered", "covered"]));
+  const gap = message([], unifiedCard(["covered", "uncovered"]));
+  expect(project([complete, gap]).current).toBe(1);
+  expect(project([complete, gap, complete]).current).toBe(2);
+  expect(
+    project([message([], { ...unifiedCard(["covered"]), agent_id: 99 })])
+      .current
+  ).toBe(0);
+});
+
 const generationTool = (overrides: Record<string, unknown> = {}) => ({
   ...message(),
   content: [
@@ -56,6 +109,19 @@ const generationTool = (overrides: Record<string, unknown> = {}) => ({
       ...overrides,
     },
   ],
+});
+
+it("does not advance a unified coverage gap from a generation tool start", () => {
+  expect(
+    project(
+      [message([], unifiedCard(["covered", "uncovered"])), generationTool()],
+      true
+    ).current
+  ).toBe(1);
+  expect(
+    project([message([], unifiedCard(["covered"])), generationTool()], true)
+      .current
+  ).toBe(3);
 });
 
 it.each([undefined, { status: "success" }])(
@@ -125,7 +191,7 @@ it.each([
     "requirements",
     "waiting",
   ],
-  [message([], { subtype: "requirement_coverage" }), "coverage", "waiting"],
+  [message([], unifiedCard(["uncovered"])), "coverage", "waiting"],
   [
     message([], { subtype: "installed_resource_binding" }),
     "binding",
@@ -248,9 +314,7 @@ it("only explicit full creation intent enables steps for an existing draft", () 
       isFullGenerationTurn(
         [
           tool(purpose),
-          message([state("searching_text")], {
-            subtype: "requirement_coverage",
-          }),
+          message([state("searching_text")], unifiedCard(["uncovered"])),
         ],
         42
       )
@@ -273,9 +337,10 @@ it("only explicit full creation intent enables steps for an existing draft", () 
 
 it("shows normal fuzzy matching without inventing semantic failure", () => {
   const view = project([
-    message([state("searching_text"), state("verifying_capabilities", 2)], {
-      subtype: "requirement_coverage",
-    }),
+    message(
+      [state("searching_text"), state("verifying_capabilities", 2)],
+      unifiedCard(["uncovered"])
+    ),
   ]);
   expect(view.current).toBe(1);
   expect(view.mode).toBe("fuzzy");

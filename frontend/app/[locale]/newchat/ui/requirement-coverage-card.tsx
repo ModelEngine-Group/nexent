@@ -2,15 +2,18 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowRight,
-  Check,
-  Clock3,
-  Download,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  CircleDashed,
+  CircleDot,
   ListChecks,
   Pencil,
   Plus,
@@ -18,7 +21,6 @@ import {
   Sparkles,
   Target,
   Trash2,
-  TriangleAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -29,8 +31,7 @@ import { API_ENDPOINTS } from "@/services/api";
 import { listMcpTools } from "@/services/mcpToolsService";
 import type {
   Nl2AgentCardAction,
-  Nl2aCoveragePayload,
-  Nl2aRequirementClarificationPayload,
+  Nl2aUnifiedResourcesPayload,
   Nl2aSuggestedResourceInstallationPayload,
 } from "../adapter/remote-chat-model-adapter";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
@@ -49,9 +50,6 @@ const AddMcpServiceModal = dynamic(
   () => import("../../mcp-space/components/add/AddMcpServiceModal"),
   { ssr: false }
 );
-
-type EditablePayload =
-  Nl2aCoveragePayload | Nl2aRequirementClarificationPayload;
 
 type DraftRow = { query: string } & (
   | { requirement_id: string; client_key?: never }
@@ -73,58 +71,53 @@ type InstalledResource = {
 };
 type McpInstallationStatus = "installed" | "disabled";
 
-const coverageAppearance = {
-  covered: { Icon: Check, color: "bg-[var(--color-success)] text-white" },
-  installable: { Icon: Download, color: "bg-brand-soft text-primary" },
-  uncovered: {
-    Icon: TriangleAlert,
-    color: "bg-[var(--color-warning-subtler)] text-[var(--color-warning-bold)]",
-  },
-  pending: { Icon: Clock3, color: "bg-muted text-muted-foreground" },
+const requirementAppearance = {
+  choose: { Icon: Circle, color: "text-muted-foreground" },
+  pending: { Icon: CircleDot, color: "text-primary" },
+  ready: { Icon: CircleCheck, color: "text-[var(--color-success)]" },
+  unmatched: { Icon: CircleDashed, color: "text-[var(--color-alert)]" },
 };
 
-function RelevanceSignal({ score }: { score: number }) {
+function RelevanceScore({ score }: { score: number }) {
   const { t } = useTranslation("common");
-  const level = score >= 0.85 ? 3 : score >= 0.6 ? 2 : 1;
-  const label =
-    level === 3
-      ? t("nl2agent.coverage.relevanceHigh", "High relevance")
-      : level === 2
-        ? t("nl2agent.coverage.relevanceMedium", "Medium relevance")
-        : t("nl2agent.coverage.relevanceLow", "Low relevance");
   return (
-    <span
-      className="inline-flex h-3 shrink-0 items-end gap-px"
-      role="img"
-      aria-label={label}
-      title={label}
-    >
-      {["h-1", "h-2", "h-3"].map((height, index) => (
-        <span
-          key={height}
-          aria-hidden="true"
-          className={`w-1 rounded-[1px] ${height} ${index < level ? "bg-[var(--color-success)]" : "bg-border"}`}
-        />
-      ))}
+    <span className="shrink-0 text-muted-foreground tabular-nums">
+      {t("nl2agent.coverage.relevanceScore", "Relevance score")}:{" "}
+      <span className="text-[var(--color-success)]">
+        {Math.round(score * 100)}
+      </span>
+      {t("nl2agent.coverage.scoreUnit", " points")}
     </span>
   );
+}
+
+export interface UnifiedBindingView {
+  busy: boolean;
+  footer: ReactNode;
+  renderResources: (requirementId: string) => ReactNode;
+  status: (
+    requirementId: string
+  ) => "ready" | "pending" | "choose" | "unmatched";
+  onAccepted: () => void;
+  onEditingChange: (editing: boolean) => void;
+  onResourceBusyChange?: (busy: boolean) => void;
 }
 
 export function RequirementCoverageCard({
   payload,
   disabled = false,
-  readOnly = false,
+  binding,
 }: {
-  payload: EditablePayload;
+  payload: Nl2aUnifiedResourcesPayload;
   disabled?: boolean;
-  readOnly?: boolean;
+  binding: UnifiedBindingView;
 }) {
   const { t } = useTranslation("common");
   const aui = useAui();
   const running = useAuiState((state) => state.thread.isRunning);
   const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
-  const cardKey = payload.card_id ?? "";
-  const requirements = payload.requirements ?? [];
+  const cardKey = payload.card_id;
+  const requirements = payload.requirements;
   const [rows, setRows] = useState<DraftRow[]>(() =>
     requirements.map(({ requirement_id, query }) => ({
       requirement_id,
@@ -132,6 +125,8 @@ export function RequirementCoverageCard({
     }))
   );
   const [failed, setFailed] = useState(false);
+  const [editingRequirements, setEditingRequirements] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [newQuery, setNewQuery] = useState("");
   const [editing, setEditing] = useState<{ key: string; value: string } | null>(
     null
@@ -158,16 +153,65 @@ export function RequirementCoverageCard({
     target: LinkTarget;
     name: string;
   } | null>(null);
-  const recommendation = payload.subtype === "resource_recommendation";
-  const clarification = payload.subtype === "requirement_clarification";
+  useEffect(() => {
+    binding.onResourceBusyChange?.(
+      Boolean(
+        installationBusy || installation || manual || pendingMcp || pendingLink
+      )
+    );
+  }, [
+    binding.onResourceBusyChange,
+    installationBusy,
+    installation,
+    manual,
+    pendingMcp,
+    pendingLink,
+  ]);
+  const recommendation = payload.purpose === "recommend";
   const hasRepositoryMcp = requirements.some(({ installable_resources }) =>
     installable_resources.some(({ candidate_ref }) =>
       candidate_ref.startsWith("tenant_mcp_repository:")
     )
   );
-  const locked = readOnly || disabled || running || !isCardInteractive(cardKey);
+  const locked =
+    disabled || running || !isCardInteractive(cardKey) || binding.busy;
+  const resourceLocked = locked || editingRequirements;
+  const changed =
+    rows.length !== requirements.length ||
+    rows.some(
+      (row) =>
+        row.query.trim() !==
+        requirements.find(
+          (original) => original.requirement_id === row.requirement_id
+        )?.query
+    );
+  const startEditing = () => {
+    if (
+      locked ||
+      installationBusy ||
+      installation ||
+      pendingLink ||
+      manual ||
+      pendingMcp
+    )
+      return;
+    setEditingRequirements(true);
+    binding.onEditingChange(true);
+  };
+  const cancelEditing = () => {
+    setRows(
+      requirements.map(({ requirement_id, query }) => ({
+        requirement_id,
+        query,
+      }))
+    );
+    setNewQuery("");
+    setEditing(null);
+    setEditingRequirements(false);
+    binding.onEditingChange(false);
+  };
   const refreshInstallationStatus =
-    hasRepositoryMcp && !locked && !recommendation && !clarification;
+    hasRepositoryMcp && !locked && !recommendation;
 
   useEffect(() => {
     if (!refreshInstallationStatus) return;
@@ -202,9 +246,8 @@ export function RequirementCoverageCard({
   }, [cardKey, refreshInstallationStatus]);
 
   useEffect(() => {
-    if (cardKey && !readOnly && !disabled)
-      registerCard(cardKey, payload.subtype, true);
-  }, [cardKey, disabled, failed, payload.subtype, readOnly, registerCard]);
+    if (cardKey && !disabled) registerCard(cardKey, payload.subtype, true);
+  }, [cardKey, disabled, failed, payload.subtype, registerCard]);
 
   const finishEdit = (key: string, value: string) => {
     const query = value.trim();
@@ -219,11 +262,6 @@ export function RequirementCoverageCard({
     }
     setEditing(null);
   };
-  const title = recommendation
-    ? t("nl2agent.coverage.recommendation", "Recommended resources")
-    : clarification
-      ? t("nl2agent.requirementClarification.title", "Clarify requirements")
-      : t("nl2agent.coverage.title", "Review resource coverage");
   const targetKey = (target: LinkTarget) =>
     `${target.requirement_id ?? target.client_key}:${target.candidate_ref ?? ""}`;
   const entries = rows.map((row) => {
@@ -235,22 +273,13 @@ export function RequirementCoverageCard({
       requirement_id: row.requirement_id,
       client_key: row.client_key,
     };
-    const awaitingVerification = [
-      target,
-      ...(original?.installable_resources ?? []).map(({ candidate_ref }) => ({
-        ...target,
-        candidate_ref,
-      })),
-    ].some((resource) => linked.includes(targetKey(resource)));
-    const status: keyof typeof coverageAppearance =
-      unchanged && !awaitingVerification ? original.coverage_status : "pending";
-    return { row, original, unchanged, target, status };
+    return { row, original, unchanged, target };
   });
-  const covered = entries.filter(({ status }) => status === "covered").length;
   const atLimit = rows.length >= 8;
   const addRequirement = () => {
     const query = newQuery.trim();
     if (!query || locked || atLimit) return;
+    startEditing();
     setRows((current) => [
       ...current,
       { client_key: crypto.randomUUID(), query },
@@ -364,13 +393,13 @@ export function RequirementCoverageCard({
     const result = {
       card_id: cardKey,
       state_version: payload.state_version,
-      ...(!recommendation ? { requirements: rows } : {}),
+      requirements: rows,
     };
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
       subtype: payload.subtype,
       agent_id: payload.agent_id,
-      action: recommendation ? "use_recommendation" : "confirm_requirements",
+      action: "confirm_requirements",
       result,
     };
     aui.thread().append({
@@ -378,7 +407,10 @@ export function RequirementCoverageCard({
         aui.thread().composer().getState().runConfig,
         payload.agent_id,
         {
-          onAccepted: () => submitCard(cardKey),
+          onAccepted: () => {
+            binding.onAccepted();
+            submitCard(cardKey);
+          },
           onRejected: () => setFailed(true),
         }
       ),
@@ -386,7 +418,7 @@ export function RequirementCoverageCard({
       content: [
         {
           type: "text",
-          text: t("nl2agent.coverage.confirm", "Confirm requirements"),
+          text: t("nl2agent.unified.update"),
         },
       ],
       metadata: { custom: { nl2agentCardAction: action } },
@@ -396,7 +428,7 @@ export function RequirementCoverageCard({
 
   return (
     <section
-      className="my-4 overflow-hidden rounded-2xl border border-border bg-card text-sm text-foreground shadow-sm"
+      className="bg-card text-sm text-foreground"
       data-testid={payload.subtype}
     >
       <header className="flex items-start justify-between gap-3 border-b bg-muted/25 px-4 py-3.5">
@@ -405,11 +437,9 @@ export function RequirementCoverageCard({
             <ListChecks className="size-4" aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <h3 className="font-semibold">{title}</h3>
+            <h3 className="font-semibold">{t("nl2agent.unified.title")}</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {clarification
-                ? t("nl2agent.coverage.clarificationDescription")
-                : t("nl2agent.coverage.description")}
+              {t("nl2agent.unified.description")}
             </p>
           </div>
         </div>
@@ -417,34 +447,58 @@ export function RequirementCoverageCard({
           aria-live="polite"
           className="shrink-0 pt-1 text-xs tabular-nums text-muted-foreground"
         >
-          {t("nl2agent.coverage.progress", { covered, total: rows.length })}
+          {t("nl2agent.unified.total", { count: rows.length })}
         </span>
       </header>
+      {!editingRequirements ? (
+        <div
+          className="flex flex-wrap gap-4 border-b px-4 py-2 text-xs"
+          aria-live="polite"
+        >
+          {(["choose", "pending", "ready", "unmatched"] as const).map(
+            (state) => {
+              const { Icon, color } = requirementAppearance[state];
+              return (
+                <span key={state} className="inline-flex items-center gap-1.5">
+                  <Icon
+                    className={`size-3.5 shrink-0 ${color}`}
+                    aria-hidden="true"
+                  />
+                  {t(`nl2agent.unified.status.${state}`)}{" "}
+                  {
+                    requirements.filter(
+                      (row) => binding.status(row.requirement_id) === state
+                    ).length
+                  }
+                </span>
+              );
+            }
+          )}
+        </div>
+      ) : null}
+      {editingRequirements ? (
+        <p role="status" className="border-b bg-brand-soft px-4 py-2 text-xs">
+          {t("nl2agent.unified.editingNotice")}
+        </p>
+      ) : null}
       <ul className="divide-y divide-border">
-        {entries.map(({ row, original, unchanged, target, status }, index) => {
+        {entries.map(({ row, original, unchanged, target }, index) => {
           const rowKey = row.requirement_id ?? row.client_key;
-          const { Icon, color } = coverageAppearance[status];
-          const resources = unchanged
-            ? [
-                ...(original?.covered_resources ?? []),
-                ...(original?.installable_resources ?? []),
-              ]
-            : [];
-          const coveredStatus =
-            status === "covered" ? (
-              <span className="ml-auto shrink-0 whitespace-nowrap text-xs leading-5 text-muted-foreground">
-                {t("nl2agent.coverage.covered", "Covered")}
-              </span>
-            ) : null;
+          const phase = binding.status(rowKey);
+          const { Icon, color } = requirementAppearance[phase];
+          const resources = original?.installable_resources ?? [];
+          const rowExpanded = expanded[rowKey] !== false;
           return (
             <li
               key={rowKey}
               className="nl2agent-requirement-row grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 px-4 py-3"
             >
               <span
-                className={`mt-0.5 flex size-5 items-center justify-center rounded-full ${color}`}
+                className={`flex size-5 items-center justify-center rounded-full ${color}`}
+                aria-label={t(`nl2agent.unified.status.${phase}`)}
+                role="img"
               >
-                <Icon className="size-3" aria-hidden="true" />
+                <Icon className="size-4" aria-hidden="true" />
               </span>
               <div className="min-w-0 space-y-1.5">
                 <div className="flex items-start gap-2">
@@ -477,12 +531,11 @@ export function RequirementCoverageCard({
                       }}
                     />
                   ) : (
-                    <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs font-semibold">
+                    <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] font-semibold">
                       {row.query}
                     </p>
                   )}
-                  {resources.length === 0 ? coveredStatus : null}
-                  {!recommendation && !locked ? (
+                  {!locked ? (
                     <div className="nl2agent-requirement-actions -my-1 flex shrink-0 items-center">
                       <Button
                         type="button"
@@ -498,9 +551,10 @@ export function RequirementCoverageCard({
                           Boolean(installation) ||
                           installationBusy
                         }
-                        onClick={() =>
-                          setEditing({ key: rowKey, value: row.query })
-                        }
+                        onClick={() => {
+                          startEditing();
+                          setEditing({ key: rowKey, value: row.query });
+                        }}
                       >
                         <Pencil className="size-3.5" aria-hidden="true" />
                       </Button>
@@ -511,188 +565,242 @@ export function RequirementCoverageCard({
                         className="size-7 text-muted-foreground"
                         aria-label={t("nl2agent.coverage.remove", "Remove")}
                         disabled={Boolean(installation) || installationBusy}
-                        onClick={() =>
+                        onClick={() => {
+                          startEditing();
                           setRows((current) =>
                             current.filter((_, i) => i !== index)
-                          )
-                        }
+                          );
+                        }}
                       >
                         <Trash2 className="size-3.5" aria-hidden="true" />
                       </Button>
                     </div>
                   ) : null}
                 </div>
-                {resources.length ? (
-                  <div className="flex items-start gap-2">
-                    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] leading-5 text-muted-foreground">
-                      <Target className="size-3" aria-hidden="true" />
-                      {t(
-                        "nl2agent.coverage.relatedResources",
-                        "Related resources"
-                      )}
-                    </span>
-                    <ul className="min-w-0 flex-1 space-y-1.5">
-                      {resources.map((resource) => {
-                        const installTarget = {
-                          ...target,
-                          candidate_ref: resource.candidate_ref,
-                        };
-                        const alreadyLinked = linked.includes(
-                          targetKey(installTarget)
-                        );
-                        const requirementId = target.requirement_id;
-                        const repositoryMcp = resource.candidate_ref.startsWith(
-                          "tenant_mcp_repository:"
-                        );
-                        const installationStatus =
-                          repositoryMcp && refreshInstallationStatus && mcpStatuses
-                            ? mcpStatuses[resource.candidate_ref]
-                            : resource.installation_status;
-                        const activeInstallation =
-                          installation &&
-                          targetKey(installation.target) ===
+                <div className="relative min-h-5 flex items-center">
+                  <button
+                    type="button"
+                    className="absolute -left-9 top-1/2 -translate-y-1/2 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={t("nl2agent.unified.toggleDetails", {
+                      query: row.query,
+                    })}
+                    aria-expanded={rowExpanded}
+                    onClick={() =>
+                      setExpanded((current) => ({
+                        ...current,
+                        [rowKey]: !rowExpanded,
+                      }))
+                    }
+                  >
+                    {rowExpanded ? (
+                      <ChevronDown className="size-4" aria-hidden="true" />
+                    ) : (
+                      <ChevronRight className="size-4" aria-hidden="true" />
+                    )}
+                  </button>
+                  {original?.search_queries ? (
+                    <p className="text-xs text-muted-foreground">
+                      {original.search_queries.zh} ·{" "}
+                      {original.search_queries.en}
+                    </p>
+                  ) : null}
+                </div>
+                <div hidden={!rowExpanded} className="space-y-1.5">
+                  {original?.covered_resources.length
+                    ? binding.renderResources(rowKey)
+                    : null}
+                  {!unchanged ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("nl2agent.unified.pendingMatch")}
+                    </p>
+                  ) : null}
+                  {resources.length ? (
+                    <div className="flex items-start gap-2">
+                      <span className="inline-flex shrink-0 items-center gap-1 text-[11px] leading-5 text-muted-foreground">
+                        <Target className="size-3" aria-hidden="true" />
+                        {t(
+                          "nl2agent.coverage.relatedResources",
+                          "Related resources"
+                        )}
+                      </span>
+                      <ul className="min-w-0 flex-1 space-y-1.5">
+                        {resources.map((resource) => {
+                          const installTarget = {
+                            ...target,
+                            candidate_ref: resource.candidate_ref,
+                          };
+                          const alreadyLinked = linked.includes(
                             targetKey(installTarget)
-                            ? installation
-                            : null;
-                        const canInstall =
-                          !recommendation &&
-                          !clarification &&
-                          !installationStatus &&
-                          original?.installable_resources.some(
-                            (candidate) =>
-                              candidate.candidate_ref === resource.candidate_ref
                           );
-                        const resourceKind =
-                          resource.resource_type === "mcp_server" ||
-                          resource.source === "MCP_TOOL"
-                            ? "MCP"
-                            : resource.resource_type === "skill" ||
-                                resource.candidate_ref.startsWith("skill:")
-                              ? "Skill"
-                              : resource.resource_type === "tool" ||
-                                  resource.candidate_ref.startsWith("tool:")
-                                ? "Tool"
-                                : null;
-                        return (
-                          <li
-                            key={resource.candidate_ref}
-                            className="flex min-h-5 flex-wrap items-center justify-between gap-x-3 gap-y-1"
-                          >
-                            <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
-                              {resourceKind ? (
-                                <Nl2AgentResourceKindBadge
-                                  kind={resourceKind}
-                                />
-                              ) : null}
-                              <span className="inline-flex min-w-0 items-center gap-1.5">
-                                <span className="break-all">
-                                  {resource.name}
-                                </span>
-                                {typeof resource.retrieval_score === "number" &&
-                                Number.isFinite(resource.retrieval_score) ? (
-                                  <RelevanceSignal
-                                    score={resource.retrieval_score}
+                          const requirementId = target.requirement_id;
+                          const repositoryMcp =
+                            resource.candidate_ref.startsWith(
+                              "tenant_mcp_repository:"
+                            );
+                          const installationStatus =
+                            repositoryMcp &&
+                            refreshInstallationStatus &&
+                            mcpStatuses
+                              ? mcpStatuses[resource.candidate_ref]
+                              : resource.installation_status;
+                          const activeInstallation =
+                            installation &&
+                            targetKey(installation.target) ===
+                              targetKey(installTarget)
+                              ? installation
+                              : null;
+                          const canInstall =
+                            !recommendation &&
+                            !editingRequirements &&
+                            !installationStatus &&
+                            original?.installable_resources.some(
+                              (candidate) =>
+                                candidate.candidate_ref ===
+                                resource.candidate_ref
+                            );
+                          const resourceKind =
+                            resource.resource_type === "mcp_server" ||
+                            resource.source === "MCP_TOOL"
+                              ? "MCP"
+                              : resource.resource_type === "skill" ||
+                                  resource.candidate_ref.startsWith("skill:")
+                                ? "Skill"
+                                : resource.resource_type === "tool" ||
+                                    resource.candidate_ref.startsWith("tool:")
+                                  ? "Tool"
+                                  : null;
+                          return (
+                            <li
+                              key={resource.candidate_ref}
+                              className="flex min-h-5 flex-wrap items-center justify-between gap-x-3 gap-y-1"
+                            >
+                              <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+                                {resourceKind ? (
+                                  <Nl2AgentResourceKindBadge
+                                    kind={resourceKind}
                                   />
                                 ) : null}
-                              </span>
-                            </div>
-                            {activeInstallation ? (
-                              <SuggestedResourceInstallationCard
-                                key={targetKey(activeInstallation.target)}
-                                payload={activeInstallation.options}
-                                disabled={
-                                  locked ||
-                                  installationBusy ||
-                                  Boolean(pendingLink)
-                                }
-                                onInstalled={(resource) =>
-                                  void registerInstallation({
-                                    ...activeInstallation.target,
-                                    ...resource,
-                                  })
-                                }
-                                installationAttempt={(input) =>
-                                  runInstallationAttempt(
-                                    activeInstallation.target,
-                                    input
-                                  )
-                                }
-                                onCloseInline={() => setInstallation(null)}
-                              />
-                            ) : installationStatus || alreadyLinked ? (
-                              <span className="text-xs text-muted-foreground">
-                                {installationStatus === "disabled"
-                                  ? t(
-                                      "nl2agent.coverage.installedDisabled",
-                                      "Installed, disabled"
+                                <span className="inline-flex min-w-0 items-center gap-1.5">
+                                  <span
+                                    className="break-all"
+                                    title={resource.candidate_ref}
+                                  >
+                                    {resource.name}
+                                  </span>
+                                  {typeof resource.retrieval_score ===
+                                    "number" &&
+                                  Number.isFinite(resource.retrieval_score) ? (
+                                    <RelevanceScore
+                                      score={resource.retrieval_score}
+                                    />
+                                  ) : null}
+                                </span>
+                              </div>
+                              {activeInstallation ? (
+                                <SuggestedResourceInstallationCard
+                                  key={targetKey(activeInstallation.target)}
+                                  payload={activeInstallation.options}
+                                  disabled={
+                                    resourceLocked ||
+                                    installationBusy ||
+                                    Boolean(pendingLink)
+                                  }
+                                  onInstalled={(resource) =>
+                                    void registerInstallation({
+                                      ...activeInstallation.target,
+                                      ...resource,
+                                    })
+                                  }
+                                  installationAttempt={(input) =>
+                                    runInstallationAttempt(
+                                      activeInstallation.target,
+                                      input
                                     )
-                                  : t(
-                                      "nl2agent.coverage.installed",
-                                      "Installed"
-                                    )}
-                              </span>
-                            ) : canInstall && requirementId ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="h-6 px-2 text-xs"
-                                disabled={
-                                  locked ||
-                                  installationBusy ||
-                                  Boolean(installation || pendingLink) ||
-                                  (repositoryMcp &&
-                                    mcpStatuses === undefined) ||
-                                  Boolean(editing)
-                                }
-                                aria-label={t(
-                                  "nl2agent.coverage.install",
-                                  "Install {{resource}}",
-                                  { resource: resource.name }
-                                )}
-                                onClick={() =>
-                                  void openInstallation({
-                                    requirement_id: requirementId,
-                                    candidate_ref: resource.candidate_ref,
-                                  })
-                                }
-                              >
-                                {t("nl2agent.coverage.installAction")}
-                              </Button>
-                            ) : null}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    {coveredStatus}
-                  </div>
-                ) : null}
-                {status === "uncovered" || status === "pending" ? (
-                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                                  }
+                                  onCloseInline={() => setInstallation(null)}
+                                />
+                              ) : installationStatus || alreadyLinked ? (
+                                <span className="text-xs text-muted-foreground">
+                                  {installationStatus === "disabled"
+                                    ? t(
+                                        "nl2agent.coverage.installedDisabled",
+                                        "Installed, disabled"
+                                      )
+                                    : t(
+                                        "nl2agent.coverage.installed",
+                                        "Installed"
+                                      )}
+                                </span>
+                              ) : canInstall && requirementId ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  disabled={
+                                    resourceLocked ||
+                                    installationBusy ||
+                                    Boolean(installation || pendingLink) ||
+                                    (repositoryMcp &&
+                                      mcpStatuses === undefined) ||
+                                    Boolean(editing)
+                                  }
+                                  aria-label={t(
+                                    "nl2agent.coverage.install",
+                                    "Install {{resource}}",
+                                    { resource: resource.name }
+                                  )}
+                                  onClick={() =>
+                                    void openInstallation({
+                                      requirement_id: requirementId,
+                                      candidate_ref: resource.candidate_ref,
+                                    })
+                                  }
+                                >
+                                  {t("nl2agent.coverage.installAction")}
+                                </Button>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <div
+                    className={
+                      phase === "unmatched"
+                        ? "space-y-2 rounded-xl border border-dashed border-[var(--color-alert)] bg-[var(--color-alert-subtler)]/60 p-3"
+                        : "flex flex-wrap items-center gap-x-2 gap-y-1"
+                    }
+                  >
                     <p
                       className={
-                        status === "uncovered"
-                          ? "text-xs text-[var(--color-warning-bold)] dark:text-muted-foreground"
+                        phase === "unmatched"
+                          ? "text-xs text-foreground"
                           : "text-xs text-muted-foreground"
                       }
                     >
-                      {status === "uncovered"
-                        ? t(
-                            "nl2agent.coverage.uncovered",
-                            "No confirmed resource"
-                          )
-                        : t(
-                            "nl2agent.coverage.pending",
-                            "Pending verification"
-                          )}
+                      {phase === "unmatched"
+                        ? t("nl2agent.unified.unmatchedTitle")
+                        : t("nl2agent.unified.otherResources")}
                     </p>
-                    {!recommendation && !locked && status === "uncovered" ? (
+                    {phase === "unmatched" ? (
+                      <p className="text-xs text-muted-foreground">
+                        {t("nl2agent.unified.unmatchedDescription")}
+                      </p>
+                    ) : null}
+                    {!recommendation ? (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
-                          className="h-6 gap-1 px-2 text-xs"
+                          variant={phase !== "unmatched" ? "link" : "outline"}
+                          className={
+                            phase !== "unmatched"
+                              ? "h-auto p-0 text-[11px] font-normal"
+                              : "h-6 gap-1 px-2 text-xs"
+                          }
                           disabled={
+                            resourceLocked ||
                             installationBusy ||
                             Boolean(
                               manual ||
@@ -703,15 +811,30 @@ export function RequirementCoverageCard({
                           }
                           onClick={() => setManual({ target, type: "skill" })}
                         >
-                          <Sparkles className="size-3" aria-hidden="true" />
+                          {phase === "unmatched" ? (
+                            <Sparkles className="size-3" aria-hidden="true" />
+                          ) : null}
                           {t("nl2agent.coverage.createSkill", "Create Skill")}
                         </Button>
+                        {phase !== "unmatched" ? (
+                          <span
+                            aria-hidden="true"
+                            className="text-[11px] text-muted-foreground"
+                          >
+                            /
+                          </span>
+                        ) : null}
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
-                          className="h-6 gap-1 px-2 text-xs"
+                          variant={phase !== "unmatched" ? "link" : "outline"}
+                          className={
+                            phase !== "unmatched"
+                              ? "h-auto p-0 text-[11px] font-normal"
+                              : "h-6 gap-1 px-2 text-xs"
+                          }
                           disabled={
+                            resourceLocked ||
                             installationBusy ||
                             Boolean(
                               manual ||
@@ -724,19 +847,21 @@ export function RequirementCoverageCard({
                             setManual({ target, type: "mcp_server" })
                           }
                         >
-                          <Plug className="size-3" aria-hidden="true" />
-                          {t("nl2agent.coverage.addMcp", "Add MCP")}
+                          {phase === "unmatched" ? (
+                            <Plug className="size-3" aria-hidden="true" />
+                          ) : null}
+                          {t("nl2agent.unified.createMcp")}
                         </Button>
                       </div>
                     ) : null}
                   </div>
-                ) : null}
+                </div>
               </div>
             </li>
           );
         })}
       </ul>
-      {!recommendation && !locked ? (
+      {!locked ? (
         <div className="flex items-center gap-2 border-t px-4 py-2">
           <Button
             type="button"
@@ -744,31 +869,44 @@ export function RequirementCoverageCard({
             size="icon"
             className="size-7 shrink-0"
             aria-label={t("nl2agent.coverage.add", "Add requirement")}
-            disabled={atLimit || !newQuery.trim()}
-            onClick={addRequirement}
+            disabled={atLimit}
+            onClick={() => {
+              startEditing();
+              if (newQuery.trim()) addRequirement();
+            }}
           >
             <Plus className="size-4" aria-hidden="true" />
           </Button>
-          <input
-            type="text"
-            aria-label={t("nl2agent.coverage.add", "Add requirement")}
-            className="h-8 min-w-0 flex-1 rounded-md bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            placeholder={
-              atLimit
-                ? t("nl2agent.coverage.limit")
-                : t("nl2agent.coverage.addPlaceholder")
-            }
-            maxLength={500}
-            disabled={atLimit}
-            value={newQuery}
-            onChange={(event) => setNewQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.nativeEvent.isComposing)
-                return;
-              event.preventDefault();
-              addRequirement();
-            }}
-          />
+          {editingRequirements ? (
+            <input
+              type="text"
+              aria-label={t("nl2agent.coverage.add", "Add requirement")}
+              className="h-8 min-w-0 flex-1 rounded-md bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder={
+                atLimit
+                  ? t("nl2agent.coverage.limit")
+                  : t("nl2agent.coverage.addPlaceholder")
+              }
+              maxLength={500}
+              disabled={atLimit}
+              value={newQuery}
+              onChange={(event) => setNewQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                  return;
+                event.preventDefault();
+                addRequirement();
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="text-[13px] text-primary"
+              onClick={startEditing}
+            >
+              {t("nl2agent.coverage.add", "Add requirement")}
+            </button>
+          )}
         </div>
       ) : null}
       {manual?.type === "skill" ? (
@@ -855,33 +993,57 @@ export function RequirementCoverageCard({
           )}
         </p>
       ) : null}
-      <footer className="flex justify-end border-t bg-muted/25 px-4 py-2.5">
-        <Button
-          type="button"
-          size="sm"
-          className="h-7 gap-1.5 px-2.5 py-0 text-xs [&_svg]:size-3.5"
-          onClick={submit}
-          disabled={
-            locked ||
-            Boolean(editing) ||
-            rows.length > 8 ||
-            Boolean(
-              newQuery.trim() ||
-              installation ||
-              pendingLink ||
-              pendingMcp ||
-              manual
-            ) ||
-            installationBusy ||
-            rows.some((row) => !row.query.trim())
-          }
-        >
-          {recommendation
-            ? t("nl2agent.coverage.use", "Use recommended resources")
-            : t("nl2agent.coverage.confirm", "Confirm requirements")}
-          <ArrowRight className="size-3.5" aria-hidden="true" />
-        </Button>
-      </footer>
+      {!editingRequirements && !linked.length ? (
+        binding.footer
+      ) : (
+        <footer className="flex justify-end border-t bg-muted/25 px-4 py-2.5">
+          {editingRequirements ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mr-2 h-7 text-xs"
+              disabled={locked}
+              onClick={cancelEditing}
+            >
+              {t("nl2agent.unified.cancel")}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 gap-1.5 px-2.5 py-0 text-xs [&_svg]:size-3.5"
+            onClick={submit}
+            disabled={
+              locked ||
+              (!changed && !linked.length) ||
+              Boolean(editing) ||
+              rows.length > 8 ||
+              Boolean(
+                newQuery.trim() ||
+                installation ||
+                pendingLink ||
+                pendingMcp ||
+                manual
+              ) ||
+              installationBusy ||
+              rows.some((row) => !row.query.trim())
+            }
+          >
+            {rows.length === 0
+              ? t(
+                  recommendation
+                    ? "nl2agent.unified.clear"
+                    : "nl2agent.unified.noResources"
+                )
+              : t(
+                  linked.length && !changed
+                    ? "nl2agent.unified.verify"
+                    : "nl2agent.unified.update"
+                )}
+            <ArrowRight className="size-3.5" aria-hidden="true" />
+          </Button>
+        </footer>
+      )}
     </section>
   );
 }

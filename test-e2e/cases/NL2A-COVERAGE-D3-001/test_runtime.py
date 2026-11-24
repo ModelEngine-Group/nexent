@@ -21,7 +21,8 @@ from management.db.models import AgentInfo
 from management.db.tool.models import ToolInstance
 from management.services.mcp import service as mcp_service
 from model_controls.runtime import runtime_fixture
-from management.services.agent import nl2agent as nl2agent_service, nl2agent_state_service
+from management.services.agent import nl2agent as nl2agent_service
+from services import nl2agent_state_service
 from services.nl2agent_state_service import ResourceScope
 from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from management.services.conversation import nl2agent_resource_index as storage
@@ -40,6 +41,57 @@ def assessed_check(state, key, accepted):
                    else "The declaration does not meet the required capability or source."}
         for item in _candidates_in_batch(state["requirements"][key])
     ]}
+
+
+def test_resource_denylist_refreshes_pending_card(monkeypatch):
+    from infrastructure.system_configuration import runtime as configuration
+    from infrastructure.system_configuration.catalog import NL2AGENT_RESOURCE_DENYLIST
+    from services import nl2agent_resource_flow as flow
+
+    catalog = [{
+        "candidate_ref": f"tool:{index}", "resource_type": "tool", "source": "LOCAL_TOOL",
+        "name": "public_web_search", "description": "Search public web background information.",
+        "names": ["public_web_search"], "labels": ["search"], "descriptions": [],
+        "interfaces": [], "inputs": {}, "installed": True, "quality": 1.0,
+        "config": [], "form_kind": "TOOL_CONFIG",
+    } for index in range(701, 705)]
+    monkeypatch.setattr(nl2agent_service, "_load_installed_resource_catalog", AsyncMock(return_value=catalog))
+    monkeypatch.setattr(nl2agent_service, "_load_internal_uninstalled_resource_catalog", AsyncMock(return_value=[]))
+    monkeypatch.setattr(flow.semantic, "resolve_model", AsyncMock(return_value=None))
+    with owned_runtime(monkeypatch) as (runtime, redis):
+        before = runtime.draft()
+
+        def verify(expected):
+            snapshot = json.loads(redis.get(_state_key(runtime)))
+            offered = {item["candidate_ref"] for item in flow._candidates_in_batch(snapshot["requirements"]["r1"])}
+            assert offered == expected
+            check = assessed_check(snapshot, "r1", sorted(offered))
+            return (f"<code>print(nl2a_verify_requirements(verification_batch_id={snapshot['batch']['id']!r}, "
+                    f"checks={[check]!r}))</code>")
+
+        requirements = [{"query": "Search public web background information", "search_queries": {
+            "zh": "搜索公开网页", "en": "web search public background information",
+        }}]
+        cid, events = post(runtime, "Find web search alternatives.", [
+            f"<code>print(nl2a_discover_requirements(requirements={requirements!r}))</code>",
+            lambda: verify({"tool:701", "tool:702", "tool:703"}),
+        ])
+        old = get_card(events)
+        configuration._process_runtime.store_snapshot({
+            **configuration.DEFAULT_CATALOG.defaults, NL2AGENT_RESOURCE_DENYLIST: ["tool:701"],
+        })
+        _, events = post(runtime, action(old, "confirm_requirements", requirements=[
+            {"requirement_id": "r1", "query": requirements[0]["query"]},
+        ]), [
+            "<code>print(nl2a_discover_requirements())</code>",
+            lambda: verify({"tool:702", "tool:703", "tool:704"}),
+        ], cid)
+        refreshed = get_card(events)
+        assert refreshed["state_version"] > old["state_version"]
+        assert {item["candidate"]["candidate_ref"] for item in refreshed["resources"]} == {
+            "tool:702", "tool:703", "tool:704",
+        }
+        assert runtime.draft() == before
 
 
 def test_search_alternatives_runtime(monkeypatch):
@@ -82,7 +134,7 @@ def test_search_alternatives_runtime(monkeypatch):
             f"<code>print(nl2a_discover_requirements(requirements={req!r}))</code>", verify,
         ])
         card = get_card(events)
-        assert card["subtype"] == "installed_resource_binding"
+        assert card["subtype"] == "requirement_resources"
         expected = {"tool:701", "tool:702", "tool:703"}
         assert {item["candidate_ref"] for item in card["requirements"][0]["covered_resources"]} == expected
         assert {item["candidate"]["candidate_ref"] for item in card["resources"]} == expected
@@ -94,23 +146,23 @@ def test_search_alternatives_runtime(monkeypatch):
         assert other_cid != cid
         other_state = redis.get(_state_key(runtime, other_cid))
         # An older conversation writes after the newer card was issued.
-        _, events = post(runtime, action(card, "return_requirements"), [], cid)
+        _, events = post(runtime, action(card, "confirm_requirements", requirements=[{"requirement_id": row["requirement_id"], "query": row["query"]} for row in card["requirements"]]), [], cid)
         clarification = get_card(events)
-        assert clarification["subtype"] == "requirement_clarification"
+        assert clarification["subtype"] == "requirement_resources"
         edits = [{"requirement_id": row["requirement_id"], "query": row["query"]}
                  for row in clarification["requirements"]]
         _, events = post(runtime, action(clarification, "confirm_requirements", requirements=edits), [], cid)
-        assert get_card(events)["subtype"] == "installed_resource_binding"
+        assert get_card(events)["subtype"] == "requirement_resources"
         assert json.loads(redis.get(_state_key(runtime, cid)))["submitted_batches"] == {}
         saved = json.loads(redis.get(_state_key(runtime, cid)))["requirements"]["r1"]["candidate_assessments"]
         assert set(saved) == expected
         assert all(item["satisfies"] and item["reason"] for item in saved.values())
         assert redis.get(_state_key(runtime, other_cid)) == other_state
-        _, events = post(runtime, action(other_card, "return_requirements"), [], other_cid)
+        _, events = post(runtime, action(other_card, "confirm_requirements", requirements=[{"requirement_id": row["requirement_id"], "query": row["query"]} for row in other_card["requirements"]]), [], other_cid)
         other_clarification = get_card(events)
-        assert other_clarification["subtype"] == "requirement_clarification"
+        assert other_clarification["subtype"] == "requirement_resources"
         _, events = post(runtime, action(other_clarification, "confirm_requirements", requirements=edits), [], other_cid)
-        assert get_card(events)["subtype"] == "installed_resource_binding"
+        assert get_card(events)["subtype"] == "requirement_resources"
         assert runtime.draft() == before
 
 
@@ -154,7 +206,7 @@ def test_bilingual_recall_and_edited_requirement(monkeypatch):
             f"<code>print(nl2a_discover_requirements(requirements={requirements!r}))</code>", verify,
         ])
         card = get_card(events)
-        assert card["subtype"] == "requirement_coverage"
+        assert card["subtype"] == "requirement_resources"
         rows = card["requirements"]
         assert [row["coverage_status"] for row in rows] == ["covered", "covered", "uncovered"]
         assert [item["candidate_ref"] for item in rows[0]["covered_resources"]] == ["tool:701"]
@@ -252,12 +304,15 @@ def action(card, name, **result):
 
 @contextmanager
 def owned_runtime(monkeypatch):
-    from management.configuration import runtime as configuration
+    from infrastructure.system_configuration import runtime as configuration
 
-    # The owned test app has no production configuration startup lifecycle.
     config = configuration.SystemConfigurationRuntime(loader=AsyncMock(return_value={}))
     config.store_snapshot(configuration.DEFAULT_CATALOG.defaults)
     monkeypatch.setattr(configuration, "_process_runtime", config)
+    loader = nl2agent_service._load_installed_resource_catalog
+    if isinstance(loader, AsyncMock) and isinstance(loader.return_value, list):
+        for item in loader.return_value:
+            item.setdefault("config", [])
     with Redis.from_url(os.environ["NEXENT_TEST_NL2AGENT_REDIS_URL"], decode_responses=True) as redis:
         redis.ping()
         monkeypatch.setattr(nl2agent_state_service, "get_redis_client", lambda: redis)
@@ -265,7 +320,7 @@ def owned_runtime(monkeypatch):
         monkeypatch.setattr(nl2agent_retrieval_progress, "get_redis_client", lambda: redis)
         runtime = None
         try:
-            with runtime_fixture(monkeypatch) as runtime:
+            with runtime_fixture(monkeypatch, creator_only=True) as runtime:
                 with runtime.storage["sessions"]() as session:
                     # This journey tests resource flow, not constrained-context compaction.
                     from management.db.model.models import ModelRecord
@@ -287,15 +342,16 @@ def owned_runtime(monkeypatch):
                 assert not runtime.provider.thread.is_alive()
                 for run in runtime.runs:
                     assert run.thread_future.done()
-                    mcp = urlparse(run.mcp_host[0]["url"])
-                    with socket.socket() as client:
-                        client.settimeout(1)
-                        assert client.connect_ex((mcp.hostname, mcp.port)) != 0
+                    for host in run.mcp_host or []:
+                        mcp = urlparse(host["url"])
+                        with socket.socket() as client:
+                            client.settimeout(1)
+                            assert client.connect_ex((mcp.hostname, mcp.port)) != 0
 
 
 def _state_key(runtime, conversation_id=None):
     if conversation_id is None:
-        conversation_id = runtime.runs[-1].mcp_host[0]["headers"]["X-Nexent-NL2Agent-Conversation-ID"]
+        conversation_id = runtime.runs[-1].observer._conversation_id
     return ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id,
                          str(conversation_id), "").key
 
@@ -326,8 +382,8 @@ def test_coverage_return_and_generation(monkeypatch):
     }
     repository_mcp = {
         "candidate_ref": "tenant_mcp_repository:3", "resource_type": "mcp_server",
-        "source": "TENANT_MCP_REPOSITORY", "name": "12306", "description": "Train ticket availability",
-        "names": ["12306"], "labels": [], "descriptions": ["Train ticket availability"], "interfaces": [],
+        "source": "TENANT_MCP_REPOSITORY", "name": "12306", "description": "Query 12306 train ticket availability",
+        "names": ["12306"], "labels": [], "descriptions": ["Query 12306 train ticket availability"], "interfaces": [],
         "installed": False, "quality": 1.0,
     }
     installed_tools = [installed]
@@ -370,10 +426,10 @@ def test_coverage_return_and_generation(monkeypatch):
             verify,
         ])
         coverage = get_card(events)
-        assert coverage["subtype"] == "requirement_coverage"
+        assert coverage["subtype"] == "requirement_resources"
         assert any(
-            message["role"] == "user" and '<completed_action_history read_only="true">' in str(message["content"])
-            and "installed_candidates" in str(message["content"])
+            "installed_candidates" in str(message["content"])
+            and weather_query in str(message["content"])
             for request in runtime.provider.wire for message in request["messages"]
         )
         weather, gap, tickets = coverage["requirements"]
@@ -382,6 +438,10 @@ def test_coverage_return_and_generation(monkeypatch):
         assert weather["query"] == weather_query and "search_query" not in weather
         assert runtime.draft() == before
 
+        assert {item["candidate"]["candidate_ref"] for item in coverage["resources"]} == {"tool:9"}
+        premature = runtime.post(PATH, query=action(coverage, "continue", selected_resource_refs=[]), conversation_id=cid)
+        assert premature.status_code == 409
+        assert premature.json()["detail"]["code"] == "required_resource_not_bound"
         assert gap["required"] is True
         edits = [{"requirement_id": weather["requirement_id"], "query": weather_query}]
         legacy_edit = {"requirement_id": gap["requirement_id"], "query": "seismograph", "required": False}
@@ -389,7 +449,7 @@ def test_coverage_return_and_generation(monkeypatch):
         _, events = post(runtime, action(coverage, "confirm_requirements",
                                          requirements=[*edits, legacy_edit, mcp_edit]), [], cid)
         coverage = get_card(events)
-        assert coverage["subtype"] == "requirement_coverage"
+        assert coverage["subtype"] == "requirement_resources"
         assert coverage["requirements"][1]["required"] is True
         mcp_record["enabled"] = True
         installed_tools.append({
@@ -401,11 +461,11 @@ def test_coverage_return_and_generation(monkeypatch):
             "<code>print(nl2a_discover_requirements())</code>", verify,
         ], cid)
         binding = get_card(events)
-        assert binding["subtype"] == "installed_resource_binding"
+        assert binding["subtype"] == "requirement_resources"
         assert {row["candidate"]["candidate_ref"] for row in binding["resources"]} == {"tool:9", "tool:17"}
-        _, events = post(runtime, action(binding, "return_requirements"), [], cid)
+        _, events = post(runtime, action(binding, "confirm_requirements", requirements=[{"requirement_id": row["requirement_id"], "query": row["query"]} for row in binding["requirements"]]), [], cid)
         clarification = get_card(events)
-        assert clarification["subtype"] == "requirement_clarification"
+        assert clarification["subtype"] == "requirement_resources"
         assert [row["requirement_id"] for row in clarification["requirements"]] == [
             weather["requirement_id"], tickets["requirement_id"],
         ]
@@ -492,6 +552,9 @@ def test_linked_installation_reenters_verification(monkeypatch):
         }
         auth = {"Authorization": "Bearer fixture-creator"}
         url = "/api/agent/nl2agent/resource_installations"
+        stored = json.loads(redis.get(_state_key(runtime, cid)))
+        assert stored["card"] == {"id": card["card_id"], "subtype": card["subtype"]}, (stored["card"], card["card_id"])
+        assert stored["version"] == card["state_version"]
         detail = runtime.client.post(url, json=link, headers=auth)
         assert detail.status_code == 200, detail.text
         assert detail.json()["resources"][0]["default_option_id"] == "official"
@@ -544,11 +607,11 @@ def test_linked_installation_reenters_verification(monkeypatch):
         assert not any(item["type"] == "nl2a_state" and
                        json.loads(item["content"]).get("event") != "resource_retrieval_progress" for item in events)
         binding = get_card(events)
-        assert binding["subtype"] == "installed_resource_binding"
+        assert binding["subtype"] == "requirement_resources"
         assert binding["resources"][0]["candidate"]["candidate_ref"] == "skill:17"
-        _, returned_events = post(runtime, action(binding, "return_requirements"), [], cid)
+        _, returned_events = post(runtime, action(binding, "confirm_requirements", requirements=[{"requirement_id": row["requirement_id"], "query": row["query"]} for row in binding["requirements"]]), [], cid)
         returned = get_card(returned_events)
-        assert returned["subtype"] == "requirement_clarification"
+        assert returned["subtype"] == "requirement_resources"
         manual = {key: link[key] for key in ("agent_id", "conversation_id")}
         manual.update(card_id=returned["card_id"], state_version=returned["state_version"],
                       client_key="manual-row", resource_type="skill", resource_id=17)
@@ -667,7 +730,7 @@ def test_knowledge_priority_runtime(monkeypatch, aidp, owned_resource_es):
                         yield verify
                 _, events = post(runtime, active_query, actions())
                 card = get_card(events)
-                assert card["subtype"] == "installed_resource_binding"
+                assert card["subtype"] == "requirement_resources"
                 refs = [item["candidate_ref"] for item in card["requirements"][0]["covered_resources"]]
                 preferred = "tool:17" if mode == "native_high" else "tool:9"
                 assert refs[0] == preferred, (mode, refs)
@@ -693,6 +756,65 @@ def test_knowledge_priority_runtime(monkeypatch, aidp, owned_resource_es):
             for key in redis.scan_iter("nl2agent:embedding:*"):
                 redis.delete(key)
             assert not list(redis.scan_iter("nl2agent:embedding:*"))
+
+
+def test_knowledge_recommendation_runtime(monkeypatch, owned_resource_es):
+    """Real authorized route/state/ES with controlled metadata and embedding HTTP."""
+    from services import nl2agent_knowledge_recommendations as knowledge
+    from services import nl2agent_semantic_retrieval as semantic
+    from management.services.model.resolver import create_embedding_model
+
+    catalog = [
+        {"id": "expense", "binding_value": "fixture-expense", "name": "差旅财务制度", "summary": "员工报销流程", "embedding_model_id": 7, "document_count": 2},
+        {"id": "wrong", "binding_value": "wrong-model", "name": "员工报销政策", "embedding_model_id": 99, "document_count": 2},
+        {"id": "empty", "binding_value": "empty", "name": "员工报销政策", "embedding_model_id": 7, "document_count": 0},
+    ]
+    tool = {"candidate_ref": "tool:17", "resource_type": "tool", "source": "LOCAL_TOOL", "name": "knowledge_base_search",
+            "names": ["knowledge_base_search"], "description": "Search knowledge", "config": [], "inputs": {}}
+    monkeypatch.setattr(nl2agent_service, "_load_installed_resource_catalog", AsyncMock(return_value=[tool]))
+    monkeypatch.setattr(knowledge, "_catalog", lambda *args: [dict(row) for row in catalog])
+    with owned_runtime(monkeypatch) as (runtime, redis), embedding_provider() as (url, wire, failure):
+        config = {"model_id": 7, "model_name": "owned-embedding", "model_type": "embedding", "base_url": url,
+                  "api_key": "fixture", "embedding_dim": 2, "model_factory": "OpenAI-API-Compatible"}
+        monkeypatch.setattr(semantic.tenant_config_manager, "get_model_config", lambda **kw: config if kw["key"] == "EMBEDDING_ID" else {})
+        monkeypatch.setattr(semantic, "create_embedding_model", create_embedding_model)
+        scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "777", "")
+        state = {"conversation_id": "777", "version": 1, "card": {"id": "knowledge-card", "subtype": "requirement_resources"},
+                 "requirements": {"r1": {"query": "员工报销政策", "installed": [{**tool, "retrieval_score": .9}],
+                     "installable": [], "accepted": ["tool:17"]}}}
+        redis.set(scope.key, json.dumps(state))
+        before = runtime.draft()
+        request = {"agent_id": runtime.agent_id, "conversation_id": 777, "card_id": "knowledge-card", "state_version": 1}
+        def call():
+            response = runtime.client.post("/api/agent/nl2agent/knowledge_recommendations", json=request,
+                                           headers={"Authorization": "Bearer fixture-creator"})
+            assert response.status_code == 200, response.text
+            return response.json()["resources"][0]
+        try:
+            first = call()
+            assert first["selected_values"] == ["fixture-expense"] and first["mode"] == "hybrid"
+            embedded = lambda: sum(text.startswith("差旅财务制度") for item in wire for text in item["input"])
+            assert embedded() == 1
+            assert call()["selected_values"] == ["fixture-expense"]
+            assert embedded() == 1
+            assert "wrong-model" not in json.dumps(wire) and "fixture-expense" not in json.dumps(wire)
+            catalog[0]["name"] = "员工报销政策"
+            failure.append(True)
+            fallback = call()
+            assert fallback["mode"] == "fallback" and fallback["selected_values"] == ["fixture-expense"]
+            catalog.clear()
+            assert call()["recommendations"] == []
+            assert json.loads(redis.get(scope.key)) == state and runtime.draft() == before
+            request["state_version"] = 0
+            response = runtime.client.post("/api/agent/nl2agent/knowledge_recommendations", json=request,
+                                          headers={"Authorization": "Bearer fixture-creator"})
+            assert response.status_code == 422
+            request["state_version"] = 2
+            response = runtime.client.post("/api/agent/nl2agent/knowledge_recommendations", json=request,
+                                          headers={"Authorization": "Bearer fixture-creator"})
+            assert response.status_code == 409
+        finally:
+            redis.delete(scope.key)
 
 
 @pytest.mark.parametrize("empty", [False, True])

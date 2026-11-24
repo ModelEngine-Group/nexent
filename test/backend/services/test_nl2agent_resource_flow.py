@@ -86,7 +86,7 @@ async def test_confirmation_rechecks_only_new_tools_from_enabled_repository_mcp(
     email = {"query": "Send email", "installed": [{"candidate_ref": "tool:1"}], "accepted": ["tool:1"]}
     state = {
         "conversation_id": "4", "run_id": "run", "version": 2, "purpose": "generate",
-        "card": {"id": "card", "subtype": "requirement_coverage"}, "batch": None,
+        "card": {"id": "card", "subtype": "requirement_resources"}, "batch": None,
         "requirements": {
             "email": email,
             "tickets": {"query": "Check real-time 12306 ticket availability",
@@ -107,14 +107,14 @@ async def test_confirmation_rechecks_only_new_tools_from_enabled_repository_mcp(
     monkeypatch.setattr(flow.legacy, "_load_installed_resource_catalog", AsyncMock(return_value=catalog))
     monkeypatch.setattr(flow.legacy, "_load_internal_uninstalled_resource_catalog", AsyncMock(return_value=[]))
     monkeypatch.setattr(flow, "read_resource_state", AsyncMock(return_value=state))
-    monkeypatch.setattr(flow, "show_card", AsyncMock(return_value={"subtype": "requirement_coverage"}))
+    monkeypatch.setattr(flow, "show_card", AsyncMock(return_value={"subtype": "requirement_resources"}))
 
     async def update(_scope, change):
         state.update(change(state))
         return state
 
     monkeypatch.setattr(flow, "update_resource_state", update)
-    result = await flow.apply_card_action(scope, "requirement_coverage", "confirm_requirements", ResourceCardAction(
+    result = await flow.apply_card_action(scope, "requirement_resources", "confirm_requirements", ResourceCardAction(
         card_id="card", state_version=2, requirements=[
             RequirementEdit(requirement_id=key, query=row["query"]) for key, row in state["requirements"].items()
         ],
@@ -126,7 +126,7 @@ async def test_confirmation_rechecks_only_new_tools_from_enabled_repository_mcp(
         assert requirement["requirement_id"] == "tickets"
         assert [item["candidate_ref"] for item in requirement["installed_candidates"]] == ["tool:7"]
     else:
-        assert result["card"]["subtype"] == "requirement_coverage"
+        assert result["card"]["subtype"] == "requirement_resources"
         assert state["requirements"]["tickets"]["accepted"] == [ref]
     assert state["requirements"]["email"]["accepted"] == ["tool:1"]
 
@@ -158,12 +158,12 @@ async def test_coverage_retry_resumes_saved_edits_only_for_current_failed_confir
     if error:
         with pytest.raises(ResourceStateError, match=error):
             await flow.apply_card_action(
-                scope, "requirement_coverage", "confirm_requirements", payload, resume_confirmation=trusted_retry,
+                scope, "requirement_resources", "confirm_requirements", payload, resume_confirmation=trusted_retry,
             )
         assert state["run_id"] == "failed-run"
     else:
         result = await flow.apply_card_action(
-            scope, "requirement_coverage", "confirm_requirements", payload, resume_confirmation=trusted_retry,
+            scope, "requirement_resources", "confirm_requirements", payload, resume_confirmation=trusted_retry,
         )
         assert result["next_step"] == "verify_resources"
         assert state["run_id"] == "retry-run"
@@ -246,7 +246,7 @@ async def test_deleting_all_requirements_explicitly_resumes_generation_without_r
     scope = ResourceScope("tenant", "user", 1, "4", "run")
     state = {
         "conversation_id": "4", "version": 2, "purpose": "generate",
-        "card": {"id": "card", "subtype": "requirement_coverage"},
+        "card": {"id": "card", "subtype": "requirement_resources"},
         "requirements": {"weather": {"query": "weather", "required": True}},
     }
     monkeypatch.setattr(flow, "read_resource_state", AsyncMock(return_value=state))
@@ -257,7 +257,7 @@ async def test_deleting_all_requirements_explicitly_resumes_generation_without_r
 
     monkeypatch.setattr(flow, "update_resource_state", update)
     result = await flow.apply_card_action(
-        scope, "requirement_coverage", "confirm_requirements",
+        scope, "requirement_resources", "confirm_requirements",
         ResourceCardAction(card_id="card", state_version=2, requirements=[]),
     )
     assert state["requirements"] == {}
@@ -318,8 +318,8 @@ def test_resource_state_key_is_isolated_by_tenant_user_agent_and_conversation():
 @pytest.mark.parametrize(("owner", "openapi"), [("user", False), ("other-user", False), ("user", True)])
 async def test_manual_mcp_link_resolves_all_tools_from_the_owned_service(monkeypatch, owner, openapi):
     scope = ResourceScope("tenant", "user", 1, "4", "run")
-    state = {"conversation_id": "4", "version": 2,
-             "card": {"id": "card", "subtype": "requirement_clarification"}, "requirements": {}}
+    state = {"conversation_id": "4", "version": 2, "purpose": "generate",
+             "card": {"id": "card", "subtype": "requirement_resources"}, "requirements": {}}
     catalog = [
         {"source": "MCP_TOOL", "candidate_ref": f"tool:{index}",
          "mcp_service_name": "outer-apis" if openapi else "new-service", "names": [f"new-service_read_{index}"]}

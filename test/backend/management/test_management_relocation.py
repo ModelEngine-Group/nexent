@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 BACKEND = ROOT / "backend"
 FLAT_SERVICE_MODULES = {
     "nl2agent_configuration",
+    "nl2agent_knowledge_recommendations",
     "nl2agent_prompt_service",
     "nl2agent_resource_flow",
     "nl2agent_retrieval_progress",

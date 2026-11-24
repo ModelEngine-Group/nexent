@@ -57,7 +57,10 @@ def test_catalog_and_authorization_contract():
         ):
             response = _request("GET", "/system_configurations", role)
         assert response.status_code == 200
-        assert response.json()["total"] == 19
+        assert response.json()["total"] == 20
+        denylist = next(row for row in response.json()["items"] if row["key"] == "NL2AGENT_RESOURCE_DENYLIST")
+        assert denylist["kind"] == "resource_refs"
+        assert denylist["value"] == denylist["default_value"] == []
         assert {item["key"] for item in response.json()["items"]} == set(
             DEFAULT_CATALOG.defaults
         )
@@ -184,6 +187,29 @@ def test_explicit_ops_and_su_can_save_platform_configuration():
         save.assert_called_once_with(
             {"MAX_TENANT_COUNT": 5}, actor=f"{role.lower()}-user"
         )
+
+
+@pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
+@pytest.mark.stage("D2")
+@pytest.mark.api_it
+def test_resource_denylist_accepts_only_reference_arrays():
+    key = "NL2AGENT_RESOURCE_DENYLIST"
+
+    def save(changes, *, actor):
+        assert actor == "ops-user"
+        validated = DEFAULT_CATALOG.validate_changes(DEFAULT_CATALOG.defaults, changes)
+        return {"items": [{"key": key, "value": validated.get(key)}], "notification": "published"}
+
+    with (
+        patch("permissions.operations.has_permission", return_value=True),
+        patch("ops.api.system_configurations.save_system_configurations", side_effect=save),
+    ):
+        response = _request("PATCH", "/system_configurations", "OPS", json={"changes": {key: ["tool:7"]}})
+        assert response.status_code == 200
+        assert response.json()["items"] == [{"key": key, "value": ["tool:7"]}]
+        invalid = _request("PATCH", "/system_configurations", "OPS", json={"changes": {key: "tool:7"}})
+        assert invalid.status_code == 400
+        assert invalid.json()["detail"]["code"] == "INVALID_CONFIGURATION"
 
 
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")

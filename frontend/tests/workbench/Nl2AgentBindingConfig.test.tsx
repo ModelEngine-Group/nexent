@@ -14,6 +14,9 @@ vi.mock("@assistant-ui/react", () => ({
   useAuiState: () => false,
 }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }));
+vi.mock("@/app/newchat/ui/use-nl2agent-knowledge-recommendations", () => ({
+  useNl2AgentKnowledgeRecommendations: () => ({ data: undefined, isFetching: false, isError: false, refetch: vi.fn() }),
+}));
 vi.mock("@/contexts/nl2AgentFlow", () => ({
   useNl2AgentFlow: () => ({
     registerCard: vi.fn(),

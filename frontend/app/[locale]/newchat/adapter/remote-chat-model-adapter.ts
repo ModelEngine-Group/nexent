@@ -144,9 +144,8 @@ export type Nl2AgentCardActionSubtype =
   | "requirement_clarification"
   | "suggested_resource_installation"
   | "installed_resource_binding"
-  | "requirement_coverage"
-  | "prompt_generation"
-  | "resource_recommendation";
+  | "requirement_resources"
+  | "prompt_generation";
 
 export interface Nl2aPromptGenerationPayload {
   subtype: "prompt_generation";
@@ -192,7 +191,13 @@ export type Nl2AgentStateEvent =
       agent_id: number;
       run_id: string;
       sequence: number;
-      stage: "preparing_embeddings" | "computing_similarity" | "verifying_capabilities" | "fallback_to_text" | "searching_text" | "searching_hybrid";
+      stage:
+        | "preparing_embeddings"
+        | "computing_similarity"
+        | "verifying_capabilities"
+        | "fallback_to_text"
+        | "searching_text"
+        | "searching_hybrid";
       completed?: number;
       total?: number;
     }
@@ -231,10 +236,6 @@ export interface Nl2aRequirementClarificationPayload {
   subtype: "requirement_clarification";
   agent_id: number;
   questions: Nl2aRequirementClarificationQuestion[];
-  protocol_version?: 2;
-  requirements?: Nl2aResourceRequirement[];
-  state_version?: number;
-  conversation_id?: string;
 }
 
 interface Nl2aCoverageResource {
@@ -250,6 +251,7 @@ export interface Nl2aResourceRequirement {
   requirement_id: string;
   query: string;
   required: boolean;
+  search_queries?: { zh: string; en: string };
   coverage_status: "covered" | "installable" | "uncovered";
   covered_resources: Nl2aCoverageResource[];
   installable_resources: Nl2aCoverageResource[];
@@ -264,9 +266,12 @@ export interface Nl2aResourceCardIdentity {
   requirements: Nl2aResourceRequirement[];
 }
 
-export interface Nl2aCoveragePayload extends Nl2aResourceCardIdentity {
-  subtype: "requirement_coverage" | "resource_recommendation";
+export interface Nl2aUnifiedResourcesPayload extends Nl2aResourceCardIdentity {
+  subtype: "requirement_resources";
   agent_id: number;
+  purpose: "recommend" | "bind" | "generate";
+  previous_card_id?: string;
+  resources: Nl2aRecommendedResource[];
 }
 
 export type Nl2aLocalMcpRecommendationPayload =
@@ -360,6 +365,8 @@ export type Nl2aRecommendedResource =
       recommendation: "recommended" | "optional";
       is_bound: boolean;
       has_config?: boolean;
+      configuration_revision?: string;
+      readiness?: "ready" | "not_ready" | "unbound";
       knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
       knowledge_bound_values?: string[];
       form_kind: "TOOL_CONFIG";
@@ -370,6 +377,8 @@ export type Nl2aRecommendedResource =
       recommendation: "recommended" | "optional";
       is_bound: boolean;
       has_config?: boolean;
+      configuration_revision?: string;
+      readiness?: "ready" | "not_ready" | "unbound";
       knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
       knowledge_bound_values?: string[];
       form_kind: "SKILL_CONFIG";
@@ -384,9 +393,19 @@ export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
   | Nl2aLocalMcpRecommendationPayload
   | Nl2aAgentDraftPayload
-  | Nl2aCoveragePayload
+  | Nl2aUnifiedResourcesPayload
   | Nl2aSuggestedResourceInstallationPayload
   | Nl2aInstalledResourceBindingPayload;
+
+const nl2aPayloadSubtypes = {
+  agent_draft: true,
+  installed_resource_binding: true,
+  local_mcp_recommendation: true,
+  prompt_generation: true,
+  requirement_clarification: true,
+  requirement_resources: true,
+  suggested_resource_installation: true,
+} satisfies Record<Nl2aPayload["subtype"], true>;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -566,7 +585,6 @@ export interface VerificationPanelPart {
   results: VerificationContent[];
   completed: boolean;
 }
-
 
 /**
  * Parses a backend `token_count` payload into a `StepTokenCount` entry.
@@ -935,14 +953,24 @@ function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
 export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
     const content = JSON.parse(chunk.content) as Nl2aPayload;
+    if (!Object.hasOwn(nl2aPayloadSubtypes, content?.subtype)) return null;
     if (content.subtype === "prompt_generation") {
-      if (!Number.isSafeInteger(content.agent_id) || content.agent_id <= 0 ||
-          typeof content.card_id !== "string" || !content.card_id ||
-          typeof content.prompt_revision !== "string" || !content.prompt_revision ||
-          typeof content.conversation_id !== "string" || !content.conversation_id ||
-          typeof content.run_id !== "string" || !content.run_id ||
-          typeof content.proposed_prompt !== "string" || !content.proposed_prompt.trim() ||
-          !["pending", "applied", "cancelled"].includes(content.status)) return null;
+      if (
+        !Number.isSafeInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        typeof content.card_id !== "string" ||
+        !content.card_id ||
+        typeof content.prompt_revision !== "string" ||
+        !content.prompt_revision ||
+        typeof content.conversation_id !== "string" ||
+        !content.conversation_id ||
+        typeof content.run_id !== "string" ||
+        !content.run_id ||
+        typeof content.proposed_prompt !== "string" ||
+        !content.proposed_prompt.trim() ||
+        !["pending", "applied", "cancelled"].includes(content.status)
+      )
+        return null;
       return { type: "nl2a", content };
     }
     if ("protocol_version" in content && content.protocol_version === 2) {
@@ -953,17 +981,24 @@ export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         !Number.isSafeInteger(content.state_version) ||
         !Array.isArray(content.requirements) ||
         content.requirements.some(
-          (row) => !row.requirement_id || typeof row.query !== "string" ||
+          (row) =>
+            !row.requirement_id ||
+            typeof row.query !== "string" ||
             typeof row.required !== "boolean" ||
-            !["covered", "installable", "uncovered"].includes(row.coverage_status) ||
-            !Array.isArray(row.covered_resources) || !Array.isArray(row.installable_resources)
+            !["covered", "installable", "uncovered"].includes(
+              row.coverage_status
+            ) ||
+            !Array.isArray(row.covered_resources) ||
+            !Array.isArray(row.installable_resources)
         )
-      ) return null;
+      )
+        return null;
     }
-    if (content.subtype === "requirement_clarification" && content.protocol_version !== 2) {
+    if (content.subtype === "requirement_clarification") {
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
+        "protocol_version" in content ||
         !Array.isArray(content.questions) ||
         content.questions.length === 0 ||
         content.questions.length > 5
@@ -972,7 +1007,32 @@ export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         return null;
       }
     }
-    if (content.subtype === "installed_resource_binding") {
+    if (
+      content.subtype === "requirement_resources" &&
+      (content.protocol_version !== 2 ||
+        !["recommend", "bind", "generate"].includes(content.purpose) ||
+        typeof content.conversation_id !== "string" ||
+        !content.conversation_id ||
+        typeof content.run_id !== "string" ||
+        !content.run_id ||
+        (content.previous_card_id !== undefined &&
+          typeof content.previous_card_id !== "string") ||
+        !Array.isArray(content.resources) ||
+        content.resources.some(
+          (resource) =>
+            (resource.readiness !== undefined &&
+              !["ready", "not_ready", "unbound"].includes(
+                resource.readiness
+              )) ||
+            !Array.isArray(resource.config) ||
+            resource.config.length !== 0
+        ))
+    )
+      return null;
+    if (
+      content.subtype === "installed_resource_binding" ||
+      content.subtype === "requirement_resources"
+    ) {
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
@@ -1051,15 +1111,42 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       return null;
     }
     if (parsed.event === "resource_retrieval_progress") {
-      const allowed = new Set(["event", "agent_id", "run_id", "sequence", "stage", "completed", "total"]);
-      const stages = new Set(["preparing_embeddings", "computing_similarity", "verifying_capabilities", "fallback_to_text", "searching_text", "searching_hybrid"]);
-      if (Object.keys(parsed).some((key) => !allowed.has(key)) ||
-          typeof parsed.run_id !== "string" || !parsed.run_id || parsed.run_id.length > 100 ||
-          !Number.isSafeInteger(parsed.sequence) || Number(parsed.sequence) < 1 ||
-          !stages.has(String(parsed.stage))) return null;
-      if ((parsed.completed !== undefined || parsed.total !== undefined) &&
-          (!Number.isSafeInteger(parsed.completed) || !Number.isSafeInteger(parsed.total) ||
-           Number(parsed.total) <= 0 || Number(parsed.completed) < 0 || Number(parsed.completed) > Number(parsed.total))) return null;
+      const allowed = new Set([
+        "event",
+        "agent_id",
+        "run_id",
+        "sequence",
+        "stage",
+        "completed",
+        "total",
+      ]);
+      const stages = new Set([
+        "preparing_embeddings",
+        "computing_similarity",
+        "verifying_capabilities",
+        "fallback_to_text",
+        "searching_text",
+        "searching_hybrid",
+      ]);
+      if (
+        Object.keys(parsed).some((key) => !allowed.has(key)) ||
+        typeof parsed.run_id !== "string" ||
+        !parsed.run_id ||
+        parsed.run_id.length > 100 ||
+        !Number.isSafeInteger(parsed.sequence) ||
+        Number(parsed.sequence) < 1 ||
+        !stages.has(String(parsed.stage))
+      )
+        return null;
+      if (
+        (parsed.completed !== undefined || parsed.total !== undefined) &&
+        (!Number.isSafeInteger(parsed.completed) ||
+          !Number.isSafeInteger(parsed.total) ||
+          Number(parsed.total) <= 0 ||
+          Number(parsed.completed) < 0 ||
+          Number(parsed.completed) > Number(parsed.total))
+      )
+        return null;
       return parsed as unknown as Nl2AgentStateEvent;
     }
     const promptFields = new Set<Nl2aPromptField>([
@@ -1094,8 +1181,17 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "display_name",
       "description",
       "enable_protocol_repair_retry",
-      "model_ids", "related_agents", "group_ids", "ingroup_permission", "is_main_agent",
-      "is_a2a", "tags", "verification_config", "max_steps", "provide_run_summary", "allow_chat_metadata",
+      "model_ids",
+      "related_agents",
+      "group_ids",
+      "ingroup_permission",
+      "is_main_agent",
+      "is_a2a",
+      "tags",
+      "verification_config",
+      "max_steps",
+      "provide_run_summary",
+      "allow_chat_metadata",
       ...promptFields,
     ]);
     if (
@@ -1527,13 +1623,19 @@ function buildTimingFromTokenCount(
   // Store step data in global registry so the currently-streaming message's
   // `SingleTurnTokenUsage` can render it without subscribing to per-message
   // metadata updates.
-  const identity = chunk.unit_index !== undefined ? `unit:${chunk.unit_index}`
-    : parsed.stepNumber > 0 ? `${chunk.invocation_id ?? ""}:${parsed.stepNumber}` : `event:${counts.size}`;
+  const identity =
+    chunk.unit_index !== undefined
+      ? `unit:${chunk.unit_index}`
+      : parsed.stepNumber > 0
+        ? `${chunk.invocation_id ?? ""}:${parsed.stepNumber}`
+        : `event:${counts.size}`;
   counts.set(identity, parsed);
   clearStepTokenCounts();
   counts.forEach(pushStepTokenCount);
   const timing = buildHistoricalMessageTiming([...counts.values()]);
-  return timing ? { metadata: { timing: { ...timing, firstTokenTime: undefined } } } : null;
+  return timing
+    ? { metadata: { timing: { ...timing, firstTokenTime: undefined } } }
+    : null;
 }
 
 /**
@@ -1933,7 +2035,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
-      if (!("type" in agentResponse) && !isResume) custom?.onMessageAccepted?.(query);
+      if (!("type" in agentResponse) && !isResume)
+        custom?.onMessageAccepted?.(query);
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
@@ -2569,7 +2672,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
           if (chunk.type === "status") {
-            if (["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+            if (["completed", "failed", "stopped"].includes(chunk.content))
+              terminalOutcome = chunk.content;
             continue;
           }
           if (chunk.type === "final_answer") {
@@ -3109,7 +3213,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Process any remaining buffered line
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
-        if (chunk?.type === "status" && ["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+        if (
+          chunk?.type === "status" &&
+          ["completed", "failed", "stopped"].includes(chunk.content)
+        )
+          terminalOutcome = chunk.content;
         if (chunk?.type === "token_count") {
           storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
         }
@@ -3593,7 +3701,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
       yield {
         ...finalResult,
-        status: messageExecutionStatus(terminalOutcome ?? (contentParts.some(part => part.isError) ? "failed" : "completed")),
+        status: messageExecutionStatus(
+          terminalOutcome ??
+            (contentParts.some((part) => part.isError) ? "failed" : "completed")
+        ),
         messageId,
         metadata: {
           ...finalResult.metadata,

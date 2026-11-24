@@ -6,7 +6,7 @@ implementations:
   selector: test_
 acceptance_bindings:
   AC-01: [test_catalog_and_authorization_contract]
-  AC-02: [test_atomic_save_and_notification_degradation_contract, test_explicit_ops_and_su_can_save_platform_configuration]
+  AC-02: [test_atomic_save_and_notification_degradation_contract, test_explicit_ops_and_su_can_save_platform_configuration, test_resource_denylist_accepts_only_reference_arrays]
   AC-03: [test_current_recommendations_are_explicitly_unavailable]
 preparation:
   families: []

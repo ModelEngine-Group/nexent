@@ -530,8 +530,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             historicalCardAction = action;
             const summaries: Partial<Record<Nl2AgentCardAction["subtype"], string>> =
               {
-                requirement_coverage: "Requirements confirmed",
-                resource_recommendation: "Recommended resources selected",
                 prompt_generation: action.action === "cancel" ? "Prompt replacement cancelled" : "Prompt application confirmed",
               };
             text = summaries[action.subtype] || formatNl2AgentActionSummary(action.subtype);

@@ -13,7 +13,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 from infrastructure import agent_model_config
 from management.services.model import run_bindings
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, MODEL_CONFIG_MAPPING
-from management.db import client as client
+from infrastructure.rdb import client
 from management.db import models as db_models
 from model_controls.api import CAPABILITY, BUDGET
 
@@ -150,6 +150,10 @@ def database_fixture(monkeypatch, provider):
         yield {"schema": schema, "tenant": tenant, "owner": owner, "models": models,
                "agent_id": agent_id, "sessions": sessions, "engine": engine}
     finally:
+        # Imports performed during a callback must not retain this schema's session factory.
+        for name, module in list(sys.modules.items()):
+            if name.startswith(("management.", "infrastructure.")) and getattr(module, "get_db_session", None) is sessions:
+                setattr(module, "get_db_session", original_session)
         with engine.begin() as connection:
             connection.execute(DropSchema(schema, cascade=True))
         event.remove(engine, "before_cursor_execute", rewrite_schema)

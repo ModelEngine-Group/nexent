@@ -135,15 +135,15 @@ def test_require_current_run_rejects_stale_scope(scope, state, code):
 def test_issue_card_increments_version_without_mutating_previous(scope):
     state = {"conversation_id": "7", "run_id": "run", "version": 2, "card": None}
     assert service.require_current_run(state, scope) is state
-    issued = service.issue_card(state, "requirement_coverage")
+    issued = service.issue_card(state, "requirement_resources")
     assert state["version"] == 2 and state["card"] is None
-    assert issued["version"] == 3 and issued["card"]["subtype"] == "requirement_coverage"
+    assert issued["version"] == 3 and issued["card"]["subtype"] == "requirement_resources"
     action = ResourceCardAction(card_id=issued["card"]["id"], state_version=3)
-    assert service.require_current_card(issued, scope, "requirement_coverage", action) is issued
+    assert service.require_current_card(issued, scope, "requirement_resources", action) is issued
     with pytest.raises(service.ResourceStateError, match="resource_card_stale"):
         service.require_current_card(issued, scope, "installed_resource_binding", action)
     with pytest.raises(service.ResourceStateError, match="resource_state_expired"):
-        service.require_current_card(None, scope, "requirement_coverage", action)
+        service.require_current_card(None, scope, "requirement_resources", action)
 
 
 def test_conversations_have_independent_keys_but_runs_share_state(scope):

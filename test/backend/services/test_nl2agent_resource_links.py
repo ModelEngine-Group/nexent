@@ -23,7 +23,7 @@ from services.nl2agent_state_service import ResourceScope, ResourceStateError
 def boundary(mocker):
     scope = ResourceScope("tenant", "user", 42, "7", "run")
     state = {"conversation_id": "7", "run_id": "run", "version": 2, "purpose": "generate",
-             "card": {"id": "card", "subtype": "requirement_coverage"},
+             "card": {"id": "card", "subtype": "requirement_resources"},
              "requirements": {"r1": {"query": "Weather"}}}
     candidate = {"candidate_ref": "tenant_skill_repository:3", "resource_type": "skill",
                  "source": "TENANT_SKILL_REPOSITORY", "name": "Weather"}

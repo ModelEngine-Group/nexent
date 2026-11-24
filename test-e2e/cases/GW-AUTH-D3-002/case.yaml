@@ -25,10 +25,10 @@ case:
   steps:
   - order: 1
     action: Start Gateway and separate Management/Runtime recording servers; invoke
-      declared ordinary Management HTTP and Runtime streaming APIs plus declared Northbound
-      API.
+      declared ordinary Management HTTP/SSE APIs plus declared Northbound
+      API, including the NL2Agent knowledge recommendation and resource installation/link operations.
     expected: Each request reaches the intended upstream with body and repeated query
-      preserved; Runtime SSE arrives incrementally.
+      preserved; Management SSE arrives incrementally.
   - order: 2
     action: Call unknown route, method mismatch, reserved internal endpoint and unregistered
       WebSocket; then exercise a declared Runtime WebSocket.

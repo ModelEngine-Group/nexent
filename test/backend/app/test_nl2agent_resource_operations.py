@@ -14,7 +14,7 @@ from contracts.nl2agent_resources import (
     ResourceLinkRequest,
 )
 from management.services.agent import authorization
-from runtime.api.agent import execution
+from management.api.agent import creator as execution
 from services import nl2agent_resource_flow as flow
 from management.services.agent.nl2agent import Nl2AgentResourceError
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
@@ -75,3 +75,18 @@ async def test_read_only_draft_cannot_reach_resource_operation(boundary, error):
         await execution._run_resource_operation(operation, payload(), request, "Bearer test")
     assert caught.value.status_code == 403 and caught.value.detail == {"code": "agent_read_only"}
     operation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_knowledge_recommendations_use_the_authorized_card_operation_boundary(boundary, monkeypatch):
+    from contracts.nl2agent_resources import KnowledgeRecommendationsRequest
+    from services import nl2agent_knowledge_recommendations as knowledge
+    request, _, authorize = boundary
+    operation = AsyncMock(return_value={"resources": []})
+    monkeypatch.setattr(knowledge, "recommend", operation)
+    data = KnowledgeRecommendationsRequest(agent_id=42, conversation_id=701, card_id="card", state_version=1)
+    result = await execution.nl2agent_knowledge_recommendations(data, request, "Bearer test", None)
+    assert result == {"resources": []}
+    authorize.assert_called_once_with(agent_id=42, tenant_id="tenant", user_id="user")
+    scope, received = operation.await_args.args
+    assert scope.user_id == "user" and scope.tenant_id == "tenant" and received is data

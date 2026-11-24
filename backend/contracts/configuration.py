@@ -123,7 +123,7 @@ def _resolve_app_version(default: str = "v2.2.1", *, version_file=None) -> str:
 class SystemConfigurationChangesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    changes: dict[str, object] = Field(min_length=1, max_length=19)
+    changes: dict[str, object] = Field(min_length=1, max_length=20)
 
 
 class SystemConfigurationRecommendationRequest(BaseModel):

@@ -16,6 +16,7 @@ import { SystemConfigPage } from "@/features/system-config/SystemConfigPage";
 import type {
   SystemConfigurationItem,
   SystemConfigurationListResponse,
+  SystemConfigurationValue,
 } from "@/types/systemConfiguration";
 
 const state = vi.hoisted(() => ({
@@ -68,14 +69,16 @@ const KEYS = [
 
 function item(
   key: string,
-  value: number | boolean = 100
+  value: SystemConfigurationValue = 100
 ): SystemConfigurationItem {
   const kind =
     key === "LLM_INCLUDE_LOGPROBS"
       ? "boolean"
-      : key.includes("TIMEOUT")
-        ? "number"
-        : "integer";
+      : Array.isArray(value)
+        ? "resource_refs"
+        : key.includes("TIMEOUT")
+          ? "number"
+          : "integer";
   return {
     key,
     value,
@@ -131,7 +134,7 @@ beforeEach(() => {
   state.save.mockImplementation(async (changes) => ({
     saved: true,
     notification: "published",
-    items: Object.entries(changes as Record<string, number | boolean>).map(
+    items: Object.entries(changes as Record<string, SystemConfigurationValue>).map(
       ([key, value]) => item(key, value)
     ),
   }));
@@ -230,6 +233,30 @@ test("updates the modified summary count as drafts change", async () => {
   expect(screen.getByTestId("config-summary-modified")).toHaveTextContent("1");
   fireEvent.click(screen.getByRole("button", { name: /discard/ }));
   expect(screen.getByTestId("config-summary-modified")).toHaveTextContent("0");
+});
+
+test("validates resource references and saves the denylist as an array", async () => {
+  const key = "NL2AGENT_RESOURCE_DENYLIST";
+  state.list.mockResolvedValue({ items: [item(key, [])], total: 1 });
+  renderPage();
+
+  const row = await screen.findByTestId(`config-row-${key}`);
+  const input = within(row).getByRole("combobox");
+  fireEvent.change(input, { target: { value: "typo" } });
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 13 });
+  expect(await within(row).findByText("systemConfig.error.resourceRefs")).toBeVisible();
+  expect(screen.getByRole("button", { name: "systemConfig.saveBar.action" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "systemConfig.discard" }));
+  fireEvent.change(input, { target: { value: "tool:7" } });
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 13 });
+  expect(await within(row).findByText("tool:7")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "systemConfig.saveBar.action" }));
+  fireEvent.click(await screen.findByRole("button", { name: "systemConfig.save.confirm" }));
+  await waitFor(() => expect(state.save).toHaveBeenCalledWith({ [key]: ["tool:7"] }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "systemConfig.saveBar.action" })).not.toBeInTheDocument()
+  );
 });
 
 test("places the save bar inside the configuration content container", async () => {

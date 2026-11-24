@@ -5,6 +5,7 @@ case:
   case_id: NL2A-COVERAGE-D3-001
   feature_id: F-045
   business_rule_ids:
+  - F-045-RULE-12
   - F-045-RULE-02
   - F-045-RULE-07
   - F-045-RULE-09
@@ -14,7 +15,8 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Exercise covered and uncovered requirements, return from binding to clarification and resume generation.
+  objective: Exercise a unified card with gaps, direct incremental edits and readiness-gated continuation through the actual
+    runtime.
   preconditions:
   - Local disposable PostgreSQL, Redis and Elasticsearch test services are available.
   test_data:
@@ -32,10 +34,11 @@ case:
     expected: Only the requirement with newly available MCP tools is rechecked. Binding uses the actual tool and the returned
       card preserves the accepted requirements.
   - order: 3
-    action: Attempt a stale card action, then confirm the current card and continue after a valid binding. Generate cards in
-      two conversations on the same draft and submit an older-conversation action after the newer card was issued.
+    action: Attempt a stale card action, then confirm the current card and continue after a valid binding. Generate cards
+      in two conversations on the same draft and submit an older-conversation action after the newer card was issued.
     expected: The stale action does not advance the run. Continue uses the saved binding before Prompt and conversation settings
-      are saved and verified. Both conversations retain independently valid cards and confirmation succeeds without draft writes.
+      are saved and verified. Both conversations retain independently valid cards and confirmation succeeds without draft
+      writes.
   - order: 4
     action: Claim installation of a recommendation twice, recover the installed resource, then link a manually created resource
       from clarification.
@@ -62,9 +65,9 @@ case:
   - order: 8
     action: Discover generic platform knowledge requirements in local and AIDP modes with lexical, hybrid and failed embedding
       retrieval, verify qualified alternatives, and request binding recommendations.
-    expected: Only threshold-qualified recalled knowledge tools enter verification; available verified candidates rank by score
-      with stable reference ties, including a higher-scoring alternative ahead of a native tool. No query keywords or ready
-      bindings override scores. Resource authorization remains; empty or failed knowledge providers are not queried
+    expected: Only threshold-qualified recalled knowledge tools enter verification; available verified candidates rank by
+      score with stable reference ties, including a higher-scoring alternative ahead of a native tool. No query keywords or
+      ready bindings override scores. Resource authorization remains; empty or failed knowledge providers are not queried
       during recommendations, while saved selections still determine binding readiness.
   - order: 9
     action: Search real ES with private, shared, stale-version and cross-tenant resources; update a resource and exercise
@@ -86,10 +89,23 @@ case:
       rejected results stay uncovered without another search.
   - order: 12
     action: Discover compact positive image-generation and train-route queries with complete matching tools and unrelated
-      image-analysis or email tools, and discover native knowledge-search capability for an event-material request,
-      using the real HTTP/MCP/Redis flow without embeddings.
+      image-analysis or email tools, and discover native knowledge-search capability for an event-material request, using
+      the real HTTP/callback/Redis flow without embeddings.
     expected: Only complete capability matches reach model verification; shared name fragments and unrelated declarations
       are excluded before verification. The accepted card retains the original query and no draft bindings are written.
+  - order: 13
+    action: Publish a unified card containing covered and unmatched requirements. Modify one query through the actual creator
+      endpoint and continue only after retained requirements have ready bindings.
+    expected: The unified card includes bindable resources despite gaps. Only changed queries prepare fresh bilingual expressions;
+      unchanged evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
+  - order: 14
+    action: Request concrete knowledge recommendations through the authorized current-card HTTP endpoint with real ES,
+      controlled embeddings, compatible and mismatched models, empty and revoked knowledge and stale card versions.
+    expected: Only visible selectable knowledge is returned. Repeated requests reuse metadata vectors, text fallback remains
+      available, stale versions are rejected and no selection, resource coverage or Agent draft is persisted.
+  - order: 15
+    action: Change the in-process configuration snapshot after a resource card is published and confirm that card through the creator endpoint.
+    expected: Only affected requirements are retrieved again. The excluded reference leaves the verification batch and replacement card, and the next ranked candidate is admitted.
   expected_results:
   - Coverage is based on complete checked candidate sets and current evidence.
   - Card actions are authorized, versioned and isolated to their Agent and conversation.
@@ -101,8 +117,8 @@ case:
   - Hybrid discovery unions lexical and semantic references, reuses versioned tenant ES resource documents without TTL, rebuilds
     only changed content/model versions, streams real progress, and uses lexical only with no model or provider failure; similarity
     never proves coverage.
-  - Score-based recommendations survive runtime verification and card generation using authorized resources,
-    without knowledge-provider queries; saved selection readiness, user configuration and capability rejection remain.
+  - Score-based recommendations survive runtime verification and card generation using authorized resources, without knowledge-provider
+    queries; saved selection readiness, user configuration and capability rejection remain.
   - ES scoring enforces tenant and visible-resource revisions before candidate retrieval; stale or unauthorized documents
     cannot leak to the model or response.
   - Search fan-out shares recommendation and process limits and the phase deadline; success, errors and cancellation release
@@ -110,18 +126,34 @@ case:
   - Threshold failures do not enter verification, ties never expand Top3, and hybrid duplicates are checked once per requirement.
     Missing or inconsistent assessments fail; all qualified recalled alternatives remain. Empty or fully rejected results
     stay uncovered without another search.
-  - Complete capability matches reach verification while wrong-action partial matches are excluded before model checks;
-    original queries and draft bindings are preserved.
+  - Complete capability matches reach verification while wrong-action partial matches are excluded before model checks; original
+    queries and draft bindings are preserved.
+  - The unified card includes bindable resources despite gaps. Only changed queries prepare fresh bilingual expressions; unchanged
+    evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
+  - An authorized current-card HTTP request recommends compatible visible knowledge metadata using real ES and controlled
+    embeddings, reuses metadata vectors, falls back to text, rejects stale cards and preserves the draft and resource state.
+  - The updated denylist is applied before lexical ranking and a pending card is safely replaced without draft writes.
   forbidden_side_effects:
   - Candidate discovery and returning to clarification never create a resource or modify the draft.
   integration_boundary:
-  - NL2Agent run endpoint, local MCP, SDK, real ES resource index, Redis state, authorized draft, and SSE.
+  - NL2Agent run endpoint, signed Management tool callbacks, SDK, real ES resource index, Redis state, authorized draft, and
+    SSE.
   observations:
   - Candidate groups, typed coverage, card versions, SSE order and durable draft readback.
   cleanup:
   - Release owned ES indices/client/container, disposable Redis keys or instance, PostgreSQL schema, model provider, MCP listener,
     workspace and workers.
   acceptance:
+  - id: AC-RESOURCE-DENYLIST
+    description: The current resource denylist governs recall, model verification and pending cards through the creator runtime.
+    steps: [15]
+    expected_results: [15]
+    forbidden_side_effects: [1]
+  - id: AC-KNOWLEDGE-AUTO
+    description: Concrete knowledge recommendations use current authorized model-compatible metadata, cached vectors and text fallback without business writes.
+    steps: [14]
+    expected_results: [14]
+    forbidden_side_effects: [1]
   - id: AC-ES-SEARCH-CONCURRENCY
     description: Real ES retrieval runs multiple query/source/name/chunk searches under default eight-per-recommendation and
       eight-per-process limits with query reuse, original filters, shared deadline and cancellation cleanup; permits and clients
@@ -142,9 +174,9 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-KNOWLEDGE-PRIORITY
-    description: Only threshold-qualified recalled knowledge tools enter verification; available verified candidates rank by score
-      with stable reference ties, including a higher-scoring alternative ahead of a native tool. No query keywords or ready
-      bindings override scores. Resource authorization remains; empty or failed knowledge providers are not queried
+    description: Only threshold-qualified recalled knowledge tools enter verification; available verified candidates rank
+      by score with stable reference ties, including a higher-scoring alternative ahead of a native tool. No query keywords
+      or ready bindings override scores. Resource authorization remains; empty or failed knowledge providers are not queried
       during recommendations, while saved selections still determine binding readiness.
     steps:
     - 8
@@ -163,7 +195,7 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-COVERAGE
-    description: A gap is shown and blocks binding, then edits reuse unchanged evidence.
+    description: A unified card contains gaps and bindable alternatives; edits reuse unchanged evidence.
     steps:
     - 1
     - 2
@@ -173,8 +205,8 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-RETURN-AND-CONTINUE
-    description: Binding returns to clarification with prior requirements and only a valid current card advances generation.
-      Different conversations on the same draft retain independent cards despite interleaved older-conversation writes.
+    description: The unified card accepts edits directly; only current versions with ready bindings for all retained requirements
+      may continue. Conversations remain isolated.
     steps:
     - 2
     - 3
@@ -195,8 +227,8 @@ case:
     - 1
   - id: AC-BILINGUAL-RECALL
     description: Opposite-language tools reach verification, unrelated candidates can be rejected, and requirement edits prepare
-      fresh expressions without changing original text or draft state. Compact positive expressions exclude wrong-action
-      partial lexical matches before verification without a generic-word list.
+      fresh expressions without changing original text or draft state. Compact positive expressions exclude wrong-action partial
+      lexical matches before verification without a generic-word list.
     steps:
     - 6
     - 12
@@ -217,3 +249,15 @@ case:
     - 11
     forbidden_side_effects:
     - 1
+  - id: AC-UNIFIED-CARD
+    description: The unified card includes bindable resources despite gaps. Only changed queries prepare fresh bilingual expressions;
+      unchanged evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
+    steps:
+    - 13
+    expected_results:
+    - 13
+    forbidden_side_effects:
+    - 1
+  requirement_ids:
+  - NL2AGENT-UNIFIED-CARD-20261120
+  - NL2AGENT-RESOURCE-DENYLIST-20261123

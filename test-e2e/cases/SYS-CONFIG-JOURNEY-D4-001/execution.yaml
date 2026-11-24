@@ -14,6 +14,7 @@ acceptance_bindings:
   AC-01: [SYS-CONFIG-JOURNEY-D4-001]
   AC-02: [SYS-CONFIG-JOURNEY-D4-001]
   AC-03: [SYS-CONFIG-JOURNEY-D4-001]
+  AC-04: [SYS-CONFIG-JOURNEY-D4-001]
 notes: >-
   Self-contained browser proof using the real frontend and Chromium with all API
   outcomes controlled at the browser boundary. No backend process, provider,

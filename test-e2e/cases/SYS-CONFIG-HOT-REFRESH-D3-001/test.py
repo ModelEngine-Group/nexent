@@ -30,6 +30,7 @@ MIGRATION = (
     Path(__file__).resolve().parents[3]
     / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
 )
+DENYLIST_MIGRATION = MIGRATION.with_name("v2.9.0_014_nl2agent_resource_denylist.sql")
 
 
 def _engine():
@@ -41,7 +42,11 @@ def _apply_migration(extra_sql=""):
     try:
         connection.autocommit = True
         with connection.cursor() as cursor:
-            cursor.execute(MIGRATION.read_text(encoding="utf-8") + extra_sql)
+            cursor.execute("\n".join([
+                MIGRATION.read_text(encoding="utf-8"),
+                DENYLIST_MIGRATION.read_text(encoding="utf-8"),
+                extra_sql,
+            ]))
     finally:
         connection.close()
 
@@ -52,10 +57,10 @@ def _restore_defaults(engine):
             connection.execute(
                 text(
                     "UPDATE nexent.sys_configuration_t "
-                    "SET configuration_value = to_jsonb(:value), updated_by = 'system', update_time = CURRENT_TIMESTAMP "
+                    "SET configuration_value = CAST(:value AS jsonb), updated_by = 'system', update_time = CURRENT_TIMESTAMP "
                     "WHERE configuration_key = :key AND delete_flag = 'N'"
                 ),
-                {"key": key, "value": value},
+                {"key": key, "value": json.dumps(value)},
             )
 
 
@@ -219,7 +224,9 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
                 "FROM nexent.sys_configuration_t WHERE delete_flag = 'N'"
             )
         ).one()
-    assert (count, tenant_limit) == (19, 100)
+    assert (count, tenant_limit) == (20, 100)
+    with Session(engine) as session:
+        assert SystemConfigurationRepository().load_snapshot(session).get("NL2AGENT_RESOURCE_DENYLIST") == ()
 
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM nexent.sys_configuration_t"))
@@ -250,8 +257,12 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
             )
         )
 
+    denylist_key = "NL2AGENT_RESOURCE_DENYLIST"
+    _save_values(engine, {denylist_key: ["tool:7"]})
     with ThreadPoolExecutor(max_workers=2) as executor:
         list(executor.map(lambda _: _apply_migration(), range(2)))
+    with Session(engine) as session:
+        assert SystemConfigurationRepository().load_snapshot(session).get(denylist_key) == ("tool:7",)
 
     with engine.connect() as connection:
         count, distinct_count = connection.execute(
@@ -275,7 +286,7 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
             )
         ).scalar_one()
 
-    assert (count, distinct_count) == (19, 19)
+    assert (count, distinct_count) == (20, 20)
     assert tenant_limit == 5
     assert skill_limit == 10
     assert actor == "ops-user"
@@ -384,6 +395,13 @@ def test_independent_consumers_reconcile_duplicate_and_invalid_notifications():
     publisher = redis.Redis.from_url(REDIS_URL)
     try:
         with _running_consumers() as workers:
+            key = "NL2AGENT_RESOURCE_DENYLIST"
+            _save_values(engine, {key: ["tool:7"]})
+            publisher.publish(CONFIGURATION_CHANNEL, "configuration_changed")
+            _wait_for_consumer_value(workers, key, ["tool:7"])
+            _save_values(engine, {key: []})
+            _wait_for_consumer_value(workers, key, [])
+
             # Direct commits prove consumers do not depend on an ops process.
             _save_values(engine, {"MAX_TENANT_COUNT": 10})
             _wait_for_consumer_value(workers, "MAX_TENANT_COUNT", 10)

@@ -122,6 +122,18 @@ def test_web_features_are_exposed_only_to_sessions(method, path):
     assert match.credential_kinds == ("session",)
 
 
+@pytest.mark.parametrize("operation", [
+    "knowledge_recommendations", "resource_installations", "resource_installation_attempts", "resource_links",
+])
+def test_nl2agent_card_operations_have_explicit_session_routes(operation):
+    path = f"/api/agent/nl2agent/{operation}"
+    match = default_registry().match("POST", path)
+    assert match is not None
+    assert match.target == "management" and match.credential_kinds == ("session",)
+    assert default_registry().match("GET", path) is None
+    assert default_registry().match("GET", path, transport="websocket") is None
+
+
 @pytest.mark.parametrize("method,path", [
     ("POST", "/api/trajectory/conversations/123/export"),
     ("POST", "/api/trajectory/import"),

@@ -8,6 +8,7 @@ import {
   useContext,
   useMemo,
   useReducer,
+  useState,
   type FC,
   type PropsWithChildren,
 } from "react";
@@ -49,7 +50,11 @@ interface ActiveNl2AgentCard {
 const cardPhase = (subtype: string): Nl2AgentFlowPhase => {
   if (subtype === "prompt_generation") return "prompt_pending";
   if (subtype === "requirement_clarification") return "clarifying";
-  if (subtype === "installed_resource_binding") return "binding";
+  if (
+    subtype === "installed_resource_binding" ||
+    subtype === "requirement_resources"
+  )
+    return "binding";
   return "installing";
 };
 
@@ -127,7 +132,11 @@ function reducer(
     case "run_finished":
       if (state.agentId !== action.agentId) return state;
       if (state.activeCard?.versioned) {
-        return { ...state, phase: cardPhase(state.activeCard.subtype), isFormLocked: false };
+        return {
+          ...state,
+          phase: cardPhase(state.activeCard.subtype),
+          isFormLocked: false,
+        };
       }
       if (
         state.activeCard !== null ||
@@ -244,6 +253,7 @@ function reducer(
 }
 
 interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
+  resourceDrafts: Map<string, unknown>;
   draftScope?: string;
   resetFlow: (agentId?: number | null) => void;
   markRunStarted: (agentId: number) => void;
@@ -272,9 +282,13 @@ export const Nl2AgentFlowProvider: FC<
   PropsWithChildren<{ draftScope?: string }>
 > = ({ children, draftScope }) => {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
+  const [resourceDrafts] = useState(() => new Map<string, unknown>());
   const resetFlow = useCallback(
-    (agentId: number | null = null) => dispatch({ type: "reset", agentId }),
-    []
+    (agentId: number | null = null) => {
+      resourceDrafts.clear();
+      dispatch({ type: "reset", agentId });
+    },
+    [resourceDrafts]
   );
   const markRunStarted = useCallback(
     (agentId: number) => dispatch({ type: "run_started", agentId }),
@@ -335,6 +349,7 @@ export const Nl2AgentFlowProvider: FC<
   const value = useMemo(
     () => ({
       ...state,
+      resourceDrafts,
       draftScope,
       resetFlow,
       markRunStarted,
@@ -352,6 +367,7 @@ export const Nl2AgentFlowProvider: FC<
       isCardInteractive,
     }),
     [
+      resourceDrafts,
       draftScope,
       isCardInteractive,
       markGenerationCompleted,
@@ -391,7 +407,9 @@ export function useNl2AgentFormLock(): boolean {
 }
 
 /** Read existing workflow state without requiring a provider for standalone panels. */
-export function useNl2AgentFlowPhase(agentId: number | null): Nl2AgentFlowPhase {
+export function useNl2AgentFlowPhase(
+  agentId: number | null
+): Nl2AgentFlowPhase {
   const state = useContext(Nl2AgentFlowContext);
   return state?.agentId === agentId ? state.phase : "idle";
 }

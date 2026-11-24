@@ -72,7 +72,7 @@ def installation(mocker, scope):
     candidate = {"candidate_ref": "tenant_mcp_repository:3", "source": "TENANT_MCP_REPOSITORY",
                  "resource_type": "mcp_server", "name": "Weather", "description": "Forecast", "retrieval_score": 0.8}
     state = {"conversation_id": "7", "run_id": "run", "version": 2, "purpose": "generate",
-             "card": {"id": "card", "subtype": "requirement_coverage"}, "requirements": {}}
+             "card": {"id": "card", "subtype": "requirement_resources"}, "requirements": {}}
     mocker.patch.object(flow, "read_resource_state", new=AsyncMock(side_effect=lambda _: deepcopy(state)))
     mocker.patch.object(flow, "coverage_rows", side_effect=lambda _: [
         {"requirement_id": "other", "installable_resources": []},

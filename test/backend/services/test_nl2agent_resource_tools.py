@@ -125,7 +125,7 @@ async def test_verify_publishes_card_only_after_final_batch(mocker, context, res
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("card", [None, {"subtype": "requirement_coverage", "card_id": "card"}])
+@pytest.mark.parametrize("card", [None, {"subtype": "requirement_resources", "card_id": "card"}])
 async def test_show_card_attaches_server_receipt_only_when_needed(mocker, context, card):
     mocker.patch.object(tools.flow, "show_card", new=AsyncMock(return_value=card))
     result = await tools.show_resource_card()

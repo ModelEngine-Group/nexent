@@ -16,7 +16,7 @@ from services.nl2agent_state_service import ResourceScope, ResourceStateError
 def boundary(mocker):
     scope = ResourceScope("tenant", "user", 42, "7", "next")
     state = {"conversation_id": "7", "run_id": "previous", "version": 2, "purpose": "generate",
-             "card": {"id": "card", "subtype": "installed_resource_binding"}, "requirements": {}}
+             "card": {"id": "card", "subtype": "requirement_resources"}, "requirements": {}}
     mocker.patch.object(flow, "read_resource_state", new=AsyncMock(side_effect=lambda _: deepcopy(state)))
 
     async def update(_scope, change):
@@ -25,6 +25,7 @@ def boundary(mocker):
         state.update(result)
         return deepcopy(state)
 
+    mocker.patch.object(flow, "_authorized_batch_result", new=AsyncMock(return_value={}))
     write = mocker.patch.object(flow, "update_resource_state", new=AsyncMock(side_effect=update))
     rows = [{"requirement_id": "r1", "query": "Weather", "required": True,
              "covered_resources": [{"candidate_ref": "tool:9"}]}]
@@ -42,7 +43,7 @@ def action(**kwargs):
 @pytest.mark.asyncio
 async def test_continue_records_verified_requirements_and_retry_receipt(boundary):
     scope, state, _, bound, _ = boundary
-    result = await flow.apply_card_action(scope, "installed_resource_binding", "continue",
+    result = await flow.apply_card_action(scope, "requirement_resources", "continue",
                                           action(selected_resource_refs=["tool:9"]))
     assert result == {"purpose": "generate", "action": "continue", "confirmed_requirements": [
         {"query": "Weather", "required": True, "bound": True},
@@ -50,7 +51,7 @@ async def test_continue_records_verified_requirements_and_retry_receipt(boundary
     assert state["card"] is None and state["version"] == 3 and state["run_id"] == "next"
     assert state["continuation"] == {"id": "card", "version": 2}
     bound.assert_awaited_once_with(agent_id=42, tenant_id="tenant", user_id="user")
-    retry = await flow.apply_card_action(scope, "installed_resource_binding", "retry_generation", action())
+    retry = await flow.apply_card_action(scope, "requirement_resources", "retry_generation", action())
     assert retry == {**result, "retry_prompt": True}
 
 
@@ -67,7 +68,7 @@ async def test_continue_rejects_missing_or_forged_bindings(boundary, case, code)
     if case == "required":
         rows.append({"query": "Email", "required": True, "covered_resources": [{"candidate_ref": "tool:10"}]})
     with pytest.raises(ResourceStateError, match=code):
-        await flow.apply_card_action(scope, "installed_resource_binding", "continue", action(selected_resource_refs=selected))
+        await flow.apply_card_action(scope, "requirement_resources", "continue", action(selected_resource_refs=selected))
     write.assert_not_awaited()
     assert state["card"] is not None
 
@@ -82,12 +83,12 @@ async def test_generation_retry_rejects_stale_continuations(boundary, case):
     elif case == "conversation":
         state["conversation_id"] = "other"
     elif case == "card":
-        state["card"] = {"id": "new", "subtype": "requirement_coverage"}
+        state["card"] = {"id": "new", "subtype": "requirement_resources"}
     else:
         state["continuation"]["version"] = 1
     before = deepcopy(state)
     with pytest.raises(ResourceStateError, match="resource_card_stale"):
-        await flow.apply_card_action(scope, "installed_resource_binding", "retry_generation", action())
+        await flow.apply_card_action(scope, "requirement_resources", "retry_generation", action())
     assert state == before
 
 
@@ -107,17 +108,17 @@ async def test_confirmed_empty_resources_continue_according_to_original_purpose(
 async def test_using_recommendation_changes_purpose_to_binding(mocker, boundary):
     scope, state, _, _, _ = boundary
     state["purpose"] = "recommend"
-    state["card"]["subtype"] = "resource_recommendation"
-    show = mocker.patch.object(flow, "show_card", new=AsyncMock(return_value={"subtype": "installed_resource_binding"}))
-    assert await flow.apply_card_action(scope, "resource_recommendation", "use_recommendation", action()) == {
-        "card": {"subtype": "installed_resource_binding"},
+    state["card"]["subtype"] = "requirement_resources"
+    show = mocker.patch.object(flow, "show_card", new=AsyncMock(return_value={"subtype": "requirement_resources"}))
+    assert await flow.apply_card_action(scope, "requirement_resources", "use_recommendation", action()) == {
+        "card": {"subtype": "requirement_resources"},
     }
     assert state["purpose"] == "bind" and state["card"] is None and state["version"] == 3
     show.assert_awaited_once_with(scope)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("subtype", ["requirement_coverage", "resource_recommendation"])
+@pytest.mark.parametrize("subtype", ["requirement_resources", "requirement_resources"])
 async def test_unsupported_card_action_is_rejected_without_state_change(boundary, subtype):
     scope, state, _, _, _ = boundary
     state["card"]["subtype"] = subtype
@@ -130,9 +131,9 @@ async def test_unsupported_card_action_is_rejected_without_state_change(boundary
 @pytest.mark.asyncio
 async def test_confirmation_requires_requirement_edits(boundary):
     scope, state, _, _, _ = boundary
-    state["card"]["subtype"] = "requirement_coverage"
+    state["card"]["subtype"] = "requirement_resources"
     with pytest.raises(ResourceStateError, match="invalid_resource_action"):
-        await flow.apply_card_action(scope, "requirement_coverage", "confirm_requirements", action())
+        await flow.apply_card_action(scope, "requirement_resources", "confirm_requirements", action())
 
 
 def test_unknown_requirement_edit_cannot_create_an_arbitrary_server_id():

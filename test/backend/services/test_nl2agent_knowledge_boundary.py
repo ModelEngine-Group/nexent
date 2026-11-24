@@ -51,7 +51,7 @@ async def test_recall_verification_and_binding_card_do_not_query_knowledge(monke
         ],
     )])
     card = await flow.show_card(scope)
-    assert card["subtype"] == "installed_resource_binding"
+    assert card["subtype"] == "requirement_resources"
     assert card["requirements"][0]["coverage_status"] == "covered"
     assert card["resources"][0]["candidate"]["candidate_ref"] == "tool:2"
     assert not card["resources"][0]["is_bound"]

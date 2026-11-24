@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-export type SystemConfigurationValue = number | boolean;
-export type SystemConfigurationKind = "integer" | "number" | "boolean";
+export type SystemConfigurationValue = number | boolean | string[];
+export type SystemConfigurationKind = "integer" | "number" | "boolean" | "resource_refs";
 export type SystemConfigurationGroup =
   "tenant" | "capacity" | "upload" | "runtime";
 

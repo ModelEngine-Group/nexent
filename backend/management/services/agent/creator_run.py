@@ -97,7 +97,7 @@ async def prepare_nl2agent_snapshot(
     )
 
 
-async def _apply_card_action(payload, actor, request):
+async def _apply_card_action(payload, actor, request, *, validate_only=False):
     """Apply the authorized user action before dispatching the next creator run."""
     from contracts.nl2agent_resources import ResourceCardAction
     from management.services.agent.authorization import require_agent_draft_edit
@@ -127,6 +127,8 @@ async def _apply_card_action(payload, actor, request):
         query = ("The runtime has applied the exact prompt approved by the user. Do not regenerate or save prompt. "
                  "Continue the original full-generation task: save greeting_message and example_questions, "
                  "then call nl2a_validate_agent_generation_complete and report its actual result.")
+    elif action.get("subtype") in {"installed_resource_binding", "local_mcp_recommendation", "suggested_resource_installation"}:
+        raise ResourceStateError("resource_card_stale")
     elif isinstance(data, dict) and ("card_id" in data or "state_version" in data):
         from services.nl2agent_resource_flow import apply_card_action
         if not scope.conversation_id:
@@ -136,7 +138,9 @@ async def _apply_card_action(payload, actor, request):
         except ValueError as exc:
             raise ResourceStateError("invalid_resource_action") from exc
         result = await apply_card_action(scope, action.get("subtype"), action.get("action"), parsed,
-                                         resume_confirmation=resume)
+                                         resume_confirmation=resume, validate_only=validate_only)
+        if validate_only:
+            return payload, []
         if result.get("card") is not None:
             frames.append({"type": "nl2a", "content": json.dumps(result["card"], ensure_ascii=False)})
             return None, frames

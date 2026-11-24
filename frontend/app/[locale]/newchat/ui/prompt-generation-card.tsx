@@ -132,11 +132,11 @@ export function PromptGenerationCard({
             onChange={(event) => setDraftPrompt(event.target.value)}
             disabled={locked}
             autoSize={{ minRows: 8, maxRows: 24 }}
-            className="!text-xs"
+            className="!text-[13px]"
           />
         ) : (
           <pre
-            className={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-xs ${expanded ? "" : "max-h-48 overflow-hidden"}`}
+            className={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-[13px] ${expanded ? "" : "max-h-48 overflow-hidden"}`}
           >
             {payload.status === "pending" && outcome !== "cancelled"
               ? draftPrompt

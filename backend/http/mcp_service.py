@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from threading import Thread
 from threading import RLock
@@ -14,15 +15,17 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from management.db.tool.outer_api import query_available_openapi_services
-from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
+from contracts.constants.environment import GATEWAY_SERVICE_URL, NEXENT_MCP_INTERNAL_TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
+    ManagedTaskSpec,
     ManagedThreadSpec,
     clear_default_thread_manager,
     set_default_thread_manager,
 )
 from backend.mcp.thread_management import mcp_thread_manager
-from gateway.downstream.identity import enabled as gateway_identity_enabled
+from infrastructure.system_configuration.runtime import start_system_configuration, stop_system_configuration
+from gateway.downstream.identity import enabled as gateway_identity_enabled, signing_key as gateway_signing_key
 from gateway.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
 from gateway.mcp.credential_client import resolve_mcp_identity as _resolve_gateway_mcp_identity
 from tool_collection.mcp.local_mcp_service import (
@@ -104,6 +107,25 @@ _tenant_mcp_lock = RLock()
 
 # FastAPI app for management endpoints (runs alongside the MCP server)
 _mcp_management_app = None
+
+
+@asynccontextmanager
+async def _mcp_management_lifespan():
+    async def run_configuration_io(fn):
+        return await mcp_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="system-configuration-refresh",
+                owner="infrastructure.system_configuration.runtime",
+            ),
+            fn,
+        )
+
+    try:
+        await start_system_configuration(run_configuration_io)
+        yield
+    finally:
+        await stop_system_configuration()
 
 
 def get_mcp_management_app():
@@ -456,13 +478,20 @@ def _legacy_mcp_identity(authorization):
     return get_current_user_id(authorization)
 
 
+async def _gateway_mcp_identity(scope, authorization):
+    """Bind deployment configuration to the independent Gateway credential client."""
+    return await _resolve_gateway_mcp_identity(
+        scope, authorization, gateway_url=GATEWAY_SERVICE_URL, key=gateway_signing_key(),
+    )
+
+
 class TenantMCPRouter(_TenantMCPRouter):
     """Bind the process registry and deployment trust policy to the MCP boundary."""
 
     def __init__(self):
         super().__init__(get_app=_tenant_app, refresh=refresh_openapi_services_by_tenant,
                          internal_token=NEXENT_MCP_INTERNAL_TOKEN, gateway_required=gateway_identity_enabled(),
-                         resolve_identity=_resolve_gateway_mcp_identity, legacy_identity=_legacy_mcp_identity)
+                         resolve_identity=_gateway_mcp_identity, legacy_identity=_legacy_mcp_identity)
 
 
 
@@ -480,11 +509,15 @@ def run_mcp_server_with_management():
     )
     server = uvicorn.Server(config)
 
+    async def serve_management():
+        async with _mcp_management_lifespan():
+            await server.serve()
+
     def run_fastapi(cancel_event):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(server.serve())
+            loop.run_until_complete(serve_management())
         finally:
             loop.close()
 

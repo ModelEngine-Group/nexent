@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useState } from "react";
-import { Button, InputNumber, Switch, Tag, Tooltip } from "antd";
+import { Button, InputNumber, Select, Switch, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, ChevronDown, RefreshCw, RotateCcw } from "lucide-react";
 
@@ -34,7 +34,9 @@ export function ConfigRow({
       ? t("systemConfig.booleanType")
       : item.kind === "integer"
         ? t("systemConfig.integerType")
-        : t("systemConfig.decimalType");
+        : item.kind === "resource_refs"
+          ? t("systemConfig.resourceRefsType")
+          : t("systemConfig.decimalType");
 
   return (
     <div
@@ -76,6 +78,20 @@ export function ConfigRow({
                 {formatConfigValue(item, value, t)}
               </span>
             </div>
+          ) : item.kind === "resource_refs" ? (
+            <Select<string[]>
+              id={`config-input-${item.key}`}
+              mode="tags"
+              size="small"
+              open={false}
+              className="w-full"
+              aria-label={label}
+              placeholder={t("systemConfig.resourceRefsPlaceholder")}
+              status={errorKey ? "error" : undefined}
+              tokenSeparators={[","]}
+              value={Array.isArray(value) ? value : []}
+              onChange={(refs) => onValueChange(refs.map((ref) => ref.trim()))}
+            />
           ) : (
             <div className="flex items-center gap-1.5">
               <InputNumber
@@ -123,7 +139,9 @@ export function ConfigRow({
             ? t("systemConfig.booleanRange")
             : item.kind === "integer"
               ? t("systemConfig.integerRange")
-              : t("systemConfig.numberRange")}
+                : item.kind === "resource_refs"
+                  ? t("systemConfig.resourceRefsRange")
+                  : t("systemConfig.numberRange")}
           <div className="text-[12px] text-[var(--color-icon-tertiary)]">
             {kindLabel}
           </div>

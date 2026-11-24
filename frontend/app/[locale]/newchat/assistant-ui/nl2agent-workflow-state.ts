@@ -54,9 +54,8 @@ export function isFullGenerationTurn(
       (card.agent_id === agentId &&
         [
           "requirement_clarification",
-          "requirement_coverage",
-          "resource_recommendation",
           "installed_resource_binding",
+          "requirement_resources",
           "suggested_resource_installation",
         ].includes(String(card.subtype))) ||
       (Array.isArray(custom.nl2agentStates) &&
@@ -121,6 +120,7 @@ export function projectNl2AgentWorkflow({
   let sequence = 0;
   let coverageSeen = false;
   let bindingSeen = false;
+  let unresolvedUnifiedCoverage = false;
   let lastCard = -1;
   let lastUser = -1;
   let lastFact = -1;
@@ -230,9 +230,8 @@ export function projectNl2AgentWorkflow({
       if (
         [
           "requirement_clarification",
-          "requirement_coverage",
-          "resource_recommendation",
           "installed_resource_binding",
+          "requirement_resources",
           "suggested_resource_installation",
         ].includes(subtype)
       ) {
@@ -242,18 +241,32 @@ export function projectNl2AgentWorkflow({
         if (subtype === "requirement_clarification") {
           view.current = 0;
           view.detail = "confirmRequirements";
-        } else if (subtype === "installed_resource_binding") {
-          bindingSeen = true;
+        } else if (
+          subtype === "installed_resource_binding" ||
+          subtype === "requirement_resources"
+        ) {
           coverageSeen = true;
-          view.current = 2;
-          view.detail = "selectResources";
+          const allCovered =
+            subtype !== "requirement_resources" ||
+            (Array.isArray(card.requirements) &&
+              card.requirements.length > 0 &&
+              card.requirements.every((value) => {
+                const requirement = record(value);
+                return (
+                  requirement.coverage_status === "covered" &&
+                  Array.isArray(requirement.covered_resources) &&
+                  requirement.covered_resources.length > 0
+                );
+              }));
+          bindingSeen ||= allCovered;
+          unresolvedUnifiedCoverage =
+            subtype === "requirement_resources" && !allCovered;
+          view.current = allCovered ? 2 : 1;
+          view.detail = allCovered ? "selectResources" : "resolveGaps";
         } else {
           coverageSeen = true;
           view.current = 1;
-          view.detail =
-            subtype === "resource_recommendation"
-              ? "recommendationReady"
-              : "resolveGaps";
+          view.detail = "resolveGaps";
         }
         if (view.current >= 1)
           view.pipeline = [
@@ -304,8 +317,9 @@ export function projectNl2AgentWorkflow({
             (part.toolName === "nl2a_save_agent_draft_fields" &&
               typeof record(args.fields).prompt === "string"));
         if (
-          startsGeneration ||
+          (startsGeneration && !unresolvedUnifiedCoverage) ||
           (!part.result &&
+            !unresolvedUnifiedCoverage &&
             [
               "nl2a_save_agent_draft_fields",
               "nl2a_validate_agent_generation_complete",
@@ -345,7 +359,6 @@ export function projectNl2AgentWorkflow({
         "resolveGaps",
         "confirmRequirements",
         "selectResources",
-        "recommendationReady",
       ].includes(view.detail)
     )
       view.detail = "processing";

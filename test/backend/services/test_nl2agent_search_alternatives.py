@@ -197,8 +197,8 @@ async def test_all_alternatives_survive_pages_and_binding_defaults(mocker, mode)
     assert {item["candidate_ref"] for item in card["requirements"][0]["covered_resources"]} == expected
     assert {item["candidate"]["candidate_ref"] for item in card["resources"]} == expected
     assert sum(item["recommendation"] == "recommended" for item in card["resources"]) == 1
-    returned = await flow.apply_card_action(scope, card["subtype"], "return_requirements", ResourceCardAction(
-        card_id=card["card_id"], state_version=card["state_version"]))
+    returned = await flow.apply_card_action(scope, card["subtype"], "confirm_requirements", ResourceCardAction(
+        card_id=card["card_id"], state_version=card["state_version"], requirements=[RequirementEdit(requirement_id=row["requirement_id"], query=row["query"]) for row in card["requirements"]]))
     clarification = returned["card"]
     await flow.apply_card_action(scope, clarification["subtype"], "confirm_requirements", ResourceCardAction(
         card_id=clarification["card_id"], state_version=clarification["state_version"], requirements=[

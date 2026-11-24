@@ -131,6 +131,7 @@ export const API_ENDPOINTS = {
     nl2agentResourceInstallations: `${API_BASE_URL}/agent/nl2agent/resource_installations`,
     nl2agentResourceInstallationAttempts: `${API_BASE_URL}/agent/nl2agent/resource_installation_attempts`,
     nl2agentResourceLinks: `${API_BASE_URL}/agent/nl2agent/resource_links`,
+    nl2agentKnowledgeRecommendations: `${API_BASE_URL}/agent/nl2agent/knowledge_recommendations`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     listPage: `${API_BASE_URL}/agent/list/page`,

@@ -9,10 +9,10 @@ import {
 } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { RequirementCoverageCard } from "@/app/newchat/ui/requirement-coverage-card";
+import { RequirementCoverageCard as UnifiedCoverage } from "@/app/newchat/ui/requirement-coverage-card";
 import { Nl2AgentFlowProvider, useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import type {
-  Nl2aCoveragePayload,
+  Nl2aUnifiedResourcesPayload,
   Nl2aInstallableResource,
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 
@@ -55,9 +55,11 @@ vi.mock("@assistant-ui/react", () => ({
   useAuiState: () => threadState.running,
 }));
 
-const payload: Nl2aCoveragePayload = {
-  subtype: "requirement_coverage",
+const payload: Nl2aUnifiedResourcesPayload = {
+  subtype: "requirement_resources",
   protocol_version: 2,
+  purpose: "generate",
+  resources: [],
   agent_id: 42,
   conversation_id: "1",
   run_id: "run",
@@ -75,7 +77,7 @@ const payload: Nl2aCoveragePayload = {
   ],
 };
 
-const repositoryPayload: Nl2aCoveragePayload = {
+const repositoryPayload: Nl2aUnifiedResourcesPayload = {
   ...payload,
   requirements: [
     {
@@ -93,7 +95,36 @@ const repositoryPayload: Nl2aCoveragePayload = {
   ],
 };
 
-it.each([{ readOnly: true }, { disabled: true }])(
+function RequirementCoverageCard({
+  payload,
+  disabled,
+  busy = false,
+}: {
+  payload: Nl2aUnifiedResourcesPayload;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <UnifiedCoverage
+      payload={payload}
+      disabled={disabled}
+      binding={{
+        busy,
+        footer: <footer>Binding actions</footer>,
+        renderResources: () => null,
+        status: (id) =>
+          payload.requirements.find((row) => row.requirement_id === id)
+            ?.coverage_status === "uncovered"
+            ? "unmatched"
+            : "choose",
+        onAccepted: () => undefined,
+        onEditingChange: () => undefined,
+      }}
+    />
+  );
+}
+
+it.each([{ disabled: true }, { busy: true }])(
   "does not refresh installation status for an inactive historical card: %j",
   async (props) => {
     fetchWithAuth.mockResolvedValue(
@@ -136,7 +167,7 @@ it("refreshes installation status only after a card becomes interactive", async 
   );
 });
 
-it.each([{ readOnly: true }, { disabled: true }])(
+it.each([{ disabled: true }, { busy: true }])(
   "cancels an installation refresh and ignores its late response when the card becomes inactive: %j",
   async (props) => {
     let complete!: (response: Response) => void;
@@ -172,27 +203,14 @@ it.each([{ readOnly: true }, { disabled: true }])(
   }
 );
 
-it("does not query installation status for recommendation-only or clarification cards", async () => {
+it("does not query installation status in recommendation mode", async () => {
   fetchWithAuth.mockResolvedValue(
     Response.json({ remote_mcp_server_list: [] })
   );
-  const { rerender } = render(
+  render(
     <Nl2AgentFlowProvider>
       <RequirementCoverageCard
-        payload={{ ...repositoryPayload, subtype: "resource_recommendation" }}
-      />
-    </Nl2AgentFlowProvider>
-  );
-  await act(async () => {});
-  expect(fetchWithAuth).not.toHaveBeenCalled();
-  rerender(
-    <Nl2AgentFlowProvider>
-      <RequirementCoverageCard
-        payload={{
-          ...repositoryPayload,
-          subtype: "requirement_clarification",
-          questions: [],
-        }}
+        payload={{ ...repositoryPayload, purpose: "recommend" }}
       />
     </Nl2AgentFlowProvider>
   );
@@ -212,7 +230,7 @@ it("shows the recorded snapshot again after an interactive card becomes read-onl
   expect(await screen.findByText("Installed", { exact: true })).toBeDefined();
   rerender(
     <Nl2AgentFlowProvider>
-      <RequirementCoverageCard payload={repositoryPayload} readOnly />
+      <RequirementCoverageCard payload={repositoryPayload} disabled />
     </Nl2AgentFlowProvider>
   );
   expect(screen.getByText("Installed, disabled")).toBeDefined();
@@ -265,9 +283,11 @@ it("retains the changed requirement and submits the current card only on confirm
       <Fixture />
     </Nl2AgentFlowProvider>
   );
-  expect(screen.getByText("No confirmed resource")).toBeDefined();
+  expect(
+    screen.getByText("nl2agent.unified.unmatchedTitle")
+  ).toBeDefined();
   expect(screen.getByRole("button", { name: "Create Skill" })).toBeDefined();
-  expect(screen.getByRole("button", { name: "Add MCP" })).toBeDefined();
+  expect(screen.getByRole("button", { name: "nl2agent.unified.createMcp" })).toBeDefined();
   expect(screen.queryByRole("textbox", { name: "Requirement" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Edit requirement" }));
   const editor = screen.getByRole("textbox", { name: "Requirement" });
@@ -278,15 +298,16 @@ it("retains the changed requirement and submits the current card only on confirm
   expect(screen.getByText("Find current weather")).toBeDefined();
   fireEvent.click(screen.getByText("Run configuration change"));
   fireEvent.click(screen.getByText("Finish configuration change"));
-  expect(screen.getByText("Pending verification")).toBeDefined();
-  expect(screen.queryByRole("button", { name: "Create Skill" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Add MCP" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Create Skill" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "nl2agent.unified.createMcp" })).toBeDisabled();
   expect(append).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm requirements" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "nl2agent.unified.update" })
+  );
   expect(append).toHaveBeenCalledOnce();
   expect(append.mock.calls[0][0].metadata.custom.nl2agentCardAction).toEqual({
     type: "nl2agent_card_action",
-    subtype: "requirement_coverage",
+    subtype: "requirement_resources",
     agent_id: 42,
     action: "confirm_requirements",
     result: {
@@ -306,13 +327,15 @@ it("keeps a historical coverage card read-only", () => {
   append.mockClear();
   render(
     <Nl2AgentFlowProvider>
-      <RequirementCoverageCard payload={payload} readOnly />
+      <RequirementCoverageCard payload={payload} disabled />
     </Nl2AgentFlowProvider>
   );
   expect(screen.getByText("Find weather")).toBeDefined();
   expect(screen.queryByRole("textbox", { name: "Requirement" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit requirement" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm requirements" }));
+  expect(
+    screen.queryByRole("button", { name: "nl2agent.unified.update" })
+  ).toBeNull();
   expect(append).not.toHaveBeenCalled();
 });
 
@@ -323,8 +346,11 @@ it("adds an inline requirement on Enter without prematurely confirming the card"
       <RequirementCoverageCard payload={payload} />
     </Nl2AgentFlowProvider>
   );
+  fireEvent.click(screen.getAllByRole("button", { name: "Add requirement" })[0]);
   const input = screen.getByRole("textbox", { name: "Add requirement" });
-  const confirm = screen.getByRole("button", { name: "Confirm requirements" });
+  const confirm = screen.getByRole("button", {
+    name: "nl2agent.unified.update",
+  });
   fireEvent.change(input, { target: { value: " Send a text message " } });
   expect((confirm as HTMLButtonElement).disabled).toBe(true);
   fireEvent.keyDown(input, { key: "Enter" });
@@ -340,18 +366,30 @@ it("adds an inline requirement on Enter without prematurely confirming the card"
   });
 });
 
-it("shows the three relevance bands and removes the requirement from the submission", () => {
+it("shows numeric relevance scores and removes the requirement from the submission", () => {
   append.mockClear();
   const scored = {
     ...payload,
     requirements: [
       {
         ...payload.requirements[0],
-        coverage_status: "covered" as const,
-        covered_resources: [
+        coverage_status: "installable" as const,
+        installable_resources: [
           { candidate_ref: "tool:17", name: "Weather", retrieval_score: 0.85 },
           { candidate_ref: "tool:18", name: "Forecast", retrieval_score: 0.6 },
           { candidate_ref: "tool:19", name: "Climate", retrieval_score: 0.599 },
+          { candidate_ref: "tool:20", name: "Missing score" },
+          {
+            candidate_ref: "tool:21",
+            name: "Invalid score",
+            retrieval_score: NaN,
+          },
+          {
+            candidate_ref: "tool:22",
+            name: "Infinite score",
+            retrieval_score: Infinity,
+          },
+          { candidate_ref: "tool:23", name: "Zero score", retrieval_score: 0 },
         ],
       },
     ],
@@ -361,28 +399,25 @@ it("shows the three relevance bands and removes the requirement from the submiss
       <RequirementCoverageCard payload={scored} />
     </Nl2AgentFlowProvider>
   );
-  const related = screen.getByText("Related resources");
-  expect(related.parentElement).toContainElement(
-    screen.getByText("Covered", { exact: true })
+  expect(screen.getByText("Related resources")).toBeDefined();
+  expect(screen.getByText("85").parentElement).toHaveTextContent(
+    "Relevance score: 85 points"
   );
-  for (const [label, bars] of [
-    ["High relevance", 3],
-    ["Medium relevance", 2],
-    ["Low relevance", 1],
-  ] as const) {
-    const signal = screen.getByRole("img", { name: label });
-    expect(signal.children).toHaveLength(3);
-    expect(
-      [...signal.children].filter((bar) =>
-        bar.classList.contains("bg-[var(--color-success)]")
-      )
-    ).toHaveLength(bars);
+  expect(screen.getByText("85")).toHaveClass("text-[var(--color-success)]");
+  expect(screen.getAllByText("60")).toHaveLength(2);
+  for (const score of screen.getAllByText("60")) {
+    expect(score.parentElement).toHaveTextContent("Relevance score: 60 points");
   }
-  expect(screen.queryByRole("button", { name: "Create Skill" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Add MCP" })).toBeNull();
+  expect(screen.getByText("0").parentElement).toHaveTextContent(
+    "Relevance score: 0 points"
+  );
+  expect(screen.getAllByText(/^Relevance score:/)).toHaveLength(4);
+  expect(screen.queryByRole("img", { name: /relevance/i })).toBeNull();
   expect(screen.queryByRole("checkbox")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-  fireEvent.click(screen.getByRole("button", { name: "Confirm requirements" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "nl2agent.unified.noResources" })
+  );
   expect(
     append.mock.calls[0][0].metadata.custom.nl2agentCardAction.result
       .requirements
@@ -419,9 +454,7 @@ it("refreshes installed MCP status on a coverage card created before installatio
   );
   expect(await screen.findByText("Installed, disabled")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Install 12306" })).toBeNull();
-  expect(container.querySelector("footer")?.textContent).toBe(
-    screen.getByRole("button", { name: "Confirm requirements" }).textContent
-  );
+  expect(container.querySelector("footer")).toHaveTextContent("Binding actions");
 });
 
 it("installs in the coverage row and retries only association after a failed link", async () => {
@@ -460,7 +493,7 @@ it("installs in the coverage row and retries only association after a failed lin
   );
   fetchWithAuth.mockResolvedValueOnce(Response.json({}, { status: 409 }));
   fetchWithAuth.mockResolvedValueOnce(Response.json({ status: "linked" }));
-  const installable: Nl2aCoveragePayload = {
+  const installable: Nl2aUnifiedResourcesPayload = {
     ...payload,
     requirements: [
       {
@@ -480,8 +513,6 @@ it("installs in the coverage row and retries only association after a failed lin
       <RequirementCoverageCard payload={installable} />
     </Nl2AgentFlowProvider>
   );
-  expect(screen.queryByRole("button", { name: "Create Skill" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Add MCP" })).toBeNull();
   expect(screen.queryByText("Install to verify")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Install Weather" }));
   fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
@@ -495,7 +526,9 @@ it("installs in the coverage row and retries only association after a failed lin
     requirement_id: "weather",
     resource_id: 17,
   });
-  expect(await screen.findByText("Pending verification")).toBeDefined();
+  expect(
+    await screen.findByRole("button", { name: "nl2agent.unified.verify" })
+  ).toBeEnabled();
 });
 
 it("asks for a missing MCP URL inside the coverage row before installing", async () => {
@@ -569,6 +602,8 @@ it("asks for a missing MCP URL inside the coverage row before installing", async
   expect(screen.queryByTestId("nl2agent-installation-card")).toBeNull();
   fireEvent.change(url, { target: { value: "https://example.test/mcp" } });
   fireEvent.click(screen.getByRole("button", { name: "Install" }));
-  expect(await screen.findByText("Pending verification")).toBeDefined();
+  expect(
+    await screen.findByRole("button", { name: "nl2agent.unified.verify" })
+  ).toBeEnabled();
   expect(fetchWithAuth).toHaveBeenCalledTimes(4);
 });
