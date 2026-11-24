@@ -158,6 +158,7 @@ export default function PublishedServiceDetailModal({
   const handleDelete = () => {
     if (!service?.communityId) return;
     modal.confirm({
+      mask: { closable: true },
       title: t("mcpTools.community.mine.unpublishTitle"),
       centered: true,
       content: (

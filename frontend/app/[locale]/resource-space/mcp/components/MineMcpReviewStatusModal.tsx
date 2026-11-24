@@ -82,6 +82,7 @@ export default function MineMcpReviewStatusModal({
 
   const confirmCancelApply = () => {
     Modal.confirm({
+      mask: { closable: true },
       title: t("repository.listingStatus.confirmCancelApplyTitle"),
       content: t("repository.listingStatus.confirmCancelApplyContent", {
         name: title,

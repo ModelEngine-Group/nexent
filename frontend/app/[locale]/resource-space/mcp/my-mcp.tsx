@@ -427,6 +427,7 @@ export function MyMcp({
     if (!onlineService.communityId) return;
     const isPendingReview = onlineService.reviewStatus === "pending";
     modal.confirm({
+      mask: { closable: true },
       title: isPendingReview
         ? t("mcpTools.mine.reviewModal.confirmCancelApplyTitle")
         : t("mcpTools.mine.unpublishOnlineVersionTitle"),
@@ -530,6 +531,7 @@ export function MyMcp({
 
   const handleDelete = (item: MineMcpCardItem) => {
     modal.confirm({
+      mask: { closable: true },
       title: t("mcpTools.mine.deleteConfirmTitle"),
       content: t("mcpTools.mine.deleteConfirmDescription", {
         name: item.service.name,

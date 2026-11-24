@@ -263,6 +263,7 @@ export function MineSkillsView({
   const handleDeleteSkill = (skill: MyEditableSkillItem) => {
     const title = skill.name?.trim() || t("skillRepository.common.untitled");
     modal.confirm({
+      mask: { closable: true },
       title: t("skillRepository.mine.deleteTitle"),
       content: t("skillRepository.mine.deleteContent", { name: title }),
       okText: t("common.delete"),

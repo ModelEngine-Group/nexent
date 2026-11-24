@@ -139,6 +139,8 @@ export default function ResourceRepositoryPage() {
   };
   return (
     <ConfigProvider
+      drawer={{ mask: { closable: true } }}
+      modal={{ mask: { closable: true } }}
       locale={i18n.language?.startsWith("zh") ? antdZhCn : antdEnUs}
       theme={{
         token: {

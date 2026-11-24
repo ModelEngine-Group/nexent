@@ -136,6 +136,7 @@ export function AgentSpace({ active }: { active: boolean }) {
       t("agentRepository.card.untitled");
 
     Modal.confirm({
+      mask: { closable: true },
       title: t("repository.listingStatus.confirmTakeDownTitle"),
       content: t("repository.listingStatus.confirmTakeDownContent", {
         name: title,

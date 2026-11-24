@@ -252,6 +252,7 @@ export function useMcpSpaceController(
   const handleRepositoryOffline = (service: CommunityMcpCard) => {
     if (!service.communityId) return;
     modal.confirm({
+      mask: { closable: true },
       title: t("mcpTools.mine.unpublishOnlineVersionTitle"),
       content: t("mcpTools.mine.unpublishOnlineVersionDescription", {
         name: service.name,

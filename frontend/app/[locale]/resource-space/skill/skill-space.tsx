@@ -261,6 +261,7 @@ export function SkillSpace({
       return;
     }
     modal.confirm({
+      mask: { closable: true },
       title: t("skillRepository.action.confirmTakeDown"),
       content: listing.name,
       okText: t("skillRepository.action.status.notShared"),

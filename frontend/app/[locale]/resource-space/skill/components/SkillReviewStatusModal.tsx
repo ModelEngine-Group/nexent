@@ -70,6 +70,7 @@ export function SkillReviewStatusModal({
 
   const confirmSetNotShared = () => {
     Modal.confirm({
+      mask: { closable: true },
       title: canTakeDown
         ? t("repository.listingStatus.confirmTakeDownTitle")
         : t("repository.listingStatus.confirmCancelApplyTitle"),
