@@ -65,6 +65,9 @@ def native_runtime():
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            migration = ROOT / "deploy/sql/migrations/v2.9.0_014_su_system_configuration.sql"
+            cursor.execute(migration.read_text(encoding="utf-8"))
         patch.setattr(auth, "init_tool_list_for_tenant", AsyncMock())
         patch.setattr(auth, "init_skill_list_for_tenant", AsyncMock())
         patch.setattr(routes, "record_security_event", lambda *a, **kw: None)

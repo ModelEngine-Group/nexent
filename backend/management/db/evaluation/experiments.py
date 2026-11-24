@@ -118,9 +118,15 @@ def claim(experiment_id=None):
              WHERE t.experiment_id=e.experiment_id AND t.status IN ('pending','running')
                AND {_DEADLINE} <= statement_timestamp()
         """))
+        # A legacy claim has no dispatch record and may already have sent its request.
         session.execute(text("""
-            UPDATE nexent.evolution_trial_t SET status='error', lease_until=NULL,
-                result='{"error":"worker_interrupted"}'::jsonb WHERE status='running' AND lease_until < now()
+            UPDATE nexent.evolution_trial_t
+            SET status=CASE WHEN dispatch_started IS FALSE AND NOT recovery_attempted THEN 'pending' ELSE 'error' END,
+                result=CASE WHEN dispatch_started IS FALSE AND NOT recovery_attempted THEN NULL
+                            ELSE '{"error":"worker_interrupted"}'::jsonb END,
+                recovery_attempted=recovery_attempted OR dispatch_started IS FALSE,
+                lease_until=NULL
+            WHERE status='running' AND lease_until < now()
         """))
         session.execute(text("""
             UPDATE nexent.evolution_trial_t t SET status='invalid', lease_until=NULL,
@@ -132,7 +138,8 @@ def claim(experiment_id=None):
         row = session.execute(text(f"""
             SELECT t.trial_id, t.case_id, t.variant, e.experiment_id, e.tenant_id, e.created_by, e.plan
             FROM nexent.evolution_trial_t t JOIN nexent.evolution_experiment_t e USING (experiment_id)
-            WHERE t.status='pending' AND NOT e.cancelled AND e.budget_stop_reason IS NULL AND ({_RUNNING}) < :limit
+            WHERE t.status='pending' AND t.cleanup_due IS NULL
+                AND NOT e.cancelled AND e.budget_stop_reason IS NULL AND ({_RUNNING}) < :limit
                 AND (CAST(:eid AS bigint) IS NULL OR e.experiment_id=:eid) ORDER BY trial_id
             LIMIT 1 FOR UPDATE OF t SKIP LOCKED
         """), params).mappings().one_or_none()
@@ -148,7 +155,7 @@ def claim(experiment_id=None):
         claim_time = time.monotonic()
         claimed = session.execute(text(f"""
             UPDATE nexent.evolution_trial_t t SET status='running', lease_until=now()+interval '120 seconds',
-                receipt_id=:receipt_id, cleanup_due=now()+interval '3 minutes'
+                receipt_id=:receipt_id, cleanup_due=now()+interval '3 minutes', dispatch_started=false
             FROM nexent.evolution_experiment_t e WHERE t.experiment_id=e.experiment_id AND t.trial_id=:trial_id
                 AND NOT e.cancelled AND e.budget_stop_reason IS NULL AND ({_RUNNING}) < :limit
                 AND ({_DEADLINE} IS NULL OR {_DEADLINE} > statement_timestamp())
@@ -159,6 +166,18 @@ def claim(experiment_id=None):
         if claimed.remaining_seconds is not None:
             job["monotonic_deadline"] = claim_time + claimed.remaining_seconds
         return job
+
+
+def authorize_dispatch(job, turn_index):
+    with get_db_session() as session:
+        return bool(session.execute(text(f"""
+            UPDATE nexent.evolution_trial_t t SET dispatch_started=true
+            FROM nexent.evolution_experiment_t e
+            WHERE t.experiment_id=e.experiment_id AND t.trial_id=:trial_id AND t.receipt_id=:receipt_id
+              AND e.tenant_id=:tenant_id AND t.status='running' AND t.dispatch_started=:already_dispatched
+              AND t.lease_until > statement_timestamp() AND NOT e.cancelled AND e.budget_stop_reason IS NULL
+              AND ({_DEADLINE} IS NULL OR {_DEADLINE} > statement_timestamp())
+        """), {**job, "already_dispatched": turn_index > 0}).rowcount)
 
 
 
@@ -342,7 +361,7 @@ def claim_cleanup():
             SELECT t.trial_id, t.receipt_id, e.created_by, c.task->'attachments' AS files
             FROM nexent.evolution_trial_t t JOIN nexent.evolution_replay_case_t c USING (case_id)
             JOIN nexent.evolution_experiment_t e USING (experiment_id)
-            WHERE t.status NOT IN ('pending','running') AND t.cleanup_due <= now()
+            WHERE t.status <> 'running' AND t.cleanup_due <= now()
             ORDER BY t.cleanup_due LIMIT 1 FOR UPDATE OF t SKIP LOCKED
         """)).mappings().one_or_none()
         if row:
@@ -355,5 +374,7 @@ def claim_cleanup():
 def complete_cleanup(trial_id, receipt_id):
     with get_db_session() as session:
         session.execute(text("""
-            UPDATE nexent.evolution_trial_t SET cleanup_due=NULL WHERE trial_id=:trial AND receipt_id=:receipt
+            UPDATE nexent.evolution_trial_t
+            SET cleanup_due=NULL, receipt_id=CASE WHEN status='pending' THEN NULL ELSE receipt_id END
+            WHERE trial_id=:trial AND receipt_id=:receipt AND status <> 'running'
         """), dict(trial=trial_id, receipt=receipt_id))

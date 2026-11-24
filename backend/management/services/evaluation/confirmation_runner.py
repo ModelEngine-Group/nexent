@@ -145,10 +145,11 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                 def stage(turn):
                     return stage_verified_input(tenant, editor, task, attempt, turn, read_material)
 
-                async def before_dispatch():
+                async def before_dispatch(turn_index):
                     if await _io("recheck-independent-grant", locked_protocol, tenant, curator, lock_id) != protocol:
                         raise ValueError("Independent authority changed")
-                    await _io("mark-private-dispatch", checkpoint, ledger, attempt, None, "dispatched")
+                    if turn_index == 0:
+                        await _io("mark-private-dispatch", checkpoint, ledger, attempt, None, "dispatched")
 
                 model_attempt = None
                 if allowance is not None:

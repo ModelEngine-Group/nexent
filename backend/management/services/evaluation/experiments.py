@@ -539,9 +539,17 @@ async def execute_trial(job):
         if not attempt:
             return "invalid", {"error": "experiment_model_budget_unavailable"}
         job = {**job, "evaluation_attempt": attempt}
+
+    async def before_dispatch(turn_index):
+        await _io("recheck-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
+        if not await _io("authorize-development-dispatch", jobs.authorize_dispatch, job, turn_index):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Development trial is no longer authorized to dispatch")
+
     client = AgentOSClient(EVOLUTION_REPLAY_RUNTIME_URL, create_httpx_client)
-    return await run_verified_arm(request, job, case, spec, client, lambda index: stage_case_input(
-        *args, job["receipt_id"], index))
+    return await run_verified_arm(
+        request, job, case, spec, client, lambda index: stage_case_input(*args, job["receipt_id"], index),
+        before_dispatch=before_dispatch,
+    )
 
 
 async def run_verified_arm(request, job, case, spec, client, stage_input, *, before_dispatch=None):

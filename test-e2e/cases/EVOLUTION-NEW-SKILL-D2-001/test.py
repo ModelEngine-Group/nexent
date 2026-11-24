@@ -54,7 +54,9 @@ def test_new_skill_http(runtime, monkeypatch):
     models.TableBase.metadata.create_all(db_client.engine)
     path = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cur:
-        for n in (18, 19, 20, 25, 28, 33, 34):
+        for name in ("003_conversation_run_admission", "006_prepared_conversation_turn"):
+            cur.execute((path / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
+        for n in (11, 15, 18, 19, 20, 21, 25, 28, 29, 33, 34, 41, 43, 44, 45, 46, 47):
             (file,) = path.glob(f"v2.9.0_{n:03}_*.sql")
             cur.execute(file.read_text(encoding="utf-8"))
         conn.execute(

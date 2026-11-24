@@ -13,7 +13,7 @@ from management.services.evaluation.replay_dialogue import run_turns
 from management.services.evaluation.tool_use import judge_dialogue_tools
 
 
-@pytest.mark.parametrize("failure", ["receipt_id", "outcome", "missing_final", "private_bucket", None])
+@pytest.mark.parametrize("failure", ["receipt_id", "outcome", "missing_final", "private_bucket", "followup_revoked", None])
 @pytest.mark.asyncio
 async def test_followup_receives_only_this_arms_completed_answer(failure):
     spec = Mock(new_skill_trial=None, confirmation_bucket="private" if failure == "private_bucket" else None,
@@ -24,8 +24,16 @@ async def test_followup_receives_only_this_arms_completed_answer(failure):
               RunInput(query="publish")]
     load_input = AsyncMock(side_effect=inputs)
     payloads = []
+    permitted = []
+
+    async def authorize_turn(turn_index):
+        assert load_input.await_count == turn_index + 1
+        if turn_index == 1 and failure == "followup_revoked":
+            raise ValueError("permission revoked")
+        permitted.append(turn_index)
 
     async def respond(payload, user, tenant):
+        assert permitted[-1] == len(payloads)
         payloads.append(payload)
         first = len(payloads) == 1
         receipt = ReplayReceipt(trial_id="0" * 32 if first and failure == "receipt_id" else payload.replay_trial_id,
@@ -34,8 +42,14 @@ async def test_followup_receives_only_this_arms_completed_answer(failure):
             events=[] if first and failure == "missing_final" else [{"type":"final_answer"}])
 
     task = {"followups":[{"query":"publish", "attachment_names":[]}], "expected":"private scoring key"}
-    observed, records, error = await run_turns(SimpleNamespace(run_prepared_evaluation=respond), spec,
-                                                task, load_input, job, "editor", "tenant")
+    client = SimpleNamespace(run_prepared_evaluation=respond)
+    if failure == "followup_revoked":
+        with pytest.raises(ValueError, match="permission revoked"):
+            await run_turns(client, spec, task, load_input, job, "editor", "tenant", before_dispatch=authorize_turn)
+        assert len(payloads) == 1 and permitted == [0]
+        return
+    observed, records, error = await run_turns(client, spec, task, load_input, job, "editor", "tenant",
+                                               before_dispatch=authorize_turn)
     assert not payloads[0].input.history and "private scoring key" not in payloads[0].input.model_dump_json()
     if failure:
         assert error and not observed and len(records) == load_input.await_count == 1

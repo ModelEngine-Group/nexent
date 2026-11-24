@@ -43,7 +43,8 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                      "029_evolution_confirmation_locks", "030_evolution_confirmation_results", "031_evolution_session_versions", "032_evolution_releases", "033_evolution_release_tools", "020_evolution_feedback_handoff",
                      "034_evolution_new_skill_candidates", "039_evolution_tool_builds", "041_evolution_generation_attempts",
                      "043_evolution_model_charges", "044_evolution_evaluation_metering",
-                     "045_evolution_confirmation_metering", "046_evolution_online_diagnosis"):
+                     "045_evolution_confirmation_metering", "046_evolution_online_diagnosis",
+                     "047_evolution_development_recovery"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for version in (0, 1, 2):

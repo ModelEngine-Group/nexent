@@ -88,8 +88,8 @@ async def run_turns(client, spec, task, load_input, job, user, tenant, *, before
             updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
         if files is not None:
             updates["replay_files"] = files
-        if index == 0 and before_dispatch is not None:
-            await before_dispatch()
+        if before_dispatch is not None:
+            await before_dispatch(index)
         try:
             observed = await client.run_prepared_evaluation(spec.model_copy(update=updates), user, tenant)
         except RuntimeUpstreamError as exc:

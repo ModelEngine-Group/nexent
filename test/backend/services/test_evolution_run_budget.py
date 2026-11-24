@@ -53,6 +53,60 @@ async def test_budget_includes_followups_and_fixed_tasks_in_every_arm(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("authority", ["active", "lost_lease", "revoked"])
+async def test_development_trial_checks_authority_at_dispatch(monkeypatch, authority):
+    from management.services.evaluation import experiments as service
+
+    async def inline(_label, fn, *args):
+        return fn(*args)
+
+    req = DevelopmentExperimentRequest(
+        agent_id=1, version_no=1, evaluator_id=2, case_ids=[1], candidate_type="baseline",
+        request_id="dispatch-authority",
+    )
+    job = dict(
+        tenant_id="t", created_by="u", case_id=1, variant="base", receipt_id="a" * 32,
+        plan={"request": req.model_dump(), "cases": {"1": "frozen"}, "snapshots": {"base": "snapshot"}},
+    )
+    sent = Mock()
+    mark = Mock(return_value=authority == "active")
+    permission = Mock(side_effect=ValueError("revoked") if authority == "revoked" else None)
+
+    async def run_arm(_req, _job, _case, _spec, _client, _stage, *, before_dispatch):
+        await before_dispatch(0)
+        sent()
+        return "pass", {}
+
+    monkeypatch.setattr(service, "_io", inline)
+    monkeypatch.setattr(service, "_snapshot", AsyncMock())
+    monkeypatch.setattr(service, "snapshot_digest", lambda _: "snapshot")
+    monkeypatch.setattr(service, "_excluded_sources", AsyncMock(return_value=set()))
+    monkeypatch.setattr(service, "get_development_case", lambda *_: {
+        "digest": "frozen", "task": {"query": "Original work", "source_group": "independent", "attachments": []},
+    })
+    monkeypatch.setattr(service, "run_verified_arm", run_arm)
+    monkeypatch.setattr(service, "require_business_agent_edit", permission)
+    monkeypatch.setattr(service.jobs, "authorize_dispatch", mark)
+
+    if authority == "active":
+        assert await service.execute_trial(job) == ("pass", {})
+        sent.assert_called_once()
+    elif authority == "lost_lease":
+        with pytest.raises(AppException, match="no longer authorized to dispatch"):
+            await service.execute_trial(job)
+        sent.assert_not_called()
+    else:
+        with pytest.raises(ValueError, match="revoked"):
+            await service.execute_trial(job)
+        sent.assert_not_called()
+    permission.assert_called_once_with(1, "t", "u")
+    if authority == "revoked":
+        mark.assert_not_called()
+    else:
+        mark.assert_called_once_with(job, 0)
+
+
+@pytest.mark.asyncio
 async def test_worker_cancels_running_trial_on_experiment_deadline(monkeypatch):
     import asyncio
     import time

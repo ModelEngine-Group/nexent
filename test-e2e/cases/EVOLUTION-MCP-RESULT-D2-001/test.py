@@ -49,7 +49,7 @@ def test_tool_repair_http(runtime, monkeypatch):
     models.TableBase.metadata.create_all(db_client.engine)
     path = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cur:
-        for n in (18, 19, 20, 25, 28, 39):
+        for n in (18, 19, 20, 25, 28, 39, 41, 43, 44, 47):
             (file,) = path.glob(f"v2.9.0_{n:03}_*.sql")
             cur.execute(file.read_text(encoding="utf-8"))
     seed_membership_roles(editor, ["DEV"])

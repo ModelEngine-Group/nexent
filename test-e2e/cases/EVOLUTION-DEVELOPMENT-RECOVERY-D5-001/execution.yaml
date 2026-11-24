@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-DEVELOPMENT-RECOVERY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_worker_exit_recovers_development_comparison
+acceptance_bindings:
+  AC-01: [test_worker_exit_recovers_development_comparison]
+  AC-02: [test_worker_exit_recovers_development_comparison]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The fixture owns a disposable PostgreSQL database, per-variant attachment and request journals, and subprocesses with bounded execution. Object storage, deployed resource assembly and the Runtime response use controlled substitutes.
