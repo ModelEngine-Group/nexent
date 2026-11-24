@@ -3,38 +3,14 @@
 
 import asyncio
 import json
-import socket
-from contextlib import asynccontextmanager
-from pathlib import Path
-from uuid import uuid4
 
 import pytest
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
+from evolution_online_http import initialize_diagnosis_schema, seed_diagnosis_turn, serve
 from local_auth_http import native_runtime, runtime
-
-
-@asynccontextmanager
-async def serve(app):
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-        server = uvicorn.Server(uvicorn.Config(app, lifespan="off", log_level="error"))
-        task = asyncio.create_task(server.serve(sockets=[listener]))
-        try:
-            async with asyncio.timeout(5):
-                while not server.started:
-                    if task.done():
-                        await task
-                        raise RuntimeError("Fixture server exited during startup")
-                    await asyncio.sleep(0.01)
-            yield f"http://127.0.0.1:{port}"
-        finally:
-            server.should_exit = True
-            await asyncio.wait_for(task, 8)
 
 
 @pytest.mark.stage("D3")
@@ -52,7 +28,6 @@ async def test_online_diagnosis(runtime, monkeypatch):
     from management.db.conversation import evolution_diagnosis as queue, evolution_review as registrar
     from management.services.evaluation import online_diagnosis
     from nexent.core.concurrency import shutdown_fallback_thread_manager
-    from ops.services.trajectory.evolution import observation
     from runtime.agentos.middleware import AgentOSMiddleware
     from runtime.agentos.model import create_model_router
     from runtime.model.service import ModelService
@@ -66,53 +41,14 @@ async def test_online_diagnosis(runtime, monkeypatch):
     monkeypatch.setattr(environment, "EVOLUTION_CONFIRMATION_BUCKET", "")
     load_system_configuration()
     engine = db_client.engine
-    models.TableBase.metadata.create_all(engine)
-    migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
-    with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        for name in ("003_conversation_run_admission", "004_agent_execution", "006_prepared_conversation_turn",
-                     "011_trajectory", "015_conversation_evolution", "018_evolution_replay_cases",
-                     "019_evolution_experiments", "021_evolution_online_reviews",
-                     "028_evolution_confirmation_suites", "029_evolution_confirmation_locks",
-                     "030_evolution_confirmation_results", "041_evolution_generation_attempts",
-                     "043_evolution_model_charges", "044_evolution_evaluation_metering",
-                     "045_evolution_confirmation_metering", "046_evolution_online_diagnosis"):
-            cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf8"))
+    initialize_diagnosis_schema(engine, models.TableBase.metadata)
     with get_db_session() as session:
         for scope, identity in ((tenant, owner), (foreign_tenant, foreign_owner)):
             session.add(models.UserAccount(user_id=identity, user_roles=["USER"], delete_flag="N"))
             session.add(models.UserTenant(user_id=identity, tenant_id=scope, user_role="USER", delete_flag="N"))
 
-    def seed(chat, *, node=None, rating=None, ordinal=1, scope=tenant, identity=owner):
-        query, reply = (("Private fixture expected a ticket ID", "Private fixture output omitted ticket ID")
-                        if ordinal == 1 else ("你漏了一项", "Post-correction reply"))
-        facts = observation({"request": query, "opinion_flag": rating}, [node] if node else [], "complete")
-        index = 2*(ordinal-1)
-        params = dict(chat=chat, tenant=scope, owner=identity, source=chat*10+index, reply=chat*10+index+1,
-                      ordinal=ordinal, index=index, run=uuid4().hex,
-                      trajectory=str(uuid4()), query=query, answer=reply, rating=rating, facts=json.dumps(facts))
-        with engine.begin() as conn:
-            conn.execute(text("""
-                INSERT INTO nexent.conversation_record_t (conversation_id,created_by,updated_by,delete_flag)
-                    VALUES (:chat,:owner,:owner,'N') ON CONFLICT DO NOTHING;
-                INSERT INTO nexent.conversation_message_t (message_id,conversation_id,message_index,message_role,
-                    message_content,opinion_flag,created_by,updated_by,delete_flag)
-                    VALUES (:source,:chat,:index,'user',:query,NULL,:owner,:owner,'N'),
-                           (:reply,:chat,:index+1,'assistant',:answer,:rating,:owner,:owner,'N');
-                INSERT INTO nexent.conversation_run_admission_t (scope_sha256,request_sha256,tenant_id,run_id,
-                    conversation_id,created_by,updated_by,prepared_assistant_id,evolution_source_message_id,evolution_grant_epoch,
-                    evolution_valid_until,delete_flag)
-                    VALUES (:run,:run,:tenant,:run,:chat,:owner,:owner,:reply,:source,0,now()+interval '1 day','N');
-                INSERT INTO nexent.trajectory_execution_t (trajectory_id,conversation_id,turn_no,agent_id,agentos_run_id,
-                    agent_version_no,status,created_by,updated_by,delete_flag)
-                    VALUES (:trajectory,:chat,:ordinal,7,:run,1,'success',:owner,:owner,'N');
-            """), params)
-            return conn.scalar(text("""
-                INSERT INTO nexent.evolution_review_turn_t
-                  (tenant_id,agent_id,agent_version_no,conversation_id,source_message_id,trajectory_id,owner_id,run_id,
-                   grant_epoch,valid_until,observation_state,observation)
-                VALUES (:tenant,7,1,:chat,:source,:trajectory,:owner,:run,0,now()+interval '1 day','observed',CAST(:facts AS jsonb))
-                RETURNING turn_id
-            """), params)
+    def seed(chat, *, scope=tenant, identity=owner, **kwargs):
+        return seed_diagnosis_turn(engine, chat, scope, identity, **kwargs)
 
     def scalar(sql, **params):
         with engine.connect() as conn:
@@ -243,6 +179,28 @@ async def test_online_diagnosis(runtime, monkeypatch):
                 assert not queue.finish(claim, first, live)
                 assert len(calls) == 5 and not await online_diagnosis.work_once()
                 assert scalar("SELECT count(*) FROM nexent.evolution_model_charge_t WHERE review_turn_id IS NOT NULL") == 5
+
+                unsent = seed(11, rating="N")
+                obsolete = queue.claim()
+                assert obsolete["turn_id"] == unsent
+                with engine.begin() as conn:
+                    conn.execute(text("""UPDATE nexent.evolution_review_turn_t
+                        SET diagnosis_lease_until=clock_timestamp()+interval '4 seconds' WHERE turn_id=:id"""),
+                                 {"id":unsent})
+                old_attempt = queue.authorize_model(obsolete, None, diagnosis_budget(tenant),
+                                                    online_diagnosis.TEMPLATE_VERSION)
+                assert old_attempt is not None
+                await asyncio.sleep(4.1)
+                replacement = queue.claim()
+                assert replacement["turn_id"] == unsent and replacement["previous_attempt"] == old_attempt
+                with pytest.raises(RuntimeUpstreamError) as stale:
+                    await invoke_chat_prompt(model_id=11, system_prompt="diagnose", user_prompt="synthetic",
+                        user_id=owner, tenant_id=tenant, diagnosis_attempt=old_attempt,
+                        options=ChatOptions(max_output_tokens=20))
+                assert stale.value.status_code == 429 and len(calls) == 5
+                assert not queue.finish(obsolete, first, old_attempt)
+                assert await online_diagnosis.diagnose_one(replacement)
+                assert report(unsent)["status"] == "needs_review" and len(calls) == 6
                 assert scalar("SELECT count(*) FROM nexent.agent_execution_t") == 0
     finally:
         await shutdown_fallback_thread_manager()

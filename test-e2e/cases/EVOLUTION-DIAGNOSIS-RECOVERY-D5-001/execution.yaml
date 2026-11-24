@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-DIAGNOSIS-RECOVERY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_management_recovers_online_diagnosis
+acceptance_bindings:
+  AC-01: [test_management_recovers_online_diagnosis]
+  AC-02: [test_management_recovers_online_diagnosis]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: This self-contained case owns a temporary PostgreSQL database, loopback servers and Management child processes. Only the controlled inference provider is substituted.

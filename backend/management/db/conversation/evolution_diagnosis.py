@@ -42,7 +42,8 @@ def claim():
 
 def _authorized_claim(session, job):
     row = session.execute(text("""
-        SELECT diagnosis_source_turn_id, diagnosis_attempt_id FROM nexent.evolution_review_turn_t
+        SELECT diagnosis_source_turn_id, diagnosis_attempt_id, diagnosis_lease_until
+        FROM nexent.evolution_review_turn_t
         WHERE turn_id=:turn_id AND tenant_id=:tenant_id AND owner_id=:owner_id
           AND diagnosis_claim_id=:diagnosis_claim_id AND diagnosis_lease_until > clock_timestamp()
         FOR UPDATE
@@ -146,8 +147,9 @@ def authorize_model(job, source_turn, allowance, template_version):
             return None
         if source_turn and not authorized_review_turn(session, job["tenant_id"], job["owner_id"], source_turn):
             return None
-        args = {**job, "model": allowance.model_id, "revision": allowance.revision(),
-                "source": source_turn, "until": current["valid_until"], "template": template_version}
+        # Reclaiming the turn must not revive a dispatch issued by the previous worker.
+        args = {**job, "model": allowance.model_id, "revision": allowance.revision(), "source": source_turn,
+                "until": min(current["valid_until"], row["diagnosis_lease_until"]), "template": template_version}
         attempt = session.scalar(text("""
             INSERT INTO nexent.evolution_generation_attempt_t
                 (tenant_id,source_digest,model_id,created_by,lease_until,metering_revision,review_turn_id,

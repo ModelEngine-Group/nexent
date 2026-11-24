@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-DIAGNOSIS-RECOVERY-D5-001
+  feature_id: AGENT-EVOLUTION-ONLINE
+  business_rule_ids: [AGENT-EVOLUTION-ONLINE-RULE-04]
+  title: Management 中断后恢复已授权的在线诊断
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 实际退出并重启 Management 诊断进程，检验模型发送、用量和五轮复盘的恢复边界。
+  preconditions: [拥有可创建临时数据库的 PostgreSQL 实例，以及可启动受控模型和签名 Runtime 的本机环境。]
+  test_data:
+    profile: 一组五轮授权业务记录，包含一个待语义分析的点踩轮次。
+  steps:
+  - order: 1
+    action: 在旧进程取得许可后、发送模型请求之前退出。等原领取到期，启动新的 Management 恢复进程。
+    expected: 同一轮次用新许可完成一次模型诊断，原复盘继续处理原来的五轮。
+  - order: 2
+    action: 在另一批中接收模型结果和用量，退出旧进程，重启 Management 恢复进程。
+    expected: 已发出请求的轮次保留中断原因和用量，供应商未收到重发，复盘结论保留其他轮次。
+  - order: 3
+    action: 在进程退出后、重新领取前撤回目标会话的历史授权。
+    expected: 撤回轮次无模型请求和诊断，原批次只复盘剩余四轮。
+  expected_results: [未发出的诊断仅发一次并结算。, 已发出的诊断用量和中断原因可查。, 撤权随重启生效，批次和轮次未重复登记。]
+  forbidden_side_effects: [重新运行原智能体或业务工具，重复发送同一诊断模型请求，或保留撤回证据。]
+  acceptance:
+  - id: AC-01
+    description: 真实进程重启区分未发出与已经结算的诊断。
+    steps: [1, 2]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 重启重新检查授权，原批次只排除被撤回的轮次。
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: RELIABILITY
+  risk: 重启后对同一轮重复调用模型，或读取用户撤回的证据。
+  condition: [进程在真实派发前或实际供应商用量入库后退出，重启从 PostgreSQL 已登记的轮次恢复。]
+  metrics: [供应商实际调用次数，持久化用量，复盘 ID、轮次和计数。]
+  thresholds: [每个目标轮次最多发出一次，撤回的轮次不发出，重复批次和业务运行均为零。]
+  recovery_expectations: [原批次按授权继续完成，进程退出后关闭临时服务并销毁数据库。]

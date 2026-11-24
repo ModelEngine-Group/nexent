@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import json
+from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -21,6 +23,24 @@ def test_model_cannot_clear_incomplete_evidence():
     assert diagnosis.model_finding(result, {}, clipped=True) == {
         "status": "needs_evidence", "reason": "incomplete_trace",
     }
+
+
+@pytest.mark.parametrize("grant_seconds,claim_seconds", [(120, 10), (5, 20)])
+def test_diagnosis_dispatch_is_bounded_by_grant_and_worker_lease(mocker, grant_seconds, claim_seconds):
+    queue = diagnosis.queue
+    now = datetime.now(timezone.utc)
+    grant_deadline = now + timedelta(seconds=grant_seconds)
+    claim_deadline = now + timedelta(seconds=claim_seconds)
+    session = Mock()
+    session.scalar.return_value = 27
+    mocker.patch.object(queue, "get_db_session", return_value=nullcontext(session))
+    mocker.patch.object(queue, "lock_model_charges")
+    mocker.patch.object(queue, "_authorized_claim", return_value=(
+        {"valid_until": grant_deadline}, {"diagnosis_attempt_id": None, "diagnosis_lease_until": claim_deadline},
+    ))
+    allowance = SimpleNamespace(model_id=11, revision=lambda: "fixture")
+    assert queue.authorize_model({"turn_id": 4, "tenant_id": "t"}, None, allowance, "test-v1") == 27
+    assert session.scalar.call_args.args[1]["until"] == min(grant_deadline, claim_deadline)
 
 
 @pytest.mark.asyncio
