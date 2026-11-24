@@ -30,6 +30,10 @@ async def _create_kb(api, run_tag: str, extra: dict | None = None) -> dict:
         'name': 'aidp-chunk-%s' % run_tag,
         'description': 'chunk settings contract %s' % run_tag,
         'embedding_model': 'bge-m3',
+        # Admin-created KBs default to READ_ONLY, which requires group_ids
+        # (HTTP 400 without them). A run-owned contract KB is personal: declare
+        # PRIVATE explicitly so creation proves the chunk contract, not groups.
+        'ingroup_permission': 'PRIVATE',
     }
     if extra:
         payload.update(extra)
@@ -155,6 +159,9 @@ async def test_aidp_chunk_settings_contract(tenant_a_admin, tenant_b_admin):
                     'name': 'aidp-chunk-%s-reject' % run_tag,
                     'description': 'oversized overlap must be rejected',
                     'embedding_model': 'bge-m3',
+                    # PRIVATE keeps the rejection about the overlap ceiling,
+                    # not about a missing group_ids for the READ_ONLY default.
+                    'ingroup_permission': 'PRIVATE',
                     'chunk_token_num': 512,
                     'chunk_overlap_num': 257,
                 },

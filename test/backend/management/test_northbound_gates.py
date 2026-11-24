@@ -99,7 +99,7 @@ def gate_client(monkeypatch):
     monkeypatch.setattr(
         audit_mod, "record_security_event", lambda *a, **k: audit_calls.append((a, k))
     )
-    monkeypatch.setattr(nb_ident, "record_api_key_usage", lambda principal, request=None: None)
+    monkeypatch.setattr(nb_ident, "submit_api_key_usage", lambda principal, request=None: None)
 
     app = create_app(title="nb-gates", enable_monitoring=False)
     from management.api.northbound_gates import nb_capability_routers
@@ -179,6 +179,8 @@ def test_file_download_stream_mode_bypasses_the_envelope(gate_client):
     assert "content-disposition" in response.headers
     # A stream response is never a JSON envelope.
     assert not response.headers["content-type"].startswith("application/json")
+    # P1 regression: authenticated partner bytes must not enter shared caches.
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def test_denied_delete_still_records_audit(gate_client, monkeypatch):

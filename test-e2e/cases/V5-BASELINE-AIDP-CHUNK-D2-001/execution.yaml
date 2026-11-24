@@ -8,17 +8,19 @@ notes: >-
   Requires the running Nexent stack with the AIDP ext mock. Proves the chunk
   configuration HTTP contract introduced by commit 01400d399; assertions read
   the AIDP detail payload rather than trusting the create response alone.
+# pytest evidence is matched by JUnit test name, not by case id: every
+# acceptance obligation binds the single contract test that asserts it.
 acceptance_bindings:
   AC-01:
-  - V5-BASELINE-AIDP-CHUNK-D2-001
+  - test_aidp_chunk_settings_contract
   AC-02:
-  - V5-BASELINE-AIDP-CHUNK-D2-001
+  - test_aidp_chunk_settings_contract
   AC-03:
-  - V5-BASELINE-AIDP-CHUNK-D2-001
+  - test_aidp_chunk_settings_contract
   AC-04:
-  - V5-BASELINE-AIDP-CHUNK-D2-001
+  - test_aidp_chunk_settings_contract
   AC-05:
-  - V5-BASELINE-AIDP-CHUNK-D2-001
+  - test_aidp_chunk_settings_contract
 preparation:
   families: []
   anchors: true

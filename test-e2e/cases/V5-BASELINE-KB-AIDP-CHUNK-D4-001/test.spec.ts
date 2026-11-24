@@ -27,10 +27,13 @@ const EXPECTED_TOPK = "10";
 const EDIT_TO_CHUNK_TOKENS = 1024;
 
 journey("V5-BASELINE-KB-AIDP-CHUNK-D4-001", async (context) => {
-  const { page, contract } = context;
+  const { page, contract, expect } = context;
   const aidp = new AidpKnowledgePage(page);
   const runTag = `aidp-chunk-${Date.now().toString(36)}`;
-  const kbName = `chunk-ui-${runTag}`;
+  // AIDP's name pattern forbids hyphens (must start with a letter, then
+  // letters/digits/underscore only); keep the run tag recognizable with
+  // underscores so the create form accepts the run-owned name.
+  const kbName = `chunk_ui_${runTag.replace(/-/g, "_")}`;
 
   type Defaults = Awaited<ReturnType<AidpKnowledgePage["openCreatePageAndReadChunkDefaults"]>>;
   type InfoRows = Awaited<ReturnType<AidpKnowledgePage["readInformationChunkRows"]>>;
@@ -38,10 +41,34 @@ journey("V5-BASELINE-KB-AIDP-CHUNK-D4-001", async (context) => {
   let observedDefaults: Defaults;
   let infoRowsAfterEdit: InfoRows;
 
+  // The contract framework consumes precondition IDs in queue order and
+  // requires every authored precondition to be recorded, so all four clauses
+  // from case.yaml are evidenced here (login, AIDP branch, ext mock models).
   await contract.precondition(contract.expectedIds("preconditions")[0], async () => {
     await loginCurrent(page, "tenant_a_admin");
     await aidp.open();
+    // The AIDP branch only renders when the knowledge-provider ext mock is
+    // serving; its presence proves the AIDP service without local tier config.
+    return "AIDP knowledge-provider ext mock serves the /knowledges AIDP branch";
+  });
+
+  await contract.precondition(contract.expectedIds("preconditions")[1], async () => {
+    const response = await page.request.get("/api/user/current_user_info");
+    expect(response.ok()).toBeTruthy();
+    const body = await response.json();
+    const user = body?.data?.user || {};
+    expect(String(user.tenant_id || body?.data?.tenant_id || "")).not.toBe("");
+    return "tenant_a_admin session is authenticated with a tenant identity";
+  });
+
+  await contract.precondition(contract.expectedIds("preconditions")[2], async () => {
+    await aidp.open();
     return "AIDP branch is active and the Local storage control is absent";
+  });
+
+  await contract.precondition(contract.expectedIds("preconditions")[3], async () => {
+    await aidp.expectCreatePageEmbeddingModel("bge-m3");
+    return "ext mock model template exposes the bge-m3 embedding option on the create page";
   });
 
   // Step 1 — create page chunk defaults.

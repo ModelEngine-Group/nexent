@@ -45,7 +45,7 @@ async def unified_identity(
     """Resolve the principal via the gateway-bound identity, with a legacy
     self-verification fallback. Late imports keep module load light.
     """
-    from management.services.permission.identity.northbound import record_api_key_usage
+    from management.services.permission.identity.northbound import submit_api_key_usage
     from management.services.permission.identity.session import authenticate_identity
 
     path = _request_path(request)
@@ -57,5 +57,7 @@ async def unified_identity(
     request.state.authenticated_identity = principal
     request.state.request_id = get_request_id(request)
     if principal.kind == CredentialKind.API_KEY:
-        record_api_key_usage(principal, request)
+        # Managed-lane submit: the synchronous ledger write never runs on the
+        # request event loop, and admission failure only drops the accounting.
+        submit_api_key_usage(principal, request)
     return principal

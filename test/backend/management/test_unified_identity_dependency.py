@@ -71,7 +71,7 @@ async def test_unified_identity_accounts_api_key_calls(monkeypatch):
         lambda authorization, kind, request: principal,
     )
     accounted = []
-    monkeypatch.setattr(nb, "record_api_key_usage", lambda p, request=None: accounted.append(p))
+    monkeypatch.setattr(nb, "submit_api_key_usage", lambda p, request=None: accounted.append(p))
     request = make_request()
     resolved = await dep.unified_identity(request, authorization="Bearer k")
     assert resolved is principal
@@ -87,7 +87,7 @@ async def test_unified_identity_skips_accounting_for_sessions(monkeypatch):
         lambda authorization, kind, request: principal,
     )
     accounted = []
-    monkeypatch.setattr(nb, "record_api_key_usage", lambda p, request=None: accounted.append(p))
+    monkeypatch.setattr(nb, "submit_api_key_usage", lambda p, request=None: accounted.append(p))
     resolved = await dep.unified_identity(make_request(path="/api/agent/run"), authorization=None)
     assert resolved is principal
     assert accounted == []
@@ -188,6 +188,98 @@ def test_usage_accounting_records_request_id(monkeypatch):
     nb.record_api_key_usage(principal, make_request(headers={"X-Request-Id": "req-9"}))
     assert logged[0]["metadata"]["request_id"] == "req-9"
     assert logged[0]["call_function_name"] == "/nb/v1/automations"
+
+
+def test_usage_accounting_stores_route_template_not_long_object_path(monkeypatch):
+    """P2 regression: call_function_name is VARCHAR(100); a long object path
+    must be stored as the stable route template, with the raw path in JSONB."""
+    logged = []
+    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
+    long_path = "/nb/v1/file/download/" + "segment/" * 40 + "file.bin"
+    request = make_request(path=long_path)
+    request.scope["route"] = SimpleNamespace(path="/nb/v1/file/download/{object_name:path}")
+    nb.record_api_key_usage(principal, request)
+    assert logged[0]["call_function_name"] == "/nb/v1/file/download/{object_name:path}"
+    assert logged[0]["metadata"]["path"] == long_path
+
+
+def test_usage_accounting_truncates_when_no_route_template(monkeypatch):
+    logged = []
+    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
+    long_path = "/nb/v1/file/download/" + "x" * 200
+    nb.record_api_key_usage(principal, make_request(path=long_path))
+    assert len(logged[0]["call_function_name"]) == 100
+
+
+# ---------------------------------------------------------------------------
+# submit_api_key_usage: managed-lane accounting off the event loop
+# ---------------------------------------------------------------------------
+
+
+def test_submit_api_key_usage_uses_managed_control_io_lane(monkeypatch):
+    """P1 regression: the synchronous ledger write must be submitted to a
+    managed lane, never executed inside the async identity dependency."""
+    from management.thread_management import config_thread_manager
+
+    submissions = []
+    monkeypatch.setattr(
+        config_thread_manager, "submit",
+        lambda lane, spec, fn, *a, **k: submissions.append((lane, spec, fn, a, k)),
+    )
+    principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
+    request = make_request()
+    nb.submit_api_key_usage(principal, request)
+    assert len(submissions) == 1
+    lane, spec, fn, args, _ = submissions[0]
+    assert lane == "control-io"
+    assert spec.task_name == "record-api-key-usage"
+    assert spec.owner == "config"
+    assert fn is nb.record_api_key_usage
+    assert args == (principal, request)
+
+
+@pytest.mark.parametrize("error_name", ["ThreadCapacityExceeded", "ThreadManagerNotRunning", "ThreadManagerDraining"])
+def test_submit_api_key_usage_drops_on_admission_failure(monkeypatch, error_name):
+    from management.thread_management import config_thread_manager
+    from nexent.core.concurrency import (
+        ThreadCapacityExceeded,
+        ThreadManagerDraining,
+        ThreadManagerNotRunning,
+    )
+
+    errors = {
+        "ThreadCapacityExceeded": ThreadCapacityExceeded("control-io", 16, 32),
+        "ThreadManagerNotRunning": ThreadManagerNotRunning("not started"),
+        "ThreadManagerDraining": ThreadManagerDraining("draining"),
+    }
+    error = errors[error_name]
+
+    def reject(*a, **k):
+        raise error
+
+    monkeypatch.setattr(config_thread_manager, "submit", reject)
+    principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
+    # Must not raise: accounting never blocks an authenticated request.
+    nb.submit_api_key_usage(principal, make_request())
+
+
+def test_submit_api_key_usage_end_to_end_records_through_lane(monkeypatch):
+    """The submitted function is the real accounting unit: running it writes
+    the ledger entry with the route template and request id."""
+    from management.thread_management import config_thread_manager
+
+    logged = []
+    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(
+        config_thread_manager, "submit",
+        lambda lane, spec, fn, *a, **k: fn(*a, **k),
+    )
+    principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
+    nb.submit_api_key_usage(principal, make_request(headers={"X-Request-Id": "req-7"}))
+    assert logged[0]["metadata"]["request_id"] == "req-7"
+    assert logged[0]["token_id"] == 7
 
 
 # ---------------------------------------------------------------------------

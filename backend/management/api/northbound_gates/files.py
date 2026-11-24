@@ -105,13 +105,15 @@ async def nb_get_storage_file(
             finally:
                 file_stream.close()
 
-        # Streams are envelope-exempt.
+        # Streams are envelope-exempt. Authenticated partner bytes must never
+        # enter a shared cache: the gateway forwards this header verbatim and
+        # key revocation cannot invalidate a cached copy.
         return StreamingResponse(
             iter_chunks(),
             media_type=content_type,
             headers={
                 "Content-Disposition": build_content_disposition_header(download_filename),
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": "private, no-store",
                 "ETag": _build_object_etag(object_name),
             },
         )

@@ -51,7 +51,7 @@ def dark_client(monkeypatch):
     monkeypatch.setattr(
         audit_mod, "record_security_event", lambda *a, **k: audit_calls.append((a, k))
     )
-    monkeypatch.setattr(nb_ident, "record_api_key_usage", lambda principal, request=None: None)
+    monkeypatch.setattr(nb_ident, "submit_api_key_usage", lambda principal, request=None: None)
 
     app = create_app(title="nb-dark-gates", enable_monitoring=False)
     from management.api.northbound_gates import nb_capability_routers
