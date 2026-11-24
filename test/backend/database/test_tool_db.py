@@ -144,7 +144,7 @@ sys.modules['management.services.permission.identity.session'] = utils_mock.auth
 sys.modules['management.services.tool.catalog'] = tool_utils_mock
 
 # Now we can safely import the module being tested
-from management.db.tool.repository import create_tool, create_or_update_tool_by_tool_info, query_all_tools, query_tools_by_labels, update_tool_labels, query_tool_instances_by_id, query_tool_instances_by_agent_id, query_tools_by_ids, query_all_enabled_tool_instances, update_tool_table_from_scan_tool_list, add_tool_field, search_tools_for_sub_agent, check_tool_is_available, delete_tools_by_agent_id, search_last_tool_instance_by_tool_id, check_tool_list_initialized, set_mcp_tools_unavailable, ToolInstance
+from management.db.tool.repository import create_tool, create_or_update_tool_by_tool_info, query_all_tools, query_tools_by_labels, update_tool_labels, query_tool_instances_by_id, query_tool_instances_by_agent_id, query_tools_by_ids, query_all_enabled_tool_instances, update_tool_table_from_scan_tool_list, add_tool_field, search_tools_for_sub_agent, check_tool_is_available, delete_tools_by_agent_id, search_last_tool_instance_by_tool_id, check_tool_list_initialized, set_mcp_tools_availability, set_mcp_tools_unavailable, ToolInstance
 
 class MockToolInstance:
     def __init__(self):
@@ -1157,21 +1157,65 @@ def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
     mock_tool_info_class.assert_called_once_with(**expected_call_args)
 
 
+@pytest.mark.parametrize("available", [True, False])
+def test_set_mcp_tools_availability(monkeypatch, mock_session, available):
+    """Toggling availability flips is_available and leaves bindings untouched."""
+    session, _ = mock_session
+    tool_update_query = MagicMock()
+    tool_update = tool_update_query.filter.return_value.update
+    tool_update.return_value = 4
+    session.query.return_value = tool_update_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+
+    result = set_mcp_tools_availability(
+        tenant_id="tenant1", mcp_server_name="server_a", user_id="user1", available=available)
+
+    assert result == 4
+    tool_update.assert_called_once_with(
+        {"is_available": available, "updated_by": "user1"})
+    # Availability toggling must never touch agent bindings (reversible disable).
+    assert session.query.call_count == 1
+
+
+def test_set_mcp_tools_availability_no_rows(monkeypatch, mock_session):
+    """A server without catalog tools reports zero updates."""
+    session, _ = mock_session
+    tool_update_query = MagicMock()
+    tool_update_query.filter.return_value.update.return_value = 0
+    session.query.return_value = tool_update_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+
+    result = set_mcp_tools_availability(
+        tenant_id="tenant1", mcp_server_name="missing_server", user_id="user1", available=True)
+
+    assert result == 0
+
+
 def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
     """Test hiding MCP tools and soft-deleting only draft agent bindings."""
     session, _ = mock_session
     ToolInstance.version_no.reset_mock()
-    tool_lookup_query = MagicMock()
-    tool_lookup_query.filter.return_value.all.return_value = [(11,), (12,), (13,)]
     tool_update_query = MagicMock()
     tool_update = tool_update_query.filter.return_value.update
     tool_update.return_value = 3
+    tool_lookup_query = MagicMock()
+    tool_lookup_query.filter.return_value.all.return_value = [(11,), (12,), (13,)]
     instance_update_query = MagicMock()
     instance_update = instance_update_query.filter.return_value.update
     instance_update.return_value = 2
     session.query.side_effect = [
-        tool_lookup_query,
         tool_update_query,
+        tool_lookup_query,
         instance_update_query,
     ]
 
@@ -1197,9 +1241,9 @@ def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
 def test_set_mcp_tools_unavailable_no_rows(monkeypatch, mock_session):
     """Test no tool or binding updates run when the MCP has no tools."""
     session, _ = mock_session
-    tool_lookup_query = MagicMock()
-    tool_lookup_query.filter.return_value.all.return_value = []
-    session.query.return_value = tool_lookup_query
+    tool_update_query = MagicMock()
+    tool_update_query.filter.return_value.update.return_value = 0
+    session.query.return_value = tool_update_query
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session

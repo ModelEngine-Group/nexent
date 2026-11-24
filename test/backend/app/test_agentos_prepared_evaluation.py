@@ -493,6 +493,32 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
     reader.assert_called_once_with(7, 2, "tenant-a", ["lookup"])
 
 
+@pytest.mark.asyncio
+async def test_disabled_mcp_tool_blocks_conversation_with_clear_error(mocker):
+    """Regression: a bound tool of a disabled MCP service blocks the run with a clear error.
+
+    Disabling an MCP service marks its tools ``is_available=False`` while the
+    persisted bindings stay in place. The compiler must refuse the run with an
+    actionable message instead of a misleading binding-mismatch failure or a
+    silent tool drop.
+    """
+    from contracts.errors.exceptions import ValidationError as ResourceValidationError
+    from management.services.agent.preparation import tools
+
+    definition = {
+        "tool_id": 17, "tool_instance_id": 17, "name": "lookup", "class_name": "lookup",
+        "origin_name": "lookup", "description": "Lookup", "inputs": None, "output_type": "object",
+        "source": "mcp", "usage": "remote", "is_available": False,
+        "params": [{"name": "limit", "default": 3}], "instance_params": {},
+    }
+    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[definition])
+    mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "agent"})
+    with pytest.raises(ResourceValidationError) as error:
+        await tools.create_tool_config_list(7, "tenant-a", "user-a", version_no=2, portable_evaluation=True)
+    assert "lookup" in str(error.value)
+    assert "Enable the MCP service" in str(error.value)
+
+
 @pytest.mark.parametrize("level", ["local", "docker"])
 def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(mocker, tmp_path, level):
     from contracts.constants import environment

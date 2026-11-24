@@ -56,7 +56,7 @@ from management.db.mcp.remote import (
     update_mcp_status_by_name_and_url,
 )
 from management.db.tag.repository import TagManagementDB
-from management.db.tool.repository import set_mcp_tools_unavailable
+from management.db.tool.repository import set_mcp_tools_availability, set_mcp_tools_unavailable
 from management.services.mcp.common import (
     logger,
 )
@@ -226,6 +226,10 @@ async def update_mcp_service_enabled(
     enabled: bool,
 ) -> None:
     """Enable or disable an MCP service.
+
+    Also refreshes the tool-catalog availability (``ToolInfo.is_available``)
+    that the agent runtime reads, so tools of this service join or leave
+    conversations as soon as it is toggled, without waiting for a tool scan.
 
     Args:
         tenant_id: Tenant ID
@@ -470,6 +474,31 @@ async def update_mcp_service_enabled(
         user_id=user_id,
         enabled=enabled,
     )
+
+    # Refresh the tool-catalog availability the agent runtime reads so bound
+    # tools of this service are excluded from (or restored to) conversations
+    # immediately, instead of leaving a stale state that fails snapshot
+    # compilation with a generic internal error.
+    mcp_server_name = current_record.get("mcp_name")
+    if mcp_server_name:
+        updated_tools = set_mcp_tools_availability(
+            tenant_id=tenant_id,
+            mcp_server_name=mcp_server_name,
+            user_id=user_id,
+            available=enabled,
+        )
+        logger.info(
+            "MCP service %s (mcp_id=%s) %s: refreshed availability for %s tool(s)",
+            mcp_server_name,
+            mcp_id,
+            "enabled" if enabled else "disabled",
+            updated_tools,
+        )
+    else:
+        logger.warning(
+            "MCP record mcp_id=%s has no service name; skipped tool availability refresh",
+            mcp_id,
+        )
 
 
 async def delete_mcp_service(

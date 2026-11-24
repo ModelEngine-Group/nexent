@@ -920,6 +920,79 @@ class TestUpdateMcpServiceEnabledApiType(unittest.IsolatedAsyncioTestCase):
 
 
 # ============================================================================
+# update_mcp_service_enabled - tool availability cascade
+# ============================================================================
+
+class TestUpdateMcpServiceEnabledToolAvailability(unittest.IsolatedAsyncioTestCase):
+    """Test the enable/disable cascade that refreshes tool catalog availability."""
+
+    def _make_remote_record(self, **overrides):
+        base = {
+            "mcp_id": 1, "mcp_name": "remote-svc", "mcp_server": "https://remote/mcp",
+            "container_id": None, "container_port": None, "config_json": None,
+            "authorization_token": None, "custom_headers": None,
+            "enabled": True, "source": "local",
+        }
+        base.update(overrides)
+        return base
+
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_availability')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_disable_marks_tools_unavailable(
+        self, mock_get, mock_availability, mock_enabled
+    ):
+        """Disabling an MCP service marks its tools unavailable for the agent runtime."""
+        mock_get.return_value = self._make_remote_record()
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=False)
+
+        mock_availability.assert_called_once_with(
+            tenant_id='tid', mcp_server_name='remote-svc', user_id='uid', available=False,
+        )
+        mock_enabled.assert_called_once_with(
+            mcp_id=1, tenant_id='tid', user_id='uid', enabled=False,
+        )
+
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_availability')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    async def test_api_enable_restores_tool_availability(
+        self, mock_records, mock_get, mock_availability, mock_enabled, mock_status
+    ):
+        """Enabling an MCP service restores its tools for the agent runtime."""
+        mock_get.return_value = self._make_remote_record(
+            config_json={"openapi": "3.0.0", "info": {"title": "Test"}},
+        )
+        mock_records.return_value = []
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_availability.assert_called_once_with(
+            tenant_id='tid', mcp_server_name='remote-svc', user_id='uid', available=True,
+        )
+        mock_enabled.assert_called_once_with(
+            mcp_id=1, tenant_id='tid', user_id='uid', enabled=True,
+        )
+
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_availability')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_missing_name_skips_availability_refresh(
+        self, mock_get, mock_availability, mock_enabled
+    ):
+        """A record without a service name toggles the flag without a tool refresh."""
+        mock_get.return_value = self._make_remote_record(mcp_name=None)
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=False)
+
+        mock_availability.assert_not_called()
+        mock_enabled.assert_called_once()
+
+
+# ============================================================================
 # get_remote_mcp_server_list - ingroup_permission tests
 # ============================================================================
 

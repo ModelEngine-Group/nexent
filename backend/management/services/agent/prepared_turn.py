@@ -18,7 +18,8 @@ from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException, ForbiddenError, RunModelControlsError, RuntimeMetadataVersionConflict,
-    RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError,
+    RuntimeServiceUnavailableError, RuntimeUpstreamError, SnapshotCompilationError, ValidationError,
+    WorkbenchConfigVersionConflict, WorkbenchError,
 )
 from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from infrastructure.rdb.agent_admission import AdmissionScopeError, conversation_claim_scope, set_conversation_admission
@@ -71,6 +72,25 @@ def _metadata_conflict(error):
 def _workbench_conflict(error: WorkbenchConfigVersionConflict) -> HTTPException:
     return HTTPException(status_code=409, detail={
         "code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": error.current_version,
+    })
+
+
+def snapshot_compilation_conflict(error: SnapshotCompilationError) -> HTTPException:
+    """Map a snapshot compilation failure to an actionable client error."""
+    # The compiler error message is intentionally safe; log the original cause
+    # server-side only so users see guidance instead of a generic 500.
+    logger.warning(
+        "Snapshot compilation failed (stage=%s, category=%s, cause=%r)",
+        error.stage,
+        error.category,
+        error.__cause__,
+    )
+    return HTTPException(status_code=409, detail={
+        "code": "AGENT_SNAPSHOT_COMPILATION_FAILED",
+        "message": (
+            "Agent resources are unavailable (tools, MCP servers, or models). "
+            "Restore the disabled resources or update the agent, then try again."
+        ),
     })
 
 
@@ -249,6 +269,8 @@ async def start_turn(
             raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
         if isinstance(exc, ValidationError):
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if isinstance(exc, SnapshotCompilationError):
+            raise snapshot_compilation_conflict(exc) from exc
         raise
 
     try:

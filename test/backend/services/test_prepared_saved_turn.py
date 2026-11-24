@@ -12,6 +12,7 @@ from starlette.responses import Response
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentRunReference, CompatibilityConversationRun
 from contracts.conversation import MessageSource
+from contracts.errors.exceptions import SnapshotCompilationError
 from management.db.conversation.prepared_turn import PreparedTurn, SavedUserTurn
 from management.services.agent import prepared_turn as service
 
@@ -62,6 +63,38 @@ async def test_saved_source_pins_history_and_staging_before_any_runtime_start(mo
     assert stage.call_args.args[4] == source.message_index
     assert stage.call_args.kwargs["saved_user"] == source
     next_index.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_turn_compile_failure_returns_actionable_conflict(mocker):
+    """A snapshot compile failure (e.g. disabled MCP service) maps to 409, not a generic 500."""
+    async def inline(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
+    payload = CompatibilityConversationRun(
+        request=request.model_dump(mode="json"), idempotency_key="prep-1", claimed_run_id="b" * 32,
+    )
+    mocker.patch.object(service, "_io", side_effect=inline)
+    mocker.patch.object(service, "get_conversation", return_value={})
+    mocker.patch.object(service.store, "next_message_index", return_value=5)
+    mocker.patch.object(
+        service, "prepare_conversation_snapshot",
+        new=AsyncMock(side_effect=SnapshotCompilationError(
+            "resource", LookupError("MCP server is not available"),
+        )),
+    )
+    rejected = mocker.patch.object(service, "reject_unstaged_turn", new=AsyncMock())
+    client = SimpleNamespace(find_active_run=AsyncMock(return_value=None), start_prepared_run=AsyncMock())
+
+    with pytest.raises(HTTPException) as error:
+        await service.start_turn(payload, request, "actor", "tenant", client)
+
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "AGENT_SNAPSHOT_COMPILATION_FAILED"
+    assert "unavailable" in error.value.detail["message"]
+    rejected.assert_awaited_once()
+    client.start_prepared_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio

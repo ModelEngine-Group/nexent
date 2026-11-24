@@ -329,7 +329,28 @@ async def create_tool_config_list(
         runtime_skill_snapshot=runtime_skill_snapshot,
     )
 
-    # Look up agent name for use in error messages.
+    # Agent name is optional for tool_params matching (matching uses tool identifiers only),
+    # but we include it in error messages so callers can identify which agent/tool caused a failure.
+    agent_info = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
+    )
+    agent_name = agent_info.get("name") if agent_info else None
+
+    # Bound tools flagged unavailable (their MCP service was disabled, or the
+    # tools were removed) can never resolve to a persisted binding, so refuse
+    # the run with an actionable message instead of silently dropping them.
+    unavailable_tools = sorted(
+        tool.get("name") or tool.get("class_name")
+        for tool in tools_list
+        if tool.get("is_available") is False
+    )
+    if unavailable_tools:
+        raise ValidationError(
+            f"Agent '{agent_name or agent_id}' cannot start: tools {unavailable_tools} are unavailable "
+            "(their MCP service may be disabled, or the tools were removed). "
+            "Enable the MCP service or remove these tools from the agent, then try again."
+        )
+
     if runtime_knowledge_tools is not None:
         from management.services.knowledge_base.mount import MANAGED_CLASSES
 
@@ -346,12 +367,6 @@ async def create_tool_config_list(
             )
         )
 
-    # Agent name is optional for tool_params matching (matching uses tool identifiers only),
-    # but we include it in error messages so callers can identify which agent/tool caused a failure.
-    agent_info = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
-    )
-    agent_name = agent_info.get("name") if agent_info else None
     agent_tool_overrides = _get_agent_tool_overrides(normalized_tool_params, agent_name)
 
     tool_keys_seen = set()
