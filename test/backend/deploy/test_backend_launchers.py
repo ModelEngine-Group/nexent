@@ -54,6 +54,6 @@ def test_data_process_chart_skips_ops_initialization_with_shared_monitoring_enab
                       and doc["metadata"]["name"] == "nexent-data-process")
     container = deployment["spec"]["template"]["spec"]["containers"][0]
     settings = {entry["name"]: entry for entry in container["env"]}
-    assert settings["NEXENT_OPS_SQL_STARTUP_MODE"]["value"] == "off"
+    assert settings["NEXENT_SQL_STARTUP_MODE"]["value"] == "off"
     assert "OPS_MONITORING_ENABLED" not in settings
     assert "backend.http.data_process_service" in container["command"][-1]

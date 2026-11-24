@@ -66,8 +66,6 @@ spec:
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
-            - name: NEXENT_OPS_SQL_STARTUP_MODE
-              value: "off"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: DOCKER_ENVIRONMENT

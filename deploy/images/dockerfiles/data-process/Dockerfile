@@ -112,7 +112,7 @@ COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
 COPY VERSION /opt/nexent/VERSION
 ENV NEXENT_SQL_STARTUP_MODE=off
-ENV NEXENT_OPS_SQL_STARTUP_MODE=off
+# Ops storage is initialized by the Ops service, outside this generic launcher.
 COPY deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/start-backend.sh
 

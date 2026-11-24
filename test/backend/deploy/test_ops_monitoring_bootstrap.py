@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Shared launcher orders independent Ops migrations before application startup."""
+"""Only the Ops entrypoint owns Ops SQL initialization."""
 
 import os
 import shutil
@@ -9,50 +9,59 @@ from pathlib import Path
 import pytest
 
 
-def launch(tmp_path, mode, enabled=None, ops_mode=None, missing_ops_helper=False, **failures):
+def launch(tmp_path, mode, enabled=None, *, ops_entry=False, missing_ops_helper=False, **failures):
     root = Path(__file__).resolve().parents[3]
-    shutil.copy(root / "deploy/common/start-backend.sh", tmp_path / "start-backend.sh")
-    for kind, name in (("main", "run-sql-migrations.sh"), ("ops", "run-ops-sql-migrations.sh")):
+    name = "start-ops.sh" if ops_entry else "start-backend.sh"
+    shutil.copy(root / "deploy/common" / name, tmp_path / name)
+    for kind, helper in (("main", "run-sql-migrations.sh"), ("ops", "run-ops-sql-migrations.sh")):
         if kind == "ops" and missing_ops_helper:
             continue
-        (tmp_path / name).write_text(
+        (tmp_path / helper).write_text(
             f'#!/usr/bin/env bash\nprintf "{kind}:%s\\n" "$1" >> "$BOOTSTRAP_LOG"\nexit "${{FAIL_{kind.upper()}:-0}}"\n',
             encoding="utf-8",
         )
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("OPS_", "NEXENT_SQL_", "NEXENT_OPS_SQL_", "FAIL_"))}
+           if not key.startswith(("OPS_", "NEXENT_SQL_", "FAIL_")) and key != "UMASK"}
     env.update(NEXENT_SQL_STARTUP_MODE=mode, BOOTSTRAP_LOG=str(tmp_path / "calls"), **failures)
     if enabled is not None:
         env["OPS_MONITORING_ENABLED"] = enabled
-    if ops_mode is not None:
-        env["NEXENT_OPS_SQL_STARTUP_MODE"] = ops_mode
     bash = shutil.which("bash")
     assert bash, "Bash is required for the deployment entrypoint regression"
-    result = subprocess.run([bash, str(tmp_path / "start-backend.sh"), bash, "-c",
+    result = subprocess.run([bash, str(tmp_path / name), bash, "-c",
                              'printf "APP\\n" >> "$BOOTSTRAP_LOG"'], env=env, capture_output=True, text=True, timeout=10)
     log = tmp_path / "calls"
     return result, log.read_text().splitlines() if log.exists() else []
 
 
 @pytest.mark.parametrize("mode,enabled,expected", [
-    ("migrate", None, ["main:--migrate", "ops:--migrate", "APP"]),
-    ("wait", None, ["main:--wait", "ops:--wait", "APP"]),
-    ("off", None, ["ops:--migrate", "APP"]),
-    ("off", "", ["ops:--migrate", "APP"]),
-    ("off", "TRUE", ["ops:--migrate", "APP"]),
+    ("migrate", None, ["main:--migrate", "APP"]),
+    ("wait", None, ["main:--wait", "APP"]),
+    ("off", None, ["APP"]),
+    ("off", "", ["APP"]),
+    ("off", "TRUE", ["APP"]),
     ("off", "false", ["APP"]),
     ("migrate", "false", ["main:--migrate", "APP"]),
     ("wait", "false", ["main:--wait", "APP"]),
 ])
-def test_launcher_initializes_or_waits_for_ops_before_application(tmp_path, mode, enabled, expected):
+def test_generic_launcher_only_runs_business_sql(tmp_path, mode, enabled, expected):
     result, calls = launch(tmp_path, mode, enabled)
     assert result.returncode == 0, result.stderr
     assert calls == expected
 
 
-@pytest.mark.parametrize("failures", [{"FAIL_MAIN": "17"}, {"FAIL_OPS": "19"}])
-def test_migration_failure_prevents_application_launch(tmp_path, failures):
-    result, calls = launch(tmp_path, "migrate", **failures)
+@pytest.mark.parametrize("mode", ["off", "migrate", "wait"])
+@pytest.mark.parametrize("enabled", [None, "true", "TRUE", "false"])
+def test_ops_entrypoint_initializes_its_own_storage_only(tmp_path, mode, enabled):
+    result, calls = launch(tmp_path, mode, enabled, ops_entry=True)
+    assert result.returncode == 0, result.stderr
+    assert calls == (["APP"] if enabled == "false" else ["ops:--migrate", "APP"])
+
+
+@pytest.mark.parametrize("ops_entry,failures", [
+    (False, {"FAIL_MAIN": "17"}), (True, {"FAIL_OPS": "19"}),
+])
+def test_migration_failure_prevents_application_launch(tmp_path, ops_entry, failures):
+    result, calls = launch(tmp_path, "migrate", ops_entry=ops_entry, **failures)
     assert result.returncode != 0
     assert "APP" not in calls
 
@@ -68,24 +77,23 @@ def test_invalid_startup_mode_does_not_run_any_migration(tmp_path):
     ("migrate", ["main:--migrate", "APP"]),
     ("wait", ["main:--wait", "APP"]),
 ])
-def test_non_ops_service_skips_ops_without_disabling_monitoring(tmp_path, mode, expected):
-    result, calls = launch(tmp_path, mode, "true", ops_mode="off", missing_ops_helper=True)
+def test_generic_launcher_needs_no_ops_helper_when_monitoring_is_enabled(tmp_path, mode, expected):
+    result, calls = launch(tmp_path, mode, "true", missing_ops_helper=True)
     assert result.returncode == 0, result.stderr
     assert calls == expected
     assert not (tmp_path / "run-ops-sql-migrations.sh").exists()
 
 
-@pytest.mark.parametrize("ops_mode", [None, "auto"])
-def test_monitored_service_still_requires_its_migration_helper(tmp_path, ops_mode):
-    result, calls = launch(tmp_path, "off", "true", ops_mode=ops_mode, missing_ops_helper=True)
+def test_ops_still_requires_its_migration_helper(tmp_path):
+    result, calls = launch(tmp_path, "off", "true", ops_entry=True, missing_ops_helper=True)
     assert result.returncode != 0
     assert "run-ops-sql-migrations.sh" in result.stderr
     assert calls == []
 
 
-@pytest.mark.parametrize("ops_mode", ["invalid", "migrate", "wait"])
-def test_invalid_ops_mode_fails_before_any_migration(tmp_path, ops_mode):
-    result, calls = launch(tmp_path, "migrate", "true", ops_mode=ops_mode)
+@pytest.mark.parametrize("ops_entry", [False, True])
+@pytest.mark.parametrize("umask", ["invalid", "9999"])
+def test_invalid_umask_prevents_migrations_and_application(tmp_path, ops_entry, umask):
+    result, calls = launch(tmp_path, "migrate", ops_entry=ops_entry, UMASK=umask)
     assert result.returncode != 0
-    assert "NEXENT_OPS_SQL_STARTUP_MODE" in result.stderr
     assert calls == []

@@ -21,16 +21,6 @@ if [ -z "${NEXENT_SQL_STARTUP_MODE+x}" ] && [ -n "${NEXENT_RUN_SQL_MIGRATIONS:-}
   fi
 fi
 
-ops_sql_startup_mode="${NEXENT_OPS_SQL_STARTUP_MODE:-auto}"
-case "$ops_sql_startup_mode" in
-  auto|off)
-    ;;
-  *)
-    printf '[start-backend] ERROR: unsupported NEXENT_OPS_SQL_STARTUP_MODE: %s\n' "$ops_sql_startup_mode" >&2
-    exit 1
-    ;;
-esac
-
 case "$SQL_STARTUP_MODE" in
   migrate)
     bash "$script_dir/run-sql-migrations.sh" --migrate
@@ -45,15 +35,5 @@ case "$SQL_STARTUP_MODE" in
     exit 1
     ;;
 esac
-
-monitoring_enabled="${OPS_MONITORING_ENABLED:-true}"
-if [[ "$ops_sql_startup_mode" == auto && "${monitoring_enabled,,}" == true ]]; then
-  # Independent Ops startup must not run business SQL for the Ops process.
-  if [[ "$SQL_STARTUP_MODE" == wait ]]; then
-    bash "$script_dir/run-ops-sql-migrations.sh" --wait
-  else
-    bash "$script_dir/run-ops-sql-migrations.sh" --migrate
-  fi
-fi
 
 exec "$@"

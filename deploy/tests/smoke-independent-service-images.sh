@@ -94,8 +94,12 @@ check_shared_monitoring() {
       exit 1
     fi
     test -x /opt/nexent/scripts/run-sql-migrations.sh
-    test -x /opt/nexent/scripts/run-ops-sql-migrations.sh
-    test -f /opt/nexent/ops-sql/ops-init.sql
+    for path in /opt/nexent/scripts/start-ops.sh /opt/nexent/scripts/run-ops-sql-migrations.sh /opt/nexent/ops-sql; do
+      if [ -e "$path" ]; then
+        echo "Unexpected Ops SQL initializer in producer image" >&2
+        exit 1
+      fi
+    done
   '
 }
 

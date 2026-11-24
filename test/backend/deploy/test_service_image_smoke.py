@@ -20,8 +20,7 @@ def smoke(tmp_path):
         base = images / role / "opt"
         for relative in (
             "infrastructure/monitoring/runtime.py",
-            "nexent/scripts/run-sql-migrations.sh", "nexent/scripts/run-ops-sql-migrations.sh",
-            "nexent/ops-sql/ops-init.sql",
+            "nexent/scripts/run-sql-migrations.sh",
         ):
             target = base / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -117,6 +116,20 @@ def test_smoke_rejects_ops_business_sources_in_runtime(smoke, extra):
     result, calls = run(full=False)
     assert result.returncode != 0
     assert "Unexpected Ops source" in result.stderr
+    assert any(call[:2] == ["network", "rm"] for call in calls)
+
+
+@pytest.mark.parametrize("extra", [
+    "nexent/scripts/start-ops.sh", "nexent/scripts/run-ops-sql-migrations.sh", "nexent/ops-sql/ops-init.sql",
+])
+def test_smoke_rejects_ops_initializers_in_producer_images(smoke, extra):
+    images, run = smoke
+    source = images / "runtime/opt" / extra
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("unexpected Ops dependency", encoding="utf-8")
+    result, calls = run(full=False)
+    assert result.returncode != 0
+    assert "Unexpected Ops SQL initializer" in result.stderr
     assert any(call[:2] == ["network", "rm"] for call in calls)
 
 

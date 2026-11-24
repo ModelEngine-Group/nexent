@@ -307,7 +307,6 @@ services:
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
-      NEXENT_OPS_SQL_STARTUP_MODE: "off"
       DOCKER_ENVIRONMENT: "true"
       PYTHONPATH: "/opt:/opt/backend"
       skip_proxy: "true"
