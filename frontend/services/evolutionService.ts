@@ -5,6 +5,36 @@ import type { ReviewBatch } from "@/types/evolutionReview";
 
 const root = `${API_BASE_URL}/agent-evolution`;
 
+export interface SuggestionReceipt {
+  conversation_id: number;
+  message_id: number;
+}
+
+export interface SuggestionComparison {
+  agent_id: number;
+  version_no: number;
+  suggestion_id: number;
+  experiment_id: number | null;
+  candidate_id: number | null;
+}
+
+export function parseSuggestionReceipt(content: unknown): SuggestionReceipt | null {
+  if (typeof content !== "string") return null;
+  try {
+    const result = JSON.parse(content) as SuggestionReceipt | null;
+    if (result && [result.conversation_id, result.message_id].every((id) => Number.isSafeInteger(id) && id > 0)) {
+      return { conversation_id: result.conversation_id, message_id: result.message_id };
+    }
+  } catch {
+    // Invalid receipt units have no actions.
+  }
+  return null;
+}
+
+function receiptEndpoint(receipt: SuggestionReceipt) {
+  return `${root}/conversations/${receipt.conversation_id}/receipts/${receipt.message_id}`;
+}
+
 interface AgentChoice {
   agent_id: number;
   name: string;
@@ -112,6 +142,8 @@ export interface ExperimentReport {
   valid_quartets?: number;
   fixed_regression?: { case_ids: number[]; failed: number[]; incomplete: number[] };
   experiment_id: number;
+  agent_id?: number;
+  version_no?: number;
   status: string;
   valid_pairs: number;
   total_pairs: number;
@@ -190,6 +222,12 @@ async function read<T>(url: string, body?: unknown): Promise<T> {
 }
 
 export const evolutionService = {
+  suggestionActions: (receipt: SuggestionReceipt) =>
+    read<{ compare?: SuggestionComparison; edit?: { candidate_id: number } }>(`${receiptEndpoint(receipt)}/actions`),
+  suggestionCandidate: (receipt: SuggestionReceipt, candidate: number) =>
+    read<{ skill_name: string; old: string; new: string }>(`${receiptEndpoint(receipt)}/skill-candidates/${candidate}`),
+  reviseSuggestionCandidate: (receipt: SuggestionReceipt, candidate: number, replacement: string) =>
+    read<{ candidate_id: number }>(`${receiptEndpoint(receipt)}/skill-candidates/${candidate}`, { replacement }),
   async publicBenchmarks(id: number, before: number | null) {
     const endpoint = API_ENDPOINTS.evolutionPublicBenchmarks(id);
     const response = await fetchWithErrorHandling(
@@ -367,6 +405,7 @@ export interface LocalFeedback {
   tool_name?: string;
   skill_id?: number;
   released_guide_candidate_id?: number;
+  suggestion_id?: number;
   share_expected_arguments?: string[];
   share_file_state?: boolean;
   failure: { case_id: number; expected: string; observed: string; input_excerpt?: string };

@@ -2,6 +2,7 @@
 """Record first-party Skill requests inside the confirmed chat-message transaction."""
 
 from contextlib import nullcontext
+from functools import partial
 
 from sqlalchemy import select, text
 
@@ -87,6 +88,11 @@ def _status_reply(session, scope, query, reply):
     match = "s.suggestion_id=:sid" if number else "s.conversation_id=:cid"
     rows = session.execute(text(f"""
         SELECT s.suggestion_id, s.status, s.experiment_id,s.agent_id,decision.*,
+            EXISTS (SELECT 1 FROM nexent.evolution_feedback_handoff_t f
+                JOIN nexent.evolution_skill_candidate_t candidate ON candidate.tenant_id=f.tenant_id
+                    AND candidate.feedback->>'feedback_id'=CAST(f.feedback_id AS text)
+                WHERE f.tenant_id=s.tenant_id AND f.feedback->>'suggestion_id'=CAST(s.suggestion_id AS text)
+                    AND f.feedback->>'method'='S2' AND candidate.feedback->>'method'='S2') AS has_candidate,
             (SELECT count(*) FROM nexent.evolution_trial_t t WHERE t.experiment_id=s.experiment_id
                 AND t.status IN ('running','pending')) AS active,
             (SELECT cancelled FROM nexent.evolution_experiment_t e WHERE e.experiment_id=s.experiment_id
@@ -112,6 +118,7 @@ def _status_reply(session, scope, query, reply):
         return reply(f"你提交了多条建议，请指定编号，例如 {ids}。", f"Please specify a suggestion ID, for example {ids}.")
     sid = rows[0]["suggestion_id"]
     row = rows[0]
+    reply = partial(reply, suggestion_id=sid)
     if row["new_version"] is not None:
         version = row["new_version"]
         if row["disabled"]:
@@ -135,6 +142,8 @@ def _status_reply(session, scope, query, reply):
             return reply(f"建议 S-{sid} 正在进行对比评测。", f"The evaluation for S-{sid} is in progress.")
         zh, en = _development_progress(session, scope, sid, row["experiment_id"])
         return reply(f"建议 S-{sid} 的对比评测已结束。{zh}", f"The evaluation for S-{sid} has finished. {en}")
+    if row["has_candidate"]:
+        return reply(f"建议 S-{sid} 已生成候选，等待对比评测。", f"A candidate for S-{sid} is ready for comparison.")
     return reply(f"建议 S-{sid} 已登记，等待维护人评审。", f"Suggestion S-{sid} is waiting for maintainer review.")
 
 
@@ -145,8 +154,11 @@ def record_intent(session, turn, source, user_turn):
     scope = dict(tenant=turn.tenant_id, owner=turn.user_id, cid=turn.reference.conversation_id,
                  source=source, agent=binding["agent"], version=binding["version"])
 
-    def reply(zh, en, *, business=False):
-        return {"message": en if language == "en" else zh, "business": business}
+    def reply(zh, en, *, business=False, suggestion_id=None):
+        receipt = {"message": en if language == "en" else zh, "business": business}
+        if suggestion_id is not None:
+            receipt["suggestion_id"] = suggestion_id
+        return receipt
 
     # A retry on the same persisted user message reuses its actual receipt, including clarification.
     previous = session.execute(text("""
@@ -217,4 +229,4 @@ def record_intent(session, turn, source, user_turn):
         return reply("希望这个 Skill 以后具体怎样处理？可以用“以后请……”说明期望。",
                      "What should the Skill do differently? Start with 'In future, please ...'.", business=mixed)
     return reply(f"已登记建议 S-{sid}（{target['name']}）。\n{expected}",
-                 f"Filed S-{sid} for {target['name']}.\n{expected}", business=mixed)
+                 f"Filed S-{sid} for {target['name']}.\n{expected}", business=mixed, suggestion_id=sid)

@@ -527,6 +527,33 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent-evolution/conversations/{conversation_id}/receipts/{message_id}/actions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-chat-suggestion-actions",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/conversations/{conversation_id}/receipts/{message_id}/skill-candidates/{candidate_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-chat-skill-candidate-read",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/conversations/{conversation_id}/receipts/{message_id}/skill-candidates/{candidate_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-chat-skill-candidate-revise",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
       "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/prompt-candidates/{candidate_id}",
       "transport": "http",
       "target": "management",

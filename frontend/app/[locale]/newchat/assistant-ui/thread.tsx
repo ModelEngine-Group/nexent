@@ -4,6 +4,8 @@
 
 import { useMessageSources } from "../ui/message-sources";
 import { ConversationEvolutionSwitch } from "./conversation-evolution-switch";
+import { SuggestionReceiptActions } from "./suggestion-receipt-actions";
+import type { SuggestionReceipt } from "@/services/evolutionService";
 
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
@@ -1879,6 +1881,13 @@ const AssistantMessage: FC<{
                       onSkillFileSelect={onSkillFileSelect}
                     />
                   );
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "evolution-suggestion-actions"
+                ) {
+                  const receipt = (part as typeof part & { data?: SuggestionReceipt }).data;
+                  return !readOnly && receipt ? <SuggestionReceiptActions receipt={receipt} /> : null;
                 }
                 if (
                   (part as typeof part & { name?: string }).name ===

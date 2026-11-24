@@ -76,10 +76,16 @@ def propose_local_edit(request, tenant_id, user_id, source, instruction, *, sour
     if allow_deletion and context and context.get("related_passage") == edit.new.strip():
         # The approved related rule is already present outside the editable passage.
         edit = edit.model_copy(update={"new": ""})
-    result = source.replace(edit.old, edit.new, 1)
+    return replace_local_passage(source, edit.old, edit.new), edit
+
+
+def replace_local_passage(source, old, new):
+    if not old or source.count(old) != 1:
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Choose one unique passage in the source text")
+    result = source.replace(old, new, 1)
     if not result.strip() or Counter(_PLACEHOLDER.findall(source)) != Counter(_PLACEHOLDER.findall(result)):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Edit removed the source text or changed its placeholders")
-    return result, edit
+    return result
 
 
 def generate_prompt_candidate(request: PromptCandidateRequest, tenant_id: str, user_id: str, *,

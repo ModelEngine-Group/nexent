@@ -22,6 +22,7 @@ import type {
 } from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
+import { parseSuggestionReceipt } from "@/services/evolutionService";
 import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDraft";
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
@@ -2627,6 +2628,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "evolution_suggestion_actions") {
+            const receipt = parseSuggestionReceipt(chunk.content);
+            if (receipt) {
+              flushOpenReasoning();
+              contentParts.push({ type: "data", name: "evolution-suggestion-actions", data: receipt });
+              yield buildStreamResult(contentParts);
+            }
+            continue;
+          }
+
           if (chunk.type === "evolution_receipt") {
             flushOpenReasoning();
             contentParts.push({ type: "data", name: "evolution-receipt", data: chunk.content });
@@ -3075,6 +3086,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
             if (isNl2Agent) {
+              yield buildStreamResult(contentParts);
+            }
+          } else if (chunk.type === "evolution_suggestion_actions") {
+            const receipt = parseSuggestionReceipt(chunk.content);
+            if (receipt) {
+              parentReasoning.close();
+              contentParts.push({ type: "data", name: "evolution-suggestion-actions", data: receipt });
               yield buildStreamResult(contentParts);
             }
           } else if (chunk.type === "evolution_receipt") {

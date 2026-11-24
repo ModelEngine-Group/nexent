@@ -113,18 +113,26 @@ async def _committed_suggestion(identity):
 
 
 async def _run_snapshot(payload, actor, identity, journal, slot=None):
-    receipt = None
+    index = 0
     if getattr(payload, "await_evolution_reply", None) is True:
         versions = {"agent_id": payload.resource.agent_id, "agent_version_no": payload.resource.version_no}
         if not await _control_io("agentos-suggestion-running", mark_running, identity, versions):
             return "stopped"
         receipt = await _committed_suggestion(identity)
+        if receipt.get("suggestion_id") and receipt.get("assistant_id"):
+            index += 1
+            await _append_event(journal, index, "agentos_observer", {
+                "type": "evolution_suggestion_actions", "content": json.dumps({
+                    "conversation_id": identity.conversation_id, "message_id": receipt["assistant_id"],
+                }),
+            })
         if not receipt["business"]:
-            await _append_event(journal, 1, "agentos_observer",
+            await _append_event(journal, index + 1, "agentos_observer",
                                 {"type": "final_answer", "answer_phase": "complete", "content": receipt["message"]})
             return "completed"
         if receipt["message"]:
-            await _append_event(journal, 1, "agentos_observer", {"type": "evolution_receipt", "content": receipt["message"]})
+            index += 1
+            await _append_event(journal, index, "agentos_observer", {"type": "evolution_receipt", "content": receipt["message"]})
     info = await load_prepared_run(payload, actor, prepare_run_snapshot)
     try:
         agent_run_manager.register_agent_run(identity.conversation_id, info, identity.user_id)
@@ -134,7 +142,6 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
 
     status = "failed"
     facts = {}
-    index = 0
     try:
         versions = {
             "agent_id": payload.resource.agent_id,
@@ -173,13 +180,12 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
         ) if checkpoint is not None else None))
         info.observer.execution_history = history
         facts = {}
-        index = 1 if receipt and receipt["message"] else 0
         with agent_monitoring_context(metadata):
             async with aclosing(_snapshot_chunks(info)) as chunks:
                 async for chunk in chunks:
                     # Re-encode JSON to keep each payload within one SSE data line.
                     observer_event = json.loads(chunk)
-                    if observer_event.get("type") == "evolution_receipt":
+                    if observer_event.get("type") in {"evolution_receipt", "evolution_suggestion_actions"}:
                         continue
                     if observer_event.get("type") == "skill_artifact":
                         raise ValueError("Prepared runs cannot journal local skill artifact paths")

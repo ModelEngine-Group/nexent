@@ -225,7 +225,10 @@ def test_create_share_snapshot_service_all_messages_without_assets(mocker):
                 "conversation_id": 8,
                 "message": [
                     {"message_id": 1, "role": "user", "message": "u1"},
-                    {"message_id": 2, "role": "assistant", "message": "a1"},
+                    {"message_id": 2, "role": "assistant", "message": [
+                        {"type": "evolution_suggestion_actions", "content": '{"conversation_id":8,"message_id":2}'},
+                        {"type": "final_answer", "content": "a1"},
+                    ]},
                     {"message_id": 3, "role": "user", "message": "u2"},
                 ],
             }
@@ -253,6 +256,7 @@ def test_create_share_snapshot_service_all_messages_without_assets(mocker):
     assert share_payload["mode"] == "all"
     assert share_payload["snapshot_json"]["share_render_version"] == "legacy"
     assert [msg["message_id"] for msg in share_payload["snapshot_json"]["message"]] == [1, 2, 3]
+    assert share_payload["snapshot_json"]["message"][1]["message"] == [{"type": "final_answer", "content": "a1"}]
     mock_create_assets.assert_called_once_with("share_token", [], "user_1")
 
 

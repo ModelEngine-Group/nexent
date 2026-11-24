@@ -6,13 +6,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { evolutionService as api, type ExperimentReport, type LocalFeedback, type Workspace } from "@/services/evolutionService";
 
-export default function LocalEditFeedback({ report, workspace, agent, version, viewer }: {
-  report: ExperimentReport; workspace: Workspace; agent: number; version: number; viewer: string;
+export default function LocalEditFeedback({ report, workspace, agent, version, viewer, suggestedId }: {
+  report: ExperimentReport; workspace: Workspace; agent: number; version: number; viewer: string; suggestedId?: number;
 }) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm<LocalFeedback & { skill_target?: string }>();
   const method = Form.useWatch("method", form);
+  const skillTarget = Form.useWatch("skill_target", form);
   const failed = Form.useWatch(["failure", "case_id"], form);
   const good = Form.useWatch(["protection", "case_id"], form);
   const tool = Form.useWatch("tool_name", form);
@@ -35,6 +36,12 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
     ...(workspace.skills ?? []).map(s => ({ value: `catalog:${s.skill_id}`, label: s.name })),
     ...(workspace.released_guides ?? []).map(s => ({ value: `guide:${s.candidate_id}`, label: s.name })),
   ];
+  const suggestions = (workspace.suggestions ?? []).filter(item =>
+    (item.skill_id && `catalog:${item.skill_id}` === skillTarget) ||
+    (item.released_guide_candidate_id && `guide:${item.released_guide_candidate_id}` === skillTarget));
+  const initialSuggestion = workspace.suggestions?.find(item => item.suggestion_id === suggestedId);
+  const initialTarget = initialSuggestion?.skill_id ? `catalog:${initialSuggestion.skill_id}` :
+    initialSuggestion?.released_guide_candidate_id ? `guide:${initialSuggestion.released_guide_candidate_id}` : undefined;
   const submit = useMutation({ mutationFn: async () => {
     const { skill_target, ...data } = await form.validateFields();
     const [targetKind, targetId] = (skill_target ?? "").split(":");
@@ -42,6 +49,7 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
       ...data, tool_name: isTool ? data.tool_name : undefined,
       skill_id: method === "S2" && targetKind === "catalog" ? Number(targetId) : undefined,
       released_guide_candidate_id: method === "S2" && targetKind === "guide" ? Number(targetId) : undefined,
+      suggestion_id: method === "S2" ? data.suggestion_id : undefined,
       related_passage: method === "P3" ? data.related_passage?.trim() || undefined : undefined,
       failure: { ...data.failure, observed: data.failure.observed ?? "" },
       protection: { ...data.protection, observed: data.protection.observed ?? "" },
@@ -55,13 +63,19 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
     <Modal open={open} title={t("evolution.shareLocalEdit")} onCancel={() => setOpen(false)}
       okText={t("evolution.shareFeedback")} cancelText={t("common.cancel")} confirmLoading={submit.isPending}
       onOk={() => submit.mutate()} destroyOnHidden>
-      <Form form={form} layout="vertical" initialValues={{ method: "P1" }} onValuesChange={() => submit.reset()}>
+      <Form form={form} layout="vertical" initialValues={initialTarget ? {
+        method: "S2", skill_target: initialTarget, suggestion_id: suggestedId, goal: initialSuggestion?.expected_behavior,
+      } : { method: "P1" }} onValuesChange={() => submit.reset()}>
         <Form.Item name="method" label={t("evolution.editMethod")} rules={[{ required: true }]}>
           <Select options={["P1","P3","T1","T2","S2"].map(value => ({ value, label: t(`evolution.method.${value}`) }))}
             onChange={() => form.setFieldValue("share_file_state", false)} />
         </Form.Item>
         {method === "S2" && <Form.Item name="skill_target" preserve={false} label={t("evolution.targetSkill")} rules={[{ required: true }]}>
-          <Select options={skillOptions} />
+          <Select options={skillOptions} onChange={() => form.setFieldValue("suggestion_id", undefined)} />
+        </Form.Item>}
+        {method === "S2" && !!suggestions.length && <Form.Item name="suggestion_id" preserve={false} label={t("evolution.suggestion")}>
+          <Select allowClear options={suggestions.map(item => ({ value: item.suggestion_id,
+            label: `S-${item.suggestion_id} · ${item.expected_behavior}` }))} />
         </Form.Item>}
         <Form.Item name="goal" label={t("evolution.editGoal")} rules={[{ required: true, whitespace: true }]}><Input maxLength={1500} /></Form.Item>
         <Form.Item name="source_passage" label={t("evolution.sourcePassage")} rules={[{ required: true, whitespace: true }]}>

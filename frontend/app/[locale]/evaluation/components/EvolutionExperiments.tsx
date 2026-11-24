@@ -199,14 +199,24 @@ function CaseForm({
   );
 }
 
+interface ComparisonFocus {
+  agent?: number;
+  version?: number;
+  suggestion?: number;
+  candidate?: number;
+  experiment?: number;
+}
+
 function Experiments({
   agent,
   version,
   viewer,
+  focus,
 }: {
   agent: number;
   version: number;
   viewer: string;
+  focus?: ComparisonFocus;
 }) {
   const { t, i18n } = useTranslation("common");
   const { availableLlmModels } = useModelList();
@@ -219,17 +229,17 @@ function Experiments({
   const [modelDollarLimit, setModelDollarLimit] = useState<number | null>(null);
   const [minimum, setMinimum] = useState<number | null>(1);
   const [targets, setTargets] = useState<number[]>([]);
-  const [candidate, setCandidate] = useState<string>();
+  const [candidate, setCandidate] = useState<string | undefined>(focus?.candidate ? `skill_step:${focus.candidate}` : undefined);
   const discoveryCandidate = candidate?.startsWith("skill_discovery:");
   const metric = chosenMetric === "skill_choices_fixed" && !discoveryCandidate ? "tasks_fixed" : chosenMetric;
   const metricOptions: ScreeningCriteria["metric"][] = ["tasks_fixed", "input_token_reduction_pct"];
   if (discoveryCandidate) metricOptions.unshift("skill_choices_fixed");
   const [sourceIds, setSources] = useState<number[]>([]);
-  const [suggestion, setSuggestion] = useState<number>();
+  const [suggestion, setSuggestion] = useState<number | undefined>(focus?.suggestion);
   const [targetCase, setTargetCase] = useState<number>();
   const [evaluatorId, setEvaluator] = useState<number>();
   const [judge, setJudge] = useState<number>();
-  const [selected, setSelected] = useState<number>();
+  const [selected, setSelected] = useState<number | undefined>(focus?.experiment);
   const [adding, setAdding] = useState<boolean | number>(false);
   const [previousTask, setPreviousTask] = useState(false);
   const [preceding, setPreceding] = useState(0);
@@ -252,9 +262,15 @@ function Experiments({
     rules.data?.find((item) => item.evaluator_id === evaluatorId)
       ?.evaluator_type !== "code";
   const report = useQuery({
-    queryKey: ["experiment-report", viewer, selected],
-    queryFn: () => api.report(selected!),
-    enabled: !!selected,
+    queryKey: ["experiment-report", viewer, selected, agent, version],
+    queryFn: async () => {
+      const result = await api.report(selected!);
+      if (selected === focus?.experiment && (result.agent_id !== agent || result.version_no !== version)) {
+        throw new Error(t("evolution.receipt.reportScope"));
+      }
+      return result;
+    },
+    enabled: !!selected && (selected !== focus?.experiment || workspace.isSuccess),
     retry: false,
     refetchInterval: (query) =>
       ["pending", "running"].includes(query.state.data?.status || "")
@@ -630,7 +646,7 @@ function Experiments({
           {development && report.data.status === "finished" && choices && Object.values(development.pairs).some(p => p.base.result?.selection) &&
             <DiscoveryFeedback key={`DiscoveryFeedback-${report.data.experiment_id}`} report={development} workspace={choices} />}
           {development && report.data.status === "finished" && choices && <LocalEditFeedback key={`LocalEditFeedback-${report.data.experiment_id}`}
-            report={development} workspace={choices} agent={agent} version={version} viewer={viewer} />}
+            report={development} workspace={choices} agent={agent} version={version} viewer={viewer} suggestedId={suggestion} />}
           {development && report.data.status === "finished" && baselineReport && choices &&
             <ToolMappingCandidate key={`ToolMappingCandidate-${report.data.experiment_id}`} report={development} cases={choices.cases} onSelect={id => {
               setCandidate(`tool_mapping:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
@@ -796,17 +812,24 @@ function Experiments({
   );
 }
 
-export default function EvolutionExperiments() {
+export default function EvolutionExperiments({ focusParams }: { focusParams?: Pick<URLSearchParams, "get"> }) {
   const { user } = useAuthorizationContext();
   if (!user) return null;
   const viewer = JSON.stringify([user.tenantId, user.id]);
-  return <AgentPicker key={viewer} viewer={viewer} />;
+  const readId = (key: string) => {
+    const raw = focusParams?.get(key);
+    const id = Number(raw);
+    return raw && /^\d+$/.test(raw) && Number.isSafeInteger(id) && id > 0 ? id : undefined;
+  };
+  const focus = { agent: readId("agent_id"), version: readId("version_no"), suggestion: readId("suggestion_id"),
+    candidate: readId("candidate_id"), experiment: readId("experiment_id") };
+  return <AgentPicker key={viewer} viewer={viewer} focus={focus} />;
 }
 
-function AgentPicker({ viewer }: { viewer: string }) {
+function AgentPicker({ viewer, focus }: { viewer: string; focus: ComparisonFocus }) {
   const { t } = useTranslation("common");
-  const [agent, setAgent] = useState<number>();
-  const [version, setVersion] = useState<number>();
+  const [agent, setAgent] = useState<number | undefined>(focus.agent);
+  const [version, setVersion] = useState<number | undefined>(focus.agent ? focus.version : undefined);
   const agents = useQuery({
     queryKey: ["evolution-agents", viewer],
     queryFn: api.agents,
@@ -863,6 +886,7 @@ function AgentPicker({ viewer }: { viewer: string }) {
           agent={agent}
           version={version}
           viewer={viewer}
+          focus={agent === focus.agent && version === focus.version ? focus : undefined}
         />
       )}
     </Flex>

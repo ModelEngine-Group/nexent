@@ -19,6 +19,7 @@ def test_online_scope_http(runtime):
     from backend.http.server.exception_handlers import register_exception_handlers
     from infrastructure.rdb.client import db_client, get_db_session
     from infrastructure.rdb.conversation_record import ConversationRecord
+    from infrastructure.rdb.skill_execution_records import SkillInfo, SkillInstance
     from infrastructure.system_configuration.runtime import load_system_configuration
     from management.api.conversation.conversation_management import router as chats
     from management.api.evaluation.evolution import router as evaluation
@@ -97,11 +98,27 @@ def test_online_scope_http(runtime):
         turn = SimpleNamespace(tenant_id="tenant-native", user_id=owner, reference=SimpleNamespace(conversation_id=17))
         query = "以后这个 Skill 要保留没有负责人的待办。"
         scope = {"agent":7, "version":2, "language":"zh", "instances":[], "released_guide_ids":[29,30,31]}
-        assert "meeting-guide" in record_intent(session, turn, 17, {"query":query, "suggestion_scope":scope})["message"]
+        receipt = record_intent(session, turn, 17, {"query":query, "suggestion_scope":scope})
+        assert "meeting-guide" in receipt["message"] and receipt["suggestion_id"] > 0
         old_scope = {**scope, "version":1}
         assert "没有你可提出改进建议" in record_intent(session, turn, 18, {"query":query, "suggestion_scope":old_scope})["message"]
         unbound_scope = {**scope, "released_guide_ids":[30,31]}
         assert "没有你可提出改进建议" in record_intent(session, turn, 19, {"query":query, "suggestion_scope":unbound_scope})["message"]
+        session.add(SkillInfo(skill_id=3, skill_name="handovers", tenant_id="tenant-native", created_by="other",
+                              updated_by="other", ingroup_permission="READ_ONLY", delete_flag="N"))
+        session.add(SkillInstance(skill_instance_id=3, skill_id=3, tenant_id="tenant-native", agent_id=7,
+                                  version_no=1, enabled=True, delete_flag="N"))
+        suggestion = session.scalar(text("SELECT suggestion_id FROM nexent.evolution_suggestion_t WHERE source_message_id=1"))
+        session.execute(text("""INSERT INTO nexent.conversation_message_t (message_id,conversation_id,message_role,
+            message_content,created_by,updated_by,delete_flag) VALUES (24,17,'assistant','receipt',:owner,:owner,'N')"""), {"owner": owner})
+        session.execute(text("""UPDATE nexent.conversation_run_admission_t SET prepared_assistant_id=24,
+            evolution_reply=jsonb_build_object('suggestion_id',CAST(:suggestion AS bigint)) WHERE conversation_id=17"""),
+            {"suggestion": suggestion})
+        candidate = session.scalar(text("""INSERT INTO nexent.evolution_skill_candidate_t
+            (tenant_id,skill_id,skill_name,base_digest,result_digest,created_by,feedback_digest,feedback)
+            VALUES ('tenant-native',3,'handovers',repeat('a',64),repeat('b',64),'other',repeat('c',64),
+                jsonb_build_object('method','S2','receipt_suggestion_id',CAST(:suggestion AS bigint),
+                'edit',jsonb_build_object('old','old step','new','candidate step'))) RETURNING candidate_id"""), {"suggestion": suggestion})
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(chats, prefix="/api")
@@ -119,6 +136,29 @@ def test_online_scope_http(runtime):
                 turn_ids = dict(session.execute(text("SELECT conversation_id,turn_id FROM nexent.evolution_review_turn_t")).all())
             base = "/api/agent-evolution/agents/7/versions/1/reviews/"
             workspace = "/api/agent-evolution/agents/7/versions/1/workspace"
+            receipt_path = "/api/agent-evolution/conversations/17/receipts/24"
+            candidate_path = receipt_path + f"/skill-candidates/{candidate}"
+            compare = client.get(receipt_path + "/actions", headers=headers)
+            assert compare.status_code == 200 and "no-store" in compare.headers["Cache-Control"]
+            assert compare.json()["data"] == {"compare": {"agent_id": 7, "version_no": 1,
+                "suggestion_id": suggestion, "experiment_id": None, "candidate_id": candidate}}
+            assert client.get(candidate_path, headers=headers).status_code == 403
+            assert client.post(candidate_path, headers=headers, json={"replacement": "other step"}).status_code == 403
+            assert client.get(candidate_path.replace("/receipts/24", "/receipts/17"), headers=headers).status_code == 404
+            with get_db_session() as session:
+                session.execute(text("UPDATE nexent.ag_tenant_agent_t SET created_by='other' WHERE agent_id=7 AND version_no=0"))
+                session.execute(text("UPDATE nexent.ag_skill_info_t SET created_by=:owner WHERE skill_id=3"), {"owner": owner})
+            assert client.get(receipt_path + "/actions", headers=headers).json()["data"] == {"edit": {"candidate_id": candidate}}
+            editable = client.get(candidate_path, headers=headers)
+            assert editable.status_code == 200 and "no-store" in editable.headers["Cache-Control"]
+            assert editable.json()["data"] == {"skill_name": "handovers", "old": "old step", "new": "candidate step"}
+            assert client.get(workspace, headers=headers).status_code == 403
+            with get_db_session() as session:
+                session.execute(text("UPDATE nexent.ag_skill_info_t SET created_by='other' WHERE skill_id=3"))
+            assert client.get(receipt_path + "/actions", headers=headers).json()["data"] == {}
+            assert client.get(candidate_path, headers=headers).status_code == 403
+            with get_db_session() as session:
+                session.execute(text("UPDATE nexent.ag_tenant_agent_t SET created_by=:owner WHERE agent_id=7 AND version_no=0"), {"owner": owner})
 
             def workbench():
                 result = client.get(workspace, headers=headers)

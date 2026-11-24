@@ -23,7 +23,7 @@ from management.db.evaluation.candidates import store_scoped_skill_candidate, st
 from management.db.identity.group import query_group_ids_by_user_in_tenant
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
-from management.services.evaluation.prompt_candidates import propose_local_edit
+from management.services.evaluation.prompt_candidates import propose_local_edit, replace_local_passage
 from management.services.evaluation.evolution_access import require_business_agent_edit
 from management.services.skill.permission import resolve_skill_permission
 
@@ -60,19 +60,24 @@ def feedback_skill_files(tenant, name, agent_version):
     return capture_skill_files(tenant, name)
 
 
-def _revise_guide_body(request, tenant_id, user_id, files, source_key):
+def _guide_sections(files):
     guide = files["SKILL.md"].decode("utf-8")
     header = re.match(r"\A---[ \t]*\r?\n.*?^---[ \t]*(?:\r?\n|\Z)", guide, re.MULTILINE | re.DOTALL)
     if not header:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Cannot delimit the Skill guide's metadata")
+    return guide[:header.end()], guide[header.end():]
+
+
+def _revise_guide_body(request, tenant_id, user_id, files, source_key):
+    header, body = _guide_sections(files)
     result, edit = propose_local_edit(
-        request, tenant_id, user_id, guide[header.end():],
+        request, tenant_id, user_id, body,
         "The correct Skill was already loaded. Compare what the same step did in the failure and good example. "
         "Fix the prerequisite, order, or exception for that step only. Preserve the good branch and output format. "
         "Do not introduce commands, tool privileges, new files or fixed case-specific names.",
         source_key=source_key,
     )
-    updated = {**files, "SKILL.md": (guide[:header.end()] + result).encode("utf-8")}
+    updated = {**files, "SKILL.md": (header + result).encode("utf-8")}
     return updated, edit.model_dump()
 
 
@@ -119,6 +124,47 @@ def generate_scoped_skill_step(request, tenant, user, feedback_id, feedback):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The source Skill changed during generation")
     return {"candidate_id": candidate, "method": "S2", "released_guide_candidate_id": guide_id,
             "base_digest": guide["digest"], "result_digest": result, "edit": edit}
+
+
+def authorize_step_revision(tenant, user, target):
+    if target["skill_id"] is not None:
+        skill = _editable_skill(tenant, user, target["skill_id"])
+        if skill["name"] != target["skill_name"]:
+            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+        return skill
+    require_business_agent_edit(target["agent_id"], tenant, user)
+    return None
+
+
+def revise_skill_step_candidate(tenant, user, target, replacement):
+    skill = authorize_step_revision(tenant, user, target)
+    agent, version, guide_id = (target[key] for key in ("agent_id", "version_no", "released_guide_candidate_id"))
+    base = target["base_digest"]
+    if skill is not None:
+        files = load_skill_package(tenant, skill["skill_id"], base)
+    else:
+        guide, files = scoped_guide_files(tenant, agent, version, guide_id)
+        if guide["digest"] != base:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The published guide differs from the candidate source")
+    edit = target["feedback"]["edit"]
+    if not replacement.strip() or replacement.strip() in {edit["old"].strip(), edit["new"].strip()}:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Change the proposed passage before saving a new candidate")
+    header, body = _guide_sections(files)
+    updated = {**files, "SKILL.md": (header + replace_local_passage(body, edit["old"], replacement)).encode("utf-8")}
+    feedback = {**target["feedback"], "parent_candidate_id": target["candidate_id"],
+                "receipt_suggestion_id": target["suggestion_id"],
+                "edit": {**edit, "new": replacement, "reason": "Manually revised by the Skill maintainer"}}
+    if skill is not None:
+        result = store_skill_package(tenant, skill["skill_id"], updated)
+        current = authorize_step_revision(tenant, user, target)
+        candidate = store_skill_candidate(tenant, current, user, base, result, feedback)
+    else:
+        result = store_new_skill_package(tenant, agent, updated)
+        authorize_step_revision(tenant, user, target)
+        candidate = store_scoped_skill_candidate(tenant, user, agent, version, guide, result, feedback)
+        if candidate is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The published guide changed while saving the revision")
+    return {"candidate_id": candidate}
 
 
 class DiscoveryEdit(BaseModel):

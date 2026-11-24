@@ -13,6 +13,7 @@ from infrastructure.skill_package import encode_skill_package
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import text_digest
 from management.db.evaluation.replay_cases import contains_fixed_cases
+from management.db.evaluation.suggestion_actions import suggestion_targets_skill
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.experiments import _io, _snapshot, snapshot_digest
@@ -129,6 +130,11 @@ def _prepare_handoff(tenant, user, eid, request):
         return plan, feedback
     feedback = dict(method=request.method, source_case_ids=source_ids, agent_id=agent_id, version_no=version, skill_id=request.skill_id,
                     goal=request.goal, source_passage=request.source_passage)
+    if request.method == "S2" and request.suggestion_id is not None:
+        if not suggestion_targets_skill(tenant, agent_id, version, request.suggestion_id, request.skill_id,
+                                        request.released_guide_candidate_id):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The suggestion must target the selected Skill and Agent version")
+        feedback["suggestion_id"] = request.suggestion_id
     for field, status in (("failure", "fail"), ("protection", "pass")):
         excerpt = getattr(request, field)
         trial = trials.get(excerpt.case_id)

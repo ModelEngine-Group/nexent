@@ -643,7 +643,7 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                     receipt = {"business": True, "message": (
                         "I couldn't process the suggestion. Please try again." if user_turn["suggestion_scope"]["language"] == "en"
                         else "本次建议处理失败，请稍后重试。")}
-                row.evolution_reply = {**receipt, "source": source_message_id}
+                row.evolution_reply = {**receipt, "source": source_message_id, "assistant_id": row.prepared_assistant_id}
             if (user_turn.get("evolution_eligible") and source_message_id is not None
                     and (row.evolution_reply or {}).get("business", True)):
                 row.evolution_source_message_id = source_message_id

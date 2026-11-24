@@ -165,7 +165,9 @@ journey(ID, async (scenario) => {
         const { message } = await send(page, "以后这个 Skill 要保留没有负责人的交接事项，负责人写待分配。", /已登记建议 S-[1-9]\d*/);
         sid = (await message.innerText()).match(/S-[1-9]\d*/)?.[0] ?? "";
         expect(sid).toBeTruthy();
-        await send(page, sid, /维护人评审/);
+        const status = await send(page, sid, /维护人评审/);
+        await expect(status.message.getByRole("link", { name: "对比评测" })).toHaveCount(0);
+        await expect(status.message.getByRole("button", { name: "编辑候选" })).toHaveCount(0);
         return "submitted and retrieved the suggestion in its original business chat";
       },
       async () => {
@@ -177,16 +179,46 @@ journey(ID, async (scenario) => {
           (item: { suggestion_id: number }) => item.suggestion_id === Number(sid.slice(2)),
         );
         expect(suggestion?.skill_id).toBe(config.feedback.skill_id);
-        const handoff = await api.post(root + "/experiments/" + config.baseline + "/feedback", {
-          data: { ...config.feedback, goal: suggestion.expected_behavior },
-        });
-        expect(handoff.status()).toBe(200);
-        const { feedback_id: feedback } = (await handoff.json()).data;
-        const result = await api.post(root + "/feedback/" + feedback + "/candidates", { data: { model_id: config.model } });
-        expect(result.status()).toBe(200);
-        const candidate = (await result.json()).data;
+        const generate = async (suggestionId: number, goal: string) => {
+          const handoff = await api.post(root + "/experiments/" + config.baseline + "/feedback", {
+            data: { ...config.feedback, goal, suggestion_id: suggestionId },
+          });
+          expect(handoff.status()).toBe(200);
+          const { feedback_id: feedback } = (await handoff.json()).data;
+          const result = await api.post(root + "/feedback/" + feedback + "/candidates", { data: { model_id: config.model } });
+          expect(result.status()).toBe(200);
+          return (await result.json()).data;
+        };
+        const candidate = await generate(suggestion.suggestion_id, suggestion.expected_behavior);
         expect(candidate.method).toBe("S2");
         expect(candidate.edit.new).not.toBe(candidate.edit.old);
+        await openChat(editor);
+        const own = await send(editor, "以后这个 Skill 要保留没有负责人的交接事项，负责人写待分配。", /已登记建议 S-[1-9]\d*/);
+        const ownId = (await own.message.innerText()).match(/S-([1-9]\d*)/)?.[1];
+        expect(ownId).toBeTruthy();
+        await expect(own.message.getByRole("link", { name: "对比评测" })).toBeVisible();
+        await expect(own.message.getByRole("button", { name: "编辑候选" })).toHaveCount(0);
+        const ownCandidate = await generate(Number(ownId), suggestion.expected_behavior);
+        const refreshed = await send(editor, `S-${ownId}`, /已生成候选，等待对比评测/);
+        await refreshed.message.getByRole("button", { name: "编辑候选" }).click();
+        const dialog = editor.getByRole("dialog", { name: "编辑候选" });
+        const replacement = ownCandidate.edit.new + "\n保留原有的事项编号。";
+        await expect(dialog.getByRole("textbox", { name: "修改后的步骤" })).toHaveValue(ownCandidate.edit.new);
+        await dialog.getByRole("textbox", { name: "修改后的步骤" }).fill(replacement);
+        const saving = editor.waitForResponse((r) => r.url().endsWith(`/skill-candidates/${ownCandidate.candidate_id}`) &&
+          r.request().method() === "POST");
+        await dialog.getByRole("button", { name: "保存为新候选" }).click();
+        const saved = await saving;
+        expect(saved.status()).toBe(200);
+        const revised = (await saved.json()).data.candidate_id;
+        expect(revised).not.toBe(ownCandidate.candidate_id);
+        await expect(dialog.getByText(`已保存候选 #${revised}，可以重新对比评测。`)).toBeVisible();
+        await dialog.getByRole("button", { name: "关闭", exact: true }).last().click();
+        const compare = refreshed.message.getByRole("link", { name: "对比评测" });
+        await expect(compare).toHaveAttribute("href", new RegExp(`candidate_id=${revised}(?:&|$)`));
+        await compare.click();
+        await expect(editor.getByRole("combobox", { name: "选择候选" })).toBeVisible();
+        await expect(editor.getByText(`#${revised} · ${config.skill}`, { exact: true })).toBeVisible();
         await editor.goto(config.origin + "/zh/evaluation", { waitUntil: "domcontentloaded" });
         await editor.getByText("候选对比", { exact: true }).first().click();
         await choose(editor, "智能体", config.display);
@@ -214,14 +246,16 @@ journey(ID, async (scenario) => {
         expect(report.valid_pairs).toBe(3);
         expect(report.counts).toMatchObject({ improved: 1, both_pass: 2, regressed: 0 });
         expect(report.screening.status).toBe("eligible");
-        await send(page, sid, /保护题全部通过/);
+        const status = await send(page, sid, /保护题全部通过/);
+        await expect(status.message.getByRole("link", { name: "对比评测" })).toHaveCount(0);
+        await expect(status.message.getByRole("button", { name: "编辑候选" })).toHaveCount(0);
         const nomination = editor.waitForResponse((r) =>
           r.url() === root + "/experiments/" + experiment + "/confirmation-candidate" && r.request().method() === "POST");
         await editor.getByRole("button", { name: "提交候选给独立评测人", exact: true }).click();
         const receipt = await nomination;
         expect(receipt.status()).toBe(200);
         expect((await receipt.json()).data.experiment_id).toBe(experiment);
-        return "candidate improved its target, preserved both guards and was nominated from the browser";
+        return "authorized receipt opened a newly revised candidate; the business candidate improved its target and was nominated";
       },
       async () => {
         const result = await control("/confirm", { suggestion_id: Number(sid.slice(2)) });

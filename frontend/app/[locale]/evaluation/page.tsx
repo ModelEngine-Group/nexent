@@ -3435,7 +3435,7 @@ export default function EvaluationPage() {
           {
             key: "evolution",
             label: t("evolution.tab"),
-            children: <EvolutionExperiments />,
+            children: <EvolutionExperiments key={searchParams?.toString()} focusParams={searchParams ?? undefined} />,
           },
           {
             key: "evaluators",

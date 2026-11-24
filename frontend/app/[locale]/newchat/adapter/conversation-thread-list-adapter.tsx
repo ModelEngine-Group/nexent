@@ -44,6 +44,7 @@ import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
 import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 
 import { storageService } from "@/services/storageService";
+import { parseSuggestionReceipt } from "@/services/evolutionService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiConversationDetail, ApiMessage } from "@/types/conversation";
@@ -1179,6 +1180,14 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "evolution_suggestion_actions") {
+            const receipt = parseSuggestionReceipt(part.content);
+            if (receipt && receipt.message_id === Number(msg.message_id)) {
+              flushReasoning();
+              content.push({ type: "data", name: "evolution-suggestion-actions", data: receipt });
+            }
+            continue;
+          }
           if (part.type === "evolution_receipt") {
             flushReasoning();
             content.push({ type: "data", name: "evolution-receipt", data: part.content });

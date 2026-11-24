@@ -258,7 +258,9 @@ def _rewrite_message_assets(
 
         msg_payload = message.get("message")
         if isinstance(msg_payload, list):
-            for unit in msg_payload:
+            message["message"] = [unit for unit in msg_payload
+                                  if not isinstance(unit, dict) or unit.get("type") != "evolution_suggestion_actions"]
+            for unit in message["message"]:
                 if isinstance(unit, dict) and isinstance(unit.get("content"), str):
                     unit["content"] = _rewrite_markdown_s3_links(
                         share_token, unit["content"], asset_map

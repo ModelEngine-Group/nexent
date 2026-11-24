@@ -365,6 +365,7 @@ class FeedbackHandoffRequest(BaseModel):
     method: Literal["P1", "P3", "T1", "T2", "S2"]
     skill_id: int | None = Field(default=None, gt=0)
     released_guide_candidate_id: int | None = Field(default=None, gt=0)
+    suggestion_id: int | None = Field(default=None, gt=0)
     goal: str = Field(min_length=1, max_length=1500)
     source_passage: str = Field(min_length=1, max_length=2000)
     related_passage: str | None = Field(default=None, min_length=1, max_length=2000)
@@ -387,6 +388,8 @@ class FeedbackHandoffRequest(BaseModel):
         skill_targets = sum(target is not None for target in (self.skill_id, self.released_guide_candidate_id))
         if skill_targets != int(self.method == "S2"):
             raise ValueError("Select exactly one bound Skill for an S2 handoff")
+        if self.suggestion_id is not None and self.method != "S2":
+            raise ValueError("Link a Skill suggestion only to an S2 handoff")
         if self.failure.case_id == self.protection.case_id:
             raise ValueError("Failure and protection tasks must be distinct")
         return self
@@ -395,6 +398,11 @@ class FeedbackHandoffRequest(BaseModel):
 class GenerateFromFeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     model_id: int = Field(gt=0)
+
+
+class ReviseSkillCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    replacement: str = Field(min_length=1, max_length=3000)
 
 
 class ToolMappingProposal(BaseModel):

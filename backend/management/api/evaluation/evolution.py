@@ -4,13 +4,13 @@ import json
 from typing import Literal
 from functools import partial
 
-from fastapi import APIRouter, Header, Query, Response
+from fastapi import APIRouter, Header, Path, Query, Response
 from contracts.agentos import EvaluationAgentRun
 from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest, CuratorGrant
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
-from contracts.evolution import PublicBenchmarkRequest
+from contracts.evolution import PublicBenchmarkRequest, ReviseSkillCandidateRequest
 from contracts.skill_script_repair import ReviewedScriptBuild, ScriptDraftRequest, ScriptRepairFeedback
 from management.services.evaluation.skill_script_repairs import build_reviewed_script, draft_script, share_script_feedback
 from contracts.tool_repair import ReviewedToolBuild, ToolCallerApproval, ToolRepairRequest
@@ -40,11 +40,45 @@ from management.services.evaluation.feedback_handoff import examples_from_experi
 from management.services.evaluation.feedback_handoff import tool_mapping_from_experiment, tool_sets_from_experiment
 from contracts.evolution import RegressionMembershipRequest, ToolMappingProposal, ToolSetProposal
 from management.services.evaluation.replay_cases import update_regression_case
+from management.services.evaluation.suggestion_actions import suggestion_actions, suggestion_candidate
 from management.services.permission.identity.session import get_current_user_id
 from nexent.core.concurrency import run_blocking
 
 
 router = APIRouter(prefix="/agent-evolution")
+
+
+@router.get("/conversations/{conversation_id}/receipts/{message_id}/actions")
+async def chat_suggestion_actions(response: Response, conversation_id: int = Path(gt=0),
+                                  message_id: int = Path(gt=0), authorization: str = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    result = await run_blocking("evolution-suggestion-actions", suggestion_actions, tenant, user, conversation_id, message_id,
+                                lane="control-io", owner="management")
+    return {"data": result}
+
+
+@router.get("/conversations/{conversation_id}/receipts/{message_id}/skill-candidates/{candidate_id}")
+async def read_chat_skill_candidate(response: Response, conversation_id: int = Path(gt=0),
+                                    message_id: int = Path(gt=0), candidate_id: int = Path(gt=0),
+                                    authorization: str = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    result = await run_blocking("evolution-suggestion-candidate", suggestion_candidate,
+                                tenant, user, conversation_id, message_id, candidate_id,
+                                lane="control-io", owner="management")
+    return {"data": result}
+
+
+@router.post("/conversations/{conversation_id}/receipts/{message_id}/skill-candidates/{candidate_id}")
+async def revise_chat_skill_candidate(body: ReviseSkillCandidateRequest, conversation_id: int = Path(gt=0),
+                                      message_id: int = Path(gt=0), candidate_id: int = Path(gt=0),
+                                      authorization: str = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking("evolution-revise-suggestion-candidate", suggestion_candidate,
+                                tenant, user, conversation_id, message_id, candidate_id, body.replacement,
+                                lane="evaluation", owner="management")
+    return {"data": result}
 
 
 @router.get("/experiments/{experiment_id}/public_benchmark_reports")
