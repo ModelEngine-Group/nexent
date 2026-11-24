@@ -10,8 +10,8 @@ from copy import copy
 from types import SimpleNamespace
 
 from nexent.core.agents.context import ContextItem, ContextManager, ContextManagerConfig
+from nexent.core.agents.context.maintenance import complete_agent_context as complete_context
 from nexent.core.agents.context.models import CurrentActionContextItem
-from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.context.usage import ContextUsageBaseline
 from nexent.core.agents.contracts.context import ContextItemInput
 from nexent.core.agents.contracts.output import ContextCapacityObservation
@@ -171,6 +171,7 @@ class JiuwenContextBridge:
         local_estimate = self._estimate(context.messages, definitions)
         model_key = self._model_key()
         self.usage_baseline.capture(local_estimate, model_key)
+        self.summary_model.model._agent_context = self.context_manager.agent_history_boundary()
         self.last_evidence = context.evidence
         summary = self.context_manager.consume_history_summary_event()
         if summary:
@@ -202,6 +203,7 @@ class JiuwenContextBridge:
         if self.scope.cancelled:
             return
         self._pending_usage = message.usage.input_tokens if message.usage.origin == "provider" else None
+        self._accepted_context_response = message
         self._pending_calls = list(native_message.tool_calls or ())
         self._completed_tool_ids.clear()
         content = "".join(part.get("text", "") for part in message.content_parts)
@@ -236,17 +238,19 @@ class JiuwenContextBridge:
         """Start maintenance at the completed response/tool boundary, never in prepare."""
         if self.scope.cancelled:
             return
-        current, tools, usage = list(self._current_items), list(self._tools), self._pending_usage
+        response, usage = self._accepted_context_response, self._pending_usage
         def work():
-            def assemble(maintenance):
-                return self.context_manager.assemble_context_items(
-                    model=self.summary_model, current_items=current, tools=tools, run_context=self.run_context,
-                    maintenance=maintenance, force_compaction=maintenance)
-            evidence = complete_context(manager=self.context_manager, baseline=self.usage_baseline,
-                model_key=self._model_key(), input_tokens=usage, assemble=assemble,
-                cancelled=lambda: self.scope.cancelled, estimate=self._estimate)
-            if evidence is not None:
-                self.last_evidence = evidence
+            try:
+                if self.scope.cancelled:
+                    return
+                self.usage_baseline.accept(usage)
+                self.last_run_local_summary = complete_context(manager=self.context_manager, response=response,
+                    model=self.summary_model, cancelled=lambda: self.scope.cancelled)
+                if self.last_run_local_summary is not None:
+                    self.usage_baseline.invalidate()
+            finally:
+                if hasattr(response, "_agent_input"):
+                    response._agent_input = None
         self._maintenance_deadline = time.monotonic() + self.context_timeout
         if self.info.model_deadline is not None:
             self._maintenance_deadline = min(self._maintenance_deadline, self.info.model_deadline)
@@ -345,3 +349,7 @@ class JiuwenContextBridge:
             if not execution.future.done():
                 self.manager.cancel(execution.execution_id, reason="Jiuwen context cleanup",
                     wait_timeout=self.info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
+
+        response = getattr(self, "_accepted_context_response", None)
+        if hasattr(response, "_agent_input"):
+            response._agent_input = None

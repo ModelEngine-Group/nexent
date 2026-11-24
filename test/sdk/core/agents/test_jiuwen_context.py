@@ -7,11 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.contracts.config import AgentConfig
-from nexent.core.agents.contracts.run import AgentRunInfo
+
 from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManagerConfig
 from nexent.core.agents.context.history_compression import HistorySummaryInput
 from nexent.core.agents.context.rendering import ContextItemRenderer
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.cores.jiuwen.context import JiuwenContextBridge, SummaryModel
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -63,7 +64,7 @@ def test_passthrough_uses_real_cm_and_keeps_current_call_ids_without_compaction(
     forbidden.assert_not_called()
 
 
-def test_saved_adaptive_mode_calls_shared_summary_and_persists_accepted_candidate():
+def test_response_without_physical_snapshot_cannot_create_a_checkpoint():
     sink = Mock()
     bridge, info = make_bridge("adaptive_compact", [turn()], sink)
     headings = bridge.context_manager.config.summary_json_schema
@@ -74,11 +75,10 @@ def test_saved_adaptive_mode_calls_shared_summary_and_persists_accepted_candidat
     bridge._assemble([{"role": "user", "content": info.query}], [])
     bridge.summary_model.assert_not_called()
     execute_pending_maintenance(bridge)
-    assert bridge.summary_model.called and sink.call_count == 1
-    assert sink.call_args.args[0].covered_through_message_id == 2
-    assert bridge.last_evidence.processing_mode == "adaptive_compact"
-    assert bridge.last_evidence.summary_persist_status == "succeeded"
-    assert info.agent_config.context_manager_config.history_summary_sink is sink
+    bridge.summary_model.assert_not_called()
+    sink.assert_not_called()
+    assert bridge.context_manager._agent_history is None
+    assert bridge.last_evidence.new_summary_coverage is None
 
 
 @pytest.mark.parametrize("content", ["", "   ", None])

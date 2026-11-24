@@ -56,8 +56,13 @@ change:
         pagination/budgets; reject foreign/deleted/non-result units and never authorize reads from summary references.
       - Close native context transactions only for parentless results with an exact provider ID; nested same-name
         successes, structured failures and exceptions cannot consume a pending top-level call or start maintenance early.
+      - Capture actual accepted physical-attempt semantic input privately at the sender boundary; do not substitute telemetry,
+        DB reconstruction, changed tool state or private reasoning. Reuse selected CM history bounds for run-local replacement
+        only, with current tasks/tool groups/new results retained and no checkpoint persistence event.
+      - Keep CodeAgent execution-result views independent, bounded to proven executed results in that sent CM boundary;
+        later tool output stays raw and cancellation commits no new view.
       - Treat local input estimates as advisory in both runtimes; over-window estimates reach model send boundaries.
-        Only valid provider input usage reaching the existing threshold triggers post-response compression; missing
+        Only same-completion provider input plus output usage reaching the threshold triggers run-local summaries; missing
         or unknown usage never substitutes an estimate. No overflow rebuild callback or new recovery flow.
     reason: Reuse targeted UT and existing self-contained Case preparation/cleanup; preserve all prior variants and D1
       contracts without a new test framework.
@@ -87,12 +92,13 @@ change:
       - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
       - test/sdk/core/agents/test_jiuwen_tool_spans.py
       - test/sdk/core/agents/test_persisted_codeagent_actions.py
+      - test/sdk/core/agents/test_run_local_completion.py
       - test/sdk/core/agents/test_post_response_context.py
       - test/sdk/core/agents/test_core_agent.py
       - test/sdk/core/agents/test_pr4005_continuation.py
       - test/sdk/core/model_service/test_legacy_chat_model.py
   notes: SPEC10 Scope Reduction defines retained behavior; SPEC09 retains original failure evidence. Recovery/catalog
     extensions and independent Ops fixes remain withdrawn. Raw journal/DB/context history and current mapper contracts
-    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03/04/05 in the current technical design
+    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03/04/05/06 in the current technical design
     cover bounded maintenance admission, backend-authorized originals after summaries and exact root native-result
-    correlation; AC-REVIEW-04 supersedes both runtimes' estimate-based rejection and compression triggers. AC-REVIEW-05 removes history-summary format/gain adoption gates only. Existing D3 preparation is reused.
+    correlation; AC-REVIEW-04 supersedes both runtimes' estimate-based rejection and compression triggers. AC-REVIEW-05 removes history-summary format/gain adoption gates only. AC-REVIEW-06 uses private actual completion pairing and run-local history only. Existing D3 preparation is reused.

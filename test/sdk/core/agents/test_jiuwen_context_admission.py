@@ -100,7 +100,7 @@ async def test_running_maintenance_is_cancelled_without_committing_after_wait_en
         release.set()
         await asyncio.wrap_future(execution.future)
         assert bridge.last_evidence.maintenance_phase != "post_response"
-        assert bridge.usage_baseline.actual_input_tokens is None
+        assert bridge.context_manager._agent_history is None
         assert len(bridge.executions) == 1
     finally:
         release.set()

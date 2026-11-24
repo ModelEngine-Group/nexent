@@ -1472,6 +1472,8 @@ Additional Args:
                 raise RuntimeFinalAnswer(refusal, "guardrail_input")
             if decision.effective_action == "mask" and decision.masked_messages is not None:
                 input_messages = decision.masked_messages
+                if hasattr(self.model, "_agent_context"):
+                    self.model._agent_context = None
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
 

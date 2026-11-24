@@ -9,9 +9,10 @@ runtime only adapts CoreAgent lifecycle calls to the ContextManager API.
 from __future__ import annotations
 
 import inspect
-from dataclasses import replace
+import logging
 from collections.abc import Sequence
-from copy import deepcopy
+from copy import copy, deepcopy
+from dataclasses import replace
 from typing import Any, Mapping
 
 from smolagents.memory import ActionStep, AgentMemory, TaskStep
@@ -19,11 +20,11 @@ from smolagents.models import ChatMessage, MessageRole, Model
 
 from nexent.core.agents.context.budget import extract_message_text
 from nexent.core.agents.context.evidence import ContextEvidenceCollector
+from nexent.core.agents.context.maintenance import complete_agent_context as complete_context
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
 from nexent.core.agents.context.run_context import ManagedRunContext
 from nexent.core.agents.context.usage import ContextUsageBaseline
-from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.contracts.context import ContextEvidence, ContextMessage, ContextToolView, FinalContext
 from nexent.core.agents.cores.smolagents.context_contracts import (
     ContextRuntime as ContextRuntime,
@@ -37,6 +38,7 @@ from nexent.core.agents.cores.smolagents.context_contracts import (
 
 
 ModelMessage = ChatMessage | dict[str, object]
+logger = logging.getLogger("agent_context.runtime")
 _UNCONFIGURED_RUNTIME_ERROR = "CoreAgent requires a context runtime from the agent factory"
 
 
@@ -58,6 +60,7 @@ class ManagedContextRuntime:
         self._memory_adapter = SmolagentsMemoryAdapter(context_manager)
         self.usage_baseline = ContextUsageBaseline()
         self.last_maintenance_evidence = None
+        self._execution_completions = set()
         self._request_system_messages = ()
         self._request_tail_messages = ()
 
@@ -76,6 +79,7 @@ class ManagedContextRuntime:
         self._evidence.reset()
         self.usage_baseline = ContextUsageBaseline()
         self.last_maintenance_evidence = None
+        self._execution_completions = set()
         self._request_system_messages = ()
         self._request_tail_messages = ()
         self._run_context = self.context_manager.prepare_items_context(
@@ -112,6 +116,8 @@ class ManagedContextRuntime:
             request_system_messages=self._request_system_messages,
             request_tail_messages=self._request_tail_messages,
         )
+        if hasattr(model, "_agent_context"):
+            model._agent_context = self.context_manager.agent_history_boundary()
         self.capture_request(final_context.messages, final_context.tools, model)
         final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
@@ -136,6 +142,8 @@ class ManagedContextRuntime:
             final_answer_templates=final_answer_templates,
             run_context=self._ensure_run_context(memory),
         )
+        if hasattr(model, "_agent_context"):
+            model._agent_context = self.context_manager.agent_history_boundary()
         self.capture_request(final_context.messages, final_context.tools, model)
         final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
@@ -169,47 +177,86 @@ class ManagedContextRuntime:
     def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
                       request_system_messages=None, request_tail_messages=None):
         """Maintain only accepted steps after all native tool results are present."""
-        if response is None:
+        if response is None or getattr(response, "nexent_context_accepted", False) is not True:
+            logger.info("event=context_run_local_skipped reason=not_context_accepted")
             return None
-        usage = getattr(response, "token_usage", None)
-        # A numeric token_usage alone does not establish provider provenance.
-        # Adapters explicitly override it, including None for unknown usage.
-        provider_input = getattr(response, "provider_input_tokens", None)
-        if not hasattr(response, "provider_input_tokens") and getattr(usage, "origin", None) == "provider":
-            provider_input = getattr(usage, "input_tokens", None)
+        from nexent.core.model_service.contracts import AssistantMessage
+
+        canonical = response if isinstance(response, AssistantMessage) else getattr(response, "raw", None)
         stop_event = getattr(model, "stop_event", None)
-        system_messages = (self._request_system_messages if request_system_messages is None
-                           else context_messages(request_system_messages))
-        tail_messages = (self._request_tail_messages if request_tail_messages is None
-                         else context_messages(request_tail_messages))
-        def assemble(maintenance):
-            return self.context_manager.assemble_context_items(
-                model=adapt_context_model(model),
-                current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-                tools=context_tool_views(tools), run_context=self._ensure_run_context(memory),
-                force_compaction=maintenance, maintenance=maintenance,
-                request_system_messages=system_messages,
-                request_tail_messages=tail_messages,
-            )
-        evidence = complete_context(manager=self.context_manager, baseline=self.usage_baseline,
-            model_key=self._model_key(model),
-            input_tokens=provider_input,
-            assemble=assemble, cancelled=lambda: stop_event is not None and stop_event.is_set() is True,
-            estimate=self._estimate)
-        if evidence is not None and evidence.maintenance_phase == "post_response":
-            history = self.context_manager.config.execution_history
-            if history is not None:
-                for _, item in self.context_manager._representation_overrides.values():
-                    key = item.content.get("execution_key")
-                    record = history.get(key) if key else None
-                    if record is not None:
-                        for name in ("summary", "preview"):
-                            if isinstance(item.content.get(name), str):
-                                record.model_view = {name: item.content[name]}
-                                break
-            self.last_maintenance_evidence = evidence
-            self._evidence.record_call(evidence)
-        return evidence
+        if not isinstance(canonical, AssistantMessage):
+            logger.info("event=context_run_local_skipped reason=no_physical_response")
+            return None
+        self.usage_baseline.accept(canonical.usage.input_tokens if canonical.usage.origin == "provider" else None)
+        def cancelled():
+            return stop_event is not None and stop_event.is_set() is True
+        manager = self.context_manager
+        prior_view = (manager._agent_epoch, manager._agent_history, set(manager._agent_covered),
+                      manager._selected_agent_history)
+        try:
+            self.last_run_local_summary = complete_context(manager=self.context_manager, response=canonical,
+                model=adapt_context_model(model), cancelled=cancelled)
+            try:
+                self._complete_sent_execution_views(canonical, adapt_context_model(model), cancelled)
+            except Exception:
+                logger.warning("event=context_execution_view_failed", exc_info=True)
+            if self.last_run_local_summary is not None:
+                self.usage_baseline.invalidate()
+        finally:
+            if cancelled() and manager._agent_epoch == prior_view[0]:
+                manager._agent_history, manager._agent_covered, manager._selected_agent_history = prior_view[1:]
+            canonical._agent_input = None
+        return None
+
+    def _complete_sent_execution_views(self, response, model, cancelled):
+        """Keep the existing result view mechanism, limited to this sent boundary."""
+        from nexent.core.agents.context.maintenance import AgentHistoryBoundary
+        from nexent.core.agents.context.models import CurrentActionContextItem
+        from nexent.core.model_service.contracts import AgentCompletionInput
+
+        snapshot = response._agent_input
+        usage = response.usage
+        counts = (usage.input_tokens, usage.output_tokens)
+        manager, history = self.context_manager, self.context_manager.config.execution_history
+        if (cancelled() or not isinstance(snapshot, AgentCompletionInput) or history is None
+                or not isinstance(snapshot.binding, AgentHistoryBoundary)
+                or snapshot.binding.epoch != manager._agent_epoch or usage.origin != "provider"
+                or any(type(value) is not int or value < 0 for value in counts)
+                or sum(counts) < manager._compaction_trigger_threshold_tokens()
+                or manager.processing_mode != "adaptive_compact"):
+            return
+        identity = (snapshot.request_id, snapshot.attempt)
+        if identity in self._execution_completions:
+            return
+        self._execution_completions.add(identity)
+        staged = []
+        for encoded in snapshot.binding.executions:
+            if cancelled():
+                return
+            item = CurrentActionContextItem.model_validate_json(encoded)
+            record = history.get(item.content["execution_key"])
+            if record is None or (record.model_action or {}).get("dispatch_state") != "dispatched":
+                continue
+            pending_record = copy(record)
+            try:
+                compact = manager._compact_execution(item, model, record_override=pending_record)
+            except Exception:
+                continue
+            finally:
+                record.called |= pending_record.called
+                record.attempted |= pending_record.attempted
+            if compact is None or manager._estimate_items([compact], [], [], []) >= manager._estimate_items([item], [], [], []):
+                continue
+            view = {name: compact.content[name] for name in ("summary", "preview")
+                    if isinstance(compact.content.get(name), str)}
+            if view:
+                staged.append((item, compact, record, pending_record, view))
+        if cancelled():
+            return
+        for item, compact, record, pending_record, view in staged:
+            manager._representation_overrides[item.id] = (manager._fingerprint(item.content), compact)
+            record.summary = pending_record.summary
+            record.model_view = view
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ChatMessage | dict[str, object]]:
         """Return display-only memory messages without compression side effects."""

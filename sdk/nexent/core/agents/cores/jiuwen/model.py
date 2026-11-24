@@ -60,6 +60,7 @@ class JiuwenServiceModel(Model):
         self.text_protocol = not artifact_output and self.profile.capabilities.tools.status != "supported"
         self.converter = ResourceConverterRegistry().resolve(self.profile.bindings.native_converter)
         self.prepare_messages = prepare_messages
+        self._agent_context = None
         self.on_error = on_error
         self.last_usage = None
         self.last_message = None
@@ -198,7 +199,8 @@ class JiuwenServiceModel(Model):
         if self.prepare_messages is not None:
             messages = await self.prepare_messages(messages, tools)
         request = self._request(messages, tools, False, kwargs)
-        message = await self.service.ainvoke(request, self.profile, scope=self.scope, deadline=self.deadline)
+        message = await self.service.ainvoke(request, self.profile, scope=self.scope, deadline=self.deadline,
+                                             **({"agent_context": self._agent_context} if self._agent_context is not None else {}))
         definitions = resource_view(messages, tools).tool_definitions
         native = self._completion(message, request, definitions)
         if self.on_event is not None:
@@ -216,7 +218,8 @@ class JiuwenServiceModel(Model):
         completed = False
         try:
             async with self.service.astream(request, self.profile, scope=self.scope, deadline=self.deadline,
-                                            empty_response_policy="fail") as events:
+                                            empty_response_policy="fail",
+                                            **({"agent_context": self._agent_context} if self._agent_context is not None else {})) as events:
                 async for event in events:
                     self._check_cancelled()
                     if completed:

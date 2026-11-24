@@ -5,6 +5,8 @@ import json
 from copy import deepcopy
 
 import pytest
+from test_jiuwen_model_service import saved_profile as saved_profile
+
 from nexent.core.agents.context.action_history import render_persisted_actions
 from nexent.core.agents.context.execution_history import ExecutionHistory
 
@@ -145,9 +147,10 @@ def test_fix01_real_renderer_and_request_capture_use_restored_representation():
 
 @pytest.mark.parametrize("dispatched", [False, True])
 def test_fix01_parsed_candidate_is_not_promoted_to_executed_source(mocker, dispatched):
-    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
     from smolagents.agents import CodeAgent
     from smolagents.memory import ActionStep, ToolCall
+
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 
     mocker.patch.object(CodeAgent, "_finalize_step")
     agent = CoreAgent.__new__(CoreAgent)
@@ -183,50 +186,52 @@ def test_fix01_shared_store_keeps_historical_references_owner_scoped():
         store.read("unregistered-child", "message:42/unit-index:5")
 
 
-def test_fix01_post_response_acceptance_saves_view_without_changing_raw_result():
-    from types import SimpleNamespace
-
-    from nexent.core.agents.context import ContextManager, ContextManagerConfig
-    from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
-    from smolagents.memory import ActionStep, TaskStep, ToolCall
+@pytest.mark.parametrize("cancel", [False, True])
+def test_fix01_post_response_acceptance_saves_only_sent_execution_view(saved_profile, monkeypatch, cancel):
+    from smolagents.memory import ActionStep, ToolCall
     from smolagents.monitoring import Timing
+    from test_run_local_completion import setup_core
 
-    history = ExecutionHistory()
+    sender, runtime, model, memory = setup_core("smolagents", saved_profile, (70, 30), history=False)
+    history = runtime.context_manager.config.execution_history = ExecutionHistory()
     fields = {"STDOUT": "head\n" + "middle\n" * 2000 + "tail\n"}
     key = history.register("owner", fields)
     history.bind(key, 42, 5)
-    config = ContextManagerConfig(
-        context_window_tokens=20000,
-        effective_input_limit_tokens=20000,
-        compaction_trigger_threshold_tokens=16000,
-        compaction_target_tokens=12000,
-        chars_per_token=1,
-        execution_history=history,
-        policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
-    )
-    runtime = ManagedContextRuntime(ContextManager(config))
-    memory = SimpleNamespace(steps=[TaskStep(task="initial")])
-    model = SimpleNamespace(model_id="controlled")
-    runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
-    step = ActionStep(step_number=1, timing=Timing(start_time=0))
-    step.tool_calls = [
-        ToolCall(id="python", name="python_interpreter", arguments="print(computed)")
-    ]
-    step.execution_fields = fields
-    step.execution_key = key
-    memory.steps.append(step)
-    # The summary boundary is controlled; the real manager commits the resulting view.
+    history.get(key).model_action = {"dispatch_state": "dispatched"}
     history.get(key).summary = "accepted factual summary"
-    result = runtime.complete_step(
-        model=model,
-        memory=memory,
-        current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=17000)),
-    )
-    assert result.maintenance_phase == "post_response"
-    assert history.get(key).model_view == {"summary": "accepted factual summary"}
-    assert history.get(key).fields == fields
-    assert history.get(key).reference == "message:42/unit-index:5"
+    step = ActionStep(step_number=1, timing=Timing(start_time=0))
+    step.tool_calls = [ToolCall(id="python", name="python_interpreter", arguments="print(computed)")]
+    step.execution_fields, step.execution_key = fields, key
+    memory.steps.append(step)
+    prepared = runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    response = model(prepared.messages)
+    response.nexent_context_accepted = True
+    later_key = history.register("owner", {"STDOUT": "later " * 10000})
+    history.bind(later_key, 43, 6)
+    later = ActionStep(step_number=2, timing=Timing(start_time=0))
+    later.execution_key = later_key
+    later.execution_fields = history.get(later_key).fields
+    memory.steps.append(later)
+    if cancel:
+        compact = runtime.context_manager._compact_execution
+        def cancelled_compact(*args, **kwargs):
+            result = compact(*args, **kwargs)
+            kwargs["record_override"].summary = "UNCOMMITTED_SUMMARY"
+            model.stop_event.set()
+            return result
+        monkeypatch.setattr(runtime.context_manager, "_compact_execution", cancelled_compact)
+    runtime.complete_step(model=model, memory=memory, current_run_start_idx=0, response=response)
+    assert history.get(key).model_view == (None if cancel else {"summary": "accepted factual summary"})
+    assert history.get(key).fields == fields and history.get(key).reference == "message:42/unit-index:5"
+    assert history.get(later_key).model_view is None
+    assert history.get(key).summary == "accepted factual summary"
+    assert "UNCOMMITTED_SUMMARY" not in json.dumps(history.get(key).payload())
+    assert sender.summary_count == 0  # No old history exists to replace.
+    if not cancel:
+        prepared = runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+        model(prepared.messages)
+        assert "accepted factual summary" in str(sender.bodies[-1])
+        assert "later " * 10000 in str(sender.bodies[-1])
 
 
 def test_fix01_summary_retains_error_and_empty_stdout_in_original():
@@ -247,12 +252,13 @@ def test_fix01_summary_retains_error_and_empty_stdout_in_original():
 
 
 def test_fix01_real_core_records_only_the_dispatched_interpreter_action():
+    from smolagents.agents import EMPTY_PROMPT_TEMPLATES
+    from smolagents.models import ChatMessage, Model
+
     from nexent.core.agents.context import ContextManager
     from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
     from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
     from nexent.core.utils.observer import MessageObserver
-    from smolagents.agents import EMPTY_PROMPT_TEMPLATES
-    from smolagents.models import ChatMessage, Model
 
     class ControlledModel(Model):
         count = 0

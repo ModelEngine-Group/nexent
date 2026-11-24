@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import threading
+import uuid
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
@@ -22,7 +23,7 @@ from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
 from .llm_summary import LLMSummary
 from .long_term_memory_selector import select_long_term_memory
-from .models import ContextItem, ContextItemInput, ContextItemType, normalize_context_inputs
+from .models import ContextItem, ContextItemInput, ContextItemType, HistorySummaryContextItem, normalize_context_inputs
 from .policy import ContextProcessingMode, resolve_policy
 from .run_context import ManagedRunContext
 from .selection import select_context_items
@@ -78,6 +79,12 @@ class ContextManager:
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
         self._run_compaction_attempts = 0
+        self._agent_epoch = uuid.uuid4().hex
+        self._agent_history = None
+        self._agent_covered = set()
+        self._selected_agent_history = ()
+        self._selected_agent_executions = ()
+        self._agent_completions = set()
         self._representation_overrides: dict[str, tuple[str, ContextItem]] = {}
 
     @property
@@ -116,6 +123,12 @@ class ContextManager:
     ) -> ManagedRunContext:
         self._history_candidate = None
         self._run_compaction_attempts = 0
+        self._agent_epoch = uuid.uuid4().hex
+        self._agent_history = None
+        self._agent_covered = set()
+        self._selected_agent_history = ()
+        self._selected_agent_executions = ()
+        self._agent_completions = set()
         self._current_item_cache.clear()
         self._representation_overrides.clear()
         source = self._item_source(items)
@@ -189,6 +202,10 @@ class ContextManager:
                 }
             ]
             persisted_items.append(self._history_candidate.as_item())
+        if self._agent_history is not None:
+            persisted_items = [item for item in persisted_items
+                               if (item.id, self._fingerprint(item.content)) not in self._agent_covered]
+            persisted_items.append(self._agent_history)
         original_items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
         items = []
         for item in original_items:
@@ -347,6 +364,11 @@ class ContextManager:
                 if original is not None and item is not original:
                     self._representation_overrides[item.id] = (self._fingerprint(original.content), item)
         final_items.sort(key=lambda item: item.layout_key)
+        self._selected_agent_history = tuple((item.id, self._fingerprint(item.content)) for item in final_items
+            if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN})
+        self._selected_agent_executions = tuple(item.model_dump_json() for item in final_items
+            if item.type == ContextItemType.CURRENT_ACTION and item.content.get("execution_key")
+            and not item.content.get("loaded_result") and item.metadata.get("representation") != "compact")
         rendered = self.build_context_messages(final_items)
         # Stable item messages remain first for KV-cache reuse.
         stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
@@ -500,12 +522,13 @@ class ContextManager:
             return self._select_long_term_memories(result, long_term_items, model=model)
         return result
 
-    def _compact_execution(self, item, model):
+    def _compact_execution(self, item, model, *, record_override=None):
         from .execution_history import summarize_record
 
         history = self.config.execution_history
         key = item.content.get("execution_key")
-        record = history.get(key) if history is not None and key else None
+        record = record_override if record_override is not None else (
+            history.get(key) if history is not None and key else None)
         if record is None:
             if "execution_fields" not in item.content:
                 return item.compact()
@@ -620,6 +643,23 @@ class ContextManager:
         """Compatibility entry; production Core bridges project their own memory."""
         from .compatibility import memory_adapter
         return memory_adapter(self)._project_current_run(memory, start)
+
+    def agent_history_boundary(self):
+        from .maintenance import AgentHistoryBoundary
+
+        return AgentHistoryBoundary(self._agent_epoch, self._selected_agent_history, self._selected_agent_executions)
+
+    def adopt_agent_summary(self, boundary, text, request_id):
+        """Replace only the selected old history; never current items or DB units."""
+        if boundary.epoch != self._agent_epoch or boundary.items != self._selected_agent_history:
+            return False
+        self._agent_covered.update(boundary.items)
+        self._agent_history = HistorySummaryContextItem(
+            id="run-local-summary:" + request_id, type=ContextItemType.HISTORY_SUMMARY,
+            content={"summary": {"markdown": text}}, source=("accepted_completion",),
+            metadata={"run_local": True})
+        self._selected_agent_history = ((self._agent_history.id, self._fingerprint(self._agent_history.content)),)
+        return True
 
     def _persist_candidate(self, candidate: HistorySummaryCandidate) -> str:
         sink = self.config.history_summary_sink
