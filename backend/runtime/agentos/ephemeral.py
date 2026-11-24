@@ -55,9 +55,13 @@ async def _observer_stream(info, execution, deferred, *, creator_mode=None, anno
         )) as events:
             async for chunk in events:
                 event = json.loads(chunk)
-                if isinstance(event, dict) and event.get("type") != "skill_artifact" and not boundary_delivered:
+                if not isinstance(event, dict):
+                    continue
+                kind = event.get("type")
+                if kind != "skill_artifact" and (not boundary_delivered or kind == "run_terminal"):
                     yield _sse(event)
-                    boundary_delivered = creator_mode == "nl2agent" and event.get("type") == "nl2a"
+                    if creator_mode == "nl2agent" and kind == "nl2a":
+                        boundary_delivered = True
         if creator_mode:
             # The SDK drains observer messages and consumes worker exceptions without re-raising.
             execution.future.result()

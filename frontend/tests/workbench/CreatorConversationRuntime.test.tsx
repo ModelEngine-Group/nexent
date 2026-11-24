@@ -88,19 +88,37 @@ function Scenario() {
     </AssistantRuntimeProvider>
   );
 }
-it("renders a second metadata-only clarification through the actual runtime and message renderer", async () => {
+it("completes the clarification message and submits the card to start one follow-up run", async () => {
   // Intranet HTTP pages may not expose crypto.randomUUID.
   vi.stubGlobal("crypto", {});
   service.runAgent
     .mockResolvedValueOnce(reply(card("Round one", "First choice")))
     .mockResolvedValueOnce(reply(card("Round two", "Second choice")));
-  render(<Scenario />);
+  const { container } = render(<Scenario />);
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
   const first = await screen.findByRole("radio", { name: "First choice" });
+  await waitFor(() =>
+    expect(
+      container.querySelector(
+        '[data-slot="aui_assistant-message-completion-indicator"] [data-state="success"]'
+      )
+    ).toBeInTheDocument()
+  );
   expect(first).toBeEnabled();
   fireEvent.click(first);
-  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  const submit = screen.getByRole("button", { name: "Submit" });
+  expect(submit).toBeEnabled();
+  fireEvent.click(submit);
   await waitFor(() => expect(service.runAgent).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(service.runAgent.mock.calls[1][0].query)).toMatchObject({
+    type: "nl2agent_card_action",
+    subtype: "requirement_clarification",
+    agent_id: 42,
+    action: "submit",
+    result: {
+      answers: [{ question_id: "goal", value: "yes", other_text: null }],
+    },
+  });
   const second = await screen.findByRole("radio", { name: "Second choice" });
   expect(second).toBeEnabled();
   expect(first).toBeDisabled();

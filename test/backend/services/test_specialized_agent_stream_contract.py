@@ -38,6 +38,11 @@ def grant(mocker):
 async def test_creation_stream_preserves_events_and_releases_grant(mocker, grant, terminal):
     opened, closed = grant
     exited = False
+    native_terminal = {
+        "type": "run_terminal", "content": "", "schema_version": 1, "runtime_mode": "native_agent",
+        "agent_core": "jiuwen", "turn_id": "turn", "sequence": 2, "status": "completed",
+        "end_reason": "awaiting_input", "final_content": "", "final_block_ids": [], "error": None,
+    }
 
     async def events():
         nonlocal exited
@@ -51,6 +56,9 @@ async def test_creation_stream_preserves_events_and_releases_grant(mocker, grant
             elif terminal == "nl2a":
                 yield b'data: {"type":"nl2a","content":"card"}\n\n'
                 yield b'data: {"type":"final_answer","content":"must not leak"}\n\n'
+                yield b"data: " + json.dumps(native_terminal).encode() + b"\n\n"
+                yield b'data: {"type":"nl2a","content":"duplicate card"}\n\n'
+                yield b'event: agentos_execution_complete\ndata: {}\n\n'
             elif terminal == "cancelled":
                 raise asyncio.CancelledError
         finally:
@@ -67,8 +75,10 @@ async def test_creation_stream_preserves_events_and_releases_grant(mocker, grant
             await anext(stream)
     else:
         output = [json.loads(frame[6:]) async for frame in stream]
-        expected = {"complete": "final_answer", "error": "error", "nl2a": "nl2a"}
-        assert [event["type"] for event in output] == [expected[terminal]]
+        expected = {"complete": ["final_answer"], "error": ["error"], "nl2a": ["nl2a", "run_terminal"]}
+        assert [event["type"] for event in output] == expected[terminal]
+        if terminal == "nl2a":
+            assert output[-1] == native_terminal
     remote.assert_awaited_once_with(_PAYLOAD, _ACTOR.user_id, _ACTOR.tenant_id)
     opened.assert_called_once_with(_PAYLOAD.run_id, 7, _ACTOR, False)
     closed.assert_called_once_with(_PAYLOAD.run_id)

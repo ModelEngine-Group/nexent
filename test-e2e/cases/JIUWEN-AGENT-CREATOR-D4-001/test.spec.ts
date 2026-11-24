@@ -20,6 +20,8 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
           submit: "提交",
           submitted: "已提交",
           summary: "已提交需求信息",
+          complete: "已完成",
+          failed: "执行失败",
         }
       : {
           create: "Create Agent",
@@ -27,8 +29,10 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
           submit: "Submit",
           submitted: "Submitted",
           summary: "Requirements submitted",
+          complete: "Complete",
+          failed: "Execution failed",
         };
-  const container = config.container || "nexent-runtime";
+  const container = config.container || "nexent-config";
   const target =
     "/tmp/agent_card_" + randomUUID().replaceAll("-", "").slice(0, 12);
   const privateState = join(contract.caseDir, "private-state.json");
@@ -39,8 +43,6 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
     JSON.parse(
       docker(
         "exec",
-        "-e",
-        "PYTHONPATH=/opt/backend",
         container,
         "/opt/backend/.venv/bin/python",
         target + ".py",
@@ -100,14 +102,8 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
   await contract.precondition(
     contract.expectedIds("preconditions")[0],
     async () => {
-      selectedCore = (
-        await (
-          await page.request.get(base + "/api/tenant_config/deployment_version")
-        ).json()
-      ).agent_core;
-      expect(["smolagents", "jiuwen"]).toContain(selectedCore);
-      setup = true;
       fixture("setup", config.auth_source_agent_id);
+      setup = true;
       docker("cp", container + ":" + target + ".json", privateState);
       state = JSON.parse(readFileSync(privateState, "utf8"));
       await page.context().addCookies([
@@ -127,6 +123,12 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
           expires: state.expires_at,
         },
       ]);
+      const deployment = await page.request.get(
+        base + "/api/tenant_config/deployment_version",
+      );
+      expect(deployment.ok()).toBe(true);
+      selectedCore = (await deployment.json()).agent_core;
+      expect(["smolagents", "jiuwen"]).toContain(selectedCore);
     },
   );
   const steps = contract.expectedIds("steps");
@@ -155,14 +157,6 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
     }
     const parts = messages[0].message;
     expect(parts.filter((p: any) => p.type === "nl2a")).toHaveLength(1);
-    const terminals = parts
-      .filter((p: any) => p.type === "run_terminal")
-      .map((p: any) => JSON.parse(p.content));
-    if (selectedCore === "jiuwen") {
-      expect(terminals).toHaveLength(1);
-      expect(terminals[0].end_reason).toBe("awaiting_input");
-      expect(terminals[0].error).toBeNull();
-    }
     if (messages.length > 1) {
       const actions = body.data[0].message
         .filter((m: any) => m.role === "user")
@@ -192,6 +186,11 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
       page.getByText(
         /NEXENT_(?:TERMINAL_MISSING|TOOL_RESULT_UNPAIRED|TOOL_RESULT_MISSING)|JIUWEN_FINAL_OUTPUT_INVALID/,
       ),
+    ).toHaveCount(0);
+    await expect(
+      page
+        .locator('[data-slot="aui_assistant-message-completion-indicator"]')
+        .getByText(labels.failed, { exact: true }),
     ).toHaveCount(0);
   };
   await contract.step(steps[0], async () => {
@@ -226,15 +225,22 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
         ),
       ).toBe(true);
     expect(stream.filter((e: any) => e.type === "error")).toEqual([]);
-    const terminal = stream.find((e: any) => e.type === "run_terminal");
-    if (selectedCore === "jiuwen")
-      expect(terminal?.end_reason).toBe("awaiting_input");
     await expect(card()).toBeVisible();
     await expect(
       card().getByRole("button", { name: labels.submit, exact: true }),
     ).toBeVisible();
+    await expect(
+      page
+        .locator('[data-slot="aui_assistant-message-completion-indicator"]')
+        .getByText(labels.complete, { exact: true }),
+    ).toHaveCount(1);
     await noErrors();
     audit = fixture("audit", cid);
+    if (selectedCore === "jiuwen") {
+      expect(audit.clarification_terminals).toEqual([
+        { status: "completed", end_reason: "awaiting_input", has_error: false },
+      ]);
+    }
     expect(audit.mode).toBe("agent_create");
     expect(audit.description || "").toBe("");
     expect(audit.prompt || "").toBe("");
@@ -293,13 +299,25 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
         r.request().method() === "POST" && r.url().includes("/nl2agent/run"),
       { timeout: 30000 },
     );
-    await card()
-      .getByRole("button", { name: labels.submit, exact: true })
-      .click();
+    const submit = card().getByRole("button", {
+      name: labels.submit,
+      exact: true,
+    });
+    await expect(submit).toBeEnabled();
+    await noErrors();
+    await submit.click();
     const submittedResponse = await pending;
     submittedAction = JSON.parse(
       submittedResponse.request().postDataJSON().query,
     );
+    expect(submittedAction).toMatchObject({
+      type: "nl2agent_card_action",
+      agent_id: audit.target_id,
+      subtype: "requirement_clarification",
+      action: "submit",
+      card_id: clarification.card_id,
+    });
+    expect(submittedAction.result.answers.length).toBeGreaterThan(0);
     await expect(page.getByText(labels.summary, { exact: true })).toHaveCount(
       1,
     );

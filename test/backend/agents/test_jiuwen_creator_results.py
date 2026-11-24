@@ -100,16 +100,29 @@ async def test_card_blocks_next_model_prepare_and_tool_dispatch():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ending", ["run_terminal", "error"])
-async def test_creator_stream_hides_output_after_first_card_and_drains_worker(monkeypatch, ending):
+@pytest.mark.parametrize("terminal_status,end_reason", [
+    ("completed", "awaiting_input"),
+    ("failed", "JIUWEN_EXECUTION_FAILED"),
+    ("stopped", "cancelled"),
+])
+async def test_creator_stream_preserves_terminal_after_first_card_and_drains_worker(
+    monkeypatch, terminal_status, end_reason,
+):
     from runtime.agentos import ephemeral
 
     adapter, _observer, _stop = setup_adapter()
-    events = [{"type": "nl2a", "content": "card"}, {"type": "execution_logs", "content": "hidden"},
+    card = {"type": "nl2a", "content": "card"}
+    terminal = {
+        "type": "run_terminal", "content": "", "schema_version": 1, "runtime_mode": "native_agent",
+        "agent_core": "jiuwen", "turn_id": "turn", "sequence": 2, "status": terminal_status,
+        "end_reason": end_reason, "final_content": "", "final_block_ids": [],
+    }
+    events = [card, {"type": "execution_logs", "content": "hidden"},
               {"type": "tool_result", "content": "already admitted call finished"},
-              {"type": "execution_logs", "content": "still hidden after the result"},
+              {"type": "error", "content": "legacy output stays hidden"},
+              terminal,
               {"type": "nl2a", "content": "duplicate card must stay hidden"},
-              {"type": ending, "content": "actual outcome"}, {"type": "done", "content": ""}]
+              {"type": "done", "content": ""}]
     closed = Mock()
 
     async def run(*args, **kwargs):
@@ -122,7 +135,7 @@ async def test_creator_stream_hides_output_after_first_card_and_drains_worker(mo
     monkeypatch.setattr(ephemeral, "agent_run", run)
     stream = ephemeral._observer_stream(adapter.run_info, Mock(), Mock(), creator_mode="nl2agent")
     output = [item async for item in stream]
-    assert [json.loads(item.removeprefix("data: ")) for item in output if item.startswith("data: ")] == [events[0]]
+    assert [json.loads(item.removeprefix("data: ")) for item in output if item.startswith("data: ")] == [card, terminal]
     assert output[-1] == "event: agentos_execution_complete\ndata: {}\n\n"
     closed.assert_called_once_with()
 

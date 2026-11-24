@@ -55,11 +55,28 @@ def main():
             messages = records(session, ConversationMessage, ConversationMessage.conversation_id == cid)
             assert any(state["marker"] in (r["message_content"] or "") for r in messages if r["message_role"] == "user")
             units = records(session, ConversationMessageUnit, ConversationMessageUnit.conversation_id == cid)
+            clarification_message_ids = {
+                unit["message_id"] for unit in units
+                if unit["unit_type"] == "nl2a"
+                and json.loads(unit["unit_content"]).get("subtype") == "requirement_clarification"
+            }
+            clarification_terminals = []
+            for unit in units:
+                if unit["unit_type"] != "run_terminal" or unit["message_id"] not in clarification_message_ids:
+                    continue
+                terminal = json.loads(unit["unit_content"])
+                if not terminal.get("invocation_id"):
+                    clarification_terminals.append({
+                        "status": terminal["status"],
+                        "end_reason": terminal["end_reason"],
+                        "has_error": terminal.get("error") is not None,
+                    })
             target = conv.target or {}
             assert target.get("type") == "agent" and target["id"] not in state["original_agents"]
             draft = session.query(AgentInfo).filter_by(agent_id=target["id"], version_no=0, created_by=state["actor"], tenant_id=state["tenant"]).one()
             print(json.dumps({"target_id": target["id"], "description": draft.description, "prompt": draft.prompt,
                               "messages_hash": digest(messages), "units_hash": digest(units),
+                              "clarification_terminals": clarification_terminals,
                               "mode": (conv.workbench_config or {}).get("mode")}))
         return
     assert mode == "cleanup"
@@ -75,11 +92,11 @@ def main():
         for aid in drafts:
             session.query(AgentInfo).filter_by(agent_id=aid, version_no=0, created_by=state["actor"], tenant_id=state["tenant"]).one()
     headers = {"Authorization": "Bearer " + state["access_token"]}
-    with httpx.Client(headers=headers, trust_env=False, timeout=30) as client:
+    with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=30) as client:
         for cid in owned:
-            assert client.delete(f"http://nexent-runtime:5014/conversation/{cid}").status_code == 200
+            client.delete(f"/conversation/{cid}").raise_for_status()
         for aid in drafts:
-            assert client.request("DELETE", "http://nexent-config:5010/agent", json={"agent_id": aid}).status_code == 200
+            client.request("DELETE", "/agent", json={"agent_id": aid}).raise_for_status()
     with get_db_session() as session:
         assert original(session, state) == state["original_hashes"], "Cleanup changed pre-existing data"
         assert not session.query(AgentInfo).filter(AgentInfo.agent_id.in_(drafts), AgentInfo.delete_flag == "N").count()
