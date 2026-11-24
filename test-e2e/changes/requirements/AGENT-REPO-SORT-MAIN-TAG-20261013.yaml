@@ -26,7 +26,7 @@ change:
       - Repository listing summaries carry the publish time, and latest-first ordering sorts dated records by time descending with a repository-id tie-break while undated records stay last; the default order is unchanged, and unparsable publish times or a scope tenant without a published version collapse into the id-ordered tail instead of failing the page.
       - The listing route forwards the sort flag to the implementation, and each listing summary and detail exposes is_main_agent, defaulting to true when the agent is unknown or absent.
       - Tag normalization recovers tags from JSON and Python-repr stringified arrays and returns an empty list for unrecoverable input, and the list card renders the recovered tag instead of the raw stringified value.
-      - The my-agents tab sends sort_by_update_time only when the latest-published order is selected and renders the main-agent badge for a main agent while leaving an ordinary agent unbadged.
+      - The unified repository tab sends sort_by_published_time only when the latest-published order is selected, and the repository card meta row marks a main agent while leaving an ordinary agent marked as a sub-agent; after the personal my-agents view was retired this marker and ordering are proved at the browser boundary by AGENT-REPO-SORT-MAIN-TAG-D4-001.
     reason: >-
       The sort ordering, the main-agent annotation and the tag matching each have isolated unit and component contracts proved
       with controlled inputs: the backend queries, ordering helper and route forwarding are exercised by traditional backend UT,
@@ -40,7 +40,7 @@ change:
       - test/backend/services/test_agent_service.py
       - frontend/tests/component/agentTagsNormalization.test.tsx
       - frontend/tests/component/agentListCard.test.tsx
-      - frontend/tests/component/myAgentMainBadge.test.tsx
+      - frontend/tests/component/casRepositoryIdentity.test.tsx
   notes: >-
     Acceptance: selecting latest-first reorders listings by publish time with undated records last on both the repository
     tab and the my-agents tab; main-agent and ordinary listings are visually distinguished by the amber main-agent badge on
@@ -60,4 +60,10 @@ change:
     browser boundary by steps 5-7 of AGENT-REPO-SORT-MAIN-TAG-D4-001 and are recorded as journey evidence rather than UT
     obligations. Multi-tag OR filtering and the English locale strings still have no automated assertion and are recorded
     here as deferred coverage rather than claimed as proved.
+
+    Reconciled by AGENT-SPACE-MY-AGENT-RETIRE-20261118: the personal my-agents tab and its myAgentMainBadge.test.tsx
+    suite were retired with the view; the unified repository tab now sends sort_by_published_time and shows the
+    main/ordinary marker as meta-row text, so the selector reference is redirected to casRepositoryIdentity.test.tsx
+    for the surviving card identity and publish-time coverage while the marker and ordering stay proved by the
+    migrated D4 case.
 

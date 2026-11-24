@@ -19,15 +19,15 @@ change:
     decision: strengthen
     test_selectors:
       - frontend/tests/component/agentListCard.test.tsx
-      - frontend/tests/component/myAgentMainBadge.test.tsx
+      - frontend/tests/component/casRepositoryIdentity.test.tsx
       - frontend/tests/component/mineApplyListingModal.test.tsx
       - frontend/tests/component/agentSinglePrompt.test.tsx
       - frontend/tests/component/agentEditorDraft.test.tsx
     behaviors:
       - Card configuration and version-menu callbacks remain connected without publication shortcuts.
-      - Repository cards omit listing and evaluation entries while retaining review and usage-guide actions.
+      - Repository cards keep identity metadata and omit in-card listing and evaluation entries; those actions stay on the management card menu and the take-down lives in the repository detail drawer.
       - The existing application dialog retains tag validation, icon upload and prefill coverage.
       - Hidden prompts render a confidential notice without required errors or edit controls; editable empty and whitespace prompts remain required.
       - Server prompt visibility metadata survives initialization and readback, resets between Agents, and stays outside editable drafts and save payloads.
     reason: Frontend entry relocation reuses existing API and mutation contracts. At the user's request, the dedicated listing-action test file was removed; its eligibility, evaluation-navigation and submission-outcome assertions are no longer retained as component UT. Existing component suites and formal regressions remain. Python and deployment behavior do not change.
-  notes: Design and execution evidence maintained in ../nexent-doc/docs/Developing/dev-agent-listing-evaluation/task.md. D4 retains its existing synthetic routes and self-contained preparation with no real business assets.
+  notes: Design and execution evidence maintained in ../nexent-doc/docs/Developing/dev-agent-listing-evaluation/task.md. D4 retains its existing synthetic routes and self-contained preparation with no real business assets. Reconciled by AGENT-SPACE-MY-AGENT-RETIRE-20261118 - the repository-card action assertions previously held in myAgentMainBadge.test.tsx followed the retired my-agents view, so the selector now references casRepositoryIdentity.test.tsx for the surviving repository card identity coverage while menu actions stay proved by agentListCard.test.tsx.

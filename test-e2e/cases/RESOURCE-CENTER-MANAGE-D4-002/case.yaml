@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D4
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-MANAGE-D4-002
+  feature_id: RESOURCE-CENTER-MANAGE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-MANAGE-RULE-012
+  - RESOURCE-CENTER-MANAGE-RULE-013
+  - RESOURCE-CENTER-MANAGE-RULE-014
+  title: 当前页批量删除、失败保留与多副本卸载
+  type: E2E
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 当前页批量删除、失败保留与多副本卸载
+  preconditions:
+  - BLOCKED：需要部署包含 MCP 批删接口的后端，并补齐固定脚本、隔离测试数据和 case-local execution 绑定。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 在Skill管理与MCP管理当前页混合放置可编辑/只读项，执行全选后换页、筛选及换Tab
+    expected: 全选只包含当前页可操作项；每次上下文变化清选择，其他页无删除请求。
+  - order: 2
+    action: 选择三条可操作项使一条被引用/删除失败后确认批量操作
+    expected: MCP 对选中项发一次 POST /mcp-tools/batch_delete 请求，本地与仓库记录分别沿用对应的单删权限；Skill 逐条调用。成功项移除并刷新，失败项及具体错误保留选择；不把部分成功显示为全部成功。
+  - order: 3
+    action: 对同源多副本选择一个具体可卸载skill_id，再对只读和来源未知历史项操作
+    expected: 仅指定副本发出删除；只读显示已安装且无卸载按钮；历史来源未关联给出说明和原管理入口，不据名称删除。
+  expected_results:
+  - 全选只包含当前页可操作项；每次上下文变化清选择，其他页无删除请求。
+  - MCP 对选中项发一次 POST /mcp-tools/batch_delete 请求，本地与仓库记录分别沿用对应的单删权限；Skill 逐条调用。成功项移除并刷新，失败项及具体错误保留选择；不把部分成功显示为全部成功。
+  - 仅指定副本发出删除；只读显示已安装且无卸载按钮；历史来源未关联给出说明和原管理入口，不据名称删除。
+  forbidden_side_effects:
+  - 不得跨页或删除未选中项。
+  - 不得把原仓库Skill当本地副本删除。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-012
+    - AC-013
+    - AC-014
+    design_status: Designed; product, script and runtime evidence PENDING.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 全选只包含当前页可操作项；每次上下文变化清选择，其他页无删除请求。（SPEC AC-012, AC-013, AC-014）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: MCP 对选中项发一次 POST /mcp-tools/batch_delete 请求，本地与仓库记录分别沿用对应的单删权限；Skill 逐条调用。成功项移除并刷新，失败项及具体错误保留选择；不把部分成功显示为全部成功。（SPEC AC-012, AC-013, AC-014）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 仅指定副本发出删除；只读显示已安装且无卸载按钮；历史来源未关联给出说明和原管理入口，不据名称删除。（SPEC AC-012, AC-013, AC-014）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  actor: 具备Case指定能力的租户用户及审核员
+  journey:
+  - 在Skill管理与MCP管理当前页混合放置可编辑/只读项，执行全选后换页、筛选及换Tab
+  - 选择三条可操作项使一条被引用/删除失败后确认批量操作
+  - 对同源多副本选择一个具体可卸载skill_id，再对只读和来源未知历史项操作
+  final_business_result:
+  - 全选只包含当前页可操作项；每次上下文变化清选择，其他页无删除请求。
+  - MCP 对选中项发一次 POST /mcp-tools/batch_delete 请求，本地与仓库记录分别沿用对应的单删权限；Skill 逐条调用。成功项移除并刷新，失败项及具体错误保留选择；不把部分成功显示为全部成功。
+  - 仅指定副本发出删除；只读显示已安装且无卸载按钮；历史来源未关联给出说明和原管理入口，不据名称删除。
+  failure_evidence:
+  - 脱敏截图、浏览器控制台、网络请求及响应、run_id和实际被测commit；不保存凭据。

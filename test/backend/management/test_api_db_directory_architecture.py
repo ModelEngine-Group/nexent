@@ -98,9 +98,10 @@ from management.db import models
 from management.db.base import SimpleTableBase, TableBase
 classes = {value for value in vars(models).values()
            if isinstance(value, type) and hasattr(value, '__tablename__')}
-assert len(classes) == 76
-assert len(TableBase.metadata.tables) == 71
+assert len(classes) == 77
+assert len(TableBase.metadata.tables) == 72
 assert len(SimpleTableBase.metadata.tables) == 5
+assert models.ResourceReview.__module__ == 'management.db.resource_review_model'
 assert models.OuterApiTool is models.OuterApiService
 assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
 assert models.ModelMonitoringRecord.__module__ == 'infrastructure.rdb.model_monitoring'
@@ -123,4 +124,4 @@ print(json.dumps({'tables': len(classes), 'client_loaded': False}))
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == {"tables": 76, "client_loaded": False}
+    assert json.loads(result.stdout) == {"tables": 77, "client_loaded": False}

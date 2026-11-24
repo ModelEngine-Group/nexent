@@ -1,0 +1,816 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import { ResourceReviewLink } from "@/app/resource-space/components/ResourceReviewCenter";
+import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import RepositoryDisplayControls from "@/app/resource-space/components/RepositoryDisplayControls";
+import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
+import { formatRegistryDate } from "@/lib/mcpTools";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { App, Button, Dropdown, Input, Popover } from "antd";
+import type { MenuProps } from "antd";
+import { useTranslation } from "react-i18next";
+import {
+  Bot,
+  ChevronDown,
+  ClipboardCheck,
+  Clock,
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Search,
+  Tag,
+  Trash2,
+  Upload,
+} from "lucide-react";
+
+import { CreateNewSkillCard } from "./CreateNewSkillCard";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
+import ResourceCard from "@/components/resource/ResourceCard";
+import { MineApplyListingModal } from "./MineApplyListingModal";
+import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
+import { AsyncContent } from "./SkillRepositoryControls";
+import {
+  formatRepositoryDate,
+  getSkillRepositoryStatusLabel,
+  pickReviewDisplayRepositoryInfo,
+} from "./skillRepositoryShared";
+import type {
+  MyEditableSkillItem,
+  MyEditableSkillListItem,
+  MySkillRepositoryInfoItem,
+  NewSkillPaddingItem,
+  SkillRepositoryListingCreatePayload,
+  SkillRepositoryListingStatus,
+} from "@/types/skillRepository";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
+
+export function isNewSkillPaddingItem(
+  item: MyEditableSkillListItem
+): item is NewSkillPaddingItem {
+  return "new_skill_padding" in item && item.new_skill_padding === true;
+}
+
+export type SkillReviewDeepLinkTarget = {
+  skillRepositoryId: number;
+  skillId: number;
+};
+
+function findRepositoryInfoById(
+  repositoryInfo: MySkillRepositoryInfoItem[],
+  skillRepositoryId: number
+): MySkillRepositoryInfoItem | null {
+  return (
+    repositoryInfo.find(
+      (item) => item.skill_repository_id === skillRepositoryId
+    ) ?? null
+  );
+}
+
+export function MineSkillsView({
+  skills,
+  searchQuery,
+  onSearchChange,
+  tagDefinitions,
+  tagPredicates,
+  onTagPredicatesChange,
+  isLoading,
+  isError,
+  isFetching,
+  page,
+  total,
+  onPageChange,
+  pageSize,
+  onPageSizeChange,
+  onRetry,
+  onCreateSkill,
+  onCreateSkillWithChat,
+  onEditSkill,
+  onViewSkill,
+  onDeleteSkill,
+  onApplyListing,
+  isUpdatingStatus,
+  onSetNotShared,
+  reviewDeepLink = null,
+  deepLinkFallbackSkill = null,
+  deepLinkFallbackLoading = false,
+  onReviewDeepLinkConsumed,
+}: {
+  skills: MyEditableSkillListItem[];
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  tagDefinitions: TagDefinition[];
+  tagPredicates: TagResourcePredicate[];
+  onTagPredicatesChange: (predicates: TagResourcePredicate[]) => void;
+  isLoading: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  pageSize: number;
+  onPageSizeChange: (size: number) => void;
+  onRetry: () => void;
+  onCreateSkill: () => void;
+  onCreateSkillWithChat: () => void;
+  onEditSkill: (skill: MyEditableSkillItem) => void;
+  onViewSkill: (skill: MyEditableSkillItem) => void;
+  onDeleteSkill: (skill: MyEditableSkillItem) => Promise<void>;
+  onApplyListing: (
+    skill: MyEditableSkillItem,
+    payload: SkillRepositoryListingCreatePayload
+  ) => Promise<void>;
+  isUpdatingStatus: boolean;
+  onSetNotShared: (repositoryInfo: MySkillRepositoryInfoItem) => Promise<void>;
+  reviewDeepLink?: SkillReviewDeepLinkTarget | null;
+  deepLinkFallbackSkill?: MyEditableSkillItem | null;
+  deepLinkFallbackLoading?: boolean;
+  onReviewDeepLinkConsumed?: () => void;
+}) {
+  const { t } = useTranslation("common");
+  const presentation = useRepositoryPresentation();
+  const [batchMode, setBatchMode] = useState(false);
+  const { message, modal } = App.useApp();
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewModalSkill, setReviewModalSkill] =
+    useState<MyEditableSkillItem | null>(null);
+  const [reviewModalInfo, setReviewModalInfo] =
+    useState<MySkillRepositoryInfoItem | null>(null);
+  const [applyQueue, setApplyQueue] = useState<MyEditableSkillItem[]>([]);
+  const applyModalSkill = applyQueue[0] ?? null;
+  const [applySubmitting, setApplySubmitting] = useState(false);
+  const consumedDeepLinkRef = useRef<number | null>(null);
+
+  const openReviewModal = (
+    skill: MyEditableSkillItem,
+    repositoryInfo?: MySkillRepositoryInfoItem | null
+  ) => {
+    const info =
+      repositoryInfo ??
+      pickReviewDisplayRepositoryInfo(skill.repository_info ?? []);
+    if (!info) {
+      return;
+    }
+    setReviewModalSkill(skill);
+    setReviewModalInfo(info);
+    setReviewModalOpen(true);
+  };
+
+  const closeReviewModal = () => {
+    setReviewModalOpen(false);
+    setReviewModalSkill(null);
+    setReviewModalInfo(null);
+  };
+
+  const handleSetNotShared = async () => {
+    if (!reviewModalInfo) return;
+
+    try {
+      await onSetNotShared(reviewModalInfo);
+      closeReviewModal();
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("skillRepository.common.statusUpdateFailed")
+      );
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    if (!reviewDeepLink) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+
+    if (consumedDeepLinkRef.current === reviewDeepLink.skillRepositoryId) {
+      return;
+    }
+
+    if (isLoading && deepLinkFallbackLoading) {
+      return;
+    }
+
+    const skillFromList = skills.find(
+      (item): item is MyEditableSkillItem =>
+        !isNewSkillPaddingItem(item) && item.skill_id === reviewDeepLink.skillId
+    );
+    const skill = skillFromList ?? deepLinkFallbackSkill;
+
+    if (!skill) {
+      if (isLoading || deepLinkFallbackLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.skillNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    const repositoryInfo = findRepositoryInfoById(
+      skill.repository_info ?? [],
+      reviewDeepLink.skillRepositoryId
+    );
+
+    if (!repositoryInfo) {
+      message.error(t("notifications.deepLink.skillNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Resolve the review deep link once its skill data is available.
+    openReviewModal(skill, repositoryInfo);
+    consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
+    onReviewDeepLinkConsumed?.();
+  }, [
+    deepLinkFallbackLoading,
+    deepLinkFallbackSkill,
+    isLoading,
+    message,
+    onReviewDeepLinkConsumed,
+    reviewDeepLink,
+    skills,
+    t,
+  ]);
+
+  const handleEnableSkill = (skill: MyEditableSkillItem) => {
+    setApplyQueue([skill]);
+  };
+
+  const handleConfirmApply = async (
+    payload: SkillRepositoryListingCreatePayload
+  ) => {
+    if (!applyModalSkill) {
+      return;
+    }
+    setApplySubmitting(true);
+    try {
+      await onApplyListing(applyModalSkill, payload);
+    } finally {
+      setApplySubmitting(false);
+    }
+  };
+
+  const handleDeleteSkill = (skill: MyEditableSkillItem) => {
+    const title = skill.name?.trim() || t("skillRepository.common.untitled");
+    modal.confirm({
+      mask: { closable: true },
+      title: t("skillRepository.mine.deleteTitle"),
+      content: t("skillRepository.mine.deleteContent", { name: title }),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await onDeleteSkill(skill);
+      },
+    });
+  };
+
+  return (
+    <div
+      className={presentation ? "space-y-4 rounded-2xl bg-white" : "space-y-5"}
+    >
+      <div
+        className={
+          presentation
+            ? "flex flex-wrap items-center justify-between gap-2"
+            : "flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4"
+        }
+      >
+        <div
+          className={
+            presentation
+              ? "flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-2"
+              : "contents"
+          }
+        >
+          <div
+            className={
+              presentation
+                ? "relative min-w-0 max-w-[800px] flex-[1_1_320px]"
+                : "relative w-full sm:flex-1"
+            }
+          >
+            <Input
+              value={searchQuery}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder={t("skillRepository.searchPlaceholder")}
+              prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+              className={
+                presentation
+                  ? "h-8 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] [&_input::placeholder]:text-[#AEAEAE]"
+                  : "rounded-xl"
+              }
+              allowClear
+            />
+          </div>
+          {presentation ? (
+            <TagFilterPopover
+              appearance="select"
+              definitions={tagDefinitions}
+              value={tagPredicates}
+              onChange={onTagPredicatesChange}
+              buttonClassName="!h-8 !w-[296px] max-w-full !justify-start !rounded !border-[#C9C9C9] !px-3 !text-sm"
+            />
+          ) : (
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              content={
+                <div className="w-72">
+                  <TagFilterControls
+                    definitions={tagDefinitions}
+                    value={tagPredicates}
+                    onChange={onTagPredicatesChange}
+                  />
+                  {tagPredicates.length > 0 ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs text-blue-600 hover:underline"
+                      onClick={() => onTagPredicatesChange([])}
+                    >
+                      {t("repository.tagFilter.clear")}
+                    </button>
+                  ) : null}
+                </div>
+              }
+            >
+              <Button
+                className={
+                  presentation
+                    ? "!h-8 !w-[296px] max-w-full !justify-start !rounded !px-3"
+                    : undefined
+                }
+                type={tagPredicates.length > 0 ? "primary" : "default"}
+                icon={<Tag className="size-3.5" aria-hidden />}
+              >
+                {t("repository.tagFilter.button")}
+              </Button>
+            </Popover>
+          )}
+        </div>
+        {presentation ? (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {batchMode ? (
+              <Button onClick={() => setBatchMode(false)}>
+                {t("skillRepository.mine.exitManagement")}
+              </Button>
+            ) : (
+              <>
+                <Button onClick={() => setBatchMode((value) => !value)}>
+                  {t(
+                    batchMode
+                      ? "common.done"
+                      : "skillRepository.mine.batchManage"
+                  )}
+                </Button>
+                <Dropdown
+                  trigger={["click"]}
+                  menu={{
+                    items: [
+                      {
+                        key: "import",
+                        label: t("skillRepository.mine.createImport"),
+                        onClick: onCreateSkill,
+                      },
+                      {
+                        key: "chat",
+                        label: t("skillRepository.mine.createChat"),
+                        onClick: onCreateSkillWithChat,
+                      },
+                    ],
+                  }}
+                >
+                  <Button type="primary">
+                    {t("skillRepository.mine.createSkill")}
+                    <ChevronDown size={14} aria-hidden />
+                  </Button>
+                </Dropdown>
+                <RepositoryDisplayControls showSort={false} />
+              </>
+            )}
+          </div>
+        ) : (
+          <RepositoryDisplayControls />
+        )}
+      </div>
+
+      <div className="min-h-0">
+        <AsyncContent
+          isLoading={isLoading}
+          isError={isError}
+          isFetching={isFetching}
+          onRetry={onRetry}
+          isEmpty={skills.length === 0 && !batchMode}
+          emptyDescription={t("skillRepository.mine.empty")}
+        >
+          <>
+            <ResourceCardGrid
+              isCreateItem={isNewSkillPaddingItem}
+              onListSelect={(skill) => {
+                if (batchMode || isNewSkillPaddingItem(skill)) return;
+                if (canEditSkill(skill)) onEditSkill(skill);
+                else onViewSkill(skill);
+              }}
+              batchDelete={async (skill) => {
+                if (!isNewSkillPaddingItem(skill)) await onDeleteSkill(skill);
+              }}
+              canBatchDelete={
+                !presentation || batchMode
+                  ? (skill) =>
+                      !isNewSkillPaddingItem(skill) &&
+                      skill.permission === "EDIT"
+                  : undefined
+              }
+              selectionKey={JSON.stringify([
+                searchQuery,
+                tagPredicates,
+                batchMode,
+              ])}
+              items={skills}
+              page={page}
+              total={total}
+              onPageChange={onPageChange}
+              pageSize={pageSize}
+              onPageSizeChange={presentation ? onPageSizeChange : undefined}
+              paginateItems={false}
+              showToolbar={false}
+              floatingBatch={batchMode ? {
+                onExit: () => setBatchMode(false),
+                canApply: (skill) => !isNewSkillPaddingItem(skill) &&
+                  skill.can_publish === true && skill.latest_review?.status !== "pending_review" &&
+                  !sharedListing(skill),
+                apply: (items) => setApplyQueue(items.filter((skill): skill is MyEditableSkillItem => !isNewSkillPaddingItem(skill))),
+                canTakeDown: (skill) => !isNewSkillPaddingItem(skill) &&
+                  skill.can_publish === true && Boolean(sharedListing(skill)),
+                takeDown: async (items) => {
+                  const failures = new Map<string, string>();
+                  for (const skill of items) {
+                    if (isNewSkillPaddingItem(skill)) continue;
+                    const listing = sharedListing(skill);
+                    if (!listing) continue;
+                    try {
+                      await onSetNotShared(listing);
+                    } catch (error) {
+                      failures.set(String(skill.skill_id), error instanceof Error
+                        ? error.message : t("skillRepository.common.statusUpdateFailed"));
+                    }
+                  }
+                  return failures;
+                },
+              } : undefined}
+              renderItem={(skill, _index, selection) =>
+                isNewSkillPaddingItem(skill) ? (
+                  <CreateNewSkillCard
+                    key="new-skill-padding"
+                    onClick={onCreateSkill}
+                  />
+                ) : (
+                  <MineSkillCard
+                    key={skill.skill_id}
+                    skill={skill}
+                    selection={selection}
+                    managing={Boolean(presentation) && batchMode}
+                    onEdit={() => onEditSkill(skill)}
+                    onView={() => onViewSkill(skill)}
+                    onDelete={() => handleDeleteSkill(skill)}
+                    onApplyListing={() => handleEnableSkill(skill)}
+                    onViewReview={() => openReviewModal(skill)}
+                  />
+                )
+              }
+            />
+          </>
+        </AsyncContent>
+      </div>
+
+      <SkillReviewStatusModal
+        open={reviewModalOpen}
+        skill={reviewModalSkill}
+        repositoryInfo={reviewModalInfo}
+        isUpdatingStatus={isUpdatingStatus}
+        onClose={closeReviewModal}
+        onSetNotShared={handleSetNotShared}
+      />
+      <MineApplyListingModal
+        key={applyModalSkill?.skill_id ?? "closed"}
+        open={Boolean(applyModalSkill)}
+        skill={applyModalSkill}
+        isVersionUpdate={Boolean(
+          applyModalSkill && sharedListing(applyModalSkill)
+        )}
+        loading={applySubmitting}
+        onClose={() => setApplyQueue([])}
+        onSubmitted={() => setApplyQueue((queue) => queue.slice(1))}
+        onConfirm={handleConfirmApply}
+      />
+    </div>
+  );
+}
+
+const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
+  not_shared:
+    "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  pending_review:
+    "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
+  rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
+  shared:
+    "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+};
+
+function getMineSkillMenuItems({
+  canApplyListing,
+  isVersionUpdate,
+  canEdit,
+  canDelete,
+  canPublish,
+  hasRepositoryInfo,
+  t,
+  onApplyListing,
+  onViewReview,
+  onEdit,
+  onDelete,
+}: {
+  canApplyListing: boolean;
+  isVersionUpdate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canPublish: boolean;
+  hasRepositoryInfo: boolean;
+  t: (key: string) => string;
+  onApplyListing: () => void;
+  onViewReview: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}): MenuProps["items"] {
+  const items: MenuProps["items"] = [];
+  if (canEdit) {
+    items.push({
+      key: "edit",
+      label: t("common.edit"),
+      icon: <Pencil className="size-3.5" aria-hidden />,
+      onClick: onEdit,
+    });
+  }
+  if (canApplyListing) {
+    items.push({
+      key: "apply-listing",
+      label: t(
+        isVersionUpdate
+          ? "repository.mine.submitVersionUpdate"
+          : "repository.mine.applyForListing"
+      ),
+      icon: <Upload className="size-3.5" aria-hidden />,
+      onClick: onApplyListing,
+    });
+  }
+  if (canPublish && hasRepositoryInfo) {
+    items.push({
+      key: "review",
+      label: t("skillRepository.mine.viewReviewProgress"),
+      icon: <ClipboardCheck className="size-3.5" aria-hidden />,
+      onClick: onViewReview,
+    });
+  }
+  if (canDelete) {
+    items.push({
+      key: "delete",
+      label: t("common.delete"),
+      icon: <Trash2 className="size-3.5" aria-hidden />,
+      danger: true,
+      onClick: onDelete,
+    });
+  }
+  return items;
+}
+
+function hasSkillWritePermission(skill: MyEditableSkillItem): boolean {
+  return skill.permission !== "READ_ONLY" && skill.permission !== "PRIVATE";
+}
+
+function canEditSkill(skill: MyEditableSkillItem): boolean {
+  return skill.source !== "official" && hasSkillWritePermission(skill);
+}
+
+function sharedListing(skill: MyEditableSkillItem) {
+  return pickReviewDisplayRepositoryInfo(
+    (skill.repository_info ?? []).filter((item) => item.status === "shared")
+  );
+}
+
+export function MineSkillCard({
+  skill,
+  selection,
+  managing = false,
+  onEdit,
+  onView,
+  onDelete,
+  onApplyListing,
+  onViewReview,
+}: {
+  skill: MyEditableSkillItem;
+  selection?: ReactNode;
+  managing?: boolean;
+  onEdit: () => void;
+  onView: () => void;
+  onDelete: () => void;
+  onApplyListing: () => void;
+  onViewReview: () => void;
+}) {
+  const { t } = useTranslation("common");
+  const presentation = useRepositoryPresentation();
+  const displayName = useUserDisplayName();
+  const author = displayName(
+    skill.author_cas_username,
+    skill.author?.trim() || t("skillRepository.detail.unknownAuthor")
+  );
+  const latestRepository = sharedListing(skill);
+  const hasRepositoryInfo = latestRepository != null;
+  const repositoryStatus = latestRepository?.status ?? "not_shared";
+  const canEdit = canEditSkill(skill);
+  const canPublish = skill.can_publish === true;
+  const updatedTime = skill.updated_at ?? skill.update_time;
+  const updatedAt = formatRepositoryDate(updatedTime);
+  const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
+  const canApplyListing =
+    canPublish && skill.latest_review?.status !== "pending_review";
+  const menuItems = getMineSkillMenuItems({
+    canApplyListing,
+    isVersionUpdate: hasRepositoryInfo,
+    canEdit,
+    canDelete: hasSkillWritePermission(skill),
+    canPublish,
+    hasRepositoryInfo: false,
+    t,
+    onApplyListing,
+    onViewReview,
+    onEdit,
+    onDelete,
+  });
+  const hasMenuItems = Boolean(menuItems?.length);
+
+  return (
+    <ResourceCard
+      actionsOnly={presentation?.layout === "list"}
+      title={
+        presentation ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate" title={skill.name || undefined}>
+              {skill.name || t("skillRepository.common.untitled")}
+            </span>
+            {skill.latest_review &&
+            skill.latest_review.status !== "approved" ? (
+              <span className="inline-flex shrink-0 items-center font-normal">
+                <ResourceReviewLink review={skill.latest_review} />
+              </span>
+            ) : null}
+            {hasRepositoryInfo && (
+              <span
+                className={`shrink-0 rounded px-2 text-xs leading-5 font-normal ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
+              >
+                {getSkillRepositoryStatusLabel(t, repositoryStatus)}
+              </span>
+            )}
+          </span>
+        ) : (
+          skill.name || t("skillRepository.common.untitled")
+        )
+      }
+      subtitle={presentation ? <span title={author}>{author}</span> : undefined}
+      className={presentation ? "h-full" : "h-full min-h-[200px] p-4"}
+      onClick={managing ? undefined : canEdit ? onEdit : onView}
+      icon={
+        presentation ? (
+          <SkillTypeIcon className="rounded" name={skill.name || ""} tags={skill.tags} />
+        ) : (
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Bot className="size-5" aria-hidden />
+          </div>
+        )
+      }
+      fixedHeaderLayout={!presentation}
+      description={
+        skill.description || t("skillRepository.common.noDescription")
+      }
+      tags={
+        tags.length > 0 ? (
+          <>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className={
+                  presentation
+                    ? "h-5 rounded bg-[rgba(25,25,25,0.05)] px-2 text-xs leading-5 text-[#393939]"
+                    : "rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                }
+              >
+                {tag}
+              </span>
+            ))}
+          </>
+        ) : undefined
+      }
+      meta={
+        presentation ? (
+          <>
+            <span className="shrink-0">
+              {t("resourceCenter.skillInstalls", {
+                count: skill.downloads ?? 0,
+              })}
+            </span>
+            {updatedAt && updatedTime && (
+              <span className="inline-flex items-center gap-1">
+                <Clock size={12} aria-hidden />
+                {t("agentConfig.list.updatedAt", {
+                  date: formatRegistryDate(updatedTime),
+                })}
+              </span>
+            )}
+          </>
+        ) : updatedAt ? (
+          <span className="inline-flex min-w-0 items-center gap-1 truncate">
+            <Clock className="size-3.5" aria-hidden />
+            {updatedAt}
+          </span>
+        ) : undefined
+      }
+      footerLayout="inline"
+      headerActions={
+        managing ? (
+          selection
+        ) : hasMenuItems || hasRepositoryInfo ? (
+          <div
+            className={
+              presentation
+                ? "flex min-h-12 max-w-[120px] flex-col justify-between"
+                : "grid h-[60px] max-w-[120px] grid-rows-2"
+            }
+          >
+            <div className="flex items-center justify-end">
+              {hasMenuItems ? (
+                <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+                  <Button
+                    type="text"
+                    size="small"
+                    className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                    icon={<MoreHorizontal className="size-4" aria-hidden />}
+                    aria-label={t("skillRepository.common.moreActions")}
+                  />
+                </Dropdown>
+              ) : null}
+            </div>
+            <div className="flex min-w-0 items-center justify-end">
+              {(!presentation || presentation.layout === "list") &&
+              skill.latest_review?.status !== "approved" ? (
+                <ResourceReviewLink review={skill.latest_review} />
+              ) : null}
+              {!presentation && hasRepositoryInfo ? (
+                <span
+                  className={`block max-w-full truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
+                >
+                  {getSkillRepositoryStatusLabel(t, repositoryStatus)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : undefined
+      }
+      footer={
+        presentation ? undefined : (
+          <div className="flex items-center gap-2">
+            {canEdit ? (
+              <Button
+                type="text"
+                size="small"
+                className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                icon={<Pencil className="size-3.5" aria-hidden />}
+                onClick={onEdit}
+              >
+                {t("common.edit")}
+              </Button>
+            ) : (
+              <Button
+                type="text"
+                size="small"
+                className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                icon={<Eye className="size-3.5" aria-hidden />}
+                onClick={onView}
+              >
+                {t("skillRepository.common.view")}
+              </Button>
+            )}
+          </div>
+        )
+      }
+    />
+  );
+}

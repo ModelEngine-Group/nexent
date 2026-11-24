@@ -13,9 +13,11 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   Modal,
+  Drawer,
   Tabs,
   Form,
   Input,
+  Select,
   Button,
   message,
   Flex,
@@ -49,6 +51,12 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
+import SkillPanelTitle from "@/components/skill/SkillPanelTitle";
+import SkillConfigurationHeader from "@/components/skill/SkillConfigurationHeader";
+import SkillGroupSelection from "@/components/skill/SkillGroupSelection";
+import { usePermission } from "@/hooks/permission/usePermission";
+import resourcePanel from "@/components/resource/resource-panel.module.css";
+import { RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH } from "@/const/resourceRepository";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -64,6 +72,7 @@ const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
 ]);
 
 interface SkillBuildModalProps {
+  repositoryLayout?: boolean;
   isOpen: boolean;
   onCancel: () => void;
   onSuccess: () => void | Promise<void>;
@@ -157,11 +166,17 @@ export default function SkillBuildModal({
   onBeforeEditSave,
   zIndex = 1000,
   initialTab = "interactive",
+  repositoryLayout = false,
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
+  const isRepositoryEdit = repositoryLayout && isEditMode;
+  const { isReady, can } = usePermission();
+  const showGroupSteps = isRepositoryEdit && isReady && can("group:read");
+  const [groupStep, setGroupStep] = useState(false);
+  const showGroupStep = showGroupSteps && groupStep;
   const creationConversationId = useRef<string | undefined>(undefined);
   const savedCreatorSkillId = useRef<number | undefined>(undefined);
   const isAdmin = hasRole(user, ...CAN_EDIT_ALL_ROLES);
@@ -171,7 +186,12 @@ export default function SkillBuildModal({
       !!user?.id &&
       String(editingSkill.created_by) === String(user.id));
   const canEditGroupSettings = isAdmin || isCreator;
-  const { data: groupData } = useGroupList(user?.tenantId ?? null);
+  const {
+    data: groupData,
+    isLoading: groupsLoading,
+    isError: groupsError,
+    refetch: refreshGroups,
+  } = useGroupList(user?.tenantId ?? null);
   const groupNamesById = useMemo(
     () =>
       new Map(
@@ -359,6 +379,7 @@ export default function SkillBuildModal({
     };
 
     setActiveTab("interactive");
+    setGroupStep(false);
     setEditFilesError(null);
     setLoadedEditSkillId(null);
     setIsLoadingEditFiles(true);
@@ -460,6 +481,7 @@ export default function SkillBuildModal({
   };
 
   const closeModal = () => {
+    setGroupStep(false);
     form.resetFields();
     onCancel();
   };
@@ -937,6 +959,44 @@ export default function SkillBuildModal({
       setSkillTabs={setSkillTabs}
       activeSkillTab={activeSkillTab}
       setActiveSkillTab={setActiveSkillTab}
+      repositoryEditor={repositoryLayout}
+      showRepositoryGroups={showGroupStep}
+      repositoryGroupSettings={
+        showGroupSteps ? (
+          <div hidden={!showGroupStep} className="rounded-lg bg-white p-4">
+            <Form.Item
+              name="ingroup_permission"
+              label={t("skillCreation.groupPermission")}
+            >
+              <Select
+                disabled={!canEditGroupSettings}
+                options={(["EDIT", "READ_ONLY", "PRIVATE"] as const).map(
+                  (value) => ({
+                    value,
+                    label: t(
+                      `tenantResources.knowledgeBase.permission.${value}`
+                    ),
+                  })
+                )}
+              />
+            </Form.Item>
+            <Form.Item name="group_ids" label={t("skillCreation.selectGroups")}>
+              <SkillGroupSelection
+                groups={
+                  canEditGroupSettings
+                    ? filteredGroups
+                    : (groupData?.groups ?? [])
+                }
+                loading={groupsLoading}
+                isError={groupsError}
+                disabled={!canEditGroupSettings}
+                preserveUnlistedSelection
+                onRetry={() => void refreshGroups()}
+              />
+            </Form.Item>
+          </div>
+        ) : undefined
+      }
       isStreaming={isStreaming}
       onNameChange={handleNameChange}
       textareaRefs={textareaRefs}
@@ -988,89 +1048,147 @@ export default function SkillBuildModal({
     return t("skillManagement.mode.create");
   };
 
+  const Panel = repositoryLayout ? Drawer : Modal;
   return (
     <>
-      <Modal
+      <Panel
         title={
-          <div>
-            <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-              {isEditMode
-                ? t("skillManagement.edit.title")
-                : t("skillManagement.title")}
+          repositoryLayout ? (
+            <SkillPanelTitle
+              name={editingSkillName}
+              tags={editingSkill?.tags}
+              title={
+                isEditMode
+                  ? editingSkillName || t("skillManagement.edit.title")
+                  : t("skillManagement.title")
+              }
+              subtitle={
+                isEditMode && editingSkillName
+                  ? t("skillManagement.edit.title")
+                  : undefined
+              }
+            />
+          ) : (
+            <div>
+              <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
+                {isEditMode
+                  ? t("skillManagement.edit.title")
+                  : t("skillManagement.title")}
+              </div>
+              <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
+                {isEditMode
+                  ? t("skillManagement.edit.subtitle", {
+                      name: editingSkillName,
+                    })
+                  : t("skillManagement.create.subtitle")}
+              </div>
             </div>
-            <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
-              {isEditMode
-                ? t("skillManagement.edit.subtitle", { name: editingSkillName })
-                : t("skillManagement.create.subtitle")}
-            </div>
-          </div>
+          )
         }
         open={isOpen}
-        onCancel={handleModalClose}
+        {...(repositoryLayout
+          ? {
+              onClose: handleModalClose,
+              size: `min(${RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH}px, 100vw)`,
+              closable: {
+                placement: "end" as const,
+                "aria-label": t("common.close"),
+              },
+              classNames: { footer: resourcePanel.footerActions },
+            }
+          : {
+              onCancel: handleModalClose,
+              centered: true,
+              width: "min(1180px, calc(100vw - 32px))",
+            })}
         destroyOnHidden
         zIndex={zIndex}
-        centered
-        width="min(1180px, calc(100vw - 32px))"
-        styles={{
-          container: {
-            display: "flex",
-            flexDirection: "column",
-            maxHeight: modalViewportFrame,
-            overflow: "hidden",
-          },
-          body: {
-            display: "flex",
-            flex: "1 1 auto",
-            flexDirection: "column",
-            height: modalBodyFrame,
-            maxHeight: modalBodyFrame,
-            minHeight: 0,
-            overflow: "hidden",
-          },
-        }}
-        footer={[
-          <Button key="cancel" onClick={handleModalClose}>
-            {t("common.cancel")}
-          </Button>,
-          isEditMode || activeTab === "interactive" ? (
-            <Button
-              key="submit"
-              type="primary"
-              loading={isSubmitting}
-              onClick={handleManualSubmit}
-              disabled={
-                isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
+        styles={
+          repositoryLayout
+            ? {
+                body: {
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
+                  ...(isRepositoryEdit
+                    ? { padding: 0, overflow: "hidden" }
+                    : {}),
+                },
               }
-            >
-              {getConfirmButtonText()}
-            </Button>
-          ) : (
-            <Button
-              key="submit"
-              type="primary"
-              loading={isSubmitting}
-              onClick={handleUploadSubmit}
-              disabled={
-                !uploadFile ||
-                !uploadExtractedSkillName.trim() ||
-                !uploadIsCreateMode
+            : {
+                container: {
+                  display: "flex",
+                  flexDirection: "column",
+                  maxHeight: modalViewportFrame,
+                  overflow: "hidden",
+                },
+                body: {
+                  display: "flex",
+                  flex: "1 1 auto",
+                  flexDirection: "column",
+                  height: modalBodyFrame,
+                  maxHeight: modalBodyFrame,
+                  minHeight: 0,
+                  overflow: "hidden",
+                },
               }
-            >
-              {getConfirmButtonText()}
-            </Button>
-          ),
-        ]}
+        }
+        footer={
+          isRepositoryEdit
+            ? null
+            : [
+                <Button
+                  key="cancel"
+                  className={repositoryLayout ? "min-w-[88px]" : undefined}
+                  onClick={handleModalClose}
+                >
+                  {t("common.cancel")}
+                </Button>,
+                isEditMode || activeTab === "interactive" ? (
+                  <Button
+                    key="submit"
+                    type="primary"
+                    className={repositoryLayout ? "min-w-[88px]" : undefined}
+                    loading={isSubmitting}
+                    onClick={handleManualSubmit}
+                    disabled={
+                      isEditMode &&
+                      (isLoadingEditFiles || Boolean(editFilesError))
+                    }
+                  >
+                    {getConfirmButtonText()}
+                  </Button>
+                ) : (
+                  <Button
+                    key="submit"
+                    type="primary"
+                    className={repositoryLayout ? "min-w-[88px]" : undefined}
+                    loading={isSubmitting}
+                    onClick={handleUploadSubmit}
+                    disabled={
+                      !uploadFile ||
+                      !uploadExtractedSkillName.trim() ||
+                      !uploadIsCreateMode
+                    }
+                  >
+                    {getConfirmButtonText()}
+                  </Button>
+                ),
+              ]
+        }
       >
-        <Tabs
-          activeKey={isEditMode ? "interactive" : activeTab}
-          onChange={(key) => {
-            if (!isEditMode) {
-              setActiveTab(key);
-            }
-          }}
-          items={visibleTabItems}
-          className="skill-build-tabs shrink-0"
-        />
+        {(!repositoryLayout || !isEditMode) && (
+          <Tabs
+            activeKey={isEditMode ? "interactive" : activeTab}
+            onChange={(key) => {
+              if (!isEditMode) {
+                setActiveTab(key);
+              }
+            }}
+            items={visibleTabItems}
+            className="skill-build-tabs shrink-0"
+          />
+        )}
         {isEditMode && !isEditContentReady ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <Spin spinning={isLoadingEditFiles}>
@@ -1081,20 +1199,86 @@ export default function SkillBuildModal({
               )}
             </Spin>
           </div>
+        ) : isRepositoryEdit ? (
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+            <div className="flex min-h-[460px] min-w-0 flex-col p-3 lg:min-h-0 lg:w-2/5">
+              <div className="min-h-0 flex-1">{renderChatPanel()}</div>
+            </div>
+            <section className="flex min-h-[600px] min-w-0 flex-1 flex-col border-t border-border bg-muted/30 lg:min-h-0 lg:border-l lg:border-t-0">
+              <SkillConfigurationHeader
+                groupStep={showGroupSteps ? showGroupStep : undefined}
+                actions={
+                  <>
+                    {showGroupStep && (
+                      <Button
+                        disabled={isSubmitting}
+                        onClick={() => setGroupStep(false)}
+                      >
+                        {t("skillCreation.previous")}
+                      </Button>
+                    )}
+                    <Button
+                      type="primary"
+                      className="min-w-[88px]"
+                      loading={isSubmitting}
+                      disabled={isLoadingEditFiles || Boolean(editFilesError)}
+                      onClick={async () => {
+                        if (!showGroupSteps || showGroupStep) {
+                          await handleManualSubmit();
+                          return;
+                        }
+                        if (
+                          await form
+                            .validateFields(["name", "description"])
+                            .catch(() => null)
+                        ) {
+                          setGroupStep(true);
+                        }
+                      }}
+                    >
+                      {t(
+                        showGroupSteps && !showGroupStep
+                          ? "skillCreation.next"
+                          : "skillManagement.mode.saveChanges"
+                      )}
+                    </Button>
+                  </>
+                }
+              />
+              <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+                {renderDraftPanel()}
+              </div>
+            </section>
+          </div>
         ) : isEditMode || activeTab === "interactive" ? (
-          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            {renderChatPanel()}
+          <div
+            className={
+              repositoryLayout
+                ? "grid min-h-0 flex-1 gap-4 lg:h-full lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
+                : "grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+            }
+          >
+            {repositoryLayout ? (
+              <div className="min-h-[420px] min-w-0 lg:min-h-0">
+                {renderChatPanel()}
+              </div>
+            ) : (
+              renderChatPanel()
+            )}
             {renderDraftPanel()}
           </div>
         ) : (
           <div className="min-h-0 flex-1">{renderUploadTab()}</div>
         )}
         <style jsx global>{`
-          .skill-build-info-form .ant-form-item-label {
+          .skill-build-info-form:not(.skill-repository-editor-form)
+            .ant-form-item-label {
             padding-bottom: 3px !important;
           }
 
-          .skill-build-info-form .ant-form-item-label > label {
+          .skill-build-info-form:not(.skill-repository-editor-form)
+            .ant-form-item-label
+            > label {
             height: 20px;
             color: #475569;
             font-size: 12px;
@@ -1107,7 +1291,7 @@ export default function SkillBuildModal({
             resize: none !important;
           }
         `}</style>
-      </Modal>
+      </Panel>
       <ResourceTagAssignmentModal
         open={assignTagsOpen}
         onClose={() => {

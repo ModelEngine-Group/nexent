@@ -167,6 +167,7 @@ export function AgentApplyListingModal({
 
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Preserve the existing modal reset when its external open state changes.
       setFormInitialized(false);
       setTagEditorOpen(false);
       setSavedAssignments(null);

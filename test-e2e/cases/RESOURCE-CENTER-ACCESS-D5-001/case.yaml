@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D5
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-ACCESS-D5-001
+  feature_id: RESOURCE-CENTER-ACCESS
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-ACCESS-RULE-001
+  title: 原有审核范围、本人读取与直调越权
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 有审核资格保留原有全部范围，无审核资格仅本人；不新增排除本人或禁止自审规则。
+  preconditions:
+  - 配置隔离后端与一次性schema权限，固定脚本使用独立身份和数据，不使用现有业务数据。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 未登录、无新URL、DEV-mine及ADMIN-all_authorized分别直调列表/详情/decision
+    expected: 未登录401、无新URL403；DEV仅可读本人且无审核资格；ADMIN可读原有范围内本人及他人；范围外记录404，无操作资格decision403；本人不是新增拒绝条件。
+  - order: 2
+    action: 两租户三类型置入同ID、代理提交、资源作者不同及历史提交人未知数据，伪造user_id/tenant_id/scope
+    expected: Agent/Skill及MCP普通管理员保持原租户范围，MCP原超级管理员保持原授权范围；无审核资格才按实际提交人等值过滤；未知提交人不影响有审核资格者原本的读取权限。
+  - order: 3
+    action: 通过新旧决策入口分别处理本人/他人提交记录、无操作资格记录及范围外记录，再查MCP安全投影
+    expected: 本人/他人提交沿用原有操作资格和状态规则，不新增禁止自审；无权限/范围外拒绝；新旧入口一致，未共享敏感字段不泄露。
+  expected_results:
+  - 未登录401、无新URL403；DEV仅可读本人且无审核资格；ADMIN可读原有范围内本人及他人；范围外记录404，无操作资格decision403；本人不是新增拒绝条件。
+  - Agent/Skill及MCP普通管理员保持原租户范围，MCP原超级管理员保持原授权范围；无审核资格才按实际提交人等值过滤；未知提交人不影响有审核资格者原本的读取权限。
+  - 本人/他人提交沿用原有操作资格和状态规则，不新增禁止自审；无权限/范围外拒绝；新旧入口一致，未共享敏感字段不泄露。
+  forbidden_side_effects:
+  - 未经现有权限授权的决策和范围外数据泄露均为0；不得新增以本人提交为由的拒绝。
+  - 不得以publisher_user_id/created_by/submitted_by邮箱替代submitted_user_id。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-001
+    - AC-005
+    design_status: Implemented; API scope and legacy authorization assertions are
+      executable.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 未登录401、无新URL403；DEV仅可读本人且无审核资格；ADMIN可读原有范围内本人及他人；范围外记录404，无操作资格decision403；本人不是新增拒绝条件。（SPEC
+      AC-001, AC-005）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Agent/Skill及MCP普通管理员保持原租户范围，MCP原超级管理员保持原授权范围；无审核资格才按实际提交人等值过滤；未知提交人不影响有审核资格者原本的读取权限。（SPEC
+      AC-001, AC-005）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 本人/他人提交沿用原有操作资格和状态规则，不新增禁止自审；无权限/范围外拒绝；新旧入口一致，未共享敏感字段不泄露。（SPEC AC-001,
+      AC-005）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  risk_type: SECURITY
+  risk: 跨租户与类型伪造不能绕过审核能力
+  condition:
+  - 真实产品鉴权与PostgreSQL；使用可重复的同步屏障/受控故障，不用睡眠推断竞争已发生。
+  metrics:
+  - 成功/拒绝请求数、跨租户泄露数、事务后状态及通知事件数
+  thresholds:
+  - 未登录401、无新URL403；DEV仅可读本人且无审核资格；ADMIN可读原有范围内本人及他人；范围外记录404，无操作资格decision403；本人不是新增拒绝条件。
+  - Agent/Skill及MCP普通管理员保持原租户范围，MCP原超级管理员保持原授权范围；无审核资格才按实际提交人等值过滤；未知提交人不影响有审核资格者原本的读取权限。
+  - 本人/他人提交沿用原有操作资格和状态规则，不新增禁止自审；无权限/范围外拒绝；新旧入口一致，未共享敏感字段不泄露。
+  recovery_expectations:
+  - 移除故障后以当前revision重试可正常完成；清理run_id数据且无遗留锁或待恢复事务。

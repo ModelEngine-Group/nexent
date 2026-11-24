@@ -7,7 +7,6 @@ import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
   AgentRepositoryListingListParams,
-  MyEditableAgentListParams,
 } from "@/types/agentRepository";
 import type {
   MyEditableSkillListParams,
@@ -19,6 +18,30 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  resourceReviews: {
+    list: (query: {
+      type: string;
+      status: string;
+      search: string;
+      page: number;
+      page_size: number;
+    }) => {
+      const params = new URLSearchParams({
+        type: query.type,
+        status: query.status,
+        search: query.search,
+        page: String(query.page),
+        page_size: String(query.page_size),
+      });
+      return `${API_BASE_URL}/reviews?${params.toString()}`;
+    },
+    submit: `${API_BASE_URL}/reviews`,
+    detail: (id: string) => `${API_BASE_URL}/reviews/${encodeURIComponent(id)}`,
+    legacyDetail: (type: string, id: string) =>
+      `${API_BASE_URL}/reviews/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
+    decision: (id: string) =>
+      `${API_BASE_URL}/reviews/${encodeURIComponent(id)}/decision`,
+  },
   systemConfigurations: `${API_BASE_URL}/system_configurations`,
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
@@ -602,10 +625,10 @@ export const API_ENDPOINTS = {
     communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
+    batchDelete: `${API_BASE_URL}/mcp-tools/batch_delete`,
+    communityStatus: (id: number) =>
+      `${API_BASE_URL}/mcp-tools/community/${id}/status`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
-    communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
-    communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
-    communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
     communityDownload: (marketId: number) =>
       `${API_BASE_URL}/mcp-tools/community/${marketId}/download`,
@@ -689,46 +712,15 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_published_time)
+        queryParams.append("sort_by_published_time", "true");
+      if (params?.sort_by_downloads)
+        queryParams.append("sort_by_downloads", "true");
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
-    },
-    mineAgents: (params?: MyEditableAgentListParams) => {
-      const queryParams = new URLSearchParams();
-      if (params?.ownership) {
-        queryParams.append("ownership", params.ownership);
-      }
-      if (params?.page != null) {
-        queryParams.append("page", String(params.page));
-      }
-      if (params?.page_size != null) {
-        queryParams.append("page_size", String(params.page_size));
-      }
-      if (params?.search?.trim()) {
-        queryParams.append("search", params.search.trim());
-      }
-      if (params?.new_agent_padding) {
-        queryParams.append("new_agent_padding", "true");
-      }
-      if (params?.agent_id != null) {
-        queryParams.append("agent_id", String(params.agent_id));
-      }
-      if (params?.tag_predicates?.length) {
-        queryParams.append(
-          "tag_predicates",
-          JSON.stringify(params.tag_predicates)
-        );
-      }
-      if (params?.search_tag_predicates?.length) {
-        queryParams.append(
-          "search_tag_predicates",
-          JSON.stringify(params.search_tag_predicates)
-        );
-      }
-      const queryString = queryParams.toString();
-      return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
@@ -750,6 +742,11 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
+    deleteLocal: (skillId: number) =>
+      `${API_BASE_URL}/repository/skill/local/${skillId}`,
+    uninstallCopy: (repositoryId: number, skillId: number) =>
+      `${API_BASE_URL}/repository/skill/${repositoryId}/installations/${skillId}`,
+
     listings: (params?: SkillRepositoryListingListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.status) queryParams.append("status", params.status);
@@ -775,9 +772,13 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_published_time)
+        queryParams.append("sort_by_published_time", "true");
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
+      if (params?.include_installations)
+        queryParams.append("include_installations", "true");
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill${queryString ? `?${queryString}` : ""}`;
     },

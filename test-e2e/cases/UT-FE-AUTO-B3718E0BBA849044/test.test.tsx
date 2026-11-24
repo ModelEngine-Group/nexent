@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 /**
  * 
  * MCP 结构化标签分配/展示：详情弹窗赋值、Mine 卡片 Chips 展示、发布只读继承与权限编辑｜核心流程
@@ -25,9 +26,9 @@ import { tagManagementApi } from "@/services/tagManagementService";
 
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
-import MineMcpServiceCard from "@/app/[locale]/mcp-space/components/MineMcpServiceCard";
-import McpServiceDetailModal from "@/app/[locale]/mcp-space/components/McpServiceDetailModal";
-import PublishConfirmModal from "@/app/[locale]/mcp-space/components/PublishConfirmModal";
+import MineMcpServiceCard from "@/app/resource-space/mcp/components/MineMcpServiceCard";
+import McpServiceDetailModal from "@/app/resource-space/mcp/components/McpServiceDetailModal";
+import PublishConfirmModal from "@/app/resource-space/mcp/components/PublishConfirmModal";
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
@@ -109,6 +110,38 @@ vi.mock("@/hooks/mcpTools/useMcpServiceDetail", () => ({
     deleting: false,
     remove: vi.fn(),
   }),
+}));
+
+// The live repository modal reads the MCP server-list upload toggle and the
+// shared permission gate; both stay inert for the tag contract under proof.
+vi.mock("@/hooks/mcp/useMcpServerList", () => ({
+  useMcpServerList: () => ({
+    data: undefined,
+    serverList: [],
+    enableUploadImage: false,
+    invalidate: vi.fn(),
+  }),
+}));
+
+vi.mock("@/hooks/permission/usePermission", () => ({
+  usePermission: () => ({
+    isReady: true,
+    isAuthenticated: true,
+    isLoading: false,
+    can: () => true,
+    cannot: () => false,
+    canAny: () => true,
+    canAll: () => true,
+  }),
+}));
+
+// The live repository card renders ResourceReviewLink, which reads the route
+// locale before its no-review early return.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useParams: () => ({ locale: "zh" }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/zh/resource-space",
 }));
 
 const defaultLibrary: TagLibrary = {
@@ -284,9 +317,9 @@ describe("MineMcpServiceCard", () => {
 describe("McpServiceDetailModal", () => {
   it("EDIT permission enables edit-tags and opens the assignment modal", async () => {
     render(<McpServiceDetailModal selectedService={baseService} onClose={vi.fn()} />);
-    const editButton = await screen.findByRole("button", {
+    const editButton = (await screen.findByRole("button", {
       name: "tagManagement.action.editTags",
-    });
+    })) as HTMLButtonElement;
     expect(editButton.disabled).toBe(false);
 
     fireEvent.click(editButton);
@@ -297,14 +330,14 @@ describe("McpServiceDetailModal", () => {
     const readOnly: McpServiceItem = { ...baseService, permission: "READ_ONLY" };
     render(<McpServiceDetailModal selectedService={readOnly} onClose={vi.fn()} />);
 
-    const editButton = await screen.findByRole("button", {
+    const editButton = (await screen.findByRole("button", {
       name: "tagManagement.action.editTags",
-    });
+    })) as HTMLButtonElement;
     expect(editButton.disabled).toBe(true);
 
     const saveButton = screen.getByRole("button", {
       name: "mcpTools.detail.noEditPermission",
-    });
+    }) as HTMLButtonElement;
     expect(saveButton.disabled).toBe(true);
   });
 });
@@ -340,7 +373,7 @@ describe("ResourceTagAssignmentModal", () => {
 
 describe("PublishConfirmModal", () => {
   it("renders inherited structured tags read-only and submits inherited tags", async () => {
-    const onConfirm = vi.fn(async () => true);
+    const onConfirm = vi.fn(async (_payload: unknown) => true);
     render(
       <PublishConfirmModal
         open

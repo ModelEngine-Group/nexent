@@ -64,7 +64,14 @@ sys.modules['psycopg2.extensions'] = MagicMock()
 # Patch storage factory before importing
 with patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock), \
         patch('nexent.storage.storage_client_factory.MinIOStorageConfig'):
-    from infrastructure.rdb.client import PostgresClient, db_client, get_db_session, get_monitoring_db_session
+    from infrastructure.rdb.client import (
+        PostgresClient,
+        bound_ambient_session,
+        current_ambient_session,
+        db_client,
+        get_db_session,
+        get_monitoring_db_session,
+    )
     from infrastructure.object_storage.client import MinioClient, minio_client
     from infrastructure.rdb.orm import as_dict, filter_property
 
@@ -583,6 +590,37 @@ class TestGetDbSession:
                 raise ValueError("Test error")
 
         # Should not rollback or close when session is provided
+        mock_session.rollback.assert_not_called()
+        mock_session.close.assert_not_called()
+
+    def test_get_db_session_joins_ambient_session(self):
+        """Test bare get_db_session joins the ambient session without owning it"""
+        mock_session = MagicMock()
+
+        with patch('infrastructure.rdb.client.db_client') as mock_db_client:
+            with bound_ambient_session(mock_session):
+                assert current_ambient_session() is mock_session
+                with get_db_session() as session:
+                    assert session is mock_session
+
+            mock_db_client.session_maker.assert_not_called()
+
+        assert current_ambient_session() is None
+        mock_session.commit.assert_not_called()
+        mock_session.close.assert_not_called()
+
+    def test_get_db_session_no_rollback_on_ambient_session_exception(self):
+        """Test get_db_session leaves rollback to the ambient session owner"""
+        mock_session = MagicMock()
+
+        with patch('infrastructure.rdb.client.db_client') as mock_db_client:
+            with bound_ambient_session(mock_session):
+                with pytest.raises(ValueError):
+                    with get_db_session() as session:
+                        assert session is mock_session
+                        raise ValueError("Test error")
+
+        mock_db_client.session_maker.assert_not_called()
         mock_session.rollback.assert_not_called()
         mock_session.close.assert_not_called()
 

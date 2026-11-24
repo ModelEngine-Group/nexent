@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { ModalProps } from "antd";
 
 export enum McpSource {
@@ -40,13 +42,6 @@ export enum McpServerStatus {
   ACTIVE = "active",
   DEPRECATED = "deprecated",
   UNKNOWN = "unknown",
-}
-
-/** Main MCP tools page: imported workspace services vs. published community list. */
-export enum McpToolsServicesTab {
-  REPOSITORY = "repository",
-  MINE = "mine",
-  REVIEW = "review",
 }
 
 export enum McpDeploymentType {
@@ -130,7 +125,6 @@ export const MCP_TOOLS_QUERY_KEYS = {
   services: ["mcp-tools", "services"] as const,
   tools: (mcpId: number) => ["mcp-tools", "service-tools", mcpId] as const,
   communityList: ["mcp-tools", "community"] as const,
-  communityReview: ["mcp-tools", "community-review"] as const,
   communityTags: ["mcp-tools", "community-tags"] as const,
   myCommunity: ["mcp-tools", "my-community"] as const,
 };

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Types for in-app user notifications
  */
@@ -12,21 +14,24 @@ export const NOTIFICATION_RESOURCE_TYPES = {
   AGENT_REPOSITORY: "agent_repository",
   SKILL_REPOSITORY: "skill_repository",
   MCP_REPOSITORY: "mcp_repository",
+  RESOURCE_REVIEW: "resource_review",
 } as const;
 
 export interface NotificationDetails {
   name?: string;
   content?: string;
-  agent_repository_id?: number;
+  agent_repository_id?: number | string;
   agent_id?: number;
-  skill_repository_id?: number;
+  skill_repository_id?: number | string;
   skill_id?: number;
-  market_id?: number;
+  market_id?: number | string;
   source_mcp_id?: number;
   [key: string]: unknown;
 }
 
 export interface NotificationItem {
+  review_id?: string | null;
+  repository_id?: string | null;
   receiver_id: number;
   notification_id: number;
   event_type: string;

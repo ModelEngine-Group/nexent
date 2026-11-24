@@ -1,0 +1,40 @@
+.editForm {
+  color: hsl(var(--foreground));
+  font-size: var(--font-body-2);
+}
+
+.editForm :global(.ant-form-item-label) > label {
+  color: hsl(var(--foreground));
+  font-size: var(--font-body-2);
+}
+
+.editForm :global(.ant-form-item-label) {
+  padding-bottom: 8px;
+}
+
+.editForm :global(.ant-form-item-extra) {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-body-1);
+}
+
+.editSection {
+  border: 1px solid var(--color-border);
+  border-radius: var(--brand-radius-lg);
+  background: hsl(var(--background));
+  padding: 16px;
+}
+
+.footerActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.detailFooter {
+  flex: none;
+  border-top: 1px solid var(--color-border);
+  background: hsl(var(--background));
+  padding: 12px 24px;
+}

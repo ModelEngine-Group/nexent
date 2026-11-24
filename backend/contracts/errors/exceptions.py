@@ -673,6 +673,10 @@ class StorageObjectConflictError(ValueError):
     """Raised when an object identity is already bound to different accounting data."""
 
 
+class ReviewConflictError(Exception):
+    """The submitted review state or revision is no longer current."""
+
+
 class SnapshotCompilationError(Exception):
     """Keep safe compiler diagnostics separate from the original failure cause."""
 

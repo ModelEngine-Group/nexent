@@ -8,6 +8,7 @@ import type {
   Dispatch,
   KeyboardEvent,
   MutableRefObject,
+  ReactNode,
   SetStateAction,
 } from "react";
 import type { FormInstance } from "antd";
@@ -20,12 +21,16 @@ import {
   Maximize2,
   Pencil,
   Plus,
+  Search,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import SkillFileSource from "@/components/skill/SkillFileSource";
+import panel from "@/components/skill/skill-panel.module.css";
+import resourcePanel from "@/components/resource/resource-panel.module.css";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import type { SkillFileContent, SkillFormData } from "@/types/skill";
 import { SkillCodePreview } from "./SkillCodePreview";
@@ -40,6 +45,10 @@ interface SkillDraftPanelProps {
   setActiveSkillTab: Dispatch<SetStateAction<string>>;
   isStreaming?: boolean;
   readOnly?: boolean;
+  repositoryLayout?: boolean;
+  repositoryEditor?: boolean;
+  showRepositoryGroups?: boolean;
+  repositoryGroupSettings?: ReactNode;
   onNameChange?: (event: ChangeEvent<HTMLInputElement>) => void;
   textareaRefs?: MutableRefObject<Record<string, unknown>>;
   shouldAutoScrollRef?: MutableRefObject<Record<string, boolean>>;
@@ -62,6 +71,10 @@ export default function SkillDraftPanel({
   setActiveSkillTab,
   isStreaming = false,
   readOnly = false,
+  repositoryLayout = false,
+  repositoryEditor = false,
+  showRepositoryGroups = false,
+  repositoryGroupSettings,
   onNameChange,
   textareaRefs,
   shouldAutoScrollRef,
@@ -81,6 +94,8 @@ export default function SkillDraftPanel({
   const [expandedEditorPath, setExpandedEditorPath] = useState("");
   const [expandedEditorContent, setExpandedEditorContent] = useState("");
   const [sourceEditorPath, setSourceEditorPath] = useState("");
+  const [markdownPreviewPath, setMarkdownPreviewPath] = useState("");
+  const [fileSearch, setFileSearch] = useState("");
 
   const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
     tabs.filter(
@@ -89,6 +104,13 @@ export default function SkillDraftPanel({
     );
 
   const visibleSkillTabs = dedupeSkillTabs(skillTabs);
+  const fileSearchTerm = fileSearch.trim().toLowerCase();
+  const listedSkillTabs =
+    (repositoryEditor || repositoryLayout) && fileSearchTerm
+      ? visibleSkillTabs.filter((tab) =>
+          tab.path.toLowerCase().includes(fileSearchTerm)
+        )
+      : visibleSkillTabs;
   const activeFile =
     visibleSkillTabs.find((tab) => tab.path === activeSkillTab) ||
     visibleSkillTabs[0];
@@ -105,8 +127,10 @@ export default function SkillDraftPanel({
   const showMarkdownPreview =
     activeFileIsMarkdown &&
     !activeFileUnavailable &&
-    (readOnly || isStreaming || !isEditingActiveFile);
+    (readOnly || isStreaming || !isEditingActiveFile) &&
+    (!repositoryEditor || markdownPreviewPath === activeFile?.path);
   const showCodePreview =
+    !repositoryEditor &&
     !showMarkdownPreview &&
     activeFileIsPreviewable &&
     (readOnly || isStreaming || !isEditingActiveFile);
@@ -230,178 +254,231 @@ export default function SkillDraftPanel({
     );
   };
 
+  const renderTags = () =>
+    tagResourceId ? (
+      <Form.Item
+        label={t("skillManagement.form.tags")}
+        style={repositoryEditor ? undefined : { marginBottom: 10 }}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+            <ResourceTagChips
+              resourceType="skill"
+              resourceId={tagResourceId}
+              max={4}
+              refreshKey={tagPreviewRefreshKey}
+              singleLine
+            />
+          </div>
+          {canAssignTags && onAssignTags ? (
+            <Button type="link" size="small" onClick={onAssignTags}>
+              {t("tagManagement.action.editTags")}
+            </Button>
+          ) : null}
+        </div>
+      </Form.Item>
+    ) : null;
+
   return (
     <div
-      className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}
+      className={`flex min-h-0 flex-col ${repositoryEditor ? (showRepositoryGroups ? "" : resourcePanel.editSection) : repositoryLayout ? "gap-6" : "h-full gap-2 overflow-hidden"} ${className || ""}`}
     >
-      <div className="shrink-0 rounded-2xl border border-slate-200 bg-white px-5 pb-2 pt-3 shadow-sm">
+      <div
+        className={
+          repositoryEditor
+            ? "shrink-0"
+            : "shrink-0 rounded-2xl border border-slate-200 bg-white px-5 pb-2 pt-3 shadow-sm"
+        }
+      >
+        {repositoryEditor && !showRepositoryGroups && (
+          <h3 className="mb-3 text-body-2 font-semibold">
+            {t("resourceCenter.agentDetail.basicInfo")}
+          </h3>
+        )}
         <Form
           form={form}
           layout="vertical"
-          className="skill-build-info-form"
+          className={`skill-build-info-form ${repositoryEditor ? `skill-repository-editor-form ${resourcePanel.editForm}` : ""}`}
           initialValues={{
             source: "custom",
             tags: [],
           }}
           disabled={readOnly}
         >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="name"
-                label={t("skillManagement.form.name")}
-                style={{ marginBottom: 10 }}
-                rules={[
-                  {
-                    required: true,
-                    message: t("skillManagement.form.nameRequired"),
-                  },
-                ]}
-              >
-                <Input
-                  onChange={onNameChange}
-                  placeholder={t("skillManagement.form.namePlaceholder")}
-                  allowClear={!readOnly}
-                  readOnly={readOnly}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="source"
-                label={t("skillManagement.form.source")}
-                style={{ marginBottom: 10 }}
-              >
-                <Select
-                  labelRender={({ label, value }) => {
-                    if (value === "official" || value === "官方") {
-                      return t("skillPool.group.official");
-                    }
-                    if (value === "custom" || value === "自定义") {
-                      return t("skillPool.group.custom");
-                    }
-                    return label ?? value;
-                  }}
-                  options={[
-                    { label: t("skillPool.group.custom"), value: "custom" },
+          <div hidden={showRepositoryGroups}>
+            <Row gutter={16}>
+              <Col span={repositoryEditor ? 24 : 12}>
+                <Form.Item
+                  name="name"
+                  label={t("skillManagement.form.name")}
+                  style={repositoryEditor ? undefined : { marginBottom: 10 }}
+                  rules={[
+                    {
+                      required: true,
+                      message: t("skillManagement.form.nameRequired"),
+                    },
                   ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          {!readOnly ? (
-            <Can permission="group:read">
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="group_ids"
-                    label={t("agent.userGroup")}
-                    style={{ marginBottom: 10 }}
-                  >
-                    <Select
-                      mode="multiple"
-                      placeholder={t("agent.userGroup")}
-                      options={groupSelectOptions}
-                      allowClear
-                      disabled={!canEditGroupSettings}
-                      showSearch={canEditGroupSettings}
-                      labelRender={({ label, value }) =>
-                        groupNamesById.get(Number(value)) ?? label
-                      }
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="ingroup_permission"
-                    label={t("tenantResources.knowledgeBase.permission")}
-                    style={{ marginBottom: 10 }}
-                  >
-                    <Select
-                      placeholder={t(
-                        "tenantResources.knowledgeBase.permission"
-                      )}
-                      disabled={!canEditGroupSettings}
-                      options={[
-                        {
-                          value: "EDIT",
-                          label: t(
-                            "tenantResources.knowledgeBase.permission.EDIT"
-                          ),
-                        },
-                        {
-                          value: "READ_ONLY",
-                          label: t(
-                            "tenantResources.knowledgeBase.permission.READ_ONLY"
-                          ),
-                        },
-                        {
-                          value: "PRIVATE",
-                          label: t(
-                            "tenantResources.knowledgeBase.permission.PRIVATE"
-                          ),
-                        },
-                      ]}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </Can>
-          ) : null}
-
-          <Form.Item
-            name="description"
-            label={t("skillManagement.form.description")}
-            style={{ marginBottom: 10 }}
-            rules={[
-              {
-                required: true,
-                message: t("skillManagement.form.descriptionRequired"),
-              },
-            ]}
-          >
-            <TextArea
-              rows={2}
-              placeholder={t("skillManagement.form.descriptionPlaceholder")}
-              readOnly={readOnly}
-              style={{ resize: "none" }}
-            />
-          </Form.Item>
-          {tagResourceId ? (
-            <Form.Item
-              label={t("skillManagement.form.tags")}
-              style={{ marginBottom: 10 }}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-                  <ResourceTagChips
-                    resourceType="skill"
-                    resourceId={tagResourceId}
-                    max={4}
-                    refreshKey={tagPreviewRefreshKey}
-                    singleLine
+                >
+                  <Input
+                    onChange={onNameChange}
+                    placeholder={t("skillManagement.form.namePlaceholder")}
+                    allowClear={!readOnly}
+                    readOnly={readOnly}
                   />
-                </div>
-                {canAssignTags && onAssignTags ? (
-                  <Button type="link" size="small" onClick={onAssignTags}>
-                    {t("tagManagement.action.editTags")}
-                  </Button>
-                ) : null}
-              </div>
+                </Form.Item>
+              </Col>
+              <Col span={repositoryEditor ? 24 : 12}>
+                <Form.Item
+                  name="source"
+                  label={t("skillManagement.form.source")}
+                  style={repositoryEditor ? undefined : { marginBottom: 10 }}
+                >
+                  <Select
+                    labelRender={({ label, value }) => {
+                      if (value === "official" || value === "官方") {
+                        return t("skillPool.group.official");
+                      }
+                      if (value === "custom" || value === "自定义") {
+                        return t("skillPool.group.custom");
+                      }
+                      return label ?? value;
+                    }}
+                    options={[
+                      { label: t("skillPool.group.custom"), value: "custom" },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {!readOnly && !repositoryEditor ? (
+              <Can permission="group:read">
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="group_ids"
+                      label={t("agent.userGroup")}
+                      style={
+                        repositoryEditor ? undefined : { marginBottom: 10 }
+                      }
+                    >
+                      <Select
+                        mode="multiple"
+                        placeholder={t("agent.userGroup")}
+                        options={groupSelectOptions}
+                        allowClear
+                        disabled={!canEditGroupSettings}
+                        showSearch={canEditGroupSettings}
+                        labelRender={({ label, value }) =>
+                          groupNamesById.get(Number(value)) ?? label
+                        }
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="ingroup_permission"
+                      label={t("tenantResources.knowledgeBase.permission")}
+                      style={
+                        repositoryEditor ? undefined : { marginBottom: 10 }
+                      }
+                    >
+                      <Select
+                        placeholder={t(
+                          "tenantResources.knowledgeBase.permission"
+                        )}
+                        disabled={!canEditGroupSettings}
+                        options={[
+                          {
+                            value: "EDIT",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.EDIT"
+                            ),
+                          },
+                          {
+                            value: "READ_ONLY",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.READ_ONLY"
+                            ),
+                          },
+                          {
+                            value: "PRIVATE",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.PRIVATE"
+                            ),
+                          },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Can>
+            ) : null}
+
+            {repositoryEditor && renderTags()}
+            <Form.Item
+              name="description"
+              label={t("skillManagement.form.description")}
+              style={repositoryEditor ? undefined : { marginBottom: 10 }}
+              rules={[
+                {
+                  required: true,
+                  message: t("skillManagement.form.descriptionRequired"),
+                },
+              ]}
+            >
+              <TextArea
+                rows={repositoryEditor ? 4 : 2}
+                showCount={repositoryEditor}
+                count={repositoryEditor ? { max: 1000 } : undefined}
+                placeholder={t("skillManagement.form.descriptionPlaceholder")}
+                readOnly={readOnly}
+                style={repositoryEditor ? undefined : { resize: "none" }}
+              />
             </Form.Item>
-          ) : null}
+            {!repositoryEditor && renderTags()}
+          </div>
+          {repositoryGroupSettings}
         </Form>
       </div>
 
       <div
-        className={`flex min-h-0 flex-1 flex-col ${readOnly ? "min-h-[300px]" : ""}`}
+        className={`${showRepositoryGroups ? "hidden" : "flex"} min-h-0 flex-1 flex-col ${repositoryLayout ? "min-h-[692px]" : readOnly ? "min-h-[300px]" : ""}`}
       >
-        <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
-            <div className="flex h-11 items-center justify-between border-b border-slate-200 px-3">
+        {repositoryEditor && (
+          <h3 className="mb-2 text-body-2 font-semibold">
+            {t("skillRepository.detail.skillFiles")}
+          </h3>
+        )}
+        <div
+          className={
+            repositoryEditor
+              ? `${panel.panel} h-[460px]`
+              : "flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+          }
+        >
+          <div
+            className={
+              repositoryEditor
+                ? panel.sidebar
+                : repositoryLayout
+                  ? "flex w-[234px] max-w-[40%] shrink-0 flex-col gap-3 border-r border-[#191919]/8 bg-white p-3"
+                  : "flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60"
+            }
+          >
+            <div
+              className={
+                repositoryEditor
+                  ? `${panel.toolbar} justify-between`
+                  : "flex h-11 items-center justify-between border-b border-slate-200 px-3"
+              }
+            >
               <span className="text-sm font-medium text-slate-700">
-                {t("skillManagement.detail.file")}
+                {repositoryEditor
+                  ? t("skillRepository.detail.fileCount", {
+                      count: visibleSkillTabs.length,
+                    })
+                  : t("skillManagement.detail.file")}
               </span>
               {canEditFiles ? (
                 <Button
@@ -422,18 +499,33 @@ export default function SkillDraftPanel({
                 />
               ) : null}
             </div>
+            {(repositoryEditor || repositoryLayout) && (
+              <Input
+                className={
+                  repositoryEditor
+                    ? "!mx-2 !mt-2 !w-[calc(100%-1rem)]"
+                    : undefined
+                }
+                allowClear
+                prefix={repositoryEditor ? <Search size={14} /> : undefined}
+                aria-label={t("resourceCenter.search")}
+                placeholder={t("resourceCenter.search")}
+                value={fileSearch}
+                onChange={(event) => setFileSearch(event.target.value)}
+              />
+            )}
             <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto py-2">
-              {visibleSkillTabs
+              {listedSkillTabs
                 .filter((tab) => !tab.path.includes("/"))
                 .map((tab) => (
                   <div
                     key={tab.path}
                     role="button"
                     tabIndex={0}
-                    className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs transition-colors ${
+                    className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 transition-colors ${repositoryEditor ? "text-body-2" : "text-xs"} ${
                       activeSkillTab === tab.path
-                        ? "bg-blue-50 text-blue-700"
-                        : "text-slate-600 hover:bg-slate-100"
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-muted"
                     }`}
                     onClick={() => {
                       setActiveSkillTab(tab.path);
@@ -460,7 +552,7 @@ export default function SkillDraftPanel({
                 ))}
               {Array.from(
                 new Set(
-                  visibleSkillTabs
+                  listedSkillTabs
                     .filter((tab) => tab.path.includes("/"))
                     .map((tab) => tab.path.split("/")[0])
                 )
@@ -472,17 +564,17 @@ export default function SkillDraftPanel({
                       {folderName}
                     </span>
                   </div>
-                  {visibleSkillTabs
+                  {listedSkillTabs
                     .filter((tab) => tab.path.startsWith(`${folderName}/`))
                     .map((tab) => (
                       <div
                         key={tab.path}
                         role="button"
                         tabIndex={0}
-                        className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg pl-7 pr-2 text-xs transition-colors ${
+                        className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg pl-7 pr-2 transition-colors ${repositoryEditor ? "text-body-2" : "text-xs"} ${
                           activeSkillTab === tab.path
-                            ? "bg-blue-50 text-blue-700"
-                            : "text-slate-600 hover:bg-slate-100"
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-muted"
                         }`}
                         onClick={() => {
                           setActiveSkillTab(tab.path);
@@ -517,35 +609,75 @@ export default function SkillDraftPanel({
             </div>
           </div>
           {activeFile ? (
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 px-4 text-sm font-medium text-slate-700">
+            <div
+              className={`flex min-w-0 flex-1 flex-col ${repositoryLayout ? "bg-[#191919]/3 text-[#191919]" : ""}`}
+            >
+              <div
+                className={
+                  repositoryEditor
+                    ? panel.toolbar
+                    : `flex shrink-0 items-center justify-between border-b px-4 text-sm font-medium ${repositoryLayout ? "h-[52px] border-[#191919]/8 bg-white py-2 text-[#191919]" : "h-11 border-slate-200 text-slate-700"}`
+                }
+              >
                 <span className="min-w-0 flex-1 truncate">
                   {activeFile.path}
                 </span>
+                {repositoryEditor && activeFile.path === "SKILL.md" && (
+                  <span className="rounded bg-primary/10 px-1.5 text-body-1 text-primary">
+                    {t("skillRepository.detail.entryFile")}
+                  </span>
+                )}
+                {repositoryEditor &&
+                  activeFileIsMarkdown &&
+                  !activeFileUnavailable && (
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Eye size={15} />}
+                      aria-label={t("common.preview")}
+                      title={t("common.preview")}
+                      aria-pressed={showMarkdownPreview}
+                      onClick={() => {
+                        setSourceEditorPath("");
+                        setMarkdownPreviewPath(
+                          showMarkdownPreview ? "" : activeFile.path
+                        );
+                      }}
+                    />
+                  )}
                 {!activeFileUnavailable &&
                 (activeFileIsMarkdown || activeFileIsPreviewable) &&
                 !readOnly &&
                 !isStreaming ? (
                   <Tooltip
                     title={t(
-                      isEditingActiveFile ? "common.preview" : "common.edit"
+                      !repositoryEditor && isEditingActiveFile
+                        ? "common.preview"
+                        : "common.edit"
                     )}
                   >
                     <Button
                       type="text"
                       size="small"
                       icon={
-                        isEditingActiveFile ? (
+                        !repositoryEditor && isEditingActiveFile ? (
                           <Eye size={15} />
                         ) : (
                           <Pencil size={15} />
                         )
                       }
-                      onClick={() =>
+                      aria-label={t(
+                        !repositoryEditor && isEditingActiveFile
+                          ? "common.preview"
+                          : "common.edit"
+                      )}
+                      aria-pressed={isEditingActiveFile}
+                      onClick={() => {
                         setSourceEditorPath(
                           isEditingActiveFile ? "" : activeFile.path
-                        )
-                      }
+                        );
+                        setMarkdownPreviewPath("");
+                      }}
                     />
                   </Tooltip>
                 ) : null}
@@ -586,6 +718,10 @@ export default function SkillDraftPanel({
                     language={resolveLanguageFromPath(activeFile.path)}
                     isStreaming={isStreaming}
                   />
+                </div>
+              ) : repositoryEditor && !isEditingActiveFile && !isStreaming ? (
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <SkillFileSource content={activeFile.content} />
                 </div>
               ) : (
                 <TextArea

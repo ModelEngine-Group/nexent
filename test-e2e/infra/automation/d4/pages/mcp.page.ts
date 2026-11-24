@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Locator, type Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 
@@ -5,8 +7,7 @@ export class McpPage {
   constructor(readonly page: Page) {}
 
   async openMine(): Promise<void> {
-    await this.page.goto(appPath("/mcp-space"), { waitUntil: "domcontentloaded" });
-    await this.page.getByRole("tab", { name: /我的MCP/ }).click();
+    await this.page.goto(appPath("/resource-space?tab=mcp&view=mine"), { waitUntil: "domcontentloaded" });
     await expect(this.page.getByRole("button", { name: /^添加\s*MCP\s*服务$/ })).toBeVisible();
   }
 

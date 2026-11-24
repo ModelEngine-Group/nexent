@@ -20,7 +20,7 @@ case:
     legacy_asset_declaration: config/mcp.yaml；services/test-mcp/
   steps:
   - order: 1
-    action: 打开/mcp-space→Mine→【Add MCP】。
+    action: 打开资源仓库 MCP Tab（/resource-space?tab=mcp）→ 我的MCP 视图→【Add MCP】。
     expected: Remote MCP健康/Tool真实来自Test Server。
   - order: 2
     action: 选择Remote/REMOTE_LINK，填run_id名称、URL和当前UI真实提供的认证/Header字段。
@@ -61,7 +61,7 @@ case:
     legacy_row: 28
   actor: Nexent browser user
   journey:
-  - 打开/mcp-space→Mine→【Add MCP】。
+  - 打开资源仓库 MCP Tab（/resource-space?tab=mcp）→ 我的MCP 视图→【Add MCP】。
   - 选择Remote/REMOTE_LINK，填run_id名称、URL和当前UI真实提供的认证/Header字段。
   - 提交创建，等待Mine出现。
   - 执行健康检查/刷新状态，确认真实Server健康。

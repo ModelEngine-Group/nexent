@@ -48,6 +48,7 @@ interface ResourceTagAssignmentModalProps {
   bulkResourceIds?: string[];
   initialSelection?: Record<number, number[]>;
   onSaved?: (assignment: TagAssignment) => void;
+  onConfirmSelection?: (selection: Record<number, number[]>) => void;
   onManageDefinitions?: () => void;
 }
 
@@ -72,13 +73,15 @@ export default function ResourceTagAssignmentModal({
   bulkResourceIds,
   initialSelection,
   onSaved,
+  onConfirmSelection,
   onManageDefinitions,
 }: ResourceTagAssignmentModalProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const isDraftSelection = Boolean(onConfirmSelection);
   const assignmentState = useTagAssignments(
     resourceType,
-    open ? resourceId : null,
+    open && !isDraftSelection ? resourceId : null,
     { provider, knowledgeBaseId }
   );
   const [selected, setSelected] = useState<Record<number, number[]>>({});
@@ -94,7 +97,8 @@ export default function ResourceTagAssignmentModal({
   const [definitionSearch, setDefinitionSearch] = useState("");
   // Track which resource the loaded assignments belong to so a stale snapshot
   // from the previously opened resource can never be saved.
-  const assignmentKey = open ? `${resourceType}:${resourceId}` : null;
+  const assignmentKey =
+    open && !isDraftSelection ? `${resourceType}:${resourceId}` : null;
   const [loadedAssignmentKey, setLoadedAssignmentKey] = useState<string | null>(
     null
   );
@@ -127,6 +131,10 @@ export default function ResourceTagAssignmentModal({
       setDefinitionSearch("");
       return;
     }
+    if (isDraftSelection) {
+      setSelected(initialSelection ?? {});
+      return;
+    }
     const next: Record<number, number[]> = {};
     for (const assignment of assignmentState.data?.assignments ?? []) {
       const group = next[assignment.definition_id] ?? [];
@@ -151,7 +159,13 @@ export default function ResourceTagAssignmentModal({
       setBulkTargets([{ resourceId, provider, knowledgeBaseId }]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, assignmentState.data, bulkResourceIds, initialSelection]);
+  }, [
+    open,
+    assignmentState.data,
+    bulkResourceIds,
+    initialSelection,
+    isDraftSelection,
+  ]);
 
   const activeDefinitions = useMemo(
     () => definitions.filter((definition) => definition.status === "active"),
@@ -213,15 +227,21 @@ export default function ResourceTagAssignmentModal({
   );
 
   const assignmentsReady =
-    assignmentKey !== null &&
-    loadedAssignmentKey === assignmentKey &&
-    !assignmentState.loading;
+    isDraftSelection ||
+    (assignmentKey !== null &&
+      loadedAssignmentKey === assignmentKey &&
+      !assignmentState.loading);
 
   const saveSingle = useCallback(async () => {
     if (!assignmentsReady || definitionsLoading) return;
     const valueIds = Object.values(selected).flat();
     if (valueIds.length > 100) {
       message.warning(t("tagManagement.warning.assignmentCapacity"));
+      return;
+    }
+    if (onConfirmSelection) {
+      onConfirmSelection(selected);
+      onClose();
       return;
     }
     setSaving(true);
@@ -249,6 +269,7 @@ export default function ResourceTagAssignmentModal({
     definitionsLoading,
     message,
     onClose,
+    onConfirmSelection,
     onSaved,
     selected,
     t,
@@ -415,7 +436,9 @@ export default function ResourceTagAssignmentModal({
       open={open}
       onCancel={onClose}
       onOk={() => (bulkTargets.length > 1 ? saveBulk() : saveSingle())}
-      okText={t("tagManagement.action.save")}
+      okText={t(
+        onConfirmSelection ? "common.confirm" : "tagManagement.action.save"
+      )}
       cancelText={t("common.cancel")}
       confirmLoading={saving}
       okButtonProps={{

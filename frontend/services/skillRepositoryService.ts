@@ -1,7 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Skill repository service for tenant marketplace listing API calls.
  */
 
+import { submitResourceReview } from "./resourceReviewService";
+import type { ResourceReview } from "@/types/resourceReview";
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -49,7 +53,8 @@ export async function fetchSkillRepositoryTagStats(): Promise<
     API_ENDPOINTS.skillRepository.tagStats,
     { method: "GET", headers: getAuthHeaders() }
   );
-  if (!response.ok) throw new Error("Failed to fetch skill repository tag stats");
+  if (!response.ok)
+    throw new Error("Failed to fetch skill repository tag stats");
   const data = (await response.json()) as {
     items?: Array<{ tag: string; count: number }>;
   };
@@ -132,31 +137,18 @@ export async function fetchMyEditableSkillCounts(): Promise<MyEditableSkillCount
 export async function createSkillRepositoryListing(
   skillId: number,
   payload: SkillRepositoryListingCreatePayload
-): Promise<SkillRepositoryListingDetail> {
-  try {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.skillRepository.createListing(skillId),
-      {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      }
-    );
+): Promise<ResourceReview> {
+  return submitResourceReview({
+    resource_type: "skill",
+    source_resource_id: String(skillId),
 
-    if (!response.ok) {
-      throw new Error(
-        `Failed to create skill repository listing: ${response.statusText}`
-      );
-    }
-
-    return response.json();
-  } catch (error) {
-    log.error("Error creating skill repository listing:", error);
-    throw error;
-  }
+    submit_description: payload.content,
+    listing_fields: {
+      icon: payload.icon,
+      tags: payload.tags,
+      category_id: payload.category_id,
+    },
+  });
 }
 
 export async function updateSkillRepositoryStatus(
@@ -246,3 +238,32 @@ const skillRepositoryService = {
 };
 
 export default skillRepositoryService;
+
+export async function uninstallSkillRepositoryCopy(
+  repositoryId: number,
+  skillId: number
+): Promise<void> {
+  const response = await fetchWithErrorHandling(
+    API_ENDPOINTS.skillRepository.uninstallCopy(repositoryId, skillId),
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    }
+  );
+  if (!response.ok)
+    throw new Error(`Could not uninstall Skill copy (${response.status})`);
+}
+
+export async function deleteLocalRepositorySkill(
+  skillId: number
+): Promise<void> {
+  const response = await fetchWithErrorHandling(
+    API_ENDPOINTS.skillRepository.deleteLocal(skillId),
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    }
+  );
+  if (!response.ok)
+    throw new Error(`Could not delete Skill (${response.status})`);
+}

@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from unittest.mock import Mock
+
 import pytest
 from contracts.errors.exceptions import McpNotFoundError
 from management.db.tag.repository import TagManagementDB
@@ -119,10 +121,20 @@ def test_skill_delete_without_a_same_tenant_record_does_not_clean_up(monkeypatch
 @pytest.mark.asyncio
 async def test_mcp_delete_cleans_up_after_the_local_tenant_record_is_deleted(monkeypatch):
     calls = []
+    identity = Mock(return_value={"user_role": "DEV"})
+    groups = Mock(return_value=[])
+    monkeypatch.setattr(remote_mcp_service, "get_user_tenant_by_user_id", identity)
+    monkeypatch.setattr(remote_mcp_service, "query_group_ids_by_user", groups)
     monkeypatch.setattr(
         remote_mcp_service,
         "get_mcp_record_by_id_and_tenant",
-        lambda **kwargs: {"mcp_id": 13, "tenant_id": kwargs["tenant_id"], "container_id": None},
+        lambda **kwargs: {
+            "mcp_id": 13,
+            "tenant_id": kwargs["tenant_id"],
+            "created_by": "user-a",
+            "group_ids": "",
+            "container_id": None,
+        },
     )
     monkeypatch.setattr(remote_mcp_service, "set_mcp_tools_unavailable", lambda **kwargs: None)
     monkeypatch.setattr(
@@ -136,6 +148,8 @@ async def test_mcp_delete_cleans_up_after_the_local_tenant_record_is_deleted(mon
 
     await remote_mcp_service.delete_mcp_service(tenant_id="tenant-a", user_id="user-a", mcp_id=13)
 
+    identity.assert_called_once_with("user-a")
+    groups.assert_called_once_with("user-a")
     assert calls == ["delete", ("tenant-a", "mcp_service", "13", "user-a")]
 
 

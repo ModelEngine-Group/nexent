@@ -94,7 +94,7 @@ export default function Homepage() {
   const navigateToChat = () => navigateWithPermissionCheck("/newchat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
   const navigateToRepository = () =>
-    navigateWithPermissionCheck("/agent-space");
+    navigateWithPermissionCheck("/resource-space");
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
 
@@ -188,7 +188,7 @@ export default function Homepage() {
                 </div>
               </Col>
             )}
-            {canShowQuickAction("/agent-space") && (
+            {canShowQuickAction("/resource-space") && (
               <Col xs={24} sm={24} md={8}>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   <Button

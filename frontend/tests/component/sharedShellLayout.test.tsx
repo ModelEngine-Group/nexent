@@ -61,7 +61,6 @@ test.each([
   "/zh/models",
   "/en/knowledges",
   "/zh/memory",
-  "/zh/agent-space",
   "/zh/agents/1",
   "/zh/newchat",
 ])("shared shell %s reserves no global header/footer space", (path) => {

@@ -19,6 +19,7 @@ from management.db.base import (
     _PUBLISHER_TENANT_ID_DOC,
     _PUBLISHER_USER_ID_DOC,
 )
+from management.db.repository_review_fields import RepositoryReviewFields
 from infrastructure.rdb.skill_execution_records import (
     SkillInfo as SkillInfo,
     SkillInstance as SkillInstance,
@@ -26,7 +27,7 @@ from infrastructure.rdb.skill_execution_records import (
 )
 
 
-class SkillRepository(TableBase):
+class SkillRepository(RepositoryReviewFields, TableBase):
     """
     Skill repository (marketplace) table. Frozen snapshot of a shared skill for installation.
     """

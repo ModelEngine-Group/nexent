@@ -9,6 +9,7 @@ and one row per resolved receiver is written to notification_receiver_t.
 
 import logging
 from typing import Any, Dict, List, Optional
+from management.db.repository_transactions import after_repository_commit
 
 from contracts.constants.constants import (
     SCOPE_SU,
@@ -22,7 +23,7 @@ from contracts.constants.constants import (
     TENANT_USER_ROLES,
     VALID_EVENT_TYPES,
     VALID_NOTIFICATION_SCOPES,
-    VALID_RESOURCE_TYPES,
+    VALID_NOTIFICATION_RESOURCE_TYPES,
 )
 from infrastructure.rdb.client import get_db_session
 from management.db.models import Notification, NotificationReceiver, UserTenant
@@ -94,7 +95,7 @@ def create_notification(
     """
     if event_type not in VALID_EVENT_TYPES:
         raise ValueError(f"Invalid event_type: {event_type}")
-    if resource_type not in VALID_RESOURCE_TYPES:
+    if resource_type not in VALID_NOTIFICATION_RESOURCE_TYPES:
         raise ValueError(f"Invalid resource_type: {resource_type}")
     if scope not in VALID_NOTIFICATION_SCOPES:
         raise ValueError(f"Invalid notification scope: {scope}")
@@ -138,6 +139,7 @@ def create_notification(
         return {"notification_id": notification_id, "receiver_count": len(receivers)}
 
 
+@after_repository_commit
 def deactivate_notifications(
     *,
     event_type: str,
@@ -208,6 +210,8 @@ def list_notifications_by_user(
                     "notification_id": recv.notification_id,
                     "event_type": notif.event_type,
                     "resource_type": notif.resource_type,
+                    "review_id": str(notif.unique_id) if notif.unique_id is not None and notif.resource_type == "resource_review" else None,
+                    "repository_id": str(notif.unique_id) if notif.unique_id is not None and notif.resource_type in {"agent_repository", "skill_repository", "mcp_repository"} else None,
                     "details": notif.details,
                     "scope": notif.scope,
                     "is_read": recv.is_read,

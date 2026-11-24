@@ -1,0 +1,149 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-SPACE-MY-AGENT-RETIRE-20261118
+  change_type: requirement
+  requirement_id: AGENT-SPACE-MY-AGENT-RETIRE-20261118
+  title: Retire the personal my-agents view and the legacy mcp-space and skill-space routes, keeping the unified repository as the only surface
+  description: >-
+    The personal my-agents management view under /agent-space is retired: tenants browse repository
+    listings only on the agent tab of the unified resource repository page (/resource-space?tab=agent), authors apply
+    for listing and follow review progress from the agent management page (/agents) card menu and the unified review
+    center (/resource-space?tab=review), and the /agent-space route itself is removed together with its redirect
+    shell so the unified surfaces are the only agent repository entry points, while the /agent-repository alias keeps
+    redirecting legacy links. The legacy /mcp-space and /skill-space routes are removed the same way: both were
+    redirect shells over stale duplicate component trees, every in-product link that targeted them (workbench
+    results and popover, notification deep links, the agent capability shortcut, copy-precheck activation paths
+    and the live components' review deep-link returns) now targets the unified /resource-space URLs, and the
+    unified page keeps the personal mine views and the review center for skills and MCP. The retired view's share
+    of the i18n catalog is removed, and the two D4 cases that exercised the
+    retired tabs are migrated onto the unified surfaces instead of being deleted: AGENT-REPO-SORT-MAIN-TAG-D4-001
+    proves the default order, pagination and the main/ordinary agent marker on the repository tab, and
+    PW-MARKET-AGENT-01 applies, reviews, copies and takes down through /agents, the unified review center and the
+    repository card; developers can take down listings they published via the existing card action.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - AGENT-REPO-SORT-MAIN-TAG
+    - V5-PW-MARKET-AGENT-01
+    - NAV-MENU-VISIBILITY
+    - RESOURCE-CENTER-ACCESS
+    - V5-PW-UI-01
+    - F-054
+    - F-079
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - AGENT-REPO-SORT-MAIN-TAG-D4-001
+    - PW-MARKET-AGENT-01
+    - NAV-MENU-D1-001
+    - NAV-MENU-D4-001
+    - RESOURCE-CENTER-ACCESS-D4-001
+    - PW-UI-01
+    - API-AUTO-A311B5BCB0E23EFF
+    - PW-SKILL-01
+    - PW-MCP-REMOTE-01
+    - PW-AUTO-37453582F1CFB11D
+    - UT-FE-AUTO-B3718E0BBA849044
+    - UT-FE-AUTO-BC23EA673FB8BEC0
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - The agent list card and its tag normalization still render recovered tags, and the card menu still offers
+        apply-listing, review-progress and usage-guide actions against the unified repository routes.
+      - The unified repository card identity, layout and route helpers still resolve /resource-space targets, and the
+        surviving /agent-repository alias still redirects instead of 404.
+      - The usage-guide flow still composes the retrieval guide for agents with a published version.
+      - The live MCP and Skill repository components keep rendering card identity, community recovery and
+        structured-tag behavior after their stale app-route duplicates were removed, and workbench, notification
+        and editor links target the unified /resource-space URLs.
+      - The repository list identifies the signed-in publisher without exposing publisher user IDs.
+    reason: >-
+      The retirement removes a view without changing the surviving components' unit contracts, so the existing
+      frontend component UT continues to prove the reused behaviors. The backend list test covers viewer
+      matching, and the existing marketplace D4 journey exercises the developer's card action.
+    test_selectors:
+    - frontend/tests/component/agentListCard.test.tsx
+    - frontend/tests/component/agentTagsNormalization.test.tsx
+    - frontend/tests/component/agentCardTags.test.tsx
+    - frontend/tests/component/casRepositoryIdentity.test.tsx
+    - frontend/tests/component/legacyRepositoryRoutes.test.tsx
+    - frontend/tests/component/agentUsageGuide.test.tsx
+    - frontend/tests/component/mcpCommunityRecovery.test.tsx
+    - frontend/tests/component/routeLoadingSkeleton.test.tsx
+    - frontend/tests/workbench/CreationResultCards.test.tsx
+    - test/backend/services/test_agent_repository_service.py::test_list_repository_listings_marks_only_the_viewer_as_publisher
+  notes: >-
+    Product scope: the deleted files cover the /agent-space personal tabs (agent-space shim, my-agent view, mine
+    review status modal, review-center trio), their services/hooks/types pruning and 118 dead zh/en i18n keys each;
+    the live AgentSpace component, the apply/copy/usage-guide modals and the unified ResourceRepositoryPage stay.
+
+    Formal-asset scope: AGENT-REPO-SORT-MAIN-TAG rules 001/002/005 are narrowed from the retired two-tab wording to
+    the unified repository tab, and its D4 case drops the deleted my-agents steps while migrating the page-reset
+    proof to the repository tab (13 fixture listings, two pages at page size 12). PW-MARKET-AGENT-01 keeps its
+    seven-step contract: the apply, review-approval, discovery, copy and take-down steps now use /agents, POST
+    /api/reviews, POST /api/reviews/{id}/decision, /resource-space?tab=agent and the developer's repository card
+    take-down (PATCH /api/repository/agent/{id}/status with not_shared), which replaces the retired
+    MineReviewStatusModal path. No case or feature is retired.
+
+    Reconciliation: the three historical change records that referenced the retired view's UT suites were adjusted in
+    place, not deleted - AGENT-REPO-SORT-MAIN-TAG-20261013 and AGENT-LISTING-EVALUATION-20261106 redirect their
+    myAgentMainBadge.test.tsx references to casRepositoryIdentity.test.tsx with the my-agents behavior reworded to
+    the unified repository tab, and AGENT-TAG-LAYOUT-20261027 drops its two mine-view behaviors together with the
+    retired myAgentOwnershipRemoval/myAgentMainBadge selectors while keeping the tag-layout and pagination
+    obligations.
+
+    Route removal scope: the /agent-space redirect shell (app/[locale]/agent-space/page.tsx) is deleted outright, so
+    stale bookmarks 404 while the /agent-repository alias keeps its redirect; the RouteLoadingSkeleton agent-space
+    entry and the shared-shell pathname fixture were pruned. Five further cases referenced the deleted route and are
+    migrated in place: NAV-MENU-D1-001 and NAV-MENU-D4-001 authorize /resource-space instead of /agent-space, assert
+    the retired label renders no sidebar button, land their account-menu and hover-rail journeys on live unified
+    routes, and NAV-MENU-VISIBILITY rule 007 now names the Globe unified-repository glyph instead of the removed
+    Skill entry; RESOURCE-CENTER-ACCESS-D4-001 drops the deleted route from its legacy redirect probe list;
+    PW-UI-01 filters stale authorized /agent-space entries out of its navigation smoke and runs the module-local
+    search step on /resource-space; API-AUTO-A311B5BCB0E23EFF redirects its consumer contract from the deleted
+    my-agent.tsx to the surviving agents management page handleCreate (agentId-only destructure with the onboarding
+    marker). The NAV scenarios' agent-space button assertions had been stale since the sidebar was consolidated to
+    the unified repository entry and are realigned to the unified entry by this record.
+
+    Legacy mcp-space and skill-space scope: the two routes were the same pattern - redirect-shell page.tsx files
+    over stale duplicate component trees (5972/2136 lines behind the live mcp/skill repository modules) - so both
+    app directories are deleted outright, their sidebar.mcpSpace/sidebar.skillSpace skeleton
+    keys and RouteLoadingSkeleton entries are pruned, and LegacyRepositoryEntry with buildLegacyRepositoryRedirect
+    are narrowed to the surviving /agent-repository alias. Every in-product link that targeted the old routes
+    (agent-capability new-tool shortcut, copy-precheck requirement activation paths, skill/mcp review notification
+    deep links, workbench creation-result and skill-popover manage links, and the live McpSpace/SkillSpace review
+    deep-link returns) now targets /resource-space?tab=<type>[&view=mine] or the unified review center directly.
+    Five further assets are migrated in place: the PW-SKILL-01 and PW-MCP-REMOTE-01 page objects land on
+    /resource-space?tab=skill|mcp, PW-AUTO-37453582F1CFB11D lands on /resource-space?tab=skill with its step
+    wording updated to the live component, UT-FE-AUTO-B3718E0BBA849044 redirects its three component imports from
+    the stale dead copies to the live mcp repository module and adds inert harness mocks for the live modal's
+    server-list toggle and permission gate, UT-FE-AUTO-BC23EA673FB8BEC0 and F-079 wording now names the
+    unified Skill/MCP tab, the workbench/agent-editor D4 fixtures authorize /resource-space instead of the deleted
+    routes, and PW-UI-01 filters stale authorized skill-space and mcp-space entries out of its navigation smoke.
+    Repository-specific components live under frontend/app/[locale]/resource-space/components/. Components reused by
+    agent configuration, the skill editor, or the shared resource grid live under frontend/components/.
+    The legacy agent repository alias owns its redirect component.
+
+    Dead-wood pass over the colocated tree: fifteen modules that lost their last product reference once the unified
+    entry became the only surface (the stale per-tab mcp and skill review-center pages with their confirm modals and
+    ReviewSkillList, the community-add AddMcpServiceCommunitySection with its card/list/toolbar, the
+    McpServiceCard/McpServicesFilterBar/McpToolsPagination/PublishedServiceCard set, and the shared StatusBadge and
+    TagEditor pair) are deleted after a whole-repo import-graph audit proves them unreachable, mcpCommunityRecovery.test.tsx drops its add-view
+    parameterization together with the deleted section while keeping the four repository-view tests, and forty
+    now-orphaned zh/en i18n keys each (the mcpTools.status family, the old repository.review column and action
+    labels) leave public/locales/*/common.json after a repo-wide zero-reference audit clears all of them.
+
+    Verification: type-check is clean across the colocated tree, the moved shared components and the rewritten test;
+    the migrated UT-FE-AUTO-B3718E0BBA849044 suite passes 10/10 after the harness
+    mocks, the rewritten legacy-alias and skeleton specs pass, and the workbench CreationResultCards suite passes 8/8
+    under its own config. The 23-file affected component set (direct alias importers, transitive consumers and
+    navigation canaries) runs 175/181; the six failures are exactly the pre-existing pairs - the two
+    mcpCommunityRecovery repository-view cases and the four skillRepositoryTakeDownAction cases - and both pairs
+    reproduce identically against the pre-change HEAD component and test copies, so they are pre-existing branch
+    failures outside this record's scope. The rewritten mcpCommunityRecovery file keeps those two failing cases
+    verbatim plus its two passing repository-view cases, so the prune only removes coverage of the deleted
+    community-add section and is proven behavior-neutral by the same HEAD comparison.

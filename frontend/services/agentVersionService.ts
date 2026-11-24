@@ -32,6 +32,7 @@ export interface Agent {
   model_ids?: number[];
   model_names?: string[];
   model_name?: string;
+  tags?: string[];
   max_steps: number;
   prompt?: string;
   parent_agent_id?: number;
@@ -51,7 +52,11 @@ export interface Agent {
   unavailable_reasons?: string[];
   tools: ToolInstance[];
   skills?: Array<{ skill_id: number; name?: string }>;
-  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string }>;
+  sub_agent_relations?: Array<{
+    agent_id: number;
+    agent_name?: string;
+    version_no?: number | null;
+  }>;
 }
 
 export interface AgentVersion {

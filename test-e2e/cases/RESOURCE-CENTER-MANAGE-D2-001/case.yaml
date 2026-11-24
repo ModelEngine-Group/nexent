@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D2
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-MANAGE-D2-001
+  feature_id: RESOURCE-CENTER-MANAGE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-MANAGE-RULE-012
+  - RESOURCE-CENTER-MANAGE-RULE-013
+  title: Skill安装关联与批量可见副本契约
+  type: API-IT
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: Skill安装关联与批量可见副本契约
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 安装仓库Skill并查询普通仓库列表installed_copies和installation_state
+    expected: 新安装返回本地skill_id；列表批量按租户和当前用户可见性联查skill_id/name/can_uninstall；installation_state仅为installed/not_installed/unknown，来源ID不作为授权依据。
+  - order: 2
+    action: 准备同名不同源、两个本地副本、只读副本和source=repository但无来源ID的历史副本
+    expected: 已知匹配副本时为installed（包括只读）；无匹配且存在当前用户可见的历史未知来源时为unknown；无匹配且无此歧义时为not_installed；多副本逐项列出，同名不同源不混淆，unknown不阻止按既有规则再次安装。
+  - order: 3
+    action: 以只读、其他租户或伪造skill_id执行卸载请求
+    expected: 调用已有本地删除权限校验，拒绝越权且仓库原件不受影响；用户需在已知副本中明确选定目标。
+  expected_results:
+  - 新安装返回本地skill_id；列表批量按租户和当前用户可见性联查skill_id/name/can_uninstall；installation_state仅为installed/not_installed/unknown，来源ID不作为授权依据。
+  - 已知匹配副本时为installed（包括只读）；无匹配且存在当前用户可见的历史未知来源时为unknown；无匹配且无此歧义时为not_installed；多副本逐项列出，同名不同源不混淆，unknown不阻止按既有规则再次安装。
+  - 调用已有本地删除权限校验，拒绝越权且仓库原件不受影响；用户需在已知副本中明确选定目标。
+  forbidden_side_effects:
+  - 不得逐条触发N+1安装状态查询。
+  - 不得将SkillInfo.skill_id与Agent-Skill绑定实例ID混用。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-012
+    - AC-013
+    design_status: Designed; product, script and runtime evidence PENDING.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 新安装返回本地skill_id；列表批量按租户和当前用户可见性联查skill_id/name/can_uninstall；installation_state仅为installed/not_installed/unknown，来源ID不作为授权依据。（SPEC
+      AC-012, AC-013）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 已知匹配副本时为installed（包括只读）；无匹配且存在当前用户可见的历史未知来源时为unknown；无匹配且无此歧义时为not_installed；多副本逐项列出，同名不同源不混淆，unknown不阻止按既有规则再次安装。（SPEC
+      AC-012, AC-013）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 调用已有本地删除权限校验，拒绝越权且仓库原件不受影响；用户需在已知副本中明确选定目标。（SPEC AC-012, AC-013）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  contract:
+    protocol: HTTP JSON; preserve router prefix
+    request_expectations:
+    - 安装仓库Skill并查询普通仓库列表installed_copies和installation_state
+    - 准备同名不同源、两个本地副本、只读副本和source=repository但无来源ID的历史副本
+    - 以只读、其他租户或伪造skill_id执行卸载请求
+    response_expectations:
+    - 新安装返回本地skill_id；列表批量按租户和当前用户可见性联查skill_id/name/can_uninstall；installation_state仅为installed/not_installed/unknown，来源ID不作为授权依据。
+    - 已知匹配副本时为installed（包括只读）；无匹配且存在当前用户可见的历史未知来源时为unknown；无匹配且无此歧义时为not_installed；多副本逐项列出，同名不同源不混淆，unknown不阻止按既有规则再次安装。
+    - 调用已有本地删除权限校验，拒绝越权且仓库原件不受影响；用户需在已知副本中明确选定目标。

@@ -35,6 +35,12 @@ class _SkillRepositoryModel:
     description = MagicMock(name="description")
     source = MagicMock(name="source")
     submitted_by = MagicMock(name="submitted_by")
+    submitted_user_id = MagicMock(name="submitted_user_id")
+    submitted_at = MagicMock(name="submitted_at")
+    submit_description = MagicMock(name="submit_description")
+    review_comment = MagicMock(name="review_comment")
+    submission_revision = MagicMock(name="submission_revision")
+    published_at = MagicMock(name="published_at")
     category_id = MagicMock(name="category_id")
     tags = MagicMock(name="tags")
     icon = MagicMock(name="icon")
@@ -288,6 +294,7 @@ def test_list_repository_by_skill_ids_maps_rows(monkeypatch, mock_session):
         skill_repository_id=1,
         skill_id=8,
         status="shared",
+        downloads=3,
         create_time=created_at,
     )
     query.filter.return_value.order_by.return_value.all.return_value = [row]
@@ -302,5 +309,6 @@ def test_list_repository_by_skill_ids_maps_rows(monkeypatch, mock_session):
         "skill_id": 8,
         "status": "shared",
         "content": row.content,
+        "downloads": 3,
         "create_time": created_at,
     }]

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   keepPreviousData,
   useMutation,
@@ -91,7 +93,7 @@ export function useSkillRepositoryListingDetail(
       skillRepositoryService.fetchSkillRepositoryListingDetail(
         skillRepositoryId as number
       ),
-    staleTime: 60_000,
+    staleTime: 0,
     enabled: enabled && skillRepositoryId != null,
   });
 }

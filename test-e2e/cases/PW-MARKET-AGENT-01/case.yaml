@@ -6,12 +6,12 @@ case:
   feature_id: V5-PW-MARKET-AGENT-01
   business_rule_ids:
   - V5-PW-MARKET-AGENT-01-RULE-01
-  title: Mine申请上架→Admin Review→Repository→同租户其他用户Copy
+  title: 智能体管理页申请上架→Admin Review→仓库→同租户其他用户Copy
   type: E2E
   priority: P1
   status: active
   automation: automated
-  objective: 按/agent-space Repository/Mine/Review三Tab验证市场闭环。
+  objective: 按智能体管理页申请上架、资源仓库审核中心批准、仓库Tab发现、同租户其他用户复制验证市场闭环。
   preconditions:
   - 作者已发布run_id Agent
   - Admin reviewer
@@ -20,17 +20,17 @@ case:
     legacy_asset_declaration: config/users.yaml
   steps:
   - order: 1
-    action: 作者进入/agent-space→Mine，定位run_id Agent并申请上架。
-    expected: Review仅管理员可见。
+    action: 作者进入/agents智能体管理页，定位run_id Agent并从卡片菜单申请上架。
+    expected: 提交成功，上架申请进入审核队列，Review仅管理员可见。
   - order: 2
-    action: 确认状态进入审核中。
-    expected: 批准后Repository可见。
+    action: 作者从卡片菜单打开审核中心详情，确认申请状态。
+    expected: 申请进入待审核。
   - order: 3
-    action: Admin进入Review，打开申请并批准。
-    expected: Copy后资源归消费者租户。
+    action: Admin进入/resource-space?tab=review审核中心，打开申请并批准。
+    expected: 批准后仓库Tab可见。
   - order: 4
-    action: 消费者进入Repository搜索run_id Agent。
-    expected: Copy后资源归消费者租户。
+    action: 消费者进入/resource-space?tab=agent仓库页搜索run_id Agent。
+    expected: 批准后的上架记录对同租户消费者可见。
   - order: 5
     action: 从仓库卡片打开复制预检弹窗并执行Copy/导入。
     expected: Copy后资源归消费者租户。
@@ -38,30 +38,45 @@ case:
     action: 按导入响应/前后列表差集捕获独立副本ID，到对应编辑器确认可编辑且配置保留；同租户重名允许产品自动添加数字后缀。
     expected: Copy后资源归消费者租户。
   - order: 7
-    action: 清理时下架/删除测试发布项。
-    expected: Copy后资源归消费者租户。
+    action: 删除消费者副本，由开发者作者点击仓库卡片下架图标并确认。
+    expected: 作者可下架自己发布的记录；请求成功后该记录从仓库消失。
   expected_results:
   - Review仅管理员可见。
   - 批准后Repository可见。
   - Copy后资源归消费者租户。
+  - 作者通过仓库卡片下架自己的记录后，仓库不再展示该条目。
   forbidden_side_effects: []
+  acceptance:
+  - id: AC-01
+    description: 作者提交上架申请并查看待审核状态，管理员完成审核。
+    steps: [1, 2, 3]
+    expected_results: [1]
+  - id: AC-02
+    description: 同租户消费者找到已上架记录并创建独立、可编辑的副本。
+    steps: [4, 5, 6]
+    expected_results: [2, 3]
+  - id: AC-03
+    description: 开发者作者通过仓库卡片图标下架自己的记录。
+    steps: [7]
+    expected_results: [4]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
     legacy_row: 25
   actor: Nexent browser user
   journey:
-  - 作者进入/agent-space→Mine，定位run_id Agent并申请上架。
-  - 确认状态进入审核中。
-  - Admin进入Review，打开申请并批准。
-  - 消费者进入Repository搜索run_id Agent。
+  - 作者进入/agents智能体管理页，定位run_id Agent并从卡片菜单申请上架。
+  - 作者从卡片菜单打开审核中心详情确认待审核。
+  - Admin进入/resource-space?tab=review审核中心，打开申请并批准。
+  - 消费者进入/resource-space?tab=agent仓库页搜索run_id Agent。
   - 从仓库卡片打开复制预检弹窗并执行Copy/导入。
   - 按导入响应/前后列表差集捕获独立副本ID，到对应编辑器确认可编辑且配置保留；同租户重名允许产品自动添加数字后缀。
-  - 清理时下架/删除测试发布项。
+  - 删除消费者副本，由开发者作者通过仓库卡片图标下架自己发布的记录。
   final_business_result:
   - Review仅管理员可见。
   - 批准后Repository可见。
   - Copy后资源归消费者租户。
+  - 作者通过仓库卡片下架自己的记录后，仓库不再展示该条目。
   failure_evidence:
   - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MARKET-AGENT-01/
 

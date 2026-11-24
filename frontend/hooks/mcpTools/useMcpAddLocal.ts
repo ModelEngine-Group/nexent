@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -12,11 +14,16 @@ import {
 } from "@/services/mcpToolsService";
 import { getMcpAddErrorMessage } from "@/lib/mcpTools";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
-import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import {
+  McpDeploymentType,
+  McpSource,
+  MCP_TOOLS_QUERY_KEYS,
+} from "@/const/mcpTools";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
-import type { LocalAddMcpDraft } from "@/types/mcpTools";
+import type { LocalAddMcpDraft, McpServerListRecord } from "@/types/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
-import { uploadMcpImageStream } from "@/services/mcpService";
+import { getMcpServerList, uploadMcpImageStream } from "@/services/mcpService";
+import { tagManagementApi } from "@/services/tagManagementService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface UseMcpAddLocalParams {
@@ -28,14 +35,20 @@ interface UseMcpAddLocalParams {
  * Submission mutation for the "Add local MCP" form. The component owns the
  * draft; this hook only cares about the network call + cache invalidation.
  */
-export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocalParams) {
+export function useMcpAddLocal({
+  onSuccess,
+  onContainerStarted,
+}: UseMcpAddLocalParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { user } = useAuthorizationContext();
   const [submitting, setSubmitting] = useState(false);
 
-  const submit = async (draft: LocalAddMcpDraft): Promise<boolean> => {
+  const submit = async (
+    draft: LocalAddMcpDraft,
+    tagValueIds: number[] = []
+  ): Promise<boolean> => {
     const trimmedName = draft.name.trim();
     if (!trimmedName) {
       message.warning(t("mcpTools.add.validate.nameRequired"));
@@ -95,6 +108,8 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
 
     setSubmitting(true);
     try {
+      let createdServiceName = trimmedName;
+      let createdContainerId: string | undefined;
       // Embed creator identity so the "我的" card can display the developer
       const registryJson: Record<string, unknown> = {};
       if (user?.email) {
@@ -111,45 +126,67 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           message.error(t("mcpConfig.message.uploadImageInvalidFileType"));
           return false;
         }
-        if (!draft.containerPort || draft.containerPort < 1 || draft.containerPort > 65535) {
+        if (
+          !draft.containerPort ||
+          draft.containerPort < 1 ||
+          draft.containerPort > 65535
+        ) {
           message.error(t("mcpConfig.message.uploadImageValidPortRequired"));
           return false;
         }
 
         const envVars = draft.authorizationToken?.trim()
-          ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
+          ? JSON.stringify({
+              authorization_token: draft.authorizationToken.trim(),
+            })
           : undefined;
 
         const result = await uploadMcpImageStream(
-          file, draft.containerPort, trimmedName, envVars,
-          undefined, draft.groupIds?.join(","), draft.ingroupPermission,
+          file,
+          draft.containerPort,
+          trimmedName,
+          envVars,
+          undefined,
+          draft.groupIds?.join(","),
+          draft.ingroupPermission,
           draft.sharedFields ? JSON.stringify(draft.sharedFields) : undefined,
-          (containerId) => onContainerStarted?.(containerId),
+          (containerId) => onContainerStarted?.(containerId)
         );
         if (!result.success) {
-          throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));
+          throw new Error(
+            result.message || t("mcpTools.add.error.imageUploadFailed")
+          );
         }
+        createdServiceName = result.data?.service_name ?? trimmedName;
+        createdContainerId = result.data?.container_id;
       } else if (isContainer) {
-        const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
+        const mcpConfig = parseContainerMcpConfigJson(
+          draft.containerConfigJson
+        );
         if (!mcpConfig) {
           message.error(t("mcpTools.add.error.containerJsonInvalid"));
           return false;
         }
 
-        await addContainerMcpToolServiceStream({
-          name: trimmedName,
-          description: draft.description ?? "",
-          source: McpSource.LOCAL,
-          authorization_token: draft.authorizationToken?.trim() || undefined,
-          registry_json: registryJson,
-          port: draft.containerPort as number,
-          mcp_config: mcpConfig,
-          group_ids: draft.groupIds?.join(",") ?? undefined,
-          ingroup_permission: draft.ingroupPermission ?? undefined,
-          shared_fields: draft.sharedFields ?? undefined,
-        }, (result) => {
-          if (result.container_id) onContainerStarted?.(result.container_id);
-        });
+        const result = await addContainerMcpToolServiceStream(
+          {
+            name: trimmedName,
+            description: draft.description ?? "",
+            source: McpSource.LOCAL,
+            authorization_token: draft.authorizationToken?.trim() || undefined,
+            registry_json: registryJson,
+            port: draft.containerPort as number,
+            mcp_config: mcpConfig,
+            group_ids: draft.groupIds?.join(",") ?? undefined,
+            ingroup_permission: draft.ingroupPermission ?? undefined,
+            shared_fields: draft.sharedFields ?? undefined,
+          },
+          (result) => {
+            if (result.container_id) onContainerStarted?.(result.container_id);
+          }
+        );
+        createdServiceName = result.service_name ?? trimmedName;
+        createdContainerId = result.container_id;
       } else {
         await addMcpToolService({
           name: trimmedName,
@@ -167,6 +204,34 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
       }
 
       message.success(t("mcpTools.add.success"));
+      if (tagValueIds.length > 0) {
+        try {
+          const servers = await getMcpServerList(user?.tenantId);
+          const records: McpServerListRecord[] = servers.data;
+          const matches = records.filter(
+            (server) =>
+              server.service_name === createdServiceName &&
+              (isContainer || isLocalImage
+                ? Boolean(createdContainerId) &&
+                  server.container_id === createdContainerId
+                : server.mcp_url === draft.serverUrl.trim())
+          );
+          if (!servers.success || matches.length !== 1 || !matches[0].mcp_id) {
+            throw new Error("Created MCP service could not be identified");
+          }
+          await tagManagementApi.replaceAssignments(
+            "mcp_service",
+            String(matches[0].mcp_id),
+            { value_ids: tagValueIds }
+          );
+        } catch (error) {
+          log.error(
+            "[useMcpAddLocal] Failed to assign tags to the created MCP service",
+            { error }
+          );
+          message.warning(t("mcpTools.add.warning.tagAssignmentFailed"));
+        }
+      }
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });

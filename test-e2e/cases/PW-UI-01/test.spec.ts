@@ -17,8 +17,12 @@ async function accessibleRoutes(page: import("playwright/test").Page): Promise<s
   // SideNavigation contains permission-only parent nodes with no page and a
   // legacy `/chat` key whose actual navigationPath is `/newchat`.
   const parentNodes = new Set(["/agent-dev", "/resource-space", "/space"]);
+  // The personal agent view and the legacy mcp/skill space routes were retired
+  // together with their routes; stale authorization entries for them must not
+  // join the navigation smoke.
+  const retiredRoutes = new Set(["/agent-space", "/skill-space", "/mcp-space"]);
   return [...new Set(permissionNodes
-    .filter((route: string) => !parentNodes.has(route))
+    .filter((route: string) => !parentNodes.has(route) && !retiredRoutes.has(route))
     .map((route: string) => route === "/chat" ? "/newchat" : route))];
 }
 
@@ -69,15 +73,15 @@ journey("PW-UI-01", async (context) => {
         return "representative enabled routes matched their URL and rendered a non-empty non-404 main surface";
       },
       async () => {
-        await page.goto(appPath("/agent-space"), { waitUntil: "domcontentloaded" });
-        const search = page.getByPlaceholder(/搜索智能体/).first();
+        await page.goto(appPath("/resource-space"), { waitUntil: "domcontentloaded" });
+        const search = page.getByPlaceholder(/搜索/).first();
         if (await search.count()) await search.fill("d4-ui-state");
         await page.goto(appPath("/models"), { waitUntil: "domcontentloaded" });
         const leaked = await page.locator("input").evaluateAll(
           (nodes) => nodes.filter((node) => (node as HTMLInputElement).value === "d4-ui-state").length,
         );
         expect(leaked).toBe(0);
-        await page.goto(appPath("/agent-space"), { waitUntil: "domcontentloaded" });
+        await page.goto(appPath("/resource-space"), { waitUntil: "domcontentloaded" });
         return "a module-local search value did not leak into another module; return behavior remained owned by that page";
       },
       async () => {

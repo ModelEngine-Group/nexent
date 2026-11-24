@@ -6,7 +6,7 @@ set +x
 umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mode=docker namespace=nexent database=nexent-postgresql source_name="" apply=false timeout=300
-legacy_action="" with_auth=false production=false
+legacy_action="" with_auth=false production=false review_preflight=false
 config_target=nexent-config
 allow_start=true env_file="$SCRIPT_DIR/../../../env/.env"
 while [ "$#" -gt 0 ]; do
@@ -21,6 +21,7 @@ while [ "$#" -gt 0 ]; do
     --source-container) source_name="$2"; shift 2 ;;
     --env-file) env_file="$2"; shift 2 ;;
     --wait-timeout) timeout="$2"; shift 2 ;;
+    --review-preflight) review_preflight=true; shift ;;
     --apply) apply=true; shift ;;
     --no-start-source) allow_start=false; shift ;;
     --deploy) shift ;;
@@ -76,12 +77,17 @@ get_target() {
   [ -n "$target_password" ] || fail "Target database password is unavailable"
 }
 preflight() {
-  local encoded
+  local sql_file="$1" encoded
   encoded="$(printf '%s' "$target_password" | base64 | tr -d '\r\n')"
   # Secrets travel over stdin, never argv; suppress raw driver diagnostics.
-  { printf '%s\n' "$encoded"; cat "$SCRIPT_DIR/inspect_accounts.sql"; } |
+  {
+    printf '%s\n' "$encoded"
+    if [ "${2:-}" = read-only ]; then printf '%s\n' 'BEGIN READ ONLY;'; fi
+    cat "$sql_file" || return 1
+    if [ "${2:-}" = read-only ]; then printf '%s\n' 'COMMIT;'; fi
+  } |
     inside "$database" sh -c 'IFS= read -r encoded; PGPASSWORD="$(printf "%s" "$encoded" | base64 -d)"; export PGPASSWORD; exec "$@"' migration \
-      psql -X -qAt -h 127.0.0.1 -p "$target_port" -U "$target_user" -d "$target_db" -v ON_ERROR_STOP=1 2>/dev/null
+      psql -X -qAt -h 127.0.0.1 -p "$target_port" -U "$target_user" -d "$target_db" -v ON_ERROR_STOP=1
 }
 get_source() {
   source_user="${SUPABASE_POSTGRES_USER:-}"; source_db="${SUPABASE_POSTGRES_DB:-}"
@@ -113,7 +119,11 @@ worker_command=(python /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker
 if [ -n "$legacy_action" ]; then source "$SCRIPT_DIR/legacy.sh"; run_recovery; exit; fi
 log_stage preflight "Inspecting target account coverage (mode=$mode target=$database)."
 get_target
-state="$(preflight)" || fail "Cannot inspect target database; check readiness and credentials"
+if [ "${review_preflight:-false}" = true ]; then
+  preflight "$SCRIPT_DIR/../../migrations/v2.9.0_017_review_preflight.sql" read-only >/dev/null ||
+    fail "Repository review preflight failed; see the affected listing above"
+fi
+state="$(preflight "$SCRIPT_DIR/inspect_accounts.sql" 2>/dev/null)" || fail "Cannot inspect target database; check readiness and credentials"
 log_stage preflight "Target account inspection: $state"
 if worker_flag complete "$state"; then
   log_stage skipped "Account data is complete; source access and cleanup were not attempted."

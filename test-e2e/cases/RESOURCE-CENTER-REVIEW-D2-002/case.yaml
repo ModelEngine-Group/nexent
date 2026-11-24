@@ -1,0 +1,131 @@
+schema_version: '1.0'
+stage: D2
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-REVIEW-D2-002
+  feature_id: RESOURCE-CENTER-REVIEW
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-REVIEW-RULE-005
+  - RESOURCE-CENTER-REVIEW-RULE-006
+  title: 统一详情与决策输入及错误契约
+  type: API-IT
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 统一详情与决策输入及错误契约
+  preconditions:
+  - 配置隔离测试后端和一次性schema权限，运行固定脚本；不使用已有业务记录。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  - 决策成功场景使用已登记新URL且具有对应decision_types资格的审核者，本人/他人提交均沿用原有操作规则；本人查看场景使用独立mine身份。
+  test_data:
+    reason_lengths:
+    - 0
+    - 1000
+    - 1001
+    unicode: 中文和emoji按Unicode code point计数；先trim再计数
+    decisions:
+    - approve
+    - reject
+  steps:
+  - order: 1
+    action: 按三类型读取/reviews/{resource_type}/{review_id}；提交后编辑源资源
+    expected: 返回共享公共字段、revision、类型化resource_detail和allowed_actions；详情内容固定在本轮提交快照，MCP字段白名单有效；非待审无approve/reject/delete。
+  - order: 2
+    action: 逐类型POST decision：approve/reject分别输入省略reason、空白、trim后1000和1001字符、非法decision/缺review_id
+    expected: 可选意见空白→null；1000成功、1001及无效/缺轮次400；成功响应含新状态和revision；UTF-8按字符而非字节计数。
+  - order: 3
+    action: 请求未登录、无权限、授权范围不存在、非pending或review_id过期的记录
+    expected: 按顺序返回401/403/404/409；仅合法pending和匹配待审申请可修改；旧接口错误响应维持旧契约。
+  - order: 4
+    action: 在隔离fixture内准备9007199254740992和9007199254740993两条同类型仓库记录并读取列表、详情及决策定位
+    expected: 新JSON review_id为原始十进制字符串；列表key/URL/详情操作不会因JS Number精度合并两条记录；旧接口字段类型不变。
+  - order: 5
+    action: 普通仓库用户打开本人待审/已审记录、审核资格用户打开本人记录和他人记录
+    expected: 无审核资格仅可读本人快照/进度/意见，不授予决策；有审核资格能读取授权范围内本人和他人，按钮及操作按原有资格/状态/轮次，不新增提交人不等条件。
+  expected_results:
+  - 返回共享公共字段、revision、类型化resource_detail和allowed_actions；详情内容固定在本轮提交快照，MCP字段白名单有效；非待审无approve/reject/delete。
+  - 可选意见空白→null；1000成功、1001及无效/缺轮次400；成功响应含新状态和revision；UTF-8按字符而非字节计数。
+  - 按顺序返回401/403/404/409；仅合法pending和匹配待审申请可修改；旧接口错误响应维持旧契约。
+  - 新JSON review_id为原始十进制字符串；列表key/URL/详情操作不会因JS Number精度合并两条记录；旧接口字段类型不变。
+  - 无审核资格仅可读本人快照/进度/意见，不授予决策；有审核资格能读取授权范围内本人和他人，按钮及操作按原有资格/状态/轮次，不新增提交人不等条件。
+  forbidden_side_effects:
+  - 不得暴露原始私密配置或审核未提交的新编辑。
+  - 不得用reason覆盖submit_description。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-005
+    - AC-006
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 返回共享公共字段、revision、类型化resource_detail和allowed_actions；详情内容固定在本轮提交快照，MCP字段白名单有效；非待审无approve/reject/delete。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 可选意见空白→null；1000成功、1001及无效/缺轮次400；成功响应含新状态和revision；UTF-8按字符而非字节计数。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 按顺序返回401/403/404/409；仅合法pending和匹配待审申请可修改；旧接口错误响应维持旧契约。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 新JSON review_id为原始十进制字符串；列表key/URL/详情操作不会因JS Number精度合并两条记录；旧接口字段类型不变。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: 无审核资格仅可读本人快照/进度/意见，不授予决策；有审核资格能读取授权范围内本人和他人，按钮及操作按原有资格/状态/轮次，不新增提交人不等条件。
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  contract:
+    protocol: HTTP JSON; preserve router prefix
+    request_expectations:
+    - 按三类型读取/reviews/{resource_type}/{review_id}；提交后编辑源资源
+    - 逐类型POST decision：approve/reject分别输入省略reason、空白、trim后1000和1001字符、非法decision/缺review_id
+    - 请求未登录、无权限、授权范围不存在、非pending或review_id过期的记录
+    - 在隔离fixture内准备9007199254740992和9007199254740993两条同类型仓库记录并读取列表、详情及决策定位
+    - 普通仓库用户打开本人待审/已审记录、审核资格用户打开本人记录和他人记录
+    response_expectations:
+    - 返回共享公共字段、revision、类型化resource_detail和allowed_actions；详情内容固定在本轮提交快照，MCP字段白名单有效；非待审无approve/reject/delete。
+    - 可选意见空白→null；1000成功、1001及无效/缺轮次400；成功响应含新状态和revision；UTF-8按字符而非字节计数。
+    - 按顺序返回401/403/404/409；仅合法pending和匹配待审申请可修改；旧接口错误响应维持旧契约。
+    - 新JSON review_id为原始十进制字符串；列表key/URL/详情操作不会因JS Number精度合并两条记录；旧接口字段类型不变。
+    - 无审核资格仅可读本人快照/进度/意见，不授予决策；有审核资格能读取授权范围内本人和他人，按钮及操作按原有资格/状态/轮次，不新增提交人不等条件。

@@ -46,7 +46,6 @@ it.each([
   ["/en/resource-manage", "table", "sidebar.resourceManage"],
   ["/zh/knowledges", "cards", "sidebar.knowledgeBaseConfig"],
   ["/zh/aidp-knowledges", "split", "sidebar.knowledgeBaseConfig"],
-  ["/zh/mcp-space", "cards", "sidebar.mcpSpace"],
   ["/zh/workbench", "conversation", "sidebar.agentWorkbench"],
   ["/en/newchat", "conversation", "sidebar.startChat"],
 ])(

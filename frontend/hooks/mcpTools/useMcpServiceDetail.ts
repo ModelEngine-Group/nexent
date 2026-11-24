@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -58,6 +60,7 @@ export function useMcpServiceDetail({
   const [deleting, setDeleting] = useState(false);
   const [tagSaving, setTagSaving] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- Reset the draft when a different saved service is selected. */
   useEffect(() => {
     if (selectedService) {
       const newDraft = { ...selectedService };
@@ -68,6 +71,7 @@ export function useMcpServiceDetail({
       draftRef.current = null;
     }
   }, [selectedService]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const invalidateServices = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
@@ -139,31 +143,36 @@ export function useMcpServiceDetail({
   );
 
   const runHealthCheck = useCallback(async () => {
-    if (!draft || draft.mcpId < 0) return;
+    if (!draft || draft.mcpId < 0) return false;
     setHealthChecking(true);
     try {
       const result = await healthcheckMcpToolService({ mcp_id: draft.mcpId });
       const nextStatus =
         result.data?.health_status ?? McpHealthStatus.UNCHECKED;
       setDraft((prev) => (prev ? { ...prev, healthStatus: nextStatus } : prev));
-      message.success(t("mcpTools.service.healthOk"));
+      const healthy = nextStatus === McpHealthStatus.HEALTHY;
+      if (healthy) message.success(t("mcpTools.service.healthOk"));
+      else message.error(t("mcpTools.service.healthFailed"));
       invalidateServices();
+      return healthy;
     } catch (error) {
       log.error("[useMcpServiceDetail] Health check failed", { error });
       message.error(t("mcpTools.service.healthFailed"));
       setDraft((prev) =>
         prev ? { ...prev, healthStatus: McpHealthStatus.UNHEALTHY } : prev
       );
+      return false;
     } finally {
       setHealthChecking(false);
     }
   }, [draft, invalidateServices, message, t]);
 
+  const selectedMcpId = selectedService?.mcpId;
   const loadTools = useCallback(async () => {
-    if (!draft || draft.mcpId < 0) return;
+    if (selectedMcpId == null || selectedMcpId < 0) return;
     setLoadingTools(true);
     try {
-      const result = await listMcpRuntimeTools(draft.mcpId);
+      const result = await listMcpRuntimeTools(selectedMcpId);
       setToolsState({ visible: true, tools: result.data || [] });
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to load tools", { error });
@@ -171,7 +180,7 @@ export function useMcpServiceDetail({
     } finally {
       setLoadingTools(false);
     }
-  }, [draft, message, t]);
+  }, [selectedMcpId, message, t]);
 
   const refreshTools = useCallback(async () => {
     if (!draft || draft.mcpId < 0) return;
@@ -194,7 +203,7 @@ export function useMcpServiceDetail({
     } finally {
       setLoadingTools(false);
     }
-  }, [draft, message, t]);
+  }, [draft, invalidateServices, message, queryClient, t]);
 
   const closeToolsModal = useCallback(() => {
     setToolsState({ visible: false, tools: [] });

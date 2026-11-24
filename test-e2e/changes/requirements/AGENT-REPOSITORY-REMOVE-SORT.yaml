@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-REPOSITORY-REMOVE-SORT
+  change_type: requirement
+  requirement_id: AGENT-REPOSITORY-REMOVE-SORT
+  title: Remove the agent repository sort selector
+  description: >-
+    The agent tab uses its default listing order. The toolbar no longer offers ordering by time or copies, and old
+    sort query parameters do not alter the agent listing request. Search, tags, pagination, display layout, and the
+    MCP and skill repository tabs retain their behavior. The backend sort parameters remain supported.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AGENT-REPO-SORT-MAIN-TAG]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-REPO-SORT-MAIN-TAG-D4-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Repository card labels and agent tag normalization remain available.
+    reason: >-
+      The existing component tests cover these retained behaviors. The absent selector, stale URLs, default API
+      requests and pagination are checked together in the existing browser journey.
+    test_selectors:
+    - frontend/tests/component/casRepositoryIdentity.test.tsx
+    - frontend/tests/component/agentCardTags.test.tsx
+  notes: >-
+    The browser journey fulfills application HTTP requests with fixtures and only needs a running frontend.
+    It creates no tenant resources and requires no shared test asset preparation or cleanup.

@@ -3,7 +3,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { Badge, Button, ConfigProvider, Dropdown, Tooltip } from "antd";
 import { Bell } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -11,11 +11,14 @@ import { useTranslation } from "react-i18next";
 import { formatNotificationMessage } from "@/lib/notificationMessage";
 import {
   buildRepositoryReviewDeepLink,
+  buildUnifiedRepositoryReviewDeepLink,
   isRepositoryReviewNotification,
 } from "@/lib/notificationNavigation";
 import { formatDateTime } from "@/lib/utils";
 import type { NotificationItem } from "@/types/notification";
 import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { withoutBasePath } from "@/lib/basePath";
 
 interface NotificationBellProps {
   unreadCount: number;
@@ -42,8 +45,10 @@ export function NotificationBell({
 }: NotificationBellProps) {
   const { t } = useTranslation("common");
   const router = useRouter();
+  const pathname = usePathname();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
+  const { canAccessRoute } = useAuthorizationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const changeOpen = (open: boolean) => {
     setDropdownOpen(open);
@@ -55,16 +60,23 @@ export function NotificationBell({
       ? t("notifications.bell.unread", { count: unreadCount })
       : t("notifications.bell.label");
 
-  const handleItemClick = async (item: NotificationItem) => {
-    if (!isRepositoryReviewNotification(item)) {
-      return;
+  const getAccessibleLink = (item: NotificationItem) => {
+    const unified =
+      pathname?.includes("/resource-space") ||
+      item.resource_type === "resource_review";
+    if (!unified && !isRepositoryReviewNotification(item)) {
+      return null;
     }
 
-    const deepLink = buildRepositoryReviewDeepLink(locale, item);
-    if (!deepLink) {
-      return;
-    }
+    const deepLink = unified
+      ? buildUnifiedRepositoryReviewDeepLink(locale, item)
+      : buildRepositoryReviewDeepLink(locale, item);
+    if (!deepLink) return null;
+    const section = withoutBasePath(deepLink).split("?")[0].split("/")[2];
+    return section && canAccessRoute(`/${section}`) ? deepLink : null;
+  };
 
+  const handleItemClick = async (item: NotificationItem, deepLink: string) => {
     changeOpen(false);
     if (onMarkRead) {
       await onMarkRead(item.receiver_id);
@@ -105,7 +117,8 @@ export function NotificationBell({
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {items.map((item) => {
-              const isClickable = isRepositoryReviewNotification(item);
+              const deepLink = getAccessibleLink(item);
+              const isClickable = deepLink !== null;
 
               return (
                 <li
@@ -115,16 +128,18 @@ export function NotificationBell({
                       ? "flex cursor-pointer gap-3 bg-slate-50/80 px-4 py-3 transition-colors hover:bg-slate-100 dark:bg-slate-800/40 dark:hover:bg-slate-800/70"
                       : "flex gap-3 bg-slate-50/80 px-4 py-3 dark:bg-slate-800/40"
                   }
-                  onClick={() => {
-                    void handleItemClick(item);
-                  }}
+                  onClick={
+                    deepLink
+                      ? () => void handleItemClick(item, deepLink)
+                      : undefined
+                  }
                   onKeyDown={(event) => {
-                    if (!isClickable) {
+                    if (!deepLink) {
                       return;
                     }
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      void handleItemClick(item);
+                      void handleItemClick(item, deepLink);
                     }
                   }}
                   role={isClickable ? "button" : undefined}

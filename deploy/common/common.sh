@@ -553,7 +553,7 @@ deployment_upgrade_local_accounts() {
   env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
   NEXENT_IMAGE="$NEXENT_MANAGEMENT_IMAGE" bash "$common_dir/../sql/tools/supabase_to_postgres/migrate.sh" \
     --deployment "$mode" --namespace "$namespace" --database-target "$database" --config-target "$config" \
-    --env-file "$env_file" --apply --wait-timeout 300
+    --env-file "$env_file" --review-preflight --apply --wait-timeout 300
 }
 
 deployment_env_dir() {

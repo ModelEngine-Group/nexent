@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent, loginIsolated } from "../../infra/automation/d4/runner/sessions";
@@ -109,18 +111,18 @@ journey(ID, async (context) => {
         await new SkillPage(reviewer.page).approve(name);
       }
       const waiting = repositoryResponse();
-      await page.goto(appPath("/skill-space"));
+      await page.goto(appPath("/resource-space?tab=skill"));
       const response = await waiting; expect(response.ok()).toBe(true);
       total = (await response.json()).pagination.total;
       expect(total).toBeGreaterThanOrEqual(2);
       return "prepared two owned shared listings, one uniquely controlled tag and a proven existing local conflict name; all IDs registered for cleanup";
     }],
     steps: [
-      async () => { await expect(page.getByRole("tab", { name: /^仓库/ })).toHaveAttribute("data-state", "active"); return "fresh route selected Repository by default"; },
+      async () => { await expect(page.getByRole("radio", { name: "仓库", exact: true })).toBeChecked(); return "fresh route selected Repository by default"; },
       async () => {
-        await expect(page.getByRole("tab", { name: /^仓库/ })).toContainText(total.toLocaleString());
+        await expect(page.getByText(`共 ${total} 条`, { exact: true })).toBeVisible();
         await expect(card(source)).toBeVisible(); await expect(card(second)).toBeVisible();
-        return "repository count badge matches unfiltered API pagination total and both prepared cards render";
+        return "repository pagination summary matches the unfiltered API total and both prepared cards render";
       },
       async () => {
         const waiting = repositoryResponse((url) => url.searchParams.get("search") === prefix);

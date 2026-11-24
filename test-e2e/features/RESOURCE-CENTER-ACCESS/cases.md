@@ -1,0 +1,7 @@
+# RESOURCE-CENTER-ACCESS 关联用例
+
+此页由结构化用例生成，不手工编辑。
+
+- D2 [RESOURCE-CENTER-ACCESS-D2-001](../../cases/RESOURCE-CENTER-ACCESS-D2-001/case.yaml) · blocked
+- D4 [RESOURCE-CENTER-ACCESS-D4-001](../../cases/RESOURCE-CENTER-ACCESS-D4-001/case.yaml) · blocked
+- D5 [RESOURCE-CENTER-ACCESS-D5-001](../../cases/RESOURCE-CENTER-ACCESS-D5-001/case.yaml) · active

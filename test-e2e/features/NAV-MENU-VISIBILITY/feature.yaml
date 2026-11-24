@@ -32,7 +32,7 @@ feature:
       content; toggling again collapses to64px. Unpinned hover remains an overlay.
   - rule_id: NAV-MENU-RULE-007
     description: Pin/PinOff header toggle uses blue foreground and transparent background
-      when pinned. Brand image40px; Sparkles Skill and FolderCog resource glyphs.
+      when pinned. Brand image40px; Globe unified-repository and FolderCog resource glyphs.
       Account popup matches measured v0:256px width,6px padding,60px identity with36px
       avatar,28px primary rows and24px links. About header22.5px,11px/16.5px typography
       at60% muted color; version monospace. Language icon/label/locale/chevron centered

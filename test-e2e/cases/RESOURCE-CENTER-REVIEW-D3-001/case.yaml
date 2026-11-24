@@ -1,0 +1,122 @@
+schema_version: '1.0'
+stage: D3
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-REVIEW-D3-001
+  feature_id: RESOURCE-CENTER-REVIEW
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-REVIEW-RULE-004
+  - RESOURCE-CENTER-REVIEW-RULE-005
+  title: 真实适配层混合查询与冻结内容联动
+  type: INTEGRATION
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 真实适配层混合查询与冻结内容联动
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  - 决策成功场景使用已登记新URL且具有对应decision_types资格的审核者，本人/他人提交均沿用原有操作规则；本人查看场景使用独立mine身份。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 向三张真实仓库表写入交错时间/同ID/非授权租户/历史null数据并通过HTTP分页
+    expected: SQL权限条件位于各分支；count和items来自同读快照，结果与独立oracle一致；无源资源join造成重复；不合并普通Agent列表的官方记录。
+  - order: 2
+    action: 分别提交Agent固定版本、Skill归档和MCP共享字段后编辑源对象
+    expected: 详情仍读取Agent提交版本和Skill提交归档；MCP仅暴露提交共享字段；type+review_id唯一决定详情。
+  - order: 3
+    action: 批准每类记录并读取源对象、仓库对象及列表详情
+    expected: 适配层执行各类型真实状态联动；提交成功后列表、详情、源对象一致，未提交编辑未被误上架。
+  - order: 4
+    action: 在count与items读取点之间并发新增匹配记录，同时测试空集页和越界页
+    expected: 单次HTTP响应使用同一SQL语句快照或显式REPEATABLE READ只读事务；count/items不发生READ COMMITTED两条语句视图分裂；空items时仍返回正确total。
+  - order: 5
+    action: 三表混合本人、他人、未知实际提交人和跨租户数据，分别以mine与all_authorized用户做列表/count/详情；向源资源作者不同的记录代提交
+    expected: 有审核资格的UNION各分支只保留原有授权/状态/搜索条件，不加提交人非空或不等过滤；无审核资格各分支增加实际提交人=当前用户；列表/count/详情一致。 mixed-type查询必须逐类型复用原资格和范围，不把MCP原超级管理员范围套给其他类型；本人或未知提交人不产生额外全量过滤。
+  expected_results:
+  - SQL权限条件位于各分支；count和items来自同读快照，结果与独立oracle一致；无源资源join造成重复；不合并普通Agent列表的官方记录。
+  - 详情仍读取Agent提交版本和Skill提交归档；MCP仅暴露提交共享字段；type+review_id唯一决定详情。
+  - 适配层执行各类型真实状态联动；提交成功后列表、详情、源对象一致，未提交编辑未被误上架。
+  - 单次HTTP响应使用同一SQL语句快照或显式REPEATABLE READ只读事务；count/items不发生READ COMMITTED两条语句视图分裂；空items时仍返回正确total。
+  - 有审核资格的UNION各分支只保留原有授权/状态/搜索条件，不加提交人非空或不等过滤；无审核资格各分支增加实际提交人=当前用户；列表/count/详情一致。 mixed-type查询必须逐类型复用原资格和范围，不把MCP原超级管理员范围套给其他类型；本人或未知提交人不产生额外全量过滤。
+  forbidden_side_effects:
+  - 不得把表内ID或源ID互相替代。
+  - 不得查询归档正文来计算普通列表或total。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-004
+    - AC-005
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: SQL权限条件位于各分支；count和items来自同读快照，结果与独立oracle一致；无源资源join造成重复；不合并普通Agent列表的官方记录。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 详情仍读取Agent提交版本和Skill提交归档；MCP仅暴露提交共享字段；type+review_id唯一决定详情。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 适配层执行各类型真实状态联动；提交成功后列表、详情、源对象一致，未提交编辑未被误上架。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 单次HTTP响应使用同一SQL语句快照或显式REPEATABLE READ只读事务；count/items不发生READ COMMITTED两条语句视图分裂；空items时仍返回正确total。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: 有审核资格的UNION各分支只保留原有授权/状态/搜索条件，不加提交人非空或不等过滤；无审核资格各分支增加实际提交人=当前用户；列表/count/详情一致。 mixed-type查询必须逐类型复用原资格和范围，不把MCP原超级管理员范围套给其他类型；本人或未知提交人不产生额外全量过滤。
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  integration_boundary:
+  - HTTP → real service/adapters → migrated PostgreSQL; repository snapshots and local Skill relations are real.
+  - Use sandbox storage for Skill archives and record notification enqueue after commit; no substituted database
+    or repository adapters.
+  observations:
+  - SQL权限条件位于各分支；count和items来自同读快照，结果与独立oracle一致；无源资源join造成重复；不合并普通Agent列表的官方记录。
+  - 详情仍读取Agent提交版本和Skill提交归档；MCP仅暴露提交共享字段；type+review_id唯一决定详情。
+  - 适配层执行各类型真实状态联动；提交成功后列表、详情、源对象一致，未提交编辑未被误上架。
+  - 单次HTTP响应使用同一SQL语句快照或显式REPEATABLE READ只读事务；count/items不发生READ COMMITTED两条语句视图分裂；空items时仍返回正确total。
+  - 有审核资格的UNION各分支只保留原有授权/状态/搜索条件，不加提交人非空或不等过滤；无审核资格各分支增加实际提交人=当前用户；列表/count/详情一致。 mixed-type查询必须逐类型复用原资格和范围，不把MCP原超级管理员范围套给其他类型；本人或未知提交人不产生额外全量过滤。
+  cleanup:
+  - 按run_id清理本Case创建的仓库记录、源资源、归档及通知；不触及基线资源。
+  - 保存脱敏请求、逐步DB断言和清理结果；清理失败不得报告PASS。

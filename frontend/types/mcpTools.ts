@@ -124,6 +124,7 @@ export interface RegistryQuickAddOption {
 }
 
 export interface CommunityMcpCard {
+  publishedAt?: string | null;
   communityId?: number;
   marketId?: number;
   reviewId?: number;
@@ -162,10 +163,15 @@ export interface CommunityMcpCard {
 }
 
 export interface McpServiceItem {
+  latest_review?: {
+    review_id: string;
+    status: "pending_review" | "approved" | "rejected";
+  } | null;
   mcpId: number;
   containerId?: string;
   containerPort?: number;
   name: string;
+  authorDisplayName?: string;
   description: string;
   source: McpSource;
   enabled: McpServiceStatus;
@@ -192,6 +198,39 @@ export interface McpServiceItem {
   groupIds?: string;
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   sharedFields?: Record<string, boolean>;
+}
+
+/** Wire shape returned by the existing MCP server-list adapter. */
+export interface McpServerListRecord {
+  latest_review?: {
+    review_id: string;
+    status: "pending_review" | "approved" | "rejected";
+  } | null;
+  mcp_id: number;
+  service_name: string;
+  author_display_name?: string | null;
+  mcp_url: string;
+  description: string;
+  source: McpSource;
+  enabled: boolean;
+  status: boolean;
+  update_time: string;
+  create_time: string;
+  container_id?: string | null;
+  container_port?: number | null;
+  tags?: string[];
+  registry_json?: (Record<string, unknown> & { _toolNames?: string[] }) | null;
+  config_json?: Record<string, unknown> | null;
+  container_status?: McpContainerStatus;
+  authorization_token?: string;
+  custom_headers?: Record<string, string> | null;
+  version?: string | null;
+  market_id?: number | null;
+  is_listed_in_repository?: boolean;
+  permission?: McpServiceItem["permission"];
+  group_ids?: string;
+  ingroup_permission?: McpServiceItem["ingroupPermission"];
+  shared_fields?: Record<string, boolean>;
 }
 
 export interface McpTagStat {

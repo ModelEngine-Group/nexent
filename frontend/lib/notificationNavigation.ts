@@ -1,26 +1,36 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Deep-link helpers for in-app notifications.
  */
 
-import type { NotificationDetails, NotificationItem } from "@/types/notification";
+import {
+  buildResourceRepositoryHref,
+  normalizeRepositoryId,
+} from "@/lib/resourceRepositoryRoutes";
+import type { ResourceType } from "@/types/resourceRepository";
+import type {
+  NotificationDetails,
+  NotificationItem,
+} from "@/types/notification";
 import {
   NOTIFICATION_EVENT_TYPES,
   NOTIFICATION_RESOURCE_TYPES,
 } from "@/types/notification";
 
 function asPositiveInt(value: unknown): number | null {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
     return value;
   }
   if (typeof value === "string" && /^\d+$/.test(value)) {
     const parsed = Number.parseInt(value, 10);
-    return parsed > 0 ? parsed : null;
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
   }
   return null;
 }
 
 export function extractReviewDeepLinkIds(
-  details: NotificationDetails | Record<string, unknown> | null | undefined
+  details: NotificationDetails | Record<string, unknown> | null | undefined,
 ): { agentRepositoryId: number; agentId: number } | null {
   if (!details) {
     return null;
@@ -34,7 +44,7 @@ export function extractReviewDeepLinkIds(
 }
 
 export function extractSkillReviewDeepLinkIds(
-  details: NotificationDetails | Record<string, unknown> | null | undefined
+  details: NotificationDetails | Record<string, unknown> | null | undefined,
 ): { skillRepositoryId: number; skillId: number } | null {
   if (!details) {
     return null;
@@ -48,7 +58,7 @@ export function extractSkillReviewDeepLinkIds(
 }
 
 export function extractMcpReviewDeepLinkIds(
-  details: NotificationDetails | Record<string, unknown> | null | undefined
+  details: NotificationDetails | Record<string, unknown> | null | undefined,
 ): { marketId: number; sourceMcpId: number } | null {
   if (!details) {
     return null;
@@ -69,7 +79,7 @@ function isReviewResultEvent(eventType: string): boolean {
 }
 
 export function isAgentRepositoryReviewResultNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   if (item.resource_type !== NOTIFICATION_RESOURCE_TYPES.AGENT_REPOSITORY) {
     return false;
@@ -86,7 +96,7 @@ export function isAgentRepositoryReviewResultNotification(
 }
 
 export function isSkillRepositoryReviewResultNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   if (item.resource_type !== NOTIFICATION_RESOURCE_TYPES.SKILL_REPOSITORY) {
     return false;
@@ -103,7 +113,7 @@ export function isSkillRepositoryReviewResultNotification(
 }
 
 export function isMcpRepositoryReviewResultNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   if (item.resource_type !== NOTIFICATION_RESOURCE_TYPES.MCP_REPOSITORY) {
     return false;
@@ -120,7 +130,7 @@ export function isMcpRepositoryReviewResultNotification(
 }
 
 export function isRepositoryReviewNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   return (
     isAgentRepositoryReviewResultNotification(item) ||
@@ -132,31 +142,26 @@ export function isRepositoryReviewNotification(
 export function buildAgentRepositoryReviewDeepLink(
   locale: string,
   details: NotificationDetails | Record<string, unknown> | null | undefined,
-  eventType?: string
+  eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
-    return `/${locale}/agent-space?tab=review`;
+    return `/${locale}/resource-space?tab=review&resource_type=agent`;
   }
 
   const ids = extractReviewDeepLinkIds(details);
   if (!ids) {
     return null;
   }
-  const params = new URLSearchParams({
-    tab: "mine",
-    agent_repository_id: String(ids.agentRepositoryId),
-    agent_id: String(ids.agentId),
-  });
-  return `/${locale}/agent-space?${params.toString()}`;
+  return `/${locale}/agents/${ids.agentId}`;
 }
 
 export function buildSkillRepositoryReviewDeepLink(
   locale: string,
   details: NotificationDetails | Record<string, unknown> | null | undefined,
-  eventType?: string
+  eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
-    return `/${locale}/skill-space?tab=review`;
+    return `/${locale}/resource-space?tab=review&resource_type=skill`;
   }
 
   const ids = extractSkillReviewDeepLinkIds(details);
@@ -164,20 +169,21 @@ export function buildSkillRepositoryReviewDeepLink(
     return null;
   }
   const params = new URLSearchParams({
-    tab: "mine",
+    tab: "skill",
+    view: "mine",
     skill_repository_id: String(ids.skillRepositoryId),
     skill_id: String(ids.skillId),
   });
-  return `/${locale}/skill-space?${params.toString()}`;
+  return `/${locale}/resource-space?${params.toString()}`;
 }
 
 export function buildMcpRepositoryReviewDeepLink(
   locale: string,
   details: NotificationDetails | Record<string, unknown> | null | undefined,
-  eventType?: string
+  eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
-    return `/${locale}/mcp-space?tab=review`;
+    return `/${locale}/resource-space?tab=review&resource_type=mcp`;
   }
 
   const ids = extractMcpReviewDeepLinkIds(details);
@@ -185,36 +191,37 @@ export function buildMcpRepositoryReviewDeepLink(
     return null;
   }
   const params = new URLSearchParams({
-    tab: "mine",
+    tab: "mcp",
+    view: "mine",
     market_id: String(ids.marketId),
     source_mcp_id: String(ids.sourceMcpId),
   });
-  return `/${locale}/mcp-space?${params.toString()}`;
+  return `/${locale}/resource-space?${params.toString()}`;
 }
 
 export function buildRepositoryReviewDeepLink(
   locale: string,
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): string | null {
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.SKILL_REPOSITORY) {
     return buildSkillRepositoryReviewDeepLink(
       locale,
       item.details,
-      item.event_type
+      item.event_type,
     );
   }
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.MCP_REPOSITORY) {
     return buildMcpRepositoryReviewDeepLink(
       locale,
       item.details,
-      item.event_type
+      item.event_type,
     );
   }
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.AGENT_REPOSITORY) {
     return buildAgentRepositoryReviewDeepLink(
       locale,
       item.details,
-      item.event_type
+      item.event_type,
     );
   }
   return null;
@@ -224,7 +231,9 @@ export function parseReviewDeepLinkParams(searchParams: URLSearchParams): {
   agentRepositoryId: number;
   agentId: number;
 } | null {
-  const agentRepositoryId = asPositiveInt(searchParams.get("agent_repository_id"));
+  const agentRepositoryId = asPositiveInt(
+    searchParams.get("agent_repository_id"),
+  );
   const agentId = asPositiveInt(searchParams.get("agent_id"));
   if (agentRepositoryId == null || agentId == null) {
     return null;
@@ -237,7 +246,7 @@ export function parseSkillReviewDeepLinkParams(searchParams: URLSearchParams): {
   skillId: number;
 } | null {
   const skillRepositoryId = asPositiveInt(
-    searchParams.get("skill_repository_id")
+    searchParams.get("skill_repository_id"),
   );
   const skillId = asPositiveInt(searchParams.get("skill_id"));
   if (skillRepositoryId == null || skillId == null) {
@@ -256,4 +265,42 @@ export function parseMcpReviewDeepLinkParams(searchParams: URLSearchParams): {
     return null;
   }
   return { marketId, sourceMcpId };
+}
+
+export function buildUnifiedRepositoryReviewDeepLink(
+  locale: string,
+  item: NotificationItem,
+): string | null {
+  if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.RESOURCE_REVIEW) {
+    const reviewId =
+      normalizeRepositoryId(item.review_id) ||
+      normalizeRepositoryId(item.details?.review_id);
+    return buildResourceRepositoryHref(locale, {
+      tab: "review",
+      ...(reviewId ? { reviewId } : {}),
+    });
+  }
+  const types: Record<string, ResourceType> = {
+    agent_repository: "agent",
+    skill_repository: "skill",
+    mcp_repository: "mcp",
+  };
+  const type = types[item.resource_type];
+  if (
+    !type ||
+    (!isReviewResultEvent(item.event_type) &&
+      item.event_type !== NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING)
+  )
+    return null;
+  const repositoryId = normalizeRepositoryId(
+    item.repository_id ??
+      item.details?.[type === "mcp" ? "market_id" : `${type}_repository_id`],
+  );
+  const pending =
+    item.event_type === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING;
+  return buildResourceRepositoryHref(locale, {
+    tab: pending ? "review" : type,
+    resourceType: type,
+    ...(repositoryId ? { repositoryId } : {}),
+  });
 }

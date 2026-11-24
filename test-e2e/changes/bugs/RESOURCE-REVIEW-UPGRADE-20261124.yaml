@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-REVIEW-UPGRADE-20261124
+  change_type: bugfix
+  bug_id: RESOURCE-REVIEW-UPGRADE-20261124
+  title: Preserve pending submissions during repository review upgrades
+  description: Append review migrations after the deployed baseline, validate legacy submissions before rollout and relink pending notifications.
+  observed_behavior: Backdated migrations replay unrelated scripts and attribute legacy submissions to source creators.
+  expected_behavior: Preserve submitter scope and pending notification identity on both develop and previously migrated branch databases.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: The earlier scenario expected the source creator as submitter and used the working tree as its baseline.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [RESOURCE-CENTER-LIFECYCLE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [RESOURCE-CENTER-LIFECYCLE-D5-002]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Authorized review detail, decision publication and submitter projections retain their existing contracts.
+    test_selectors:
+    - test/backend/management/test_resource_review_submissions.py
+    - test/backend/management/test_resource_review_publication.py
+    - test/backend/management/test_resource_review_projection.py
+    reason: The storage upgrade needs a real PostgreSQL runner; existing service tests cover the unchanged decision workflow.
+  notes: The D5 scenario owns its temporary database and runner files, uses fixed pre-change schemas, and checks rollback, approval delivery and replay.

@@ -217,6 +217,7 @@ def test_list_agent_repository_listings_api_success(
         page_size=10,
         search=None,
         sort_by_update_time=False,
+        user_id="test_user_id",
     )
 
 
@@ -249,6 +250,7 @@ def test_list_agent_repository_listings_api_passes_agent_id(
         page_size=10,
         search=None,
         sort_by_update_time=False,
+        user_id="test_user_id",
     )
 
 
@@ -281,6 +283,7 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
         page_size=10,
         search=None,
         sort_by_update_time=False,
+        user_id="test_user_id",
     )
 
 
@@ -321,6 +324,7 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         page_size=6,
         search="alpha",
         sort_by_update_time=False,
+        user_id="test_user_id",
     )
 
 
@@ -350,6 +354,7 @@ def test_list_agent_repository_listings_api_passes_tag_filter(
         search=None,
         tag="operations",
         sort_by_update_time=False,
+        user_id="test_user_id",
     )
 
 
@@ -414,11 +419,13 @@ def test_list_agent_repository_listings_api_passes_tag_predicates(
     ]
 
 
+@pytest.mark.parametrize("selector", ["sort_by_update_time", "sort_by_published_time", "sort_by_downloads"])
 def test_list_agent_repository_listings_api_passes_sort_selector(
     mocker,
     mock_auth_header,
+    selector,
 ):
-    """Test listing API forwards the latest-first sort selector to the service."""
+    """Test listing API forwards the requested sort selector to the service."""
     mocker.patch(
         "management.api.agent.agent_repository.get_current_user_id",
         return_value=("test_user_id", "test_tenant_id"),
@@ -429,12 +436,12 @@ def test_list_agent_repository_listings_api_passes_sort_selector(
     )
 
     response = client.get(
-        "/repository/agent?sort_by_update_time=true",
+        f"/repository/agent?{selector}=true",
         headers=mock_auth_header,
     )
 
     assert response.status_code == 200
-    assert mock_list.call_args.kwargs["sort_by_update_time"] is True
+    assert mock_list.call_args.kwargs[selector] is True
 
 
 def test_list_agent_repository_listings_api_returns_main_agent_flag(
@@ -1340,3 +1347,11 @@ def test_upload_agent_repository_icon_api_emits_audit_entry(
     assert '"version_no":2' in messages[0]
     assert '"filename":"icon.png"' in messages[0]
     assert "image" not in messages[0]
+
+
+@pytest.fixture(autouse=True)
+def isolate_latest_review_projection(monkeypatch):
+    """Keep API unit tests isolated from the new application-summary database query."""
+    module = types.ModuleType("management.services.repository.reviews")
+    module.attach_latest_reviews = MagicMock()
+    monkeypatch.setitem(sys.modules, "management.services.repository.reviews", module)

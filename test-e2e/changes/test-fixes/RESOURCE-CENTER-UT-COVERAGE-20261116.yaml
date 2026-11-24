@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-CENTER-UT-COVERAGE-20261116
+  change_type: test-fix
+  title: Complete isolated repository review and Skill removal unit coverage
+  description: >-
+    Backfill traditional Python unit assertions for existing resource repository
+    behavior after PR 4339 reported 68.34 percent patch coverage on 3f291f50f.
+    Product code, coverage thresholds and CI workflows remain unchanged.
+  affected_features:
+    existing: [RESOURCE-CENTER-REVIEW, RESOURCE-CENTER-LIFECYCLE, RESOURCE-CENTER-MANAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    The missing proof concerns isolated SQL construction, projection, service
+    dispatch and HTTP error conversion. Add traditional UT rather than duplicate
+    existing formal API, lifecycle and installation scenarios as new D1 Cases.
+    Existing formal contracts and runtime evidence remain unchanged.
+  notes: |-
+    Proof gap assessment:
+    | Behavior | Existing proof | Missing unit evidence and action |
+    | Frozen review publication | test_resource_review_submissions mocks _publish | Exercise actual publication for Agent/Skill/MCP, source conflicts, protected ownership/counters and MCP source link. |
+    | Review visibility and detail | Existing scope and contract tests | Assert authorized SQL pagination/search/locks, first CAS identity, frozen detail, URL/config masking and legacy unique mapping. |
+    | Review HTTP errors | test_resource_review_api covers decisions | Add authentication expiry, submission errors and legacy identity dispatch. |
+    | Skill copy removal | Formal installation scenario | Add isolated missing/read-only/referenced/success assertions and both HTTP deletion routes. |
+    The database boundary is mocked; POSTGRES_HOST=127.0.0.1 and POSTGRES_PORT=5432
+    prohibit accidentally passing through a live database in the test container.
+    UT selectors:
+    test/backend/management/test_resource_review_projection.py
+    test/backend/management/test_resource_review_publication.py
+    test/backend/management/test_resource_review_queries.py
+    test/backend/management/test_skill_installation_removal.py
+    test/backend/management/test_resource_review_api.py
+    test/backend/app/test_skill_repository_installation_routes.py
+    Local result: 77 passed. Supplementary coverage compared against the same
+    Codecov PR baseline fully covers 210 previously missed/partial changed lines,
+    conservatively estimating 91.83 percent patch coverage. This is an estimate
+    combining CI baseline and local supplementary data, not a new CI result or
+    formal functional acceptance certification. Verify the remote Codecov check
+    after pushing. Frontend coverage is not combined with Python coverage.

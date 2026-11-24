@@ -12,6 +12,13 @@ export type SkillRepositoryListingStatus =
 export type MineOwnershipFilter = "all" | "created" | "others";
 
 export interface SkillRepositoryListingItem {
+  installed_copies?: {
+    skill_id: number;
+    name: string;
+    can_uninstall: boolean;
+  }[];
+  installation_state?: "installed" | "not_installed" | "unknown";
+  published_at?: string | null;
   skill_repository_id: number;
   skill_id?: number;
   name: string;
@@ -43,6 +50,7 @@ export interface SkillRepositoryListingListResponse {
 }
 
 export interface SkillRepositoryListingListParams {
+  include_installations?: boolean;
   status?: SkillRepositoryListingStatus;
   skill_id?: number;
   category_id?: number;
@@ -52,9 +60,11 @@ export interface SkillRepositoryListingListParams {
   tag_predicates?: TagResourcePredicate[];
   tag?: string;
   sort_by_update_time?: boolean;
+  sort_by_published_time?: boolean;
 }
 
 export interface SkillRepositoryListingDetail extends SkillRepositoryListingItem {
+  agent_reference_count?: number;
   skill_info_json?: Record<string, unknown>;
   skill_zip_base64?: string;
   created_at?: string | null;
@@ -73,6 +83,12 @@ export interface MySkillRepositoryInfoItem {
 }
 
 export interface MyEditableSkillItem {
+  author?: string | null;
+  author_cas_username?: string | null;
+  latest_review?: {
+    review_id: string;
+    status: "pending_review" | "approved" | "rejected";
+  } | null;
   skill_id: number;
   name?: string | null;
   description?: string | null;

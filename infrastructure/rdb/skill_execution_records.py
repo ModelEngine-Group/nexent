@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Skill persistence and read-only authorization for Runtime execution."""
 
-from sqlalchemy import JSON, Boolean, Column, Index, Integer, Sequence, String, Text, select, text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, Index, Integer, Sequence, String, Text, select, text
 
 from infrastructure.rdb.base import SCHEMA, TableBase
 
@@ -34,6 +34,10 @@ class SkillInfo(TableBase):
 
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
+    source_repository_id = Column(
+        BigInteger, nullable=True,
+        comment="Source Skill repository listing ID for an installed copy; NULL when not associated",
+    )
     skill_name = Column(String(100), nullable=False,
                         doc="Skill name, unique among active skills within its tenant scope")
     tenant_id = Column(String(100), nullable=True,

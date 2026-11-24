@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Form, Modal, Spin } from "antd";
+import { Alert, Button, Drawer, Form, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { Skill } from "@/types/agentConfig";
@@ -21,6 +21,9 @@ import {
 import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
 import SkillDraftPanel from "./SkillDraftPanel";
+import SkillReadOnlyDetail from "@/components/skill/SkillReadOnlyDetail";
+import SkillPanelTitle from "@/components/skill/SkillPanelTitle";
+import { RESOURCE_REPOSITORY_DETAIL_DRAWER_WIDTH } from "@/const/resourceRepository";
 
 interface SkillDetailModalProps {
   skill: Skill | null;
@@ -28,6 +31,7 @@ interface SkillDetailModalProps {
   onClose: () => void;
   zIndex?: number;
   maskClosable?: boolean;
+  repositoryLayout?: boolean;
 }
 
 const OFFICIAL_SOURCES = new Set(["official", "\u5b98\u65b9"]);
@@ -64,6 +68,7 @@ export default function SkillDetailModal({
   onClose,
   zIndex = 1000,
   maskClosable = true,
+  repositoryLayout = false,
 }: SkillDetailModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
@@ -72,12 +77,17 @@ export default function SkillDetailModal({
   ]);
   const [activeSkillTab, setActiveSkillTab] = useState("SKILL.md");
   const [loading, setLoading] = useState(false);
+  const [detailInfo, setDetailInfo] = useState<Pick<
+    Skill,
+    "name" | "source" | "tags" | "description"
+  > | null>(null);
   const [fileTreeMessage, setFileTreeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !skill) return;
 
     let cancelled = false;
+    setDetailInfo(skill);
     form.setFieldsValue({
       name: skill.name,
       description: skill.description || "",
@@ -100,6 +110,7 @@ export default function SkillDetailModal({
           detailResult.success && detailResult.data ? detailResult.data : skill;
         const skillName = detail.name?.trim() || skill.name;
         if (!cancelled) {
+          setDetailInfo(detail);
           form.setFieldsValue({
             name: skillName,
             description: detail.description || "",
@@ -146,24 +157,8 @@ export default function SkillDetailModal({
     onClose();
   };
 
-  return (
-    <Modal
-      title={t("skillManagement.detail.title")}
-      open={open}
-      onCancel={handleClose}
-      footer={null}
-      width={820}
-      zIndex={zIndex}
-      mask={{ closable: maskClosable }}
-      className="skill-detail-modal"
-      styles={{
-        body: {
-          height: 620,
-          maxHeight: "75vh",
-          overflow: "hidden",
-        },
-      }}
-    >
+  const content = (
+    <>
       {fileTreeMessage ? (
         <Alert
           type="warning"
@@ -174,14 +169,28 @@ export default function SkillDetailModal({
       ) : null}
       <Spin spinning={loading} wrapperClassName="h-full">
         <div className="h-full">
-          <SkillDraftPanel
-            form={form}
-            skillTabs={skillTabs}
-            setSkillTabs={setSkillTabs}
-            activeSkillTab={activeSkillTab}
-            setActiveSkillTab={setActiveSkillTab}
-            readOnly
-          />
+          {repositoryLayout ? (
+            <Form form={form} component={false}>
+              <SkillReadOnlyDetail
+                source={formatSource(detailInfo?.source, t)}
+                tags={detailInfo?.tags ?? []}
+                description={detailInfo?.description || ""}
+                files={skillTabs}
+                sourcePreview
+                showFileActions
+              />
+            </Form>
+          ) : (
+            <SkillDraftPanel
+              form={form}
+              skillTabs={skillTabs}
+              setSkillTabs={setSkillTabs}
+              activeSkillTab={activeSkillTab}
+              setActiveSkillTab={setActiveSkillTab}
+              readOnly
+              repositoryLayout={repositoryLayout}
+            />
+          )}
         </div>
       </Spin>
       <style jsx global>{`
@@ -190,6 +199,72 @@ export default function SkillDetailModal({
           height: 100%;
         }
       `}</style>
+    </>
+  );
+  if (repositoryLayout) {
+    return (
+      <Drawer
+        open={open}
+        onClose={handleClose}
+        placement="right"
+        size={`min(${RESOURCE_REPOSITORY_DETAIL_DRAWER_WIDTH}px, 100vw)`}
+        title={
+          <SkillPanelTitle
+            name={
+              detailInfo?.name ||
+              skill?.name ||
+              t("skillManagement.detail.title")
+            }
+            tags={detailInfo?.tags}
+          />
+        }
+        closable={{ placement: "end", "aria-label": t("common.close") }}
+        zIndex={zIndex}
+        mask={{ closable: maskClosable }}
+        destroyOnHidden
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button className="min-w-[88px]" onClick={handleClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              className="min-w-[88px]"
+              type="primary"
+              onClick={handleClose}
+            >
+              {t("common.confirm")}
+            </Button>
+          </div>
+        }
+      >
+        {content}
+      </Drawer>
+    );
+  }
+  return (
+    <Modal
+      title={t("skillManagement.detail.title")}
+      open={open}
+      onCancel={handleClose}
+      footer={repositoryLayout ? undefined : null}
+      onOk={handleClose}
+      okText={t("common.confirm")}
+      cancelText={t("common.cancel")}
+      centered={repositoryLayout}
+      destroyOnHidden={repositoryLayout}
+      width={repositoryLayout ? 860 : 820}
+      zIndex={zIndex}
+      mask={{ closable: maskClosable }}
+      className="skill-detail-modal"
+      styles={{
+        body: {
+          height: repositoryLayout ? "auto" : 620,
+          maxHeight: "75vh",
+          overflow: repositoryLayout ? "auto" : "hidden",
+        },
+      }}
+    >
+      {content}
     </Modal>
   );
 }

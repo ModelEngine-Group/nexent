@@ -208,6 +208,10 @@ feature_overrides:
   V5-UT-BE-022: model
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
+  RESOURCE-CENTER-ACCESS: system
+  RESOURCE-CENTER-REVIEW: system
+  RESOURCE-CENTER-LIFECYCLE: system
+  RESOURCE-CENTER-MANAGE: system
 case_overrides:
   MODEL-LEGACY-TOOLS-D3-001: model
   CHAT-MODEL-CONTROLS-D2-001: runtime

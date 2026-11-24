@@ -21,6 +21,7 @@ import tempfile
 import zipfile
 from typing import Dict, List, Optional
 
+from contracts.authentication import AuthenticatedIdentity
 from contracts.constants.environment import OFFICIAL_AGENTS_PATH
 from contracts.knowledge import KnowledgeBaseResolution
 from contracts.agent import KnowledgeBaseSeedDoc, OfficialAgentAgentInfo, OfficialAgentBundle, OfficialAgentInstallItem, OfficialAgentInstallStep, OfficialAgentListItem, OfficialAgentMcpPreview
@@ -927,7 +928,7 @@ async def _install_bundle(
             import_agent_with_skills_impl(
                 bundle,
                 bundle.skills,
-                authorization,
+                AuthenticatedIdentity(user_id=user_id, tenant_id=tenant_id),
                 skill_resolutions=skill_resolutions,
             ),
         )
@@ -945,7 +946,7 @@ async def _install_bundle(
             "agent",
             import_agent_impl(
                 bundle,
-                authorization,
+                AuthenticatedIdentity(user_id=user_id, tenant_id=tenant_id),
             ),
         )
 
