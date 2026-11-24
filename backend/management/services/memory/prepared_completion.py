@@ -69,7 +69,9 @@ async def process_memory_job(job):
             source = await _io("memory-completion-source", queue.read_source, job)
             if source is not None and await _io("memory-completion-switch", get_memory_switch, source.user_id):
                 if job.job_type == queue.TURN_COMPLETED:
-                    await _ingest_turn(job, source)
+                    from contracts.constants.environment import MEMORY_WRITE_TIMEOUT_SECONDS
+                    async with asyncio.timeout(MEMORY_WRITE_TIMEOUT_SECONDS):
+                        await _ingest_turn(job, source)
                 else:
                     await _extract_answer(job, source)
     except Exception as exc:

@@ -22,7 +22,9 @@ Usage from the agent build path::
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -72,6 +74,17 @@ async def _backend_store_hook(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Store bound Agent memory and relay the existing external-ingest notification."""
+    from contracts.constants.environment import MEMORY_WRITE_TIMEOUT_SECONDS
+
+    layer = payload.get("layer", MemoryLayer.AGENT.value)
+    if layer not in (MemoryLayer.AGENT, MemoryLayer.AGENT.value):
+        return await _bounded_backend_store_hook(payload)
+    deadline = time.monotonic() + MEMORY_WRITE_TIMEOUT_SECONDS
+    async with asyncio.timeout(MEMORY_WRITE_TIMEOUT_SECONDS):
+        return await _bounded_backend_store_hook(payload, deadline=deadline)
+
+
+async def _bounded_backend_store_hook(payload, *, deadline=None):
     layer_value = payload.get("layer", MemoryLayer.AGENT.value)
     if isinstance(layer_value, MemoryLayer):
         layer_value = layer_value.value
@@ -89,7 +102,12 @@ async def _backend_store_hook(
         result = await _store_legacy_memory(payload, layer_value, memory_type_value)
 
     try:
-        await _fanout_external_ingest(payload, result)
+        if deadline is None:
+            await _fanout_external_ingest(payload, result)
+        else:
+            from infrastructure.memory_io import remaining_time
+            async with asyncio.timeout(max(0.001, remaining_time(deadline) - 0.01)):
+                await _fanout_external_ingest(payload, result)
     except Exception as exc:
         logger.warning(
             "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
