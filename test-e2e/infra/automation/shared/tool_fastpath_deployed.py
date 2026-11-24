@@ -3,12 +3,14 @@
 """Owned HTTP fixtures and assertions for deployed TFP D3/D4 acceptance."""
 
 import asyncio
+import io
 import json
 import os
 import re
 import uuid
 from pathlib import Path
 from urllib.parse import quote
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 from jsonschema import Draft202012Validator, FormatChecker
@@ -18,8 +20,9 @@ from shared.auth import sign_in
 from shared.case_evidence import write_case_evidence
 from shared.config import controlled_asset_url
 from shared.factories.conversation import delete_owned_conversation
+from shared.factories.skill import _delete_skill
 from shared.http import MODEL_TIMEOUT, assert_status, client
-from shared.tool_fastpath_observation import verify_deployment, verify_trace_access
+from shared.tool_fastpath_observation import inspect_deployment, verify_deployment, verify_trace_access
 
 
 def fixture_config():
@@ -28,11 +31,40 @@ def fixture_config():
         raise AssetDependencyError(
             "deployment", "tfp_fixture", detail="NEXENT_TFP_FIXTURE must name a private deployed fixture"
         )
-    schema = json.loads(Path(__file__).with_name("tool_fastpath_fixture.schema.json").read_text())
-    cfg = json.loads(Path(path).read_text())
+    return checked_fixture(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def checked_fixture(cfg):
+    schema = json.loads(Path(__file__).with_name("tool_fastpath_fixture.schema.json").read_text(encoding="utf-8"))
     if not Draft202012Validator(schema, format_checker=FormatChecker()).is_valid(cfg):
         raise ValueError("Private TFP fixture does not match its maintained schema")
     return cfg
+
+
+def skill_archive(name):
+    root = Path(__file__).resolve().parents[2] / "assets/tool-fastpath/skill"
+    content = io.BytesIO()
+    with ZipFile(content, "w", compression=ZIP_DEFLATED) as archive:
+        manifest = (root / "SKILL.md").read_text(encoding="utf-8")
+        archive.writestr(f"{name}/SKILL.md", manifest.replace("\nname: tfp-verification\n", f"\nname: {name}\n", 1))
+        for relative in ("config/schema.yaml", "config/config.yaml", "scripts/report.py"):
+            archive.write(root / relative, f"{name}/{relative}")
+    return content.getvalue()
+
+
+async def create_owned_skill(api, identity, name, case_id, fixture):
+    archive = skill_archive(name)
+    created = await api.post("/skills/upload", data={"skill_name": name},
+                             files={"file": (name + ".zip", archive, "application/zip")})
+    assert_status(created, 201)
+    fixture["owned_skill"] = name
+    register_asset("owned_skills", name, name, owner_case_id=case_id, cleanup={
+        "service": "config", "identity": identity.id, "method": "DELETE",
+        "path": "/skills/" + name, "allowed_statuses": [200, 404],
+    })
+    body = created.json()
+    assert body["name"] == name, "Uploaded Skill name differs from the owned fixture"
+    return int(body["skill_id"])
 
 
 async def control(nonce, operation, *, responses=None):
@@ -83,12 +115,30 @@ def responses_for(cfg, nonce, promoted):
 
 
 async def setup(case_id):
-    cfg = fixture_config()
     # Preflight must precede every product mutation.
-    fingerprints = verify_deployment(cfg)
-    await verify_trace_access(cfg)
+    managed = os.environ.get("NEXENT_CASE_DEPLOYMENT_PROFILE") == "tfp"
+    if managed:
+        fingerprints, mount_id = inspect_deployment("nexent-runtime")
+        cfg = {"runtime_container": "nexent-runtime", "workspace_mount_id": mount_id,
+               "config": {"marker": "TFP_RULES", "value": 7},
+               "langfuse": {"url": os.environ.get("NEXENT_TFP_LANGFUSE_URL", ""),
+                            "api_version": os.environ.get("NEXENT_TFP_LANGFUSE_API_VERSION", "v1"),
+                            "public_key_env": "TFP_TRACE_PUBLIC_KEY", "secret_key_env": "TFP_TRACE_SECRET_KEY"}}
+    else:
+        cfg = fixture_config()
+        fingerprints = verify_deployment(cfg)
+    await verify_trace_access(cfg, startup_wait=45 if managed else 0)
     controlled_asset_url()
-    identity = await sign_in("tenant_a_admin")
+    if managed:
+        try:
+            identity = await sign_in("tenant_a_admin")
+            other = await sign_in("tenant_b_user")
+        except (RuntimeError, ValueError, AssertionError, OSError, httpx.HTTPError) as error:
+            raise AssetDependencyError("deployment", "tfp_users", detail="TFP test identities could not sign in") from error
+        if identity.tenant_id == other.tenant_id:
+            raise AssetDependencyError("deployment", "tfp_users", detail="TFP test identities require different tenants")
+    else:
+        identity = await sign_in("tenant_a_admin")
     nonce = uuid.uuid4().hex
     fixture = {
         "nonce": nonce,
@@ -100,6 +150,10 @@ async def setup(case_id):
     try:
         await control(nonce, "reset", responses=["<final_answer>TFP_READY</final_answer>"])
         async with client("config", token=identity.access_token) as api:
+            if managed:
+                cfg["skill_name"] = "tfp-verification-" + nonce
+                cfg["skill_id"] = await create_owned_skill(api, identity, cfg["skill_name"], case_id, fixture)
+                checked_fixture(cfg)
             skill = await api.get("/skills/" + cfg["skill_name"])
             assert_status(skill, 200)
             assert int(skill.json()["skill_id"]) == cfg["skill_id"], (
@@ -193,7 +247,7 @@ async def setup(case_id):
                 ),
                 200,
             )
-        return fixture
+        return cfg, fixture, identity
     except BaseException as primary:
         try:
             await cleanup_fixture(fixture, identity=identity)
@@ -223,6 +277,11 @@ async def cleanup_fixture(fixture, *, identity=None):
                     errors.append(type(error).__name__)
     except Exception as error:
         errors.append(type(error).__name__)
+    if identity is not None and fixture.get("owned_skill"):
+        try:
+            await _delete_skill(identity, fixture["owned_skill"])
+        except Exception as error:
+            errors.append(type(error).__name__)
     try:
         await control(fixture["nonce"], "delete")
     except Exception as error:

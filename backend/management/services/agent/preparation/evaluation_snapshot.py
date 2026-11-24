@@ -396,7 +396,7 @@ async def prepare_conversation_snapshot(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
     if request.is_debug or (workbench is None and (
-        request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None
+        request.agent_id is None or request.entrypoint == "workbench" or conversation.get("workbench_config") is not None
     )):
         return None
     if workbench is None and native_knowledge is None and (
@@ -408,8 +408,9 @@ async def prepare_conversation_snapshot(
         )
     from infrastructure.memory_io import memory_deadline, optional_memory_io
 
+    automation_proposal_only = request.entrypoint == "automation"
     memory_query_deadline = memory_deadline()
-    memory_enabled = bool(await optional_memory_io(
+    memory_enabled = not automation_proposal_only and bool(await optional_memory_io(
         "snapshot-memory-policy", get_memory_switch, user_id, deadline=memory_query_deadline,
     ))
     compile_options = {}
@@ -486,6 +487,7 @@ async def prepare_conversation_snapshot(
     scope = PreparedConversationScope(
         **reference.model_dump(),
         memory_enabled=True if memory_enabled else None,
+        automation_proposal_only=True if automation_proposal_only else None,
         historical_context=historical_context,
         workbench_config_version=workbench.version if workbench is not None else None,
         native_knowledge=True if native_knowledge is not None else None,

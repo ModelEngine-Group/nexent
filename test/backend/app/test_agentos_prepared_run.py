@@ -149,6 +149,79 @@ async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch
     runtime.release.assert_called_once_with(runtime.info, 42, "actor", "completed")
 
 
+# Captured first model response from PW-TASK-01 (conversation 3305), with the test marker normalized.
+_RECORDED_NO_TOOL_REPLY = """<final_answer>当前会话中没有可用的定时任务调度工具（仅提供文件下载/上传、并行执行、执行输出读取与记忆存储能力），因此我无法为你建立「每 60 分钟」的周期性提醒，也无法在后台按小时主动推送 `TASK-REGRESSION`。
+
+可选的做法：
+1. 如果平台侧已开放定时任务能力，请在支持该能力的入口提交："每60分钟告诉我 TASK-REGRESSION"。
+2. 你也可以现在把 `TASK-REGRESSION` 对应的具体内容（任务说明、检查项、数据源等）告诉我，我可以即时为你处理，并在本次会话内按需重复输出。
+
+补充：本轮并没有实际的定时任务被创建。若你希望我改为一次性输出该任务标识，或需要我说明如何在你的环境里配置每小时提醒，告诉我即可。</final_answer>"""
+
+
+@pytest.mark.asyncio
+async def test_automation_entry_does_not_end_with_recorded_no_tool_reply(monkeypatch, payload, runtime):
+    data = payload.model_dump()
+    data["automation_proposal_only"] = True
+    data["resource"]["tools"] = [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]
+    data["input"]["query"] = "每60分钟告诉我 TASK-REGRESSION"
+    dedicated_payload = PreparedAgentRun.model_validate(data)
+
+    async def chat_runner(_info, **_kwargs):
+        yield json.dumps({"type": "final_answer", "content": _RECORDED_NO_TOOL_REPLY})
+
+    monkeypatch.setattr(prepared_run, "agent_run", chat_runner)
+    proposal = {"proposal_id": 73, "status": "PENDING", "task_id": None}
+    request_proposal = AsyncMock(return_value={
+        "status": "proposal_ready", "proposal": proposal, "user_message": "Review and confirm.",
+    })
+    monkeypatch.setattr(prepared_run, "request_automation_proposal", request_proposal, raising=False)
+
+    for request, expected in [
+        (payload, [{"type": "final_answer", "content": _RECORDED_NO_TOOL_REPLY}]),
+        (dedicated_payload, [
+            {"type": "automation_proposal", "content": json.dumps(proposal, ensure_ascii=False)},
+            {"type": "final_answer", "content": "Review and confirm."},
+        ]),
+    ]:
+        journal = runtime.journal.return_value
+        journal.reset_mock()
+        await prepared_run.start_prepared_run(request, ACTOR)
+        await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+        entries = [json.loads(call.args[1].split("\ndata: ", 1)[1]) for call in journal.append.call_args_list]
+        assert entries == expected
+        journal.repair_terminal.assert_called_once_with("completed")
+    request_proposal.assert_awaited_once_with(AgentRunReference(conversation_id=42, run_id=RUN_ID), ACTOR)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("result", "final", "terminal"), [
+    ({"status": "needs_clarification", "user_message": "Which interval?"}, "Which interval?", "completed"),
+    ({"status": "not_automation", "user_message": "Specify the schedule."}, "Specify the schedule.", "completed"),
+    ({"status": "error", "user_message": "Provider failed. Try again."}, "Provider failed. Try again.", "failed"),
+    ({"status": "proposal_ready", "user_message": "Incomplete result"},
+     "暂时无法生成定时任务提案，请稍后重试。", "failed"),
+    (None, "暂时无法生成定时任务提案，请稍后重试。", "failed"),
+])
+async def test_automation_entry_reports_clarification_or_retry_without_card(
+    monkeypatch, payload, runtime, result, final, terminal,
+):
+    call = AsyncMock(return_value=result) if result else AsyncMock(side_effect=RuntimeError("unavailable"))
+    monkeypatch.setattr(prepared_run, "request_automation_proposal", call)
+    data = payload.model_dump()
+    data["resource"]["tools"] = [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]
+    request = PreparedAgentRun.model_validate({**data, "automation_proposal_only": True, "language": "zh"})
+
+    await prepared_run.start_prepared_run(request, ACTOR)
+    await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+
+    journal = runtime.journal.return_value
+    journal.append.assert_called_once()
+    event = json.loads(journal.append.call_args.args[1].split("\ndata: ", 1)[1])
+    assert event == {"type": "final_answer", "content": final}
+    journal.repair_terminal.assert_called_once_with(terminal)
+
+
 @pytest.mark.asyncio
 async def test_scoped_stop_cancels_detached_worker(monkeypatch, payload, runtime):
     running = asyncio.Event()

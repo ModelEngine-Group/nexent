@@ -35,7 +35,11 @@ def docker_command(*arguments):
 
 
 def verify_deployment(cfg):
-    record = json.loads(docker_command("inspect", cfg["runtime_container"]))[0]
+    return inspect_deployment(cfg["runtime_container"], workspace_mount_id=cfg["workspace_mount_id"])[0]
+
+
+def inspect_deployment(runtime_container, *, workspace_mount_id=None):
+    record = json.loads(docker_command("inspect", runtime_container))[0]
     assert record["State"]["Running"], "The declared disposable runtime must be running"
     deployed = dict(value.split("=", 1) for value in record["Config"].get("Env", []) if "=" in value)
     assert deployed.get("NEXENT_SANDBOX_DEFAULT_LEVEL") == "docker"
@@ -54,19 +58,21 @@ def verify_deployment(cfg):
         "print(json.dumps({'sources':sources,'mount_id':mapping.mount_id}))"
     )
     observed = json.loads(
-        docker_command("exec", cfg["runtime_container"], "/opt/backend/.venv/bin/python", "-c", script)
+        docker_command("exec", runtime_container, "/opt/backend/.venv/bin/python", "-c", script)
     )
     expected = {path: hashlib.sha256((repo_root() / "sdk/nexent" / path).read_bytes()).hexdigest() for path in SOURCES}
     assert observed["sources"] == expected, "The running SDK differs from the worktree under test"
-    assert observed["mount_id"] == cfg["workspace_mount_id"], "Docker observation scope differs from runtime mapping"
+    mount_id = observed["mount_id"]
+    if workspace_mount_id is not None:
+        assert mount_id == workspace_mount_id, "Docker observation scope differs from runtime mapping"
     filters = (
         "--filter",
         "label=com.nexent.sandbox=session",
         "--filter",
-        "label=com.nexent.workspace=" + cfg["workspace_mount_id"],
+        "label=com.nexent.workspace=" + mount_id,
     )
     assert not docker_command("ps", *filters, "--format", "{{.ID}}").strip(), "Fixture sandbox scope must be idle"
-    return expected
+    return expected, mount_id
 
 
 def sandbox_events(cfg, started):
@@ -226,24 +232,33 @@ def trace_credentials(cfg):
     return settings, (public, private)
 
 
-async def verify_trace_access(cfg):
+async def verify_trace_access(cfg, *, startup_wait=0):
     settings, credentials = trace_credentials(cfg)
-    try:
-        async with httpx.AsyncClient(
-            base_url=settings["url"].rstrip("/"), auth=credentials, timeout=15, trust_env=False
-        ) as api:
-            if settings.get("api_version", "v1") == "v2":
-                now = datetime.now(timezone.utc)
-                response = await api.get("/api/public/v2/observations", params={
-                    "limit": 1, "sessionId": "tfp-preflight", "fields": "core",
-                    "fromStartTime": (now - timedelta(minutes=1)).isoformat(), "toStartTime": now.isoformat(),
-                })
-            else:
-                response = await api.get("/api/public/traces", params={"limit": 1, "sessionId": "tfp-preflight"})
-    except httpx.RequestError as error:
-        raise AssetDependencyError("monitoring", "tfp_langfuse", detail="Trace API is unreachable") from error
-    if response.status_code != 200:
-        raise AssetDependencyError("monitoring", "tfp_langfuse", detail=f"Read-only trace preflight failed (HTTP {response.status_code})")
+    now = datetime.now(timezone.utc)
+    path = "/api/public/traces"
+    params = {"limit": 1, "sessionId": "tfp-preflight"}
+    if settings.get("api_version", "v1") == "v2":
+        path = "/api/public/v2/observations"
+        params.update(fields="core", fromStartTime=(now - timedelta(minutes=1)).isoformat(), toStartTime=now.isoformat())
+    deadline = time.monotonic() + startup_wait
+    async with httpx.AsyncClient(
+        base_url=settings["url"].rstrip("/"), auth=credentials, timeout=15, trust_env=False
+    ) as api:
+        while True:
+            try:
+                response = await api.get(path, params=params)
+                if response.status_code == 200:
+                    return
+                detail = f"Read-only trace preflight failed (HTTP {response.status_code})"
+                if response.status_code not in {502, 503, 504}:
+                    break
+            except httpx.RequestError:
+                detail = "Trace API is unreachable"
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(2, remaining))
+    raise AssetDependencyError("monitoring", "tfp_langfuse", detail=detail)
 
 
 def backend_values(value):

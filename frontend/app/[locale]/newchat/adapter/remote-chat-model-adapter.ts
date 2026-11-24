@@ -358,6 +358,7 @@ interface NexentRunConfig {
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
+  automationEntry?: boolean;
   workbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
   workbenchConfigVersion?: number;
   onWorkbenchConfigVersion?: (version: number) => void;
@@ -1761,7 +1762,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               Record<string, Record<string, unknown>> | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
-          entrypoint: workbenchConfig ? "workbench" : undefined,
+          entrypoint: workbenchConfig
+            ? "workbench"
+            : !isResume && !isEphemeralRuntime && custom?.automationEntry
+              ? "automation"
+              : undefined,
           workbench: workbenchConfig,
           expected_workbench_config_version: custom?.workbenchConfigVersion,
         },

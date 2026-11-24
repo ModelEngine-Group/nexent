@@ -4,14 +4,12 @@
 import time
 
 import pytest
-from shared.auth import sign_in
 from shared.case_evidence import write_case_evidence
 from shared.factories.conversation import _create_conversation
 from shared.tool_fastpath_deployed import (
     cleanup_conversation,
     cleanup_fixture,
     control,
-    fixture_config,
     history_units,
     responses_for,
     run_agent,
@@ -32,9 +30,7 @@ pytestmark = [pytest.mark.case_id("TFP-D3-001"), pytest.mark.stage("D3")]
 
 
 async def exercise(promoted, *, fail_after_verification=False):
-    cfg = fixture_config()
-    identity = await sign_in("tenant_a_admin")
-    fixture = await setup("TFP-D3-001")
+    cfg, fixture, identity = await setup("TFP-D3-001")
     conversation = None
     primary = None
     scenario = "failed-assertion" if fail_after_verification else "promoted" if promoted else "cold"

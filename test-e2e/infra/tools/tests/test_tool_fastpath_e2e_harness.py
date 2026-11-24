@@ -2,6 +2,7 @@
 """Negative checks for test oracles; these do not count as deployed E2E runs."""
 
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -11,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from zipfile import ZipFile
 
 import httpx
 from fastapi import FastAPI
@@ -38,6 +40,68 @@ CFG = {"config": {"marker": "TFP_RULES", "value": 7}, "skill_name": "tfp-verific
 IDENTITY = SimpleNamespace(id="tenant_a_admin", user_id="owned-user", tenant_id="tenant-a", access_token="private")
 KEY = f"workspace/{IDENTITY.user_id}/{'c' * 32}/outputs/tfp-{NONCE}.txt"
 URL = "s3://bucket/" + KEY
+
+
+class ManagedFixtureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_registers_only_the_versioned_skill_and_its_owner(self):
+        name = "tfp-verification-" + NONCE
+        api = AsyncMock()
+        api.post.return_value = httpx.Response(201, json={"name": name, "skill_id": 73})
+        fixture = {}
+        with patch.object(deployed, "register_asset") as register:
+            skill_id = await deployed.create_owned_skill(api, IDENTITY, name, "TFP-D3-001", fixture)
+        self.assertEqual(skill_id, 73)
+        self.assertEqual(fixture, {"owned_skill": name})
+        sent = api.post.await_args
+        self.assertEqual(sent.args, ("/skills/upload",))
+        self.assertEqual(sent.kwargs["data"], {"skill_name": name})
+        with ZipFile(io.BytesIO(sent.kwargs["files"]["file"][1])) as archive:
+            self.assertEqual(set(archive.namelist()), {f"{name}/{path}" for path in (
+                "SKILL.md", "config/schema.yaml", "config/config.yaml", "scripts/report.py",
+            )})
+            self.assertIn(f"\nname: {name}\n", archive.read(f"{name}/SKILL.md").decode("utf-8"))
+            self.assertIn(b"TFP_RULES", archive.read(f"{name}/config/config.yaml"))
+        self.assertEqual(register.call_args.kwargs["owner_case_id"], "TFP-D3-001")
+        self.assertEqual(register.call_args.kwargs["cleanup"]["path"], "/skills/" + name)
+
+    async def test_dependency_failures_precede_provider_and_skill_writes(self):
+        with (patch.dict(os.environ, {"NEXENT_CASE_DEPLOYMENT_PROFILE": "tfp"}),
+              patch.object(deployed, "inspect_deployment", return_value=({}, NONCE * 2)),
+              patch.object(deployed, "verify_trace_access", AsyncMock()),
+              patch.object(deployed, "controlled_asset_url"),
+              patch.object(deployed, "sign_in", AsyncMock(return_value=IDENTITY)),
+              patch.object(deployed, "control", AsyncMock()) as control,
+              patch.object(deployed, "client") as client):
+            with self.assertRaisesRegex(deployed.AssetDependencyError, "different tenants"):
+                await deployed.setup("TFP-D4-001")
+        control.assert_not_awaited()
+        client.assert_not_called()
+
+    async def test_setup_error_cleans_owned_skill(self):
+        api = AsyncMock()
+        api.get.return_value = httpx.Response(404, request=httpx.Request("GET", "http://config.test/skills/fixture"))
+        identity_b = SimpleNamespace(tenant_id="tenant-b")
+
+        async def upload(_api, _identity, name, _case_id, fixture):
+            fixture["owned_skill"] = name
+            return 42
+
+        with (patch.dict(os.environ, {"NEXENT_CASE_DEPLOYMENT_PROFILE": "tfp",
+                                    "NEXENT_TFP_LANGFUSE_URL": "http://langfuse.example.test"}),
+              patch.object(deployed, "inspect_deployment", return_value=({}, NONCE * 2)),
+              patch.object(deployed, "verify_trace_access", AsyncMock()),
+              patch.object(deployed, "controlled_asset_url"),
+              patch.object(deployed, "sign_in", AsyncMock(side_effect=[IDENTITY, identity_b])),
+              patch.object(deployed, "client") as client,
+              patch.object(deployed, "create_owned_skill", side_effect=upload),
+              patch.object(deployed, "_delete_skill", AsyncMock()) as delete,
+              patch.object(deployed, "control", AsyncMock()) as control):
+            client.return_value.__aenter__.return_value = api
+            with self.assertRaises(AssertionError):
+                await deployed.setup("TFP-D3-001")
+        self.assertEqual(delete.await_args.args[0], IDENTITY)
+        self.assertTrue(delete.await_args.args[1].startswith("tfp-verification-"))
+        self.assertEqual(control.await_args.args[1], "delete")
 
 
 def units(promoted):

@@ -317,7 +317,7 @@ async def test_workbench_debug_checks_root_metadata_policy_before_dispatch(mocke
 @pytest.mark.parametrize(("kind", "persisted_parameters"), [
     (kind, persisted_parameters)
     for kind in ("evaluation", "ordinary", "clarification", "saved_preferences", "saved_preferences_clear", "planning",
-                 "default", "new", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
+                 "default", "new", "automation_entry", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
                  "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope", "workbench_preferences",
                  "workbench_preferences_clear",
                  "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
@@ -329,7 +329,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         kind = "a2a"
     debug_planning = kind == "debug_planning"
     planning = kind == "planning" or debug_planning
-    new = kind in {"new", "first_metadata", "workbench_first_metadata"}
+    new = kind in {"new", "automation_entry", "first_metadata", "workbench_first_metadata"}
     use_workbench = kind.startswith("workbench")
     workbench_metadata = use_workbench and "metadata" in kind
     redis = object()
@@ -411,7 +411,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         } if kind == "clarification" else None
         request = AgentRequest(
             query="hello", agent_id=7, conversation_id=42, clarification_response=clarification,
-            enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
+            entrypoint="automation" if kind == "automation_entry" else None,
+            enable_automation_tool=kind in {"default", "new", "automation_entry"}, enable_plan=planning, metadata=metadata,
         )
         conversation_preferences = {}
         if kind in {"saved_preferences", "workbench_preferences"}:
@@ -493,6 +494,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         if clarification is not None:
             assert "Original form" not in prepared.model_dump_json()
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
+        assert payload.automation_proposal_only is (True if kind == "automation_entry" else None)
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
         if conversation_preferences:
             assert payload.models.llm.conversation_parameters == conversation_preferences["11"]
@@ -629,7 +631,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     try:
         for agent in [info.agent_config, *info.agent_config.worker_agents]:
             expected = ["parallel_executor", "download_from_s3", "upload_to_s3"]
-            if kind in {"default", "new"} and agent is info.agent_config:
+            if kind in {"default", "new", "automation_entry"} and agent is info.agent_config:
                 expected.insert(1, "create_scheduled_task_proposal")
                 tool = next(tool for tool in agent.tools if tool.name == "create_scheduled_task_proposal")
                 assert callable(tool.metadata["create_proposal"])
