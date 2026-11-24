@@ -39,6 +39,8 @@ interface AgentChoice {
   agent_id: number;
   name: string;
   display_name?: string;
+  permission?: "EDIT" | "READ_ONLY";
+  current_version_no?: number | null;
 }
 interface VersionChoice {
   version_no: number;
@@ -273,7 +275,10 @@ export const evolutionService = {
     read(`${root}/confirmation-locks/${id}/promote`, {expected_version,candidate_digest,reason}),
   rollback: (id: number, expected_version: number, reason: string, emergency: boolean) =>
     read(`${root}/confirmation-locks/${id}/rollback`, {expected_version,reason,emergency}),
-  agents: () => read<AgentChoice[]>(API_ENDPOINTS.agent.publishedList),
+  agents: async () => {
+    const agents = await read<AgentChoice[]>(API_ENDPOINTS.agent.list);
+    return agents.filter(agent => agent.permission === "EDIT" && (agent.current_version_no ?? 0) > 0);
+  },
   versions: (agent: number) =>
     read<VersionChoice[]>(API_ENDPOINTS.agent.versions.list(agent)),
   evaluators: () => read<Rule[]>(API_ENDPOINTS.evaluators.list),
