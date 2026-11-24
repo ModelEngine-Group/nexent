@@ -55,5 +55,8 @@ def test_prepared_history_preserves_read_only_execution_records():
     received = PreparedConversationHistory.model_validate(wire)
     restored = _restore_conversation_history(received, ServicePrincipal("owner", "tenant"))
 
-    assert restored["conversation_turns"][0]["execution_records"] == records
+    # Optional provenance stays unknown for older rows; no IDs/events are invented.
+    assert restored["conversation_turns"][0]["execution_records"] == [
+        record | {"unit_index": None, "execution_event": None} for record in records
+    ]
     assert "execution_records" not in restored["conversation_turns"][1]

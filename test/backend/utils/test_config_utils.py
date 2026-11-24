@@ -1,10 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 import json
-import sys
-import types
 from unittest.mock import patch
-from pydantic import BaseModel, Field
 
 # Setup common mocks
 from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
@@ -13,21 +10,7 @@ from test.common.test_mocks import setup_common_mocks, patch_minio_client_initia
 mocks = setup_common_mocks()
 
 
-class InvalidReservePolicy(Exception):
-    pass
-
-
-class CapacityReservePolicy(BaseModel):
-    compaction_trigger_ratio: float = Field(default=0.8, gt=0, le=1)
-    compaction_trigger_ratio_source: str = "code_default"
-    compaction_target_ratio: float = Field(default=0.6, gt=0, le=1)
-    compaction_target_ratio_source: str = "code_default"
-
-
-capacity_budget_mock = types.ModuleType("nexent.core.models.capacity_budget")
-capacity_budget_mock.CapacityReservePolicy = CapacityReservePolicy
-capacity_budget_mock.InvalidReservePolicy = InvalidReservePolicy
-sys.modules["nexent.core.models.capacity_budget"] = capacity_budget_mock
+from nexent.core.models.capacity_budget import InvalidReservePolicy
 
 # Patch storage factory before importing
 with patch_minio_client_initialization():
@@ -269,6 +252,32 @@ class TestTenantConfigManager:
         ]
 
         with pytest.raises(Exception, match=CONTEXT_COMPACTION_TRIGGER_RATIO_KEY):
+            config_manager.get_capacity_reserve_policy("tenant1")
+
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
+    def test_remaining_policy_overrides_legacy_trigger(self, mock_get_configs, config_manager):
+        mock_get_configs.return_value = [
+            {"config_key": "context.remaining_window_ratio", "config_value": "0.1"},
+            {"config_key": "context.remaining_window_max_tokens", "config_value": "12000"},
+            {"config_key": "context.maintenance_target_multiplier", "config_value": "3"},
+            {"config_key": CONTEXT_COMPACTION_TRIGGER_RATIO_KEY, "config_value": "invalid-old-value"},
+        ]
+        policy = config_manager.get_capacity_reserve_policy("tenant1")
+        assert policy.remaining_window_ratio == 0.1
+        assert policy.remaining_window_max_tokens == 12000
+        assert policy.maintenance_target_multiplier == 3
+
+    @pytest.mark.parametrize("key,value", [
+        ("context.remaining_window_ratio", "0"),
+        ("context.remaining_window_ratio", "1"),
+        ("context.remaining_window_max_tokens", "0"),
+        ("context.maintenance_target_multiplier", "1"),
+        ("context.maintenance_target_multiplier", "inf"),
+    ])
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
+    def test_invalid_remaining_policy_is_rejected(self, mock_get_configs, key, value, config_manager):
+        mock_get_configs.return_value = [{"config_key": key, "config_value": value}]
+        with pytest.raises(InvalidReservePolicy, match="remaining-context"):
             config_manager.get_capacity_reserve_policy("tenant1")
 
     @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')

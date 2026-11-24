@@ -1967,8 +1967,8 @@ def _context_budget_snapshot(requested_output_tokens=128):
         "compaction_target_tokens": 600,
         "field_sources": {},
         "warnings": [],
-        "schema_version": 2,
-        "resolver_version": "2.0.0",
+        "schema_version": 3,
+        "resolver_version": "3.0.0",
     }
     payload["fingerprint"] = compute_context_budget_fingerprint(
         resolver_version=payload["resolver_version"],
@@ -2012,12 +2012,7 @@ def test_monitoring_projection_cannot_be_assigned_to_dispatch_model(
 def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
     openai_model_instance,
 ):
-    """Regression: when a W2 snapshot is active on self, __call__ must not
-    auto-fill max_tokens from self.max_output_tokens. The dispatch boundary
-    treats any caller-supplied max_tokens that disagrees with the snapshot as
-    CallerMaxTokensOverrideForbidden, so the pre-W2 auto-fill must be gated
-    on the snapshot being absent.
-    """
+    """Saved output capability and retired budget values cannot limit the wire request."""
     snapshot = _context_budget_snapshot(requested_output_tokens=8192)
     openai_model_instance.max_output_tokens = 131072
     openai_model_instance.context_budget_snapshot = snapshot
@@ -2047,10 +2042,10 @@ def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
         openai_model_instance.__call__(messages)
 
     create_kwargs = openai_model_instance.client.chat.completions.create.call_args.kwargs
-    assert create_kwargs["max_tokens"] == 8192
+    assert "max_tokens" not in create_kwargs
 
 
-def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model_instance):
+def test_dispatch_without_w2_snapshot_omits_existing_max_tokens(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
         stream=True,
         messages=[],
@@ -2060,11 +2055,10 @@ def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=64,
     )
 
 
-def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_instance):
+def test_dispatch_with_w2_snapshot_omits_requested_output_tokens(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
         context_budget_snapshot=_context_budget_snapshot(256),
         stream=True,
@@ -2074,7 +2068,6 @@ def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_ins
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=256,
     )
 
 
@@ -2089,20 +2082,17 @@ def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instan
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=256,
     )
 
 
-def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
-    with pytest.raises(openai_llm_module.CallerMaxTokensOverrideForbidden):
-        openai_model_instance._dispatch_chat_completion(
-            context_budget_snapshot=_context_budget_snapshot(256),
-            stream=True,
-            messages=[],
-            max_tokens=128,
-        )
-
-    openai_model_instance.client.chat.completions.create.assert_not_called()
+def test_dispatch_ignores_caller_max_tokens_override(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        context_budget_snapshot=_context_budget_snapshot(256),
+        stream=True, messages=[], max_tokens=128,
+    )
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True, messages=[],
+    )
 
 
 def test_dispatch_rejects_tampered_w2_snapshot(openai_model_instance):
@@ -2141,7 +2131,6 @@ def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=256,
     )
 
 
@@ -2209,7 +2198,6 @@ def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_m
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=256,
     )
 
 
@@ -2220,7 +2208,7 @@ def test_context_budget_trace_attributes_are_prefixed():
 
     assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
-    assert attrs["w2.requested_output_tokens"] == 256
+    assert attrs["w2.requested_output_tokens"] is None
     assert attrs["context.effective_input_limit_tokens"] == 1000
     assert attrs["context.compaction_trigger_threshold_tokens"] == 800
     assert attrs["context.compaction_target_tokens"] == 600
@@ -2762,8 +2750,8 @@ def test_dispatch_extra_body_forwarded(openai_model_instance):
             assert dispatch_kw.get("extra_body") == {"some_flag": True}
 
 
-def test_dispatch_max_output_tokens_autofill_when_budget_none(openai_model_instance):
-    """max_output_tokens is set into completion_kwargs when not already there and budget is None (L288)."""
+def test_dispatch_does_not_autofill_output_capability_when_budget_none(openai_model_instance):
+    """Model output capability is metadata even without a runtime budget."""
     openai_model_instance.max_output_tokens = 256
     openai_model_instance.context_budget_snapshot = None
 
@@ -2773,7 +2761,7 @@ def test_dispatch_max_output_tokens_autofill_when_budget_none(openai_model_insta
                           return_value=[_make_content_chunk("x")]) as mock_dispatch:
             openai_model_instance.__call__([{"role": "user", "content": "hi"}])
             dispatch_kw = mock_dispatch.call_args[1]
-            assert dispatch_kw.get("max_tokens") == 256
+            assert "max_tokens" not in dispatch_kw
 
 
 def test_context_evidence_sets_span_attributes(openai_model_instance):
@@ -2862,7 +2850,7 @@ def test_verify_w1_w2_consistency_all_none_returns_early():
     )
 
 
-def test_coerce_context_budget_snapshot_passes_v2_instance():
+def test_coerce_context_budget_snapshot_passes_current_instance():
     from nexent.core.models.openai_llm import OpenAIModel
 
     snapshot = OpenAIModel._coerce_context_budget_snapshot(
