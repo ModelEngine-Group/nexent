@@ -6,7 +6,6 @@ import {
   Alert,
   Button,
   DatePicker,
-  Empty,
   Segmented,
   Select,
   Spin,
@@ -24,6 +23,7 @@ import type { OperationsResource } from "@/types/operations";
 import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
+import { McpMonitoring } from "./components/mcp/McpMonitoring";
 import { ModelMonitoringDetails } from "./components/model/ModelMonitoringDetails";
 import { ModelMonitoringPanels } from "./components/model/ModelMonitoringPanels";
 import { MonitoringOverview } from "./components/overview/MonitoringOverview";
@@ -249,7 +249,11 @@ function MonitoringScope({
     userTenant,
     modelSelection,
   ] as const;
-  const selectedMonitoringResource = selectedAgent ?? selectedModel;
+  const selectedMonitoringResource =
+    selectedAgent ?? selectedModel ?? directories.mcpService;
+  const selectedMcpTool = directories.canReadTools
+    ? directories.tools.data?.find((tool) => tool.name === filters.tool)
+    : undefined;
   const modelFetching = useIsFetching({ queryKey: modelQueryKey }) > 0;
   const queryClient = useQueryClient();
   const scopeLoading = Boolean(
@@ -333,14 +337,6 @@ function MonitoringScope({
       (directories.groups.isError ||
         resourceQuery.isError ||
         directories.tools.isError));
-  const placeholder = (
-    <div className={styles.placeholder}>
-      <Empty
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={t("ops.monitoring.statisticsUnavailable")}
-      />
-    </div>
-  );
 
   const content = (
     <>
@@ -386,17 +382,11 @@ function MonitoringScope({
                 failed={resourceQuery.isError}
                 onChange={(value) => dispatch({ type: "resource", tab, value })}
               />
-              {tab === "mcp" && resource && (
+              {directories.mcpService && (
                 <DirectorySelect
                   label={t("ops.monitoring.tool")}
                   allLabel={t("ops.monitoring.allTools")}
-                  value={
-                    directories.tools.data?.some(
-                      (tool) => tool.name === filters.tool
-                    )
-                      ? filters.tool
-                      : ""
-                  }
+                  value={selectedMcpTool?.name ?? ""}
                   choices={directories.tools.data?.map((tool) => ({
                     value: tool.name,
                     label: tool.name,
@@ -439,8 +429,8 @@ function MonitoringScope({
           >
             {selectedMonitoringResource
               ? selectedMonitoringResource.name || selectedMonitoringResource.id
-              : (resource?.label ?? allResources)}{" "}
-            ·{" "}
+              : (resource?.label ?? allResources)}
+            {selectedMcpTool && ` / ${selectedMcpTool.name}`} ·{" "}
             {selectedMonitoringResource
               ? tenantLabel(selectedMonitoringResource.tenant_id)
               : scopeLabel}
@@ -538,7 +528,15 @@ function MonitoringScope({
           ) : tab === "skill" ? (
             <SkillMonitoring singleSkill={Boolean(resource)} />
           ) : (
-            placeholder
+            <McpMonitoring
+              scope={
+                selectedMcpTool
+                  ? "tool"
+                  : directories.mcpService
+                    ? "service"
+                    : "all"
+              }
+            />
           )}
         </>
       )}

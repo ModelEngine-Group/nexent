@@ -61,14 +61,6 @@
   font-size: 13px;
 }
 
-.placeholder {
-  display: grid;
-  min-height: 200px;
-  align-items: center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
 .authLoading {
   margin: 24px;
 }

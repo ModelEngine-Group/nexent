@@ -101,6 +101,7 @@ export function useMonitoringDirectories({
     groups,
     inventory,
     skills,
+    mcpService: service,
     tools,
     canReadTools,
     fetching,

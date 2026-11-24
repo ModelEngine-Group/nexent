@@ -24,8 +24,8 @@ case:
     action: Select a tenant, group and Agent, inspect Model cards and trends, page, search, sort and clear Model details, open Model statistics from a row and refresh, then switch tenants and return.
     expected: Model search and sort submit to the Model endpoint on page one with the selected scope. Pagination keeps the active order. A row action selects its tenant and model ID while the dates stay selected. Escape returns focus to the icon. Tabs share tenant, group and dates, and changing tenants clears group and resource selections.
   - order: 3
-    action: Select an MCP service in the session tenant and one of its tools, then select another service and refresh.
-    expected: The tool selection clears, the new service's tool list remains scoped, and only applicable directories are queried again.
+    action: Inspect all MCP services, select a service and a tool, change the service, refresh, then change tenants.
+    expected: The cards, trend, ranking and detail columns match each selection. All statistics are unavailable and name search is disabled. Service and tenant changes clear dependent selections and preserve dates. The tool directory stays limited to the session tenant and refresh rereads only active directories.
   - order: 4
     action: Inspect Agent cards and switch between call count, success rate and Token trend. Change the group and refresh.
     expected: The inventory count stays stable under group and date filtering. Summary and trend requests use the current scope. Token values preserve large integers and report usage coverage separately from publication status. Refresh repeats both reads.
@@ -56,8 +56,9 @@ case:
   - Model cards use inventory and the scoped summary. Both charts share a single scoped trends read. Switching the left metric does not request data. Refresh rereads summary, trends and the current list.
   - Model metric sorting retains the search, page size, tenant, group and dates. The sorted list follows server order across pages. The primary-name hint matches server search and a row can open its tenant-qualified Model statistics.
   - The Skill view uses the tenant-scoped directory, changes layout with the active Skill and displays unavailable statistics without values, chart samples or table rows.
+  - All MCP services show the current service count, call count, daily trend, service Top 5 and service details. A selected service shows tool count, call count, daily trend, tool Top 5 and tool details. A selected tool shows call count, a full-width daily trend and tool details without row actions. Each statistics region shows unavailable.
   forbidden_side_effects:
-  - Statistics use the connected Agent and Model GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking, cross-tenant MCP tool directory request or Skill statistics request is sent.
+  - Statistics use the connected Agent and Model GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking, cross-tenant MCP tool directory request or Skill or MCP statistics request is sent.
   actor: Authorized super administrator
   journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
   final_business_result:
@@ -120,4 +121,9 @@ case:
     description: Skill directory selection switches the layout and refresh stays within the existing directory scope.
     steps: [9]
     expected_results: [11]
+    forbidden_side_effects: [1]
+  - id: AC-12
+    description: MCP directory selection switches between three unavailable-statistics layouts and retains the dates under tenant and service changes.
+    steps: [3]
+    expected_results: [12]
     forbidden_side_effects: [1]

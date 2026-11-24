@@ -627,7 +627,6 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       .locator(".ant-select-item-option")
       .getByText(name, { exact: true });
   const picker = page.locator(".ant-picker-dropdown:visible");
-  const placeholder = page.getByText("统计数据暂未接入", { exact: true });
   const heading = page.getByRole("heading", { name: "监控", exact: true });
   const allTools = page
     .getByRole("tabpanel", { name: "MCP" })
@@ -1043,14 +1042,86 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   });
   await contract.step(tools, async () => {
     await tab("MCP").click();
+    const mcp = page.getByRole("tabpanel", { name: "MCP", exact: true });
+    const cards = mcp.locator('dl[aria-label="MCP 指标概览"]');
+    const trend = mcp.getByRole("region", { name: "工具调用趋势" });
+    const serviceTop = mcp.getByRole("region", { name: "服务调用量 Top 5" });
+    const toolTop = mcp.getByRole("region", { name: "工具调用量 Top 5" });
+    const services = mcp.getByRole("region", { name: "MCP 服务明细" });
+    const toolDetails = mcp.getByRole("region", { name: "工具明细" });
+    const unavailable = (region: typeof mcp) =>
+      region.getByText("暂未接入", { exact: true });
+    const expectCards = async (titles: string[]) => {
+      await expect(cards.locator("dt")).toHaveText(titles);
+      await expect(cards.locator("strong")).toHaveText(titles.map(() => "—"));
+      await expect(unavailable(cards)).toHaveCount(titles.length);
+    };
+    const expectDetails = async (
+      details: typeof mcp,
+      headers: string[],
+      search: string,
+    ) => {
+      await expect(details.getByRole("columnheader")).toHaveText(headers);
+      await expect(unavailable(details)).toBeVisible();
+      await expect(details.locator("tbody tr[data-row-key]")).toHaveCount(0);
+      await expect(
+        details.getByRole("button", { name: search }),
+      ).toBeDisabled();
+    };
+    const toolColumns = ["工具名称", "工具调用量", "平均时延（ms）"];
+
     await choose("MCP", "研发服务");
     await expect(select("MCP 工具")).toBeDisabled();
+    await expect(unavailable(toolTop)).toBeVisible();
     await choose("租户", "运营中心");
+    await expect(
+      mcp.getByRole("heading", { name: "全部服务 · 运营中心" }),
+    ).toBeVisible();
+    await expect(select("MCP 工具")).toHaveCount(0);
+    await expectCards(["当前 MCP 总数", "工具调用量"]);
+    await expect(unavailable(trend)).toBeVisible();
+    await expect(unavailable(serviceTop)).toBeVisible();
+    await expect(toolTop).toHaveCount(0);
+    await expectDetails(
+      services,
+      [
+        "服务名称",
+        "来源",
+        "活跃工具数",
+        "工具调用量",
+        "平均时延（ms）",
+        "操作",
+      ],
+      "搜索服务名称",
+    );
+    await screenshot("mcp-all");
+
     await choose("MCP", "知识库服务");
+    await expect(
+      mcp.getByRole("heading", { name: "知识库服务 · 运营中心" }),
+    ).toBeVisible();
+    await expect(allTools).toBeVisible();
+    await expectCards(["工具数", "工具调用量"]);
+    await expect(unavailable(trend)).toBeVisible();
+    await expect(serviceTop).toHaveCount(0);
+    await expect(unavailable(toolTop)).toBeVisible();
+    await expectDetails(toolDetails, [...toolColumns, "操作"], "搜索工具名称");
+    await screenshot("mcp-service");
+
     await choose("MCP 工具", "语义检索");
-    await screenshot("mcp");
+    await expect(
+      mcp.getByRole("heading", { name: "知识库服务 / 语义检索 · 运营中心" }),
+    ).toBeVisible();
+    await expectCards(["工具调用量"]);
+    await expect(unavailable(trend)).toBeVisible();
+    await expect(serviceTop).toHaveCount(0);
+    await expect(toolTop).toHaveCount(0);
+    await expectDetails(toolDetails, toolColumns, "搜索工具名称");
+    await screenshot("mcp-tool");
+
     await choose("MCP", "文件服务");
     await expect(allTools).toBeVisible();
+    await expect(toolTop).toBeVisible();
     await select("MCP 工具").click();
     await expect(option("查阅文件")).toBeVisible();
     await expect(option("语义检索")).toHaveCount(0);
@@ -1063,6 +1134,30 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect
       .poll(() => reads.slice(start).sort())
       .toEqual(["groups:a", "resources:a", "scope:a", "tenants", "tools:4"]);
+
+    await choose("MCP 工具", "查阅文件");
+    await choose("MCP", "全部服务");
+    await expect(select("MCP 工具")).toHaveCount(0);
+    await expect(serviceTop).toBeVisible();
+    await choose("MCP", "文件服务");
+    await expect(allTools).toBeVisible();
+    await choose("MCP 工具", "查阅文件");
+    await choose("用户组", "一线运营组");
+    await choose("租户", "研发中心");
+    await expect(mcp.getByText("全部用户组", { exact: true })).toBeVisible();
+    await expect(
+      mcp.getByRole("heading", { name: "全部服务 · 研发中心" }),
+    ).toBeVisible();
+    await expect(select("MCP 工具")).toHaveCount(0);
+    await expect(mcp.getByPlaceholder("请选择开始日期")).toHaveValue(
+      "2026-11-07",
+    );
+    await expect(mcp.getByPlaceholder("请选择结束日期")).toHaveValue(
+      "2026-11-12",
+    );
+    expect(unexpected).toEqual([]);
+    await choose("租户", "运营中心");
+    await choose("MCP", "文件服务");
   });
   const overview = page.locator('dl[aria-label="智能体指标概览"]');
   const card = (title: string) =>
@@ -1641,10 +1736,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     modelMetrics,
     modelListNavigation,
     skillMonitoring,
+    mcpMonitoring,
   ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
-    await expect(placeholder).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "工具明细", exact: true })
+        .getByText("暂未接入", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByPlaceholder("请选择开始日期")).toHaveValue(
       "2026-11-07",
     );
@@ -1773,6 +1873,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   await contract.assertion(skillMonitoring, async () => {
     expect(reads).toEqual(expect.arrayContaining(["skills:a", "skills:b"]));
     expect(reads).not.toContain("skills:*");
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(mcpMonitoring, async () => {
+    await expect(
+      page.getByRole("heading", { name: "文件服务 · 运营中心" }),
+    ).toBeVisible();
+    expect(reads.filter((read) => read.startsWith("tools:")).sort()).toEqual(
+      expect.arrayContaining(["tools:3", "tools:4"]),
+    );
     expect(unexpected).toEqual([]);
   });
 });
