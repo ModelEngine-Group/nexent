@@ -58,17 +58,9 @@ def build_run_monitoring_catalog(tenant_id, used_mcp_urls, mcp_records, local_se
         return None
 
 
-def build_run_monitoring_catalog_from_db(tenant_id, used_mcp_urls, mcp_rows, local_server_url, *, enabled, is_debug):
-    """Assemble the per-run catalog from unified infrastructure MCP record rows.
-
-    ``mcp_rows`` are ``McpRecord`` dicts keyed by persistence column names
-    (``mcp_server``/``mcp_name``); they are mapped to the catalog record shape
-    and delegated to the shared assembler. Container records keep
-    ``container_id``/``config_json`` so container classification survives.
-    """
-    if not enabled or is_debug or not used_mcp_urls:
-        return None
-    mapped = [
+def _catalog_records(mcp_rows):
+    """Map unified ``McpRecord`` persistence rows onto the shared catalog record shape."""
+    return [
         {
             "remote_mcp_server": row.get("mcp_server"),
             "remote_mcp_server_name": row.get("mcp_name"),
@@ -80,6 +72,19 @@ def build_run_monitoring_catalog_from_db(tenant_id, used_mcp_urls, mcp_rows, loc
         for row in (mcp_rows or [])
         if isinstance(row, dict)
     ]
+
+
+def build_run_monitoring_catalog_from_db(tenant_id, used_mcp_urls, mcp_rows, local_server_url, *, enabled, is_debug):
+    """Assemble the per-run catalog from unified infrastructure MCP record rows.
+
+    ``mcp_rows`` are ``McpRecord`` dicts keyed by persistence column names
+    (``mcp_server``/``mcp_name``); they are mapped to the catalog record shape
+    and delegated to the shared assembler. Container records keep
+    ``container_id``/``config_json`` so container classification survives.
+    """
+    if not enabled or is_debug or not used_mcp_urls:
+        return None
+    mapped = _catalog_records(mcp_rows)
     return select_run_monitoring_catalog(mapped, used_mcp_urls, local_server_url, query_converted_tool_names(tenant_id))
 
 
@@ -87,18 +92,20 @@ def prepare_tenant_monitoring_catalog(tenant_id, local_server_url, *, enabled=Tr
     """Build the full tenant catalog for a prepared payload; None when omitted.
 
     Management attaches this to the prepared run payload; Runtime filters it to
-    the URLs each run materializes. Failures degrade to an omitted catalog.
+    the URLs each run materializes. Tenant lookups return unified ``McpRecord``
+    persistence rows, so they are mapped before assembly. Failures degrade to
+    an omitted catalog.
     """
     if not enabled:
         return None
     try:
         local_server_url = local_server_url if local_server_url else None
-        records = _mcp_records_for_tenant(tenant_id)
+        records = _catalog_records(_mcp_records_for_tenant(tenant_id))
         if not records:
             return None
         return select_run_monitoring_catalog(
             records,
-            [record.get("remote_mcp_server") for record in records if record.get("remote_mcp_server")],
+            [record["remote_mcp_server"] for record in records if record["remote_mcp_server"]],
             local_server_url,
             query_converted_tool_names(tenant_id),
         )

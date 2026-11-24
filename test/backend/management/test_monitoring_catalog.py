@@ -26,6 +26,20 @@ def _record(url, **overrides):
     return record
 
 
+def _db_record(url, **overrides):
+    """Unified ``McpRecord`` persistence row, as ``get_mcp_records_by_tenant`` returns it."""
+    record = {
+        "mcp_name": url.rsplit("/", 1)[-1],
+        "mcp_server": url,
+        "status": True,
+        "mcp_id": 11,
+        "container_id": None,
+        "config_json": None,
+    }
+    record.update(overrides)
+    return record
+
+
 def test_catalog_maps_container_and_remote_records():
     records = [
         _record("http://container.invalid/mcp", container_id="abc123"),
@@ -204,14 +218,14 @@ def test_run_catalog_from_db_maps_persistence_rows_and_skips_non_dicts(monkeypat
 
 
 def test_prepare_tenant_monitoring_catalog_assembles_and_degrades(monkeypatch):
-    records = [_record("http://remote.invalid/mcp", mcp_id=9, remote_mcp_server_name="docs")]
+    records = [_db_record("http://remote.invalid/mcp", mcp_id=9, mcp_name="docs")]
     monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: records)
     monkeypatch.setattr(catalog_mod, "query_converted_tool_names", lambda tenant_id: set())
 
     assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL, enabled=False) is None
 
     # An empty local endpoint must not classify tenant records as the builtin local server.
-    local_records = [_record(LOCAL, mcp_id=None, remote_mcp_server_name="outer-apis")]
+    local_records = [_db_record(LOCAL, mcp_id=None, mcp_name="outer-apis")]
     monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: local_records)
     assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", "")[0]["mcp_server_type"] == "remote"
 
@@ -228,6 +242,34 @@ def test_prepare_tenant_monitoring_catalog_assembles_and_degrades(monkeypatch):
 
     monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", broken_records)
     assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL) is None
+
+
+def test_prepare_tenant_monitoring_catalog_maps_persistence_rows(monkeypatch):
+    """Regression: tenant lookups return mcp_server/mcp_name rows, not catalog keys.
+
+    Passing persistence rows through unmapped dropped every record, so AgentOS
+    chat preparations attached no catalog and facts degraded to the unknown type.
+    """
+    records = [
+        _db_record("http://host.docker.internal:8767/mcp", mcp_id=10, mcp_name="mcp-mixed-tools"),
+        _db_record("http://container.invalid/mcp", mcp_id=6, mcp_name="boxed", container_id="abc123"),
+        "not-a-dict",
+    ]
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: records)
+    monkeypatch.setattr(catalog_mod, "query_converted_tool_names", lambda tenant_id: set())
+
+    catalog = catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL)
+
+    assert {entry["url"]: entry for entry in catalog} == {
+        "http://host.docker.internal:8767/mcp": {
+            "url": "http://host.docker.internal:8767/mcp", "mcp_server_id": 10,
+            "mcp_server_name": "mcp-mixed-tools", "mcp_server_type": "remote",
+        },
+        "http://container.invalid/mcp": {
+            "url": "http://container.invalid/mcp", "mcp_server_id": 6,
+            "mcp_server_name": "boxed", "mcp_server_type": "container",
+        },
+    }
 
 
 def test_openapi_tool_names_match_fastmcp_default_naming():
