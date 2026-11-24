@@ -50,6 +50,10 @@ feature:
   - rule_id: TRJ-RULE-012
     description: 管理员导入ZIP到本地服务持久目录，每次上传新增记录，仅可信当前租户的导入者可访问和删除；独立导入列表分页倒序展示，刷新、重登、服务重启后可重新查看，保存至手动删除，不参与原采集清理与统计。
       文件名及导入时间支持分页前升降序，勾选跨页保留并确认批量删除；成功项移除、失败项保留重试，离开或认证失效停止后续请求。
+  - rule_id: TRJ-RULE-013
+    description: 智能体对话和工作台在当前会话取得服务端 ID 后，在对话顶部显示会话 ID 并支持复制纯数字。切换会话时显示新会话的 ID，未保存的会话不显示临时标识。
+  - rule_id: TRJ-RULE-014
+    description: 模型节点的完整请求可按消息顺序显示序号、角色和正文，正文按 Markdown 渲染。表格视图不加载图片或解析原始 HTML，复制保留原始请求，JSON 和文本视图继续可用；无法解析或超过预览限制时保留原视图。
   required_test_stages:
   - D2
   - D3
@@ -57,6 +61,8 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-TRAJECTORY-MODEL-INPUT-TABLE-20261124
+    - CHAT-TRAJECTORY-COPY-ID-20261124
     - CHAT-TRAJECTORY-IMPORT-MANAGEMENT-20261118
     - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
     - CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
@@ -78,7 +84,7 @@ feature:
     - CHAT-TRAJECTORY-REFRESH-20261116
     - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
-    notes: Current rules include TRJ-RULE-001 through TRJ-RULE-012. Preserve existing
+    notes: Current rules include TRJ-RULE-001 through TRJ-RULE-014. Preserve existing
       D1 and the retired TRJ-RULE-009 provenance. Native archive exchange is implemented;
       POST /trajectory/import remains temporary, while current UI uploads use persistent
       imports with private owner-scoped lists. See changes/ops-trajectory-saved-imports

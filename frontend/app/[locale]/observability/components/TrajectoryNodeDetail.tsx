@@ -228,10 +228,12 @@ export function TrajectoryNodeDetail({
             key={`${node.id}:${slot}`}
             reference={node[slot]}
             slot={slot}
-            outputKind={
-              slot === "output" && isMarkdownOutputKind(node.kind)
-                ? node.kind
-                : undefined
+            previewKind={
+              slot === "input" && node.kind === "model"
+                ? "modelInput"
+                : slot === "output" && isMarkdownOutputKind(node.kind)
+                  ? node.kind
+                  : undefined
             }
             conversationId={conversationId}
             nodeId={node.id}

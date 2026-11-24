@@ -597,24 +597,37 @@ def test_capture_independent_process_reads_published_facts_without_runtime_cache
 
 
 @pytest.mark.parametrize('workbench', [False, True])
-def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, monkeypatch, workbench):
+@pytest.mark.parametrize('kind', ['agent', 'skill'])
+def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, monkeypatch, workbench, kind):
     import asyncio
-    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
 
-    from contracts.agent import NL2AgentRunRequest, SystemAgentRef
-    from contracts.authentication import AuthenticatedIdentity
-    from management.services.conversation import creation_history, creator_execution
-    from services import nl2agent_service
+    import httpx
+    from fastapi import FastAPI
 
-    from nexent.core.agents.contracts.run import AgentRunInfo
-    from nexent.core.utils.observer import MessageObserver
-    from nexent.monitor import get_agent_monitoring_context
+    from contracts.agent import SystemAgentRef
+    from contracts.constants import environment
+    from management.api.agent import creator as agent_api
+    from management.api.skill import creation as skill_api
+    from management.services.agent import creator_run, runtime_client
+    from management.services.conversation import creation_history, creator_checkpoints, creator_execution
+    from management.services.skill import creation as skill_creation
+    from nexent.core.concurrency.context import _reset_current_thread_manager, _set_current_thread_manager
+    from nexent.monitor import AgentRunMetadata, agent_monitoring_context, get_agent_monitoring_context
+    from runtime.agentos import (
+        agent_creator_config, creator_definition, ephemeral, prepared_agent_creator, prepared_skill_creator,
+    )
+    from runtime.agentos.middleware import AgentOSMiddleware
 
-    history = {'agent_id': 77, 'target': {'type': 'agent', 'id': 201}, 'message_records': []}
+    system_id = 77 if kind == 'agent' else 78
+    system_key = f'nl2{kind}_main'
+    target = {'type': 'agent', 'id': 201} if kind == 'agent' else None
+    history = {'agent_id': system_id, 'target': target, 'message_records': []}
     saved, run_infos = [], []
-    runtime.catalog.agent_id = '77'
+    runtime.catalog.agent_id = str(system_id)
     monkeypatch.setattr(creator_execution.system_agent_provider, 'get_creator_ref',
-                        lambda *_: SystemAgentRef('shared', 'nl2agent_main', 77, 0))
+                        lambda *_: SystemAgentRef('shared', system_key, system_id, 0))
     monkeypatch.setattr(creator_execution, 'authorize_target', lambda target, *_: target)
     monkeypatch.setattr(creator_execution, 'get_conversation_history', lambda *_: history)
     monkeypatch.setattr(creation_history, 'get_conversation_history', lambda *_: history)
@@ -623,7 +636,24 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
     monkeypatch.setattr(creation_history, 'save_message_unit', lambda **kw: None)
     monkeypatch.setattr('management.services.conversation.model_preferences.read_model_preferences',
                         lambda *_: {'model_parameter_preferences': {}, 'selected_model_id': None})
-    monkeypatch.setattr(nl2agent_service, 'runtime_thread_manager', runtime.threads)
+    monkeypatch.setattr(creator_checkpoints, 'checkpoint_creator_message', Mock())
+    monkeypatch.setattr(ephemeral, 'runtime_thread_manager', runtime.threads)
+    monkeypatch.setattr(environment, 'JWT_SECRET', 'controlled-creator-trajectory-agentos-key')
+    monkeypatch.setattr(agent_creator_config, 'NEXENT_AGENT_CORE', 'smolagents')
+    monkeypatch.setattr(prepared_skill_creator, 'NEXENT_AGENT_CORE', 'smolagents')
+    creator_lookup = Mock(return_value={'agent_id': system_id, 'version_no': 0, 'max_steps': 2})
+    monkeypatch.setattr(creator_definition, 'read_system_creator', creator_lookup)
+    model_scope = {
+        'model': {'model_id': 11, 'alias': 'model', 'revision': 'v1'},
+        'input_budget': 8192, 'context_window_tokens': 8192,
+    }
+    monkeypatch.setattr(creator_run, 'prepare_creator_model', lambda *_: model_scope)
+    monkeypatch.setattr(skill_creation, 'prepare_creator_model', lambda *_: model_scope)
+    monkeypatch.setattr(creator_run, '_build_verified_bound_resources_context',
+                        AsyncMock(return_value=SimpleNamespace(content={'text': 'Verified bindings'})))
+    opened, closed = Mock(), Mock()
+    monkeypatch.setattr(creator_run, 'open_nl2agent_tool_grant', opened)
+    monkeypatch.setattr(creator_run, 'close_nl2agent_tool_grant', closed)
 
     def save(message, **kwargs):
         identity = len(saved) + 10
@@ -635,64 +665,98 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
         return identity
 
     monkeypatch.setattr(creation_history, 'save_message', save)
+    monkeypatch.setattr(creator_execution, 'save_message', save)
+
+    management, worker = FastAPI(), FastAPI()
+    management.include_router(agent_api.router if kind == 'agent' else skill_api.skill_creator_router)
+    permission = (agent_api.require_agent_create_permission if kind == 'agent' else skill_api.require_skill_create_permission)
+    management.dependency_overrides[permission] = lambda: None
+    public_api = agent_api if kind == 'agent' else skill_api
+    monkeypatch.setattr(public_api, 'ENABLE_AGENT_WORKBENCH', True)
+    monkeypatch.setattr(public_api, 'get_current_user_info', lambda *_: ('owner', 'tenant', 'en'))
+    worker.add_middleware(AgentOSMiddleware)
+    worker.include_router(ephemeral.create_ephemeral_run_router())
+    load = ephemeral.load_prepared_run
+
+    async def observe_load(payload, actor, materialize):
+        assert get_agent_monitoring_context().conversation_id is None
+        info = await load(payload, actor, materialize)
+        run_infos.append(info)
+        return info
+
+    async def runtime_app(scope, receive, send):
+        with agent_monitoring_context(AgentRunMetadata()):
+            await worker(scope, receive, send)
+
+    async def assert_runtime_response(response):
+        assert response.status_code == 200, (response.status_code, (await response.aread()).decode())
+
+    monkeypatch.setattr(ephemeral, 'load_prepared_run', observe_load)
+    monkeypatch.setattr(runtime_client, 'create_httpx_client', lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=runtime_app, root_path='/api'),
+        event_hooks={'response': [assert_runtime_response]}, **kwargs,
+    ))
 
     def reply(request, number, emit):
-        emit('<final_answer>created</final_answer>')
+        answer = 'created' if kind == 'agent' else '<skill>\n# created\n</skill>'
+        emit(f'<final_answer>{answer}</final_answer>')
         emit(done=True)
 
     with runtime.http(reply) as (base, requests):
-        async def build(**kwargs):
-            info = AgentRunInfo(
-                query=kwargs['request'].query, observer=MessageObserver(),
-                stop_event=threading.Event(), thread_manager=runtime.threads,
-                agent_config=AgentConfig(name='nl2agent_main', agent_id=77, version_no=0,
-                                         description='Controlled creator', model_name='model', tools=[], max_steps=2),
-                model_config_list=[ModelConfig(cite_name='model', model_name='model', url=base, api_key='synthetic')],
-            )
-            run_infos.append(info)
-            return info
-
-        monkeypatch.setattr(nl2agent_service, 'build_nl2agent_run_info', AsyncMock(side_effect=build))
+        materialization = prepared_agent_creator if kind == 'agent' else prepared_skill_creator
+        monkeypatch.setattr(materialization, '_materialize_model', lambda *_: ModelConfig(
+            cite_name='model', model_name='model', url=base, api_key='synthetic',
+        ))
 
         async def execute():
-            config = ({'schema_version': 4, 'mode': 'agent_create', 'agent_mounts': [], 'skill_mounts': []}
-                      if workbench else None)
+            config = {'schema_version': 4, 'mode': f'{kind}_create', 'agent_mounts': [], 'skill_mounts': []}
+            path = '/agent/nl2agent/run' if kind == 'agent' else '/skills/nl2skill/run'
+            fields = {'agent_id': 201} if kind == 'agent' else {}
+            token = _set_current_thread_manager(runtime.threads)
             before = get_agent_monitoring_context()
-            for turn in range(3):
-                request = NL2AgentRunRequest(
-                    query='build' if turn != 1 else 'edit', agent_id=201,
-                    conversation_id=None if turn == 0 else 123, workbench_config=config,
-                    retry_user_message_id=10 if turn == 2 else None,
-                )
-                stream, conversation = await creator_execution.start_creation_turn(
-                    request, kind='agent', user_id='owner', tenant_id='tenant',
-                    stream_factory=lambda effective, ref: nl2agent_service.create_nl2agent_stream(
-                        effective, 'tenant', 'en', identity=AuthenticatedIdentity('owner', 'tenant'),
-                        system_ref=ref,
-                    ),
-                )
-                assert conversation == 123
-                events = []
-                async for event in stream:
-                    events.append(event)
+            try:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
+                                             base_url='http://management') as client:
+                    for turn in range(3):
+                        response = await client.post(path, json={
+                            **fields, 'query': 'build' if turn != 1 else 'edit',
+                            'conversation_id': None if turn == 0 else 123,
+                            'retry_user_message_id': 10 if turn == 2 else None,
+                            'workbench_config': config if workbench else None,
+                        })
+                        assert response.status_code == 200 and response.headers['conversation_id'] == '123'
+                        events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith('data: ')]
+                        assert 'created' in response.text and all(event['type'] != 'error' for event in events), events
+                        assert get_agent_monitoring_context() is before
+                    response = await client.post(path, json={
+                        **fields, 'query': 'unsaved', 'conversation_id': 123, 'persist_history': False,
+                        'trajectory': {'conversation_id': 123, 'source_message_id': 10},
+                    })
+                    assert response.status_code == 200 and 'conversation_id' not in response.headers
+                    assert 'created' in response.text
                     assert get_agent_monitoring_context() is before
-                assert any('created' in event for event in events)
-                assert get_agent_monitoring_context() is before
+            finally:
+                _reset_current_thread_manager(token)
 
         asyncio.run(execute())
-        assert len(requests) == 3
+        assert len(requests) == 4
     assert [role for role, _, _ in saved] == ['user', 'assistant', 'user', 'assistant', 'assistant']
-    assert history['agent_id'] == 77 and history['target'] == {'type': 'agent', 'id': 201}
+    assert history['agent_id'] == system_id and history['target'] == target
+    assert [call.args for call in creator_lookup.call_args_list] == [(system_id, 0, system_key)] * 3
+    if kind == 'agent':
+        assert opened.call_count == closed.call_count == 4
+        assert all(call.args[1] == 201 for call in opened.call_args_list)
     assert all(info.thread_future.done() and info.attempt_outcome == 'completed' for info in run_infos)
     roots = [span for span in runtime.spans() if span['name'] == 'agent.run']
     assert len(roots) == 3
     values = sorted((attrs(span) for span in roots), key=lambda item: int(item['nexent.source_message_id']))
     assert [item['nexent.source_message_id'] for item in values] == ['10', '10', '12']
-    assert all(str(item['agent.id']) == '77' for item in values)
+    assert all(str(item['agent.id']) == str(system_id) for item in values)
     assert all(str(item['nexent.trace_id']) == '123' for item in values)
     assert all(str(item['agent.version_no']) == '0' for item in values)
+    assert [item['input.value'] for item in values] == ['build', 'build', 'edit']
     meta_path = next(runtime.root.rglob('meta.json'))
-    assert meta_path.parent.parts[-4:] == ('tenant', 'owner', '77', '123')
+    assert meta_path.parent.parts[-4:] == ('tenant', 'owner', str(system_id), '123')
     meta = json.loads(meta_path.read_text())
     assert len(meta['runs']) == 3
     with runtime.client() as client:
@@ -702,7 +766,7 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
                                      headers={'Authorization': 'admin'}))
             root = next(node for node in result['nodes'] if node['parent_id'] is None)
             assert root['agent_version_no'] == 0
-            assert run['root_agent_id'] == '77'
+            assert run['root_agent_id'] == str(system_id)
             assert len([node for node in result['nodes'] if node['kind'] == 'model']) == 1
 
 

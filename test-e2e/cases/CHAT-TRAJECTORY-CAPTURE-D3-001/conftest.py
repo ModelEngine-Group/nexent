@@ -200,7 +200,7 @@ def runtime(tmp_path, monkeypatch):
     store = TrajectoryFileStore(directory, authorize=lambda _: None)
     local = LocalTrajectoryProcessor(store, get_agent_monitoring_context)
     threads = ThreadManager('capture-fixture', {
-        lane: LanePolicy(lane, 6, 8)
+        lane: LanePolicy(lane, 6, 8, queue_timeout_seconds=3 if lane == 'agent-run' else 0)
         for lane in ('agent-run', 'model-tool-io', 'sandbox', 'control-io', 'background-service', 'trajectory-read')
     })
     threads.start()

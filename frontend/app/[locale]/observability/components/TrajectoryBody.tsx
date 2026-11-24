@@ -11,24 +11,26 @@ import {
   WrapText,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { trajectoryService } from "@/services/trajectoryService";
 import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
 import type { ContentReference } from "@/types/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
+import { TrajectoryMarkdown } from "./TrajectoryMarkdown";
+import {
+  modelInputMessages,
+  TrajectoryModelInput,
+} from "./TrajectoryModelInput";
 import {
   outputMarkdown,
   type MarkdownOutputKind,
 } from "./trajectoryOutputMarkdown";
 
-type BodyMode = "text" | "json" | "markdown";
-const MARKDOWN_PLUGINS = [remarkGfm];
+type BodyMode = "text" | "json" | "markdown" | "table";
 
 interface TrajectoryBodyProps {
   reference: ContentReference;
   slot: string;
-  outputKind?: MarkdownOutputKind;
+  previewKind?: MarkdownOutputKind | "modelInput";
   conversationId: string;
   nodeId: string;
   cache: BodyCache;
@@ -43,7 +45,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
         props.conversationId,
         props.nodeId,
         props.slot,
-        props.outputKind,
+        props.previewKind,
         props.reference.content_id,
         props.reference.availability,
         props.reference.complete,
@@ -56,7 +58,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
 function TrajectoryBodyContent({
   reference,
   slot,
-  outputKind,
+  previewKind,
   conversationId,
   nodeId,
   cache,
@@ -68,7 +70,7 @@ function TrajectoryBodyContent({
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [preferredMode, setMode] = useState<BodyMode>(
-    outputKind ? "markdown" : "json"
+    previewKind === "modelInput" ? "table" : previewKind ? "markdown" : "json"
   );
   const [wordWrap, setWordWrap] = useState(false);
   const [chunk, setChunk] = useState<{
@@ -97,17 +99,35 @@ function TrajectoryBodyContent({
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
   const markdown = useMemo(() => {
-    if (!outputKind || !complete || reference.availability !== "available")
+    if (
+      !previewKind ||
+      previewKind === "modelInput" ||
+      !complete ||
+      reference.availability !== "available"
+    )
       return "";
-    return outputMarkdown(text, outputKind, {
+    return outputMarkdown(text, previewKind, {
       field: t("trajectory.markdownField"),
       value: t("trajectory.markdownValue"),
       index: t("trajectory.markdownIndex"),
       logs: t("trajectory.markdownLogs"),
     });
-  }, [complete, outputKind, reference.availability, t, text]);
+  }, [complete, previewKind, reference.availability, t, text]);
+  const messages = useMemo(
+    () =>
+      previewKind === "modelInput" &&
+      complete &&
+      reference.availability === "available"
+        ? modelInputMessages(text)
+        : null,
+    [complete, previewKind, reference.availability, text]
+  );
   const mode =
-    preferredMode === "markdown" && !markdown ? "json" : preferredMode;
+    (preferredMode === "markdown" && !markdown) ||
+    (preferredMode === "table" && !messages)
+      ? "json"
+      : preferredMode;
+  const richPreview = mode === "markdown" || mode === "table";
   const formatted = useMemo(() => {
     if (mode === "markdown") return markdown;
     if (mode !== "json") return text;
@@ -119,13 +139,13 @@ function TrajectoryBodyContent({
   }, [text, mode, markdown]);
   const lineNumbers = useMemo(
     () =>
-      mode === "markdown"
+      richPreview
         ? ""
         : Array.from(
             { length: Math.min(formatted.split("\n").length, 10000) },
             (_, index) => index + 1
           ).join("\n"),
-    [formatted, mode]
+    [formatted, richPreview]
   );
   const load = useCallback(
     async (offset: number) => {
@@ -231,6 +251,9 @@ function TrajectoryBodyContent({
               ...(markdown
                 ? [{ label: "Markdown", value: "markdown" as const }]
                 : []),
+              ...(messages
+                ? [{ label: t("trajectory.table"), value: "table" as const }]
+                : []),
             ]}
           />
         </div>
@@ -249,7 +272,11 @@ function TrajectoryBodyContent({
                 <div className="trajectory-code-card">
                   <div className="trajectory-code-toolbar">
                     <span>
-                      {mode === "markdown" ? "Markdown" : mode.toUpperCase()}
+                      {mode === "table"
+                        ? t("trajectory.table")
+                        : mode === "markdown"
+                          ? "Markdown"
+                          : mode.toUpperCase()}
                     </span>
                     <span
                       className="trajectory-code-meta"
@@ -270,7 +297,7 @@ function TrajectoryBodyContent({
                         count: reference.char_count ?? Array.from(text).length,
                       })}
                       <span className="trajectory-code-actions">
-                        {mode !== "markdown" && (
+                        {!richPreview && (
                           <Button
                             type={wordWrap ? "primary" : "text"}
                             size="small"
@@ -324,20 +351,18 @@ function TrajectoryBodyContent({
                       </span>
                     </span>
                   </div>
-                  {mode === "markdown" ? (
+                  {richPreview ? (
                     <div
                       className={`markdown-body trajectory-markdown-body ${expanded ? "trajectory-body-full" : "trajectory-body-preview"}`}
                       role="region"
-                      aria-label={t("trajectory.output")}
+                      aria-label={t(`trajectory.${slot}`)}
                       tabIndex={0}
                     >
-                      <ReactMarkdown
-                        remarkPlugins={MARKDOWN_PLUGINS}
-                        skipHtml
-                        disallowedElements={["img"]}
-                      >
-                        {markdown}
-                      </ReactMarkdown>
+                      {mode === "table" && messages ? (
+                        <TrajectoryModelInput messages={messages} />
+                      ) : (
+                        <TrajectoryMarkdown text={markdown} />
+                      )}
                     </div>
                   ) : (
                     <div className="trajectory-code-scroll">

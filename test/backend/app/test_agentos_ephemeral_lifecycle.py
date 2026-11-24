@@ -10,8 +10,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
-from contracts.agentos import PreparedEphemeralRun, PreparedSkillCreatorRun
+from contracts.agentos import PreparedAgentCreatorRun, PreparedEphemeralRun, PreparedSkillCreatorRun
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.concurrency import ThreadCapacityExceeded
@@ -129,6 +130,50 @@ async def test_skill_creator_reports_worker_failure_without_exposing_error(runti
     runtime.materialize.assert_awaited_once_with(creator, ACTOR, ephemeral.prepare_skill_creator_run)
     assert "run_id" not in response.headers
     runtime.registry.reserve_agent_capacity.assert_not_called()
+
+
+def creator_payload(mode, **fields):
+    creator_type = PreparedAgentCreatorRun if mode == "nl2agent" else PreparedSkillCreatorRun
+    return creator_type.model_validate({
+        "mode": mode, "run_id": RUN_ID, "input": {"query": "prepared", "user_query": "original"},
+        "model": {"model_id": 11, "alias": "llm", "revision": "revision-1"},
+        "input_budget": 512, "context_window_tokens": 1024,
+        **({"agent_id": 201, "bound_resources": "Verified"} if mode == "nl2agent" else {}),
+        **fields,
+    })
+
+
+@pytest.mark.parametrize("mode", ["nl2agent", "nl2skill"])
+@pytest.mark.parametrize("persisted", [True, False])
+async def test_trajectory_metadata_uses_signed_creator_scope(runtime, mode, persisted):
+    runtime.info.agent_config = SimpleNamespace(agent_core="jiuwen")
+    creator = creator_payload(mode, **({
+        "system_agent": {"agent_id": 77, "version_no": 1},
+        "trajectory": {"conversation_id": 9, "source_message_id": 10},
+    } if persisted else {}))
+    response = await ephemeral._open_ephemeral(creator, ACTOR)
+    metadata = response.metadata
+    assert (metadata.user_id, metadata.tenant_id, metadata.query) == (ACTOR.user_id, ACTOR.tenant_id, "original")
+    assert metadata.is_debug is not persisted
+    assert metadata.conversation_id == (9 if persisted else None)
+    assert metadata.agent_id == (77 if persisted else 201 if mode == "nl2agent" else None)
+    assert metadata.extra_metadata.get("trajectory_source_message_id") == ("10" if persisted else None)
+    assert metadata.extra_metadata.get("core_type") == ("jiuwen" if persisted else None)
+    assert response.debug_run_id is None
+    runtime.registry.reserve_agent_capacity.assert_not_called()
+    assert not hasattr(runtime.info, "conversation_id")
+
+
+@pytest.mark.parametrize(("reference", "trajectory"), [
+    (None, {"conversation_id": 9}),
+    ({"agent_id": 77, "version_no": 1}, {"conversation_id": "9"}),
+    ({"agent_id": 77, "version_no": 1}, {"conversation_id": 0}),
+    ({"agent_id": 77, "version_no": 1}, {"conversation_id": 9, "source_message_id": True}),
+    ({"agent_id": 77, "version_no": 1}, {"conversation_id": 9, "user_id": "other"}),
+])
+def test_invalid_creator_trajectory_scope_is_rejected(reference, trajectory):
+    with pytest.raises(ValidationError):
+        creator_payload("nl2skill", system_agent=reference, trajectory=trajectory)
 
 
 async def test_debug_watcher_stops_only_the_registered_execution(runtime, mocker):

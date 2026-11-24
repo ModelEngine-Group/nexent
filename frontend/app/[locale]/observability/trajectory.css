@@ -808,6 +808,26 @@
   overflow: auto;
   overflow-wrap: anywhere;
 }
+.trajectory-model-input-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.trajectory-model-input-table > :is(thead, tbody) > tr > :is(th, td) {
+  border: 1px solid var(--color-border-separator);
+  padding: 6px 8px;
+  text-align: start;
+  vertical-align: top;
+}
+.trajectory-model-input-table > thead > tr > th:first-child {
+  width: 3em;
+}
+.trajectory-model-input-table > thead > tr > th:nth-child(2) {
+  width: 7em;
+}
+.trajectory-model-input-table > tbody > tr > td > :last-child {
+  margin-bottom: 0;
+}
 .trajectory-segment-navigation {
   display: flex;
   align-items: center;

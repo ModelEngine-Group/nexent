@@ -13,8 +13,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentLegacyResume, AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
-    EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
+    AgentLegacyResume, AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun,
+    CreatorTrajectoryScope, EvaluationAgentResult, EvaluationAgentRun, PreparedAgentCreatorRun, PreparedCreatorRun,
+    PreparedSkillCreatorRun, TrackedBackgroundResult,
     WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, NEXENT_AGENT_CORE, RUNTIME_SERVICE_URL
@@ -33,6 +34,7 @@ from management.services.agent.workbench_debug_grant import (
     WorkbenchDebugGrantUnavailable, close_workbench_debug_grant, open_workbench_debug_grant,
 )
 from nexent.core.concurrency import run_blocking
+from nexent.monitor import get_agent_monitoring_context
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,26 @@ async def _run_prepared_debug(client, prepared, user_id, tenant_id):
 async def forward_creator_run(
     payload: PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
 ) -> StreamingResponse:
+    """Forward the history receipt bound around the persisted creator stream."""
+    if isinstance(payload, PreparedCreatorRun):
+        scope = None
+        metadata = get_agent_monitoring_context()
+        if (
+            metadata is not None
+            and payload.system_agent is not None
+            and metadata.conversation_id is not None
+            and metadata.is_debug is False
+            and metadata.user_id == user_id
+            and metadata.tenant_id == tenant_id
+            and metadata.agent_id == payload.system_agent.agent_id
+            and metadata.extra_metadata.get("creator_mode") == payload.mode
+        ):
+            source_id = metadata.extra_metadata.get("trajectory_source_message_id")
+            scope = CreatorTrajectoryScope(
+                conversation_id=metadata.conversation_id,
+                source_message_id=int(source_id) if source_id is not None else None,
+            )
+        payload = payload.model_copy(update={"trajectory": scope})
     return await _agentos_client().run_ephemeral(payload, user_id, tenant_id)
 
 
