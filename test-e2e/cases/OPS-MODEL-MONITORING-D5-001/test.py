@@ -2,6 +2,7 @@
 """Prove automatic independent Ops initialization through the deployment launcher."""
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -28,7 +29,7 @@ def test_ops_database_migration(tmp_path):
     with admin.cursor() as cursor:
         cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(business)))
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("OPS_POSTGRES_", "POSTGRES_", "NEXENT_SQL_"))
+           if not key.startswith(("OPS_POSTGRES_", "POSTGRES_", "NEXENT_SQL_", "NEXENT_OPS_SQL_"))
            and key not in {"OPS_MONITORING_ENABLED", "NEXENT_POSTGRES_PASSWORD"}}
     env.update(POSTGRES_HOST=host, POSTGRES_PORT="5432", POSTGRES_USER="postgres", POSTGRES_DB=business,
                NEXENT_POSTGRES_PASSWORD="", NEXENT_SQL_STARTUP_MODE="off", NEXENT_SQL_WAIT_TIMEOUT_SECONDS="15")
@@ -102,6 +103,25 @@ def test_ops_database_migration(tmp_path):
         databases.add(disabled_db)
         finish(start(OPS_MONITORING_ENABLED="false", OPS_POSTGRES_DB=disabled_db))
         assert not exists(disabled_db)
+
+        # DataProcess does not package Ops SQL helpers, even when monitoring is globally enabled.
+        unrelated_db = "ops_unrelated_" + uuid4().hex
+        databases.add(unrelated_db)
+        launcher = tmp_path / "data-process"
+        launcher.mkdir()
+        shutil.copy(root / "deploy/common/start-backend.sh", launcher / "start-backend.sh")
+        unrelated = subprocess.Popen(
+            ["bash", str(launcher / "start-backend.sh"), sys.executable, "-c",
+             "import os; assert os.environ['OPS_MONITORING_ENABLED'] == 'true'; print('OPS_READY')"],
+            env={**env, "OPS_MONITORING_ENABLED": "true", "NEXENT_OPS_SQL_STARTUP_MODE": "off",
+                 "OPS_POSTGRES_DB": unrelated_db},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        processes.append(unrelated)
+        finish(unrelated)
+        assert not exists(unrelated_db)
+        assert not (launcher / "run-ops-sql-migrations.sh").exists()
+
         finish(start(OPS_POSTGRES_DB=business), success=False)
         finish(start(OPS_POSTGRES_DB="o" * 64), success=False)
         assert control_tables(business) == 0

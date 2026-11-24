@@ -61,6 +61,21 @@ def test_independent_services_package_the_shared_monitoring_producer_and_ops_mig
         assert "deploy/sql/ops-init.sql" in target and "deploy/sql/migrations/ops/" in target
 
 
+def test_data_process_image_excludes_ops_sql_initialization():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/data-process/Dockerfile").read_text(encoding="utf-8")
+    assert "ENV NEXENT_OPS_SQL_STARTUP_MODE=off" in dockerfile
+    assert "COPY deploy/common/start-backend.sh" in dockerfile
+    assert "run-ops-sql-migrations.sh" not in dockerfile
+    assert "deploy/sql/ops-init.sql" not in dockerfile
+
+
+@pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_data_process_compose_overrides_shared_ops_sql_policy(filename):
+    services = yaml.safe_load((ROOT / "deploy/docker/compose" / filename).read_text(encoding="utf-8"))["services"]
+    assert services["nexent-data-process"]["environment"]["NEXENT_OPS_SQL_STARTUP_MODE"] == "off"
+    assert "OPS_MONITORING_ENABLED" not in services["nexent-data-process"]["environment"]
+
+
 def test_runtime_packages_aidp_search_without_management_extensions():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
     runtime = dockerfile.split(" AS runtime\n", 1)[1].split("\nFROM ", 1)[0]

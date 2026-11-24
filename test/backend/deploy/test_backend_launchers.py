@@ -37,3 +37,23 @@ def test_config_chart_launches_the_package_module(paused):
         assert bootstrap[:2] == ["sh", "-c"]
         assert "python -m management.services.agent.system_initialize" in bootstrap[2]
         assert "python -m management.services.agent.system_release" in bootstrap[2]
+
+
+def test_data_process_chart_skips_ops_initialization_with_shared_monitoring_enabled():
+    helm = shutil.which("helm")
+    assert helm, "Helm is required for backend launcher template verification"
+    root = Path(__file__).resolve().parents[3]
+    result = subprocess.run(
+        [helm, "template", "launcher-test", str(root / "deploy/k8s/helm/nexent"),
+         "--set", "nexent-common.secrets.jwtSecret=isolated-launcher-fixture"],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    documents = [doc for doc in yaml.safe_load_all(result.stdout) if isinstance(doc, dict)]
+    deployment = next(doc for doc in documents if doc.get("kind") == "Deployment"
+                      and doc["metadata"]["name"] == "nexent-data-process")
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    settings = {entry["name"]: entry for entry in container["env"]}
+    assert settings["NEXENT_OPS_SQL_STARTUP_MODE"]["value"] == "off"
+    assert "OPS_MONITORING_ENABLED" not in settings
+    assert "backend.http.data_process_service" in container["command"][-1]

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 ARG DATA_PROCESS_DEPENDENCY_VARIANT=cpu
 
 FROM python:3.11-slim AS data-process-base
@@ -110,6 +112,7 @@ COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
 COPY VERSION /opt/nexent/VERSION
 ENV NEXENT_SQL_STARTUP_MODE=off
+ENV NEXENT_OPS_SQL_STARTUP_MODE=off
 COPY deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/start-backend.sh
 
