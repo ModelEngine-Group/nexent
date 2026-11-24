@@ -369,6 +369,10 @@ function Experiments({
                     #{row.turn_id} · {row.batch_id ? t("evolution.batchNumber", { id: row.batch_id }) : t("evolution.waitingBatch")}
                     {" · "}{t(`evolution.observation.${row.state}`)}
                     {row.signals.map((signal) => ` · ${t(`evolution.observation.${signal}`)}`)}
+                    {row.diagnosis && row.diagnosis.reason !== "no_signal" && <div>
+                      {t(`evolution.diagnosis.${row.diagnosis.status}`)} · {t(`evolution.diagnosis.${row.diagnosis.reason}`)}
+                      {row.diagnosis.missing?.map(item => ` · ${t(`evolution.diagnosis.${item}`)}`)}
+                    </div>}
                     {row.state === "observed" && <Button type="link" onClick={() => { setPreviousTask(false); setAdding(row.turn_id); }}>
                       {t("evolution.makeTraceCase")}</Button>}
                     {row.state === "observed" && row.signals.includes("user_correction") && (

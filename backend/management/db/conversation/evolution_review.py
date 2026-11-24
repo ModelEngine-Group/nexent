@@ -25,6 +25,19 @@ def enqueue_review_batches():
             WHERE batch_id IN (SELECT batch_id FROM invalidated)
         """))
         session.execute(text("""
+            WITH affected AS (
+                UPDATE nexent.evolution_review_turn_t r
+                   SET diagnosis='{"status":"needs_evidence","reason":"authorization_changed"}'::jsonb,
+                       diagnosis_source_turn_id=NULL,diagnosis_claim_id=NULL,diagnosis_lease_until=NULL
+                FROM nexent.evolution_review_turn_t source
+                WHERE r.diagnosis_source_turn_id=source.turn_id
+                  AND (source.observation_state IN ('expired','revoked') OR source.valid_until<=clock_timestamp())
+                RETURNING r.batch_id
+            )
+            UPDATE nexent.evolution_review_batch_t SET status='pending',result=NULL,finished_at=NULL
+            WHERE batch_id IN (SELECT batch_id FROM affected)
+        """))
+        session.execute(text("""
             INSERT INTO nexent.evolution_review_turn_t
                 (tenant_id, agent_id, agent_version_no, conversation_id, source_message_id, trajectory_id,
                  owner_id, run_id, grant_epoch, valid_until)
@@ -88,9 +101,13 @@ def review_rows(session, predicate, params, *, limit):
     # Callers supply fixed predicates. Membership and grant expiry must also be checked at display time.
     rows = session.execute(text(f"""
         SELECT r.turn_id, r.batch_id, r.owner_id, r.tenant_id, r.observation_state, r.observation,
+            CASE WHEN r.diagnosis_source_turn_id IS NULL OR
+                 (source.valid_until > clock_timestamp() AND source.observation_state='observed')
+                 THEN r.diagnosis END AS diagnosis,
             r.valid_until > clock_timestamp() AND r.grant_epoch=c.evolution_grant_epoch
               AND r.owner_id=c.created_by AND c.delete_flag='N' AS authorized
         FROM nexent.evolution_review_turn_t r LEFT JOIN nexent.conversation_record_t c USING (conversation_id)
+        LEFT JOIN nexent.evolution_review_turn_t source ON source.turn_id=r.diagnosis_source_turn_id
         WHERE {predicate} ORDER BY r.turn_id DESC LIMIT :limit
     """), {**params, "limit": limit}).mappings().all()
     members = {}
@@ -107,12 +124,14 @@ def recent_reviews(tenant, agent, version):
         scope = "r.tenant_id=:tenant AND r.agent_id=:agent AND r.agent_version_no=:version"
         rows = review_rows(session, scope, params, limit=25)
         return [{"turn_id": row["turn_id"], "batch_id": row["batch_id"], "state": row["observation_state"],
-                 "signals": (row["observation"] or {}).get("signals", [])}
+                 "signals": (row["observation"] or {}).get("signals", []),
+                 **({"diagnosis": row["diagnosis"]} if row["diagnosis"] else {})}
                 for row in rows if row["authorized"] and row["observation_state"] not in {"revoked", "expired"}]
 
 
 def summarize_batch(rows):
     result = {"reviewed": 0, "excluded": 0, "missing": 0, "signals": {}, "no_signal_turn_ids": []}
+    findings, steps = {}, {}
     for row in rows:
         if not row["authorized"] or row["observation_state"] in {"revoked", "expired"}:
             result["excluded"] += 1
@@ -124,6 +143,17 @@ def summarize_batch(rows):
         signals = facts.get("signals", [])
         for signal in signals:
             result["signals"].setdefault(signal, []).append(row["turn_id"])
+        diagnosis = row.get("diagnosis") or {}
+        if diagnosis.get("status") == "needs_review":
+            findings.setdefault((diagnosis["direction"], diagnosis["reason"]), []).append(row["turn_id"])
+        if facts.get("successful_tool_steps"):
+            steps.setdefault(tuple(facts["successful_tool_steps"]), []).append(row["turn_id"])
         if not signals and facts.get("coverage") == "complete":
             result["no_signal_turn_ids"].append(row["turn_id"])
+    if findings:
+        result["findings"] = [{"direction": direction, "reason": reason, "turn_ids": turns}
+                              for (direction, reason), turns in sorted(findings.items())]
+    if any(len(turns) > 1 for turns in steps.values()):
+        result["reference_workflows"] = [{"tools": list(tools), "turn_ids": turns}
+                                         for tools, turns in sorted(steps.items()) if len(turns) > 1]
     return result

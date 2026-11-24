@@ -208,7 +208,8 @@ it("requires a business expectation before freezing a trace draft, then selects 
   vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting agent" }]);
   vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
   vi.mocked(evolutionService.workspace).mockResolvedValue({ candidates: [], cases: [], experiments: [],
-    reviews: [{turn_id: 3, batch_id: 1, state: "observed", signals: ["user_correction"]}] });
+    reviews: [{turn_id: 3, batch_id: 1, state: "observed", signals: ["user_correction"],
+      diagnosis: {status: "needs_review", reason: "requirements_missed", missing: ["expected_behavior"]}}] });
   vi.mocked(evolutionService.traceCaseDraft).mockResolvedValue({ turn_id: 3, draft_digest: "a".repeat(64),
     trajectory_id: "scope-run", attachment_count: 0, tool_count: 1, tools: [], signals: [], query: "Summarize the minutes." });
   vi.mocked(evolutionService.createCase).mockResolvedValue({ case_id: 12 });
@@ -216,6 +217,7 @@ it("requires a business expectation before freezing a trace draft, then selects 
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
   fireEvent.click(await screen.findByText("evolution.recentObservations"));
+  expect(screen.getByText(/evolution.diagnosis.needs_review/)).toHaveTextContent("evolution.diagnosis.expected_behavior");
   fireEvent.click(screen.getByRole("button", { name: "evolution.makeTraceCase" }));
   expect(await screen.findByDisplayValue("Summarize the minutes.")).toBeInTheDocument();
   const save = screen.getByRole("button", { name: "evolution.saveCase" });

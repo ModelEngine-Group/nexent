@@ -51,6 +51,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 from .agent_version import agent_version_attributes
 from .first_token import stream_token_basis, valid_ttft
 from .local_content import local_capture_enabled
+from .private_logging import private_evaluation_active
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
     DEFAULT_EXCLUDED_SPAN_NAMES,
@@ -737,7 +738,7 @@ class MonitoringManager:
     @property
     def is_enabled(self) -> bool:
         """Check if monitoring is enabled."""
-        return (self._config is not None and
+        return (not private_evaluation_active.get() and self._config is not None and
                 self._config.enable_telemetry and
                 OPENTELEMETRY_AVAILABLE)
 
@@ -2988,6 +2989,8 @@ def configure_monitoring_records(
 
 def get_monitoring_buffer() -> Optional[MonitoringRecordBuffer]:
     global _monitoring_buffer
+    if private_evaluation_active.get():
+        return None
     with _monitoring_buffer_lock:
         if _monitoring_buffer is None and _monitoring_buffer_factory is not None:
             _monitoring_buffer = _monitoring_buffer_factory()

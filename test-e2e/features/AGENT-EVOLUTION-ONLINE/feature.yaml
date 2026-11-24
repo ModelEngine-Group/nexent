@@ -14,4 +14,6 @@ feature:
     description: 编辑者的评测工作台只显示本租户所选智能体版本的正式建议。
   - rule_id: AGENT-EVOLUTION-ONLINE-RULE-03
     description: 同一租户和发布版本每五个获准业务轮次跨会话复盘一次，明确纠正可先做当轮诊断。
+  - rule_id: AGENT-EVOLUTION-ONLINE-RULE-04
+    description: 即时诊断先用执行事实判断，语义不明时由已配置且受租户预算约束的模型分析。结果引用当前授权的证据，撤权后清除。五轮复盘复用已有结论。
   required_test_stages: [D2, D3]

@@ -28,7 +28,9 @@ def create_model_router(service: ModelService) -> APIRouter:
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         try:
-            with private_evaluation_logging(bool(environment.EVOLUTION_CONFIRMATION_BUCKET)):
+            with private_evaluation_logging(
+                bool(environment.EVOLUTION_CONFIRMATION_BUCKET or getattr(payload, "diagnosis_attempt", None))
+            ):
                 return await action(payload, principal)
         except ModelAccessError as exc:
             return JSONResponse({"code": exc.code}, status_code=exc.status)

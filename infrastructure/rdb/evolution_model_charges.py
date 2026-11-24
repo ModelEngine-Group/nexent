@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from contracts.evolution_metering import cost_in_micros
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.evolution_review_authority import authorized_review_turn
 
 
 def lock_model_charges(session, tenant):
@@ -30,7 +31,8 @@ def _stop_budget(session, attempt, experiment, confirmation_lock):
 
 def _active_confirmation(session, params):
     return session.execute(text("""
-        SELECT NULL AS experiment_id, l.lock_id AS confirmation_lock_id, l.model_metering AS limits
+        SELECT NULL AS experiment_id, l.lock_id AS confirmation_lock_id, NULL AS review_turn_id,
+               l.model_metering AS limits
         FROM nexent.evolution_generation_attempt_t a
         JOIN nexent.evolution_confirmation_lock_t l ON l.lock_id=a.confirmation_lock_id
         JOIN nexent.evolution_experiment_t e ON e.experiment_id=l.experiment_id
@@ -54,25 +56,51 @@ def _active_confirmation(session, params):
     """), params).mappings().one_or_none()
 
 
+def _active_diagnosis(session, params):
+    job = session.execute(text("""
+        SELECT NULL AS experiment_id, NULL AS confirmation_lock_id, r.turn_id AS review_turn_id,
+               r.diagnosis_source_turn_id, NULL AS limits
+        FROM nexent.evolution_generation_attempt_t a
+        JOIN nexent.evolution_review_turn_t r ON r.turn_id=a.review_turn_id
+        WHERE a.attempt_id=:attempt AND a.tenant_id=:tenant AND a.created_by=:user AND a.model_id=:model
+          AND a.metering_revision=:revision AND a.completed_at IS NULL AND NOT a.budget_stopped
+          AND a.lease_until > clock_timestamp() AND r.diagnosis_attempt_id=a.attempt_id
+          AND r.diagnosis_claim_id IS NOT NULL AND r.diagnosis_lease_until > clock_timestamp()
+          AND NOT EXISTS (SELECT 1 FROM nexent.evolution_model_charge_t c WHERE c.attempt_id=a.attempt_id)
+        FOR UPDATE OF a,r
+    """), params).mappings().one_or_none()
+    if job is None:
+        return None
+    for turn in {job["review_turn_id"], job["diagnosis_source_turn_id"]} - {None}:
+        if not authorized_review_turn(session, params["tenant"], params["user"], turn):
+            return None
+    return job
+
+
 def reserve_model_call(tenant, user, model, attempt, allowance, tariff, output_tokens, *,
-                       evaluation=False, confirmation=False):
+                       evaluation=False, confirmation=False, diagnosis=False):
     reserved_micros = cost_in_micros(tariff.max_input_tokens, output_tokens,
                                     tariff.input_micros_per_million, tariff.output_micros_per_million)
     params = dict(tenant=tenant, user=user, model=model, attempt=attempt, evaluation=evaluation and not confirmation,
-                  confirmation=confirmation,
+                  confirmation=confirmation, diagnosis=diagnosis,
                   input=tariff.max_input_tokens, output=output_tokens, micros=reserved_micros,
                   input_rate=tariff.input_micros_per_million, output_rate=tariff.output_micros_per_million,
                   revision=allowance.revision())
     with get_db_session() as session:
         lock_model_charges(session, tenant)
-        active = _active_confirmation(session, params) if confirmation else session.execute(text("""
-            SELECT a.experiment_id, a.confirmation_lock_id, e.plan->'metering' AS limits
+        if diagnosis:
+            active = _active_diagnosis(session, params)
+        elif confirmation:
+            active = _active_confirmation(session, params)
+        else:
+            active = session.execute(text("""
+            SELECT a.experiment_id, a.confirmation_lock_id, a.review_turn_id, e.plan->'metering' AS limits
             FROM nexent.evolution_generation_attempt_t a
             LEFT JOIN nexent.evolution_experiment_t e ON e.experiment_id=a.experiment_id
             LEFT JOIN nexent.evolution_trial_t t ON t.trial_id=a.trial_id AND t.experiment_id=e.experiment_id
             WHERE a.attempt_id=:attempt AND a.tenant_id=:tenant AND a.created_by=:user
               AND a.metering_revision=:revision AND a.completed_at IS NULL AND NOT a.budget_stopped
-              AND a.confirmation_lock_id IS NULL
+              AND a.confirmation_lock_id IS NULL AND a.review_turn_id IS NULL
               AND a.lease_until > clock_timestamp() AND (a.model_id IS NULL OR a.model_id=:model)
               AND CASE WHEN :evaluation THEN
                   e.tenant_id=:tenant AND e.created_by=:user AND NOT e.cancelled AND e.budget_stop_reason IS NULL
@@ -87,6 +115,7 @@ def reserve_model_call(tenant, user, model, attempt, allowance, tariff, output_t
         experiment, confirmation_lock = active["experiment_id"], active["confirmation_lock_id"]
         params["experiment"] = experiment
         params["confirmation_lock"] = confirmation_lock
+        params["review_turn"] = active["review_turn_id"]
         used_tokens, used_micros, exceeded = session.execute(text("""
             SELECT COALESCE(sum(COALESCE(reported_input + reported_output, reserved_input + reserved_output)), 0),
                    COALESCE(sum(COALESCE(reported_micros, reserved_micros)), 0),
@@ -94,6 +123,7 @@ def reserve_model_call(tenant, user, model, attempt, allowance, tariff, output_t
               FROM nexent.evolution_model_charge_t WHERE tenant_id=:tenant
                AND (experiment_id IS NOT NULL)=:evaluation
                AND (confirmation_lock_id IS NOT NULL)=:confirmation
+               AND (review_turn_id IS NOT NULL)=:diagnosis
                AND create_time >= (date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
         """), params).one()
         tokens = tariff.max_input_tokens + output_tokens
@@ -103,9 +133,10 @@ def reserve_model_call(tenant, user, model, attempt, allowance, tariff, output_t
             return None
         return session.scalar(text("""
             INSERT INTO nexent.evolution_model_charge_t
-                (tenant_id, attempt_id, experiment_id, confirmation_lock_id, model_id, reserved_input, reserved_output, reserved_micros,
+                (tenant_id, attempt_id, experiment_id, confirmation_lock_id, review_turn_id, model_id,
+                 reserved_input, reserved_output, reserved_micros,
                  input_rate, output_rate)
-            VALUES (:tenant, :attempt, :experiment, :confirmation_lock, :model, :input, :output, :micros,
+            VALUES (:tenant, :attempt, :experiment, :confirmation_lock, :review_turn, :model, :input, :output, :micros,
                     :input_rate, :output_rate)
             RETURNING charge_id
         """), params)

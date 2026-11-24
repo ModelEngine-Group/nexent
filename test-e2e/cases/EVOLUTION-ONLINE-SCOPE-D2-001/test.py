@@ -35,7 +35,9 @@ def test_online_scope_http(runtime):
         for name in ("003_conversation_run_admission", "006_prepared_conversation_turn", "011_trajectory", "015_conversation_evolution",
                      "016_evolution_candidates", "017_evolution_skill_candidates", "018_evolution_replay_cases",
                      "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
-                     "025_evolution_regression_cases", "028_evolution_confirmation_suites", "020_evolution_feedback_handoff", "034_evolution_new_skill_candidates", "039_evolution_tool_builds"):
+                     "025_evolution_regression_cases", "028_evolution_confirmation_suites", "020_evolution_feedback_handoff",
+                     "034_evolution_new_skill_candidates", "039_evolution_tool_builds", "041_evolution_generation_attempts",
+                     "043_evolution_model_charges", "046_evolution_online_diagnosis"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         session.add(models.UserTenant(user_id="other", tenant_id="tenant-native", user_role="USER", delete_flag="N"))

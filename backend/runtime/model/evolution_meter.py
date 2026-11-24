@@ -3,7 +3,7 @@
 
 from contextlib import contextmanager
 
-from contracts.evolution_metering import confirmation_budget, evaluation_budget, generation_budget
+from contracts.evolution_metering import confirmation_budget, diagnosis_budget, evaluation_budget, generation_budget
 from infrastructure.rdb.evolution_model_charges import reconcile_model_call, reserve_model_call
 from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
 
@@ -16,12 +16,17 @@ def meter_evaluation(attempt, actor, model=None, *, confirmation=False):
     return _meter(attempt, model, actor, evaluation=True, confirmation=confirmation)
 
 
+def meter_diagnosis(attempt, actor, model):
+    return _meter(attempt, model, actor, evaluation=False, diagnosis=True)
+
+
 @contextmanager
-def _meter(attempt, model, actor, *, evaluation, confirmation=False):
+def _meter(attempt, model, actor, *, evaluation, confirmation=False, diagnosis=False):
     if attempt is None:
         yield
         return
-    budget = confirmation_budget if confirmation else evaluation_budget if evaluation else generation_budget
+    budget = (diagnosis_budget if diagnosis else confirmation_budget if confirmation
+              else evaluation_budget if evaluation else generation_budget)
     allowance = budget(actor.tenant_id)
     denied = False
 
@@ -30,7 +35,8 @@ def _meter(attempt, model, actor, *, evaluation, confirmation=False):
         if denied:
             raise ModelWireBudgetExceeded("Model budget stopped this request")
         actual_model = wire_model_id or model
-        tariff = allowance.models.get(str(actual_model)) if allowance else None
+        tariff = (allowance.models.get(str(actual_model))
+                  if allowance and (not diagnosis or allowance.model_id == actual_model) else None)
         if tariff is None or model is not None and actual_model != model:
             denied = True
             raise ModelWireBudgetExceeded("No billing ceiling for the selected model")
@@ -49,7 +55,7 @@ def _meter(attempt, model, actor, *, evaluation, confirmation=False):
         wire[cap_key] = output
         charge = reserve_model_call(
             actor.tenant_id, actor.user_id, actual_model, attempt, allowance, tariff, output,
-            evaluation=evaluation, confirmation=confirmation,
+            evaluation=evaluation, confirmation=confirmation, diagnosis=diagnosis,
         )
         if charge is None:
             denied = True

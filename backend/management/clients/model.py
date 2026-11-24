@@ -26,6 +26,7 @@ async def invoke_chat_prompt(
     options: ChatOptions | None = None,
     generation_attempt: int | None = None,
     evaluation_attempt: int | None = None,
+    diagnosis_attempt: int | None = None,
 ) -> str:
     return await invoke_chat_messages(
         model_id=model_id,
@@ -38,6 +39,7 @@ async def invoke_chat_prompt(
         options=options,
         generation_attempt=generation_attempt,
         evaluation_attempt=evaluation_attempt,
+        diagnosis_attempt=diagnosis_attempt,
     )
 
 
@@ -50,10 +52,11 @@ async def invoke_chat_messages(
     options: ChatOptions | None = None,
     generation_attempt: int | None = None,
     evaluation_attempt: int | None = None,
+    diagnosis_attempt: int | None = None,
 ) -> str:
     payload = ChatInvocation(
         model_id=model_id, input=messages, options=options,
-        generation_attempt=generation_attempt, evaluation_attempt=evaluation_attempt,
+        generation_attempt=generation_attempt, evaluation_attempt=evaluation_attempt, diagnosis_attempt=diagnosis_attempt,
     )
     result = await _model_client().invoke_model(payload, user_id, tenant_id)
     content = result.output.get("content") if isinstance(result.output, dict) else None

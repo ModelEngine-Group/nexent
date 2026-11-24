@@ -3,4 +3,5 @@
 此页由结构化用例生成，不手工编辑。
 
 - D2 [EVOLUTION-ONLINE-SCOPE-D2-001](../../cases/EVOLUTION-ONLINE-SCOPE-D2-001/case.yaml) · active
+- D3 [EVOLUTION-ONLINE-DIAGNOSIS-D3-001](../../cases/EVOLUTION-ONLINE-DIAGNOSIS-D3-001/case.yaml) · active
 - D3 [EVOLUTION-REVIEW-BATCH-D3-001](../../cases/EVOLUTION-REVIEW-BATCH-D3-001/case.yaml) · active

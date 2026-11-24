@@ -18,12 +18,15 @@ def test_distributed_budget(runtime, monkeypatch):
     from management.db.evaluation import experiments as jobs
 
     engine = db_client.engine
+    runtime[3].TableBase.metadata.create_all(engine)
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
         for name in ("018_evolution_replay_cases", "019_evolution_experiments", "028_evolution_confirmation_suites",
                      "029_evolution_confirmation_locks", "030_evolution_confirmation_results",
+                     "003_conversation_run_admission", "011_trajectory", "015_conversation_evolution",
+                     "021_evolution_online_reviews",
                      "041_evolution_generation_attempts", "043_evolution_model_charges",
-                     "044_evolution_evaluation_metering", "045_evolution_confirmation_metering"):
+                     "044_evolution_evaluation_metering", "045_evolution_confirmation_metering", "046_evolution_online_diagnosis"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
 
     def submit(tenant, count, metering=None, editor="editor"):

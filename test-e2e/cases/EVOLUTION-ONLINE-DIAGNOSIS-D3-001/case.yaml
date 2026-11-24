@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-ONLINE-DIAGNOSIS-D3-001
+  feature_id: AGENT-EVOLUTION-ONLINE
+  business_rule_ids: [AGENT-EVOLUTION-ONLINE-RULE-04]
+  title: 在线诊断按授权和预算调用模型并复用结论
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 通过 Management、签名 Runtime 和受控供应商验证在线诊断的实际调用与回写。
+  preconditions: [可创建临时数据库的 PostgreSQL 实例，可在本机启动受控模型服务。]
+  test_data:
+    profile: 具备正反证据的合成业务轮次、不同租户和额度临界点。
+  steps:
+  - order: 1
+    action: 从一个带点踩的授权轮次执行后台诊断，供应商返回可核对的结果和用量。
+    expected: 无需凑满五轮，后台使用配置的模型和有界输入，保留归因线索、有效证据引用和结算。
+  - order: 2
+    action: 让已诊断轮次进入五轮批次，加入有直接工具故障和没有明确信号的轮次。重复处理。
+    expected: 直接故障按规则登记，已有模型结论在复盘中复用，批次不会再次调用模型分析这些轮次。
+  - order: 3
+    action: 耗尽第一租户额度，再运行第二租户。演练无效引用、发出请求前撤权、纠正所依赖的原轮过期，以及有在途回执的故障恢复。
+    expected: 超额或未授权不访问供应商，第二租户独立运行。引用仅来自获准轮次，原轮过期后的旧结论清除，恢复不重复计费，旧任务不能写回。
+  expected_results: [实际模型回执和结构化结论可按轮复查。, 已有结论及可核验执行事实可用于批次复盘。, 过期撤权和预算控制覆盖模型实发与写回。]
+  forbidden_side_effects: [不重新运行原智能体或业务工具。, 用户正文、工具正文和模型自由文本不进入诊断记录。]
+  acceptance:
+  - id: AC-01
+    description: 真实后台和供应商协议验证即时分析、合法证据及实际结算。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: 五轮复盘复用已有诊断，确定性规则不发模型请求。
+    steps: [2]
+    expected_results: [2]
+  - id: AC-03
+    description: 不足额度、授权撤回或无效输出都不能产生可信归因。
+    steps: [3]
+    expected_results: [3]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary: [已归档的轨迹事实、Management 诊断作业、真实 Runtime 模型请求、受控供应商及 PostgreSQL。]
+  observations: [供应商请求次数、诊断结论、闭合回执和模型额度。]
+  cleanup: [关闭临时服务并销毁测试数据库。]

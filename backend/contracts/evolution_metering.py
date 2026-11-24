@@ -5,7 +5,7 @@ import json
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, TypeAdapter, model_validator
 
 from contracts.constants import environment
 from contracts.evolution_sources import task_digest
@@ -33,6 +33,16 @@ class TenantBudget(BaseModel):
         return task_digest(self.model_dump(mode="json"))
 
 
+class DiagnosisBudget(TenantBudget):
+    model_id: PositiveInt
+
+    @model_validator(mode="after")
+    def registered_model(self):
+        if str(self.model_id) not in self.models:
+            raise ValueError("The diagnosis model needs a tariff")
+        return self
+
+
 @lru_cache(maxsize=1)
 def parse_metering(raw):
     return TypeAdapter(dict[str, TenantBudget]).validate_python(json.loads(raw))
@@ -48,6 +58,15 @@ def evaluation_budget(tenant):
 
 def confirmation_budget(tenant):
     return parse_metering(environment.EVOLUTION_CONFIRMATION_METERING).get(tenant)
+
+
+@lru_cache(maxsize=1)
+def parse_diagnosis_metering(raw):
+    return TypeAdapter(dict[str, DiagnosisBudget]).validate_python(json.loads(raw))
+
+
+def diagnosis_budget(tenant):
+    return parse_diagnosis_metering(environment.EVOLUTION_DIAGNOSIS_METERING).get(tenant)
 
 
 def cost_in_micros(input_tokens, output_tokens, input_rate, output_rate):

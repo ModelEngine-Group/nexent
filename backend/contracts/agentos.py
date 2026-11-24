@@ -1001,6 +1001,7 @@ class ChatOptions(BaseModel):
 class ChatInvocation(ModelInvokeBase):
     operation: Literal["chat"] = "chat"
     evaluation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
+    diagnosis_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     generation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     input: Annotated[list[ChatMessage], Field(min_length=1)]
     options: ChatOptions | None = None

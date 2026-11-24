@@ -26,7 +26,8 @@ export interface Workspace {
     rubric?: { name: string; version_no: number } }[];
   skills?: { skill_id: number; name: string }[];
   suggestions?: { suggestion_id: number; expected_behavior: string; skill_id: number; experiment_id: number | null }[];
-  reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[] }[];
+  reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[];
+    diagnosis?: { status: "needs_review" | "needs_evidence" | "no_issue"; reason: string; missing?: string[] } }[];
   candidates: { candidate_id: number; kind: string; name: string }[];
   cases: { case_id: number; digest?: string; family: string; query: string; expected_skill_names?: string[] | null }[];
   experiments: { experiment_id: number; create_time: string; candidate_type?: string;

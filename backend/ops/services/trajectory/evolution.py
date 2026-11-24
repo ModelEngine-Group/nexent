@@ -14,6 +14,15 @@ from .runtime import get_service
 logger = logging.getLogger(__name__)
 CORRECTION = re.compile(r"(?:刚才|上次|你给的|这份结果|你的回答).{0,16}(?:不对|漏了|有误|错了)|你漏了|you (?:missed|omitted)", re.I)
 FILE_REQUEST = re.compile(r"(?:请|帮我|需要)(?:生成|导出|提供|创建).{0,12}(?:文件|附件|表格|xlsx|pdf)|(?:export|generate) (?:a |an )?(?:pdf|xlsx|file)", re.I)
+OPERATION = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]{0,95}")
+
+
+def node_ref(node):
+    source = node.get("source", {})
+    trace, span = source.get("trace_id", ""), source.get("span_id", "")
+    if re.fullmatch(r"[0-9a-fA-F]{32}", trace) and re.fullmatch(r"[0-9a-fA-F]{16}", span):
+        return f"otel:{trace}:{span}"
+    return None
 
 
 def observation(message, nodes=(), coverage="missing"):
@@ -28,26 +37,33 @@ def observation(message, nodes=(), coverage="missing"):
     failures = [n for n in nodes if n["kind"] == "tool" and n["status"] in {"failed", "interrupted"}]
     if failures:
         signals.append("tool_error")
-    refs = []
-    for node in failures[:16]:
-        source = node.get("source", {})
-        trace, span = source.get("trace_id", ""), source.get("span_id", "")
-        if re.fullmatch("[0-9a-fA-F]{32}", trace) and re.fullmatch("[0-9a-fA-F]{16}", span):
-            refs.append(f"otel:{trace}:{span}")
+    refs = [ref for node in failures[:16] if (ref := node_ref(node))]
     facts = {"coverage": coverage, "signals": signals, "failed_tool_count": len(failures), "node_refs": refs}
     if coverage == "complete":
         calls = [n for n in nodes if n["kind"] == "tool"]
         evidence = []
         for node in calls[:32]:
-            source = node.get("source", {})
-            trace, span = source.get("trace_id", ""), source.get("span_id", "")
-            if re.fullmatch(r"[0-9a-fA-F]{32}", trace) and re.fullmatch(r"[0-9a-fA-F]{16}", span):
-                item = {"node": f"otel:{trace}:{span}"}
+            if ref := node_ref(node):
+                item = {"node": ref}
                 invocation = node.get("attributes", {}).get("nexent.invocation_id")
                 if isinstance(invocation, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", invocation):
                     item["invocation_id"] = invocation
                 evidence.append(item)
         facts["case_outline"] = {"tool_count": len(calls), "tools": evidence}
+        summaries = []
+        for node in [*failures, *(n for n in calls if n["status"] not in {"failed", "interrupted"})][:16]:
+            ref = node_ref(node)
+            if ref is None or node["status"] not in {"completed", "failed", "interrupted"}:
+                continue
+            name = node.get("name") or ""
+            summaries.append({"ref": ref, "kind": "tool", "status": node["status"],
+                              **({"operation": name} if OPERATION.fullmatch(name) else {})})
+        if summaries:
+            facts["diagnosis_nodes"] = summaries
+        if not signals and calls and len(calls) == len(summaries) and message.get("opinion_flag") == "Y":
+            operations = [node.get("operation") for node in summaries if node["status"] == "completed"]
+            if len(operations) == len(calls) and all(operations):
+                facts["successful_tool_steps"] = operations
     return facts
 
 

@@ -573,14 +573,17 @@ async def _register_evolution_turns():
 @asynccontextmanager
 async def prepared_turn_lifespan():
     from management.services.memory.prepared_completion import recover_memory_jobs
+    from management.services.evaluation.online_diagnosis import recover_diagnoses
 
     recovery = asyncio.create_task(_recover_pending_turns(), name="prepared-public-turn-recovery")
     memory = asyncio.create_task(recover_memory_jobs(), name="prepared-memory-recovery")
     evolution = asyncio.create_task(_register_evolution_turns(), name="evolution-turn-registration")
+    diagnosis = asyncio.create_task(recover_diagnoses(), name="evolution-diagnosis")
     try:
         yield
     finally:
         recovery.cancel()
         memory.cancel()
         evolution.cancel()
-        await asyncio.gather(recovery, memory, evolution, return_exceptions=True)
+        diagnosis.cancel()
+        await asyncio.gather(recovery, memory, evolution, diagnosis, return_exceptions=True)
