@@ -105,7 +105,6 @@ def _enrich_bindings_sync(
                 )
         enriched.append(
             {
-                "binding_id": row.get("binding_id"),
                 "od_id": row["od_id"],
                 "od_name": domain_names.get(row["od_id"]),
                 "kds_id": row["kds_id"],
@@ -298,12 +297,11 @@ async def _enrich_entity_rows(
     *,
     detail_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Attach relations and the detail fields the list does not carry.
+    """Attach relations and detail-only fields to a single entity detail row.
 
-    The entity list omits relations, properties and audit fields, so each row
-    needs one detail call for synonyms and properties. The detail endpoint also
-    needs its relations enriched, so a single-row detail caller can pass its
-    already-fetched detail through ``detail_by_id`` to avoid a duplicate call.
+    The entity list already returns parent/child/synonym arrays; this helper is
+    used by the detail route, which passes its already-fetched detail through
+    ``detail_by_id`` to avoid a duplicate detail call.
     """
     if not rows:
         return rows

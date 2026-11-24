@@ -18,6 +18,7 @@ from nexent.utils.http_client_manager import http_client_manager
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
+from ext_components.aidp.services.aidp_client import _extract_upstream_code
 from ext_components.aidp.services.aidp_service import (
     _extract_upstream_error,
     _raise_aidp_http_error,
@@ -40,6 +41,18 @@ _METADATA_TYPES = ("string", "number", "date")
 
 
 _BINDING_SCAN_DOMAIN_LIMIT = 100
+
+
+# Entity/domain business codes documented by AIDP. They arrive with HTTP
+# statuses that would otherwise be classified as auth or parameter errors.
+_ONTOLOGY_BUSINESS_ERRORS = {
+    1002: ErrorCode.COMMON_PARAMETER_INVALID,
+    1025: ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+    1056: ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+    1057: ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+    1058: ErrorCode.COMMON_FORBIDDEN,
+    1059: ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+}
 
 
 def _get_ontology_path(tenant_id: str | None = None) -> str:
@@ -103,24 +116,46 @@ def _ontology_request(
         response.raise_for_status()
     except httpx.HTTPStatusError as error:
         status = error.response.status_code
+        upstream_code = _extract_upstream_code(error.response)
+        reason = _extract_upstream_error(error.response) or (
+            f"AIDP rejected the request (HTTP {status})"
+        )
+        business_error = _ONTOLOGY_BUSINESS_ERRORS.get(upstream_code)
+        if business_error is not None:
+            logger.warning(
+                "AIDP %s rejected with status=%s code=%s reason=%s",
+                operation,
+                status,
+                upstream_code,
+                reason,
+            )
+            raise AppException(
+                business_error,
+                reason,
+                details={
+                    "upstream_status": status,
+                    "upstream_code": upstream_code,
+                    "operation": operation,
+                },
+            ) from error
         if 400 <= status < 500 and status not in (401, 403, 429):
             # Domain validation, conflicts and in-use fields are caller errors,
             # not gateway failures. Preserve the readable upstream reason.
-            reason = _extract_upstream_error(error.response) or (
-                f"AIDP rejected the request (HTTP {status})"
-            )
             logger.warning(
                 "AIDP %s rejected with status=%s reason=%s",
                 operation,
                 status,
                 reason,
             )
+            details = {"upstream_status": status, "operation": operation}
+            if upstream_code is not None:
+                details["upstream_code"] = upstream_code
             raise AppException(
                 ErrorCode.COMMON_RESOURCE_NOT_FOUND
                 if status == 404
                 else ErrorCode.COMMON_PARAMETER_INVALID,
                 reason,
-                details={"upstream_status": status, "operation": operation},
+                details=details,
             ) from error
         _raise_aidp_http_error(error, operation)
     except httpx.RequestError as error:

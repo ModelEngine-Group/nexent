@@ -29,6 +29,10 @@ export interface AidpKbDetail {
   created_by?: string | null;
   creator_name?: string | null;
   creator_cas_username?: string | null;
+  /** AIDP KDS detail binding state: ontology / jargon / none. */
+  bind_lib_id?: number | string | null;
+  bind_lib_type?: "ontology" | "jargon" | "none" | string | null;
+  bind_lib_name?: string | null;
 }
 
 export interface AidpDocumentItem {

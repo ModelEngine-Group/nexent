@@ -22,6 +22,13 @@ export const getAidpPlainMessage = (
 ): string =>
   error instanceof Error && error.message ? error.message : fallbackMessage;
 
+/** Stable reason codes returned by the ontology binding BFF. */
+const AIDP_BINDING_REASON_KEYS: Record<string, string> = {
+  ontology_binding_jargon_conflict:
+    "aidpKnowledge.ontologyBindingJargonConflict",
+  ontology_binding_other_conflict: "aidpKnowledge.ontologyBindingOtherConflict",
+};
+
 /** Resolve errors for a caller-owned inline state or notification. */
 export const getAidpErrorMessage = (
   error: unknown,
@@ -31,6 +38,13 @@ export const getAidpErrorMessage = (
   const message =
     error instanceof Error && error.message ? error.message : fallbackMessage;
   if (!(error instanceof ApiError)) return message;
+
+  const reason = error.details?.reason;
+  const reasonKey =
+    typeof reason === "string" ? AIDP_BINDING_REASON_KEYS[reason] : undefined;
+  if (reasonKey) {
+    return translate(reasonKey, { defaultValue: message });
+  }
 
   const upstreamCode = upstreamCodeOf(error);
   if (upstreamCode) {

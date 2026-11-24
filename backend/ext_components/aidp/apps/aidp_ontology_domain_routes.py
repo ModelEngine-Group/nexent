@@ -283,10 +283,7 @@ async def list_ontology_entities(
         lane="control-io",
         owner="config",
     )
-    rows = await _enrich_entity_rows(
-        server_url, api_key, domain_id, envelope["value"], kind or "entity"
-    )
-    envelope["value"] = [_entity_summary(item) for item in rows]
+    envelope["value"] = [_entity_summary(item) for item in envelope["value"]]
     return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
 
 

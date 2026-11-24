@@ -4,7 +4,6 @@ import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 import type {
-  AidpOntologyBinding,
   AidpOntologyBindingListResponse,
   AidpOntologyDomain,
   AidpOntologyDomainListResponse,
@@ -124,6 +123,12 @@ class AidpOntologyService {
     );
   }
 
+  getEntity(domainId: string, entityId: string): Promise<AidpOntologyEntity> {
+    return jsonRequest<AidpOntologyEntity>(
+      API_ENDPOINTS.aidpMgmt.ontology.entity(domainId, entityId)
+    );
+  }
+
   createEntity(
     domainId: string,
     payload: AidpOntologyEntityCreatePayload
@@ -171,13 +176,11 @@ class AidpOntologyService {
     domainId: string,
     kdsId: string
   ): Promise<{
-    binding_id?: string | null;
     od_id: string;
     kds_id: string;
     unchanged?: boolean;
   }> {
     return jsonRequest<{
-      binding_id?: string | null;
       od_id: string;
       kds_id: string;
       unchanged?: boolean;
@@ -217,14 +220,6 @@ class AidpOntologyService {
         page_size: pageSize,
         task_type: taskType || undefined,
       })
-    );
-  }
-
-  getKnowledgeBaseBinding(
-    kdsId: string
-  ): Promise<{ binding: AidpOntologyBinding | null }> {
-    return jsonRequest<{ binding: AidpOntologyBinding | null }>(
-      API_ENDPOINTS.aidpMgmt.ontology.bindingByKb(kdsId)
     );
   }
 

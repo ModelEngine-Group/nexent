@@ -91,8 +91,6 @@ export interface AidpOntologyEntityUpdatePayload {
 }
 
 export interface AidpOntologyBinding {
-  /** Present only when AIDP returns the BindingId; required for unbind. */
-  binding_id?: string | null;
   od_id: string;
   od_name?: string | null;
   kds_id: string;
