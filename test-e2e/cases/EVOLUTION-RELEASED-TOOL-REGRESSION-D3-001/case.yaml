@@ -1,0 +1,43 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-RELEASED-TOOL-REGRESSION-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-01, AGENT-EVOLUTION-REPLAY-RULE-12]
+  title: 后续候选按已发布工具配置核对固定回归
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 从已发布工具移除记录和签名试跑回执判断固定回归。
+  preconditions: [独占 PostgreSQL 数据库及签名试跑 HTTP 服务。]
+  test_data:
+    profile: V1 可用工具，V2 已移除该工具。冻结禁止调用题和必须调用题。
+  steps:
+  - order: 1
+    action: 对 V2 用完整空调用回执判定禁止调用题和必须调用题。
+    expected: 禁止调用题通过，必须调用题因调用次数不足失败。
+  - order: 2
+    action: 对 V1 使用相同回执，再对 V2 改用不完整回执或包含该工具的回执。
+    expected: 三种情况均保留缺证状态，不能进入最终通过数。
+  expected_results: [上一版已移除的工具按该版本事实计分。, 有效调用凭证不足或与版本相矛盾时标记缺证。]
+  forbidden_side_effects: [把旧版未登记的工具或不完整的回执直接计为通过。]
+  acceptance:
+  - id: AC-01
+    description: 结合版本记录和完整回执区分禁止与必须调用的条件。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 未登记和不完整的证据不会被认作安全跳过。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - Management 按真实 PostgreSQL 发布记录判分，通过签名 AgentOS HTTP 获取受控 Runtime 回执。
+  observations: [逐题答复、工具记录和实际判分状态。]
+  cleanup: [关闭试跑服务并删除独占 PostgreSQL 数据库。]

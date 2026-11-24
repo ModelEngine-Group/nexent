@@ -30,4 +30,6 @@ feature:
     description: 公开评测报告可选录入并关联候选实验，按智能体编辑权限访问。公开分不进入业务评测、提名或晋升。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-11
     description: P3 同时向生成器提供待修改与相关的已发布规则，仅待修改规则可替换。未获准的规则、改变位置的改写或不符合结构的回复不能生成候选。
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-12
+    description: 后续候选沿用基线版本已发布的工具移除配置。工具专项题仍须有完整运行回执，按实际配置和调用核对禁止调用及必须调用的要求。
   required_test_stages: [D1, D2, D3, D5]

@@ -609,8 +609,14 @@ async def run_verified_arm(request, job, case, spec, client, stage_input, *, bef
         catalog = catalog.model_copy(update={field: sorted({name for c in catalogs for name in getattr(c, field)})
             for field in ("schema_tools", "executable", "instruction_mentions", "native_definitions", "prompt_tools")}
             | {"model_inputs": sum(c.model_inputs for c in catalogs)})
-    absent = set(spec.tool_set_check.removed) if spec.tool_set_check and spec.tool_set_check.arm == "result" else set()
-    tool_grade = judge_dialogue_tools(task["tool_use"], [r.tool_observation for r in receipts], absent=absent) if task.get("tool_use") else None
+    tool_grade = None
+    if task.get("tool_use"):
+        published = await _io("read-released-tool-exclusions", published_business_agent,
+                              tenant, spec.resource.agent_id, spec.resource.version_no)
+        absent = set(published.get("released_tool_exclusions") or ())
+        if spec.tool_set_check and spec.tool_set_check.arm == "result":
+            absent.update(spec.tool_set_check.removed)
+        tool_grade = judge_dialogue_tools(task["tool_use"], [r.tool_observation for r in receipts], absent=absent)
     usage = [reported_step_input_tokens(obs.events) for obs in observations]
     status = grade["status"]
     if tool_grade and status in {"pass", "fail"} and tool_grade["status"] != "pass":

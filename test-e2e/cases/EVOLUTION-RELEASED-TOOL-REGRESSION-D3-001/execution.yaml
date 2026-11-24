@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-RELEASED-TOOL-REGRESSION-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_released_tool_regression
+acceptance_bindings:
+  AC-01: [test_released_tool_regression]
+  AC-02: [test_released_tool_regression]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The fixture owns a disposable PostgreSQL database and a scoped in-process HTTP transport. AgentOS authenticates the test requests and the Runtime execution result is controlled.

@@ -36,6 +36,21 @@ def test_zero_calls_requires_a_registered_tool_and_complete_receipt():
     assert judge_tool_use(rule, None)["status"] == "missing_evidence"
 
 
+def test_versioned_exclusions_still_require_a_consistent_receipt():
+    absent = {"excluded"}
+    zero = ToolUseExpectation(rules=[{"name": "excluded", "min_calls": 0, "max_calls": 0},
+                                     {"name": "retained", "min_calls": 0, "max_calls": 0}]).model_dump()
+    receipt = ReplayToolObservation(registered=["retained"], complete=True, calls=[])
+    assert judge_tool_use(zero, receipt, absent=absent)["status"] == "pass"
+    for observation in (None, receipt.model_copy(update={"complete": False}),
+                        receipt.model_copy(update={"registered": []}),
+                        receipt.model_copy(update={"registered": ["retained", "excluded"]})):
+        assert judge_tool_use(zero, observation, absent=absent)["status"] == "missing_evidence"
+    required = ToolUseExpectation(rules=[{"name": "excluded", "min_calls": 1, "max_calls": 1}]).model_dump()
+    grade = judge_tool_use(required, ReplayToolObservation(registered=[], complete=True, calls=[]), absent=absent)
+    assert grade["issues"] == [{"tool": "excluded", "reason": "too_few", "count": 0}]
+
+
 def test_raised_forward_remains_an_error_and_extra_calls_fail():
     recorder = ReplayToolRecorder(object(), {"apply":[]})
     def fail():
