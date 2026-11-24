@@ -13,6 +13,7 @@ class ToolSign(Enum):
     LINKUP_SEARCH = "c"       # Linkup search tool identifier
     TAVILY_SEARCH = "d"  # Tavily search tool identifier
     DEEPSEEK_SEARCH = "o"  # DeepSeek search tool identifier
+    OUTCRAWL_SEARCH = "q"  # Outcrawl search tool identifier
     DATAMATE_SEARCH = "e"  # DataMate search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     DIFY_SEARCH = "g"  # Dify search tool identifier
@@ -35,6 +36,7 @@ TOOL_SIGN_MAPPING = {
     "knowledge_base_search": ToolSign.KNOWLEDGE_BASE.value,
     "tavily_search": ToolSign.TAVILY_SEARCH.value,
     "linkup_search": ToolSign.LINKUP_SEARCH.value,
+    "outcrawl_search": ToolSign.OUTCRAWL_SEARCH.value,
     "exa_search": ToolSign.EXA_SEARCH.value,
     "datamate_search": ToolSign.DATAMATE_SEARCH.value,
     "dify_search": ToolSign.DIFY_SEARCH.value,
