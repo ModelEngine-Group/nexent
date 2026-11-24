@@ -17,7 +17,7 @@ from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
-from nexent.core.model_service.contracts import ModelError
+from nexent.core.model_service.contracts import ModelError, ToolCall
 from nexent.core.model_service.service import ModelServiceError
 from nexent.core.utils.observer import MessageObserver
 
@@ -43,6 +43,28 @@ def adapter():
     instance.tool_configs = list(info.agent_config.tools)
     instance.scope = RunCancellationScope(info.stop_event)
     return instance
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_resource_completion_forwards_matched_provider_identity(adapter, mocker, failed):
+    """FIX-JW-02: carry event correlation into maintenance on success and error."""
+    adapter.context_bridge = mocker.Mock()
+    arguments = {"key": "second"}
+    adapter.events.calls.append(ToolCall(provider_call_id="provider-second", name="local", index=1,
+        raw_arguments=json.dumps(arguments), parsed_arguments=arguments))
+    if failed:
+        with pytest.raises(ValueError, match="actual failure"):
+            with adapter._observe_tool("local", arguments):
+                raise ValueError("actual failure")
+    else:
+        with adapter._observe_tool("local", arguments):
+            adapter._resource_result("actual result")
+    callback = adapter.context_bridge.completed_tool.call_args
+    assert callback.kwargs == {"provider_call_id": "provider-second", "parent_call_id": None}
+    assert callback.args[0] == "local"
+    assert callback.args[1] == ("Resource failed" if failed else "actual result")
+    assert callback.args[2]
+    adapter.context_bridge.completed_tool.assert_called_once()
 
 
 @pytest.mark.parametrize("lang", ["zh", "en"])

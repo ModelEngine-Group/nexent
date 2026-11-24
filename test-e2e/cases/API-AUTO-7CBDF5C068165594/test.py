@@ -14,9 +14,9 @@ import pytest
 import httpx
 from fastapi import FastAPI
 
-from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
-from gateway.downstream import internal_tokens
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
+from gateway.identity import internal_tokens
+from gateway.identity.middleware import GatewayIdentityMiddleware
 from runtime.api.agent import execution
 from runtime.api.identity_routes import is_runtime_service_request
 from contracts.constants import environment

@@ -18,8 +18,12 @@ export const useKbOntologyBinding = (kdsId: string) => {
   const scope = useAidpQueryScope();
   return useQuery({
     queryKey: [...scope.key, "kb-ontology-binding", kdsId],
-    queryFn: async ({ signal }) =>
-      aidpOntologyService.getKnowledgeBaseBinding(kdsId, signal),
+    queryFn: async () => {
+      const response = await aidpOntologyService.listAllBindings();
+      const binding =
+        response.value.find((item) => item.kds_id === kdsId) ?? null;
+      return { binding };
+    },
     enabled: scope.enabled && !!kdsId,
     staleTime: 60_000,
     refetchOnWindowFocus: false,

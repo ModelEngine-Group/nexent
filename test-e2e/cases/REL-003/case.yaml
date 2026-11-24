@@ -13,46 +13,24 @@ case:
   automation: automated
   objective: orphaned agent workspace cleanup 不误删活跃资源｜核心流程
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/environment.yaml
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - 测试进程可以在独立临时目录创建目录、文件和符号链接。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/environment.yaml'
+    workspace_entries: [orphan_run, shared_directory, run_id_file, run_id_symlink, root_symlink]
   steps:
   - order: 1
-    action: 准备本地真实测试环境和“orphaned agent workspace cleanup 不误删活跃资源｜核心流程”要求的最小数据，所有可变资源使用 RunID 前缀。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 在独立临时根目录准备上次运行的工作目录、共享目录、普通文件和指向工作区外的符号链接。
+    expected: 所有测试数据由用例创建并在结束后清理。
   - order: 2
-    action: 通过 backend/services/workspace_cleanup_service.py 对外暴露的真实入口执行目标操作，不直接修改最终数据库状态绕过业务逻辑。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 先通过符号链接根目录，再通过真实根目录调用 Runtime 启动清理入口 cleanup_orphaned_agent_workspaces。
+    expected: 链接根目录不触发清理，真实根目录仅删除上次运行的工作目录并返回 1。
   - order: 3
-    action: 记录请求参数、返回状态、资源ID和关键副作用。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - order: 4
-    action: 重新查询详情/列表/持久化状态，验证写入与读取一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 5
-    action: 执行对应边界/错误输入，确认错误码和失败原子性。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 6
-    action: 如涉及外部服务，优先使用本地真实协议服务或真实Provider；Mock仅限故障注入。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 7
-    action: 检查日志不泄露 secret，并清理临时数据。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: 读取保留的文件并检查符号链接，再次调用清理。
+    expected: 保留内容不变，第二次清理返回 0。
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  forbidden_side_effects: []
+  - 仅删除上次运行的工作目录。
+  - 重复清理返回 0。
+  forbidden_side_effects:
+  - 删除共享目录、普通文件、符号链接或其目标。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -60,26 +38,16 @@ case:
   risk_type: RELIABILITY
   risk: orphaned agent workspace cleanup 不误删活跃资源｜核心流程
   condition:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/environment.yaml
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - Runtime 启动清理入口收到独立临时工作目录。
   metrics:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 清理返回的目录计数和保留文件内容。
   thresholds:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 首次清理返回 1，重复调用返回 0，保留文件内容无变化。
   recovery_expectations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 测试结束后释放独立临时目录。
+  acceptance:
+  - id: AC-01
+    description: Runtime 清理入口只回收旧运行目录，保留共享与符号链接资源，且重复执行无副作用。
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]

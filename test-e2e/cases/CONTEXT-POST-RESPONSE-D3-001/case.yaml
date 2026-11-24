@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CONTEXT
+case:
+  case_id: CONTEXT-POST-RESPONSE-D3-001
+  feature_id: F-171
+  business_rule_ids: [F-171-RULE-03]
+  title: Accepted response usage drives maintenance without output limits on the wire
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise real context runtime and model HTTP transport with controlled usage, then verify post-response run-local maintenance and successful whole-turn checkpoint proposals.
+  preconditions: [Product SDK dependencies installed, Loopback TCP available]
+  test_data:
+    configuration: Combined context and output capabilities with varying retired input/reserve values; owned protocol provider returns explicit usage.
+  steps:
+  - order: 1
+    action: Prepare and send a model request through real runtime and model service with historical output settings.
+    expected: Preparation does not compact and captured request has no output-length fields.
+  - order: 2
+    action: Accept the completed response, append its result, and notify the runtime at the safe step boundary.
+    expected: Actual input plus output usage triggers run-local history maintenance only after the accepted response.
+  - order: 3
+    action: Continue with added content and repeat with changed retired model input/reserve values, then close owned resources.
+    expected: Retired fields do not change thresholds; successful completion proposes a whole-turn checkpoint including the real tail and final output; provider and threads are reclaimed.
+  expected_results:
+  - Real wire requests omit max_tokens, max_completion_tokens and max_output_tokens.
+  - Normal preparation is pure; provider input plus output usage drives run-local maintenance only after accepted completion, and successful run finalization proposes a complete-turn checkpoint.
+  - Retired capacities do not alter behavior and all owned resources are closed.
+  - Strict CodeAgent sends only RESULT as stop and returns real output from both statements in a complete code action containing a closing-tag literal.
+  forbidden_side_effects: [No external provider or database use, No mutation of unaccepted history, No orphan provider resources]
+  integration_boundary: [Context runtime through LegacyChatModel and ModelService to an owned HTTP protocol provider]
+  observations: [Captured request bodies, Usage baseline and maintenance timing, Cleanup assertions]
+  cleanup: [Close provider and join owned threads]
+  acceptance:
+  - id: AC-POST-RESPONSE
+    description: Actual HTTP usage drives post-response maintenance while preparation remains pure and output limits remain absent.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1, 2, 3]
+  - id: AC-WHOLE-TURN
+    description: A successful triggered round proposes current_completed_turn with the real tail and final output, without assigning a DB boundary or adding an output cap.
+    steps: [2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1, 2, 3]
+  - id: AC-CODE-END-STOP
+    description: Strict CodeAgent leaves the code closing tag out of the HTTP stop parameter and executes a complete action containing that literal.
+    steps: [1, 2, 3]
+    expected_results: [4]
+    forbidden_side_effects: [1, 2, 3]

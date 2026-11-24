@@ -232,7 +232,14 @@ class MessageObserver:
             ProcessType.FINAL_ANSWER,
             "" if streamed and streamed.strip() == answer.strip() else answer,
             agent_name=agent_name,
-            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
+            metadata={
+                "answer_phase": "complete",
+                "reclassify_step": state.get("reclassify_step", False),
+                # Authoritative answer carried alongside the phase marker so
+                # consumers (evaluation, exports) never have to guess whether
+                # the content field holds the answer or an empty trailer.
+                "accepted_answer": answer,
+            },
         )
 
     @property
@@ -761,6 +768,7 @@ class MessageObserver:
                    if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
                               "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
                               "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "source_protocol", "call_group_id", "call_index", "call_count", "parent_call_id",
                               "step_number", "duration", "step_error", "status", "end_reason", "final_content",
                               "final_block_ids", "error", "context_capacity"}}
             },

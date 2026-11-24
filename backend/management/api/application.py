@@ -14,6 +14,7 @@ from management.api.automation.agent_automation import (
 )
 from management.api.skill.creation import skill_creator_router
 from management.api.agent.creator import router as agent_creator_router
+from management.api.dev.clock import router as clock_router
 from management.api.agent.nl2agent_callback import router as nl2agent_callback_router
 from management.api.agent.workbench_callback import router as workbench_callback_router
 from management.api.automation.agentos_callback import router as automation_callback_router
@@ -254,6 +255,9 @@ app.include_router(personal_quota_router)
 app.include_router(memory_dreaming_router)
 app.include_router(memory_provider_router)
 app.include_router(tag_management_router)
+
+# Sample domain router used for OpenAPI→MCP conversion demo endpoints.
+app.include_router(clock_router)
 
 # Northbound and A2A business routes share Management lifecycle and ownership.
 app.include_router(northbound_router)

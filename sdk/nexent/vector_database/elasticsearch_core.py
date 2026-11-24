@@ -942,9 +942,11 @@ class ElasticSearchCore(VectorDatabaseCore):
             "page_size": result_page_size,
         }
 
-    def create_chunk(self, index_name: str, chunk: Dict[str, Any]) -> Dict[str, Any]:
+    def create_chunk(
+        self, index_name: str, chunk: Dict[str, Any], *, refresh: bool | str = "wait_for",
+    ) -> Dict[str, Any]:
         """
-        Create a single chunk document.
+        Create a single chunk document; optionally wait for search visibility.
         """
         try:
             payload = chunk.copy()
@@ -953,7 +955,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 index=index_name,
                 id=document_id,
                 document=payload,
-                refresh="wait_for",
+                refresh=refresh,
             )
             logger.info(
                 "Created chunk %s in index %s", response.get("_id"), index_name
@@ -1030,7 +1032,9 @@ class ElasticSearchCore(VectorDatabaseCore):
             )
             raise
 
-    def search(self, index_name: str, query: Dict[str, Any]) -> Dict[str, Any]:
+    def search(
+        self, index_name: str, query: Dict[str, Any], *, request_timeout: float | None = None,
+    ) -> Dict[str, Any]:
         """
         Execute a search query on an index.
 
@@ -1041,7 +1045,10 @@ class ElasticSearchCore(VectorDatabaseCore):
         Returns:
             Dict containing search results
         """
-        return self.client.search(index=index_name, body=query)
+        client = self.client
+        if request_timeout is not None:
+            client = client.options(request_timeout=request_timeout, max_retries=0, retry_on_timeout=False)
+        return client.search(index=index_name, body=query)
 
     def multi_search(self, body: List[Dict[str, Any]], index_name: str) -> Dict[str, Any]:
         """

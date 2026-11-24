@@ -54,9 +54,9 @@ def stream_capture(monkeypatch):
         public = await prepared_turn._stream_turn(
             turn, client, include_journal_controls=False, complete_answer=final_answer_mode == "complete",
         )
-        async for chunk in public.body_iterator:
-            if chunk.startswith(b"data: {"):
-                published.append(json.loads(chunk.removeprefix(b"data: ")))
+        async for frame in agentos_events.iter_sse_frames(public):
+            if frame.startswith(b"data: {"):
+                published.append(json.loads(frame.removeprefix(b"data: ")))
         persist.assert_awaited_once()
         return published, persist.await_args.kwargs if persist.side_effect is None else None
 

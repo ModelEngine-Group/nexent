@@ -20,7 +20,7 @@ from contracts.authentication import NorthboundContext
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, RATE_LIMIT_EXCEEDED_DETAIL, CONFIG_SERVICE_NAME
 from contracts.knowledge import VectorDatabaseType, HybridSearchRequest, ProcessParams
 from contracts.conversation import GenerateTitleRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NorthboundStopInProgressError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
 from contracts.tool import ToolParamsRequest
 from fastapi import (
@@ -480,6 +480,12 @@ async def stop_chat_stream(
     try:
         ctx: NorthboundContext = await _get_northbound_context(request)
         return await stop_chat(ctx=ctx, conversation_id=conversation_id, meta_data=parsed_meta_data)
+    except NorthboundStopInProgressError:
+        return JSONResponse(
+            status_code=HTTPStatus.CONFLICT,
+            content={"code": "NORTHBOUND_STOP_IN_PROGRESS", "message": "The conversation is still stopping."},
+            headers={"Retry-After": "1"},
+        )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")

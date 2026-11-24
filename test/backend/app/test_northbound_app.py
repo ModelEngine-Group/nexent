@@ -534,6 +534,19 @@ def test_stop_chat_success():
         assert resp.status_code == 200
 
 
+def test_stop_chat_reports_unreleased_conversation():
+    from contracts.errors.exceptions import NorthboundStopInProgressError
+
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock), patch(
+        "management.api.northbound.stop_chat", new_callable=AsyncMock, side_effect=NorthboundStopInProgressError(),
+    ):
+        response = client.get("/nb/v1/chat/stop/123", headers=_build_headers())
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "NORTHBOUND_STOP_IN_PROGRESS"
+    assert response.headers["Retry-After"] == "1"
+
+
 def test_stop_chat_preserves_runtime_error_response():
     upstream_error = RuntimeUpstreamError(
         status_code=403,

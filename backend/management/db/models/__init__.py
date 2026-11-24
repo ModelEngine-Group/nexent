@@ -89,4 +89,4 @@ from management.db.evaluation.models import AgentEvaluation, AgentEvaluationCase
 
 from management.db.identity.models import UserAccount
 
-from management.db.trajectory.models import TrajectoryExecution, TrajectoryStatistics
+from infrastructure.rdb.trajectory.models import TrajectoryExecution, TrajectoryStatistics

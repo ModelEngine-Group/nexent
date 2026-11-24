@@ -7,7 +7,8 @@ from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from starlette.responses import StreamingResponse
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
@@ -16,6 +17,8 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
+from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
+from management.api.agent import conversation_run
 from management.services.agent import conversation_submission, prepared_turn, runtime_client, workbench
 from management.services.agent.preparation import evaluation_snapshot
 from management.services.knowledge_base import mount, scope
@@ -124,6 +127,43 @@ async def test_existing_workbench_returns_the_confirmed_config_and_metadata_vers
     assert response.headers["x-runtime-metadata-version"] == "4"
     assert response.headers["x-workbench-config-version"] == "3"
     assert any(json.loads(chunk[6:])["type"] == "workbench_config_resolved" for chunk in chunks if chunk.startswith(b'data: {'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_id", [11, None])
+async def test_workbench_send_stages_automation_with_request_model(existing_workbench, mocker, model_id):
+    state = existing_workbench
+    snapshot = state.compile_snapshot.return_value
+    snapshot.resource.tools = [SimpleNamespace(tool_id=AUTOMATION_PROPOSAL_TOOL)]
+    snapshot.models = SimpleNamespace(llm=SimpleNamespace(model_id=22))
+    mocker.patch.object(run_controls, "get_model_by_model_id", return_value={"model_type": "llm"})
+    mocker.patch.object(conversation_run, "get_current_user_id", return_value=ACTOR)
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=state.client)
+
+    async def submit(payload, user_id, tenant_id, dispatch, **_options):
+        claimed = payload.model_copy(update={"claimed_run_id": REFERENCE.run_id})
+        return await dispatch(claimed, user_id, tenant_id)
+
+    mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
+    request = {
+        **PAYLOAD.request, "entrypoint": "workbench", "expected_workbench_config_version": 2,
+        "enable_automation_tool": True,
+    }
+    if model_id is not None:
+        request["model_id"] = model_id
+
+    app = FastAPI()
+    app.include_router(conversation_run.router, prefix="/api")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://management") as http:
+        response = await http.post("/api/agent/run", json=request, headers={"Idempotency-Key": "once"})
+
+    assert response.status_code == 200
+    assert state.operations == ["stage", "start", "confirm"]
+    assert prepared_turn.store.stage_turn.call_args.args[5]["automation"] == {
+        "agent_id": 7, "agent_version_no": 2, "model_id": model_id, "tool_params": None, "has_attachments": False,
+    }
+    state.client.start_prepared_run.assert_awaited_once_with(snapshot, *ACTOR)
+    state.reject.assert_not_awaited()
 
 
 @pytest.mark.asyncio

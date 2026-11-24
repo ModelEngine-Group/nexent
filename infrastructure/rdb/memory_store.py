@@ -2,6 +2,7 @@
 """Authorized and serialized persistence for Agent short-term Memory writes."""
 
 import json
+import time
 from collections.abc import Callable
 
 from sqlalchemy import select, text
@@ -69,13 +70,36 @@ def find_existing_memory(
         return row.memory_id if row is not None and row.content == content else None
 
 
+def _require_automatic_memory(session, user_id, agent_id):
+    rows = session.execute(text("""
+        SELECT config_key, config_value FROM nexent.memory_user_config_t
+        WHERE user_id = :user_id AND delete_flag = 'N'
+          AND config_key IN ('MEMORY_SWITCH', 'DISABLE_AGENT_ID', 'DISABLE_USERAGENT_ID')
+        ORDER BY config_id
+    """), {"user_id": user_id}).all()
+    enabled = True
+    disabled = set()
+    for key, value in rows:
+        if key == "MEMORY_SWITCH":
+            enabled = value == "Y"
+        else:
+            disabled.add(value)
+    if not enabled or str(agent_id) in disabled:
+        raise MemoryStoreScopeError("Automatic memory is disabled")
+
+
 def write_agent_memory(
     tenant_id: str, user_id: str, agent_id: int, conversation_id: int | None, key: str, content: str, index_name: str,
+    *, deadline: float | None = None,
 ) -> tuple[int, str]:
     with get_db_session() as session:
         _lock(session, tenant_id, key)
         _require_scope(session, tenant_id, user_id, agent_id, conversation_id)
         row = _find(session, tenant_id, key, user_id, agent_id)
+        if deadline is not None:
+            _require_automatic_memory(session, user_id, agent_id)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Memory write budget expired")
         if row is not None:
             if row.content == content:
                 return row.memory_id, "UNCHANGED"
@@ -96,6 +120,7 @@ def write_agent_memory(
 
 def mirror_current_memory(
     tenant_id: str, key: str, memory_id: int, content: str, index_name: str, publish: Callable[[dict], bool],
+    *, deadline: float | None = None,
 ) -> bool:
     with get_db_session() as session:
         _lock(session, tenant_id, key)
@@ -109,6 +134,8 @@ def mirror_current_memory(
         ))
         if row is None:
             return False
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Memory index budget expired")
         return publish(as_dict(row))
 
 
