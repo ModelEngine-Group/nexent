@@ -1,4 +1,4 @@
-# Agent Development
+# Create and Configure Agents
 
 On the Agent Development page, you can create, configure, and manage agents. The page contains an **AI Generation** panel and a **Configuration** panel: AI Generation turns natural-language requirements into a configuration draft, while Configuration lets you adjust settings manually. After configuration, click **Debug** in the lower-right corner to open the debug panel and verify the agent's behavior.
 
