@@ -837,6 +837,8 @@ function AgentPicker({ viewer }: { viewer: string }) {
           }}
         />
         <Select
+          showSearch
+          optionFilterProp="label"
           aria-label={t("agentEvaluation.agentVersionLabel")}
           disabled={!agent}
           value={version}

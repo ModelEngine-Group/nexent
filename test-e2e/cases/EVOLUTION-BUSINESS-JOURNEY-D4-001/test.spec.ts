@@ -41,10 +41,11 @@ function fixture(): Fixture {
   return value;
 }
 
-async function choose(page: Page, label: string, option: string | RegExp) {
+async function choose(page: Page, label: string, option: string | RegExp, search?: string) {
   const input = page.getByRole("combobox", { name: label, exact: true });
   await input.focus();
   await input.press("ArrowDown");
+  if (search) await input.fill(search);
   const id = await input.getAttribute("aria-controls");
   if (!id) throw new Error("Evaluation selector has no popup");
   await page.locator('[id="' + id + '"]')
@@ -188,8 +189,10 @@ journey(ID, async (scenario) => {
         expect(candidate.edit.new).not.toBe(candidate.edit.old);
         await editor.goto(config.origin + "/zh/evaluation", { waitUntil: "domcontentloaded" });
         await editor.getByText("候选对比", { exact: true }).first().click();
+        await choose(editor, "智能体", config.display);
+        await choose(editor, "版本", /^V1(?:\s|$)/, "V1 ");
         for (const [label, value] of [
-          ["智能体", config.display], ["版本", /^V1(?:\s|$)/], ["关联业务用户的建议（需选目标题和保护题）", sid + " ·"],
+          ["关联业务用户的建议（需选目标题和保护题）", sid + " ·"],
           ["选择候选", "#" + candidate.candidate_id + " · " + config.skill],
           ["业务题", config.target], ["业务题", config.guard], ["建议的目标题（其他已选题用于回归）", "新交接"],
         ] as const) await choose(editor, label, value);
