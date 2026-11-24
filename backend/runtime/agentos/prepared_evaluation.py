@@ -24,6 +24,7 @@ from contracts.constants.environment import (
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from contracts.errors.exceptions import RunModelControlsError, ValidationError as AgentValidationError
+from contracts.evaluation_answer import completed_root_answer
 from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
@@ -603,6 +604,7 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
             result = await collect_observer_output(info, agent_run, runtime_thread_manager)
         status = info.attempt_outcome or "completed"
         if payload.replay_trial_id is not None:
+            result.answer = completed_root_answer(result.events) or ""
             for skill, path in observations:
                 skill.guide_reads = reads[path].count if path is not None else 0
             file_state = await fixture.receipt() if fixture else None

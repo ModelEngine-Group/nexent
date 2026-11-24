@@ -102,7 +102,11 @@ async def test_new_skill_over_agentos(tmp_path, monkeypatch):
         elif info.query == "revision" and tools:
             config = tools[0]
             guide = ReadSkillMdTool(**config.params, **config.metadata).forward("intake")
-            return EvaluationAgentResult(answer="region" if "record the region" in guide else "number", events=[])
+            answer = "region" if "record the region" in guide else "number"
+            return EvaluationAgentResult(answer="child detail\n" + answer, events=[
+                {"type":"final_answer", "invocation_id":"child", "content":"child detail"},
+                {"type":"final_answer", "answer_phase":"complete", "content":"", "accepted_answer":answer},
+            ])
         return EvaluationAgentResult(answer="done", events=[{"type": "final_answer", "content": "done"}])
 
     def release(info, *args):

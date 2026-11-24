@@ -29,10 +29,15 @@ def completed_root_answer(events):
             continue
         if kind not in {"model_output_thinking", "model_output_code", "final_answer"}:
             continue
+        phase = event.get("answer_phase")
+        if kind == "final_answer" and phase == "complete":
+            confirmed = event.get("accepted_answer")
+            if isinstance(confirmed, str) and confirmed.strip():
+                accepted = confirmed
+                continue
         content = event.get("content")
         if not isinstance(content, str):
             continue
-        phase = event.get("answer_phase")
         if kind == "final_answer" and phase is None:
             legacy.append(content)
             continue

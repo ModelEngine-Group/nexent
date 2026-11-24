@@ -2306,8 +2306,73 @@ class TestEvaluateQuery:
             )
         run_agent.assert_not_called()
 
+    def test_empty_answer_skips_judges_and_fails(self, service_module, monkeypatch):
+        # Regression for the v2.8.4 incident: an empty actual answer must not
+        # reach the judges (which scored empty air and produced phantom
+        # passes / JSON format errors).
+        import asyncio
+
+        run_agent = AsyncMock(return_value=("", []))
+        score_mock = MagicMock(return_value=({"n1": 1.0}, {"n1": "should not happen"}))
+        set_import_attribute(monkeypatch, service_module, "_run_agent_to_final_answer", run_agent)
+        set_import_attribute(monkeypatch, service_module, "_score_with_evaluators", score_mock)
+        answer, events, score, reason = asyncio.run(
+            service_module._evaluate_query(
+                tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
+                query="q", judge_model_id=99,
+                evaluators={1: {"name": "n1"}}, judge_system_prompt="sys",
+            )
+        )
+        assert answer == ""
+        assert score == {"n1": 0.0}
+        from management.services.evaluation.execution import _EMPTY_ANSWER_REASON
+        assert reason == {"n1": _EMPTY_ANSWER_REASON}
+        score_mock.assert_not_called()
+
+    def test_whitespace_answer_skips_judges(self, service_module, monkeypatch):
+        import asyncio
+
+        run_agent = AsyncMock(return_value=("   \n  ", []))
+        score_mock = MagicMock()
+        set_import_attribute(monkeypatch, service_module, "_run_agent_to_final_answer", run_agent)
+        set_import_attribute(monkeypatch, service_module, "_score_with_evaluators", score_mock)
+        _, _, score, reason = asyncio.run(
+            service_module._evaluate_query(
+                tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
+                query="q", judge_model_id=99,
+                evaluators={1: {"name": "n1"}, 2: {"name": "n2"}}, judge_system_prompt="sys",
+            )
+        )
+        assert score == {"n1": 0.0, "n2": 0.0}
+        from management.services.evaluation.execution import _EMPTY_ANSWER_REASON
+        assert set(reason.values()) == {_EMPTY_ANSWER_REASON}
+        score_mock.assert_not_called()
+
 
 class TestCasePassStatusHelpers:
+    def test_runtime_upstream_detail_handles_bytes_and_strings(self, service_module):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+        from management.services.evaluation.execution import _runtime_upstream_detail
+
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+        ) == 'HTTP 401: {"code":"TOKEN_EXPIRED"}'
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(500, '{"code":"X"}', {})
+        ) == 'HTTP 500: {"code":"X"}'
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(503, None, {})
+        ) == "HTTP 503:"
+
+    def test_friendly_error_message_surfaces_runtime_upstream_detail(self, service_module):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+
+        exc = RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+        message = service_module._generate_friendly_error_message(
+            exc, "default msg", model_id=99, tenant_id="t1", user_id="u1"
+        )
+        assert message == 'Runtime call failed: HTTP 401: {"code":"TOKEN_EXPIRED"}'
+
     def test_determine_case_pass_status(self, service_module):
         assert (
             service_module._determine_case_pass_status(1, {})
@@ -2506,14 +2571,40 @@ class TestSetupNoSetAndExecute:
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         assert service_module._generate_test_queries.call_args.kwargs["model_id"] == 99
 
-    def test_failure_marks_run_failed(self, service_module, monkeypatch):
+    def test_failure_marks_run_failed_with_exception_detail(self, service_module, monkeypatch):
         bind_import_attribute(service_module, 'get_db_session', MagicMock(side_effect=RuntimeError('db down')))
         bind_import_attribute(service_module, '_generate_test_queries', MagicMock(side_effect=RuntimeError('llm down')))
         bind_import_attribute(service_module, 'update_agent_evaluation_status', MagicMock())
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         kw = service_module.update_agent_evaluation_status.call_args.kwargs
         assert kw["status"] == service_module.EvalRunStatus.FAILED
-        assert kw["error_message"] == "Failed to generate test queries"
+        # The fixed generic string is now suffixed with the actual failure so
+        # the UI can show a real reason instead of "no-error failure".
+        assert kw["error_message"].startswith("Failed to generate test queries")
+        assert "RuntimeError" in kw["error_message"]
+        assert "llm down" in kw["error_message"]
+
+    def test_runtime_upstream_failure_reports_dispatch_detail(self, service_module, monkeypatch):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+
+        # Model fallback stays healthy; the runtime 401 hits at dispatch time.
+        bind_import_attribute(service_module, 'get_db_session', MagicMock(side_effect=RuntimeError('db down')))
+        bind_import_attribute(service_module, '_generate_test_queries', MagicMock(return_value=['q1']))
+        bind_import_attribute(service_module, 'materialize_virtual_evaluation_set_for_run', MagicMock(return_value=1))
+        bind_import_attribute(service_module, 'get_evaluation_set_cases_all', MagicMock(return_value=[]))
+        bind_import_attribute(service_module, 'create_agent_evaluation_cases', MagicMock())
+        bind_import_attribute(
+            service_module, '_dispatch_agent_evaluation_run',
+            MagicMock(side_effect=RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})),
+        )
+        bind_import_attribute(service_module, 'update_agent_evaluation_status', MagicMock())
+        service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
+        kw = service_module.update_agent_evaluation_status.call_args.kwargs
+        assert kw["status"] == service_module.EvalRunStatus.FAILED
+        # Runtime dispatch failures carry their own HTTP detail instead of the
+        # query-generation message.
+        assert kw["error_message"].startswith("Runtime dispatch failed: HTTP 401")
+        assert "TOKEN_EXPIRED" in kw["error_message"]
 
 
 class TestPreloadEvaluatorsForRun:

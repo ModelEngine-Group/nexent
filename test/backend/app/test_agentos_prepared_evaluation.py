@@ -29,6 +29,9 @@ def test_evaluation_grades_only_the_accepted_root_attempt():
     assert has_completed_root_answer(events) and completed_root_answer(events) == "OPS"
     events[-1]["content"] = "verified"
     assert completed_root_answer(events) == "verified"
+    events[-1]["accepted_answer"] = "authoritative root"
+    events.append({"type": "final_answer", "answer_phase": "complete", "depth": 1, "accepted_answer": "child"})
+    assert completed_root_answer(events) == "authoritative root"
 
 
 @pytest.fixture(autouse=True)
