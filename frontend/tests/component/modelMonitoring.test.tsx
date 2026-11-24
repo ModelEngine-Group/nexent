@@ -8,6 +8,7 @@ import {
   getModelMonitoringSummary,
   getModelMonitoringTrends,
 } from "@/services/modelMonitoringService";
+import type { ModelListRequest } from "@/types/modelMonitoring";
 
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
 
@@ -33,11 +34,17 @@ describe("Model monitoring list requests", () => {
     modelId: 2,
     groupIds: [10, 20],
   };
-  const list = { page: 1, pageSize: 10, search: "Qwen & DeepSeek" };
+  const list: ModelListRequest = {
+    page: 2,
+    pageSize: 10,
+    search: "Qwen & DeepSeek",
+    sortBy: "total_tokens",
+    descending: false,
+  };
 
   beforeEach(() => fetch.mockReset());
 
-  it("sends scoped paged search and returns the server payload", async () => {
+  it("sends scoped paged search and sort and returns the server payload", async () => {
     const payload = {
       data: { items: [], total: 0 },
       coverage_state: "partial",
@@ -47,7 +54,7 @@ describe("Model monitoring list requests", () => {
       payload
     );
     expect(fetch).toHaveBeenCalledWith(
-      "/api/ops/v1/monitoring/models?start_date=2026-11-17&end_date=2026-11-23&tenant_id=a%26b&model_id=2&group_ids=10&group_ids=20&page=1&page_size=10&search=Qwen+%26+DeepSeek",
+      "/api/ops/v1/monitoring/models?start_date=2026-11-17&end_date=2026-11-23&tenant_id=a%26b&model_id=2&group_ids=10&group_ids=20&page=2&page_size=10&search=Qwen+%26+DeepSeek&sort_by=total_tokens&descending=false",
       { signal }
     );
   });
@@ -58,12 +65,12 @@ describe("Model monitoring list requests", () => {
     await expect(
       getModelMonitoringList(
         { ...scope, tenantId: null, modelId: null, groupIds: [] },
-        { ...list, search: "" },
+        { ...list, page: 1, search: "", descending: true },
         signal
       )
     ).rejects.toBe(error);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/ops/v1/monitoring/models?start_date=2026-11-17&end_date=2026-11-23&page=1&page_size=10",
+      "/api/ops/v1/monitoring/models?start_date=2026-11-17&end_date=2026-11-23&page=1&page_size=10&sort_by=total_tokens&descending=true",
       { signal }
     );
   });

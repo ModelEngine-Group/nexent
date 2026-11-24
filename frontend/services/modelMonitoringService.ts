@@ -64,6 +64,8 @@ export async function getModelMonitoringList(
   params.set("page", String(list.page));
   params.set("page_size", String(list.pageSize));
   if (list.search) params.set("search", list.search);
+  params.set("sort_by", list.sortBy);
+  params.set("descending", String(list.descending));
   return readModelMonitoring<ModelMonitoringList>(
     API_ENDPOINTS.operations.modelMonitoringList,
     params,

@@ -243,8 +243,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       modelListReads.push(Object.fromEntries(searchParams));
       const modelId = searchParams.get("model_id");
       const search = searchParams.get("search")?.toLowerCase() ?? "";
-      const rows =
-        tenantId === "b"
+      const rows = [
+        ...(tenantId === "b"
           ? []
           : Array.from({ length: 12 }, (_, i) => ({
               tenant_id: "a",
@@ -254,12 +254,52 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
               model_factory: "fixture",
               model_type: i === 0 ? "llm" : "embedding",
               connect_status: "available",
-              metrics: null,
-            })).filter(
-              (row) =>
-                (!modelId || String(row.model_id) === modelId) &&
-                row.display_name.toLowerCase().includes(search),
-            );
+              metrics: {
+                request_count: 100 + i,
+                error_rate: 0,
+                avg_duration_ms: 1200,
+                avg_ttft_ms: 100,
+                total_tokens: {
+                  value: (9007199254740989n + BigInt(i)).toString(),
+                  known_count: 100 + i,
+                  eligible_count: 100 + i,
+                  coverage_rate: 1,
+                },
+                avg_generation_rate: 42,
+              },
+            }))),
+        ...(tenantId === "a"
+          ? []
+          : [
+              {
+                tenant_id: "b",
+                model_id: 2,
+                display_name: "历史文本模型",
+                model_name: "historical-model",
+                model_factory: "fixture",
+                model_type: "llm",
+                connect_status: null,
+                metrics: null,
+              },
+            ]),
+      ].filter(
+        (row) =>
+          (!modelId || String(row.model_id) === modelId) &&
+          row.display_name.toLowerCase().includes(search),
+      );
+      const metric = searchParams.get("sort_by") ?? "request_count";
+      const descending = searchParams.get("descending") !== "false";
+      const value = (row: (typeof rows)[number]) =>
+        metric === "total_tokens"
+          ? BigInt(row.metrics?.total_tokens.value ?? "0")
+          : BigInt(row.metrics?.request_count ?? 0);
+      rows.sort((left, right) => {
+        if (!left.metrics || !right.metrics)
+          return Number(!left.metrics) - Number(!right.metrics);
+        const a = value(left);
+        const b = value(right);
+        return (descending ? -1 : 1) * (a < b ? -1 : Number(a > b));
+      });
       const size = Number(searchParams.get("page_size"));
       const start = (Number(searchParams.get("page")) - 1) * size;
       json = {
@@ -608,8 +648,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       await expect(select("租户")).toBeEnabled();
     },
   );
-  const [dates, scope, tools, metrics, states, details, charts] =
-    contract.expectedIds("steps");
+  const [
+    dates,
+    scope,
+    tools,
+    metrics,
+    states,
+    details,
+    charts,
+    modelDrilldown,
+  ] = contract.expectedIds("steps");
   await contract.step(dates, async () => {
     await expect(page.getByRole("tab")).toHaveText([
       "概览",
@@ -776,8 +824,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const modelDetails = page.getByRole("region", { name: "模型明细" });
     const modelSearchButton = modelDetails
       .getByRole("columnheader", { name: /名称/ })
-      .getByRole("button", { name: "搜索模型名称" });
-    const modelSearch = page.getByRole("searchbox", { name: "搜索模型名称" });
+      .getByRole("button", { name: "搜索列表中的主名称" });
+    const modelSearch = page.getByRole("searchbox", {
+      name: "搜索列表中的主名称",
+    });
     const agentReads = listReads.length;
     await modelDetails.locator(".ant-pagination-item-2").click();
     await expect.poll(() => modelListReads.at(-1)).toMatchObject({ page: "2" });
@@ -802,8 +852,53 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       10,
     );
     expect(modelListReads.at(-1)).not.toHaveProperty("search");
+    await modelSearch.fill("向量模型");
+    await modelSearch.press("Enter");
     await modelSearch.press("Escape");
     await expect(modelSearchButton).toBeFocused();
+    const modelRows = modelDetails.locator("tbody tr[data-row-key]");
+    const tokenColumn = modelDetails.getByRole("columnheader", {
+      name: /Token 数/,
+    });
+    await expect(modelRows.first()).toContainText("向量模型 11");
+    await modelDetails.locator(".ant-pagination-item-2").click();
+    await expect(modelRows.first()).toContainText("向量模型 1");
+    const beforeSort = [modelSummaryReads.length, modelTrendReads.length];
+    const sortedScope = {
+      search: "向量模型",
+      page_size: "10",
+      sort_by: "total_tokens",
+      tenant_id: "a",
+      group_ids: "10",
+      start_date: "2026-11-07",
+      end_date: "2026-11-12",
+    };
+    await tokenColumn.click();
+    await expect(tokenColumn).toHaveAttribute("aria-sort", "descending");
+    await expect
+      .poll(() => modelListReads.at(-1))
+      .toMatchObject({ ...sortedScope, page: "1", descending: "true" });
+    await expect(modelRows.first()).toContainText("向量模型 11");
+    await modelDetails.locator(".ant-pagination-item-2").click();
+    await expect
+      .poll(() => modelListReads.at(-1))
+      .toMatchObject({ ...sortedScope, page: "2", descending: "true" });
+    await expect(modelRows).toHaveCount(1);
+    await expect(modelRows.first()).toContainText("向量模型 1");
+    await tokenColumn.click();
+    await expect(tokenColumn).toHaveAttribute("aria-sort", "ascending");
+    await expect
+      .poll(() => modelListReads.at(-1))
+      .toMatchObject({ ...sortedScope, page: "1", descending: "false" });
+    await expect(
+      modelRows.first().getByText("向量模型 1", { exact: true }),
+    ).toBeVisible();
+    expect([modelSummaryReads.length, modelTrendReads.length]).toEqual(
+      beforeSort,
+    );
+    await modelSearchButton.click();
+    await modelSearch.locator("..").locator(".ant-input-clear-icon").click();
+    await modelSearch.press("Escape");
     expect(listReads).toHaveLength(agentReads);
     const modelCards = page.locator('dl[aria-label="模型指标概览"]');
     const modelCard = (name: string) =>
@@ -847,7 +942,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
     await choose("用户组", "一线运营组");
     await page.getByText("自定义", { exact: true }).click();
-    await choose("模型", "文本生成模型");
+    await modelRows
+      .filter({ hasText: "文本生成模型" })
+      .getByRole("button", { name: "查看统计" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "文本生成模型 · 运营中心" }),
+    ).toBeFocused();
+    await expect(
+      modelDetails.getByRole("button", { name: "查看统计" }),
+    ).toBeDisabled();
     await expect
       .poll(() => modelListReads.at(-1))
       .toMatchObject({ tenant_id: "a", model_id: "2", page: "1" });
@@ -1377,6 +1481,41 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await tab("MCP").click();
     await page.getByText("自定义", { exact: true }).click();
   });
+  await contract.step(modelDrilldown, async () => {
+    await tab("模型").click();
+    await choose("租户", "全部租户");
+    const modelDetails = page.getByRole("region", { name: "模型明细" });
+    await modelDetails.locator(".ant-pagination-item-2").click();
+    await modelDetails
+      .getByRole("row", { name: /历史文本模型/ })
+      .getByRole("button", { name: "查看统计" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "历史文本模型 · 研发中心" }),
+    ).toBeFocused();
+    const expected = {
+      tenant_id: "b",
+      model_id: "2",
+      start_date: "2026-11-07",
+      end_date: "2026-11-12",
+    };
+    await expect.poll(() => modelSummaryReads.at(-1)).toEqual(expected);
+    await expect.poll(() => modelTrendReads.at(-1)).toEqual(expected);
+    await expect.poll(() => modelListReads.at(-1)).toMatchObject(expected);
+    await expect(page.getByPlaceholder("请选择开始日期")).toHaveValue(
+      expected.start_date,
+    );
+    await expect(page.getByPlaceholder("请选择结束日期")).toHaveValue(
+      expected.end_date,
+    );
+    await choose("模型", "全部模型");
+    await expect(
+      page.getByRole("heading", { name: "全部模型 · 全部租户" }),
+    ).toBeVisible();
+    await choose("租户", "运营中心");
+    await tab("MCP").click();
+    await choose("MCP", "文件服务");
+  });
   const [
     dashboard,
     reset,
@@ -1387,6 +1526,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     monitoringOverview,
     sharedDetailSearch,
     modelMetrics,
+    modelListNavigation,
   ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
@@ -1494,6 +1634,26 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     });
     expect(modelSummaryReads).toEqual(expect.arrayContaining([single]));
     expect(modelTrendReads).toEqual(expect.arrayContaining([single]));
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(modelListNavigation, async () => {
+    expect(modelListReads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          search: "向量模型",
+          page: "2",
+          sort_by: "total_tokens",
+          descending: "true",
+        }),
+        expect.objectContaining({
+          search: "向量模型",
+          page: "1",
+          sort_by: "total_tokens",
+          descending: "false",
+        }),
+        expect.objectContaining({ tenant_id: "b", model_id: "2", page: "1" }),
+      ]),
+    );
     expect(unexpected).toEqual([]);
   });
 });

@@ -1,12 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Alert, Empty, Pagination, Table } from "antd";
+import { Alert, Button, Empty, Pagination, Table } from "antd";
 import type { TableProps } from "antd";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelMonitoringList } from "@/services/modelMonitoringService";
 import type {
   ModelListRequest,
+  ModelListSort,
   ModelMonitoringRow,
   ModelMonitoringSelection,
 } from "@/types/modelMonitoring";
@@ -15,16 +16,24 @@ import { resourceKey } from "../../useMonitoringDirectories";
 import { MonitoringColumnSearch } from "../shared/MonitoringColumnSearch";
 import styles from "../../agentMonitoring.module.css";
 
-const defaultList: ModelListRequest = { page: 1, pageSize: 10, search: "" };
+const defaultList: ModelListRequest = {
+  page: 1,
+  pageSize: 10,
+  search: "",
+  sortBy: "request_count",
+  descending: true,
+};
 
 export function ModelMonitoringDetails({
   queryKey,
   scopeLoading,
   hasRange,
+  onViewStatistics,
 }: {
   queryKey: readonly [string, string, string, ModelMonitoringSelection | null];
   scopeLoading: boolean;
   hasRange: boolean;
+  onViewStatistics: (row: ModelMonitoringRow) => void;
 }) {
   const { t, i18n } = useTranslation("common");
   const titleId = useId();
@@ -57,6 +66,18 @@ export function ModelMonitoringDetails({
     (selection !== null && (details.isPending || details.isFetching));
   const number = (value: number | null | undefined) =>
     formatAgentMetric(value ?? null, "execution_count", i18n.language);
+  const sortColumn = (
+    key: ModelListSort,
+    title: string
+  ): NonNullable<TableProps<ModelMonitoringRow>["columns"]>[number] => ({
+    key,
+    title,
+    sorter: true,
+    sortDirections: ["descend", "ascend", "descend"],
+    sortOrder:
+      list.sortBy === key ? (list.descending ? "descend" : "ascend") : null,
+    align: "right",
+  });
   const numericColumns = {
     request_count: "requests",
     error_rate: "errorRate",
@@ -125,9 +146,7 @@ export function ModelMonitoringDetails({
     },
     ...(Object.keys(numericColumns) as (keyof typeof numericColumns)[]).map(
       (key) => ({
-        title: label(numericColumns[key]),
-        key,
-        align: "right" as const,
+        ...sortColumn(key, label(numericColumns[key])),
         render: (_: unknown, row: ModelMonitoringRow) =>
           key === "error_rate"
             ? formatAgentMetric(
@@ -139,9 +158,7 @@ export function ModelMonitoringDetails({
       })
     ),
     {
-      title: label("tokens"),
-      key: "total_tokens",
-      align: "right",
+      ...sortColumn("total_tokens", label("tokens")),
       render: (_, row) => (
         <span className={styles.tokenValue}>
           {formatAgentMetric(
@@ -152,7 +169,36 @@ export function ModelMonitoringDetails({
         </span>
       ),
     },
+    {
+      title: label("action"),
+      key: "action",
+      render: (_, row) => (
+        <Button
+          type="link"
+          size="small"
+          disabled={
+            selection?.tenantId === row.tenant_id &&
+            selection.modelId === row.model_id
+          }
+          onClick={() => onViewStatistics(row)}
+        >
+          {label("view")}
+        </Button>
+      ),
+    },
   ];
+  const onTableChange: NonNullable<
+    TableProps<ModelMonitoringRow>["onChange"]
+  > = (_pagination, _filters, sorter, extra) => {
+    if (extra.action !== "sort" || Array.isArray(sorter) || !sorter.columnKey)
+      return;
+    setList((current) => ({
+      ...current,
+      page: 1,
+      sortBy: sorter.columnKey as ModelListSort,
+      descending: sorter.order !== "ascend",
+    }));
+  };
   return (
     <section
       aria-labelledby={titleId}
@@ -171,6 +217,7 @@ export function ModelMonitoringDetails({
         rowKey={(row) => resourceKey(row.tenant_id, row.model_id)}
         loading={loading}
         pagination={false}
+        onChange={onTableChange}
         locale={{
           emptyText:
             loading || details.isError ? null : (
@@ -188,7 +235,7 @@ export function ModelMonitoringDetails({
               />
             ),
         }}
-        scroll={{ x: 1080 }}
+        scroll={{ x: 1180 }}
         size="small"
       />
       {total !== undefined && (

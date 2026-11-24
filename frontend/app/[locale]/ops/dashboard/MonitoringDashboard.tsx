@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { hasRole } from "@/lib/roles";
 import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
+import type { OperationsResource } from "@/types/operations";
 import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
@@ -107,6 +108,8 @@ function MonitoringScope({
     updateMonitoringFilters,
     initialMonitoringFilters
   );
+  const [modelDrilldown, setModelDrilldown] =
+    useState<Pick<OperationsResource, "tenant_id" | "id" | "name">>();
   const directories = useMonitoringDirectories({
     userId,
     userTenant,
@@ -154,28 +157,54 @@ function MonitoringScope({
   );
 
   const onOverview = tab === "overview";
+  const resourceSelection = onOverview ? "" : (filters.resources[tab] ?? "");
+  const scopePending = directories.tenant === undefined;
+  const models =
+    tab === "model" && canReadInventory && !scopePending
+      ? directories.inventory.data?.filter((item) => item.kind === "model")
+      : undefined;
+  const directoryModel = models?.find(
+    (item) => resourceKey(item.tenant_id, item.id) === resourceSelection
+  );
+  const selectedModel =
+    directoryModel ??
+    (tab === "model" &&
+    !scopePending &&
+    modelDrilldown &&
+    (!directories.tenant || directories.tenant === modelDrilldown.tenant_id) &&
+    resourceKey(modelDrilldown.tenant_id, modelDrilldown.id) ===
+      resourceSelection
+      ? modelDrilldown
+      : undefined);
   const resourceQuery =
     tab === "skill" ? directories.skills : directories.inventory;
-  const resourceChoices =
+  const inventoryChoice = (
+    item: Pick<OperationsResource, "tenant_id" | "id" | "name">
+  ) => ({
+    value: resourceKey(item.tenant_id, item.id),
+    label: directories.tenant
+      ? item.name || String(item.id)
+      : `${item.name || item.id} · ${tenantLabel(item.tenant_id)}`,
+  });
+  const directoryChoices =
     tab === "skill"
       ? directories.skills.data?.map((skill) => ({
           value: resourceKey(directories.tenant ?? "", skill.skill_id),
           label: skill.name || skill.skill_id,
         }))
-      : directories.inventory.data
-          ?.filter((item) => item.kind === tab)
-          .map((item) => ({
-            value: resourceKey(item.tenant_id, item.id),
-            label: directories.tenant
-              ? item.name || String(item.id)
-              : `${item.name || item.id} · ${tenantLabel(item.tenant_id)}`,
-          }));
-  const resourceSelection = onOverview ? "" : (filters.resources[tab] ?? "");
+      : canReadInventory
+        ? directories.inventory.data
+            ?.filter((item) => item.kind === tab)
+            .map(inventoryChoice)
+        : undefined;
+  const resourceChoices =
+    selectedModel && !directoryModel
+      ? [...(directoryChoices ?? []), inventoryChoice(selectedModel)]
+      : directoryChoices;
   const resource = resourceChoices?.find(
     (choice) => choice.value === resourceSelection
   );
   const allResources = onOverview ? "" : t(`ops.monitoring.all.${tab}`);
-  const scopePending = directories.tenant === undefined;
   const scopeDisabledText = directories.scope.isError
     ? t("ops.loadError")
     : t("common.loading");
@@ -203,13 +232,6 @@ function MonitoringScope({
         )
       : null;
   const agentMonitoring = useAgentMonitoring(userId, userTenant, selection);
-  const models =
-    tab === "model" && canReadInventory && !scopePending
-      ? directories.inventory.data?.filter((item) => item.kind === "model")
-      : undefined;
-  const selectedModel = models?.find(
-    (item) => resourceKey(item.tenant_id, item.id) === resourceSelection
-  );
   const modelSelection: ModelMonitoringSelection | null =
     tab === "model" && directories.tenant !== undefined && range
       ? {
@@ -355,7 +377,7 @@ function MonitoringScope({
                     ? scopeDisabledText
                     : tab === "skill" && !directories.tenant
                       ? t("ops.monitoring.notConnected")
-                      : tab !== "skill" && !canReadInventory
+                      : tab !== "skill" && !canReadInventory && !selectedModel
                         ? t("ops.noPermission")
                         : undefined
                 }
@@ -496,6 +518,20 @@ function MonitoringScope({
                 queryKey={modelQueryKey}
                 scopeLoading={scopeLoading}
                 hasRange={Boolean(range)}
+                onViewStatistics={(row) => {
+                  setModelDrilldown({
+                    tenant_id: row.tenant_id,
+                    id: row.model_id,
+                    name:
+                      row.display_name || row.model_name || `#${row.model_id}`,
+                  });
+                  dispatch({
+                    type: "resource",
+                    tab: "model",
+                    value: resourceKey(row.tenant_id, row.model_id),
+                  });
+                  requestAnimationFrame(() => resourceHeading.current?.focus());
+                }}
               />
             </>
           ) : (

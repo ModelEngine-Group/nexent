@@ -27,10 +27,20 @@ export interface ModelMonitoringSelection extends MonitoringDateScope {
   groupIds: number[];
 }
 
+export type ModelListSort =
+  | "request_count"
+  | "error_rate"
+  | "avg_duration_ms"
+  | "avg_ttft_ms"
+  | "avg_generation_rate"
+  | "total_tokens";
+
 export interface ModelListRequest {
   page: number;
   pageSize: number;
   search: string;
+  sortBy: ModelListSort;
+  descending: boolean;
 }
 
 export interface ModelMonitoringRow {

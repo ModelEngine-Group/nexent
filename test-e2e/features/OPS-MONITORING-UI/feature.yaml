@@ -24,7 +24,9 @@ feature:
     description: The Agent and Model detail tables share the name-column search control. Each submits to its own tenant-scoped endpoint and returns to page one on search or clear.
   - rule_id: OPS-MONITORING-UI-RULE-08
     description: Model cards and both charts respect the active filters. The all-model inventory count only depends on tenant, and both charts use a single trends response.
+  - rule_id: OPS-MONITORING-UI-RULE-09
+    description: Model details sort six metrics on the server. A sort change resets the page and keeps list search and monitoring filters. Each row opens statistics scoped to its tenant and model ID while keeping the date range.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124, OPS-MODEL-UI-NAVIGATION-20261124]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md
