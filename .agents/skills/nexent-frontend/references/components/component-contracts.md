@@ -7,7 +7,7 @@ Use these constraints as the default contract for new or substantially changed f
 - Place feature-only components under `frontend/app/[locale]/{feature}/components/`.
 - Place components reused by multiple features under `frontend/components/`.
 - Keep feature-private components private to their feature. Do not import another feature's internal component; promote shared behavior instead.
-- Keep route entries thin. A page should compose components and coordinate routing, authentication, and feature-level data rather than contain a large reusable UI implementation.
+- Extract focused components that the page can compose as part of its overall structure. Follow the [page composition rules](../pages.md) for deciding what belongs in `page.tsx`.
 
 ## Public API
 

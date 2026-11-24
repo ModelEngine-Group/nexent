@@ -80,7 +80,8 @@ async def test_prepared_native_clarification_keeps_the_persisted_unit_identity()
         terminal(3),
     )
     result = public_events.present_public_resume(source, request, "actor")
-    frames = [frame async for frame in result.body_iterator]
+    wire = b"".join([frame async for frame in result.body_iterator])
+    frames = [frame + b"\n\n" for frame in wire.split(b"\n\n") if frame]
 
     assert len(frames) == 2 and frames[-1] == terminal(3)
     public = json.loads(frames[0].split(b"data: ", 1)[1])
@@ -157,7 +158,8 @@ async def test_interrupted_native_stream_keeps_derived_step_and_thinking_at_one_
         observer(2, native("model_output", 2, content="unfinished", step_id="second", block_id="body")),
     )
     result = public_events.present_public_resume(upstream, request, "actor")
-    frames = [frame async for frame in result.body_iterator]
+    wire = b"".join([frame async for frame in result.body_iterator])
+    frames = [frame + b"\n\n" for frame in wire.split(b"\n\n") if frame]
     events = [json.loads(frame.split(b"data: ", 1)[1]) for frame in frames]
 
     assert [event["type"] for event in events] == ["step_count", "step_count", "model_output_thinking", "error"]
@@ -184,7 +186,8 @@ async def test_public_resume_adapts_only_prepared_frames_and_retains_the_cursor(
     assert b"".join([chunk async for chunk in output.body_iterator]) == (
         legacy + event.replace(b"event: agentos_observer\n", b"") + b": keep-alive\n\n" + terminal
     )
-    resume.assert_awaited_once_with(CURSOR, "actor", "tenant")
+    assert [call.args for call in resume.await_args_list] == [
+        (CURSOR, "actor", "tenant")]
 
 
 @pytest.mark.asyncio
@@ -260,7 +263,8 @@ async def test_failed_prepared_turn_presents_an_error_before_the_terminal_frame(
 @pytest.mark.asyncio
 async def test_ephemeral_frames_preserve_observers_and_only_sign_run_owned_files(mocker):
     scoped = f"workspace/actor/{CURSOR.run_id}/outputs/result.txt"
-    frame = lambda event: ("data: " + json.dumps(event) + "\n\n").encode()
+    def frame(event):
+        return ("data: " + json.dumps(event) + "\n\n").encode()
     observer_frame = frame({"type": "final_answer", "content": "answer"})
     artifact = frame({"type": "file_artifact", "content": {"artifacts": [
         {"object_name": scoped, "name": "result.txt", "absolute_path": "/runtime/path"},

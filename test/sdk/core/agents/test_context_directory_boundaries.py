@@ -276,7 +276,13 @@ def test_native_tool_audit_and_request_messages_preserve_budget_and_fingerprints
         run_context=legacy_run,
     )
     assert legacy.tools == tools
-    assert asdict(final.evidence) == asdict(legacy.evidence)
+    # The runtime calibrates request evidence; the neutral assembly stays uncalibrated.
+    assert final.evidence.calibrated_input_estimate == final.evidence.final_token_estimate
+    assert legacy.evidence.calibrated_input_estimate == 0
+    assert asdict(final.evidence) == {
+        **asdict(legacy.evidence),
+        "calibrated_input_estimate": final.evidence.final_token_estimate,
+    }
     assert [
         getattr(message, "content", message)
         for message in native_context_messages(final.messages)

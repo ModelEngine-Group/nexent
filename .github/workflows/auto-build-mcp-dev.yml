@@ -1,4 +1,4 @@
-name: Docker Build MCP Images
+name: Docker Build MCP Proxy Image
 
 concurrency:
   group: docker-build-mcp-dev-${{ github.ref }}
@@ -9,35 +9,35 @@ on:
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
-      - 'backend/**'
-      - 'sdk/**'
       - 'deploy/images/dockerfiles/mcp/**'
-      - '.github/workflows/**'
+      - 'deploy/images/build.sh'
+      - '.dockerignore'
+      - '.github/workflows/auto-build-mcp-dev.yml'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
-      - 'backend/**'
-      - 'sdk/**'
       - 'deploy/images/dockerfiles/mcp/**'
-      - '.github/workflows/**'
+      - 'deploy/images/build.sh'
+      - '.dockerignore'
+      - '.github/workflows/auto-build-mcp-dev.yml'
 
 jobs:
-  build-mcp-amd64:
-    runs-on: ubuntu-latest
+  build-mcp:
+    name: build-mcp-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Build MCP image (amd64) and load locally
+      - uses: actions/checkout@v4
+      - name: Build MCP proxy
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          docker build --platform linux/amd64 -t nexent/nexent-mcp:dev-amd64 -f deploy/images/dockerfiles/mcp/Dockerfile .
-
-  build-mcp-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Build MCP image (arm64) and load locally
-        run: |
-          docker build --platform linux/arm64 -t nexent/nexent-mcp:dev-arm64 -f deploy/images/dockerfiles/mcp/Dockerfile .
-
-
+          bash deploy/images/build.sh --images mcp --platform "linux/$ARCH" \
+            --version "dev-$ARCH" --load

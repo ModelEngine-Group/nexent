@@ -3,7 +3,6 @@
 import type { Metadata } from "next";
 import React, { ReactNode } from "react";
 import { RootProvider } from "@/components/providers/rootProvider";
-import { DeploymentProvider } from "@/components/providers/deploymentProvider";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { ClientLayout } from "./layout.client";
 import I18nProviderWrapper from "@/components/providers/I18nProviderWrapper";
@@ -47,11 +46,9 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <I18nProviderWrapper locale={locale}>
-            <DeploymentProvider>
-              <RootProvider>
-                <ClientLayout>{children}</ClientLayout>
-              </RootProvider>
-            </DeploymentProvider>
+            <RootProvider>
+              <ClientLayout>{children}</ClientLayout>
+            </RootProvider>
           </I18nProviderWrapper>
         </NextThemesProvider>
       </body>

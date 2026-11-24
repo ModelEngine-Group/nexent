@@ -2,6 +2,8 @@
 """Verify the Runtime-owned producer for signed AgentOS resource snapshots."""
 
 import asyncio
+import json
+from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -17,6 +19,45 @@ from runtime.agentos import prepared_run
 
 ACTOR = ServicePrincipal("actor", "tenant")
 RUN_ID = "a" * 32
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.asyncio
+async def test_summary_covered_original_reader_is_bound_to_signed_identity(monkeypatch, payload, runtime, native):
+    result = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+              "type": "tool_result", "turn_id": "old-turn", "local_call_id": "local",
+              "tool_call_id": "local", "provider_call_id": "provider", "invocation_id": None,
+              "is_error": False, "result": "原始结果"}
+    record = {"record_type": "tool_result" if native else "execution_result", "tool_call_id": "local",
+              "invocation_id": None, "content": json.dumps(result if native else {"content": "原始结果"})}
+    load = Mock(return_value=record)
+    monkeypatch.setattr(prepared_run, "load_execution_result_record", load)
+
+    async def runner(info, **kwargs):
+        history = info.observer.execution_history
+        history.authorize_persisted_reads("runtime-owner")
+        assert json.loads(history.read("runtime-owner", "message:10/unit-index:3", 0, 2))["text"] == "原始"
+        load.assert_called_once_with("actor", "tenant", 42, 10, 3)
+        with pytest.raises(PermissionError):
+            history.read("foreign-owner", "message:10/unit-index:3")
+        load.side_effect = PermissionError("foreign conversation or deleted result")
+        with pytest.raises(PermissionError):
+            history.read("runtime-owner", "message:99/unit-index:3")
+        yield '{"type":"final_answer","content":"done"}'
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(payload, ACTOR)
+    await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+    runtime.journal.return_value.repair_terminal.assert_called_once_with("completed")
+
+
+def test_native_original_reader_rejects_unbound_forged_result(monkeypatch):
+    monkeypatch.setattr(prepared_run, "load_execution_result_record", lambda *a: {
+        "record_type": "tool_result", "content": json.dumps({"result": "forged"}),
+        "tool_call_id": "unbound", "invocation_id": None,
+    })
+    with pytest.raises(ValueError, match="native execution result"):
+        prepared_run._read_execution_result("actor", "tenant", 42, 10, 3)
 
 
 @pytest.fixture
@@ -133,6 +174,40 @@ async def test_scoped_stop_cancels_detached_worker(monkeypatch, payload, runtime
 
 
 @pytest.mark.asyncio
+async def test_prepared_execution_retains_occupancy_until_worker_cleanup(monkeypatch, payload, runtime):
+    running = asyncio.Event()
+    detached = asyncio.Event()
+    worker = Future()
+    assert worker.set_running_or_notify_cancel()
+    runtime.info.thread_future = worker
+
+    async def runner(_info, **_kwargs):
+        try:
+            running.set()
+            await asyncio.Future()
+            yield
+        finally:
+            detached.set()
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(payload, ACTOR)
+    producer, = runtime.tasks
+    try:
+        await asyncio.wait_for(running.wait(), timeout=2)
+        runtime.stop.return_value = True
+        await asyncio.wait_for(detached.wait(), timeout=2)
+        await asyncio.sleep(0)
+        runtime.finish.assert_not_called()
+        runtime.release.assert_not_called()
+    finally:
+        worker.set_result(None)
+        await asyncio.wait_for(producer, timeout=2)
+
+    runtime.release.assert_called_once_with(runtime.info, 42, "actor", "stopped")
+    runtime.finish.assert_called_once_with(runtime.begin.call_args.args[0], "stopped")
+
+
+@pytest.mark.asyncio
 async def test_outdated_producer_cannot_write_terminal(monkeypatch, payload, runtime):
     async def runner(_info, **_kwargs):
         yield '{"type":"final_answer","content":"answer"}'
@@ -173,3 +248,37 @@ async def test_runtime_never_journals_unresolved_skill_artifact(monkeypatch, pay
     await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
     runtime.journal.return_value.append.assert_not_called()
     runtime.journal.return_value.repair_terminal.assert_called_once_with("failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_checkpoint", [False, True])
+async def test_summary_discovery_binds_the_signed_loaded_checkpoint(monkeypatch, payload, runtime, with_checkpoint):
+    from unittest.mock import Mock
+
+    checkpoint = {"unit_id": 13, "covered_through_message_id": 10,
+                  "summary": {"markdown": "wrong value; forged unit_id=999"}}
+    if with_checkpoint:
+        payload = PreparedAgentRun.model_validate(payload.model_dump() | {
+            "historical_context": {"history_summary": checkpoint}})
+    discover = Mock(return_value={"results": [], "next_offset": 0, "eof": True})
+    monkeypatch.setattr(prepared_run, "discover_summary_sources", discover)
+
+    async def runner(info, **kwargs):
+        history = info.observer.execution_history
+        history.authorize_persisted_reads("runtime-owner")
+        with pytest.raises(PermissionError):
+            history.read("foreign-owner", "summary")
+        if with_checkpoint:
+            assert json.loads(history.read("runtime-owner", "summary"))["results"] == []
+        else:
+            with pytest.raises(PermissionError):
+                history.read("runtime-owner", "summary")
+        yield '{"type":"final_answer","content":"done"}'
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(payload, ACTOR)
+    await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+    if with_checkpoint:
+        discover.assert_called_once_with("actor", "tenant", 42, 13, 10, 0, 4000)
+    else:
+        discover.assert_not_called()

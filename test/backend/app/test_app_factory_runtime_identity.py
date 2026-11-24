@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.http.server import app_factory
-from gateway.downstream import identity, internal_tokens, middleware
+from gateway.identity import downstream, internal_tokens, middleware
 
 
 @pytest.mark.parametrize("monitoring_enabled", [False, True])
@@ -34,7 +34,7 @@ def test_real_runtime_factory_call_preserves_identity_and_lifespan(monkeypatch, 
     monkeypatch.setattr("infrastructure.monitoring.runtime.producer_lifespan", producer)
     monkeypatch.setattr(middleware, "enabled", lambda: True)
     monkeypatch.setattr(middleware, "signing_key", lambda: key)
-    monkeypatch.setattr(identity, "signing_key", lambda: key)
+    monkeypatch.setattr(downstream, "signing_key", lambda: key)
     monkeypatch.setattr(internal_tokens, "JWT_SECRET", "runtime-factory-isolated-service-signature")
 
     source = Path(__file__).resolve().parents[3] / "backend/runtime/api/application.py"
@@ -46,7 +46,7 @@ def test_real_runtime_factory_call_preserves_identity_and_lifespan(monkeypatch, 
     })
 
     def current_identity():
-        return identity.identity_context.get()
+        return downstream.identity_context.get()
 
     internal_path = "/legacy-service-probe"
     public_path = "/factory-probe"
@@ -61,11 +61,11 @@ def test_real_runtime_factory_call_preserves_identity_and_lifespan(monkeypatch, 
         assert client.post(internal_path, headers={"Authorization": "Bearer invalid"}).status_code == 401
         assert client.post(public_path, headers={"Authorization": f"Bearer {service_token}"}).status_code == 401
         session = {"kind": "session", "user_id": "user", "tenant_id": "tenant"}
-        signature = identity.sign_identity(session, "runtime", "POST", public_path, b"", key=key)
-        assert client.post(public_path, headers={identity.IDENTITY_HEADER: signature}).json() == session
+        signature = downstream.sign_identity(session, "runtime", "POST", public_path, b"", key=key)
+        assert client.post(public_path, headers={downstream.IDENTITY_HEADER: signature}).json() == session
         assert client.post(public_path).status_code == 401
         assert client.get("/health/live").status_code == 200
-    assert identity.identity_context.get() is None
+    assert downstream.identity_context.get() is None
     assert events == (["producer-start"] if monitoring_enabled else []) + [
         "runtime-start", "runtime-stop",
     ] + (["producer-stop"] if monitoring_enabled else [])

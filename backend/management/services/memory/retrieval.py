@@ -126,6 +126,7 @@ class MemoryRetrievalService:
         *,
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
         write_hits: bool = True,
+        deadline: float | None = None,
     ) -> List[MemorySearchResult]:
         """Run a retrieval against the requested layers.
 
@@ -153,6 +154,7 @@ class MemoryRetrievalService:
                         layer=layer.value,
                         top_k=top_k,
                         embedding_model_info=embedding_model_info,
+                        **({"deadline": deadline} if deadline is not None else {}),
                     )
                 )
             else:
@@ -248,6 +250,7 @@ class MemoryRetrievalService:
         layer: str,
         top_k: int,
         embedding_model_info: Optional[EmbeddingModelInfo],
+        deadline: float | None = None,
     ) -> List[MemorySearchResult]:
         embedding = request.embedding
         if embedding is None or not embedding_model_info:
@@ -259,6 +262,13 @@ class MemoryRetrievalService:
             logger.warning("No index name found")
             return []
 
+        search_options = {}
+        if deadline is not None:
+            from infrastructure.memory_io import remaining_time
+            remaining = remaining_time(deadline)
+            if remaining <= 0:
+                return []
+            search_options["request_timeout"] = remaining
         raw_hits = self.index_service.search_similar(
             index_name=index_name,
             embedding=list(embedding),
@@ -270,6 +280,7 @@ class MemoryRetrievalService:
             hybrid=getattr(request, "hybrid", False),
             query_text=request.query if getattr(request, "hybrid", False) else None,
             weight_accurate=getattr(request, "weight_accurate", 0.3),
+            **search_options,
         )
 
         if not raw_hits:
