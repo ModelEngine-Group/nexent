@@ -3006,6 +3006,28 @@
     },
     {
       "method": "GET",
+      "path": "/api/memory/config/tenant-switch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-fed989f4c3dee7e1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/config/tenant-switch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-114554631c1bfc9f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/memory/context",
       "transport": "http",
       "target": "management",
@@ -6537,5 +6559,5 @@
       ]
     }
   ],
-  "revision": "2026-11-23.agentos-ops-monitoring"
+  "revision": "2026-11-24.memory-tenant-switch"
 }

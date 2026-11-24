@@ -237,3 +237,28 @@ def test_registry_cannot_be_changed_by_mutating_its_input():
     data["routes"][0]["credential_kinds"].append("api_key")
     data["routes"].clear()
     assert registry.match("GET", "/api/models/test").credential_kinds == ("session",)
+
+
+@pytest.mark.parametrize("method", ["GET", "PUT"])
+def test_tenant_memory_switch_has_precise_session_exposure(method):
+    route = default_registry().match(method, "/api/memory/config/tenant-switch")
+    assert route is not None and route.target == "management"
+    assert route.credential_kinds == ("session",)
+    assert default_registry().match("POST", "/api/memory/config/tenant-switch") is None
+
+
+@pytest.mark.parametrize("method", ["GET", "PUT"])
+@pytest.mark.asyncio
+async def test_tenant_memory_switch_rejects_anonymous_before_upstream(method):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Anonymous tenant settings request reached identity storage")
+
+    def upstream(request):
+        pytest.fail("Anonymous tenant settings request reached a business handler")
+
+    app = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret="fixture"),
+                             identity_lookup=forbidden, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.request(method, "/api/memory/config/tenant-switch")
+    assert response.status_code == 401
