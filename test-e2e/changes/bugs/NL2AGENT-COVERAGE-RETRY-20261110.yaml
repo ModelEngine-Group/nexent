@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-COVERAGE-RETRY-20261110
+  change_type: bugfix
+  bug_id: NL2AGENT-COVERAGE-RETRY-20261110
+  title: Resume requirement verification when a confirmed creator turn fails
+  description: Continue from saved requirement edits when the latest failed confirmation is retried through creation history.
+  observed_behavior: A provider failure after accepting coverage confirmation makes the normal turn retry return resource_card_stale.
+  expected_behavior: Retrying the latest failed confirmation uses the saved requirements. A direct duplicate or superseded card remains stale.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The creator integration case checked stale actions and linked resource verification but did not retry after a provider failure.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/backend/services/test_creator_turn_failures.py
+      - test/backend/services/test_workbench_creation_history_service.py
+    behaviors:
+      - Adopt the existing verification state only for a trusted retry and the immediately consumed card version.
+      - Retain saved edits and identifiers when resuming and reject direct duplicate or superseded actions.
+    reason: Exercise the state transition directly and retain creator history and target authorization regression coverage.
+  notes: >-
+    The resource flow design is in ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md,
+    sections 4.4 and 7.9. Reuse the existing coverage D3 case for the runtime, model and history boundary.

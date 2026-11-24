@@ -67,6 +67,7 @@ interface SkillBuildModalProps {
   isOpen: boolean;
   onCancel: () => void;
   onSuccess: () => void | Promise<void>;
+  onCreated?: (skillId: number) => void;
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
   zIndex?: number;
@@ -153,6 +154,7 @@ export default function SkillBuildModal({
   isOpen,
   onCancel,
   onSuccess,
+  onCreated,
   editingSkill,
   onBeforeEditSave,
   zIndex = 1000,
@@ -563,7 +565,8 @@ export default function SkillBuildModal({
         allSkills,
         onSuccess,
         closeModal,
-        t
+        t,
+        onCreated
       );
     } finally {
       setIsSubmitting(false);
@@ -902,6 +905,7 @@ export default function SkillBuildModal({
     );
   };
   const bindSavedSkill = async (id: number) => {
+    if (!editingSkill && !savedCreatorSkillId.current) onCreated?.(id);
     savedCreatorSkillId.current = id;
     if (creationConversationId.current) {
       await conversationService.bindTarget(

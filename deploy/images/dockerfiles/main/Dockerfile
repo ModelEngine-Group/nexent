@@ -126,6 +126,14 @@ COPY backend/adapters /opt/backend/adapters
 COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
 COPY backend/memory_provider_plugins /opt/backend/memory_provider_plugins
 COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
+COPY backend/services/__init__.py \
+    backend/services/nl2agent_configuration.py \
+    backend/services/nl2agent_knowledge_recommendations.py \
+    backend/services/nl2agent_prompt_service.py \
+    backend/services/nl2agent_resource_flow.py \
+    backend/services/nl2agent_retrieval_progress.py \
+    backend/services/nl2agent_semantic_retrieval.py \
+    backend/services/nl2agent_state_service.py /opt/backend/services/
 COPY backend/tool_collection/mcp /opt/backend/tool_collection/mcp
 COPY backend/mcp /opt/backend/mcp
 COPY backend/http/client.py backend/http/logging.py backend/http/mcp_service.py /opt/backend/http/

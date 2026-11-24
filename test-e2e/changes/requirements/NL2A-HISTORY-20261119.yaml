@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: NL2A-HISTORY-20261119
+  change_type: requirement
+  requirement_id: NL2A-HISTORY-20261119
+  title: Retain three Agent and Skill creator histories without pagination
+  description: Both creator lists send only kind and target_id and soft-delete excess owned target histories; NL2Agent prefers continued optimization in the latest session.
+  affected_features:
+    existing: []
+    added: []
+    modified: [SYS-AGENT-LIFECYCLE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [NL2A-HISTORY-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Retention is owner/executor/target scoped, atomic, ordered and propagates errors.
+    - Agent and Skill lists retain three histories without pagination; requests contain only kind and target_id.
+    - Entry restores the latest session once; new sessions, failed loads and stale responses preserve user control.
+    reason: Strengthen existing service, database and panel UT; D4 separately proves editor/runtime collaboration. No duplicate D1 or deployment Case.
+    test_selectors:
+    - test/backend/services/test_creator_histories.py
+    - test/backend/database/test_creator_history_retention.py
+    - test/backend/database/test_creator_conversation_targets.py
+    - frontend/tests/workbench/CreatorHistoryQuery.test.tsx
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    - frontend/tests/workbench/Nl2SkillPanelControls.test.tsx
+    - frontend/tests/workbench/CreatorHistoryRequest.test.ts
+  notes: 'SPEC: ../nexent-doc/nexent/nl2agent-history-limit/. Responsibility inherits agent_config. D4 has browser-local fixtures and closes its page; no shared preparation assets.'

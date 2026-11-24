@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: MCP-OPENAPI-SCAN-ROUTING-20261117
+  change_type: bugfix
+  bug_id: MCP-OPENAPI-SCAN-ROUTING-20261117
+  title: Scan API-converted tools through the tenant MCP only
+  description: Skip direct MCP handshakes against REST addresses of OpenAPI services and identify failed remote services in logs.
+  observed_behavior: Enabled healthy OpenAPI records are scanned as native MCP endpoints before their converted tools are scanned through the local tenant MCP.
+  expected_behavior: OpenAPI records use the existing local tenant MCP conversion path; native MCP scanning, credentials and failure isolation remain intact.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing scan UT does not supply an enabled OpenAPI record or require a service identifier for empty timeout errors.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-MCP-API-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/services/test_mcp_discovery_openapi.py
+      - test/backend/services/test_tool_configuration_service.py::TestGetAllMcpTools
+    behaviors:
+      - OpenAPI REST addresses are never connected with an MCP client while local converted tools are retained.
+      - Native MCP credentials, enabled and healthy boundaries, and remote failure isolation remain intact.
+      - Failure logs identify the remote service and exception type without credentials.
+    reason: Routing and log assertions belong in UT; the existing PW-MCP-API-01 browser journey remains unchanged and no duplicate formal Case is added.
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/mcp-openapi-scan-routing/design.md.
+    V5-PW-MCP-API-01-RULE-01 remains the API conversion contract, routed to the mcp domain.
+    PW-MCP-API-01 was inspected as adjacent full-journey coverage, not selected as execution evidence
+    for this unit routing correction. No schema, endpoint, deployment or permissions change.

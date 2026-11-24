@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-ENABLED-MCP-RECHECK-20261110
+  change_type: bugfix
+  bug_id: NL2AGENT-ENABLED-MCP-RECHECK-20261110
+  title: Recheck coverage after a repository MCP gains available tools
+  description: Confirmation reuses existing evidence and checks newly available tools from a previously verified repository MCP.
+  observed_behavior: Enabling a repository MCP changed its installation label but confirmation reused the old coverage result.
+  expected_behavior: Confirmation rechecks the affected requirement with actual tools from the visible enabled installation and leaves unrelated coverage intact.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The coverage case showed a disabled installed candidate but did not follow it through enablement and recheck.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_resource_flow.py::test_confirmation_rechecks_only_new_tools_from_enabled_repository_mcp
+    behaviors:
+      - Prioritize actual tools from a visible enabled installation of the accepted repository entry.
+      - Retain coverage for other requirements and avoid rechecking disabled, unavailable, or already reviewed tools.
+    reason: Check when confirmation should reuse existing evidence and when it must reverify a row.
+  notes: >-
+    See ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md, section 4.4.
+    The existing coverage D3 case exercises transition from the coverage card to binding.

@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-MCP-RETRIEVAL-LANE-20261113
+  change_type: bugfix
+  bug_id: NL2AGENT-MCP-RETRIEVAL-LANE-20261113
+  title: Allow NL2Agent resource retrieval in the MCP process
+  description: Register a bounded model-tool-io lane in the MCP process manager for SDK blocking retrieval helpers.
+  observed_behavior: Both semantic and lexical discovery fail with Unknown thread lane model-tool-io under the production MCP manager.
+  expected_behavior: Blocking retrieval runs through the MCP manager and releases capacity after success or error.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Retrieval mocks and the SDK fallback manager hid the missing production MCP lane.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045, F-131]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [NL2A-COVERAGE-D3-001]
+    added: []
+    modified: [UT-BE-AUTO-A5E5C8329C318684]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/consts/test_mcp_thread_config.py
+    behaviors:
+      - The default SDK blocking helper executes with the production MCP policies.
+      - Success and exceptions release the bounded lane and shutdown leaves no active executions.
+    reason: A focused regression reproduces the production KeyError without external services.
+  notes: >-
+    Reuse the existing thread-policy D1 without adding a duplicate Case.
+    NL2A-COVERAGE-D3-001 remains the HTTP/MCP retrieval regression; its prerequisite
+    availability and execution are reported separately from UT.

@@ -30,7 +30,7 @@ case:
     expected: 三个 manager 对象互不相同，service_name 与对应服务一致。
   - order: 3
     action: 断言三个 manager 使用当前实现的 _policies 内部策略映射，键集合及 LanePolicy.name 与源码一致，不再访问不存在的 lane_policies 属性。
-    expected: runtime 7 lane、config 4 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+    expected: runtime 7 lane、config 4 lane、mcp 3 lane 的键集合无误，LanePolicy.name 与键一致。
   - order: 4
     action: 断言 runtime：control-io worker16/queue32/cancel2，sandbox worker200/queue8/cancel5，evaluation worker6/queue12/cancel5。
     expected: runtime 三个指定 lane 的精确策略参数与契约一致。
@@ -45,8 +45,8 @@ case:
     action: 检查三个服务实例均实现 ThreadManagerBase 生命周期接口。
     expected: 三个服务均可通过同一抽象接口启动、查询容量和关闭。
   - order: 8
-    action: 断言 mcp：control-io worker8/queue16/cancel5，background-service worker12/queue8/cancel5。
-    expected: mcp 两个 lane 的精确策略参数与契约一致。
+    action: 断言 mcp：control-io worker8/queue16/cancel5，background-service worker12/queue8/cancel5，model-tool-io worker6/queue16/queue_timeout0/cancel5/shutdown_grace=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS。
+    expected: mcp 三个 lane 的精确策略参数与契约一致。
   - order: 9
     action: 断言各 manager 的 _policies 与同名 LanePolicy 实例互不共享。
     expected: 策略映射和同名 LanePolicy 实例互不共享，各服务 shutdown_grace 常量正确绑定。
@@ -59,7 +59,7 @@ case:
   expected_results:
   - 三个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、api-to-mcp。
   - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 contracts.constants.environment 对应常量相等。
-  - runtime 7 lane、config 4 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - runtime 7 lane、config 4 lane、mcp 3 lane 的键集合无误，LanePolicy.name 与键一致。
   - 三个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定同一服务关停配置。
   - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用；Management model-tool-io 成功结果与受控异常正确传播，任务完成后释放容量，关闭后无遗留执行；日志不泄露敏感信息。
   forbidden_side_effects:
@@ -91,6 +91,6 @@ case:
   assertions:
   - 三个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、api-to-mcp。
   - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 contracts.constants.environment 对应常量相等。
-  - runtime 7 lane、config 4 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - runtime 7 lane、config 4 lane、mcp 3 lane 的键集合无误，LanePolicy.name 与键一致。
   - 三个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定同一服务关停配置。
   - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用；Management model-tool-io 成功结果与受控异常正确传播，任务完成后释放容量，关闭后无遗留执行；日志不泄露敏感信息。

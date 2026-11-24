@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-RESOURCE-RECOMMENDATION-20261109
+  change_type: requirement
+  requirement_id: NL2AGENT-RESOURCE-RECOMMENDATION-20261109
+  title: NL2Agent resource coverage and request-scoped configuration
+  description: >-
+    Resource recommendation SPEC increments: distinguish persisted field saves from
+    explicit full generation validation (AC-011, AC-015, AC-016), publish trusted
+    tool results (AC-003, AC-015), and verify resource search input and paging
+    (AC-001, AC-005, AC-015).
+  affected_features:
+    existing: [NL2AGENT-PROTOCOL]
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: [NL2AGENT-PROTOCOL-D4-001]
+    added: [NL2A-COMPLETION-D3-001, NL2A-INPUT-D3-001, NL2A-COVERAGE-D3-001, NL2A-CONFIG-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_nl2agent_completion_tool.py
+    - test/backend/services/test_nl2agent_resource_input.py
+    - test/backend/services/test_nl2agent_resource_pagination.py
+    - test/backend/services/test_nl2agent_resource_flow.py
+    - test/backend/services/test_nl2agent_configuration.py
+    - test/backend/services/test_nl2agent_guardrail_contract.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/sdk/core/agents/test_managed_mcp.py
+    behaviors:
+    - A successful save reports only the persisted fields, for both local and multi-field saves.
+    - Explicit validation reads the authorized run target without looking up the resource catalog, reports missing fields independently and emits completion only on success.
+    - The creator prompt and local MCP registration expose explicit validation without surfacing it in resource recommendations.
+    - Both creator prompts plan from the requested goal and use the validation tool result when deciding whether to report full completion.
+    - Both search tools report the same technical limit for an oversized batch without accessing authorization or catalogs, keep validation of other malformed requests, and pass every valid requirement through.
+    - Publish internal MCP state and card receipts for the active target and run only; ignore unrelated tools, stale receipts and duplicate events. Stdout cannot change state or end an interactive turn.
+    - Follow Skill pages and MCP cursors beyond the first 300 items and reject a repeated MCP cursor without returning partial results as success.
+    - Allocate requirement and batch IDs in the server, retain unchanged evidence on edits, reject incomplete verification and stale actions, and keep card state isolated by target and conversation.
+    - Validate section-specific changes before writing; preserve unrelated model parameters, relationships, assignments, and nested guardrail or verification settings.
+    - Document valid guardrail actions and field nesting in both creator prompts and the tool contract; save block, mask and pass while rejecting risk levels and per-rule enabled or action fields.
+    reason: Preserve existing partial-save and DB readback tests; add proof for the changed tool and prompt boundaries.
+  notes: SPEC is maintained under ../nexent-doc/nexent/nl2agent-resource-recommendation-flow. Other AC obligations remain pending and will extend the Change as their contracts are designed.

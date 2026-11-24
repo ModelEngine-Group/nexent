@@ -1,0 +1,51 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-SKILL-BINDING-SYNC-20261123
+  change_type: bugfix
+  bug_id: NL2AGENT-SKILL-BINDING-SYNC-20261123
+  title: Synchronize saved Skill bindings into active unified resource cards
+  description: Reconcile Skills by ID from the matching saved Agent snapshot, including
+    required configuration readiness and removal. Preserve historical and other-agent
+    cards.
+  observed_behavior: The Agent already contains saved Skills but the card still presents
+    them as selected pending bindings.
+  expected_behavior: Saved Skills appear checked and disabled, do not count as pending
+    writes, and allow continuation only when all required bindings are ready.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing synchronization covered tools only. Browser ready Skill
+      fixtures trusted is_bound on the card and did not represent a stale recommendation
+      with actual Agent bindings.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-045
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - NL2A-WORKFLOW-D4-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Saved Skill IDs supersede stale card flags under every shared requirement without
+      a binding call.
+    - Unsaved choices remain pending; saved removal restores availability; other-agent
+      and historical cards stay isolated.
+    - Missing required saved configuration remains bound but not ready; valid saved
+      values restore continuation.
+    reason: Strengthen real-card frontend UT and the existing compiled browser journey.
+      Backend bindings and API contracts are unchanged; no new Python UT/D2/D3/D5
+      is necessary.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentUnifiedBinding.test.tsx
+  notes: 'Baseline: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md
+    11.10. F-045 owns agent_config. Browser fixtures/context are owned and cleaned;
+    no persistent writes. Use savedAgent rather than optimistic editedAgent. The source
+    tree also had a dangling removed readOnly reference; replace it with the existing
+    disabled guard to restore current-card registration.'

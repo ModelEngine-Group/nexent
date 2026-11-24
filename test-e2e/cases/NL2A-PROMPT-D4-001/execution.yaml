@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: NL2A-PROMPT-D4-001
+timeout_seconds: 600
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: NL2A-PROMPT-D4-001
+acceptance_bindings:
+  AC-PREVIEW: [NL2A-PROMPT-D4-001]
+  AC-ACTIONS: [NL2A-PROMPT-D4-001]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained browser API fixtures own the editable draft and history/SSE data. No shared factories or persistent resources. Cleanup closes the page and the runner releases its browser context. F-045 routes to agent_config.

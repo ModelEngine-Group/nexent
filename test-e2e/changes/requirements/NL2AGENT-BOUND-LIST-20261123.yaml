@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-BOUND-LIST-20261123
+  change_type: requirement
+  requirement_id: NL2AGENT-BOUND-LIST-20261123
+  title: Keep ready requirements and bound resource checkboxes in the unified list
+  description: Binding preserves the original requirement rows and individual expansion
+    state. Bound selections remain checked and disabled; remaining resources can be
+    selected and bound cumulatively. Continue follows existing complete-coverage and
+    binding readiness rules.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-045
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - NL2A-WORKFLOW-D4-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Actual binding leaves ready requirements visible, bound resources checked and
+      disabled, optional resources selectable and Continue enabled when all required
+      needs have ready bindings.
+    - A later binding writes only the newly selected resource and retains the first
+      binding without a second write.
+    - A remaining coverage gap continues to block continuation.
+    reason: Strengthen frontend UT using the real binding item and mock only external
+      services/catalogs. Strengthen existing D4 for ready server snapshots and preserved
+      choice. No backend contract or persistence change, so Python UT/D2/D3/D5 require
+      no new cases.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentUnifiedBinding.test.tsx
+  notes: 'Baseline: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/. F-045
+    owns agent_config. Browser fixture/context are owned and cleaned with no persistent
+    writes. The click-bind and cumulative write boundary is asserted in frontend UT;
+    D4 proves ready-state rendering in the compiled browser. Existing backend continuation
+    validation is unchanged.'

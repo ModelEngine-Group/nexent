@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-COVERAGE-PROMPT-CONTEXT-20261116
+  change_type: test-fix
+  title: Restore first-prompt generation setup in the resource coverage journey
+  description: >-
+    The coverage journey inherited a nonempty prompt from the shared model fixture
+    and attempted a prompt save without reading generation context. The current
+    prompt confirmation contract correctly rejects that call. Seed an empty prompt
+    in this journey and read current context before saving. Preserve both save
+    receipts, the completion receipt, and exact database persistence assertions.
+    Existing-prompt apply/cancel coverage remains in NL2A-COMPLETION-D3-001.
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  notes: >-
+    Test-only correction; no product behavior or acceptance changes. Reuse prompt
+    confirmation and completion-tool UT. Agent configuration owns F-045. Existing
+    self-contained preparation and disposable PostgreSQL, Redis and ES cleanup
+    remain unchanged. Initial failure evidence is archived under the workspace
+    checks/2026-11-16/nl2agent-redis-retry directory.
