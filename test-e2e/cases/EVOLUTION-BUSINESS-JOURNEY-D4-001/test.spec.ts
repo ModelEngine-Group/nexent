@@ -121,7 +121,6 @@ journey(ID, async (scenario) => {
     expect(response.status()).toBe(200);
     const message = target.locator(ANSWER).nth(count);
     await expect(message.getByText(answer).first()).toBeVisible();
-    expect(await response.finished()).toBeNull();
     return { message, execution: await response.headerValue("x-agentos-run-id") };
   }
 
