@@ -63,6 +63,15 @@ def test_memory_search_export_rejects_unowned_or_inconsistent_observer_events(ma
         snapshot._export_memory_search(SimpleNamespace(pre_run_tool_events=events), allow)
 
 
+def test_memory_search_export_preserves_long_context_query():
+    query = "q" * 82_601
+    events = PreparedMemorySearch(query=query, result="No relevant memories found.").observer_events()
+
+    exported = snapshot._export_memory_search(SimpleNamespace(pre_run_tool_events=events), allow_memory=True)
+
+    assert exported.query == query
+
+
 @pytest.mark.parametrize("params,metadata", [
     ({"workspace_path": "/request-workspace"}, None),
     ({"unexpected": "value"}, None),
