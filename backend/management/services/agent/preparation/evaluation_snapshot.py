@@ -621,7 +621,9 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
             expected["config_overrides"] = configs
         if builtin in {EvaluationSkillTool.SCRIPT, EvaluationSkillTool.GUIDE} and skill_name_to_id:
             expected["skill_name_to_id"] = skill_name_to_id
-        if workbench_skills:
+        # SCRIPT already declares authorized names above; keep the shared
+        # workbench authorization check for the other built-in skill tools.
+        if workbench_skills and builtin is not EvaluationSkillTool.SCRIPT:
             expected["authorized_skill_names"] = sorted(configs)
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):
