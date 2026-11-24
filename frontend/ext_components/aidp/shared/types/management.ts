@@ -70,7 +70,7 @@ export interface AidpFolderFileItem {
   file_name?: string;
   file_type?: string;
   file_size?: number;
-  /** Folder/Files status: 1 ingested, 2 extracting, 3 failed, 4 graph failed, 5 removing, 6 remove failed. */
+  /** Folder/Files status (AIDP HistoryStatus): 0 nothing to do, 1 completed, 2 extracting, 3 failed, 4 uploading, 5 graph failed, 6 removing, 7 remove failed. */
   status?: string | number | null;
   /** Actual creation/upload time; never fall back to update_time for the UI. */
   created_at?: string | null;

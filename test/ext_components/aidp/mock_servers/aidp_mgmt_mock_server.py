@@ -1384,17 +1384,13 @@ def _uuid_hex(value: Any) -> str:
 
 
 def _folder_tree_status(document: Dict[str, Any]) -> int:
-    """Map the mock's task status to the new tree contract 1–6."""
+    """Map the mock's task status to AIDP's real HistoryStatus contract 0–7."""
     deleted_at = document.get("_deleted_at")
     if isinstance(deleted_at, (int, float)) and deleted_at > time.time():
-        return 5
-    if document.get("file_status") == 2:
         return 6
+    if document.get("file_status") == 2:
+        return 7
     status = _doc_effective_status(document)
-    if status == 4:
-        return 2
-    if status == 5:
-        return 4
     return status if isinstance(status, int) else 1
 
 

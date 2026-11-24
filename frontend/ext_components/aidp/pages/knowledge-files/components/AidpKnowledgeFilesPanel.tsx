@@ -48,6 +48,7 @@ import {
   folderTreeStatusMeta,
   formatDetailDateTime,
   formatFileSize,
+  splitFileNameExtension,
   sumColumnWidths,
   withResizableHeaders,
 } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
@@ -1319,6 +1320,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     segments.length > 0
       ? segments[segments.length - 1].label
       : knowledgeBase.kds_name;
+  const fileRenameName = splitFileNameExtension(fileRenameTarget?.file_name);
 
   return (
     <section className="flex min-h-[420px] grow shrink-0 basis-auto flex-col bg-white">
@@ -1329,7 +1331,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           value={keywordInput}
           onChange={(event) => setKeywordInput(event.target.value)}
           placeholder={t("aidpKnowledge.detailFileSearchInFolder")}
-          style={{ width: 280, maxWidth: "100%" }}
+          style={{ width: 240, maxWidth: "100%" }}
         />
         <div className="flex items-center gap-2">
           <Tooltip title={t("aidpKnowledge.refresh")}>
@@ -1627,7 +1629,8 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         open={fileRenameTarget !== null}
         title={t("aidpKnowledge.fileRenameTitle")}
         label={t("aidpKnowledge.fileNameLabel")}
-        initialValue={fileRenameTarget?.file_name || ""}
+        initialValue={fileRenameName.stem}
+        suffix={fileRenameName.extension || undefined}
         confirmLoading={fileRenameSaving}
         onCancel={() => setFileRenameTarget(null)}
         onSubmit={(name) => {
@@ -1635,7 +1638,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             message.error(t("aidpKnowledge.fileNameInvalid"));
             return;
           }
-          void handleRenameFile(name);
+          void handleRenameFile(`${name}${fileRenameName.extension}`);
         }}
       />
 

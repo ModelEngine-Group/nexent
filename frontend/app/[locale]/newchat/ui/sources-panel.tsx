@@ -596,7 +596,12 @@ const SourceListItem = memo(function SourceListItem({
     [citationContext, retrievalHighlightTerms, item.text, selected]
   );
   const previewUrl = isAidp
-    ? undefined
+    ? aidpFileIdentity
+      ? aidpKnowledgeService.getPreviewUrl(
+          aidpFileIdentity.kdsId,
+          aidpFileIdentity.fileUuid
+        )
+      : undefined
     : getLocalFilePreviewUrl(
         item.url,
         item.filename || item.title,
