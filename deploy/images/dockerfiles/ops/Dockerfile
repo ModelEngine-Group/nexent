@@ -40,7 +40,12 @@ COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py /
 COPY backend/management/__init__.py /opt/backend/management/
 COPY backend/management/api/__init__.py /opt/backend/management/api/
 COPY backend/management/api/permission /opt/backend/management/api/permission
-COPY backend/management/db/__init__.py backend/management/db/base.py /opt/backend/management/db/
+COPY \
+    backend/management/db/__init__.py \
+    backend/management/db/base.py \
+    backend/management/db/repository_review_fields.py \
+    backend/management/db/resource_review_model.py \
+    /opt/backend/management/db/
 COPY backend/management/db/agent/__init__.py backend/management/db/agent/models.py /opt/backend/management/db/agent/
 COPY \
     backend/management/db/automation/__init__.py \
