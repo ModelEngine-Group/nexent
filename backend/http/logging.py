@@ -6,6 +6,7 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from contracts.constants.environment import IS_DEBUG, LOG_BACKUP_COUNT, LOG_DIR, LOG_LEVEL, LOG_MAX_BYTES, LOG_ROTATION_INTERVAL
+from nexent.monitor.private_logging import PrivateEvaluationLogFilter
 
 
 class ColorFormatter(logging.Formatter):
@@ -120,6 +121,7 @@ def _make_file_handler(category: str) -> logging.Handler:
     # File format (no color, machine-parseable)
     fmt = "%(asctime)s  %(levelname)-8s  %(name)-25s  %(message)s"
     handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    handler.addFilter(PrivateEvaluationLogFilter())
     return handler
 
 
@@ -129,6 +131,7 @@ def _make_console_handler() -> logging.Handler:
     handler.setFormatter(
         ColorFormatter("[%(asctime)s %(levelname)-1s %(name)-1s] %(message)s", datefmt="%H:%M:%S")
     )
+    handler.addFilter(PrivateEvaluationLogFilter())
     return handler
 
 
@@ -223,6 +226,7 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         "level": level,
         "formatter": "color",
         "stream": "ext://sys.stdout",
+        "filters": ["private_evaluation"],
     }
 
     # --- File handler per category (hybrid time+size) ---
@@ -243,6 +247,7 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
             "backupCount": LOG_BACKUP_COUNT,
             "maxBytes": LOG_MAX_BYTES,
             "encoding": "utf-8",
+            "filters": ["private_evaluation"],
         }
 
     # --- Formatters ---
@@ -269,6 +274,7 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": formatters,
+        "filters": {"private_evaluation": {"()": PrivateEvaluationLogFilter}},
         "handlers": {**{"console": console_handler}, **file_handlers},
         "root": {"level": level, "handlers": root_handler_names},
     }

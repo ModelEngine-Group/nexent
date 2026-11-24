@@ -30,7 +30,8 @@ def set_curator(tenant, agent, actor, grant):
             INSERT INTO nexent.evolution_confirmation_curator_t (tenant_id,agent_id,user_id,enabled,updated_by)
             VALUES (:tenant,:agent,:user,:enabled,:actor)
             ON CONFLICT (tenant_id,agent_id,user_id) DO UPDATE SET
-                enabled=EXCLUDED.enabled, updated_by=EXCLUDED.updated_by, update_time=now()
+                enabled=EXCLUDED.enabled, updated_by=EXCLUDED.updated_by, update_time=clock_timestamp()
+            WHERE evolution_confirmation_curator_t.enabled IS DISTINCT FROM EXCLUDED.enabled
         """), {"tenant":tenant,"agent":agent,"user":grant.user_id,"actor":actor,"enabled":grant.enabled})
 
 

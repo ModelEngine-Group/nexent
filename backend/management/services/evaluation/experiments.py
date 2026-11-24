@@ -583,7 +583,7 @@ async def run_verified_arm(request, job, case, spec, client, stage_input):
         grading_task = {**task, "query": json.dumps(messages[:-1], ensure_ascii=False)}
     grade = await run_blocking("grade-development-trial", _grade, request, job, grading_task,
                                final.model_copy(update={"events": events}), lane="evaluation", owner="management")
-    if job.get("evaluation_attempt") and grade["status"] == "invalid":
+    if job.get("evaluation_attempt") and grade["status"] == "invalid" and not getattr(spec, "confirmation_bucket", None):
         usage = await _io("read-trial-budget-state", jobs.model_budget_report, tenant, job["experiment_id"])
         if usage and usage["stopped_reason"]:
             return "invalid", {"error": usage["stopped_reason"], "judgment": grade, **dialogue}

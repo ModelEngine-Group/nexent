@@ -4,7 +4,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 from contracts.evaluation_answer import completed_root_answer
 from starlette.responses import JSONResponse
@@ -12,7 +12,9 @@ from starlette.responses import JSONResponse
 from contracts.agentos import (
     BODY_KEY, PRINCIPAL_KEY, AgentOperation, EvaluationAgentResult, PreparedEvaluationRun,
 )
+from contracts.constants import environment
 from backend.http.server.agentos_lifecycle import run_until_disconnect
+from nexent.monitor.private_logging import private_evaluation_logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,17 @@ def create_evaluation_router() -> APIRouter:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         from runtime.agentos.prepared_evaluation import execute_prepared_evaluation
 
-        return await run_until_disconnect(request, execute_prepared_evaluation(payload, actor))
+        private = bool(environment.EVOLUTION_CONFIRMATION_BUCKET)
+        try:
+            with private_evaluation_logging(private):
+                return await run_until_disconnect(request, execute_prepared_evaluation(payload, actor))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if not private:
+                raise
+            logger.warning("Independent evaluation request failed (%s)", type(exc).__name__)
+            return JSONResponse({"code": "AGENTOS_CONFIRMATION_REQUEST_FAILED"}, status_code=500)
 
     return router
 

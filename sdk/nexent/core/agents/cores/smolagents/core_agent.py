@@ -19,7 +19,7 @@ from rich.text import Text
 from smolagents.agents import ActionOutput, AgentError, CodeAgent, RunResult, handle_agent_output_types
 from smolagents.memory import ActionStep, FinalAnswerStep, PlanningStep, SystemPromptStep, TaskStep, ToolCall
 from smolagents.models import CODEAGENT_RESPONSE_FORMAT, ChatMessage, MessageRole
-from smolagents.monitoring import YELLOW_HEX, LogLevel, Timing, TokenUsage
+from smolagents.monitoring import YELLOW_HEX, AgentLogger, LogLevel, Timing, TokenUsage
 from smolagents.utils import (
     AgentExecutionError,
     AgentGenerationError,
@@ -81,6 +81,7 @@ from nexent.core.utils.model_output_diagnostics import bounded_rejected_output_p
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.core.utils.token_estimation import msg_token_count
 from nexent.monitor import get_monitoring_manager
+from nexent.monitor.private_logging import private_evaluation_active
 
 
 if TYPE_CHECKING:
@@ -615,6 +616,8 @@ class CoreAgent(CodeAgent):
 
 
         context_runtime = kwargs.pop("context_runtime", None)
+        if private_evaluation_active.get():
+            kwargs["logger"] = AgentLogger(level=LogLevel.OFF)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.tools.pop("final_answer", None)
         for container_name in ("functions", "tools", "static_tools"):
@@ -954,6 +957,8 @@ class CoreAgent(CodeAgent):
             stop_sequences: Optional stop sequences for the model
             additional_args: Additional arguments passed to the model
         """
+        if private_evaluation_active.get():
+            return
         try:
             # Convert messages to serializable format and truncate
             messages_data = []
@@ -2008,7 +2013,8 @@ Additional Args:
             fallback_system_prompt=self.system_prompt,
         )
 
-        logger.info("NEW RUN TASK\n%s", truncate_content(display_task.strip(), max_length=1000))
+        if not private_evaluation_active.get():
+            logger.info("NEW RUN TASK\n%s", truncate_content(display_task.strip(), max_length=1000))
         self.logger.log_task(content=display_task.strip(),
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
                              level=LogLevel.INFO, title=self.name if hasattr(self, "name") else None, )

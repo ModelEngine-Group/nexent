@@ -122,6 +122,34 @@ async def test_model_invoke_uses_registered_model(model_type, request_body, prov
     adapter.invoke.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attempt", [None, 5])
+async def test_private_judge_requires_and_forwards_a_confirmation_lease(mocker, attempt):
+    from contextlib import nullcontext
+
+    from runtime.model import service as model_service
+
+    mocker.patch.object(model_service.environment, "EVOLUTION_CONFIRMATION_BUCKET", "private-suites")
+    mocker.patch.object(model_service.environment, "ENABLE_TELEMETRY", False)
+    mocker.patch.object(model_service, "confirmation_budget", return_value=object())
+    meter = mocker.patch.object(model_service, "meter_evaluation", return_value=nullcontext())
+    adapter = Mock(spec=model_service.OpenAILLMAdapter)
+    adapter.invoke = AsyncMock(return_value=SimpleNamespace(content="measured"))
+    build = Mock(return_value=adapter)
+    service = ModelService(Mock(return_value=_record()), build)
+    payload = ChatInvocation(model_id=1, input=[ChatMessage(role="user", content="private task")],
+                             evaluation_attempt=attempt)
+    if attempt is None:
+        with pytest.raises(ModelAccessError) as exc:
+            await service.invoke(payload, _ACTOR)
+        assert (exc.value.status, exc.value.code) == (422, "INVALID_EVOLUTION_METERING_SCOPE")
+        build.assert_not_called()
+    else:
+        assert (await service.invoke(payload, _ACTOR)).output == {"content": "measured"}
+        meter.assert_called_once_with(attempt, _ACTOR, 1, confirmation=True)
+        adapter.invoke.assert_awaited_once()
+
+
 @pytest.mark.parametrize("options", [{"temperature": -1}, {"top_p": 2}, {"api_key": "secret"}])
 def test_chat_sampling_does_not_allow_connection_fields_or_unbounded_values(options):
     with pytest.raises(ValidationError):

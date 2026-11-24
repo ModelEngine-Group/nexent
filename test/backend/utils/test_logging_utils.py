@@ -23,10 +23,29 @@ from backend.http.logging import (
     ColorFormatter,
     HybridRotatingFileHandler,
     MODEL_CALL_LOGGERS,
+    _make_console_handler,
     configure_elasticsearch_logging,
     configure_logging,
     get_uvicorn_logging_config,
 )
+from nexent.monitor.private_logging import private_evaluation_logging
+
+
+def test_private_log_context_hides_payload_and_restores_service_logging(capsys):
+    handler = _make_console_handler()
+
+    def write(message):
+        handler.handle(logging.LogRecord("openai_llm", logging.WARNING, __file__, 0, message, (), None))
+
+    write("ordinary request")
+    with private_evaluation_logging(True):
+        write("private input")
+        with private_evaluation_logging(False):
+            write("private tool reply")
+    write("ordinary result")
+    logs = capsys.readouterr().err
+    assert "ordinary request" in logs and "ordinary result" in logs
+    assert "private" not in logs
 
 
 # ---------------------------------------------------------------------------
@@ -362,9 +381,9 @@ class TestModelCallRouting:
             assert "level" not in entry
         # file_model_call shares the service level like every other category.
         assert cfg["handlers"]["file_model_call"]["level"] == cfg["handlers"]["file_runtime"]["level"]
-        # Console itself stays unfiltered (docker logs behaviour unchanged).
-        assert "filters" not in cfg["handlers"]["console"]
-        assert "filters" not in cfg["handlers"]["file_runtime"]
+        assert cfg["handlers"]["console"]["filters"] == ["private_evaluation"]
+        assert cfg["handlers"]["file_model_call"]["filters"] == ["private_evaluation"]
+        assert cfg["handlers"]["file_runtime"]["filters"] == ["private_evaluation"]
 
     def test_whitelist_covers_sdk_model_loggers(self):
         assert set(MODEL_CALL_LOGGERS) >= {

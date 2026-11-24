@@ -536,19 +536,22 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
     from contracts.agentos import ReplayReceipt
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
     from contracts.constants import environment
+    from contracts.evolution_metering import confirmation_budget
 
     from nexent.core.models.wire_budget import ModelWireBudgetExceeded
     from runtime.model.evolution_meter import meter_evaluation
 
     private_bucket = environment.EVOLUTION_CONFIRMATION_BUCKET
     evaluation_attempt = getattr(payload, "evaluation_attempt", None)
-    if evaluation_attempt is not None and (not payload.replay_trial_id or private_bucket):
+    if evaluation_attempt is not None and not payload.replay_trial_id:
         raise HTTPException(status_code=422, detail={"code": "INVALID_EVOLUTION_METERING_SCOPE"})
     if private_bucket or payload.confirmation_bucket:
         if (not private_bucket or payload.confirmation_bucket != private_bucket
                 or environment.MINIO_DEFAULT_BUCKET != private_bucket or environment.ENABLE_TELEMETRY
                 or not EVOLUTION_REPLAY_RUNTIME or not payload.replay_trial_id):
             raise HTTPException(status_code=403, detail={"code": "AGENTOS_CONFIRMATION_RUNTIME_REQUIRED"})
+        if (evaluation_attempt is None) != (confirmation_budget(actor.tenant_id) is None):
+            raise HTTPException(status_code=422, detail={"code": "INVALID_EVOLUTION_METERING_SCOPE"})
 
     if payload.replay_trial_id is not None and not EVOLUTION_REPLAY_RUNTIME:
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_REPLAY_RUNTIME_REQUIRED"})
@@ -586,7 +589,7 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
                 if ref.package_candidate_id:
                     observations.append(await run_blocking("observe-trial-skill", skill_trial_observation,
                         payload, info, actor, ref.package_candidate_id, lane="control-io", owner="runtime"))
-        with (meter_evaluation(evaluation_attempt, actor),
+        with (meter_evaluation(evaluation_attempt, actor, confirmation=bool(private_bucket)),
               observe_trial_guide_choices(info, actor.tenant_id, [path for _, path in observations],
                                           payload.observe_root_skill_choices) as (reads, all_reads)):
             result = await collect_observer_output(info, agent_run, runtime_thread_manager)

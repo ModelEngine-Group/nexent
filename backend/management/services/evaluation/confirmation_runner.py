@@ -11,6 +11,7 @@ from backend.http.client import create_httpx_client
 from contracts.confirmation import ConfirmationPolicy
 from contracts.constants import environment
 from contracts.evolution import DevelopmentExperimentRequest
+from contracts.evolution_metering import confirmation_budget
 from contracts.evolution_sources import task_digest
 from infrastructure.agentos_client import AgentOSClient
 from management.cli.confirmation_manifest import read_private_suite, verify_private_protocol
@@ -21,6 +22,7 @@ from management.services.evaluation.confirmation import verified_recipe
 from management.services.evaluation.confirmation_results import arm_measurement, comparison_summary
 from management.services.evaluation.replay_cases import stage_verified_input
 from nexent.core.concurrency import run_blocking
+from nexent.monitor.private_logging import private_evaluation_logging
 
 
 async def _io(name, fn, *args):
@@ -80,6 +82,12 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
         if stored["lock_id"] == lock_id and stored["summary"] is not None:
             return stored["summary"]
     req = DevelopmentExperimentRequest.model_validate(plan["request"])
+    allowance = confirmation_budget(tenant)
+    if allowance is None and authority.get("model_metering") is not None:
+        raise ValueError("Restore the locked independent billing configuration before resuming")
+    if allowance is not None:
+        await _io("freeze-independent-model-budget", confirmation_runs.freeze_model_metering,
+                  tenant, curator, protocol, allowance)
     client = AgentOSClient(environment.EVOLUTION_CONFIRMATION_RUNTIME_URL, create_httpx_client)
     step_ids = {part.candidate_id for part in req.components or () if part.candidate_type == "skill_step"}
     pairs = []
@@ -117,6 +125,16 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                 def stage(turn):
                     return stage_verified_input(tenant, editor, task, attempt, turn, read_material)
 
+                model_attempt = None
+                if allowance is not None:
+                    model_attempt = await _io(
+                        "authorize-independent-model-attempt", confirmation_runs.authorize_model_attempt,
+                        tenant, curator, protocol, editor, req.timeout_seconds,
+                    )
+                    if model_attempt is None:
+                        measured[arm] = arm_measurement("invalid", {}, task=task)
+                        continue
+                    job["evaluation_attempt"] = model_attempt
                 try:
                     status, details = await asyncio.wait_for(
                         experiments.run_verified_arm(
@@ -133,6 +151,10 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                     # The preregistered arm budget expired. An upstream outage, in contrast,
                     # interrupts the job and permits a later operator restart of the same lock.
                     status, details = "invalid", {}
+                finally:
+                    if model_attempt is not None:
+                        await _io("close-independent-model-attempt", confirmation_runs.close_model_attempt,
+                                  tenant, lock_id, model_attempt)
                 await _io("recheck-independent-grant", locked_protocol, tenant, curator, lock_id)
                 observation = await _io(
                     "save-private-checkpoint",
@@ -172,6 +194,7 @@ async def run_confirmation(tenant, lock_id, path):
         await _io("release-independent-run", slot.__exit__, None, None, None)
         raise
     try:
-        return await _run_locked(tenant, lock_id, path, bucket, ledger)
+        with private_evaluation_logging(True):
+            return await _run_locked(tenant, lock_id, path, bucket, ledger)
     finally:
         await _io("release-independent-run", slot.__exit__, None, None, None)

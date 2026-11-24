@@ -19,5 +19,5 @@ feature:
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-05
     description: Skill 脚本专项题以沙箱实际运行的脚本、输入、退出码和输出判分，缺证不能计为通过。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-06
-    description: 开发实验冻结全部重放轮数和总时限，按租户限制并发，到期保留已有结果，缺少有效判分时不能提名。候选生成在调用模型前扣减租户和来源的额度，超额停止。
+    description: 开发实验冻结全部重放轮数和总时限，按租户限制并发，到期保留已有结果，缺少有效判分时不能提名。候选生成在调用模型前扣减租户和来源的额度，超额停止。独立确认使用独立的租户模型额度，只报告整批供应商用量，额度不足时不能据部分结果晋升。
   required_test_stages: [D1, D2, D3]

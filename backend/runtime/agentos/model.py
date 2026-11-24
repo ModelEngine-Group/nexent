@@ -8,6 +8,8 @@ from pydantic import TypeAdapter, ValidationError
 from starlette.responses import JSONResponse
 
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, ModelInvocation, ModelOperation, ModelReference
+from contracts.constants import environment
+from nexent.monitor.private_logging import private_evaluation_logging
 from runtime.model.service import ModelAccessError, ModelService
 
 _INVOKE = TypeAdapter(ModelInvocation)
@@ -26,7 +28,8 @@ def create_model_router(service: ModelService) -> APIRouter:
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         try:
-            return await action(payload, principal)
+            with private_evaluation_logging(bool(environment.EVOLUTION_CONFIRMATION_BUCKET)):
+                return await action(payload, principal)
         except ModelAccessError as exc:
             return JSONResponse({"code": exc.code}, status_code=exc.status)
         except Exception as exc:

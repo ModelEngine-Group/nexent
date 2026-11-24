@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-03: [test_distributed_budget]
   AC-04: [test_distributed_budget]
   AC-05: [test_distributed_budget]
+  AC-06: [test_distributed_budget]
 preparation:
   families: []
   anchors: false

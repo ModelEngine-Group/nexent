@@ -20,11 +20,13 @@ def test_distributed_budget(runtime, monkeypatch):
     engine = db_client.engine
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        for name in ("018_evolution_replay_cases", "019_evolution_experiments", "041_evolution_generation_attempts",
-                     "043_evolution_model_charges", "044_evolution_evaluation_metering"):
+        for name in ("018_evolution_replay_cases", "019_evolution_experiments", "028_evolution_confirmation_suites",
+                     "029_evolution_confirmation_locks", "030_evolution_confirmation_results",
+                     "041_evolution_generation_attempts", "043_evolution_model_charges",
+                     "044_evolution_evaluation_metering", "045_evolution_confirmation_metering"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
 
-    def submit(tenant, count, metering=None):
+    def submit(tenant, count, metering=None, editor="editor"):
         with engine.begin() as conn:
             ids = [conn.scalar(text("""INSERT INTO nexent.evolution_replay_case_t
                 (tenant_id,agent_id,version_no,digest,task,created_by)
@@ -37,8 +39,8 @@ def test_distributed_budget(runtime, monkeypatch):
                 "request":request.model_dump(), "budget":{**request.budget.model_dump(), "planned_replay_turns":count}}
         if metering:
             plan["metering"] = metering
-        eid = jobs.submit(tenant, "editor", request, plan)
-        assert jobs.previous_submission(tenant, "editor", request) == eid
+        eid = jobs.submit(tenant, editor, request, plan)
+        assert jobs.previous_submission(tenant, editor, request) == eid
         return eid
 
     first, second = submit("tenant-a",5), submit("tenant-b",1)
@@ -68,6 +70,7 @@ def test_distributed_budget(runtime, monkeypatch):
     _verify_candidate_budget(monkeypatch)
     _verify_provider_quota(monkeypatch)
     _verify_experiment_quota(monkeypatch, submit)
+    _verify_confirmation_quota(monkeypatch, submit)
 
 
 def _verify_candidate_budget(monkeypatch):
@@ -243,3 +246,102 @@ def _verify_experiment_quota(monkeypatch, submit):
     ordinary = generation_attempts.reserve(tenant, actor.user_id, "a"*64, 3)
     with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(ordinary, actor, model=3):
         model_wire_budget.get()({})
+
+
+def _verify_confirmation_quota(monkeypatch, submit):
+    import json
+    from types import SimpleNamespace
+
+    from contracts.constants import environment
+    from contracts.errors.exceptions import AppException
+    from contracts.evolution_metering import confirmation_budget
+    from contracts.evolution_sources import task_digest
+    from infrastructure.rdb.account_record import UserAccount, UserTenant
+    from infrastructure.rdb.client import db_client, get_db_session
+    from management.db.evaluation import confirmation_runs as confirmation, generation_attempts
+    from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
+    from runtime.model.evolution_meter import meter_evaluation
+
+    tenant = "tenant-native"
+    curator, editor = "independent-reviewer", "candidate-editor"
+    with get_db_session() as session:
+        for user, role in ((curator, "USER"), (editor, "DEV")):
+            session.add(UserAccount(user_id=user, user_roles=[role], delete_flag="N"))
+            session.add(UserTenant(user_id=user, tenant_id=tenant, delete_flag="N"))
+    eid = submit(tenant, 1, editor=editor)
+    tariff = dict(max_input_tokens=40, max_output_tokens=20, input_micros_per_million=1_000_000,
+                  output_micros_per_million=1_000_000)
+    config = dict(daily_tokens=900, daily_micros=74, models={"2": tariff, "3": tariff})
+    policy, manifest, recipe = {}, {"cases": ["synthetic private fingerprint"]}, {"candidate": eid}
+    with db_client.engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO nexent.evolution_confirmation_curator_t (tenant_id,agent_id,user_id,enabled,updated_by)
+            VALUES (:tenant,1,:curator,true,:curator)
+        """), dict(tenant=tenant, curator=curator))
+        suite_id = conn.scalar(text("""
+            INSERT INTO nexent.evolution_confirmation_suite_t
+                (tenant_id,agent_id,version_no,digest,manifest,created_by)
+            VALUES (:tenant,1,1,:digest,CAST(:manifest AS jsonb),:curator) RETURNING suite_id
+        """), dict(tenant=tenant, digest=task_digest(manifest), manifest=json.dumps(manifest), curator=curator))
+        conn.execute(text("""
+            INSERT INTO nexent.evolution_confirmation_candidate_t (experiment_id,digest,recipe,submitted_by)
+            VALUES (:eid,:digest,CAST(:recipe AS jsonb),:editor)
+        """), dict(eid=eid, digest=task_digest(recipe), recipe=json.dumps(recipe), editor=editor))
+        lock = conn.scalar(text("""
+            INSERT INTO nexent.evolution_confirmation_lock_t (suite_id,experiment_id,digest,policy,locked_by)
+            VALUES (:suite,:eid,:digest,CAST(:policy AS jsonb),:curator) RETURNING lock_id
+        """), dict(suite=suite_id, eid=eid, policy=json.dumps(policy), curator=curator,
+                  digest=task_digest([tenant, suite_id, task_digest(manifest), eid, task_digest(recipe), policy])))
+
+    _, protocol = confirmation.run_authority(tenant, lock)
+    monkeypatch.setattr(environment, "EVOLUTION_CONFIRMATION_METERING", json.dumps({tenant: config}))
+    # Identical tariff revisions in the two pools still cannot reuse each other's permits.
+    monkeypatch.setattr(environment, "EVOLUTION_EVALUATION_METERING", json.dumps({tenant: config}))
+    allowance = confirmation_budget(tenant)
+    confirmation.freeze_model_metering(tenant, curator, protocol, allowance)
+    with pytest.raises(AppException, match="billing configuration changed"):
+        confirmation.freeze_model_metering(tenant, curator, protocol, allowance.model_copy(update={"daily_tokens": 899}))
+    actor = SimpleNamespace(tenant_id=tenant, user_id=editor)
+    old = confirmation.authorize_model_attempt(tenant, curator, protocol, editor, 30)
+    current = confirmation.authorize_model_attempt(tenant, curator, protocol, editor, 30)
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(old, actor, model=2, confirmation=True):
+        model_wire_budget.get()({})
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(current, actor, model=2):
+        model_wire_budget.get()({})
+    assert not generation_attempts.complete(tenant, current)
+
+    def set_grant(enabled):
+        with db_client.engine.begin() as conn:
+            conn.execute(text("""UPDATE nexent.evolution_confirmation_curator_t
+                SET enabled=:enabled,update_time=clock_timestamp() WHERE user_id=:curator"""),
+                dict(enabled=enabled, curator=curator))
+
+    set_grant(False)
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(current, actor, model=2, confirmation=True):
+        model_wire_budget.get()({})
+    set_grant(True)
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(current, actor, model=2, confirmation=True):
+        model_wire_budget.get()({})
+    current = confirmation.authorize_model_attempt(tenant, curator, protocol, editor, 30)
+    with meter_evaluation(current, actor, confirmation=True):
+        model_wire_budget.get()({}, 2)(5, 4)
+    with meter_evaluation(current, actor, model=3, confirmation=True):
+        model_wire_budget.get()({})(4, 3)
+    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(current, actor, model=3, confirmation=True):
+        model_wire_budget.get()({})
+    assert not confirmation.authorize_model_attempt(tenant, curator, protocol, editor, 30)
+    measured = {"decision": "passed", "valid_pairs": 1, "missing": []}
+    result = confirmation.finalize(tenant, curator, protocol, measured)
+    assert result == {
+        "decision": "insufficient", "valid_pairs": 1, "missing": ["confirmation_model_budget_exceeded"],
+        "model_usage": {"calls": 2, "reported_calls": 2, "input_tokens": 9, "output_tokens": 7,
+                        "cost_micros": 16, "unsettled_tokens": 0, "unsettled_micros": 0},
+    }
+    assert confirmation.result_for_experiment(tenant, eid) == [{"lock_id": lock, "summary": result}]
+    with db_client.engine.connect() as conn:
+        stored = conn.execute(text("""
+            SELECT a.source_digest,a.trial_id,a.trial_receipt,c.model_id,c.experiment_id
+            FROM nexent.evolution_model_charge_t c JOIN nexent.evolution_generation_attempt_t a USING (attempt_id)
+            WHERE c.confirmation_lock_id=:id ORDER BY c.charge_id
+        """), {"id": lock}).all()
+        assert stored == [("0"*64, None, None, 2, None), ("0"*64, None, None, 3, None)]

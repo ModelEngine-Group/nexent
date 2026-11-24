@@ -5,7 +5,7 @@ case:
   case_id: EVOLUTION-RUN-BUDGET-D3-001
   feature_id: AGENT-EVOLUTION-REPLAY
   business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-06]
-  title: 开发试跑和候选生成按租户限制额度
+  title: 开发试跑、候选生成和独立确认按租户限制额度
   type: AGENT-IT
   priority: P0
   status: active
@@ -30,8 +30,11 @@ case:
   - order: 5
     action: 用同一个实验额度为重放和模型裁判分别申请模型调用，保留首项评分，再耗尽额度。尝试继续领取任务或沿用已完成的试跑。
     expected: 原有评分保留，未领取任务标记预算中止，已结束试跑不能继续计费。
-  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。, 模型费用和 token 分别预留并按回执结算。, 重放与模型裁判共享同一个实验的模型预算，停止后不再派发。]
-  forbidden_side_effects: [单个租户的实验不能占用另一租户的额度。]
+  - order: 6
+    action: 以已锁定的独立确认申请额度，提交供应商用量。用相同回执从开发链路申请，再撤回独立评测人资格或耗尽确认额度。
+    expected: 独立确认的额度和回执不能由开发试跑复用。旧租约、撤权或余额不足在发模型请求前拦截。已有判分保留，只回传汇总用量。额度不足时结论不能为通过。
+  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。, 模型费用和 token 分别预留并按回执结算。, 重放与模型裁判共享同一个实验的模型预算，停止后不再派发。, 独立确认使用单独的额度与租约，余额不足时阻止晋升。]
+  forbidden_side_effects: [单个租户的实验不能占用另一租户的额度。, 公共计费记录和汇总不含私有用例标识、任务和判分明细。]
   acceptance:
   - id: AC-01
     description: 多 worker 同时申请额度且其他租户可运行。
@@ -54,6 +57,11 @@ case:
     description: 冻结的预算同时覆盖重放与裁判，达到上限后停止派发并保留已完成判分。
     steps: [5]
     expected_results: [5]
+  - id: AC-06
+    description: 私有重放与裁判结算至同一锁定批次，拒绝跨链路及失效回执，预算中止时只提交汇总和未通过结论。
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [2]
   execution:
     profiles:
     - name: mock

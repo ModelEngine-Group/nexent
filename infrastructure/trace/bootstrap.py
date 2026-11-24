@@ -61,7 +61,9 @@ def _initialize_monitoring():
 
     monitoring_manager.configure(config)
     configure_monitoring_records(
-        write_model_monitoring_record if environment.ENABLE_MODEL_MONITORING else None,
+        write_model_monitoring_record
+        if environment.ENABLE_MODEL_MONITORING and not environment.EVOLUTION_CONFIRMATION_BUCKET
+        else None,
         batch_size=environment.MODEL_MONITORING_BATCH_SIZE,
         flush_interval=environment.MODEL_MONITORING_FLUSH_INTERVAL_SECONDS,
     )

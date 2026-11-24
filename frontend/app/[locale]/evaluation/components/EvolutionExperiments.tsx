@@ -574,6 +574,15 @@ function Experiments({
                   #{lock_id} · {t(`evolution.confirmation.${summary?.decision ?? "pending"}`)}
                   {summary && <> · {t("evolution.confirmation.pairs", {valid: summary.valid_pairs,
                     total: summary.total_pairs, regressed: summary.regressed})}</>}
+                  {summary?.model_usage && <> · {t("evolution.confirmation.modelUsage", {
+                    tokens: summary.model_usage.input_tokens + summary.model_usage.output_tokens,
+                    dollars: (summary.model_usage.cost_micros / 1_000_000).toFixed(6),
+                    reservedTokens: summary.model_usage.unsettled_tokens,
+                    reservedCost: (summary.model_usage.unsettled_micros / 1_000_000).toFixed(6),
+                  })}</>}
+                  {summary?.missing?.includes("confirmation_model_budget_exceeded") && <>
+                    {" · "}{t("evolution.confirmation.modelStopped")}
+                  </>}
                   {summary?.decision === "passed" && <> · <a href={`/${i18n.language.startsWith("zh") ? "zh" : "en"}/evaluation/releases/${lock_id}`}>
                     {t("evolution.release.open")}
                   </a></>}

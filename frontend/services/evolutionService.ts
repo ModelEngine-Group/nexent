@@ -226,7 +226,9 @@ export const evolutionService = {
   confirmationResults: (id: number) => read<Array<{
     lock_id: number;
     summary: null | { decision: "passed" | "failed" | "insufficient"; valid_pairs: number;
-      total_pairs: number; regressed: number; quality_gain_pp: number | null };
+      total_pairs: number; regressed: number; quality_gain_pp: number | null; missing?: string[];
+      model_usage?: { input_tokens: number; output_tokens: number; cost_micros: number;
+        unsettled_tokens: number; unsettled_micros: number } };
   }>>(`${root}/experiments/${id}/confirmation-results`),
   nominate: (id: number) => read<{ experiment_id: number; candidate_digest: string }>(
     `${root}/experiments/${id}/confirmation-candidate`, {}),

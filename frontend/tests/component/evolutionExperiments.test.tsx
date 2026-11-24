@@ -184,8 +184,12 @@ it("submits an eligible candidate only when its editor requests independent conf
     screening:{status:"eligible",gain:1,criteria:{target_case_ids:[2],metric:"tasks_fixed",minimum:1},failures:{},missing:{}}});
   const digest = "b".repeat(64);
   vi.mocked(evolutionService.nominate).mockResolvedValue({experiment_id:41,candidate_digest:digest});
-  vi.mocked(evolutionService.confirmationResults).mockResolvedValue([{lock_id:1,summary:{
-    decision:"passed",valid_pairs:3,total_pairs:3,regressed:0,quality_gain_pp:100/3}}]);
+  vi.mocked(evolutionService.confirmationResults).mockResolvedValue([
+    {lock_id:1,summary:{decision:"passed",valid_pairs:3,total_pairs:3,regressed:0,quality_gain_pp:100/3}},
+    {lock_id:2,summary:{decision:"insufficient",valid_pairs:1,total_pairs:3,regressed:0,quality_gain_pp:100,
+      missing:["confirmation_model_budget_exceeded"],
+      model_usage:{input_tokens:9,output_tokens:7,cost_micros:16,unsettled_tokens:0,unsettled_micros:0}}},
+  ]);
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
@@ -196,6 +200,8 @@ it("submits an eligible candidate only when its editor requests independent conf
   expect(await screen.findByText(digest)).toBeInTheDocument();
   expect(evolutionService.nominate).toHaveBeenCalledWith(41);
   expect(await screen.findByText(/evolution.confirmation.passed/)).toBeInTheDocument();
+  expect(screen.getByText(/evolution.confirmation.modelUsage/)).toHaveTextContent("evolution.confirmation.modelStopped");
+  expect(screen.getByRole("link", {name:"evolution.release.open"})).toHaveAttribute("href", "/zh/evaluation/releases/1");
 });
 
 it("requires a business expectation before freezing a trace draft, then selects its baseline", async () => {

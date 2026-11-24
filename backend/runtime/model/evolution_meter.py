@@ -3,7 +3,7 @@
 
 from contextlib import contextmanager
 
-from contracts.evolution_metering import evaluation_budget, generation_budget
+from contracts.evolution_metering import confirmation_budget, evaluation_budget, generation_budget
 from infrastructure.rdb.evolution_model_charges import reconcile_model_call, reserve_model_call
 from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
 
@@ -12,16 +12,17 @@ def meter_generation(attempt, model, actor):
     return _meter(attempt, model, actor, evaluation=False)
 
 
-def meter_evaluation(attempt, actor, model=None):
-    return _meter(attempt, model, actor, evaluation=True)
+def meter_evaluation(attempt, actor, model=None, *, confirmation=False):
+    return _meter(attempt, model, actor, evaluation=True, confirmation=confirmation)
 
 
 @contextmanager
-def _meter(attempt, model, actor, *, evaluation):
+def _meter(attempt, model, actor, *, evaluation, confirmation=False):
     if attempt is None:
         yield
         return
-    allowance = (evaluation_budget if evaluation else generation_budget)(actor.tenant_id)
+    budget = confirmation_budget if confirmation else evaluation_budget if evaluation else generation_budget
+    allowance = budget(actor.tenant_id)
     denied = False
 
     def admit(wire, wire_model_id=None):
@@ -46,8 +47,10 @@ def _meter(attempt, model, actor, *, evaluation):
         configured = wire.get(cap_key)
         output = min(configured, tariff.max_output_tokens) if type(configured) is int and configured > 0 else tariff.max_output_tokens
         wire[cap_key] = output
-        charge = reserve_model_call(actor.tenant_id, actor.user_id, actual_model,
-                                    attempt, allowance, tariff, output, evaluation=evaluation)
+        charge = reserve_model_call(
+            actor.tenant_id, actor.user_id, actual_model, attempt, allowance, tariff, output,
+            evaluation=evaluation, confirmation=confirmation,
+        )
         if charge is None:
             denied = True
             raise ModelWireBudgetExceeded("Model token or cost budget exhausted")

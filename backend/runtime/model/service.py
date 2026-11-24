@@ -12,6 +12,8 @@ from contracts.agentos import (
     ModelMetadata,
     ModelResult,
 )
+from contracts.constants import environment
+from contracts.evolution_metering import confirmation_budget
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.concurrency import run_blocking
@@ -76,10 +78,18 @@ class ModelService:
             raise ModelAccessError(409, "MODEL_REVISION_MISMATCH")
         if metadata.model_type not in _MODEL_TYPES[payload.operation]:
             raise ModelAccessError(422, "MODEL_OPERATION_UNSUPPORTED")
+        private = bool(environment.EVOLUTION_CONFIRMATION_BUCKET)
+        if private and (environment.ENABLE_TELEMETRY or not isinstance(payload, ChatInvocation)):
+            raise ModelAccessError(403, "AGENTOS_CONFIRMATION_RUNTIME_REQUIRED")
 
         set_monitoring_context(user_id=actor.user_id, tenant_id=actor.tenant_id)
         set_monitoring_operation(f"agentos_model_{payload.operation}", display_name=metadata.display_name)
         if isinstance(payload, ChatInvocation):
+            if private and (
+                payload.generation_attempt is not None
+                or (payload.evaluation_attempt is None) != (confirmation_budget(actor.tenant_id) is None)
+            ):
+                raise ModelAccessError(422, "INVALID_EVOLUTION_METERING_SCOPE")
             options = payload.options.model_dump(exclude_none=True) if payload.options else {}
             adapter = self.build_adapter(record, "llm", "llm", actor.tenant_id, stream=False, **options)
             try:
@@ -89,7 +99,7 @@ class ModelService:
                     adapter, OpenAILLMAdapter
                 ):
                     raise ModelWireBudgetExceeded("This model adapter has no provider metering")
-                meter = (meter_evaluation(payload.evaluation_attempt, actor, payload.model_id)
+                meter = (meter_evaluation(payload.evaluation_attempt, actor, payload.model_id, confirmation=private)
                          if payload.evaluation_attempt is not None
                          else meter_generation(payload.generation_attempt, payload.model_id, actor))
                 with meter:
