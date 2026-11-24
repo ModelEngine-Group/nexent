@@ -64,7 +64,7 @@ def test_root_preferences_use_original_outlet_then_agent_values_without_mutating
     merge.assert_called_once_with(original, {'top_p': 0.8}, {'temperature': 0})
     assert models == [root, child, copy] and config.model_name == 'private'
     assert child.resolved_profile is active and root.resolved_profile is active
-    assert root.model_copy.call_args.kwargs['update']['default_output_reserve_tokens'] == 256
+    assert 'default_output_reserve_tokens' not in root.model_copy.call_args.kwargs['update']
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ def test_saved_profile_preferences_work_without_original_catalog_lookup(monkeypa
     run_preparation.apply_root_model_preferences(models, config, {'12': {'temperature': 0}})
     service.merge_model_preferences.assert_called_once_with(profile, {'temperature': 0})
     assert models[-1] is copied and config.model_name == 'private'
-    assert root.model_copy.call_args.kwargs['update']['default_output_reserve_tokens'] == 512
+    assert 'default_output_reserve_tokens' not in root.model_copy.call_args.kwargs['update']
 
 
 @pytest.mark.asyncio

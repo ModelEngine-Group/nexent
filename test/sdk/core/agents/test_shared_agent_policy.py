@@ -410,6 +410,9 @@ def test_parallel_delegation_validates_the_exact_action_with_quoted_protocol_tag
     assert list(agent._run_stream(_PARALLEL_REQUEST, max_steps=5))[-1].output == "Verified both workers"
     agent.python_executor.assert_called_once_with(_PARALLEL_ACTION_WITH_MARKUP)
     agent.observer.rollback_model_attempt.assert_not_called()
+    if strict:
+        assert agent.model.call_args_list[0].kwargs["stop_sequences"] is None
+        assert agent.model.call_args_list[1].kwargs["stop_sequences"] == ["<RESULT>", "</code>"]
 
 
 def test_legacy_parallel_delegation_recovers_after_bad_quotes(monkeypatch):

@@ -417,7 +417,9 @@ async def test_first_prepared_turn_compiles_before_creating_a_conversation(flow,
     assert compile_snapshot.await_args.kwargs["new_conversation"] is True
     assert response.headers["conversation_id"] == str(REFERENCE.conversation_id)
     output = b"".join([part async for part in response.body_iterator])
-    assert b'"type":"conversation_created"' in output and output.endswith(b"data: answer\n\n")
+    created = json.loads(output.split(b"\n\n", 1)[0].removeprefix(b"data: "))
+    assert created == {"type": "conversation_created", "content": {"conversation_id": REFERENCE.conversation_id}}
+    assert output.endswith(b"data: answer\n\n")
     client.find_active_run.assert_not_awaited()
 
 

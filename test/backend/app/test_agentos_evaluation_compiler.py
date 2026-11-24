@@ -748,7 +748,27 @@ def test_prepared_conversation_preserves_authorized_execution_history(records):
     )
     payload = PreparedConversationHistory.model_validate_json(history.model_dump_json())
     restored = prepared_evaluation._restore_conversation_history(payload, ServicePrincipal("actor", "tenant"))
-    assert restored["conversation_turns"][0].get("execution_records", []) == records
+    assert restored["conversation_turns"][0].get("execution_records", []) == [
+        {"unit_index": None, "execution_event": None} | record for record in records
+    ]
+
+
+def test_prepared_conversation_keeps_authorized_tool_records_across_runtime_boundary():
+    records = [{
+        "record_type": "execution_logs", "content": "Actual result 2603", "unit_index": 7,
+        "tool_call_id": "call-1", "invocation_id": None,
+    }]
+    history = {"conversation_turns": [{
+        "user_message": "Calculate", "assistant_final_answer": "The result is 2603",
+        "user_message_id": 21, "assistant_message_id": 22, "execution_records": records,
+    }]}
+
+    prepared = evaluation_snapshot._prepare_conversation_history(history, "actor", "tenant")
+    restored = prepared_evaluation._restore_conversation_history(prepared, ServicePrincipal("actor", "tenant"))
+
+    assert restored["conversation_turns"][0]["execution_records"] == [
+        record | {"execution_event": None} for record in records
+    ]
 
 
 def test_prepared_conversation_rejects_foreign_history_attachment():

@@ -19,6 +19,7 @@ from openjiuwen.core.foundation.llm.schema.tool_call import ToolCall as NativeTo
 from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
 from nexent.core.agents.cores.jiuwen.messages import resource_view
 from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, JiuwenProtocolError, parse_execution_blocks
+from nexent.core.agents.output.answer import AnswerBoundaryError, normalize_public_answer
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.model_service.contracts import ModelError
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
@@ -59,6 +60,7 @@ class JiuwenServiceModel(Model):
         self.text_protocol = not artifact_output and self.profile.capabilities.tools.status != "supported"
         self.converter = ResourceConverterRegistry().resolve(self.profile.bindings.native_converter)
         self.prepare_messages = prepare_messages
+        self._agent_context = None
         self.on_error = on_error
         self.last_usage = None
         self.last_message = None
@@ -92,13 +94,7 @@ class JiuwenServiceModel(Model):
                 raise JiuwenProtocolError("JIUWEN_RUNTIME_PARAMETER_OVERRIDE")
         if kwargs.get("model") not in (None, "", self.profile.identity.request_model_id):
             raise JiuwenProtocolError("JIUWEN_MODEL_IDENTITY_MISMATCH")
-        view = resource_view(messages, tools, prefix=self.prefix, text_protocol=self.text_protocol)
-        if self.delegation is not None:
-            terminal = [tool for tool in view.tool_definitions
-                        if self.clarification is not None and tool.name == self.clarification.name]
-            view = self.delegation.constrain(view)
-            if terminal and not any(tool.name == self.clarification.name for tool in view.tool_definitions):
-                view = view.model_copy(update={"tool_definitions": [*view.tool_definitions, *terminal]})
+        view = self._resource_view(messages, tools)
         if self.validate_input is not None:
             self.validate_input(view)
         self.logical_requests += 1
@@ -106,6 +102,21 @@ class JiuwenServiceModel(Model):
         if self.on_step is not None:
             self.on_step(request)
         return request
+
+    def _resource_view(self, messages, tools):
+        view = resource_view(messages, tools, prefix=self.prefix, text_protocol=self.text_protocol)
+        if self.delegation is not None:
+            terminal = [tool for tool in view.tool_definitions
+                        if self.clarification is not None and tool.name == self.clarification.name]
+            view = self.delegation.constrain(view)
+            if terminal and not any(tool.name == self.clarification.name for tool in view.tool_definitions):
+                view = view.model_copy(update={"tool_definitions": [*view.tool_definitions, *terminal]})
+        return view
+
+    def preview_request(self, messages, tools):
+        """Use the sending conversion without attempts, effects or network IO."""
+        return self.converter.convert(self._resource_view(messages, tools), self.profile,
+            request_id="context-preview", run_id=self.run_id).request
 
     def _fail(self, request, category):
         error = ModelError(
@@ -155,6 +166,11 @@ class JiuwenServiceModel(Model):
                                             arguments=json.dumps({"code": block.code}), index=0))
         if not calls and not content.strip():
             self._fail(request, "MODEL_EMPTY_RESPONSE")
+        if not calls and not self.artifact_output:
+            try:
+                normalize_public_answer(content)
+            except AnswerBoundaryError as error:
+                self._fail(request, str(error))
         if self.clarification is not None:
             try:
                 self._clarification_form = self.clarification.form_for(calls, text_protocol=self.text_protocol)
@@ -173,15 +189,18 @@ class JiuwenServiceModel(Model):
         )):
             native_usage = UsageMetadata(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
                                          total_tokens=usage.total_tokens)
-        return AssistantMessage(content=content, reasoning_content=reasoning or None,
+        native = AssistantMessage(content=content, reasoning_content=reasoning or None,
                                 tool_calls=calls or None, finish_reason="tool_calls" if calls else "stop",
                                 usage_metadata=native_usage)
+        self.last_native_message = native
+        return native
 
     async def _invoke_once(self, messages, *, tools=None, **kwargs):
         if self.prepare_messages is not None:
             messages = await self.prepare_messages(messages, tools)
         request = self._request(messages, tools, False, kwargs)
-        message = await self.service.ainvoke(request, self.profile, scope=self.scope, deadline=self.deadline)
+        message = await self.service.ainvoke(request, self.profile, scope=self.scope, deadline=self.deadline,
+                                             **({"agent_context": self._agent_context} if self._agent_context is not None else {}))
         definitions = resource_view(messages, tools).tool_definitions
         native = self._completion(message, request, definitions)
         if self.on_event is not None:
@@ -199,7 +218,8 @@ class JiuwenServiceModel(Model):
         completed = False
         try:
             async with self.service.astream(request, self.profile, scope=self.scope, deadline=self.deadline,
-                                            empty_response_policy="fail") as events:
+                                            empty_response_policy="fail",
+                                            **({"agent_context": self._agent_context} if self._agent_context is not None else {})) as events:
                 async for event in events:
                     self._check_cancelled()
                     if completed:
@@ -256,7 +276,13 @@ class JiuwenServiceModel(Model):
                 return None
             self.argument_corrections += 1
             kind = "arguments"
-        elif category in {"MODEL_EMPTY_RESPONSE", "MODEL_RESPONSE_INCOMPLETE"}:
+        elif category in {
+            "MODEL_EMPTY_RESPONSE", "MODEL_RESPONSE_INCOMPLETE", "MODEL_STREAM_INCOMPLETE",
+            "JIUWEN_INCOMPLETE_EXECUTION_BLOCK", "JIUWEN_TOOL_FINISH_MISMATCH", "JIUWEN_FINAL_OUTPUT_INVALID",
+        } or (
+            category == "MODEL_PROTOCOL_ERROR"
+            and error.diagnostic_code in {"MODEL_TOOL_CALL_INVALID", "MODEL_RESPONSE_INCOMPLETE"}
+        ):
             if self.response_corrections >= 1:
                 return None
             self.response_corrections += 1
@@ -285,6 +311,10 @@ class JiuwenServiceModel(Model):
         return current
 
     async def invoke(self, messages, *, tools=None, **kwargs):
+        owner = getattr(self.prepare_messages, "__self__", None)
+        begin_context_request = getattr(owner, "begin_request", None)
+        if begin_context_request is not None:
+            begin_context_request()
         step_corrections = 0
         while True:
             try:
@@ -297,6 +327,10 @@ class JiuwenServiceModel(Model):
                 messages = corrected
 
     async def stream(self, messages, *, tools=None, **kwargs):
+        owner = getattr(self.prepare_messages, "__self__", None)
+        begin_context_request = getattr(owner, "begin_request", None)
+        if begin_context_request is not None:
+            begin_context_request()
         step_corrections = 0
         while True:
             try:

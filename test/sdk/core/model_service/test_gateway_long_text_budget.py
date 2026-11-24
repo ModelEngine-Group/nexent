@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Long-text input fits both the separate cap and the shared output window."""
+"""Long-text preparation uses the combined window, ignoring retired settings."""
 
 from copy import deepcopy
 
@@ -35,14 +35,12 @@ def build(openai_profile, window, input_limit, output_limit, requested, key="max
 
 
 @pytest.mark.parametrize("window,input_limit,output_limit,requested,expected", [
-    (8192, 7000, 4096, 4096, 4096),
-    (8192, 2000, 4096, 4096, 2000),
-    (8192, None, 4096, 4096, 4096),
-    (None, 7000, None, 4096, 7000),
-    (8192, 7000, 4096, None, 4096),
-    (None, 7000, None, None, 7000),
+    (8192, 7000, 4096, 4096, 8192),
+    (8192, 2000, 4096, 4096, 8192),
+    (8192, None, 4096, 4096, 8192),
+    (8192, 7000, 4096, None, 8192),
 ])
-def test_long_text_reserves_output_and_intersects_limits(
+def test_long_text_uses_combined_window_independently_of_retired_limits(
     openai_profile, window, input_limit, output_limit, requested, expected,
 ):
     adapter = build(openai_profile, window, input_limit, output_limit, requested)
@@ -57,15 +55,15 @@ def test_long_text_effective_output_alias_and_prompt_buffer(openai_profile, mock
     mocker.patch.object(adapter, "truncate_text", side_effect=lambda text, limit: " ".join(text.split()[:limit]))
     messages, percent = adapter.prepare_long_text_message("token " * 10000, "system", "analyze")
     input_tokens = sum(len(message["content"].split()) for message in messages)
-    assert input_tokens == 3996
-    assert input_tokens + 4096 <= 8192
-    assert percent == "39"
+    assert input_tokens == 8092
+    assert input_tokens + 100 <= 8192
+    assert percent == "80"
 
 
 @pytest.mark.parametrize("window,input_limit,output_limit,requested", [
-    (4096, None, 4096, 4096),
+    (None, 7000, None, 4096),
     (2048, None, 4096, 4096),
-    (8192, None, None, None),
+    (None, None, None, None),
 ])
 def test_long_text_rejects_no_safe_shared_window_before_model(
     openai_profile, mocker, window, input_limit, output_limit, requested,
