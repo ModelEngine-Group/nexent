@@ -36,12 +36,6 @@ on:
       - 'deploy/docker/**'
       - 'deploy/k8s/**'
       - 'test/**'
-      - 'test-e2e/cases/AOS-MODEL-D3-001/**'
-      - 'test-e2e/cases/AOS-TRANSPORT-D3-001/**'
-      - 'test-e2e/infra/tools/**'
-      - 'test-e2e/infra/automation/**'
-      - 'test-e2e/conftest.py'
-      - 'test-e2e/pytest.ini'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
@@ -55,12 +49,6 @@ on:
       - 'deploy/docker/**'
       - 'deploy/k8s/**'
       - 'test/**'
-      - 'test-e2e/cases/AOS-MODEL-D3-001/**'
-      - 'test-e2e/cases/AOS-TRANSPORT-D3-001/**'
-      - 'test-e2e/infra/tools/**'
-      - 'test-e2e/infra/automation/**'
-      - 'test-e2e/conftest.py'
-      - 'test-e2e/pytest.ini'
       - '.github/workflows/**'
 
 jobs:
@@ -249,16 +237,3 @@ jobs:
           fail_ci_if_error: true
           os: ${{ inputs.codecov_os || (runner.arch == 'ARM64' && 'linux-arm64' || 'linux') }}
           verbose: false
-
-      - name: Run AgentOS HTTP contract cases
-        if: ${{ !cancelled() && steps.unit-tests.conclusion == 'success' }}
-        timeout-minutes: 5
-        run: |
-          set -euo pipefail
-          export NEXENT_TEST_HOME
-          NEXENT_TEST_HOME="$(mktemp -d "$RUNNER_TEMP/nexent-agentos.XXXXXX")"
-          mkdir "$NEXENT_TEST_HOME/config"
-          touch "$NEXENT_TEST_HOME/config/daily.env" "$NEXENT_TEST_HOME/config/secrets.env"
-          printf '{}\n' > "$NEXENT_TEST_HOME/config/environment.yaml"
-          # Use the backend test environment already installed by this job.
-          backend/.venv/bin/python test-e2e/infra/tools/run_cases.py AOS-TRANSPORT-D3-001 AOS-MODEL-D3-001

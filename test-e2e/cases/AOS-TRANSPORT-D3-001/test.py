@@ -23,8 +23,8 @@ from contracts.agentos import (
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
-from gateway.downstream.middleware import GatewayIdentityMiddleware
-from gateway.security.context import trusted_identity
+from gateway.identity.middleware import GatewayIdentityMiddleware
+from gateway.identity.context import trusted_identity
 from infrastructure import agentos_identity
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
@@ -1977,7 +1977,7 @@ def _serve_workbench_aidp_images():
 
 async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, provider_url, provider_calls):
     from contracts.agentos import EvaluationSkillTool, ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
-    from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+    from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
     from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
     from infrastructure.local_tool_execution import build_local_tool

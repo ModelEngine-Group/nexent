@@ -17,10 +17,6 @@ CHART = ROOT / "deploy/k8s/helm/nexent"
 def test_gateway_image_delegates_the_application_command_like_main():
     for image in ("gateway", "main"):
         source = (ROOT / "deploy/images/dockerfiles" / image / "Dockerfile").read_text(encoding="utf-8")
-        if image == "main":
-            shared, services_and_final = source.split("FROM python:3.11-slim AS standalone-service", 1)
-            final = services_and_final.split(" AS final\n", 1)[1]
-            source = shared + final
         instructions = [line.strip().split(maxsplit=1)[0].upper() for line in source.splitlines()
                         if line.strip() and not line.lstrip().startswith("#")]
         assert "ENTRYPOINT" not in instructions
@@ -140,7 +136,8 @@ def test_offline_application_includes_gateway():
                       "--version gateway-fixture --components application --image-source general "
                       "--include-sandbox false --dry-run")
     assert "nexent/nexent-gateway:gateway-fixture" in result
-    assert "nexent/nexent:gateway-fixture" in result
+    assert "nexent/nexent-management:gateway-fixture" in result
+    assert "nexent/nexent:gateway-fixture" not in result
 
 
 def test_custom_gateway_image_uses_registry_prefix():
@@ -159,4 +156,6 @@ printf '%s' "$NEXENT_GATEWAY_IMAGE"
 def test_release_matrix_publishes_gateway_and_service_images(registry):
     workflow = yaml.safe_load((ROOT / f".github/workflows/docker-build-push-{registry}.yml").read_text(encoding="utf-8"))
     images = workflow["jobs"]["build-and-push"]["strategy"]["matrix"]["image"]
-    assert {"main", "gateway", "management", "runtime", "mcp-service", "ops", "mcp"}.issubset(images)
+    assert {"gateway", "management", "runtime", "ops", "mcp"}.issubset(images)
+    assert "main" not in images
+    assert "mcp-service" not in images

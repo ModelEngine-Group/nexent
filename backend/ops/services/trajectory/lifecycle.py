@@ -5,7 +5,7 @@ from contracts.constants import environment as config
 from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
 from infrastructure.trace.trajectory_runtime import conversation_deleted
 from infrastructure.trace.trajectory_store import TrajectoryFileStore
-from management.db.trajectory.repository import ExecutionRepository
+from infrastructure.rdb.trajectory.repository import ExecutionRepository
 from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
 from ops.services.trajectory.cleanup_schedule import read_policies
 from ops.services.trajectory.statistics import StatisticsWorker, SummaryWorker

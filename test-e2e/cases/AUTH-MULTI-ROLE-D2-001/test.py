@@ -13,14 +13,15 @@ def test_roles_union_compatibility_and_operations_boundary(role_runtime):
     assert r.assign("user", ["DEV", "OPS"]).status_code == 200
     profile = r.info("user").json()["data"]["user"]
     assert profile["roles"] == ["DEV", "OPS"]
-    assert set(["/agents", "/ops/dashboard", "/ops/configuration", "/resource-manage"]) <= set(
+    assert set(["/agents", "/ops/dashboard", "/resource-manage"]) <= set(
         profile["accessibleRoutes"]
     )
+    assert "/ops/configuration" not in profile["accessibleRoutes"]
     assert len(profile["permissions"]) == len(set(profile["permissions"]))
     assert len(profile["accessibleRoutes"]) == len(set(profile["accessibleRoutes"]))
     assert r.assign("user", ["OPS"]).status_code == 200
     profile = r.info("user").json()["data"]["user"]
-    assert set(profile["accessibleRoutes"]) == {"/ops/dashboard", "/ops/configuration", "/resource-manage"}
+    assert set(profile["accessibleRoutes"]) == {"/ops/dashboard", "/resource-manage"}
     inventory = r.client.get("/ops/resources", headers=r.headers("user"))
     assert inventory.status_code == 200
     assert {row["tenant_id"] for row in inventory.json()["data"]["items"]} == {"a"}

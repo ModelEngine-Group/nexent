@@ -1,12 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""MCP's signed delegation client; external credentials are verified by Gateway."""
+"""Resolve MCP request credentials through the Gateway delegation protocol."""
 
 import json
 from urllib.parse import urlsplit
 
 import httpx
 
-from gateway.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
+from gateway.identity.protocol import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
 
 
 async def resolve_mcp_identity(scope, authorization, *, gateway_url, key, transport=None):

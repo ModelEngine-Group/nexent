@@ -210,14 +210,14 @@ const ROUTE_PREFETCH_DELAY_MS = 50;
 
 function isRouteAccessible(
   route: RouteConfig,
-  accessibleRoutes: string[],
+  canAccessRoute: (route: string) => boolean,
   enableAgentWorkbench: boolean
 ) {
   if (route.path === "/workbench" && !enableAgentWorkbench) {
     return false;
   }
 
-  return accessibleRoutes.includes(route.path);
+  return canAccessRoute(route.path);
 }
 
 interface SideNavigationProps {
@@ -232,7 +232,7 @@ export function SideNavigation({
   isNavigating = false,
 }: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
-  const { accessibleRoutes, user } = useAuthorizationContext();
+  const { accessibleRoutes, user, canAccessRoute } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
   const router = useRouter();
@@ -357,9 +357,15 @@ export function SideNavigation({
         !route.isSection &&
         (route.path !== "/observability" || hasRole(user, "OPS", "SU")) &&
         !(route.path === "/" && hideHomePage) &&
-        isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
+        isRouteAccessible(route, canAccessRoute, enableAgentWorkbench)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage, user]);
+  }, [
+    accessibleRoutes,
+    canAccessRoute,
+    enableAgentWorkbench,
+    hideHomePage,
+    user,
+  ]);
 
   const getRouteNavigationPath = (route: RouteConfig) => {
     const routePath = route.navigationPath || route.path;

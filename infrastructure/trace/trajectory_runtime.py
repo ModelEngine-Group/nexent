@@ -6,31 +6,24 @@ from __future__ import annotations
 
 def authorize_capture(identity):
     """Use the existing tenant membership and conversation ownership queries."""
-    from management.db.conversation.repository import get_conversation
-    from management.db.identity.user_tenant import get_user_tenant_in_tenant
+    from infrastructure.rdb.trajectory.capture import CaptureCatalog
 
-    member = get_user_tenant_in_tenant(identity.owner_user_id, identity.tenant_id)
-    if not member or member.get("delete_flag") != "N":
-        raise PermissionError("Trajectory capture owner is not an active tenant member")
-    conversation = get_conversation(
-        int(identity.conversation_id), user_id=identity.owner_user_id, tenant_id=identity.tenant_id
-    )
-    if not conversation or conversation.get("created_by") != identity.owner_user_id:
-        raise PermissionError("Trajectory capture conversation ownership differs")
+    CaptureCatalog().authorize(identity)
 
 
-def create_local_processor(config, metadata_provider):
+def create_local_processor(config, metadata_provider, *, repository=None):
     """Keep environment reads in the backend configuration module."""
     capturing = config.ENABLE_TELEMETRY and config.MONITORING_PROVIDER == "local_file"
     maintaining = config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
     if not capturing and not maintaining:
         return None
-    from management.db.trajectory.repository import ExecutionRepository
+    from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
     from .trajectory_processor import LocalTrajectoryProcessor
     from .trajectory_store import TrajectoryFileStore
 
-    repository = ExecutionRepository()
+    if repository is None:
+        repository = ExecutionRepository()
     store = TrajectoryFileStore(
         config.TRAJECTORY_ROOT_DIR,
         authorize=authorize_capture,
@@ -53,7 +46,7 @@ def create_local_processor(config, metadata_provider):
 
 def capture_sources(identity, upper=None):
     """Read only scalar IDs from the same currently authorized conversation."""
-    from management.db.conversation.trajectory_capture import CaptureCatalog
+    from infrastructure.rdb.trajectory.capture import CaptureCatalog
 
     return CaptureCatalog().source_messages(
         identity.tenant_id, identity.owner_user_id, identity.conversation_id, upper=upper,
@@ -62,7 +55,7 @@ def capture_sources(identity, upper=None):
 
 def conversation_deleted(identity):
     """Only a confirmed PG absence permits maintenance to reclaim an orphan."""
-    from management.db.conversation.trajectory_capture import CaptureCatalog
+    from infrastructure.rdb.trajectory.capture import CaptureCatalog
 
     return CaptureCatalog().conversation_deleted(identity.conversation_id, identity.owner_user_id)
 

@@ -335,7 +335,7 @@ def create_conversation(
         )
 
         record = session.execute(stmt).fetchone()
-        from management.db.trajectory.repository import seed_conversation
+        from infrastructure.rdb.trajectory.repository import seed_conversation
         seed_conversation(session, record.conversation_id, user_id, agent_id)
 
         # Convert to dictionary and ensure timestamps are integers
@@ -2205,7 +2205,7 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if conversation_result.rowcount == 0:
             return False
 
-        from management.db.trajectory.repository import delete_summaries
+        from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, [conversation_id], user_id)
 
         # 2. Mark related messages as deleted
@@ -2295,7 +2295,7 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
             .values(update_data)
         )
 
-        from management.db.trajectory.repository import delete_summaries
+        from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, owned_ids, user_id)
 
         # 2. Mark related messages as deleted
@@ -2358,7 +2358,7 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             .values(update_data)
         )
 
-        from management.db.trajectory.repository import delete_summaries
+        from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, conv_ids, user_id)
 
         # 3) Mark messages as deleted
