@@ -1505,6 +1505,9 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
+            "context.maintenance_phase": getattr(evidence, "maintenance_phase", "prepare"),
+            "context.usage_source": getattr(evidence, "usage_source", "estimated"),
+            "context.calibrated_input_estimate": getattr(evidence, "calibrated_input_estimate", 0),
             "context.effective_input_limit_tokens": getattr(
                 evidence, "effective_input_limit_tokens", 0
             ),
@@ -1565,6 +1568,7 @@ class MonitoringManager:
         tool_name: str,
         agent_name: str,
         tool_input: Optional[Dict] = None,
+        safe_diagnostics: bool = False,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """
@@ -1625,17 +1629,21 @@ class MonitoringManager:
 
         with self._tracer.start_as_current_span(
             span_name,
-            attributes=openinference_attrs
+            attributes=openinference_attrs,
+            **({"record_exception": False, "set_status_on_exception": False} if safe_diagnostics else {}),
         ) as span:
             start_time = time.time()
             success = True
             try:
                 yield span
-            except Exception as e:
+            except BaseException as e:
+                if not safe_diagnostics and not isinstance(e, Exception):
+                    raise
                 success = False
-                span.set_status(Status(StatusCode.ERROR, str(e)))
+                detail = type(e).__name__ if safe_diagnostics else str(e)
+                span.set_status(Status(StatusCode.ERROR, detail))
                 span.set_attribute("error.type", type(e).__name__)
-                span.set_attribute("error.message", str(e))
+                span.set_attribute("error.message", detail)
                 span.set_attribute("agent.tool.success", False)
                 if self._agent_error_count:
                     self._agent_error_count.add(
@@ -1807,6 +1815,29 @@ class MonitoringManager:
         span = trace.get_current_span()
         if span:
             span.set_attributes(attributes)
+
+    def record_model_http_request(self, body: Dict[str, Any], *, request_id: str, attempt: int,
+                                  method: str, url: str) -> None:
+        """Observe prepared JSON; keep first-send input and separate retry events."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+        from .local_content import safe_local_content
+
+        attributes = self._trace_payload_attributes("input", body)
+        attributes.update({
+            "input.value": attributes.get("input.preview", ""),
+            "input.preview": attributes.get("input.preview", ""),
+            "input.mime_type": "application/json",
+            "http.request.method": method,
+            "url.full": safe_local_content(url),
+            "model.request_id": request_id,
+            "model.request.attempt": attempt,
+        })
+        if attempt == 1:
+            self.set_span_attributes(**attributes)
+        self.add_span_event("model_attempt_begin", {
+            "request_id": request_id, "attempt": attempt, **attributes,
+        })
 
     def create_token_tracker(self, model_name: str, span: Optional[Any] = None) -> 'LLMTokenTracker':
         """Create a token tracker for LLM calls."""

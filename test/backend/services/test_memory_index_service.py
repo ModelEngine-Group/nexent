@@ -469,17 +469,20 @@ def test_index_lifecycle_returns_false_when_backend_fails(service):
     assert service.drop_index("memory-index") is False
 
 
-def test_index_record_resolves_model_index_and_writes_payload(service):
+@pytest.mark.parametrize("refresh", ["wait_for", False])
+def test_index_record_resolves_model_index_and_writes_payload(service, refresh):
     model_info = _FakeEmbeddingModelInfo(model_repo="repo", model_name="model", dimension=4)
     record = {"memory_id": 12, "layer": "agent", "content": "remember this"}
 
-    assert service.index_record(record, [0.1] * 4, model_info) is True
+    options = {} if refresh == "wait_for" else {"refresh": refresh}
+    assert service.index_record(record, [0.1] * 4, model_info, **options) is True
 
     service.vdb_core.create_index.assert_called_once_with(
         "mem_repo_model_4", embedding_dim=4
     )
     create_call = service.vdb_core.create_chunk.call_args
     assert create_call.kwargs["index_name"] == "mem_repo_model_4"
+    assert create_call.kwargs.get("refresh", "wait_for") == refresh
     assert create_call.kwargs["chunk"]["id"] == "12"
     assert create_call.kwargs["chunk"]["content"] == "remember this"
 

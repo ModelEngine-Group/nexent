@@ -132,12 +132,17 @@ def test_run_context_original_query_and_background_fallback(run_context, options
     assert request.query == "execution query"
 
 
-def test_run_context_preparation_error_does_not_bind_query(run_context):
+def test_run_context_defers_failed_memory_policy_until_bounded_compilation(run_context):
     run_context.memory.side_effect = RuntimeError("controlled preparation failure")
-    request = SimpleNamespace(agent_id=1, query="execution query", is_debug=False)
-    with pytest.raises(RuntimeError, match="controlled preparation failure"):
-        run_context.module.build_agent_run_context(
-            request, "u", "t", "zh", extra_metadata={}, user_query="用户输入",
-        )
-    run_context.manager.bind_agent_context.assert_not_called()
+    request = SimpleNamespace(
+        agent_id=1, conversation_id=123, query="execution query", is_debug=False,
+        history=[], minio_files=[],
+    )
+    result = run_context.module.build_agent_run_context(
+        request, "u", "t", "zh", extra_metadata={}, user_query="用户输入",
+    )
+    run_context.memory.assert_not_called()
+    run_context.manager.bind_agent_context.assert_called_once()
+    assert result.metadata.query == "用户输入"
+    assert result.metadata.memory_enabled is None
     assert request.query == "execution query"

@@ -471,7 +471,7 @@ class TestGetCurrentUserInfo:
                 "user_email": "mock@example.com",
                 "user_role": "admin",
                 "permissions": ["agent:create", "agent:read"],
-                "accessibleRoutes": ["chat", "agents"]
+                "accessiblePages": ["chat", "agents"]
             }
         }
         mock_get_user_info.return_value = mock_user_info
@@ -551,7 +551,7 @@ class TestGetCurrentUserInfo:
                 "user_email": "test@example.com",
                 "user_role": "user",
                 "permissions": [],
-                "accessibleRoutes": []
+                "accessiblePages": []
             }
         }
         mock_get_user_info.return_value = mock_user_info
@@ -576,7 +576,7 @@ class TestGetCurrentUserInfo:
         assert "user_email" in user_data
         assert "user_role" in user_data
         assert "permissions" in user_data
-        assert "accessibleRoutes" in user_data
+        assert "accessiblePages" in user_data
 
 
 if __name__ == "__main__":

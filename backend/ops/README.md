@@ -13,11 +13,11 @@ Use the existing Python 3.11 backend environment. From the repository root,
 with both the root and `backend/` on `PYTHONPATH`:
 
 ```shell
-bash deploy/common/start-backend.sh python -m backend.http.ops_service
+bash deploy/common/start-ops.sh python -m backend.http.ops_service
 ```
 
-Compose and Helm use this module command through `start-backend.sh`, which
-initializes Ops storage before launching the service. Running
+Compose and Helm use this module command through `start-ops.sh`, which
+initializes Ops storage when monitoring is enabled. Running
 `backend/http/ops_service.py` as a script places its directory first on Python's
 import path, where the shared `logging.py` shadows the standard library.
 

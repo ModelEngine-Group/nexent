@@ -9,7 +9,6 @@ EXPECTED_DEFAULTS = {
     "MAX_TENANT_COUNT": 100,
     "MAX_USERS_PER_TENANT": 10000,
     "MAX_GROUPS_PER_TENANT": 1000,
-    "MAX_SUPER_ADMIN_COUNT": 1,
     "MAX_ADMINS_PER_TENANT": 1000,
     "MAX_KNOWLEDGE_BASES_PER_TENANT": 10000,
     "MAX_KNOWLEDGE_BASES_PER_USER": 10,
@@ -44,7 +43,7 @@ def test_catalog_contains_exact_frozen_defaults():
     catalog = _catalog()
 
     assert set(catalog.defaults) == set(EXPECTED_DEFAULTS)
-    assert len(catalog.definitions) == 19
+    assert len(catalog.definitions) == 18
     assert catalog.defaults == EXPECTED_DEFAULTS
     assert all(item.recommendation_rule is None for item in catalog.definitions)
 

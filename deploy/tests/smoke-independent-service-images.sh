@@ -94,8 +94,12 @@ check_shared_monitoring() {
       exit 1
     fi
     test -x /opt/nexent/scripts/run-sql-migrations.sh
-    test -x /opt/nexent/scripts/run-ops-sql-migrations.sh
-    test -f /opt/nexent/ops-sql/ops-init.sql
+    for path in /opt/nexent/scripts/start-ops.sh /opt/nexent/scripts/run-ops-sql-migrations.sh /opt/nexent/ops-sql; do
+      if [ -e "$path" ]; then
+        echo "Unexpected Ops SQL initializer in producer image" >&2
+        exit 1
+      fi
+    done
   '
 }
 
@@ -121,7 +125,14 @@ docker exec "$prefix-runtime" sh -ec '
   test ! -d /opt/backend/data_process
 '
 
-docker exec "$prefix-runtime" python -c '
+if [ "$#" -eq 3 ]; then
+  wait_ready "$prefix-management" 9200 '/_cluster/health?wait_for_status=yellow&timeout=2s' elasticsearch
+  docker run -d --name "$prefix-ops" --network "$prefix" "${env_args[@]}" \
+    -e GATEWAY_AUTH_ENABLED=true -e TRAJECTORY_READ_ENABLED=true \
+    -e REDIS_BACKEND_URL=redis://redis:6379/0 \
+    --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory "$3" >/dev/null
+  wait_ready "$prefix-ops" 5016
+  docker exec "$prefix-runtime" python -c '
 from contracts.constants.environment import OPS_MONITORING_ENABLED
 from infrastructure.monitoring.store import BatchStore, monitoring_engine
 assert OPS_MONITORING_ENABLED
@@ -131,6 +142,7 @@ try:
 finally:
     store.engine.dispose()
 '
+fi
 
 docker run -d --name "$prefix-runtime-read" --network "$prefix" "${env_args[@]}" \
   -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false -e TRAJECTORY_READ_ENABLED=true \
@@ -205,12 +217,6 @@ docker run -d --name "$prefix-mcp" --network "$prefix" "${env_args[@]}" \
 wait_ready "$prefix-mcp" 5015 /tools/outer_api
 
 if [ "$#" -eq 3 ]; then
-  wait_ready "$prefix-management" 9200 '/_cluster/health?wait_for_status=yellow&timeout=2s' elasticsearch
-  docker run -d --name "$prefix-ops" --network "$prefix" "${env_args[@]}" \
-    -e GATEWAY_AUTH_ENABLED=true -e TRAJECTORY_READ_ENABLED=true \
-    -e REDIS_BACKEND_URL=redis://redis:6379/0 \
-    --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory "$3" >/dev/null
-  wait_ready "$prefix-ops" 5016
   docker exec "$prefix-ops" python -c '
 from contracts.constants.environment import ES_HOST, OPS_MONITORING_ENABLED
 from elasticsearch import Elasticsearch
