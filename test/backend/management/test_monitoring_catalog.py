@@ -121,6 +121,115 @@ def _fastmcp_default_name(method, path, operation_id=None, summary=None):
     raise AssertionError("fastmcp _generate_default_name not found")
 
 
+def test_query_converted_tool_names_reads_tenant_openapi_services(monkeypatch):
+    services = [{"config_json": {"openapi": "3.0.0"}}]
+    seen = {}
+
+    def fake_convert(converted):
+        seen["services"] = converted
+        return {"list_pets"}
+
+    def fake_query(tenant_id):
+        seen["tenant_id"] = tenant_id
+        return services
+
+    from management.db.tool import outer_api
+
+    monkeypatch.setattr(outer_api, "query_available_openapi_services", fake_query)
+    monkeypatch.setattr(catalog_mod, "converted_tool_names_from_services", fake_convert)
+    assert catalog_mod.query_converted_tool_names("tenant-1") == {"list_pets"}
+    assert seen == {"tenant_id": "tenant-1", "services": services}
+
+
+def test_query_converted_tool_names_degrades_to_empty_on_failure(monkeypatch):
+    from management.db.tool import outer_api
+
+    def broken_query(tenant_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(outer_api, "query_available_openapi_services", broken_query)
+    assert catalog_mod.query_converted_tool_names("tenant-1") == set()
+
+
+def test_mcp_records_for_tenant_reads_and_degrades(monkeypatch):
+    from management.db.mcp import remote
+
+    seen = {}
+    records = [_record("http://remote.invalid/mcp")]
+
+    def fake_records(tenant_id, **_kwargs):
+        seen["tenant_id"] = tenant_id
+        return records
+
+    monkeypatch.setattr(remote, "get_mcp_records_by_tenant", fake_records)
+    assert catalog_mod._mcp_records_for_tenant("tenant-1") == records
+    assert seen == {"tenant_id": "tenant-1"}
+
+    def broken_records(tenant_id, **_kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(remote, "get_mcp_records_by_tenant", broken_records)
+    assert catalog_mod._mcp_records_for_tenant("tenant-1") == []
+
+
+def test_run_catalog_from_db_maps_persistence_rows_and_skips_non_dicts(monkeypatch):
+    monkeypatch.setattr(catalog_mod, "query_converted_tool_names", lambda tenant_id: set())
+    rows = [
+        {"mcp_server": "http://remote.invalid/mcp", "mcp_name": "docs", "status": True, "mcp_id": 5,
+         "container_id": None, "config_json": None},
+        {"mcp_server": "http://container.invalid/mcp", "mcp_name": "boxed", "status": True, "mcp_id": 6,
+         "container_id": "abc123", "config_json": None},
+        "not-a-dict",
+    ]
+
+    assert catalog_mod.build_run_monitoring_catalog_from_db(
+        "tenant-1", [], rows, LOCAL, enabled=True, is_debug=False) is None
+
+    catalog = catalog_mod.build_run_monitoring_catalog_from_db(
+        "tenant-1", ["http://remote.invalid/mcp", "http://container.invalid/mcp"], rows, LOCAL,
+        enabled=True, is_debug=False)
+    assert {entry["url"]: entry["mcp_server_type"] for entry in catalog} == {
+        "http://remote.invalid/mcp": "remote",
+        "http://container.invalid/mcp": "container",
+    }
+    assert {entry["url"]: entry["mcp_server_id"] for entry in catalog} == {
+        "http://remote.invalid/mcp": 5,
+        "http://container.invalid/mcp": 6,
+    }
+
+    assert catalog_mod.build_run_monitoring_catalog_from_db(
+        "tenant-1", ["http://remote.invalid/mcp"], rows, LOCAL, enabled=False, is_debug=False) is None
+    assert catalog_mod.build_run_monitoring_catalog_from_db(
+        "tenant-1", ["http://remote.invalid/mcp"], rows, LOCAL, enabled=True, is_debug=True) is None
+
+
+def test_prepare_tenant_monitoring_catalog_assembles_and_degrades(monkeypatch):
+    records = [_record("http://remote.invalid/mcp", mcp_id=9, remote_mcp_server_name="docs")]
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: records)
+    monkeypatch.setattr(catalog_mod, "query_converted_tool_names", lambda tenant_id: set())
+
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL, enabled=False) is None
+
+    # An empty local endpoint must not classify tenant records as the builtin local server.
+    local_records = [_record(LOCAL, mcp_id=None, remote_mcp_server_name="outer-apis")]
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: local_records)
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", "")[0]["mcp_server_type"] == "remote"
+
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: [])
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL) is None
+
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: records)
+    catalog = catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL)
+    assert catalog and catalog[0]["url"] == "http://remote.invalid/mcp"
+    assert catalog[0]["mcp_server_type"] == "remote"
+
+    def broken_records(tenant_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", broken_records)
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL) is None
+
+
 def test_openapi_tool_names_match_fastmcp_default_naming():
     spec = {"paths": {
         "/pets": {

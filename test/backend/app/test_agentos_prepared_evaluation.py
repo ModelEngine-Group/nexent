@@ -690,3 +690,23 @@ def test_monitoring_catalog_skips_debug_and_disabled_runs(monkeypatch):
 
     monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", False)
     assert prepared_evaluation._build_run_monitoring_catalog(payload, mcp, debug=False) is None
+
+
+def test_prepared_mcp_accessors_stay_empty_before_materialization():
+    """PreparedMCP server/url accessors are safe to read before and after materialization."""
+    from types import SimpleNamespace
+
+    from runtime.agentos.prepared_mcp import PreparedMCP
+
+    prepared = PreparedMCP(SimpleNamespace(tenant_id="tenant-1"))
+    assert prepared.servers == []
+    assert prepared.used_urls == []
+
+    servers = [{"mcp_id": 3, "mcp_name": "docs"}]
+    prepared._servers = servers
+    assert prepared.servers == servers
+    assert prepared.servers is not servers
+
+    prepared.hosts["s1"] = {"url": "http://a.example/mcp"}
+    prepared.hosts[None] = {}
+    assert prepared.used_urls == ["http://a.example/mcp"]

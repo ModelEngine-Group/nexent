@@ -4,6 +4,7 @@
 import asyncio
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from nexent.consts.mcp_errors import MCPToolTimeoutError
@@ -176,6 +177,42 @@ def test_sink_exception_is_isolated():
         set_fact_sink(None)
     assert observation.started is not None
     assert observation.terminal is not None
+
+
+def test_finish_after_sink_unbound_emits_nothing():
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with agent_monitoring_context(_metadata()):
+            observation = McpToolCallObservation("search")
+            observation.dispatch()
+            set_fact_sink(None)
+            observation.sink = None
+            observation.finish()
+    finally:
+        set_fact_sink(None)
+    assert [fact["record_revision"] for fact in facts] == [1]
+    assert observation.terminal is not None
+
+
+def test_trace_binding_skips_invalid_span_contexts(monkeypatch):
+    from opentelemetry.trace import SpanContext
+
+    facts = []
+    monkeypatch.setattr(mcp_fact, "get_current_span", Mock(return_value=SimpleNamespace(
+        is_recording=lambda: True,
+        get_span_context=lambda: SpanContext(trace_id=0, span_id=0, is_remote=False),
+    )))
+
+    def run_call():
+        with agent_monitoring_context(_metadata()):
+            observation = McpToolCallObservation("search")
+            observation.dispatch()
+            observation.finish()
+
+    _record(facts, run_call)
+    assert len(facts) == 2
+    assert "trace_id" not in facts[0] and "span_id" not in facts[0]
 
 
 def test_inert_when_sink_unbound_at_construction():
