@@ -148,14 +148,14 @@ def _prepare_handoff(tenant, user, eid, request):
             if not excerpt.input_excerpt.strip() or excerpt.input_excerpt not in case["task"]["query"]:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Approve an exact request excerpt")
             feedback[field]["input_excerpt"] = excerpt.input_excerpt
-        if request.share_file_state and not case["task"].get("tool_use"):
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose two tasks with verified tool checks")
-        if request.method in {"T1", "T2"} and case["task"].get("tool_use"):
+        if request.method in {"T1", "T2"}:
+            expectation = case["task"].get("tool_use") or {}
             evidence = trial["result"].get("tool_use") or {}
-            rule = next((r for r in case["task"]["tool_use"]["rules"] if r["name"] == request.tool_name), None)
-            if rule is None or evidence.get("status") not in {"pass", "fail"}:
+            rule = next((r for r in expectation.get("rules", ()) if r["name"] == request.tool_name), None)
+            if (rule is None or evidence.get("status") not in {"pass", "fail"}
+                    or request.tool_name not in evidence.get("checked", ())):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose a tool with verified behavior on both tasks")
-            issues = invocation_issues(evidence, request.tool_name, case["task"]["tool_use"].get("order") or [])
+            issues = invocation_issues(evidence, request.tool_name, expectation.get("order") or [])
             if field == "failure" and not issues and any(
                     e["tool"] == request.tool_name and e["input_matches"] and
                     (not e["reply_matches"] or e["state_matches"] is False) for e in evidence.get("mcp_evidence", ())):

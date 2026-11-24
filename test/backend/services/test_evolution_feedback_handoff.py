@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import json
 from unittest.mock import Mock
 
 import pytest
@@ -107,3 +108,56 @@ def test_conflict_handoff_keeps_the_approved_related_clause(monkeypatch):
     request, _, _ = generate.call_args.args
     assert request.method == "P3" and request.related_passage == record["related_passage"]
     assert generate.call_args.kwargs == {"feedback_id": 19, "source_digest": record["source_digest"]}
+
+
+@pytest.mark.parametrize("method", ["T1", "T2"])
+def test_tool_handoff_requires_selection(method):
+    from pydantic import ValidationError
+
+    from contracts.evolution import FeedbackHandoffRequest
+
+    with pytest.raises(ValidationError, match="Select the measured tool"):
+        FeedbackHandoffRequest(method=method, goal="Choose the correct tool", source_passage="Default rule",
+                               failure={"case_id": 1, "expected": "done", "observed": "done"},
+                               protection={"case_id": 2, "expected": "done", "observed": "done"})
+
+
+@pytest.mark.parametrize("gap", ["no_expectation", "not_checked", "missing_receipt", None])
+def test_feedback_requires_observed_calls_in_both_tool_examples(monkeypatch, gap):
+    from contracts.errors.exceptions import AppException
+    from contracts.evolution import FeedbackHandoffRequest
+    from management.services.evaluation import feedback_handoff as service
+
+    name = "read_order"
+    rule = {"name": name, "min_calls": 0, "max_calls": 0, "arguments": {}}
+    tasks = {
+        1: {"digest": "fail", "task": {"expected": "done", "tool_use": {"rules": [rule]}}},
+        2: {"digest": "pass", "task": {"expected": "done", "tool_use": {"rules": [{**rule, "min_calls": 1, "max_calls": 1}]}}},
+    }
+    trials = [{"case_id": case, "variant": "base", "receipt_id": str(case), "status": row["digest"],
+               "result": {"case_digest": row["digest"], "answer": "done", "tool_use": {"status": row["digest"],
+                   "checked": [name], "sequence": [name], "issues": [{"tool": name, "reason": "too_many"}] if case == 1 else []}}}
+              for case, row in tasks.items()]
+    if gap == "no_expectation":
+        tasks[2]["task"].pop("tool_use")
+    elif gap == "not_checked":
+        trials[1]["result"]["tool_use"]["checked"] = ["other_tool"]
+    elif gap == "missing_receipt":
+        trials[1]["result"].pop("tool_use")
+    monkeypatch.setattr(service.jobs, "scope", lambda *args: {"agent_id": 7, "version_no": 1})
+    monkeypatch.setattr(service.jobs, "read_plan", lambda *args: {})
+    monkeypatch.setattr(service.jobs, "trials", lambda *args: trials)
+    monkeypatch.setattr(service, "require_business_agent_edit", Mock())
+    monkeypatch.setattr(service, "require_development_sources", Mock())
+    monkeypatch.setattr(service, "get_development_case", lambda *args: tasks[args[-1]])
+    monkeypatch.setattr(service, "published_business_agent", lambda *args: {"prompt": "Use the lookup on all orders."})
+    request = FeedbackHandoffRequest(method="T1", tool_name=name, goal="Skip unnecessary calls",
+        source_passage="Use the lookup on all orders.", failure={"case_id": 1, "expected": "done", "observed": "done"},
+        protection={"case_id": 2, "expected": "done", "observed": "done"})
+    if gap:
+        with pytest.raises(AppException, match="verified behavior on both tasks"):
+            service._prepare_handoff("tenant", "editor", 10, request)
+    else:
+        _, feedback = service._prepare_handoff("tenant", "editor", 10, request)
+        assert json.loads(feedback["failure"]["tool_evidence"])["required_max"] == 0
+        assert json.loads(feedback["protection"]["tool_evidence"])["calls"] == 1

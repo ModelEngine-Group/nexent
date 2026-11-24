@@ -21,11 +21,15 @@ case:
   - order: 2
     action: 两种身份分别读取复现题、登记构建、提交回归题，再给智能体编辑者管理员角色。
     expected: 工具编辑权控制复现题与构建登记。智能体编辑权控制提交业务题，须明确同意。相同构建重复登记返回原编号。
-  expected_results: [不同职责按资源分别授权。, 业务初态终态和回执来自两道原始题。]
+  - order: 3
+    action: 编辑者通过开发实验交接工具调用改进，分别提交两道都有测量结果的题、未指定工具的请求和保护题缺少测量的请求。
+    expected: 合格请求保存故障与保护题的调用次数。缺工具名称或缺测量的请求被拒。
+  expected_results: [不同职责按资源分别授权。, 业务初态终态和回执来自两道原始题。, T1、T2 只接收两道题都核验过同一工具的反馈。]
   forbidden_side_effects: [不转交会话正文、服务地址或凭据。]
   acceptance:
   - {id: AC-01, description: 确认复现与任务编辑权, steps: [1], expected_results: [1]}
   - {id: AC-02, description: 核对工具维护权限, steps: [2], expected_results: [2], forbidden_side_effects: [1]}
+  - {id: AC-03, description: 核对工具调用反馈的两道题均有测量结果, steps: [3], expected_results: [3]}
   contract:
     protocol: HTTP API
     request_expectations: [使用原生会话凭据。]

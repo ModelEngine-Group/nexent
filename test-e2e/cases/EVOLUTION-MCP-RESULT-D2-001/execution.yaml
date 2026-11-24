@@ -7,6 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01: [test_tool_repair_http]
   AC-02: [test_tool_repair_http]
+  AC-03: [test_tool_repair_http]
 preparation:
   families: []
   anchors: false

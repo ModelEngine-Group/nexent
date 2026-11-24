@@ -379,6 +379,8 @@ class FeedbackHandoffRequest(BaseModel):
     def valid_resource(self):
         if self.related_passage is not None and self.method != "P3":
             raise ValueError("Select a related clause only when resolving a prompt conflict")
+        if self.method in {"T1", "T2"} and not (self.tool_name or "").strip():
+            raise ValueError("Select the measured tool for a tool-call handoff")
         if self.share_file_state and (self.method not in {"T1", "T2"} or not self.tool_name):
             raise ValueError("Choose a measured tool before sharing its file checks")
         if self.tool_name and self.method not in {"T1", "T2"}:

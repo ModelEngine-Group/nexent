@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,7 @@ def test_tool_repair_http(runtime, monkeypatch):
     from management.db.evaluation import experiments as jobs
     from management.db.evaluation.replay_cases import save_replay_case
     from management.services.evaluation import tool_repairs as repair
+    from management.services.evaluation import feedback_handoff as handoff
     from management.services.evaluation.experiments import snapshot_digest
     from management.thread_management import config_thread_manager
     from nexent.core.concurrency import set_default_thread_manager, clear_default_thread_manager
@@ -63,6 +65,7 @@ def test_tool_repair_http(runtime, monkeypatch):
                     version_no=version,
                     tenant_id=tenant,
                     name="intake",
+                    prompt="Run the ledger tool whenever a receipt is requested.",
                     created_by=editor,
                     updated_by=editor,
                     delete_flag="N",
@@ -139,19 +142,23 @@ def test_tool_repair_http(runtime, monkeypatch):
         }
         records[case["case_id"]] = (case["digest"], correct, observed)
     ids = list(records)
+    plain_case = save_replay_case(tenant, agent, 1, editor, {"query": "Return the ledger status only",
+        "expected": "accepted", "family": "ledger status", "attachments": []})
+    plain_id = plain_case["case_id"]
+    records[plain_id] = (plain_case["digest"], True, None)
 
-    def experiment(label):
+    def experiment(label, case_ids=ids):
         req = DevelopmentExperimentRequest(
             agent_id=agent,
             version_no=1,
             evaluator_id=1,
-            case_ids=ids,
+            case_ids=case_ids,
             candidate_type="baseline",
             request_id=label,
         )
         plan = {
             "request": req.model_dump(),
-            "cases": {str(k): v[0] for k, v in records.items()},
+            "cases": {str(k): records[k][0] for k in case_ids},
             "snapshots": {"base": digest},
             "evaluator": {"version_no": 1},
         }
@@ -159,27 +166,27 @@ def test_tool_repair_http(runtime, monkeypatch):
         while trial := jobs.claim(eid):
             case_digest, correct, observed = records[trial["case_id"]]
             status = "pass" if correct else "fail"
-            assert jobs.finish(
-                trial,
-                status,
-                {
-                    "case_digest": case_digest,
-                    "snapshot_digest": digest,
-                    "tool_use": {
-                        "status": status,
-                        "issues": [] if correct else [{"tool": "post_receipt", "reason": "wrong_mcp_state"}],
-                        "mcp_evidence": [{**observed, "after": "d" * 64} if label == "drift" else observed],
-                    },
-                },
-            )
+            result = {"case_digest": case_digest, "snapshot_digest": digest, "answer": "accepted"}
+            if observed and label.startswith("local"):
+                result["tool_use"] = {"status": status, "checked": ["post_receipt"],
+                    "sequence": ["post_receipt"] if correct else ["post_receipt", "post_receipt"],
+                    "issues": [] if correct else [{"tool": "post_receipt", "reason": "too_many", "count": 2}]}
+            elif observed:
+                result["tool_use"] = {"status": status,
+                    "issues": [] if correct else [{"tool": "post_receipt", "reason": "wrong_mcp_state"}],
+                    "mcp_evidence": [{**observed, "after": "d" * 64} if label == "drift" else observed]}
+            assert jobs.finish(trial, status, result)
         return eid
 
     eid, repeat, drift = (experiment(label) for label in ("original", "repeat", "drift"))
+    measured = experiment("local-measured")
+    unmeasured = experiment("local-unmeasured", [ids[0], plain_id])
 
     async def snapshot(*args):
         return spec
 
     monkeypatch.setattr(repair, "_snapshot", snapshot)
+    monkeypatch.setattr(handoff, "_snapshot", snapshot)
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api")
@@ -187,6 +194,23 @@ def test_tool_repair_http(runtime, monkeypatch):
     set_default_thread_manager(config_thread_manager)
     try:
         with TestClient(app) as client:
+            local = f"/api/agent-evolution/experiments/{measured}/feedback"
+            local_feedback = {"method": "T1", "tool_name": "post_receipt", "goal": "Only write one receipt",
+                "source_passage": "Run the ledger tool whenever a receipt is requested.",
+                "failure": {"case_id": ids[0], "expected": "accepted", "observed": "accepted"},
+                "protection": {"case_id": ids[1], "expected": "accepted", "observed": "accepted"}}
+            assert client.post(local, headers=editor_header, json={**local_feedback, "tool_name": None}).status_code == 422
+            accepted = client.post(local, headers=editor_header, json=local_feedback)
+            assert accepted.is_success, accepted.text
+            stored = jobs.read_handoff(tenant, accepted.json()["data"]["feedback_id"])
+            assert json.loads(stored["failure"]["tool_evidence"])["calls"] == 2
+            assert json.loads(stored["protection"]["tool_evidence"])["calls"] == 1
+            no_measurement = f"/api/agent-evolution/experiments/{unmeasured}/feedback"
+            for method in ("T1", "T2"):
+                refused = client.post(no_measurement, headers=editor_header, json={**local_feedback, "method": method,
+                    "protection": {**local_feedback["protection"], "case_id": plain_id}})
+                assert refused.status_code == 400 and "verified behavior on both tasks" in refused.text, refused.text
+
             url = f"/api/agent-evolution/experiments/{eid}/tool-repair-feedback"
             body = {
                 "tool_name": "post_receipt",
