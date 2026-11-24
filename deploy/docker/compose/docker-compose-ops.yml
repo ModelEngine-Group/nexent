@@ -20,7 +20,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: "off"
       PYTHON_DOTENV_DISABLED: "1"
     entrypoint:
-      - /opt/nexent/scripts/start-backend.sh
+      - /opt/nexent/scripts/start-ops.sh
       - python
       - -m
       - backend.http.ops_service

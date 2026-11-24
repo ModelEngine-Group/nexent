@@ -36,14 +36,4 @@ case "$SQL_STARTUP_MODE" in
     ;;
 esac
 
-monitoring_enabled="${OPS_MONITORING_ENABLED:-true}"
-if [[ "${monitoring_enabled,,}" == true ]]; then
-  # Independent Ops startup must not run business SQL for the Ops process.
-  if [[ "$SQL_STARTUP_MODE" == wait ]]; then
-    bash "$script_dir/run-ops-sql-migrations.sh" --wait
-  else
-    bash "$script_dir/run-ops-sql-migrations.sh" --migrate
-  fi
-fi
-
 exec "$@"
