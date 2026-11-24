@@ -7,12 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 from smolagents import Tool
+from smolagents.memory import ActionStep
 from smolagents.models import ChatMessage, Model
 
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.core.models.wire_budget import ModelWireBudgetExceeded
 from nexent.core.utils.observer import MessageObserver
 
 FORM = [{"id": "scope", "type": "text", "title": "Which region?"}]
@@ -63,6 +65,27 @@ def build_agent():
 
 def events(observer):
     return [json.loads(message) for message in observer.get_cached_message()]
+
+
+def test_exhausted_background_budget_ends_the_react_run(build_agent):
+    tool = RecordTool()
+    agent, model, observer = build_agent([], [tool])
+    denial = ModelWireBudgetExceeded("Model token or cost budget exhausted")
+
+    def reject_call():
+        raise denial
+
+    model.on_call = reject_call
+    with pytest.raises(ModelWireBudgetExceeded) as caught:
+        agent.run("Check the saved case", max_steps=3)
+
+    assert caught.value is denial
+    assert caught.value.error_code.value == "model_budget_exhausted"
+    assert caught.value.retryable is False
+    assert len(model.calls) == 1
+    assert not any(isinstance(step, ActionStep) for step in agent.memory.steps)
+    assert tool.calls == 0
+    assert all(event["type"] != "final_answer" for event in events(observer))
 
 
 @pytest.mark.parametrize("prefix", [

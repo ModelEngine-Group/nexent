@@ -22,6 +22,7 @@ class ModelErrorCode(str, Enum):
     NOT_FOUND = "model_not_found"
     INVALID_REQUEST = "model_invalid_request"
     CONTEXT_OVERFLOW = "model_context_overflow"
+    BUDGET_EXHAUSTED = "model_budget_exhausted"
     EMPTY_RESPONSE_EXHAUSTED = "model_empty_response_exhausted"
     UNKNOWN_ERROR = "model_unknown_error"
 
@@ -58,6 +59,10 @@ _SAFE_ERROR_MESSAGES = {
     ModelErrorCode.CONTEXT_OVERFLOW: {
         "en": "The conversation is too long for the selected model.",
         "zh": "当前会话内容超出所选模型的上下文限制。",
+    },
+    ModelErrorCode.BUDGET_EXHAUSTED: {
+        "en": "This background task exhausted its model budget.",
+        "zh": "本次后台任务已用完模型额度。",
     },
     ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED: {
         "en": "The model repeatedly returned an empty response. Please try again later.",

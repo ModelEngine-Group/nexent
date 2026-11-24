@@ -209,10 +209,16 @@ def _verify_experiment_quota(monkeypatch, submit):
     import json
     from types import SimpleNamespace
 
+    from smolagents.models import Model
+
     from contracts.constants import environment
     from contracts.evolution_metering import evaluation_budget
     from management.db.evaluation import experiments as jobs, generation_attempts
+    from nexent.core.agents.context import ContextManager, ContextManagerConfig
+    from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
     from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
+    from nexent.core.utils.observer import MessageObserver
     from runtime.model.evolution_meter import meter_evaluation
 
     tenant = "metered-replay"
@@ -235,8 +241,22 @@ def _verify_experiment_quota(monkeypatch, submit):
     second_id = jobs.authorize_model_attempt(second, 30)
     with meter_evaluation(second_id, actor, model=3):
         model_wire_budget.get()({})(4, 3)
-    with pytest.raises(ModelWireBudgetExceeded), meter_evaluation(second_id, actor, model=3):
-        model_wire_budget.get()({})
+    class RejectedModel(Model):
+        calls = 0
+
+        def generate(self, messages, **kwargs):
+            self.calls += 1
+            model_wire_budget.get()({})
+            raise AssertionError("Exhausted budget admitted a provider request")
+
+    model = RejectedModel()
+    agent = CoreAgent(
+        observer=MessageObserver(), model=model, tools=[], verbosity_level=0,
+        context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig())),
+    )
+    with pytest.raises(ModelWireBudgetExceeded, match="budget exhausted"), meter_evaluation(second_id, actor, model=3):
+        agent.run("Check the saved record", max_steps=3)
+    assert model.calls == 1
     assert jobs.finish(second, "invalid", {"error": "experiment_model_budget_exceeded"})
     assert jobs.claim(eid) is None
     rows = jobs.trials(tenant, eid)

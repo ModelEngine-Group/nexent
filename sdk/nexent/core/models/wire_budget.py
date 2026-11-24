@@ -5,9 +5,14 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from typing import Any, Protocol
 
+from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 
-class ModelWireBudgetExceeded(RuntimeError):
+
+class ModelWireBudgetExceeded(ModelInvocationTerminalError):
     """The selected background job may not make another provider request."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(ModelErrorCode.BUDGET_EXHAUSTED, attempts=0, cause=RuntimeError(reason))
 
 
 SettleUsage = Callable[[int, int], None]
