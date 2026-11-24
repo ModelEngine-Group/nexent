@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ModelCapacityResolver (W1)."""
 from __future__ import annotations
 
@@ -101,9 +103,9 @@ def test_known_profile_no_overrides_builds_snapshot():
     assert snap.model_name == "gpt-4o"
     assert snap.context_window_tokens == 128_000
     assert snap.max_output_tokens == 16_384
-    assert snap.default_output_reserve_tokens == 4_096
-    assert snap.requested_output_tokens == 4_096  # defaulted from reserve
-    assert snap.provider_input_limit_tokens == 128_000 - 4_096
+    assert snap.default_output_reserve_tokens is None
+    assert snap.requested_output_tokens is None
+    assert snap.provider_input_limit_tokens == 128_000
     assert snap.tokenizer_family == "o200k_base"
     assert snap.counting_mode == "estimated"  # no adapter registered yet
     assert snap.capability_profile_version == "openai/gpt-4o@1"
@@ -114,7 +116,7 @@ def test_known_profile_no_overrides_builds_snapshot():
     # overrides are supplied.
     assert snap.field_sources["context_window_tokens"] == "profile"
     assert snap.field_sources["max_output_tokens"] == "profile"
-    assert snap.field_sources["max_input_tokens"] == "unknown"  # gpt-4o has no separate input limit
+    assert "max_input_tokens" not in snap.field_sources
     assert "operator" not in snap.field_sources.values()
     assert len(snap.fingerprint) == 32
 
@@ -147,8 +149,8 @@ def test_uncataloged_model_with_operator_overrides_resolves():
     )
 
     assert snap.context_window_tokens == 32_000
-    assert snap.requested_output_tokens == 1_000
-    assert snap.provider_input_limit_tokens == 32_000 - 1_000
+    assert snap.requested_output_tokens is None
+    assert snap.provider_input_limit_tokens == 32_000
     assert snap.field_sources["context_window_tokens"] == "operator"
     assert snap.capability_profile_version is None
     assert "capability_profile_missing" in snap.unknown_capabilities
@@ -177,15 +179,11 @@ def test_max_output_exceeding_context_window_is_rejected():
         )
 
 
-def test_requested_output_exceeding_max_output_is_rejected():
-    catalog = _catalog(_gpt4o_profile())
-    with pytest.raises(RequestedOutputExceedsCap):
-        resolve_capacity(
-            model_id="gpt-4o",
-            provider="openai",
-            requested_output_tokens=32_000,
-            capability_profiles=catalog,
-        )
+def test_retired_requested_output_does_not_override_model_output_capability():
+    snap = resolve_capacity(model_id="gpt-4o", provider="openai", requested_output_tokens=32000,
+                            capability_profiles=_catalog(_gpt4o_profile()))
+    assert snap.max_output_tokens == 16384
+    assert snap.requested_output_tokens is None
 
 
 def test_requested_output_defaults_to_profile_reserve():
@@ -195,18 +193,13 @@ def test_requested_output_defaults_to_profile_reserve():
         provider="openai",
         capability_profiles=catalog,
     )
-    assert snap.requested_output_tokens == 4_096
+    assert snap.requested_output_tokens is None
 
 
-def test_separate_input_limit_uses_max_input_tokens():
-    catalog = _catalog(_separate_limit_profile())
-    snap = resolve_capacity(
-        model_id="separate-limit-model",
-        provider="testprovider",
-        capability_profiles=catalog,
-    )
-    assert snap.max_input_tokens == 32_768
-    assert snap.provider_input_limit_tokens == 32_768
+def test_separate_input_limit_cannot_replace_a_missing_combined_window():
+    with pytest.raises(ProviderCapabilityUnknown):
+        resolve_capacity(model_id="separate-limit-model", provider="testprovider",
+                         capability_profiles=_catalog(_separate_limit_profile()))
 
 
 def test_separate_input_limit_with_combined_takes_minimum():
@@ -220,7 +213,7 @@ def test_separate_input_limit_with_combined_takes_minimum():
         model_id="y", provider="x",
         capability_profiles=_catalog(profile),
     )
-    assert snap.provider_input_limit_tokens == 16_000
+    assert snap.provider_input_limit_tokens == 128_000
 
 
 def test_snapshot_is_immutable():
@@ -260,7 +253,7 @@ def test_fingerprint_recomputes_identically():
     assert snap.fingerprint == recomputed
 
 
-def test_fingerprint_changes_when_request_changes():
+def test_fingerprint_ignores_retired_output_request_changes():
     catalog = _catalog(_gpt4o_profile())
     snap_a = resolve_capacity(
         model_id="gpt-4o", provider="openai",
@@ -272,7 +265,7 @@ def test_fingerprint_changes_when_request_changes():
         requested_output_tokens=4_000,
         capability_profiles=catalog,
     )
-    assert snap_a.fingerprint != snap_b.fingerprint
+    assert snap_a.fingerprint == snap_b.fingerprint
 
 
 def test_negative_or_zero_capacity_is_rejected():
@@ -290,28 +283,18 @@ def test_negative_or_zero_capacity_is_rejected():
         )
 
 
-def test_requested_output_must_be_positive():
-    catalog = _catalog(_gpt4o_profile())
-    with pytest.raises(InvalidCapacityConfiguration):
-        resolve_capacity(
-            model_id="gpt-4o", provider="openai",
-            requested_output_tokens=0,
-            capability_profiles=catalog,
-        )
+def test_retired_requested_output_cannot_change_active_capacity():
+    snap = resolve_capacity(model_id="gpt-4o", provider="openai", requested_output_tokens=0,
+                            capability_profiles=_catalog(_gpt4o_profile()))
+    assert snap.requested_output_tokens is None
+    assert snap.provider_input_limit_tokens == 128000
 
 
-def test_max_input_tokens_above_context_window_is_rejected():
-    with pytest.raises(InvalidCapacityConfiguration) as exc_info:
-        resolve_capacity(
-            model_id="bad", provider="x",
-            operator_overrides={
-                "context_window_tokens": 128_000,
-                "max_input_tokens": 200_000,
-            },
-            capability_profiles={},
-        )
-    assert "max_input_tokens" in str(exc_info.value)
-    assert "exceeds context_window_tokens" in str(exc_info.value)
+def test_retired_input_limit_is_ignored_even_above_combined_window():
+    snap = resolve_capacity(model_id="controlled", provider="x",
+        operator_overrides={"context_window_tokens": 128000, "max_input_tokens": 200000}, capability_profiles={})
+    assert snap.max_input_tokens is None
+    assert snap.provider_input_limit_tokens == 128000
 
 
 def test_max_input_tokens_equal_to_context_window_is_allowed():
@@ -324,7 +307,7 @@ def test_max_input_tokens_equal_to_context_window_is_allowed():
         },
         capability_profiles={},
     )
-    assert snap.max_input_tokens == 128_000
+    assert snap.max_input_tokens is None
 
 
 def test_unknown_capabilities_includes_tokenizer_when_estimated():

@@ -12,7 +12,7 @@ Every lookup uses a read-only repeatable-read transaction with finite acquire/qu
 
 The image packages Gateway, its launcher, the shared security protocol, and the read-only RDB identity adapter. Its six direct dependencies are FastAPI, Uvicorn, HTTPX, websockets, PyJWT and asyncpg. Gateway configuration reads injected environment only and never loads .env.
 
-Gateway owns request signing, path normalization, the public-entry policy, and MCP credential delegation. The MCP process binds the Gateway-owned tenant router to its local app registry and supplies its own Gateway URL and signing key. Downstream apps use the adapters in `gateway/downstream/` to load backend configuration and verify signatures. The standalone Gateway image packages only the edge modules and pure protocol code.
+Gateway authenticates external credentials, signs forwarded requests, and serves MCP credential delegation. `gateway/identity/` contains the shared identity protocol, token codecs, request context, and downstream adapters. Downstream apps load the adapters to verify signatures with backend configuration. The Gateway process uses the protocol with its own settings. MCP owns its tenant router and uses the Gateway delegation endpoint to resolve external credentials.
 
 ## Database configuration
 
@@ -37,6 +37,16 @@ Keep TZ identical to Management because CAS expiration uses naive local timestam
 `exposure/registry.json` is the explicit method/path/transport snapshot, including existing public aliases. Adding a downstream route does not publish it automatically. Unlisted requests and method/transport mismatches return404 (WebSocket1008) before authentication or upstream work. CORS preflight is admitted only for a declared HTTP operation. Manifest revision/digest are available on app.state. Direct API-key aliases need a coordinated service identity policy change.
 
 Gateway owns a shared HTTP client without a user-cookie jar. SSE/WS responses close on completion, failure and disconnect; streaming execution is never retried implicitly. Northbound protocol/business currently remains in Management behind the fixed Northbound upstream. Moving that adaptation layer is the next batch; durable task recovery remains with the business owner.
+
+When adding or moving a public API, update its explicit exposure and regression
+inputs together. Resolve the target from the application's `include_router`
+mounts, rather than the handler's source directory: conversation handlers under
+`management/api/conversation/` are mounted by Runtime. Register literal paths
+such as `creator_histories` explicitly even when an existing parameter route
+could match them. Verify the target, session policy, exact method and transport
+in unit tests, and add the operation to the existing live forwarding Case when
+the network boundary changes. Private and unmounted handlers must not be
+published automatically.
 
 ## Build, upgrade and rollback
 

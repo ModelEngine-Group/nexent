@@ -292,6 +292,7 @@ class NexentAgent(AgentResources):
             context_manager = ContextManager(
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
+                message_format="codeagent",
             )
             from nexent.core.agents.prompt.policies import with_common_behavior
 
@@ -883,6 +884,8 @@ class NexentAgent(AgentResources):
                     # Remove thinking prefix content (until two newlines)
                     final_answer_str = re.sub(
                         THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+                    if final_answer is None or not final_answer_str.strip():
+                        observer.mark_answer_fallback()
                     final_answer_str = _ensure_non_empty_final_answer(
                         final_answer_str,
                         getattr(observer, "lang", "en"),

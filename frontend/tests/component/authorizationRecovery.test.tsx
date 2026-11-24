@@ -147,17 +147,28 @@ test("OPS admin can open personal profile with only the system configuration gra
   expect(state.replace).not.toHaveBeenCalled();
 });
 
-test("OPS user can open the legacy system configuration alias", async () => {
+test("SU can open the legacy system configuration alias", async () => {
   state.pathname = "/zh/system-config";
   const auth = response(["/ops/configuration"]);
-  auth.user.role = USER_ROLES.OPS;
-  auth.user.roles = [USER_ROLES.OPS];
   state.request.mockResolvedValueOnce(auth);
   renderHome(false);
   const probe = screen.getByTestId("permissions");
   await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
   expect(probe).toHaveAttribute("data-denied", "false");
   expect(state.replace).not.toHaveBeenCalled();
+});
+
+test("OPS cannot open system configuration with only the legacy grant", async () => {
+  state.pathname = "/zh/ops/configuration";
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-denied", "true"));
+  expect(probe).toHaveAttribute("data-authorized", "false");
+  expect(state.replace).toHaveBeenCalledWith("/");
 });
 
 async function retryButton() {

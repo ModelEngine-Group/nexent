@@ -87,7 +87,6 @@ def _agent_with_responses(contents, *, strict, monkeypatch):
         )
 
     agent.context_runtime.prepare_step.side_effect = assemble
-    agent.context_runtime.recover_step.side_effect = assemble
     return agent, responses, base
 
 

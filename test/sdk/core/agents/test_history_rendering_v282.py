@@ -90,6 +90,30 @@ def test_compaction_retains_error_and_authorized_reference(compact):
             else '<OUTPUT preview="head_tail">PREVIEW</OUTPUT>' in text)
 
 
+
+@pytest.mark.parametrize(("compact", "outcome"), [
+    ({"summary": "SUMMARY"}, "<SUMMARIED_RESULT>SUMMARY</SUMMARIED_RESULT>"),
+    ({"preview": "PREVIEW"}, '<OUTPUT preview="head_tail">PREVIEW</OUTPUT>'),
+])
+def test_strict_compaction_keeps_observation_error_and_reference(compact, outcome):
+    item = ContextItem.from_input(ContextItemInput(
+        id="step", type="current_action",
+        content={
+            "execution_fields": {"STDOUT": "ORIGINAL_SENTINEL", "ERROR": "timeout"},
+            "output_ref": "message:5/unit-index:2",
+            **compact,
+        },
+        metadata={"use_result_observations": True},
+    ))
+
+    [message] = ContextItemRenderer().render([item])
+    assert message["role"] == "tool-response"
+    assert message["content"][0]["text"] == (
+        f"<RESULT>\n{outcome}\n<ERROR>timeout</ERROR>"
+        "\n<OUTPUT_REF>message:5/unit-index:2</OUTPUT_REF>\n</RESULT>"
+    )
+
+
 def test_canonical_masked_result_never_falls_back_to_raw_fields():
     text = render({'OUTPUT': '[MASKED]'}, observations='RAW_SECRET', result='RAW_SECRET')
     assert '[MASKED]' in text and 'RAW_SECRET' not in text
@@ -145,8 +169,13 @@ def test_actual_call_executes_once_and_next_request_has_one_real_result(strict):
             assert requests[-1].count('ACTUAL_RESULT_SENTINEL') == 1
             assert 'FAKE_SUCCESS_SENTINEL' not in requests[-1]
             assert 'MODEL_NARRATION_SENTINEL' not in requests[-1]
-            assert '<completed_action>' in requests[-1] and 'index: 1' in requests[-1]
-            assert 'tool: python_interpreter' in requests[-1]
+            if strict:
+                assert 'Executed action:' not in requests[-1]
+                assert '<code>value = actual()' in requests[-1]
+                assert '<RESULT>' in requests[-1]
+            else:
+                assert '<completed_action>' in requests[-1] and 'index: 1' in requests[-1]
+                assert 'tool: python_interpreter' in requests[-1]
             assert '<CODE_EXEC_RESULT>' not in requests[-1]
             return ChatMessage(role='assistant', content='<final_answer>Confirmed actual result</final_answer>')
 

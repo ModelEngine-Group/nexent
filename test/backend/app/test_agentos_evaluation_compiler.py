@@ -729,6 +729,24 @@ async def test_prepared_conversation_cannot_export_unowned_message_boundary(mock
     compile_run.assert_not_called()
 
 
+def test_prepared_conversation_keeps_authorized_tool_records_across_runtime_boundary():
+    records = [{
+        "record_type": "execution_logs", "content": "Actual result 2603", "unit_index": 7,
+        "tool_call_id": "call-1", "invocation_id": None,
+    }]
+    history = {"conversation_turns": [{
+        "user_message": "Calculate", "assistant_final_answer": "The result is 2603",
+        "user_message_id": 21, "assistant_message_id": 22, "execution_records": records,
+    }]}
+
+    prepared = evaluation_snapshot._prepare_conversation_history(history, "actor", "tenant")
+    restored = prepared_evaluation._restore_conversation_history(prepared, ServicePrincipal("actor", "tenant"))
+
+    assert restored["conversation_turns"][0]["execution_records"] == [
+        record | {"execution_event": None} for record in records
+    ]
+
+
 def test_prepared_conversation_rejects_foreign_history_attachment():
     from contracts.agentos import PreparedConversationHistory
     from contracts.constants.environment import MINIO_DEFAULT_BUCKET
@@ -755,7 +773,7 @@ def test_prepared_conversation_keeps_persisted_execution_records():
     every follow-up message into a 500.
     """
     from contracts.agentos import PreparedConversationHistory
-    from contracts.agentos import PreparedHistoryRecord
+    from contracts.agentos import PreparedHistoryExecutionRecord
 
     turn = {
         "user_message": "previous request", "assistant_final_answer": "previous answer",
@@ -776,7 +794,7 @@ def test_prepared_conversation_keeps_persisted_execution_records():
     assert [record.record_type for record in records] == ["tool", "execution_logs"]
     assert records[0].tool_call_id == "call-1" and records[0].invocation_id is None
     assert records[1].content is None and records[1].invocation_id == "inv-2"
-    assert all(isinstance(record, PreparedHistoryRecord) for record in records)
+    assert all(isinstance(record, PreparedHistoryExecutionRecord) for record in records)
 
     restored = prepared_evaluation._restore_conversation_history(
         prepared, ServicePrincipal("actor", "tenant"),

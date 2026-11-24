@@ -21,10 +21,10 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
+from gateway.identity.downstream import enabled as gateway_identity_enabled
+from backend.mcp.credential_client import resolve_mcp_identity as _resolve_gateway_mcp_identity
+from backend.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
 from backend.mcp.thread_management import mcp_thread_manager
-from gateway.downstream.identity import enabled as gateway_identity_enabled
-from gateway.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
-from gateway.mcp.credential_client import resolve_mcp_identity as _resolve_gateway_mcp_identity
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
@@ -462,11 +462,11 @@ async def _resolve_delegated_identity(scope, authorization, *, transport=None):
     ``TenantMCPRouter`` calls the resolver with ``(scope, authorization)`` only,
     while ``resolve_mcp_identity`` takes the Gateway origin and signing key as
     required keyword arguments. This adapter lives in the launcher because
-    ``backend/gateway`` is import-isolated from ``contracts`` and
-    ``gateway.downstream``, which is where the deployment settings come from.
+    ``backend/gateway`` is import-isolated from ``contracts``, and the
+    deployment settings come from the identity downstream adapter.
     """
     from contracts.constants import environment
-    from gateway.downstream.identity import signing_key
+    from gateway.identity.downstream import signing_key
 
     return await _resolve_gateway_mcp_identity(
         scope, authorization,

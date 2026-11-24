@@ -11,11 +11,10 @@ import pytest
 
 from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
-from gateway.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
-from gateway.mcp import identity_router as mcp
-from gateway.security.context import identity_context
-from gateway.mcp import credential_client
-from gateway.mcp.credential_client import resolve_mcp_identity
+from gateway.identity.protocol import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
+from backend.mcp import identity_router as mcp
+from gateway.identity.context import identity_context
+from backend.mcp.credential_client import resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
@@ -85,7 +84,7 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
             closed.append(True)
 
     def transport(request):
-        from gateway.security.identity import verify_delegation
+        from gateway.identity.protocol import verify_delegation
 
         verify_delegation(request.headers["x-nexent-service-token"], request.content, key=KEY)
         assert json.loads(request.content)["path"] == SCOPE["path"]
@@ -112,7 +111,7 @@ async def test_delegated_identity_adapter_reads_gateway_origin_and_key_from_sett
     from contracts.constants import environment
 
     from backend.http import mcp_service
-    from gateway.security.identity import derive_signing_key
+    from gateway.identity.protocol import derive_signing_key
 
     seen = {}
 

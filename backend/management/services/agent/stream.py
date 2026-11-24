@@ -312,6 +312,16 @@ class AssistantMessageProjection:
 
     def record_execution_fact(self, payload):
         content = {key: payload[key] for key in ("content", "summary") if isinstance(payload.get(key), str)}
+        if isinstance(payload.get("model_action"), dict) and isinstance(payload.get("step_id"), str):
+            content["model_action"] = payload["model_action"]
+            if isinstance(payload.get("model_view"), dict):
+                content["model_view"] = payload["model_view"]
+            content["covered_unit_indices"] = [
+                unit["unit_index"] for unit in self.units
+                if unit.get("_step_id") == payload["step_id"]
+                and unit.get("invocation_id") == payload.get("invocation_id")
+                and unit.get("unit_type") in {"tool", "tool-call", "execution_logs", "error"}
+            ]
         self._buffer_unit("execution_result", json.dumps(content, ensure_ascii=False), payload, False)
         return self.units[-1]
 

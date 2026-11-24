@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-APP-FACTORY-20261119
+  change_type: bugfix
+  bug_id: RUNTIME-APP-FACTORY-20261119
+  title: Forward the Runtime service identity policy through the shared application factory
+  description: Accept the Runtime caller's internal_runtime_request callback and pass it to the Gateway identity middleware while preserving the Ops producer lifespan.
+  observed_behavior: Runtime passes internal_runtime_request but the shared factory signature does not accept it, raising TypeError during module import on the synchronized develop baseline as well as the monitoring branch.
+  expected_behavior: The Runtime application constructs with its declared arguments; scoped service credentials remain restricted to internal Runtime routes and public routes still require Gateway identities.
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: Runtime lifespan tests replace create_app with a permissive kwargs stub and do not check the real caller against the real factory.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-176]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-162, API-163]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Execute the real Runtime factory expression with the shared factory, Preserve scoped internal JWT and signed Gateway authentication, Reject absent and invalid identities, Preserve producer and Runtime startup and shutdown order with monitoring enabled and disabled]
+    reason: A real factory and real identity middleware are needed to catch signature and callback forwarding defects hidden by the existing permissive factory stub.
+    test_selectors: [test/backend/app/test_app_factory_runtime_identity.py, test/backend/app/test_app_factory.py, test/backend/app/test_runtime_application_lifespan.py, test/backend/gateway/test_central_authentication.py, test/backend/gateway/test_identity_signatures.py, test/backend/gateway/test_model_monitoring.py]

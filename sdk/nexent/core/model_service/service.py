@@ -12,7 +12,7 @@ import time
 import uuid
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from threading import Event
 
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
@@ -21,16 +21,23 @@ from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadManager
 from nexent.core.concurrency.helpers import get_fallback_thread_manager
 from nexent.core.concurrency.models import ManagedTaskSpec
 from nexent.core.model_service.concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
-from nexent.core.model_service.contracts import ModelError, ModelEvent, ModelRequest
+from nexent.core.model_service.contracts import AgentCompletionInput, ModelError, ModelEvent, ModelRequest
 from nexent.core.model_service.errors import normalize_model_error
 from nexent.core.model_service.http_contracts import ModelTransportError
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.registry import AdapterRegistry
 from nexent.monitor import get_monitoring_manager
 from nexent.monitor.model_attempt import ModelAttemptSession
+from nexent.monitor.model_fact import AttemptObservation
 
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _observe_async(call):
+    with call.observe_attempt():
+        yield
 
 
 class ModelServiceError(Exception):
@@ -75,6 +82,21 @@ class _Call:
     empty_response_retries: int = 0
     speculative_empty_retry: bool = False
     capture: object = None
+    agent_context: object = field(default=None, repr=False)
+    agent_input: AgentCompletionInput | None = field(default=None, repr=False)
+    observation: AttemptObservation | None = None
+
+    @contextmanager
+    def observe_attempt(self):
+        self.observation = AttemptObservation(self.request, self.profile, self.attempt)
+        try:
+            yield
+        except BaseException as error:
+            self.observation.finish(error)
+            raise
+        finally:
+            self.observation.finish()
+            self.observation = None
 
     def check(self):
         if self.scope.cancelled:
@@ -94,15 +116,33 @@ class _Call:
         return configured if self.deadline is None else min(configured, self.deadline - time.monotonic())
 
     def wire_request(self):
-        self.monitoring.add_span_event("model_attempt_begin", {
-            "request_id": self.request.request_id, "attempt": self.attempt,
-        })
         prepared = replace(
             self.prepared,
             headers=dict(self.prepared.headers),
             json_body=json.loads(self.prepared.body_bytes),
             timeout_seconds=self.timeout(),
+            on_dispatch=self._dispatch_attempt,
         )
+        if self.agent_context is not None:
+            body = json.loads(prepared.body_bytes)
+            messages = [{key: value for key, value in message.items()
+                         if key not in {"reasoning_content", "reasoning", "thinking"}}
+                        for message in body.get("messages", [])]
+            semantic = {"messages": messages}
+            if "tools" in body:
+                semantic["tools"] = body["tools"]
+            self.agent_input = AgentCompletionInput(str(self.request.request_id), self.attempt,
+                json.dumps(semantic, ensure_ascii=False), self.agent_context)
+        self.monitoring.record_model_http_request(
+            json.loads(prepared.body_bytes), request_id=self.request.request_id,
+            attempt=self.attempt, method=prepared.method, url=prepared.url,
+        )
+        self.monitoring.set_span_attributes(**{
+            "llm.invocation_parameters": json.dumps(
+                {"stop": prepared.json_body["stop"]} if prepared.json_body.get("stop") is not None else {},
+                ensure_ascii=False,
+            ),
+        })
         tracker = self.capture.begin(
             json.loads(prepared.body_bytes),
             config={
@@ -120,6 +160,10 @@ class _Call:
             self.first_token_received = False
         return prepared
 
+    def _dispatch_attempt(self):
+        self.capture.bind_observation(self.observation)
+        self.observation.dispatch()
+
     def event(self, event):
         self.check()
         basis = None
@@ -127,10 +171,15 @@ class _Call:
             basis = "content" if event.type == "text_delta" else "reasoning"
         elif event.type == "tool_call_delta" and event.tool_call_delta.arguments_delta:
             basis = "tool_delta"
-        if basis is not None and not self.first_token_received:
-            self.token_tracker.record_first_token(basis=basis)
-            self.first_token_received = True
+        if basis is not None:
+            if self.observation is not None:
+                self.observation.content()
+            if not self.first_token_received:
+                self.token_tracker.record_first_token(basis=basis)
+                self.first_token_received = True
         elif event.type == "usage":
+            if self.observation is not None:
+                self.observation.observe_usage(event.usage)
             self.monitoring.add_span_event("model_usage", {
                 "attempt": self.attempt, **event.usage.model_dump(exclude_none=True),
             })
@@ -141,7 +190,12 @@ class _Call:
         return event.model_copy(update={"sequence": self.sequence, "attempt": self.attempt})
 
     def observe_completion(self, message):
+        if self.agent_input is not None:
+            message._agent_input = self.agent_input
         usage = message.usage
+        if self.observation is not None:
+            self.observation.complete(usage)
+            self.observation.finish()
         if usage.input_tokens is not None and usage.output_tokens is not None:
             self.token_tracker.record_completion(usage.input_tokens, usage.output_tokens, total_tokens=usage.total_tokens)
         self.monitoring.set_span_attributes(**{
@@ -315,7 +369,7 @@ class ModelService:
         self._registry.resolve(profile.bindings.adapter)
         return profile
 
-    def _call(self, request, profile, scope, deadline, request_rebuild=None):
+    def _call(self, request, profile, scope, deadline, request_rebuild=None, agent_context=None):
         if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
             raise ValueError("Run deadline must be a finite monotonic timestamp")
         request = ModelRequest.model_validate(request.model_dump())
@@ -336,7 +390,7 @@ class ModelService:
                 )
             ) from None
         call = _Call(request, profile, adapter, sender, prepared, scope, deadline, self._policy,
-                     monitoring=self._monitoring, request_rebuild=request_rebuild)
+                     monitoring=self._monitoring, request_rebuild=request_rebuild, agent_context=agent_context)
         call.check()
         return call
 
@@ -381,7 +435,6 @@ class ModelService:
             f"{call.profile.identity.display_name or call.profile.identity.request_model_id}.generate",
             call.profile.identity.request_model_id,
             **{
-                "input.value": [message.model_dump(mode="json") for message in call.request.messages],
                 "model.request_id": call.request.request_id,
                 **({"model.outlet_id": call.profile.outlet_id} if call.profile.outlet_id is not None else {}),
                 "model.config_revision": call.profile.config_revision,
@@ -499,15 +552,15 @@ class ModelService:
             if permit is not None:
                 permit.release()
 
-    def invoke(self, request, profile, *, scope=None, deadline=None, request_rebuild=None):
+    def invoke(self, request, profile, *, scope=None, deadline=None, request_rebuild=None, agent_context=None):
         self._validate_rebuild(request_rebuild, asynchronous=False)
         if request.stream:
             raise ValueError("Invoke requires a non-streaming request")
-        call = self._call(request, profile, scope, deadline, request_rebuild)
+        call = self._call(request, profile, scope, deadline, request_rebuild, agent_context)
         with self._trace(call):
             while True:
                 try:
-                    with self._permit(call) as scope:
+                    with self._permit(call) as scope, call.observe_attempt():
                         raw = call.sender.invoke(call.wire_request(), scope=scope)
                         call.capture.raw_response(raw)
                         result = call.adapter.decode_response(raw, call.request, call.profile)
@@ -523,15 +576,15 @@ class ModelService:
                     call.apply_rebuild(call.request_rebuild(normalized))
                 call.wait(delay)
 
-    async def ainvoke(self, request, profile, *, scope=None, deadline=None, request_rebuild=None):
+    async def ainvoke(self, request, profile, *, scope=None, deadline=None, request_rebuild=None, agent_context=None):
         self._validate_rebuild(request_rebuild, asynchronous=True)
         if request.stream:
             raise ValueError("Invoke requires a non-streaming request")
-        call = self._call(request, profile, scope, deadline, request_rebuild)
+        call = self._call(request, profile, scope, deadline, request_rebuild, agent_context)
         with self._trace(call):
             while True:
                 try:
-                    async with self._apermit(call):
+                    async with self._apermit(call), _observe_async(call):
                         raw = await call.sender.ainvoke(call.wire_request(), scope=call.scope)
                         call.capture.raw_response(raw)
                         result = call.adapter.decode_response(raw, call.request, call.profile)
@@ -595,7 +648,8 @@ class ModelService:
             try:
                 if pending_delay is not None:
                     call.wait(pending_delay)
-                with self._permit(call) as scope, call.sender.stream(call.wire_request(), scope=scope) as frames:
+                with (self._permit(call) as scope, call.observe_attempt(),
+                      call.sender.stream(call.wire_request(), scope=scope) as frames):
                     for event in call.adapter.decode_stream(call.capture.frames(frames), call.request, call.profile):
                         message_id = event.message_id
                         call.capture.event(event)
@@ -621,8 +675,11 @@ class ModelService:
             try:
                 if pending_delay is not None:
                     await call.await_retry(pending_delay)
-                async with self._apermit(call), call.sender.astream(call.wire_request(), scope=call.scope) as frames:
-                    async for event in call.adapter.adecode_stream(call.capture.aframes(frames), call.request, call.profile):
+                async with (self._apermit(call), _observe_async(call),
+                            call.sender.astream(call.wire_request(), scope=call.scope) as frames):
+                    async for event in call.adapter.adecode_stream(
+                        call.capture.aframes(frames), call.request, call.profile,
+                    ):
                         message_id = event.message_id
                         call.capture.event(event)
                         self._check_empty_response(call, event, empty_response_policy)
@@ -642,14 +699,14 @@ class ModelService:
 
     @contextmanager
     def stream(
-        self, request, profile, *, scope=None, deadline=None, empty_response_policy="accept", request_rebuild=None,
+        self, request, profile, *, scope=None, deadline=None, empty_response_policy="accept", request_rebuild=None, agent_context=None,
     ):
         """Stream events; retry_uncommitted requires a caller that rolls back speculative deltas."""
         self._validate_rebuild(request_rebuild, asynchronous=False)
         self._validate_empty_policy(empty_response_policy)
         if not request.stream:
             raise ValueError("Stream requires a streaming request")
-        call = self._call(request, profile, scope, deadline, request_rebuild)
+        call = self._call(request, profile, scope, deadline, request_rebuild, agent_context)
         events = self._events(call, empty_response_policy)
         with self._trace(call):
             try:
@@ -659,14 +716,14 @@ class ModelService:
 
     @asynccontextmanager
     async def astream(
-        self, request, profile, *, scope=None, deadline=None, empty_response_policy="accept", request_rebuild=None,
+        self, request, profile, *, scope=None, deadline=None, empty_response_policy="accept", request_rebuild=None, agent_context=None,
     ):
         """Async stream with the same explicit speculative-rollback contract as stream."""
         self._validate_rebuild(request_rebuild, asynchronous=True)
         self._validate_empty_policy(empty_response_policy)
         if not request.stream:
             raise ValueError("Stream requires a streaming request")
-        call = self._call(request, profile, scope, deadline, request_rebuild)
+        call = self._call(request, profile, scope, deadline, request_rebuild, agent_context)
         events = self._aevents(call, empty_response_policy)
         with self._trace(call):
             try:

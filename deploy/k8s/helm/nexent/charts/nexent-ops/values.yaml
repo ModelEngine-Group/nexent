@@ -2,7 +2,7 @@ replicaCount: 1
 
 images:
   backend:
-    repository: nexent/nexent
+    repository: nexent/nexent-ops
     tag: latest
     pullPolicy: IfNotPresent
 

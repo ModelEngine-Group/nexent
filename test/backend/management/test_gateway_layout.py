@@ -35,8 +35,12 @@ def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
 def test_gateway_authentication_and_management_route_ownership():
     assert {p.name for p in (BACKEND / "gateway/security").glob("*.py")} == {
         "__init__.py", "credentials.py", "management_client.py", "delegation.py", "database_provider.py",
-        "identity.py", "policy.py", "token_codec.py", "service_tokens.py", "context.py",
     }
+    assert {p.name for p in (BACKEND / "gateway/identity").glob("*.py")} == {
+        "__init__.py", "protocol.py", "policy.py", "token_codec.py", "service_tokens.py", "context.py",
+        "downstream.py", "internal_tokens.py", "middleware.py",
+    }
+    assert not list((BACKEND / "gateway/downstream").glob("*.py"))
     assert not list((BACKEND / "management/security").glob("*.py"))
     assert not list((BACKEND / "gateway/api").glob("*.py"))
     assert (BACKEND / "management/services/permission/identity/session.py").is_file()

@@ -41,8 +41,6 @@ from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbPermissionDeniedError,
 )
 from ext_components.aidp.database import aidp_permission_db
-from management.db.identity import group as group_db_module
-from management.db.identity import user_tenant as user_tenant_db_module
 
 logger = logging.getLogger("aidp_permission_service")
 

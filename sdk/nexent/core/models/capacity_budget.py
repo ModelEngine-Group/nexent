@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .capacity_resolver import ModelCapacitySnapshot
 
 
-CONTEXT_BUDGET_RESOLVER_VERSION = "2.0.0"
-CONTEXT_BUDGET_FINGERPRINT_SCHEMA_VERSION = 2
+CONTEXT_BUDGET_RESOLVER_VERSION = "3.0.0"
+CONTEXT_BUDGET_FINGERPRINT_SCHEMA_VERSION = 3
 LEGACY_W2_RESOLVER_VERSION = "1.0.0"
 LEGACY_W2_FINGERPRINT_SCHEMA_VERSION = 1
 
@@ -107,6 +107,10 @@ class CapacityReservePolicy(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    remaining_window_ratio: float = Field(default=0.2, gt=0, lt=1)
+    remaining_window_max_tokens: int = Field(default=20000, gt=0)
+    maintenance_target_multiplier: float = Field(default=2.0, gt=1, allow_inf_nan=False)
+
     compaction_trigger_ratio: float = Field(
         default=0.8,
         gt=0,
@@ -143,7 +147,7 @@ class ContextBudgetSnapshot(BaseModel):
     provider: str
     model_name: str
 
-    requested_output_tokens: int
+    requested_output_tokens: Optional[int] = None
     output_reserve_source: OutputReserveSource
 
     effective_input_limit_tokens: int
@@ -160,8 +164,8 @@ class ContextBudgetSnapshot(BaseModel):
 
     field_sources: Mapping[str, str] = Field(default_factory=dict)
     warnings: Sequence[str] = Field(default_factory=list)
-    schema_version: Literal[2] = CONTEXT_BUDGET_FINGERPRINT_SCHEMA_VERSION
-    resolver_version: Literal["2.0.0"] = CONTEXT_BUDGET_RESOLVER_VERSION
+    schema_version: Literal[3] = CONTEXT_BUDGET_FINGERPRINT_SCHEMA_VERSION
+    resolver_version: Literal["3.0.0"] = CONTEXT_BUDGET_RESOLVER_VERSION
     fingerprint: str
 
 
@@ -198,11 +202,6 @@ def compute_context_budget_fingerprint(
         "w1_fingerprint": w1_fingerprint,
         "provider": provider,
         "model_name": model_name,
-        "requested_output_tokens": requested_output_tokens,
-        "output_reserve_source": output_reserve_source,
-        "uncertainty_reserve_tokens": uncertainty_reserve_tokens,
-        "uncertainty_reserve_basis": uncertainty_reserve_basis,
-        "approved_profile_reserve_tokens": approved_profile_reserve_tokens,
         "effective_input_limit_tokens": effective_input_limit_tokens,
         "compaction_trigger_ratio": compaction_trigger_ratio,
         "compaction_trigger_ratio_source": compaction_trigger_ratio_source,
@@ -291,257 +290,63 @@ def parse_context_budget_snapshot(
     if actual_v1 != expected_v1:
         raise ContextBudgetFingerprintMismatch(expected=expected_v1, actual=actual_v1)
 
-    effective_input_limit_tokens = int(data["provider_input_limit_tokens"])
-    trigger_ratio = float(data["soft_limit_ratio"])
-    trigger_threshold = int(data["soft_input_budget_tokens"])
-    target_ratio = 0.6
-    target_tokens = max(1, math.floor(effective_input_limit_tokens * target_ratio))
-    legacy_sources = dict(data.get("field_sources") or {})
-    field_sources = {
-        key: value
-        for key, value in legacy_sources.items()
-        if key not in {
-            "provider_input_limit_tokens",
-            "soft_limit_ratio",
-            "soft_input_budget_tokens",
-            "hard_input_budget_tokens",
-        }
-    }
-    field_sources.update({
-        "effective_input_limit_tokens": legacy_sources.get(
-            "provider_input_limit_tokens", "derived"
-        ),
-        "compaction_trigger_ratio": legacy_sources.get(
-            "soft_limit_ratio", "legacy_payload"
-        ),
-        "compaction_trigger_threshold_tokens": legacy_sources.get(
-            "soft_input_budget_tokens", "legacy_payload"
-        ),
-        "compaction_target_ratio": "code_default",
-        "compaction_target_tokens": "derived",
-    })
-    warnings = [*list(data.get("warnings") or []), "legacy_w2_v1_payload_migrated"]
-    fingerprint = compute_context_budget_fingerprint(
-        resolver_version=CONTEXT_BUDGET_RESOLVER_VERSION,
-        w1_fingerprint=str(data["w1_fingerprint"]),
-        provider=str(data["provider"]),
-        model_name=str(data["model_name"]),
-        requested_output_tokens=int(data["requested_output_tokens"]),
-        output_reserve_source=str(data["output_reserve_source"]),
-        uncertainty_reserve_tokens=int(data["uncertainty_reserve_tokens"]),
-        uncertainty_reserve_basis=str(data["uncertainty_reserve_basis"]),
-        approved_profile_reserve_tokens=data.get("approved_profile_reserve_tokens"),
-        effective_input_limit_tokens=effective_input_limit_tokens,
-        compaction_trigger_ratio=trigger_ratio,
-        compaction_trigger_ratio_source="legacy_payload",
-        compaction_trigger_threshold_tokens=trigger_threshold,
-        compaction_target_ratio=target_ratio,
-        compaction_target_ratio_source="code_default",
-        compaction_target_tokens=target_tokens,
-        field_sources=field_sources,
-        warnings=warnings,
-    )
-    return ContextBudgetSnapshot(
-        w1_fingerprint=str(data["w1_fingerprint"]),
-        provider=str(data["provider"]),
-        model_name=str(data["model_name"]),
-        requested_output_tokens=int(data["requested_output_tokens"]),
-        output_reserve_source=data["output_reserve_source"],
-        effective_input_limit_tokens=effective_input_limit_tokens,
-        uncertainty_reserve_tokens=int(data["uncertainty_reserve_tokens"]),
-        uncertainty_reserve_basis=data["uncertainty_reserve_basis"],
-        approved_profile_reserve_tokens=data.get("approved_profile_reserve_tokens"),
-        compaction_trigger_ratio=trigger_ratio,
-        compaction_trigger_ratio_source="legacy_payload",
-        compaction_trigger_threshold_tokens=trigger_threshold,
-        compaction_target_ratio=target_ratio,
-        compaction_target_ratio_source="code_default",
-        compaction_target_tokens=target_tokens,
-        field_sources=field_sources,
-        warnings=warnings,
-        fingerprint=fingerprint,
+    raise NoSafeInputCapacity(
+        "Legacy context budgets must be rebuilt from the current combined and output capabilities"
     )
 
 
 class ContextBudgetCalculator:
-    """Pure canonical W2 calculator over an immutable W1 capacity snapshot."""
-
-    _UNKNOWN_CAPABILITIES_REQUIRING_RESERVE = frozenset(
-        {
-            "capability_profile_missing",
-            "tokenizer",
-            "reasoning_window_behavior",
-            "provider_overhead_behavior",
-        }
-    )
+    """Derive post-response maintenance thresholds without output reservations."""
 
     def calculate_context_budget(
-        self,
-        *,
-        capacity_snapshot: ModelCapacitySnapshot,
+        self, *, capacity_snapshot: ModelCapacitySnapshot,
         reserve_policy: CapacityReservePolicy,
         request_overrides: Optional[RequestBudgetOverrides] = None,
         requested_output_tokens: Optional[int] = None,
         output_reserve_source: OutputReserveSource = "model_default",
     ) -> ContextBudgetSnapshot:
-        effective_output_tokens = (
-            requested_output_tokens
-            if requested_output_tokens is not None
-            else capacity_snapshot.requested_output_tokens
-        )
-        effective_output_source: OutputReserveSource = output_reserve_source
-        if requested_output_tokens is None:
-            effective_output_source = "model_default"
-
-        if effective_output_tokens <= 0:
-            raise InvalidReservePolicy(
-                "requested_output_tokens must be a positive integer"
-            )
-
-        if request_overrides and request_overrides.requested_output_tokens is not None:
-            if request_overrides.requested_output_tokens < effective_output_tokens:
-                raise InvalidReservePolicy(
-                    "per-request requested_output_tokens may not lower the "
-                    "resolved model or agent output reserve"
-                )
-            effective_output_tokens = request_overrides.requested_output_tokens
-            effective_output_source = "request"
-
-        if (
-            capacity_snapshot.max_output_tokens is not None
-            and effective_output_tokens > capacity_snapshot.max_output_tokens
-        ):
-            raise RequestedOutputExceedsCapacity(
-                "requested_output_tokens "
-                f"({effective_output_tokens}) exceeds max_output_tokens "
-                f"({capacity_snapshot.max_output_tokens})"
-            )
-
-        provider_input_limit = self._provider_input_limit(
-            capacity_snapshot=capacity_snapshot,
-            requested_output_tokens=effective_output_tokens,
-        )
-
-        uncertainty_reserve_tokens, uncertainty_reserve_basis, warnings = (
-            self._uncertainty_reserve(capacity_snapshot, reserve_policy)
-        )
-
-        if uncertainty_reserve_tokens > provider_input_limit:
-            raise ReserveExceedsCapacity(
-                "uncertainty reserve "
-                f"({uncertainty_reserve_tokens}) exceeds provider input limit "
-                f"({provider_input_limit})"
-            )
-
-        compaction_trigger_threshold_tokens = max(
-            1, math.floor(provider_input_limit * reserve_policy.compaction_trigger_ratio)
-        )
-        compaction_target_tokens = max(
-            1, math.floor(provider_input_limit * reserve_policy.compaction_target_ratio)
-        )
-
-        field_sources = {
-            "requested_output_tokens": effective_output_source,
-            "compaction_trigger_ratio": reserve_policy.compaction_trigger_ratio_source,
-            "compaction_target_ratio": reserve_policy.compaction_target_ratio_source,
-            "uncertainty_reserve_tokens": uncertainty_reserve_basis,
+        window = capacity_snapshot.context_window_tokens
+        if window is None or window < 2:
+            raise NoSafeInputCapacity("a combined context window of at least two tokens is required")
+        ratio = reserve_policy.remaining_window_ratio
+        # Preserve an explicitly configured legacy strategy ratio, not legacy
+        # model output budgets. Defaults use the remaining-space policy.
+        if (reserve_policy.compaction_trigger_ratio_source != "code_default"
+                and "remaining_window_ratio" not in reserve_policy.model_fields_set):
+            ratio = 1 - reserve_policy.compaction_trigger_ratio
+        if not 0 < ratio < 1:
+            raise InvalidReservePolicy("remaining context ratio must be in (0, 1)")
+        headroom = min(window - 1, math.ceil(min(
+            ratio * window, reserve_policy.remaining_window_max_tokens,
+        )))
+        target_headroom = min(window - 1, math.ceil(
+            headroom * reserve_policy.maintenance_target_multiplier,
+        ))
+        trigger = window - headroom
+        target = window - target_headroom
+        fields = {
             "effective_input_limit_tokens": "derived",
             "compaction_trigger_threshold_tokens": "derived",
             "compaction_target_tokens": "derived",
         }
-
+        values = dict(
+            w1_fingerprint=capacity_snapshot.fingerprint,
+            provider=capacity_snapshot.provider, model_name=capacity_snapshot.model_name,
+            requested_output_tokens=None, output_reserve_source="model_default",
+            uncertainty_reserve_tokens=0, uncertainty_reserve_basis="none",
+            approved_profile_reserve_tokens=None,
+            effective_input_limit_tokens=window,
+            compaction_trigger_ratio=trigger / window,
+            compaction_trigger_ratio_source=reserve_policy.compaction_trigger_ratio_source,
+            compaction_trigger_threshold_tokens=trigger,
+            compaction_target_ratio=target / window,
+            compaction_target_ratio_source="code_default",
+            compaction_target_tokens=target, field_sources=fields, warnings=[],
+        )
         fingerprint = compute_context_budget_fingerprint(
-            resolver_version=CONTEXT_BUDGET_RESOLVER_VERSION,
-            w1_fingerprint=capacity_snapshot.fingerprint,
-            provider=capacity_snapshot.provider,
-            model_name=capacity_snapshot.model_name,
-            requested_output_tokens=effective_output_tokens,
-            output_reserve_source=effective_output_source,
-            uncertainty_reserve_tokens=uncertainty_reserve_tokens,
-            uncertainty_reserve_basis=uncertainty_reserve_basis,
-            approved_profile_reserve_tokens=reserve_policy.approved_profile_reserve_tokens,
-            effective_input_limit_tokens=provider_input_limit,
-            compaction_trigger_ratio=reserve_policy.compaction_trigger_ratio,
-            compaction_trigger_ratio_source=reserve_policy.compaction_trigger_ratio_source,
-            compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
-            compaction_target_ratio=reserve_policy.compaction_target_ratio,
-            compaction_target_ratio_source=reserve_policy.compaction_target_ratio_source,
-            compaction_target_tokens=compaction_target_tokens,
-            field_sources=field_sources,
-            warnings=warnings,
+            resolver_version=CONTEXT_BUDGET_RESOLVER_VERSION, **values,
         )
-
-        return ContextBudgetSnapshot(
-            w1_fingerprint=capacity_snapshot.fingerprint,
-            provider=capacity_snapshot.provider,
-            model_name=capacity_snapshot.model_name,
-            requested_output_tokens=effective_output_tokens,
-            output_reserve_source=effective_output_source,
-            effective_input_limit_tokens=provider_input_limit,
-            uncertainty_reserve_tokens=uncertainty_reserve_tokens,
-            uncertainty_reserve_basis=uncertainty_reserve_basis,
-            approved_profile_reserve_tokens=reserve_policy.approved_profile_reserve_tokens,
-            compaction_trigger_ratio=reserve_policy.compaction_trigger_ratio,
-            compaction_trigger_ratio_source=reserve_policy.compaction_trigger_ratio_source,
-            compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
-            compaction_target_ratio=reserve_policy.compaction_target_ratio,
-            compaction_target_ratio_source=reserve_policy.compaction_target_ratio_source,
-            compaction_target_tokens=compaction_target_tokens,
-            field_sources=field_sources,
-            warnings=warnings,
-            resolver_version=CONTEXT_BUDGET_RESOLVER_VERSION,
-            fingerprint=fingerprint,
-        )
-
-    @staticmethod
-    def _provider_input_limit(
-        *,
-        capacity_snapshot: ModelCapacitySnapshot,
-        requested_output_tokens: int,
-    ) -> int:
-        derived_limits: list[int] = []
-        if capacity_snapshot.max_input_tokens is not None:
-            derived_limits.append(capacity_snapshot.max_input_tokens)
-        if capacity_snapshot.context_window_tokens is not None:
-            derived_limits.append(
-                capacity_snapshot.context_window_tokens - requested_output_tokens
-            )
-        if not derived_limits:
-            raise NoSafeInputCapacity("no provider input limit could be derived")
-        provider_input_limit = min(derived_limits)
-        if provider_input_limit <= 0:
-            raise NoSafeInputCapacity(
-                "provider input limit is non-positive after output reserve"
-            )
-        return provider_input_limit
-
-    def _uncertainty_reserve(
-        self,
-        capacity_snapshot: ModelCapacitySnapshot,
-        reserve_policy: CapacityReservePolicy,
-    ) -> tuple[int, UncertaintyReserveBasis, list[str]]:
-        unknown_required_behavior = self._UNKNOWN_CAPABILITIES_REQUIRING_RESERVE.intersection(
-            capacity_snapshot.unknown_capabilities
-        )
-
-        if reserve_policy.approved_profile_reserve_tokens is not None:
-            return (
-                reserve_policy.approved_profile_reserve_tokens,
-                "approved_profile",
-                [],
-            )
-
-        if not unknown_required_behavior:
-            return 0, "none", []
-
-        if capacity_snapshot.context_window_tokens is None:
-            raise UncertaintyReserveBasisUnknown(
-                "context_window_tokens is required for the unified 10 percent "
-                "uncertainty reserve"
-            )
-
-        reserve = math.ceil(capacity_snapshot.context_window_tokens * 0.10)
-        return reserve, "context_window_10pct", ["uncertainty_reserve_active"]
+        return ContextBudgetSnapshot(**values, fingerprint=fingerprint)
 
 
 def verify_context_budget_capacity(

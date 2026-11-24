@@ -213,7 +213,8 @@ for target in docker k8s all; do
   [ "$(cat "$package_dir/VERSION")" = "v2.2.0" ] || fail "root VERSION should match requested package version for target $target"
   [ -f "$OUT_DIR/nexent-offline-${target}-amd64-v2.2.0.zip" ] || fail "zip package should be created for target $target"
   grep -q "target: \"$target\"" "$package_dir/manifest.yaml" || fail "manifest should record target $target"
-  grep -q "nexent/nexent:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include Nexent image"
+  grep -q "nexent/nexent-management:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include Management"
+  ! grep -q "nexent/nexent:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should skip the combined backend"
   grep -q 'includeSandbox: "true"' "$package_dir/manifest.yaml" || fail "manifest should record that the Sandbox image is included by default"
   grep -q "nexent/nexent-sandbox:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include the Sandbox image by default"
   [ -f "$package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "offline package should save the Sandbox image tar by default"
@@ -238,6 +239,15 @@ for target in docker k8s all; do
       ;;
   esac
 done
+
+langfuse_package_dir="$OUT_DIR/langfuse-all"
+PATH="$BIN_DIR:$PATH" \
+  bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+    --version v2.2.0 --components infrastructure,monitoring --monitoring-provider langfuse \
+    --image-source general --target all --output-dir "$langfuse_package_dir" >"$TMP_DIR/langfuse-all.log"
+[ "$(grep -Fxc '  - "nexent/minio:RELEASE.2023-12-20T01-00-02Z"' "$langfuse_package_dir/manifest.yaml")" -eq 1 ] || fail "combined package should list the selected MinIO image once"
+[ -f "$langfuse_package_dir/images/minio-2023-12-20T01-00-02Z.tar" ] || fail "combined package should save the selected MinIO tar"
+! grep -Fq 'quay.io/minio/minio:' "$langfuse_package_dir/manifest.yaml" || fail "combined package should only use the selected mirror"
 
 sandbox_package_dir="$OUT_DIR/without-sandbox"
 PATH="$BIN_DIR:$PATH" \
@@ -382,7 +392,7 @@ latest_pull_log="$TMP_DIR/latest-docker.log"
 output="$(bash "$PROJECT_ROOT/build.sh" --package --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
 echo "$output" | grep -q "=== DRY RUN MODE ===" || fail "build.sh --package should forward to offline package builder"
 echo "$output" | grep -q "Target: docker" || fail "build.sh --package should forward package arguments"
-echo "$output" | grep -q "nexent/nexent:v2.2.0" || fail "build.sh --package should render package image plan"
+echo "$output" | grep -q "nexent/nexent-management:v2.2.0" || fail "build.sh --package should render package image plan"
 
 PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
@@ -408,7 +418,7 @@ push_log="$TMP_DIR/push-images.log"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-ops:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --image-registry-prefix https://registry.local/nexent/ \
@@ -416,15 +426,15 @@ PATH="$BIN_DIR:$PATH" \
     --output-env-file "$TMP_DIR/push-images.env" >/tmp/nexent-offline-package-push.log
 grep -q '^login registry.local --username user --password-stdin password=secret$' "$push_log" || fail "push-images.sh should login to registry host with password stdin"
 grep -q '^IMAGE_REGISTRY_PREFIX=registry.local/nexent$' "$TMP_DIR/push-images.env" || fail "push-images.sh should write selected registry prefix to output env file"
-grep -q '^tag nexent/nexent:latest registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should tag Nexent image with registry prefix"
-grep -q '^push registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should push prefixed Nexent image"
+grep -q '^tag nexent/nexent-management:latest registry.local/nexent/nexent/nexent-management:latest$' "$push_log" || fail "push-images.sh should tag Nexent image with registry prefix"
+grep -q '^push registry.local/nexent/nexent/nexent-management:latest$' "$push_log" || fail "push-images.sh should push prefixed Nexent image"
 grep -q '^tag docker.elastic.co/elasticsearch/elasticsearch:8.17.4 registry.local/nexent/docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$push_log" || fail "push-images.sh should tag third-party image with registry prefix"
 grep -q '^tag nexent/minio:RELEASE.2023-12-20T01-00-02Z registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should tag the configured MinIO image with registry prefix"
 grep -q '^push registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should push the configured MinIO image"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-ops:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --load-images \
@@ -605,8 +615,8 @@ second_line="$(sed -n '2p' "$offline_deploy_log")"
 
 [ -f "$OUT_DIR/nexent-custom-latest.zip" ] || fail "zip package should use the requested final package name"
 [ ! -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "custom package name should replace the generated package name"
-grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
-grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should be pulled"
+grep -q "nexent/nexent-management:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
+grep -q '^pull .*nexent/nexent-management:latest$' "$latest_pull_log" || fail "latest Nexent image should be pulled"
 grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should be pulled"
 grep -q '^pull .*nexent/nexent-mcp:latest$' "$latest_pull_log" || fail "latest Nexent MCP image should be pulled"
 grep -q '^pull .*docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$latest_pull_log" || fail "non-latest infrastructure images should still be pulled"
@@ -617,7 +627,7 @@ local_pull_log="$TMP_DIR/local-existing-docker.log"
 
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$local_pull_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:v2.2.0,docker.elastic.co/elasticsearch/elasticsearch:8.17.4" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent-management:v2.2.0,docker.elastic.co/elasticsearch/elasticsearch:8.17.4" \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
     --version v2.2.0 \
     --platform amd64 \
@@ -630,7 +640,7 @@ PATH="$BIN_DIR:$PATH" \
 assert_common_package_files "$local_package_dir"
 [ "$(cat "$local_package_dir/VERSION")" = "v2.2.0" ] || fail "root VERSION should match requested package version"
 [ -f "$OUT_DIR/local-existing/nexent-offline-docker-amd64-v2.2.0.zip" ] || fail "zip package should be created for local existing package"
-! grep -q '^pull .*nexent/nexent:v2.2.0$' "$local_pull_log" || fail "existing local Nexent image should not be pulled"
+! grep -q '^pull .*nexent/nexent-management:v2.2.0$' "$local_pull_log" || fail "existing local Nexent image should not be pulled"
 ! grep -q '^pull .*docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$local_pull_log" || fail "existing local infrastructure image should not be pulled"
 grep -q '^pull .*nexent/nexent-web:v2.2.0$' "$local_pull_log" || fail "missing non-latest Nexent web image should still be pulled"
 

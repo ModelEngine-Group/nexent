@@ -3,6 +3,7 @@
 """Adapter resource registration preserves ownership, authorization and sandbox policy."""
 
 import asyncio
+import json
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -34,15 +35,17 @@ def adapter():
 
 def capture_registration(adapter, mocker):
     def local_function(card, fn):
-        fn.card = card
-        return fn
+        wrapper = Mock(wraps=fn)
+        wrapper.card = card
+        return wrapper
 
     mocker.patch("openjiuwen.core.foundation.tool.LocalFunction", side_effect=local_function)
     handler = mocker.patch.object(adapter, "_business_handler", side_effect=lambda name, fn, **kwargs: fn)
     return handler
 
 
-def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker):
+@pytest.mark.parametrize("retriever", [False, True])
+def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker, retriever):
     from openjiuwen.harness import factory as native_factory
 
     child = AgentConfig(name="child", description="Child", model_name="child-model", tools=[])
@@ -56,6 +59,15 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
                                to_a2a_agent_info=Mock(return_value="external-info"))
     adapter.external_agents = [external]
     local, worker = Mock(), Mock()
+    documents = [{"id": "doc-1", "content": "evidence", "source": "source-1"}]
+    if retriever:
+        local = type("KnowledgeBaseSearchTool", (), {})()
+        local.forward = Mock(return_value=documents)
+    original_forward = getattr(local, "forward")
+    monitoring = Mock()
+    from contextlib import nullcontext
+    monitoring.trace_retriever_call.side_effect = lambda *args, **kwargs: nullcontext()
+    mocker.patch("nexent.core.agents.resources.monitoring.get_monitoring_manager", return_value=monitoring)
     for tool, name in [(local, "lookup"), (worker, "child")]:
         tool.name, tool.description, tool.inputs = name, name, {"task": {"type": "string"}}
     resources = Mock()
@@ -64,7 +76,6 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     resources._prepare_file_workspace.return_value = "Authorized latest task"
     resources._wrap_subagent.side_effect = lambda definition, *args, **kwargs: definition
     resource_type = mocker.patch("nexent.core.agents.cores.jiuwen.adapter.AgentResources", return_value=resources)
-    mocker.patch("nexent.core.agents.cores.jiuwen.adapter._wrap_tool_with_monitoring", side_effect=lambda tool, name: tool)
     capture_registration(adapter, mocker)
     native = adapter.native_agent
     factory = mocker.patch.object(native_factory, "create_deep_agent", return_value=native)
@@ -76,20 +87,46 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     mocker.patch.object(adapter, "_skill_rails", return_value=[])
     parallel = mocker.patch.object(adapter, "_bind_parallel_tool")
     executor = mocker.patch.object(adapter, "_bind_text_executor")
-    adapter.context_items = []
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+    from nexent.core.agents.contracts.context import ContextItemInput
+    reader = Mock(return_value="old original")
+    discovery = Mock(return_value={"results": [{"output_ref": "message:10/unit-index:3"}],
+                                   "next_offset": 1, "eof": True})
+    history = adapter.run_info.observer.execution_history = ExecutionHistory(
+        read_conversation_result=reader, discover_summary_sources=discovery)
+    adapter.context_items = [ContextItemInput(id="summary", type="history_summary", content={
+        "summary": "Older results summarized", "covered_through_message_id": 50,
+    })]
     adapter.run_info.tool_call_timeout_seconds = 900
     proxies = [Mock(return_value="first"), Mock(return_value="second")]
     proxy_type = mocker.patch("nexent.core.agents.resources.a2a.ExternalA2AAgentWrapper", side_effect=proxies)
     adapter.prepare()
+    assert adapter.execution_history is history
+    assert "old original" in adapter.business_tools["read_execution_output"].forward("message:10/unit-index:3")
+    reader.assert_called_once_with(10, 3)
+    discovered = json.loads(adapter.business_tools["read_execution_output"].forward("summary"))
+    assert discovered["results"][0]["output_ref"] == "message:10/unit-index:3"
+    discovery.assert_called_once()
     resources.create_tool.assert_called_once_with(tools[0])
+    if retriever:
+        assert local._nexent_monitoring_wrapped is True
+        assert local.forward(task="search") is documents
+        original_forward.assert_called_once_with(task="search")
+        monitoring.trace_retriever_call.assert_called_once()
+        monitoring.set_retriever_output.assert_called_once_with(documents)
+        monitoring.trace_tool_call.assert_not_called()
+    else:
+        assert local.forward is original_forward
+        monitoring.trace_retriever_call.assert_not_called()
+        monitoring.trace_tool_call.assert_not_called()
     resources._create_subagent_definition.assert_called_once_with(child, {})
-    assert set(adapter.business_tools) == {"lookup", "child", "remote"}
+    assert set(adapter.business_tools) == {"lookup", "child", "remote", "read_execution_output"}
     assert adapter.query == "Authorized latest task" and resources.core_run_info is adapter.run_info
     assert resource_type.call_args.kwargs["tenant_id"] == "tenant"
     assert resource_type.call_args.kwargs["user_id"] == "user"
     settings = factory.call_args.kwargs
     assert settings["system_prompt"] == "shared instructions" and settings["language"] == "cn"
-    assert len(settings["tools"]) == 3 and settings["tool_owner_id"] == adapter.owner_id
+    assert len(settings["tools"]) == 4 and settings["tool_owner_id"] == adapter.owner_id
     # Every native business/child/A2A card uses the run's deployment deadline.
     from openjiuwen.core.single_agent.ability_manager import AbilityManager
     assert all(AbilityManager._resolve_call_timeout(tool.card) == 900 for tool in settings["tools"])
@@ -98,7 +135,8 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
                 "parallel_tool_calls"):
         assert settings[key] is False
     assert model.prefix == [] and model.prepare_messages == adapter._prepare_model_messages
-    context_type.assert_called_once_with(adapter.run_info, adapter.scope, adapter.manager, model, [])
+    context_type.assert_called_once_with(adapter.run_info, adapter.scope, adapter.manager, model, adapter.context_items,
+                                         message_format="openai_chat_completions")
     parallel.assert_called_once()
     executor.assert_called_once()
     remote = adapter.business_tools["remote"]
