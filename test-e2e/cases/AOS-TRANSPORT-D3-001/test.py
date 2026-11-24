@@ -851,11 +851,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
     skill_tools = [
         ToolConfig(
             class_name=class_name, name=name, source="builtin", usage="builtin", metadata=skill_metadata,
-            params={"local_skills_dir": str(skill_root), **params},
+            params={"local_skills_dir": str(skill_root), "authorized_skill_names": ["summarize"], **params},
         )
         for class_name, name, params in [
             ("RunSkillScriptTool", "run_skill_script",
-             {"workspace_path": None, "isolated_skills_root": False, "authorized_skill_names": ["summarize"]}),
+             {"workspace_path": None, "isolated_skills_root": False}),
             ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False}),
             ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": skill["config"]}}),
         ]
@@ -2555,7 +2555,17 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert first.headers["X-Workbench-Config-Version"] == "4"
         if metadata is not None:
             assert first.headers["X-Runtime-Metadata-Version"] == str(metadata_version)
-        assert first.text.startswith(prefix)
+        def frame_fields(frame):
+            fields = []
+            for line in frame.splitlines():
+                name, separator, value = line.partition(": ")
+                assert separator
+                fields.append((name, json.loads(value) if name == "data" else value))
+            return fields
+
+        expected_frames = prefix.split("\n\n")[:-1]
+        actual_frames = first.text.split("\n\n")[:len(expected_frames)]
+        assert [frame_fields(frame) for frame in actual_frames] == [frame_fields(frame) for frame in expected_frames]
         assert "agentos_terminal" in first.text
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id
         assert retry.json()["conversation_id"] == reference.conversation_id

@@ -51,12 +51,14 @@ class RecordTool(Tool):
 
 @pytest.fixture
 def build_agent():
-    def build(outputs, tools=None, **kwargs):
+    def build(outputs, tools=None, *, context_window=128000, **kwargs):
         observer = MessageObserver()
         model = ScriptedModel(outputs)
         agent = CoreAgent(
             observer=observer, model=model, tools=tools or [], enable_clarification=True,
-            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig())),
+            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig(
+                context_window_tokens=context_window, effective_input_limit_tokens=context_window,
+            ))),
             verbosity_level=0, **kwargs,
         )
         return agent, model, observer
@@ -344,3 +346,17 @@ def test_clarification_uses_existing_content_guardrail(build_agent, action):
         assert len(cards) == 1
         assert cards[0]["content"]["questions"][0]["title"] == "Filtered question"
         assert result == "1. Filtered question"
+
+
+def test_clarification_small_window_remains_advisory_before_inference(build_agent, monkeypatch):
+    """An over-window estimate still reaches inference without pre-send compression."""
+    agent, model, observer = build_agent([f"<code>{CODE}</code>"], context_window=1000)
+    manager = agent.context_runtime.context_manager
+    summary = MagicMock(side_effect=AssertionError("Unexpected pre-send summary"))
+    monkeypatch.setattr(manager._llm, "generate_summary", summary)
+    result = str(agent.run("Help with " * 1000, max_steps=1))
+    assert len(model.calls) == 1
+    assert manager._message_tokens(model.calls[0]) > manager.config.context_window_tokens == 1000
+    summary.assert_not_called()
+    assert result == "1. Which region?"
+    assert len([event for event in events(observer) if event["type"] == "human_interaction"]) == 1

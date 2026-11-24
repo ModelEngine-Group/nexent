@@ -91,8 +91,9 @@ def test_retry_and_early_close_share_trace_and_release_observation(setup, monito
     with service.stream(request, profile) as events:
         assert next(events).delta == 'partial' and active
     assert len(calls) == 1 and not active and not limiter._entries
-    begins = [call.args for call in manager.add_span_event.call_args_list if call.args[0] == 'model_attempt_begin']
-    assert [args[1]['attempt'] for args in begins] == [1, 2]
+    begins = manager.record_model_http_request.call_args_list
+    assert [call.kwargs['attempt'] for call in begins] == [1, 2]
+    assert [call.args[0] for call in begins] == [json.loads(sent.body_bytes) for sent in sender.calls]
     manager.create_token_tracker.return_value.record_completion.assert_not_called()
     assert sender.closed == 2
 

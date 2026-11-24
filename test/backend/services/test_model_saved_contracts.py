@@ -5,6 +5,8 @@
 from copy import deepcopy
 
 import pytest
+from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+from nexent.core.model_service.contracts import ModelMessage, ModelRequest
 from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
 from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
 from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
@@ -14,12 +16,12 @@ from nexent.core.model_service.profiles.protocol_parameters import (
 )
 from nexent.core.model_service.registry import model_service_references
 from nexent.core.models.capacity_budget import (
-    CallerMaxTokensOverrideForbidden, CapacityReservePolicy, ContextBudgetCalculator,
+    CapacityReservePolicy, ContextBudgetCalculator,
     ContextBudgetCapacityMismatch, verify_context_budget_capacity,
 )
 from nexent.core.models.capacity_resolver import ModelCapacitySnapshot
 from management.services.model.outlet_projection import project_saved_outlet
-from test.sdk.core.model_service.conftest import protocol_profile  # noqa: F401
+from test.sdk.core.model_service.conftest import protocol_profile as _protocol_profile
 
 
 @pytest.mark.parametrize("entry", [None, [], {"parameter_values": []},
@@ -51,6 +53,11 @@ def test_current_agent_entries_retire_only_outlet_token_limits():
     assert read_agent_parameter_entry(entry) == {
         "parameter_values": {"temperature": 0}, "custom_overrides": {"flag": False}}
     assert entry == before
+
+
+@pytest.fixture(name="protocol_profile")
+def resolved_protocol_profile():
+    return _protocol_profile.__wrapped__()
 
 
 @pytest.fixture
@@ -135,15 +142,18 @@ def test_stale_budget_identity_reports_exact_mismatched_field(budget, field, key
     assert error.value.actual == getattr(budget, key)
 
 
-def test_budget_alias_uses_trusted_limit_and_rejects_caller_override(protocol_profile, budget):
+def test_budget_alias_retains_saved_values_but_omits_all_wire_length_overrides(protocol_profile, budget):
     for capacity in (None, {}, {"provider": budget.provider.upper(), "model_name": budget.model_name}):
         verify_context_budget_capacity(budget_snapshot=budget, capacity_snapshot=capacity)
     original = deepcopy(protocol_profile.model_dump())
-    result = LegacyInvocationOptions({}, context_budget_snapshot=budget).resolve(protocol_profile)
-    assert result.parameter_values["max_output_tokens"] == budget.requested_output_tokens
-    assert protocol_profile.model_dump() == original
-    with pytest.raises(CallerMaxTokensOverrideForbidden) as error:
-        LegacyInvocationOptions({"max_tokens": 1}, context_budget_snapshot=budget).resolve(protocol_profile)
-    assert error.value.snapshot_value == budget.requested_output_tokens and error.value.caller_value == 1
+    request = ModelRequest(request_id="budget-retirement", outlet_id=protocol_profile.outlet_id,
+        config_revision=protocol_profile.config_revision,
+        messages=[ModelMessage(semantic_role="user", content_parts=[{"type": "text", "text": "Hello"}])])
+    for parameters in ({}, {"max_tokens": 1}, {"max_output_tokens": 512, "max_completion_tokens": 1024}):
+        result = LegacyInvocationOptions(parameters, context_budget_snapshot=budget).resolve(protocol_profile)
+        assert result.parameter_values == original["parameter_values"]
+        body = OpenAIChatAdapter().prepare_http_request(request, result).json_body
+        assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(body)
+        assert protocol_profile.model_dump() == original
     with pytest.raises(TypeError, match="context_budget_snapshot"):
         LegacyInvocationOptions({}, context_budget_snapshot="invalid").resolve(protocol_profile)

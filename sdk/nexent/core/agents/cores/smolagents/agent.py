@@ -294,6 +294,7 @@ class NexentAgent(AgentResources):
             context_manager = ContextManager(
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
+                message_format="codeagent",
             )
             from nexent.core.agents.prompt.policies import with_common_behavior
 

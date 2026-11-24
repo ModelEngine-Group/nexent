@@ -34,6 +34,7 @@ def capture():
         _config=SimpleNamespace(provider="local_file", export_traces=True),
         tracer=provider.get_tracer("test"),
         record_llm_metrics=Mock(),
+        record_model_http_request=Mock(),
     )
     manager.create_token_tracker = lambda model, span: LLMTokenTracker(
         manager, model, span
