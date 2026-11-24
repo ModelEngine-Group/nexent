@@ -158,6 +158,7 @@ class MessageObserver:
         # Control output language
         self.lang = lang
         self.enable_nl2a_wrapper = enable_nl2a_wrapper
+        self.workspace_uploads_enabled = True
         self._nl2a_state_events: set[str] = set()
         self._nl2a_state_lock = threading.Lock()
 

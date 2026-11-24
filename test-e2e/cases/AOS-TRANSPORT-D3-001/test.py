@@ -205,7 +205,7 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
             raise memory.MemoryStoreScopeError
         return rows.get((tenant, key, content))
 
-    def write(tenant, user, agent, conversation, key, content, index):
+    def write(tenant, user, agent, conversation, key, content, index, *, deadline):
         assert (tenant, user, agent, conversation, index) == ("tenant-a", "user-a", 7, 42, "mem_embed_2")
         rows[tenant, key, content] = 17
         return 17, "ADD"
@@ -219,11 +219,11 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     index_service.index_record.return_value = True
     write_record = Mock(side_effect=write)
     fanout = AsyncMock()
-    monkeypatch.setattr(memory, "run_blocking", controlled_io)
+    monkeypatch.setattr(memory, "run_memory_io", controlled_io)
     monkeypatch.setattr(memory, "_load_embedding", lambda tenant: model if tenant == actor.tenant_id else None)
     monkeypatch.setattr(memory, "find_existing_memory", find)
     monkeypatch.setattr(memory, "write_agent_memory", write_record)
-    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args: args[-1]({"memory_id": 17}))
+    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args, deadline: args[-1]({"memory_id": 17}))
     monkeypatch.setattr(provider, "_fanout_external_ingest", fanout)
     monkeypatch.setattr(provider, "get_memory_record_service", Mock(side_effect=AssertionError("legacy store loaded")))
 
@@ -1555,6 +1555,11 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluation_snapshot, "run_blocking", control_io)
     monkeypatch.setattr(evaluation_snapshot, "get_conversation", read_conversation)
     monkeypatch.setattr(evaluation_snapshot, "get_memory_switch", lambda user: user == actor.user_id)
+
+    async def memory_io(_task, function, *args, deadline):
+        return function(*args)
+
+    monkeypatch.setattr("infrastructure.memory_io.run_memory_io", memory_io)
     monkeypatch.setattr("management.services.knowledge_base.scope.snapshot_runtime_knowledge_tree", lambda *_: [{
         "agent_id": 7, "version_no": 3, "agent_name": "agent",
         "tools": [{

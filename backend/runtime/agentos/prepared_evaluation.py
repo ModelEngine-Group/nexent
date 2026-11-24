@@ -563,6 +563,8 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
     if payload.replay_trial_id is not None and not EVOLUTION_REPLAY_RUNTIME:
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_REPLAY_RUNTIME_REQUIRED"})
     info = await load_prepared_run(payload, actor, prepare_evaluation_run)
+    if private_bucket:
+        info.observer.workspace_uploads_enabled = False
     try:
         agent_run_manager.register_agent_run(payload.conversation_id, info, actor.user_id)
     except Exception as exc:

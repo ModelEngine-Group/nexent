@@ -399,6 +399,18 @@ class TestUploadToS3ToolForward:
         mock_minio_client.upload_file.assert_called_once()
         mock_minio_client.get_file_url.assert_not_called()
 
+    def test_private_evaluation_cannot_upload_workspace_files(self, tool_with_file, mock_minio_client):
+        tool, _ = tool_with_file
+        tool.observer.workspace_uploads_enabled = False
+
+        with pytest.raises(PermissionError, match="independent evaluation"):
+            tool.forward("test_report.txt")
+        with pytest.raises(PermissionError, match="independent evaluation"):
+            tool.upload_artifact("test_report.txt", "result.txt")
+
+        mock_minio_client.upload_file.assert_not_called()
+        tool.observer.add_message.assert_not_called()
+
     def test_upload_with_target_filename(self, tool_with_file, mock_minio_client):
         tool, test_file = tool_with_file
         result = tool.forward("test_report.txt", "custom_name.txt")

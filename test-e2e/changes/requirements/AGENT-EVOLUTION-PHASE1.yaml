@@ -48,11 +48,14 @@ change:
     - test/backend/services/test_evolution_feedback_handoff.py
     - test/backend/app/test_agentos_prepared_skills.py
     - test/backend/app/test_agentos_prepared_attachments.py
+    - test/backend/app/test_agentos_skill_artifact_upload.py
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/gateway/test_exposure.py
     - test/sdk/core/tools/test_read_skill_md_tool.py
     - test/sdk/core/agents/test_replay_tool_bindings.py
     - test/sdk/core/agents/test_replay_file_directory.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/tools/test_s3_tools.py
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
     - frontend/tests/component/evolutionAgentChoices.test.tsx
@@ -66,6 +69,7 @@ change:
     - test/backend/utils/test_logging_utils.py
     - test/backend/services/test_prepared_public_turn.py
     behaviors:
+    - 独立 Runtime 禁止显式上传和自动发布工作区产物，继续支持私有输入以及本地文件判分。普通会话和常规评测的文件上传保持原有行为。
     - 评测入口按当前已发布智能体的配置编辑权限筛选。只读成员仍可查看自己的改进建议，跨租户资源返回不存在，试跑不能沿用已撤回的编辑权限。
     - 紧急停用同事务标记该已发布版本的活跃执行，保留已完成回执。Runtime 进入运行状态时与同一发布记录同步，不能启动已停用的版本。
     - 按冻结的已发布智能体版本核对历史工具移除记录，并与本次候选移除项合并。禁止调用项仍须有完整运行回执；必须调用项缺调用判失败，未知缺项列为缺证。

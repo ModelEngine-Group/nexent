@@ -544,7 +544,7 @@ class WorkspaceResources:
 
     def _finalize_file_workspace(self) -> None:
         """Upload all workspace outputs that were not already uploaded explicitly."""
-        if not self.workspace_path:
+        if not self.workspace_path or getattr(self.observer, "workspace_uploads_enabled", True) is False:
             return
         self._pull_file_workspace_from_sandbox()
         workspace = Path(self.workspace_path)

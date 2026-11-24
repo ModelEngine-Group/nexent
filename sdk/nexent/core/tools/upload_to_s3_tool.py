@@ -167,6 +167,8 @@ class UploadToS3Tool(Tool):
         return json.loads(self._upload(file_path, target_filename, notify=False, allow_empty=True))
 
     def _upload(self, file_path: str, target_filename: str | None, *, notify: bool, allow_empty: bool = False) -> str:
+        if getattr(self.observer, "workspace_uploads_enabled", True) is False:
+            raise PermissionError("Workspace uploads are disabled for independent evaluation")
         try:
             if notify and self.observer:
                 card_content = [{"icon": "upload", "text": f"Uploading {file_path}"}]

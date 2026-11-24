@@ -5154,6 +5154,21 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             for call_args in nexent_agent_instance.observer.add_message.call_args_list
         )
 
+    def test_private_evaluation_does_not_publish_workspace_outputs(self, nexent_agent_instance, tmp_path):
+        output = tmp_path / "outputs" / "copied_attachment.txt"
+        output.parent.mkdir()
+        output.write_text("private input", encoding="utf-8")
+        upload_tool = MagicMock()
+        upload_tool.uploaded_paths = set()
+        nexent_agent_instance.workspace_path = str(tmp_path)
+        nexent_agent_instance.observer.workspace_uploads_enabled = False
+        nexent_agent_instance.agent = MagicMock(tools={"upload_to_s3": upload_tool})
+
+        with patch.object(nexent_agent_instance, "_pull_file_workspace_from_sandbox"):
+            nexent_agent_instance._finalize_file_workspace()
+
+        upload_tool.forward.assert_not_called()
+
     @pytest.mark.parametrize("with_output", [False, True])
     def test_finalize_workspace_excludes_runtime_skill_snapshots(
         self, nexent_agent_instance, tmp_path, with_output
