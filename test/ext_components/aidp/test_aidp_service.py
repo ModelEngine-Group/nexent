@@ -1015,6 +1015,30 @@ class TestNormalizeFolderTreeFile:
         assert result["created_at"] is None
         assert result["updated_at"] is not None
 
+    def test_canonicalizes_status_aliases_for_the_status_column(self):
+        from ext_components.aidp.services import aidp_folder_service
+
+        numeric = aidp_folder_service._normalize_folder_tree_file(
+            {"file_status": 1}
+        )
+        assert numeric["status"] == "1"
+        assert numeric["file_status"] == 1
+
+        alias = aidp_folder_service._normalize_folder_tree_file(
+            {"fileStatus": "failed"}
+        )
+        assert alias["status"] == "FAILED"
+
+        canonical = aidp_folder_service._normalize_folder_tree_file(
+            {"status": "completed"}
+        )
+        assert canonical["status"] == "COMPLETED"
+
+        missing = aidp_folder_service._normalize_folder_tree_file(
+            {"file_status": "  "}
+        )
+        assert "status" not in missing
+
 
 # ---------------------------------------------------------------------------
 # Small gap coverage for existing function tests

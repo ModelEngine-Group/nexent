@@ -14,7 +14,10 @@ from ext_components.aidp.services.aidp_client import (
     _request_aidp_json,
     _resolve_aidp_folder_id,
 )
-from ext_components.aidp.services.aidp_service import _normalize_aidp_doc
+from ext_components.aidp.services.aidp_service import (
+    _extract_doc_status,
+    _normalize_aidp_doc,
+)
 
 
 def _normalize_folder_tree_file(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -25,6 +28,10 @@ def _normalize_folder_tree_file(raw: Dict[str, Any]) -> Dict[str, Any]:
     wrong for the new "created at" column. Folder/Files only guarantees a
     creation time when one of its explicit fields is present; otherwise the
     UI must render an unknown value rather than relabel the update time.
+
+    Folder/Files reports the processing status under an alias (usually
+    ``file_status``); re-emit it under the canonical ``status`` key so the
+    file list can render the status column from one field.
     """
     normalized = _normalize_aidp_doc(raw)
     has_creation_source = any(
@@ -33,6 +40,11 @@ def _normalize_folder_tree_file(raw: Dict[str, Any]) -> Dict[str, Any]:
     )
     if not has_creation_source:
         normalized["created_at"] = None
+    status = _extract_doc_status(raw)
+    if status is None:
+        normalized.pop("status", None)
+    else:
+        normalized["status"] = status
     return normalized
 
 
