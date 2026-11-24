@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management AgentOS calls for Agent execution."""
 
+import asyncio
 import logging
 from functools import partial
 
@@ -20,8 +21,8 @@ from contracts.agentos import (
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, NEXENT_AGENT_CORE, RUNTIME_SERVICE_URL
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
-    RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
-    ValidationError, WorkbenchError,
+    NorthboundStopInProgressError, RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError,
+    RuntimeUpstreamError, ValidationError, WorkbenchError,
 )
 from infrastructure.rdb.agent_admission import AdmissionScopeError
 from infrastructure.agentos_identity import ServicePrincipal
@@ -35,6 +36,9 @@ from management.services.agent.workbench_debug_grant import (
 from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
+
+_NORTHBOUND_STOP_WAIT_SECONDS = 5.0
+_NORTHBOUND_STOP_POLL_SECONDS = 0.25
 
 
 def _agentos_client() -> AgentOSClient:
@@ -224,7 +228,7 @@ async def forward_agent_stop(
     user_id: str,
     tenant_id: str,
 ) -> dict:
-    """Cancel a Northbound conversation run through AgentOS."""
+    """Cancel a Northbound run and confirm its conversation reservations are released."""
     from management.services.agent.prepared_turn import find_pending_turn
 
     client = _agentos_client()
@@ -241,11 +245,35 @@ async def forward_agent_stop(
     state = await client.stop_run(
         AgentStop(**reference.model_dump(), prevent_start=pending is not None), user_id, tenant_id,
     )
+    await _wait_for_northbound_stop(client, reference, user_id, tenant_id)
     if state.cancellation_requested:
         message = f"successfully stopped agent run for user_id {user_id}, run_id {conversation_id}"
         return {"status": "success", "message": message}
     message = f"no running agent or preprocess tasks found for user_id {user_id}, run_id {conversation_id}"
     return {"status": "success", "message": message, "already_stopped": True}
+
+
+async def _wait_for_northbound_stop(client, reference: AgentRunReference, user_id: str, tenant_id: str) -> None:
+    from management.services.agent.prepared_turn import find_pending_turn, reconcile_turn
+
+    scope = (reference.conversation_id, user_id, tenant_id)
+    deadline = asyncio.timeout(_NORTHBOUND_STOP_WAIT_SECONDS)
+    try:
+        async with deadline:
+            while True:
+                if await client.find_active_run(*scope) != reference.run_id:
+                    pending = await find_pending_turn(*scope)
+                    if pending is None or pending.reference != reference:
+                        return
+                    await reconcile_turn(pending, client)
+                    pending = await find_pending_turn(*scope)
+                    if pending is None or pending.reference != reference:
+                        return
+                await asyncio.sleep(_NORTHBOUND_STOP_POLL_SECONDS)
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
+        raise NorthboundStopInProgressError() from exc
 
 
 async def forward_evaluation_case(payload: EvaluationAgentRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:

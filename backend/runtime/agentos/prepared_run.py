@@ -8,6 +8,7 @@ from concurrent.futures import Future
 from contextlib import aclosing
 from dataclasses import dataclass
 from functools import partial
+from typing import Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
@@ -46,6 +47,7 @@ class _AdmissionSlot:
 
     token: str
     worker: Future | None = None
+    cleanup: Callable[[], None] | None = None
 
     def release(self, _completed=None):
         if self.worker is not None and not self.worker.done():
@@ -212,16 +214,23 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
                         "fact_sequence": fact_index, **update,
                     })
         finally:
-            if slot is not None:
+            if slot is None:
+                release_prepared_run(info, identity.conversation_id, identity.user_id, status)
+            else:
                 slot.worker = info.thread_future
-            release_prepared_run(info, identity.conversation_id, identity.user_id, status)
+                slot.cleanup = partial(release_prepared_run, info, identity.conversation_id, identity.user_id, status)
 
 
-async def _finish_producer(runner, monitor, identity, journal, status):
+async def _finish_producer(runner, monitor, identity, journal, status, slot):
     for task in (runner, monitor):
         if not task.done():
             task.cancel()
     await asyncio.gather(runner, monitor, return_exceptions=True)
+    if slot is not None and slot.cleanup is not None:
+        # Keep the persisted conversation reservation until local cleanup finishes.
+        if slot.worker is not None:
+            await asyncio.gather(asyncio.wrap_future(slot.worker), return_exceptions=True)
+        slot.cleanup()
     try:
         finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
         if finished:
@@ -248,7 +257,7 @@ async def _produce(payload, actor, identity, journal, slot=None):
         logger.exception("Prepared AgentOS run failed run_id=%s", identity.run_id)
     finally:
         # Keep joining the owned worker and terminal write during repeated shutdown cancellation.
-        cleanup = asyncio.create_task(_finish_producer(runner, monitor, identity, journal, status))
+        cleanup = asyncio.create_task(_finish_producer(runner, monitor, identity, journal, status, slot))
         cancelled = False
         while not cleanup.done():
             try:
