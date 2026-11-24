@@ -2405,43 +2405,27 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
         return len(conv_ids)
 
 
-def update_message_opinion(message_id: int, opinion: str, user_id: Optional[str] = None) -> bool:
-    """
-    Update message like/dislike status
+def update_message_opinion(message_id: int, opinion: Optional[str], *, user_id: str, tenant_id: str) -> bool:
+    """Update feedback only while the actor owns the live message and conversation."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
 
-    Args:
-        message_id: Message ID (integer)
-        opinion: Opinion flag, 'Y' for like, 'N' for dislike, None for no opinion
-        user_id: Reserved parameter for updated_by field
-
-    Returns:
-        bool: Whether the operation was successful
-    """
     with get_db_session() as session:
-        # Ensure message_id is of integer type
-        message_id = int(message_id)
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return False
 
-        # Prepare update data
-        update_data = {
-            "opinion_flag": opinion,
-            # Use the database's CURRENT_TIMESTAMP function
-            "update_time": func.current_timestamp(),
-        }
-        if user_id:
-            update_data = add_update_tracking(update_data, user_id)
-
-        # Build the update statement
+        owned_conversation = select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == ConversationMessage.conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).exists()
+        update_data = add_update_tracking({"opinion_flag": opinion, "update_time": func.current_timestamp()}, user_id)
         stmt = (
             update(ConversationMessage)
-            .where(ConversationMessage.message_id == message_id, ConversationMessage.delete_flag == "N")
+            .where(ConversationMessage.message_id == message_id, ConversationMessage.created_by == user_id,
+                   ConversationMessage.delete_flag == "N", owned_conversation)
             .values(update_data)
         )
-
-        # Execute the update statement
-        result = session.execute(stmt)
-
-        # Check if any rows were affected
-        return result.rowcount > 0
+        return session.execute(stmt).rowcount > 0
 
 
 def get_conversation_history(conversation_id: int, user_id: Optional[str] = None) -> Optional[ConversationHistory]:

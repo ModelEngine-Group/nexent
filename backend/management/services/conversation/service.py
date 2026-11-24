@@ -1292,18 +1292,9 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         raise Exception(str(e))
 
 
-def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> bool:
-    """
-    Update message like/dislike status
-
-    Args:
-        message_id: Message ID
-        opinion: Opinion value ('Y' or 'N' or None)
-
-    Returns:
-        bool: Whether the update was successful
-    """
-    success = update_message_opinion(message_id, opinion)
+def update_message_opinion_service(message_id: int, opinion: Optional[str], *, user_id: str, tenant_id: str) -> bool:
+    """Update feedback on a message owned by the active user."""
+    success = update_message_opinion(message_id, opinion, user_id=user_id, tenant_id=tenant_id)
     if not success:
         raise ConversationNotFoundError("Message does not exist or has been deleted")
     return True

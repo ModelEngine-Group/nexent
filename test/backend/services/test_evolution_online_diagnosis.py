@@ -25,6 +25,20 @@ def test_model_cannot_clear_incomplete_evidence():
     }
 
 
+@pytest.mark.parametrize("reason", ["trajectory_expired", "trajectory_mismatch"])
+def test_unavailable_trajectory_short_circuits_message_and_model_analysis(mocker, reason):
+    queue = diagnosis.queue
+    mocker.patch.object(queue, "get_db_session", return_value=nullcontext(Mock()))
+    facts = {"coverage": "missing", "signals": ["user_correction", "negative_feedback"], "unavailable": reason}
+    mocker.patch.object(queue, "_authorized_claim", return_value=({"observation": facts}, {}))
+    message_pair = mocker.patch.object(queue, "_message_pair")
+
+    job = {"tenant_id": "t", "owner_id": "u", "previous_attempt": None, "diagnosis_claim_count": 1}
+    evidence = queue.read_evidence(job)
+    assert diagnosis.rule_finding(evidence) == {"status": "needs_evidence", "reason": reason}
+    message_pair.assert_not_called()
+
+
 @pytest.mark.parametrize("grant_seconds,claim_seconds", [(120, 10), (5, 20)])
 def test_diagnosis_dispatch_is_bounded_by_grant_and_worker_lease(mocker, grant_seconds, claim_seconds):
     queue = diagnosis.queue
@@ -70,6 +84,7 @@ async def test_only_ambiguous_authorized_turns_use_the_diagnosis_model(mocker, s
     if source == "model":
         model.assert_called_once_with("t")
         assert model_call.await_args.kwargs["diagnosis_attempt"] == 27
+        assert model_call.await_args.kwargs["evolution_output_limit"] == 2048
         prompt = json.loads(model_call.await_args.kwargs["user_prompt"])
         assert prompt["allowed_evidence_keys"] == list(prompt["evidence"]) == ["request", "answer", "correction"]
         assert all("ref" not in item for item in prompt["evidence"].values())

@@ -668,6 +668,8 @@
   "evolution.diagnosis.missing_reply": "Original answer unavailable",
   "evolution.diagnosis.missing_authorized_original": "The preceding turn is unavailable or unauthorized",
   "evolution.diagnosis.incomplete_trace": "Evidence incomplete",
+  "evolution.diagnosis.trajectory_expired": "Trajectory content expired",
+  "evolution.diagnosis.trajectory_mismatch": "Trajectory does not match this execution",
   "evolution.diagnosis.model_interrupted": "Diagnosis call interrupted",
   "evolution.diagnosis.invalid_model_output": "The model returned invalid findings or references",
   "evolution.diagnosis.model_not_configured": "No diagnosis model configured",

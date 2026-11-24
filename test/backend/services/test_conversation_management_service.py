@@ -1083,10 +1083,10 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_opinion.return_value = True
 
         # Execute
-        update_message_opinion_service(123, "Y")
+        update_message_opinion_service(123, "Y", user_id="owner", tenant_id="tenant")
 
         # Assert
-        mock_update_opinion.assert_called_once_with(123, "Y")
+        mock_update_opinion.assert_called_once_with(123, "Y", user_id="owner", tenant_id="tenant")
 
     @patch('management.services.conversation.service.update_message_opinion')
     def test_update_message_opinion_service_failure(self, mock_update_opinion):
@@ -1096,9 +1096,9 @@ class TestConversationManagementService(unittest.TestCase):
 
         # Execute & Assert
         with self.assertRaises(Exception) as context:
-            update_message_opinion_service(123, "Y")
+            update_message_opinion_service(123, "Y", user_id="owner", tenant_id="tenant")
         self.assertIn("Message does not exist", str(context.exception))
-        mock_update_opinion.assert_called_once_with(123, "Y")
+        mock_update_opinion.assert_called_once_with(123, "Y", user_id="owner", tenant_id="tenant")
 
     @patch('management.services.conversation.service.get_message_id_by_index')
     def test_get_message_id_by_index_impl_success(self, mock_get_message):
@@ -2025,7 +2025,7 @@ def test_missing_message_raises_not_found_domain_error():
 
     with patch('management.services.conversation.service.update_message_opinion', return_value=False):
         with pytest.raises(ConversationNotFoundError):
-            update_message_opinion_service(123, "Y")
+            update_message_opinion_service(123, "Y", user_id="owner", tenant_id="tenant")
     with patch('management.services.conversation.service.get_message_id_by_index', return_value=None):
         with pytest.raises(ConversationNotFoundError):
             asyncio.run(get_message_id_by_index_impl(123, 0))
@@ -2037,7 +2037,7 @@ def test_message_database_failure_preserves_unexpected_error():
     failure = RuntimeError("database unavailable")
     with patch('management.services.conversation.service.update_message_opinion', side_effect=failure):
         with pytest.raises(RuntimeError) as error:
-            update_message_opinion_service(123, "Y")
+            update_message_opinion_service(123, "Y", user_id="owner", tenant_id="tenant")
     assert error.value is failure
 
 

@@ -667,6 +667,8 @@
   "evolution.diagnosis.missing_reply": "缺少原回答",
   "evolution.diagnosis.missing_authorized_original": "紧邻原轮无可用授权",
   "evolution.diagnosis.incomplete_trace": "证据不完整",
+  "evolution.diagnosis.trajectory_expired": "轨迹正文已过期",
+  "evolution.diagnosis.trajectory_mismatch": "轨迹与本次执行不匹配",
   "evolution.diagnosis.model_interrupted": "模型调用中断",
   "evolution.diagnosis.invalid_model_output": "模型引用的证据或结果无效",
   "evolution.diagnosis.model_not_configured": "租户未配置诊断模型",

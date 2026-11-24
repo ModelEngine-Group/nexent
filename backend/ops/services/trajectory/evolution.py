@@ -25,7 +25,7 @@ def node_ref(node):
     return None
 
 
-def observation(message, nodes=(), coverage="missing"):
+def observation(message, nodes=(), coverage="missing", *, unavailable=None):
     signals = []
     request = message.get("request") or ""
     if CORRECTION.search(request):
@@ -39,6 +39,8 @@ def observation(message, nodes=(), coverage="missing"):
         signals.append("tool_error")
     refs = [ref for node in failures[:16] if (ref := node_ref(node))]
     facts = {"coverage": coverage, "signals": signals, "failed_tool_count": len(failures), "node_refs": refs}
+    if unavailable:
+        facts["unavailable"] = unavailable
     if coverage == "complete":
         calls = [n for n in nodes if n["kind"] == "tool"]
         evidence = []
@@ -70,13 +72,16 @@ def observation(message, nodes=(), coverage="missing"):
 def _track_root_execution(requests, roots):
     """Read the trusted root correlation without exposing it in public trajectory nodes."""
     for request in requests:
+        if len(roots) > 1:
+            yield request
+            continue
         for resource in request.get("resourceSpans", []):
             for scope in resource.get("scopeSpans", []):
                 for span in scope.get("spans", []):
                     if span.get("name") != "agent.run":
                         continue
                     attrs = {item["key"]: item["value"] for item in span.get("attributes", [])}
-                    if attrs.get("nexent.trajectory.root", {}).get("boolValue") is True:
+                    if len(roots) <= 1 and attrs.get("nexent.trajectory.root", {}).get("boolValue") is True:
                         execution = attrs.get("nexent.agent_run_id", {}).get("stringValue")
                         roots.add((span["traceId"], span["spanId"], execution))
         yield request
@@ -88,19 +93,21 @@ def inspect_archive(job, message):
     identity = {**job, "conversation_id": str(job["conversation_id"]), "agent_id": str(job["agent_id"])}
     with service.archive.opened(identity, job["trajectory_id"], budget) as (fd, _, run):
         if (run.get("root_agent_id"), run.get("root_agent_version_no")) != (identity["agent_id"], job["agent_version_no"]):
-            return observation(message)
+            return observation(message, unavailable="trajectory_mismatch")
         source = run.get("source_message_id")
         if source is not None and source != str(job["source_message_id"]):
-            return observation(message)
+            return observation(message, unavailable="trajectory_mismatch")
         reader = JSONReader(fd, run["confirmed_bytes"], check=budget.check)
-        requests = reader.requests()
         roots = set()
-        if source is None:
-            requests = _track_root_execution(requests, roots)
+        requests = _track_root_execution(reader.requests(), roots)
         nodes, _, coverage = build_nodes(requests, conversation_id=identity["conversation_id"],
                                          complete=run["capture_state"] == "ready", check=budget.check)
-        if source is None and (len(roots) != 1 or next(iter(roots))[2] != job["run_id"]):
-            return observation(message)
+        if len(roots) > 1 or (not roots and source is None):
+            return observation(message, unavailable="trajectory_mismatch")
+        if roots:
+            execution = next(iter(roots))[2]
+            if execution != job["run_id"] and (execution is not None or source is None):
+                return observation(message, unavailable="trajectory_mismatch")
         complete = coverage["complete"] and not coverage["capture_gap"]
         return observation(message, nodes, "complete" if complete else "partial")
 
@@ -132,7 +139,9 @@ class EvolutionReviewWorker:
         try:
             facts = inspect_archive(job, message)
         except QueryError as error:
-            queue.finish(job, observation(message), retry=error.status >= 500 or error.code == "trajectory_unarchived")
+            unavailable = "trajectory_expired" if error.code == "content_expired" else None
+            queue.finish(job, observation(message, unavailable=unavailable),
+                         retry=error.status >= 500 or error.code == "trajectory_unarchived")
         except (OSError, ValueError, TypeError, RecursionError, KeyError):
             queue.finish(job, observation(message), retry=True)
         else:

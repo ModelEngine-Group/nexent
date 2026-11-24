@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,8 +16,9 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     from contracts.errors.exceptions import AppException
     from infrastructure.rdb.client import db_client, get_db_session
     from infrastructure.system_configuration.runtime import load_system_configuration
-    from infrastructure.trace.trajectory_store import CaptureIdentity, TrajectoryFileStore
+    from infrastructure.trace.trajectory_store import CaptureIdentity, TrajectoryFileStore, timestamp
     from management.db.conversation import evolution_review as registrar, prepared_turn
+    from management.db.conversation.repository import update_message_opinion
     from management.services.evaluation.replay_cases import freeze_development_case, preview_trace_case
     from ops.db.trajectory import evolution as queue
     from ops.services.trajectory import evolution as reader
@@ -160,7 +162,7 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     assert preview_trace_case(tenant, owner, 7, 1, corrected_turn)["query"] == "你漏了一项"
     prepared_turn.evolution_setting(4, owner, tenant, True)
     seed(4, 1, query="先列出议题")
-    seed(4, 2, query="为这些议题补上来源")
+    original_reply = seed(4, 2, query="为这些议题补上来源")
     seed(4, 3, correction=True)
     registrar.enqueue_review_batches()
     while worker.tick():
@@ -182,3 +184,31 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     with pytest.raises(AppException):
         freeze_development_case(request, owner, tenant)
     assert preview_trace_case(tenant, owner, 7, 1, end, True)["query"] == "为这些议题补上来源"
+
+    source = draft["task_turn_id"]
+    actor = CaptureIdentity(tenant, owner, "4", "7")
+    with store._session(actor) as archive:
+        manifest = archive.read_json("meta.json")
+        run = next(item for item in manifest["runs"] if item["trajectory_id"] == draft["trajectory_id"])
+        run["expires_at"] = timestamp(datetime.now(timezone.utc) - timedelta(seconds=1))
+        store._save_manifest(archive, manifest)
+    with engine.begin() as conn:
+        conn.execute(text("""UPDATE nexent.evolution_review_turn_t SET diagnosis_source_turn_id=:source,
+            diagnosis='{"status":"needs_review","reason":"requirements_missed"}'::jsonb WHERE turn_id=:end"""),
+            {"source": source, "end": end})
+    # The grant is active, but its cited archive can no longer be read.
+    assert update_message_opinion(original_reply, "N", user_id=owner, tenant_id=tenant)
+    while worker.tick():
+        pass
+    with pytest.raises(AppException):
+        preview_trace_case(tenant, owner, 7, 1, end, True)
+    registrar.enqueue_review_batches()
+    reviews = {row["turn_id"]: row for row in registrar.recent_reviews(tenant, 7, 1)}
+    assert reviews[source]["state"] == "missing"
+    assert reviews[end]["diagnosis"] == {"status": "needs_evidence", "reason": "trajectory_expired"}
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE nexent.trajectory_execution_t SET status='expired' WHERE trajectory_id=:trace"),
+                     {"trace": draft["trajectory_id"]})
+    reviews = {row["turn_id"]: row for row in registrar.recent_reviews(tenant, 7, 1)}
+    assert reviews[source]["signals"] == []
+    assert reviews[source]["diagnosis"] == {"status": "needs_evidence", "reason": "trajectory_expired"}

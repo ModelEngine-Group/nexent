@@ -690,8 +690,11 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
         ConversationResponse object
     """
     try:
-        update_message_opinion_service(request.message_id, request.opinion)
+        user_id, tenant_id = get_current_user_id(authorization)
+        update_message_opinion_service(request.message_id, request.opinion, user_id=user_id, tenant_id=tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
+    except (TokenExpiredError, UnauthorizedError) as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Please login first") from exc
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:

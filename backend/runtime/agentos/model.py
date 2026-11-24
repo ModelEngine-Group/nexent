@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse
 
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, ModelInvocation, ModelOperation, ModelReference
 from contracts.constants import environment
+from nexent.core.model_errors import ModelInvocationTerminalError
 from nexent.monitor.private_logging import private_evaluation_logging
 from runtime.model.service import ModelAccessError, ModelService
 
@@ -34,6 +35,9 @@ def create_model_router(service: ModelService) -> APIRouter:
                 return await action(payload, principal)
         except ModelAccessError as exc:
             return JSONResponse({"code": exc.code}, status_code=exc.status)
+        except ModelInvocationTerminalError as exc:
+            logger.warning("AgentOS model request failed code=%s", exc.error_code.value)
+            return JSONResponse({"code": "MODEL_REQUEST_FAILED"}, status_code=502)
         except Exception as exc:
             # Provider failures can contain credentials, prompts or connection details.
             logger.warning("AgentOS model request failed (%s)", type(exc).__name__)

@@ -72,7 +72,8 @@ def _active_diagnosis(session, params):
     if job is None:
         return None
     for turn in {job["review_turn_id"], job["diagnosis_source_turn_id"]} - {None}:
-        if not authorized_review_turn(session, params["tenant"], params["user"], turn):
+        if not authorized_review_turn(session, params["tenant"], params["user"], turn,
+                                      require_complete=turn == job["diagnosis_source_turn_id"]):
             return None
     return job
 

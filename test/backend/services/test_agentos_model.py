@@ -5,22 +5,40 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
+from starlette.requests import Request
 
 from contracts.agentos import (
+    BODY_KEY,
+    PRINCIPAL_KEY,
     ChatInvocation,
     ChatMessage,
     ChatOptions,
     EmbeddingInvocation,
     ModelInvocation,
+    ModelOperation,
     RerankInput,
     RerankInvocation,
     RerankOptions,
 )
 from infrastructure.agentos_identity import ServicePrincipal
+from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.models.wire_budget import model_wire_budget
+from runtime.agentos.model import create_model_router
 from runtime.model.service import ModelAccessError, ModelService
 
 _ACTOR = ServicePrincipal("user", "tenant")
+
+
+@pytest.mark.asyncio
+async def test_model_router_logs_only_the_stable_terminal_error_category(caplog):
+    error = ModelInvocationTerminalError(ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED, 1,
+                                         cause=ValueError("private provider response"))
+    service = SimpleNamespace(invoke=AsyncMock(side_effect=error))
+    operation = next(route for route in create_model_router(service).routes if route.path == ModelOperation.INVOKE.value)
+    body = ChatInvocation(model_id=1, input=[ChatMessage(role="user", content="request")]).model_dump_json().encode()
+    response = await operation.endpoint(Request({"type": "http", BODY_KEY: body, PRINCIPAL_KEY: _ACTOR}))
+    assert response.status_code == 502 and response.body == b'{"code":"MODEL_REQUEST_FAILED"}'
+    assert "model_empty_response_exhausted" in caplog.text and "private provider response" not in caplog.text
 
 
 def _record(**overrides):

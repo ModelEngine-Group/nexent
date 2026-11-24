@@ -6,7 +6,7 @@ from sqlalchemy import text
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 
 
-def authorized_review_turn(session, tenant, owner, turn):
+def authorized_review_turn(session, tenant, owner, turn, *, require_complete=False):
     if not tenant_membership_matches(session, owner, tenant):
         return None
     return session.execute(text("""
@@ -24,5 +24,6 @@ def authorized_review_turn(session, tenant, owner, turn):
                AND t.agent_id=r.agent_id AND t.agent_version_no=r.agent_version_no AND t.status<>'expired'
          WHERE r.turn_id=:turn AND r.tenant_id=:tenant AND r.owner_id=:owner
            AND r.observation_state IN ('observed','missing')
+           AND (NOT :require_complete OR (r.observation_state='observed' AND r.observation->>'coverage'='complete'))
            AND LEAST(r.valid_until,a.evolution_valid_until) > clock_timestamp()
-    """), dict(tenant=tenant, owner=owner, turn=turn)).mappings().one_or_none()
+    """), dict(tenant=tenant, owner=owner, turn=turn, require_complete=require_complete)).mappings().one_or_none()

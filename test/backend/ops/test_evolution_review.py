@@ -8,6 +8,7 @@ import pytest
 from ops.services.trajectory import evolution
 from ops.services.trajectory.evolution import observation
 from management.db.conversation.evolution_review import _batch_view, summarize_batch
+from contracts.errors.trajectory import QueryError
 
 
 @pytest.mark.parametrize(("source", "executions", "coverage"), [
@@ -16,6 +17,9 @@ from management.db.conversation.evolution_review import _batch_view, summarize_b
     (None, [None], "missing"),
     (None, ["a" * 32, "a" * 32], "missing"),
     ("20", ["a" * 32], "missing"),
+    ("19", ["b" * 32], "missing"),
+    ("19", ["a" * 32, "a" * 32], "missing"),
+    ("19", ["a" * 32], "complete"),
     ("19", [None], "complete"),
 ])
 def test_review_correlates_archived_root_with_the_authorized_original_run(mocker, source, executions, coverage):
@@ -35,7 +39,22 @@ def test_review_correlates_archived_root_with_the_authorized_original_run(mocker
     reader.return_value.requests.return_value = iter(requests)
     job = {"conversation_id": 1, "agent_id": 3, "agent_version_no": 1, "source_message_id": 19,
            "run_id": "a" * 32, "trajectory_id": "7ac1b2c9-3770-431c-8437-91205db79e6e"}
-    assert evolution.inspect_archive(job, {})["coverage"] == coverage
+    facts = evolution.inspect_archive(job, {})
+    assert facts["coverage"] == coverage
+    assert facts.get("unavailable") == ("trajectory_mismatch" if coverage == "missing" else None)
+
+
+def test_expired_archive_is_reported_without_retry_or_tool_evidence(mocker):
+    job = {"trajectory_id": "test"}
+    mocker.patch.object(evolution.queue, "claim", return_value=job)
+    mocker.patch.object(evolution.queue, "messages", return_value={"opinion_flag": "N"})
+    finish = mocker.patch.object(evolution.queue, "finish")
+    mocker.patch.object(evolution, "inspect_archive", side_effect=QueryError("content_expired", 410))
+    job["attempts"] = 1
+
+    assert evolution.EvolutionReviewWorker().tick()
+    finish.assert_called_once_with(job, {"coverage": "missing", "signals": ["negative_feedback"],
+        "failed_tool_count": 0, "node_refs": [], "unavailable": "trajectory_expired"}, retry=False)
 
 
 def test_evidence_minimization_and_incomplete_coverage():

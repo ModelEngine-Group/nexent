@@ -1654,10 +1654,14 @@ def test_update_message_opinion(monkeypatch):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.update", _create_update_mock())
+    membership = MagicMock(return_value=True)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.tenant_membership_matches", membership)
 
-    ok = update_message_opinion(7, "Y", user_id="actor")
+    ok = update_message_opinion(7, "Y", user_id="actor", tenant_id="tenant")
 
     assert ok is True
+    membership.assert_called_once_with(session, "actor", "tenant")
     assert _captured_update_values["opinion_flag"] == "Y"
     assert _captured_update_values["updated_by"] == "actor"
 
@@ -2853,28 +2857,25 @@ def test_update_message_opinion_returns_false_when_not_found(monkeypatch):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.tenant_membership_matches", lambda *_: True)
 
-    ok = update_message_opinion(999, "Y", user_id="actor")
+    ok = update_message_opinion(999, "Y", user_id="actor", tenant_id="tenant")
 
     assert ok is False
 
 
-def test_update_message_opinion_without_user(monkeypatch):
-    """update_message_opinion works without user_id."""
+def test_update_message_opinion_refuses_inactive_membership(monkeypatch):
+    """The repository does not run an UPDATE for a stale tenant identity."""
     session = MagicMock()
-    result_mock = MagicMock()
-    result_mock.rowcount = 1
-    session.execute.return_value = result_mock
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.tenant_membership_matches", lambda *_: False)
 
-    ok = update_message_opinion(7, "N")
+    assert not update_message_opinion(7, "N", user_id="actor", tenant_id="stale")
+    session.execute.assert_not_called()
 
-    assert ok is True
-    assert _captured_update_values["opinion_flag"] == "N"
-    assert "updated_by" not in _captured_update_values
 
 
 def test_update_message_minio_files_with_existing_files(monkeypatch, mock_session_ctx):

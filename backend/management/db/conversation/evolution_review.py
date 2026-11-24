@@ -28,11 +28,13 @@ def enqueue_review_batches():
         session.execute(text("""
             WITH affected AS (
                 UPDATE nexent.evolution_review_turn_t r
-                   SET diagnosis='{"status":"needs_evidence","reason":"authorization_changed"}'::jsonb,
+                   SET diagnosis=jsonb_build_object('status','needs_evidence','reason',CASE
+                           WHEN source.observation_state='missing' THEN COALESCE(source.observation->>'unavailable','incomplete_trace')
+                           ELSE 'authorization_changed' END),
                        diagnosis_source_turn_id=NULL,diagnosis_claim_id=NULL,diagnosis_lease_until=NULL
                 FROM nexent.evolution_review_turn_t source
                 WHERE r.diagnosis_source_turn_id=source.turn_id
-                  AND (source.observation_state IN ('expired','revoked') OR source.valid_until<=clock_timestamp())
+                  AND (source.observation_state IN ('expired','revoked','missing') OR source.valid_until<=clock_timestamp())
                 RETURNING r.batch_id
             )
             UPDATE nexent.evolution_review_batch_t SET status='pending',result=NULL,finished_at=NULL
@@ -101,11 +103,16 @@ def complete_review_batches():
 def review_rows(session, predicate, params, *, limit):
     # Callers supply fixed predicates. Membership and grant expiry must also be checked at display time.
     rows = session.execute(text(f"""
-        SELECT r.turn_id, r.batch_id, r.owner_id, r.tenant_id, r.observation_state, r.observation,
-            r.diagnosis, r.diagnosis_source_turn_id,
+        SELECT r.turn_id, r.batch_id, r.owner_id, r.tenant_id,
+            CASE WHEN t.status='expired' AND r.observation_state NOT IN ('revoked','expired')
+                 THEN 'missing' ELSE r.observation_state END AS observation_state,
+            CASE WHEN t.status='expired' THEN jsonb_build_object('coverage','missing') ELSE r.observation END AS observation,
+            CASE WHEN t.status='expired' THEN jsonb_build_object('status','needs_evidence','reason','trajectory_expired')
+                 ELSE r.diagnosis END AS diagnosis,
+            CASE WHEN t.status='expired' THEN NULL ELSE r.diagnosis_source_turn_id END AS diagnosis_source_turn_id,
             LEAST(r.valid_until,a.evolution_valid_until) > clock_timestamp()
               AND r.grant_epoch=c.evolution_grant_epoch AND r.owner_id=c.created_by AND c.delete_flag='N'
-              AND a.run_id IS NOT NULL AND t.status<>'expired' AS authorized
+              AND a.run_id IS NOT NULL AND t.trajectory_id IS NOT NULL AS authorized
         FROM nexent.evolution_review_turn_t r LEFT JOIN nexent.conversation_record_t c USING (conversation_id)
         LEFT JOIN nexent.conversation_run_admission_t a ON a.run_id=r.run_id AND a.tenant_id=r.tenant_id
           AND a.conversation_id=r.conversation_id AND a.created_by=r.owner_id AND a.delete_flag='N'
@@ -124,7 +131,7 @@ def review_rows(session, predicate, params, *, limit):
         diagnosis = row["diagnosis"]
         source = row["diagnosis_source_turn_id"]
         if authorized and diagnosis and source and not authorized_review_turn(
-            session, row["tenant_id"], row["owner_id"], source
+            session, row["tenant_id"], row["owner_id"], source, require_complete=True
         ):
             diagnosis = None
         yield {**row, "authorized": authorized, "diagnosis": diagnosis}

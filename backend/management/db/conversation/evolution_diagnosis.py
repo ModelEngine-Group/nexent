@@ -23,7 +23,7 @@ def claim():
                 WHERE observation_state IN ('observed','missing') AND diagnosis IS NULL
                   AND valid_until > clock_timestamp() AND diagnosis_claim_count <= 3
                   AND (diagnosis_lease_until IS NULL OR diagnosis_lease_until <= clock_timestamp())
-                  AND (batch_id IS NOT NULL OR jsonb_array_length(observation->'signals') > 0)
+                  AND (batch_id IS NOT NULL OR observation ? 'unavailable' OR jsonb_array_length(observation->'signals') > 0)
                   AND NOT EXISTS (
                       SELECT 1 FROM nexent.evolution_review_turn_t active
                       WHERE active.tenant_id=candidate.tenant_id AND active.diagnosis_lease_until>clock_timestamp()
@@ -107,6 +107,8 @@ def read_evidence(job):
         if (prior and prior["charge_id"]) or job["diagnosis_claim_count"] > 3:
             return {"interrupted": True, "previous_attempt": job["previous_attempt"]}
         facts = current["observation"] or {}
+        if facts.get("unavailable"):
+            return {"facts": facts, "missing": facts["unavailable"]}
         # Rule findings need only Ops facts. Read message bodies only for semantic assessment.
         if not set(facts.get("signals", ())) & {"user_correction", "negative_feedback"}:
             return {"facts": facts}
@@ -120,12 +122,13 @@ def read_evidence(job):
                 return {"facts": facts, "missing": "missing_authorized_original"}
             correction = message["request"]
             correction_clipped = bool(message["clipped"])
+        source_facts = source["observation"] or {}
+        if source_facts.get("coverage") != "complete":
+            return {"facts": facts, "missing": source_facts.get("unavailable") or "incomplete_trace"}
+        if correction:
             message = _message_pair(session, source, owner)
         if not message or not message["answer"] or not message["request"]:
             return {"facts": facts, "missing": "missing_reply"}
-        source_facts = source["observation"] or {}
-        if source_facts.get("coverage") != "complete":
-            return {"facts": facts, "missing": "incomplete_trace"}
         return {
             "facts": facts, "source_turn_id": source["turn_id"] if source is not current else None,
             "request": message["request"], "answer": message["answer"],
@@ -145,7 +148,8 @@ def authorize_model(job, source_turn, allowance, template_version):
             (usage := _usage(session, row["diagnosis_attempt_id"])) and usage["charge_id"]
         ):
             return None
-        if source_turn and not authorized_review_turn(session, job["tenant_id"], job["owner_id"], source_turn):
+        if source_turn and not authorized_review_turn(session, job["tenant_id"], job["owner_id"], source_turn,
+                                                      require_complete=True):
             return None
         # Reclaiming the turn must not revive a dispatch issued by the previous worker.
         args = {**job, "model": allowance.model_id, "revision": allowance.revision(), "source": source_turn,
@@ -174,7 +178,8 @@ def finish(job, diagnosis, attempt=None):
         if attempt is not None and attempt != row["diagnosis_attempt_id"]:
             return False
         source = row["diagnosis_source_turn_id"]
-        if source and not authorized_review_turn(session, job["tenant_id"], job["owner_id"], source):
+        if source and not authorized_review_turn(session, job["tenant_id"], job["owner_id"], source,
+                                                 require_complete=True):
             diagnosis = {"status": "needs_evidence", "reason": "authorization_changed"}
             source = None
         if attempt is not None and attempt == row["diagnosis_attempt_id"]:

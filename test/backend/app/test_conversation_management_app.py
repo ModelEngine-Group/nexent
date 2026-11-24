@@ -666,19 +666,33 @@ async def test_generate_title_validation_error(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_update_opinion_success(conversation_mocks):
+    conversation_mocks['get_current_user_id'].return_value = ('owner', 'tenant')
     request_obj = MagicMock()
     request_obj.message_id = 5
     request_obj.opinion = "like"
 
-    result = await update_opinion_endpoint(request_obj)
+    result = await update_opinion_endpoint(request_obj, authorization="Bearer session")
 
     assert result.code == 0 and result.data is True
     conversation_mocks['update_opinion_service'].assert_called_once_with(
-        5, "like")
+        5, "like", user_id="owner", tenant_id="tenant")
+    conversation_mocks['get_current_user_id'].assert_called_once_with("Bearer session")
+
+
+@pytest.mark.asyncio
+async def test_update_opinion_requires_identity(conversation_mocks):
+    from contracts.errors.exceptions import UnauthorizedError
+
+    conversation_mocks['get_current_user_id'].side_effect = UnauthorizedError("Login required")
+    with pytest.raises(HTTPException) as exc_info:
+        await update_opinion_endpoint(MagicMock(message_id=5, opinion="N"))
+    assert exc_info.value.status_code == 401
+    conversation_mocks['update_opinion_service'].assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_update_opinion_failure(conversation_mocks):
+    conversation_mocks['get_current_user_id'].return_value = ('owner', 'tenant')
     request_obj = MagicMock()
     request_obj.message_id = 5
     request_obj.opinion = "like"
@@ -700,6 +714,7 @@ async def test_missing_message_returns_404(conversation_mocks, route):
 
     request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
     if route == "opinion":
+        conversation_mocks['get_current_user_id'].return_value = ('owner', 'tenant')
         conversation_mocks['update_opinion_service'].side_effect = ConversationNotFoundError("Message not found")
         endpoint = update_opinion_endpoint
     else:
