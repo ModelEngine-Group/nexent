@@ -7,6 +7,22 @@ from contracts.evolution import DevelopmentExperimentRequest
 from management.utils.suggestion_intent import choose_target, future_request, intent
 
 
+@pytest.mark.parametrize(("base", "candidate", "guard", "target_text", "guard_text"), [
+    ("fail", "pass", "pass", "候选已通过", "保护题全部通过"),
+    ("pass", "pass", "pass", "原版和候选均通过", "保护题全部通过"),
+    ("pass", "fail", "fail", "仍未达到要求", "保护题未通过"),
+    ("error", "pass", None, "目标题缺少有效对照", "保护题仍缺少有效对照"),
+])
+def test_submitter_receives_only_validated_task_outcomes(base, candidate, guard, target_text, guard_text):
+    from management.db.conversation.suggestions import _development_message
+
+    rows = [{"target":True, "baseline":base, "candidate":candidate},
+            {"target":False, "baseline":"pass", "candidate":guard}]
+    zh, en = _development_message(rows)
+    assert target_text in zh and guard_text in zh and en
+    assert "尚无可核对" in _development_message(rows[1:])[0]
+
+
 @pytest.mark.parametrize(("message", "expected"), [
     ("以后这个 Skill 也要保留没有负责人的待办。", "propose"),
     ("以后这个 Skill 要把负责人写成“待分配”。", "propose"),

@@ -121,6 +121,10 @@ def test_grade_and_compare(monkeypatch):
     decision = service.experiment_report("tenant", "editor", 9)["screening"]
     assert decision["status"] == "failed" and decision["failures"] == {"forbidden_action":[2],"protection_failed":[2]}
 
+    plan["request"]["suggestion_target_case_id"] = 2
+    assert service.experiment_report("tenant", "editor", 9)["screening"]["failures"]["suggestion_target_failed"] == [2]
+    del plan["request"]["suggestion_target_case_id"]
+
     # Reuse the same business task and fixed regression rubric in all four arms.
     from copy import deepcopy
     protected = rows[-1]

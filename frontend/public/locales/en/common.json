@@ -83,6 +83,7 @@
   "evolution.screen.observed": "Observed",
   "evolution.screen.unverified_trials": "Missing valid receipts or mismatched task, rubric, or runtime revision",
   "evolution.screen.forbidden_action": "Candidate performed a forbidden action",
+  "evolution.screen.suggestion_target_failed": "The task selected for the user's suggestion failed",
   "evolution.screen.protection_failed": "Candidate failed protection tasks",
   "evolution.screen.quality_regressed": "Candidate failed a target task the baseline passed",
   "evolution.screen.new_skill_scope_coverage": "Missing evidence of both use and correct omission of the new Skill",

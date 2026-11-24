@@ -156,3 +156,18 @@ def test_combination_token_target_compares_against_each_single_revision():
     assert screen_development(plan, pairs, cancelled=False)["missing"] == {"missing_component_tokens": [1]}
     pairs[1]["only_b"]["result"]["reported_step_input_tokens"] = 78
     assert screen_development(plan, pairs, cancelled=False)["failures"] == {"redundant_combination": [1]}
+
+def test_another_improvement_cannot_hide_a_failed_suggestion_target():
+    from copy import deepcopy
+
+    plan, pairs = fixture()
+    plan["request"].update(suggestion_id=9, suggestion_target_case_id=3)
+    plan["request"]["screening"]["target_case_ids"].append(3)
+    plan["cases"]["3"] = "suggestion"
+    pairs[3] = deepcopy(pairs[1])
+    for row in pairs[3].values():
+        row["status"] = row["result"]["judgment"]["status"] = "fail"
+        row["result"]["case_digest"] = "suggestion"
+    decision = screen_development(plan, pairs, cancelled=False)
+    assert decision["gain"] == 1 and decision["status"] == "failed"
+    assert decision["failures"] == {"suggestion_target_failed": [3]}

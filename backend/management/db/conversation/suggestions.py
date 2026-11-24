@@ -30,6 +30,43 @@ def _visible_skills(session, scope, binding):
             if can_view_skill(skill=skill, user_id=owner, user_role=roles, user_group_ids=groups)]
 
 
+def _development_progress(session, scope, sid, experiment_id):
+    # The submitter may see what happened to their requested change, not the evaluation materials.
+    rows = session.execute(text("""
+        SELECT task.case_id=(e.plan->'request'->>'suggestion_target_case_id')::bigint AS target,
+               CASE WHEN b.receipt_id IS NOT NULL THEN b.status END AS baseline,
+               CASE WHEN r.receipt_id IS NOT NULL THEN r.status END AS candidate
+          FROM nexent.evolution_suggestion_t s
+          JOIN nexent.evolution_experiment_t e ON e.experiment_id=s.experiment_id
+            AND e.tenant_id=s.tenant_id AND e.agent_id=s.agent_id AND e.version_no=s.version_no
+          CROSS JOIN LATERAL (SELECT key::bigint AS case_id FROM jsonb_object_keys(e.plan->'cases') AS key) task
+          LEFT JOIN nexent.evolution_trial_t b ON b.experiment_id=e.experiment_id AND b.case_id=task.case_id AND b.variant='base'
+          LEFT JOIN nexent.evolution_trial_t r ON r.experiment_id=e.experiment_id AND r.case_id=task.case_id AND r.variant='result'
+         WHERE s.tenant_id=:tenant AND s.submitter_id=:owner AND s.suggestion_id=:sid AND e.experiment_id=:eid
+    """), {**scope, "sid":sid, "eid":experiment_id}).mappings().all()
+    return _development_message(rows)
+
+
+def _development_message(rows):
+    target = next((row for row in rows if row["target"]), None)
+    if not target:
+        return "尚无可核对的目标题结果。", "There is no verified result for the suggested change yet."
+    if target["candidate"] not in {"pass", "fail"} or target["baseline"] not in {"pass", "fail"}:
+        zh, en = "目标题缺少有效对照。", "The target task lacks a valid comparison."
+    elif target["candidate"] == "fail":
+        zh, en = "候选在目标题上仍未达到要求。", "The candidate did not meet the requirement on the target task."
+    elif target["baseline"] == "fail":
+        zh, en = "原版未通过目标题，候选已通过。", "The candidate passed the target task that the original version failed."
+    else:
+        zh, en = "原版和候选均通过目标题。", "Both versions passed the target task."
+    guards = [row for row in rows if not row["target"]]
+    if any(row["candidate"] == "fail" for row in guards):
+        return zh + "有保护题未通过。", en + " A protection task failed."
+    if not guards or any(row["baseline"] not in {"pass", "fail"} or row["candidate"] != "pass" for row in guards):
+        return zh + "保护题仍缺少有效对照。", en + " Protection coverage is incomplete."
+    return zh + "保护题全部通过。", en + " All protection tasks passed."
+
+
 def _status_reply(session, scope, query, reply):
     number = NUMBER.search(query)
     match = "s.suggestion_id=:sid" if number else "s.conversation_id=:cid"
@@ -71,15 +108,18 @@ def _status_reply(session, scope, query, reply):
     if row["lock_id"] is not None and not row["stopped"]:
         if row["independent"] == "passed":
             return reply(f"建议 S-{sid} 已通过独立确认，等待发布。", f"S-{sid} passed independent evaluation and awaits publication.")
-        if row["independent"] in {"failed", "insufficient"}:
-            return reply(f"建议 S-{sid} 的独立确认未达到发布条件。", f"The independent result for S-{sid} did not qualify for publication.")
+        if row["independent"] == "insufficient":
+            return reply(f"建议 S-{sid} 暂缓发布，独立确认的有效证据不足。", f"Publication for S-{sid} is on hold because independent evidence was insufficient.")
+        if row["independent"] == "failed":
+            return reply(f"建议 S-{sid} 未采用，独立确认未通过预设的发布条件。", f"S-{sid} was not adopted because the independent release criteria were not met.")
         return reply(f"建议 S-{sid} 正在独立确认。", f"S-{sid} is undergoing independent evaluation.")
     if row["experiment_id"] is not None:
         if rows[0]["stopped"]:
             return reply(f"建议 S-{sid} 的对比评测已取消。", f"The evaluation for S-{sid} was cancelled.")
         if rows[0]["active"]:
             return reply(f"建议 S-{sid} 正在进行对比评测。", f"The evaluation for S-{sid} is in progress.")
-        return reply(f"建议 S-{sid} 的对比评测已结束，等待评审结果。", f"The evaluation for S-{sid} has finished and awaits review.")
+        zh, en = _development_progress(session, scope, sid, row["experiment_id"])
+        return reply(f"建议 S-{sid} 的对比评测已结束。{zh}", f"The evaluation for S-{sid} has finished. {en}")
     return reply(f"建议 S-{sid} 已登记，等待维护人评审。", f"Suggestion S-{sid} is waiting for maintainer review.")
 
 

@@ -83,6 +83,7 @@
   "evolution.screen.observed": "实测",
   "evolution.screen.unverified_trials": "缺少有效回执，或题目、判据、运行版本与计划不符",
   "evolution.screen.forbidden_action": "候选执行了禁止的操作",
+  "evolution.screen.suggestion_target_failed": "建议对应的目标题未通过",
   "evolution.screen.protection_failed": "候选未通过保护题",
   "evolution.screen.quality_regressed": "候选未通过基线答对的目标题",
   "evolution.screen.new_skill_scope_coverage": "缺少新 Skill 的实际使用或正确跳过记录",

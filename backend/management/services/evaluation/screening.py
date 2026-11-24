@@ -83,6 +83,8 @@ def screen_development(plan, pairs, *, cancelled):
         if "result" not in verified:
             continue
         result = pair["result"]
+        if cid == request.get("suggestion_target_case_id") and result["status"] == "fail":
+            failures.setdefault("suggestion_target_failed", []).append(cid)
         evidence = result["result"]
         if request["candidate_type"] == "skill_new" and key not in regression:
             skill_uses.add(new_skill_use(evidence))

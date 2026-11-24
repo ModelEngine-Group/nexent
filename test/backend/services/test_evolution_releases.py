@@ -87,7 +87,8 @@ def test_changed_shared_metadata_aborts_publication():
     ("state", "message"),
     [
         ({"independent": "passed"}, "等待发布"),
-        ({"independent": "insufficient"}, "未达到发布条件"),
+        ({"independent": "insufficient"}, "有效证据不足"),
+        ({"independent": "failed"}, "未通过预设的发布条件"),
         ({"new_version": 3}, "本租户智能体 #7 发布 V3"),
         ({"new_version": 3, "rollback_at": "now"}, "已回退"),
         ({"new_version": 3, "disabled": True}, "已紧急停用"),
