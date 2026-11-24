@@ -5433,6 +5433,7 @@
   "agentEvaluation.noSetShort": "无评测集",
   "agentEvaluation.noSetTag": "无评测集",
   "agentEvaluation.none": "暂无",
+  "agentEvaluation.runFailureReason": "失败原因",
   "agentEvaluation.notFound": "评测任务不存在",
   "agentEvaluation.overallScore": "综合得分",
   "agentEvaluation.pagination.total": "共 {{total}} 条",
