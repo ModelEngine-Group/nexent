@@ -24,7 +24,10 @@ case:
   - order: 3
     action: 多个编辑者争抢同一来源的生成额度，再从同租户另一来源和另一租户提交生成。
     expected: 额度耗尽时在模型调用前拒绝，另一租户继续生成。旧的超时尝试不能补写完成，UTC 次日可重新申请。
-  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。]
+  - order: 4
+    action: 代入供应商用量前先申请模型额度，分别尝试耗尽 token 和费用额度，再提交真实回执、越界回执与下一次请求。
+    expected: 按预留金额拦截超额请求。实际用量结算后可以重用余额。越界回执保留实际值并停止本次生成。
+  expected_results: [并发限制对所有 worker 生效且按租户隔离。, 截止后保留已完成行并拒绝迟到结果。, 候选生成按租户和来源扣减次数并限制并发。, 模型费用和 token 分别预留并按回执结算。]
   forbidden_side_effects: [单个租户的实验不能占用另一租户的额度。]
   acceptance:
   - id: AC-01
@@ -40,6 +43,10 @@ case:
     description: 限额按租户和来源执行，超额请求不会调用模型。
     steps: [3]
     expected_results: [3]
+  - id: AC-04
+    description: 供应商额度预占、真实用量和费用均持久化。
+    steps: [4]
+    expected_results: [4]
   execution:
     profiles:
     - name: mock

@@ -26,6 +26,7 @@ from nexent.core.model_service.errors import normalize_model_error
 from nexent.core.model_service.http_contracts import ModelTransportError
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.registry import AdapterRegistry
+from nexent.core.models.wire_budget import ModelWireBudgetExceeded, SettleUsage, model_wire_budget
 from nexent.monitor import get_monitoring_manager
 from nexent.monitor.model_attempt import ModelAttemptSession
 from nexent.monitor.model_fact import AttemptObservation
@@ -83,6 +84,7 @@ class _Call:
     speculative_empty_retry: bool = False
     capture: object = None
     observation: AttemptObservation | None = None
+    settle_usage: SettleUsage | None = None
 
     @contextmanager
     def observe_attempt(self):
@@ -117,10 +119,13 @@ class _Call:
         self.monitoring.add_span_event("model_attempt_begin", {
             "request_id": self.request.request_id, "attempt": self.attempt,
         })
+        body = json.loads(self.prepared.body_bytes)
+        budget = model_wire_budget.get()
+        self.settle_usage = budget(body) if budget is not None else None
         prepared = replace(
             self.prepared,
             headers=dict(self.prepared.headers),
-            json_body=json.loads(self.prepared.body_bytes),
+            json_body=body,
             timeout_seconds=self.timeout(),
             on_dispatch=self._dispatch_attempt,
         )
@@ -172,6 +177,8 @@ class _Call:
 
     def observe_completion(self, message):
         usage = message.usage
+        if self.settle_usage is not None:
+            self.settle_usage(usage.input_tokens, usage.output_tokens)
         if self.observation is not None:
             self.observation.complete(usage)
             self.observation.finish()
@@ -187,6 +194,8 @@ class _Call:
         self.capture.end()
 
     def failure(self, error):
+        if isinstance(error, ModelWireBudgetExceeded):
+            raise error
         if self.scope.cancelled:
             raise RunTerminated()
         normalized = (

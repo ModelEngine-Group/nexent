@@ -24,6 +24,7 @@ async def invoke_chat_prompt(
     user_id: str,
     tenant_id: str,
     options: ChatOptions | None = None,
+    generation_attempt: int | None = None,
 ) -> str:
     return await invoke_chat_messages(
         model_id=model_id,
@@ -34,6 +35,7 @@ async def invoke_chat_prompt(
         user_id=user_id,
         tenant_id=tenant_id,
         options=options,
+        generation_attempt=generation_attempt,
     )
 
 
@@ -44,8 +46,9 @@ async def invoke_chat_messages(
     user_id: str,
     tenant_id: str,
     options: ChatOptions | None = None,
+    generation_attempt: int | None = None,
 ) -> str:
-    payload = ChatInvocation(model_id=model_id, input=messages, options=options)
+    payload = ChatInvocation(model_id=model_id, input=messages, options=options, generation_attempt=generation_attempt)
     result = await _model_client().invoke_model(payload, user_id, tenant_id)
     content = result.output.get("content") if isinstance(result.output, dict) else None
     return content if isinstance(content, str) else ""
@@ -54,6 +57,7 @@ async def invoke_chat_messages(
 def invoke_chat_prompt_in_worker(
     *, model_id: int, system_prompt: str, user_prompt: str, user_id: str, tenant_id: str,
     max_output_tokens: int | None = None, timeout_seconds: int | None = None,
+    generation_attempt: int | None = None,
 ) -> str:
     """Invoke AgentOS from an existing synchronous job worker."""
     async def request():
@@ -62,6 +66,7 @@ def invoke_chat_prompt_in_worker(
                 model_id=model_id,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
+                generation_attempt=generation_attempt,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 options=ChatOptions(temperature=0.3, top_p=0.95, max_output_tokens=max_output_tokens),

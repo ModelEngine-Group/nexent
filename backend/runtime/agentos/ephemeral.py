@@ -25,6 +25,7 @@ from runtime.agentos.prepared_evaluation import discard_prepared_workspace, load
 from runtime.agentos.prepared_agent_creator import prepare_agent_creator_run
 from runtime.agentos.prepared_skill_creator import prepare_skill_creator_run
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
+from runtime.model.evolution_meter import meter_generation
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ def _close_execution(execution, deferred):
 class _EphemeralResponse(StreamingResponse):
     def __init__(
         self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, creator_mode=None,
-        announce_ready=False,
+        announce_ready=False, generation=None,
     ):
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         self.debug_run_id = f"debug-{info.workspace_run_id}" if debug_owner is not None else None
@@ -110,6 +111,7 @@ class _EphemeralResponse(StreamingResponse):
         self.deferred = deferred
         self.metadata = metadata
         self.debug_owner = debug_owner
+        self.generation = generation
 
     async def stream_response(self, send):
         watcher = None
@@ -127,7 +129,11 @@ class _EphemeralResponse(StreamingResponse):
                 if runtime_state_service.enabled:
                     watcher = asyncio.create_task(_watch_debug_stop(self.debug_run_id, self.debug_owner, self.info))
             with agent_monitoring_context(self.metadata):
-                await super().stream_response(send)
+                if self.generation is None:
+                    await super().stream_response(send)
+                else:
+                    with meter_generation(*self.generation):
+                        await super().stream_response(send)
         finally:
             if watcher is not None:
                 watcher.cancel()
@@ -198,6 +204,8 @@ async def _open_ephemeral(payload, actor):
     return _EphemeralResponse(
         info, execution, deferred, metadata, debug_owner=debug_owner(actor) if debug else None, creator_mode=creator_mode,
         announce_ready=bool(debug and payload.native_knowledge),
+        generation=(payload.generation_attempt, payload.model.model_id, actor)
+        if isinstance(payload, PreparedSkillCreatorRun) and payload.generation_attempt is not None else None,
     )
 
 

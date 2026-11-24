@@ -65,6 +65,7 @@ from .retry import (
     get_retry_after_seconds,
 )
 from .sampling import DEFAULT_TEMPERATURE, SAMPLING_FIELDS, validate_sampling_value, without_unset_sampling
+from .wire_budget import ModelWireBudgetExceeded, model_wire_budget
 
 
 logger = logging.getLogger("openai_llm")
@@ -613,10 +614,19 @@ class OpenAIModel(OpenAIServerModel):
                         self.concurrency_wait_timeout_seconds,
                         self.stop_event,
                     )
+                settle_usage = None
+
+                def admit(dispatch_kwargs):
+                    nonlocal settle_usage
+                    budget = model_wire_budget.get()
+                    if budget is not None:
+                        settle_usage = budget(dispatch_kwargs)
+
                 current_request = self._dispatch_chat_completion(
                     context_budget_snapshot=trusted_budget_snapshot,
                     capacity_snapshot=self.capacity_snapshot,
                     _trajectory_capture=_trajectory_capture,
+                    _admit=admit,
                     stream=True,
                     **dispatch_kwargs,
                 )
@@ -756,6 +766,8 @@ class OpenAIModel(OpenAIServerModel):
                     usage = None
                     if chunk_list and chunk_list[-1].usage is not None:
                         usage = chunk_list[-1].usage
+                        if settle_usage is not None:
+                            settle_usage(usage.prompt_tokens, getattr(usage, "completion_tokens", None))
                         input_tokens = usage.prompt_tokens
                         output_tokens = usage.completion_tokens if hasattr(
                             usage, 'completion_tokens') else usage.total_tokens
@@ -993,7 +1005,7 @@ class OpenAIModel(OpenAIServerModel):
                     if _trajectory_capture is not None:
                         _trajectory_capture.end(cancelled=True)
                     raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE) from e
-                if isinstance(e, ModelConcurrencyExceeded):
+                if isinstance(e, (ModelConcurrencyExceeded, ModelWireBudgetExceeded)):
                     raise
                 if token_tracker:
                     self._monitoring.add_span_event("error_occurred", {
@@ -1163,6 +1175,7 @@ class OpenAIModel(OpenAIServerModel):
         context_budget_snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]] = None,
         capacity_snapshot: Optional[Dict[str, Any]] = None,
         _trajectory_capture=None,
+        _admit=None,
         **completion_kwargs: Any,
     ) -> Any:
         """Dispatch the OpenAI chat completion request.
@@ -1221,6 +1234,8 @@ class OpenAIModel(OpenAIServerModel):
             ),
         )
         def dispatch(parameters):
+            if _admit is not None:
+                _admit(parameters)
             if _trajectory_capture is not None:
                 wire_body = {key: value for key, value in parameters.items()
                              if key not in {"extra_headers", "extra_query", "extra_body", "timeout"}}

@@ -109,6 +109,8 @@ class _SkillCreatorObserver(MessageObserver):
 
 
 def prepare_skill_creator_run(payload: PreparedSkillCreatorRun, actor: ServicePrincipal) -> AgentRunInfo:
+    if payload.generation_attempt is not None and NEXENT_AGENT_CORE != "smolagents":
+        raise HTTPException(status_code=422, detail={"code": "EVOLUTION_GENERATION_METER_UNSUPPORTED"})
     if payload.model.provider_body_revision is not None or payload.model.root_generation is not None:
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
     model = _materialize_model(payload.model, actor, None)

@@ -63,6 +63,7 @@ def test_distributed_budget(runtime, monkeypatch):
     assert jobs.finish(other, "pass", {"answer":"independent"})
 
     _verify_candidate_budget(monkeypatch)
+    _verify_provider_quota(monkeypatch)
 
 
 def _verify_candidate_budget(monkeypatch):
@@ -74,9 +75,10 @@ def _verify_candidate_budget(monkeypatch):
     from management.services.evaluation import generation_budget
 
     engine = db_client.engine
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_041_evolution_generation_attempts.sql"
+    migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        cursor.execute(migration.read_text(encoding="utf8"))
+        for name in ("041_evolution_generation_attempts", "043_evolution_model_charges"):
+            cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf8"))
 
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_CONCURRENCY", 1)
     monkeypatch.setattr(environment, "EVOLUTION_GENERATION_SOURCE_ATTEMPTS", 1)
@@ -138,3 +140,60 @@ def _verify_candidate_budget(monkeypatch):
     assert invoke("tenant-c", another_source) == "revised"
     with pytest.raises(AppException, match="attempt limit"):
         invoke("tenant-c", source)
+
+
+
+def _verify_provider_quota(monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from contracts.constants import environment
+    from contracts.evolution_metering import generation_budget
+    from infrastructure.rdb.client import db_client
+    from management.db.evaluation.generation_attempts import complete, reserve, stopped
+    from nexent.core.models.wire_budget import ModelWireBudgetExceeded, model_wire_budget
+    from runtime.model.evolution_meter import meter_generation
+
+    monkeypatch.setattr(environment, "EVOLUTION_GENERATION_CONCURRENCY", 2)
+    tariff = dict(max_input_tokens=100, max_output_tokens=50, input_micros_per_million=2_000_000,
+                  output_micros_per_million=3_000_000)
+    token_limit = dict(daily_tokens=180, daily_micros=1000, models={"1": tariff})
+    fee_limit = dict(daily_tokens=1000, daily_micros=360, models={"1": tariff})
+    monkeypatch.setattr(environment, "EVOLUTION_GENERATION_METERING",
+                        json.dumps({"meter": token_limit, "fee": fee_limit, "overflow": token_limit, "stale": token_limit}))
+    for tenant in ("meter", "fee"):
+        actor = SimpleNamespace(tenant_id=tenant, user_id="creator")
+        attempt = reserve(tenant, actor.user_id, "d" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
+        assert not complete(tenant, attempt), "A metered job cannot complete without a wire reservation"
+        with meter_generation(attempt, 1, actor):
+            charge = model_wire_budget.get()
+            wire = {"max_tokens": 99}
+            settle = charge(wire)
+            assert wire["max_tokens"] == 50
+            with pytest.raises(ModelWireBudgetExceeded):
+                charge({})
+            # The uncertain second dispatch was rejected. An earlier response can still settle.
+            settle(3, 1)
+        assert stopped(tenant, attempt) and not complete(tenant, attempt)
+        retry = reserve(tenant, actor.user_id, "e" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
+        with meter_generation(retry, 1, actor):
+            model_wire_budget.get()({})(5, 3)
+        assert complete(tenant, retry)
+
+    revision_actor = SimpleNamespace(tenant_id="stale", user_id="creator")
+    mismatched = reserve("stale", revision_actor.user_id, "g" * 64, 1, metering_revision="x" * 64)
+    with meter_generation(mismatched, 1, revision_actor), pytest.raises(ModelWireBudgetExceeded):
+        model_wire_budget.get()({})
+
+    actor = SimpleNamespace(tenant_id="overflow", user_id="creator")
+    attempt = reserve("overflow", actor.user_id, "f" * 64, 1, metering_revision=generation_budget(actor.tenant_id).revision())
+    with meter_generation(attempt, 1, actor):
+        settle = model_wire_budget.get()({})
+        with pytest.raises(ModelWireBudgetExceeded, match="exceeds"):
+            settle(101, 4)
+    assert stopped("overflow", attempt)
+    with db_client.engine.connect() as conn:
+        row = conn.execute(text("""SELECT reserved_input, reserved_output, reserved_micros,
+            reported_input, reported_output, reported_micros FROM nexent.evolution_model_charge_t
+            WHERE tenant_id='overflow'""")).one()
+        assert tuple(row) == (100, 50, 350, 101, 4, 214)

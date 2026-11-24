@@ -17,8 +17,11 @@ from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.concurrency import run_blocking
 from nexent.core.gateway.modality.embedding.embedding_adapter import EmbeddingRequest
 from nexent.core.gateway.modality.llm.llm_adapter import LLMRequest
+from nexent.core.gateway.modality.llm.openai import OpenAILLMAdapter
+from nexent.core.models.wire_budget import ModelWireBudgetExceeded
 from nexent.core.gateway.modality.rerank.rerank_adapter import RerankRequest
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from runtime.model.evolution_meter import meter_generation
 
 
 class ModelAccessError(Exception):
@@ -79,7 +82,13 @@ class ModelService:
         if isinstance(payload, ChatInvocation):
             options = payload.options.model_dump(exclude_none=True) if payload.options else {}
             adapter = self.build_adapter(record, "llm", "llm", actor.tenant_id, stream=False, **options)
-            output = await adapter.invoke(LLMRequest([message.model_dump() for message in payload.input]))
+            try:
+                if payload.generation_attempt is not None and not isinstance(adapter, OpenAILLMAdapter):
+                    raise ModelWireBudgetExceeded("This model adapter has no provider metering")
+                with meter_generation(payload.generation_attempt, payload.model_id, actor):
+                    output = await adapter.invoke(LLMRequest([message.model_dump() for message in payload.input]))
+            except ModelWireBudgetExceeded as exc:
+                raise ModelAccessError(429, "EVOLUTION_GENERATION_BUDGET") from exc
             output = {"content": output.content}
         elif isinstance(payload, EmbeddingInvocation):
             modality = metadata.model_type

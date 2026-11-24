@@ -13,13 +13,15 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution_sources import normalized_text, task_digest
 from infrastructure.skill_package import encode_skill_package, load_new_skill_package, store_new_skill_package
-from management.db.evaluation import experiments as jobs, generation_attempts, new_skills
+from management.db.evaluation import experiments as jobs, new_skills
 from management.db.evaluation.confirmation_runs import exclusive_job_slot
 from management.db.skill.repository import get_skill_by_name
 from management.services.evaluation.evolution_access import require_business_agent_edit
 from management.services.evaluation.experiments import _io
 from management.services.evaluation.feedback_handoff import require_development_sources
-from management.services.evaluation.generation_budget import finish_generation, source_digest as generation_source
+from management.services.evaluation.generation_budget import (
+    finish_generation, reject_stopped_generation, reserve_generation, source_digest as generation_source,
+)
 from management.services.evaluation.new_skill_evidence import check_private, invalid, require_creator
 from management.services.skill.creation import create_nl2skill_stream, prepare_nl2skill_snapshot
 from nexent.skills.skill_loader import SkillLoader
@@ -145,13 +147,19 @@ async def generate_new_skill(tenant, user, fid, model_id):
             payload.model.revision,
         )
         if existing is None:
-            attempt = await _io("reserve-new-skill-generation", generation_attempts.reserve,
+            attempt, metered = await _io("reserve-new-skill-generation", reserve_generation,
                                 tenant, user, generation_source("S3", fid), model_id)
+            if metered:
+                payload = payload.model_copy(update={"generation_attempt": attempt})
             try:
                 async with asyncio.timeout(environment.EVOLUTION_GENERATION_TIMEOUT_SECONDS):
                     files = await collect_files(create_nl2skill_stream(payload, user, tenant))
             except TimeoutError as exc:
                 raise AppException(ErrorCode.SYSTEM_TIMEOUT, "Candidate generation exceeded its time budget") from exc
+            except AppException:
+                if metered:
+                    await _io("check-new-skill-budget", reject_stopped_generation, tenant, attempt)
+                raise
             await _io("complete-new-skill-generation", finish_generation, tenant, attempt)
 
             def store():

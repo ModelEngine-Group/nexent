@@ -9,10 +9,10 @@ from contracts.errors.exceptions import AppException
 from infrastructure.rdb.client import get_db_session
 
 
-def reserve(tenant, user, source, model):
+def reserve(tenant, user, source, model, *, metering_revision=None):
     with get_db_session() as session:
         params = dict(tenant=tenant, user=user, source=source, model=model,
-                      seconds=environment.EVOLUTION_GENERATION_TIMEOUT_SECONDS)
+                      seconds=environment.EVOLUTION_GENERATION_TIMEOUT_SECONDS, metered=metering_revision)
         session.execute(text("""
             SELECT pg_advisory_xact_lock(hashtextextended('evolution-generation:' || :tenant, 0))
         """), params)
@@ -33,8 +33,8 @@ def reserve(tenant, user, source, model):
             raise AppException(ErrorCode.COMMON_RATE_LIMIT_EXCEEDED, "Candidate generation is at its concurrency limit")
         return session.scalar(text("""
             INSERT INTO nexent.evolution_generation_attempt_t
-                (tenant_id, source_digest, model_id, created_by, lease_until)
-            VALUES (:tenant, :source, :model, :user, clock_timestamp() + make_interval(secs=>:seconds))
+                (tenant_id, source_digest, model_id, created_by, lease_until, metering_revision)
+            VALUES (:tenant, :source, :model, :user, clock_timestamp() + make_interval(secs=>:seconds), :metered)
             RETURNING attempt_id
         """), params)
 
@@ -43,6 +43,19 @@ def complete(tenant, attempt_id):
     with get_db_session() as session:
         return bool(session.scalar(text("""
             UPDATE nexent.evolution_generation_attempt_t SET completed_at=clock_timestamp()
-            WHERE tenant_id=:tenant AND attempt_id=:attempt AND completed_at IS NULL AND lease_until > clock_timestamp()
+            WHERE tenant_id=:tenant AND attempt_id=:attempt AND completed_at IS NULL AND NOT budget_stopped
+              AND lease_until > clock_timestamp()
+              AND (metering_revision IS NULL OR EXISTS (
+                  SELECT 1 FROM nexent.evolution_model_charge_t WHERE attempt_id=:attempt AND tenant_id=:tenant
+              ))
             RETURNING attempt_id
+        """), dict(tenant=tenant, attempt=attempt_id)))
+
+
+
+def stopped(tenant, attempt_id):
+    with get_db_session() as session:
+        return bool(session.scalar(text("""
+            SELECT budget_stopped FROM nexent.evolution_generation_attempt_t
+            WHERE tenant_id=:tenant AND attempt_id=:attempt
         """), dict(tenant=tenant, attempt=attempt_id)))

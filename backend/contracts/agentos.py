@@ -722,6 +722,7 @@ class PreparedSkillCreatorRun(PreparedCreatorRun):
     mode: Literal["nl2skill"]
     draft: SkillCreatorDraft | None = None
     target_files: list[str] = Field(default_factory=list)
+    generation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class PreparedAgentCreatorRun(PreparedCreatorRun):
@@ -998,6 +999,7 @@ class ChatOptions(BaseModel):
 
 class ChatInvocation(ModelInvokeBase):
     operation: Literal["chat"] = "chat"
+    generation_attempt: PositiveInt | None = Field(default=None, exclude_if=lambda value: value is None)
     input: Annotated[list[ChatMessage], Field(min_length=1)]
     options: ChatOptions | None = None
 
