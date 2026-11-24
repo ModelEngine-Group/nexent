@@ -1318,6 +1318,24 @@ def _active_documents(kds_id: str) -> List[Dict[str, Any]]:
     ]
 
 
+def _tree_documents(kds_id: str) -> List[Dict[str, Any]]:
+    """Return every file still present in the folder tree.
+
+    Folders/Tree lists files in all HistoryStatus states, not only completed
+    ones; rows past their removal window are hidden here while History keeps
+    the audit record.
+    """
+    now = time.time()
+    return [
+        doc
+        for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if not (
+            isinstance(doc.get("_deleted_at"), (int, float))
+            and doc["_deleted_at"] <= now
+        )
+    ]
+
+
 def _normalize_mock_folder_path(path: Optional[str]) -> str:
     """Normalize one mock folder path to the AIDP relative form."""
     normalized = (path or "/").strip().replace("\\", "/")
@@ -1384,17 +1402,13 @@ def _uuid_hex(value: Any) -> str:
 
 
 def _folder_tree_status(document: Dict[str, Any]) -> int:
-    """Map the mock's task status to the new tree contract 1–6."""
+    """Map the mock's task status to AIDP's real HistoryStatus contract 0–7."""
     deleted_at = document.get("_deleted_at")
     if isinstance(deleted_at, (int, float)) and deleted_at > time.time():
-        return 5
-    if document.get("file_status") == 2:
         return 6
+    if document.get("file_status") == 2:
+        return 7
     status = _doc_effective_status(document)
-    if status == 4:
-        return 2
-    if status == 5:
-        return 4
     return status if isinstance(status, int) else 1
 
 
@@ -1905,7 +1919,7 @@ class FusionSearchRequest(BaseModel):
 
 
 class RemoveFilesBody(BaseModel):
-    file_uuids: List[uuid.UUID] = Field(..., min_length=1)
+    file_uuids: List[str] = Field(..., min_length=1)
 
 
 class CountFilesBody(BaseModel):
@@ -2517,7 +2531,7 @@ def get_folder_tree(
     if include_files:
         documents = [
             document
-            for document in _active_documents(kds_id)
+            for document in _tree_documents(kds_id)
             if (document.get("folder_path") or "/") == normalized_path
         ]
         normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
@@ -2998,7 +3012,11 @@ def remove_documents(
     for raw_file_uuid in body.file_uuids:
         file_uuid = str(raw_file_uuid)
         matched = next(
-            (document for document in documents if document.get("file_uuid") == file_uuid),
+            (
+                document
+                for document in documents
+                if _uuid_hex(document.get("file_uuid")) == _uuid_hex(file_uuid)
+            ),
             None,
         )
         already_deleted = (

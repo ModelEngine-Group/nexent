@@ -77,6 +77,22 @@ export const formatFileSize = (bytes?: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
+/** Split a file name into its editable stem and fixed extension.
+ *
+ * The last dot separates the extension; leading dots (dotfiles) and trailing
+ * dots stay part of the stem so a name is never reduced to an empty string.
+ */
+export const splitFileNameExtension = (
+  name: string | null | undefined
+): { stem: string; extension: string } => {
+  const value = typeof name === "string" ? name : "";
+  const dot = value.lastIndexOf(".");
+  if (dot <= 0 || dot === value.length - 1) {
+    return { stem: value, extension: "" };
+  }
+  return { stem: value.slice(0, dot), extension: value.slice(dot) };
+};
+
 export const statusCode = (
   status: AidpDocumentItem["status"]
 ): number | null => {
@@ -105,11 +121,10 @@ export const statusCode = (
 };
 
 /**
- * Status presentation shared by the file list and the upload-task tab.
+ * Status presentation for the upload-task history tab.
  *
- * AIDP is adding the same status field to the folder/file listing, so both
- * surfaces must use one vocabulary: success / extracting / failed / queued /
- * graph failed, plus the remove-failed state when a deployment reports it.
+ * Kept separate from the folder-tree contract below: the history view still
+ * uses its older 1–6 vocabulary, where 4 means queued.
  */
 export interface AidpDocumentStatusMeta {
   code: number;
@@ -146,9 +161,10 @@ export const documentStatusMeta = (
 /**
  * Folder/Files status contract (new AIDP API).
  *
- * The folder tree uses numeric 1–6. This is deliberately separate from the
- * legacy document list's ``file_status`` (0/1/2) and from the upload-task
- * vocabulary, where 4 means queued and 5 means graph failed.
+ * Folder/Files reports AIDP's HistoryStatus as 0–7: nothing to do (0),
+ * completed (1), extracting (2), failed (3), uploading (4), graph failed (5),
+ * removing (6) and remove failed (7). This is deliberately separate from the
+ * upload-task history vocabulary, where 4 still means queued.
  */
 export interface AidpFolderTreeStatusPermissions {
   canRename: boolean;
@@ -180,6 +196,18 @@ const FOLDER_TREE_STATUS_META: Record<
     permissions: AidpFolderTreeStatusPermissions;
   }
 > = {
+  0: {
+    labelKey: "aidpKnowledge.fileStatusNothingToDo",
+    dotClass: "bg-gray-400",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: true,
+      canDownload: true,
+      canRetry: false,
+    },
+  },
   1: {
     labelKey: "aidpKnowledge.fileStatusIngested",
     dotClass: "bg-green-500",
@@ -217,6 +245,11 @@ const FOLDER_TREE_STATUS_META: Record<
     },
   },
   4: {
+    labelKey: "aidpKnowledge.fileStatusUploading",
+    dotClass: "bg-blue-500",
+    permissions: { ...NONE_PERMISSIONS },
+  },
+  5: {
     labelKey: "aidpKnowledge.fileStatusGraphFailed",
     dotClass: "bg-orange-500",
     permissions: {
@@ -228,33 +261,34 @@ const FOLDER_TREE_STATUS_META: Record<
       canRetry: true,
     },
   },
-  5: {
+  6: {
     labelKey: "aidpKnowledge.fileStatusRemoving",
     dotClass: "bg-gray-400",
     permissions: { ...NONE_PERMISSIONS },
   },
-  6: {
+  7: {
     labelKey: "aidpKnowledge.fileStatusRemoveFailed",
     dotClass: "bg-red-500",
     permissions: { ...NONE_PERMISSIONS, canDelete: true },
   },
 };
 
-// AIDP's string status is authoritative. Numeric 1–6 is retained only as a
-// fallback for deployments that still return the previous contract.
+// AIDP reports HistoryStatus as the numeric 0–7 code, sometimes quoted as a
+// string; alias names are accepted from deployments that spell it out.
 const folderTreeStatusCode = (
   status: AidpDocumentItem["status"]
 ): number | null => {
   if (typeof status === "number") {
-    return status >= 1 && status <= 6 ? status : null;
+    return status >= 0 && status <= 7 ? status : null;
   }
   if (typeof status === "string") {
     const trimmed = status.trim();
     if (/^\d+$/.test(trimmed)) {
       const code = Number(trimmed);
-      return code >= 1 && code <= 6 ? code : null;
+      return code >= 0 && code <= 7 ? code : null;
     }
     const aliases: Record<string, number> = {
+      NOTHING_TO_DO: 0,
       COMPLETED: 1,
       SUCCESS: 1,
       INGESTED: 1,
@@ -263,13 +297,14 @@ const folderTreeStatusCode = (
       WAITING: 2,
       FAILED: 3,
       VECTOR_INGESTION_FAILED: 3,
-      GRAPH_INGESTION_FAILED: 4,
-      GRAPH_FAILED: 4,
-      GRAPHFAILED: 4,
-      REMOVING: 5,
-      DELETING: 5,
-      REMOVE_FAILED: 6,
-      DELETE_FAILED: 6,
+      UPLOADING: 4,
+      GRAPH_INGESTION_FAILED: 5,
+      GRAPH_FAILED: 5,
+      GRAPHFAILED: 5,
+      REMOVING: 6,
+      DELETING: 6,
+      REMOVE_FAILED: 7,
+      DELETE_FAILED: 7,
     };
     return aliases[trimmed.toUpperCase()] ?? null;
   }

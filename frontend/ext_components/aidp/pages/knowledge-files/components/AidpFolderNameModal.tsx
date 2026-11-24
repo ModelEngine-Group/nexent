@@ -13,6 +13,8 @@ interface AidpFolderNameModalProps {
   label: string;
   initialValue?: string;
   placeholder?: string;
+  /** Fixed, read-only text shown after the editable value (e.g. ".pdf"). */
+  suffix?: string;
   confirmLoading?: boolean;
   onCancel: () => void;
   onSubmit: (name: string) => void;
@@ -25,6 +27,7 @@ const AidpFolderNameModal: React.FC<AidpFolderNameModalProps> = ({
   label,
   initialValue = "",
   placeholder,
+  suffix,
   confirmLoading = false,
   onCancel,
   onSubmit,
@@ -79,6 +82,9 @@ const AidpFolderNameModal: React.FC<AidpFolderNameModalProps> = ({
           maxLength={255}
           value={value}
           placeholder={placeholder}
+          suffix={
+            suffix ? <span className="text-gray-400">{suffix}</span> : undefined
+          }
           status={error ? "error" : undefined}
           onChange={(event) => {
             setValue(event.target.value);

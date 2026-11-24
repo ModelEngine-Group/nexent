@@ -128,7 +128,12 @@
   display: flex;
   flex: none;
   align-items: flex-start;
+  align-self: start;
+  justify-content: flex-end;
   gap: 2px;
+  /* Pull the collapse/close pair up to the panel's top-right corner instead
+     of leaving it centred against the 84px progress ring. */
+  margin: -12px -12px 0 0;
 }
 
 .stateBar {
