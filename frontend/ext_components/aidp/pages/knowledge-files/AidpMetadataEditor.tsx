@@ -177,7 +177,9 @@ const AidpMetadataEditor: React.FC<AidpMetadataEditorProps> = ({
         <span className={styles.headRequired}>
           {t("aidpKnowledge.chunkMetadataFieldName")}
         </span>
-        <span>{t("aidpKnowledge.chunkMetadataType")}</span>
+        <Tooltip title={t("aidpKnowledge.chunkMetadataTypeHint")}>
+          <span>{t("aidpKnowledge.chunkMetadataType")}</span>
+        </Tooltip>
         <span>{t("aidpKnowledge.chunkMetadataValue")}</span>
         <span>{t("aidpKnowledge.chunkMetadataOperation")}</span>
       </div>

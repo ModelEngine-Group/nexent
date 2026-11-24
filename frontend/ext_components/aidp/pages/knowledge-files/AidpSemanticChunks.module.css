@@ -520,8 +520,8 @@
   align-items: center;
   padding: 8px 12px;
   color: var(--chunk-secondary, #595959);
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 14px;
+  line-height: 22px;
   background: #f5f5f5;
   margin-top: 4px;
   margin-bottom: 8px;
@@ -533,8 +533,8 @@
   align-items: center;
   padding: 8px 12px;
   color: var(--chunk-secondary, #595959);
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 14px;
+  line-height: 22px;
   background: #f5f5f5;
   margin-top: 4px;
   margin-bottom: 8px;
@@ -559,13 +559,15 @@
   margin-bottom: 10px;
 }
 .metadataTypeCell {
-  padding: 5px 12px;
-  border: 1px solid #dfdfdf;
-  border-radius: 4px;
-  background: #f5f5f5;
-  color: var(--chunk-secondary, #595959);
-  font-size: 12px;
-  line-height: 20px;
+  display: flex;
+  height: 32px;
+  box-sizing: border-box;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--chunk-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -631,6 +633,14 @@
   background: #fafafa;
   color: #595959;
   font-weight: 500;
+}
+.chunkTableScroll [contenteditable="true"] {
+  cursor: text;
+}
+.chunkTableScroll [contenteditable="true"]:focus {
+  outline: 2px solid var(--chunk-primary, #0067d1);
+  outline-offset: -2px;
+  background: #ffffff;
 }
 .chunkTable {
   width: 100%;

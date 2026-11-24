@@ -2,7 +2,13 @@
 
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Drawer, Input, Select } from "antd";
 import {
@@ -112,10 +118,122 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
     () => (isTableChunk && previewing ? sanitizeAidpTableHtml(text) : null),
     [isTableChunk, previewing, text]
   );
+  const tablePreviewRef = useRef<HTMLDivElement | null>(null);
+  const previewDirtyRef = useRef(false);
+  const [previewLength, setPreviewLength] = useState<number | null>(null);
+
+  // Keep the preview table structural, but allow plain-text cell edits. The
+  // DOM is only committed back to the HTML textarea when leaving preview or
+  // submitting, so React does not re-render the table on every keystroke.
+  // Cells are plaintext-only, so the table structure is always intact.
+  const serializePreview = useCallback((): string => {
+    // Only reachable while the preview is mounted; cells accept plaintext only.
+    const root = tablePreviewRef.current!;
+    const clone = root.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("[contenteditable]").forEach((cell) => {
+      cell.removeAttribute("contenteditable");
+      cell.removeAttribute("spellcheck");
+    });
+    const tableHtml = clone.innerHTML;
+    return preview?.caption ? `${preview.caption}\n\n${tableHtml}` : tableHtml;
+  }, [preview]);
+
+  const refreshPreviewLength = useCallback(() => {
+    setPreviewLength(serializePreview().length);
+  }, [serializePreview]);
+
+  useEffect(() => {
+    const root = tablePreviewRef.current;
+    if (!previewing || !root) return;
+    const cells = Array.from(root.querySelectorAll<HTMLElement>("td,th"));
+    for (const cell of cells) {
+      // plaintext-only keeps every edit to text, so cells cannot inject markup.
+      cell.setAttribute("contenteditable", "plaintext-only");
+      cell.setAttribute("spellcheck", "false");
+    }
+    return () => {
+      for (const cell of cells) {
+        cell.removeAttribute("contenteditable");
+        cell.removeAttribute("spellcheck");
+      }
+    };
+  }, [previewing, preview?.tableHtml]);
+
+  const togglePreview = useCallback(() => {
+    if (!previewing) {
+      previewDirtyRef.current = false;
+      setPreviewLength(null);
+      setPreviewing(true);
+      return;
+    }
+    if (previewDirtyRef.current) {
+      setText(serializePreview());
+      setTouched(true);
+      previewDirtyRef.current = false;
+    }
+    setPreviewLength(null);
+    setPreviewing(false);
+  }, [previewing, serializePreview]);
+
+  const handlePreviewInput = useCallback(() => {
+    previewDirtyRef.current = true;
+    refreshPreviewLength();
+  }, [refreshPreviewLength]);
+
+  const handlePreviewPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const plainText = event.clipboardData.getData("text/plain");
+      const root = tablePreviewRef.current;
+      const selection = window.getSelection();
+      if (!root || !plainText || !selection || selection.rangeCount === 0) {
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const anchor =
+        range.startContainer.nodeType === Node.ELEMENT_NODE
+          ? (range.startContainer as Element)
+          : range.startContainer.parentElement;
+      // Only insert while the caret is inside a table cell.
+      if (!anchor || !root.contains(anchor) || !anchor.closest("td,th")) {
+        return;
+      }
+      range.deleteContents();
+      const textNode = document.createTextNode(plainText);
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      previewDirtyRef.current = true;
+      refreshPreviewLength();
+    },
+    [refreshPreviewLength]
+  );
+
+  const handlePreviewDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      // A drop could insert rich markup; the preview only accepts typed text.
+      event.preventDefault();
+    },
+    []
+  );
+
+  const handlePreviewKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      // Enter would let contentEditable insert block elements into the table.
+      if (event.key === "Enter") event.preventDefault();
+    },
+    []
+  );
 
   const trimmed = text.trim();
   const isEmpty = trimmed.length === 0;
-  const isTooLong = text.length > AIDP_CHUNK_TEXT_MAX_LENGTH;
+  // While previewing, the textarea is hidden and its state intentionally stays
+  // untouched; the serialized preview length keeps the counter live.
+  const effectiveLength =
+    previewing && previewLength !== null ? previewLength : text.length;
+  const isTooLong = effectiveLength > AIDP_CHUNK_TEXT_MAX_LENGTH;
 
   const metadataJson = useMemo(() => {
     const result: Record<string, string> = {};
@@ -164,9 +282,19 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
+    const nextText =
+      previewing && previewDirtyRef.current ? serializePreview() : text;
+    const nextTrimmed = nextText.trim();
+    if (!nextTrimmed || nextText.length > AIDP_CHUNK_TEXT_MAX_LENGTH) {
+      setText(nextText);
+      setPreviewing(false);
+      setPreviewLength(null);
+      previewDirtyRef.current = false;
+      return;
+    }
     try {
       await onSubmit({
-        text: trimmed,
+        text: nextTrimmed,
         metadataDirty,
         tag: cleanedTags,
         metadata_json: metadataJson,
@@ -174,7 +302,16 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
     } catch {
       // The parent reports the failure; keeping the values lets the user retry.
     }
-  }, [canSubmit, cleanedTags, metadataDirty, metadataJson, onSubmit, trimmed]);
+  }, [
+    canSubmit,
+    cleanedTags,
+    metadataDirty,
+    metadataJson,
+    onSubmit,
+    previewing,
+    serializePreview,
+    text,
+  ]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -220,7 +357,7 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
                   size="small"
                   className={styles.previewToggle}
                   disabled={submitting}
-                  onClick={() => setPreviewing((prev) => !prev)}
+                  onClick={togglePreview}
                 >
                   {previewing
                     ? t("aidpKnowledge.chunkTableBackToEdit")
@@ -237,11 +374,23 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
                     </div>
                   )}
                   <div
+                    ref={tablePreviewRef}
                     className={styles.chunkTableScroll}
+                    onInput={handlePreviewInput}
+                    onPaste={handlePreviewPaste}
+                    onDrop={handlePreviewDrop}
+                    onDragOver={handlePreviewDrop}
+                    onKeyDown={handlePreviewKeyDown}
                     // Rebuilt from a table-only whitelist by
                     // sanitizeAidpTableHtml; no script-capable markup survives.
+                    // Cells become contenteditable after render; only their text
+                    // is committed back, never the table structure.
                     dangerouslySetInnerHTML={{ __html: preview.tableHtml }}
                   />
+                  <div className={styles.formHint}>
+                    <InfoCircleOutlined className={styles.hintIcon} />
+                    {t("aidpKnowledge.chunkTablePreviewEditHint")}
+                  </div>
                 </div>
               ) : (
                 <Alert
@@ -260,7 +409,7 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
                   minHeight: 160,
                   padding: "8px 12px",
                   resize: "vertical",
-                  background: "#f5f5f5",
+                  background: submitting ? "#f5f5f5" : "#ffffff",
                 }}
                 value={text}
                 onChange={(event) => {
@@ -294,7 +443,7 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
                     : t("aidpKnowledge.chunkEditVectorHint")}
               </span>
               <span className={styles.counter}>
-                {text.length}/{AIDP_CHUNK_TEXT_MAX_LENGTH}
+                {effectiveLength}/{AIDP_CHUNK_TEXT_MAX_LENGTH}
               </span>
             </div>
             {isTooLong && (
@@ -323,10 +472,13 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
 
           {hasOntology && (
             <div>
-              <div className={styles.tagTableHead}>
-                <span className={styles.headRequired}>
-                  {t("aidpKnowledge.chunkMetadataValue")}
+              <div className={styles.fieldLabelRow}>
+                <span className={styles.fieldLabel}>
+                  {t("aidpKnowledge.chunkTags")}
                 </span>
+              </div>
+              <div className={styles.tagTableHead}>
+                <span>{t("aidpKnowledge.chunkMetadataValue")}</span>
                 <span>{t("aidpKnowledge.chunkMetadataOperation")}</span>
               </div>
               {tagRows.map((tag, index) => (
