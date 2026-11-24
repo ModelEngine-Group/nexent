@@ -13,7 +13,7 @@ change:
   affected_cases:
     existing: []
     added: [EVOLUTION-RELEASE-RACE-D5-001, EVOLUTION-BUSINESS-JOURNEY-D4-001, EVOLUTION-PROMPT-CONFLICT-D2-001, EVOLUTION-PUBLIC-BENCHMARK-D2-001, EVOLUTION-SANDBOX-RECOVERY-D5-001, EVOLUTION-DEVELOPMENT-RECOVERY-D5-001, EVOLUTION-PRIVATE-RECOVERY-D5-001, EVOLUTION-ONLINE-DIAGNOSIS-D3-001, EVOLUTION-RUN-BUDGET-D3-001, EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
-    modified: []
+    modified: [AOS-TRANSPORT-D3-001]
     retired: []
   traditional_ut:
     decision: add
@@ -98,4 +98,4 @@ change:
     - S3 晋升只将确认过的指南绑定到目标智能体新版本，之后发布可继承。回退及旧会话按实际版本取包。
     - T3 仅移除独立确认中的工具。下一版继承已生效的工具选择，其他智能体、草稿及旧会话仍按原清单运行。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
-  notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。随开发增量登记其余 AC 的证明边界。
+  notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。AgentOS 传输用例固定普通会话无演进发布记录，真实选版和并发事务分别由专项 D3、D5 覆盖。

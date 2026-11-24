@@ -2380,6 +2380,8 @@ async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(conversation_submission, "conversation_belongs_to", owned)
     monkeypatch.setattr(prepared_turn, "run_blocking", inline)
+    # This transport fixture has no managed release scope for its synthetic agent.
+    monkeypatch.setattr(prepared_turn, "select_chat_version", lambda *_: None)
     monkeypatch.setattr(prepared_turn, "get_conversation", lambda *_args, **_kwargs: {
         "knowledge_scope": config.knowledge_scope.model_dump(mode="json") if native_scope else None,
     })
