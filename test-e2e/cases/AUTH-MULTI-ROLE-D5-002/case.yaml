@@ -25,13 +25,13 @@ case:
     expected: Record the complete initial rows and effective routes for comparison.
   - order: 2
     action: Apply the current additive Ops page identifier migration to real PostgreSQL.
-    expected: Only matching navigation subtypes change; IDs, roles and all other record fields are preserved. Effective routes remain unchanged and deduplicated.
+    expected: Only matching navigation subtypes change; IDs, roles and all other record fields are preserved. accessiblePages contains the new identifiers without backend route translation; resource grants remain unchanged.
   - order: 3
     action: Apply the migration again, then release connections and drop the owned database through the existing disposable factory.
     expected: The second execution makes no changes; the owned database is removed.
   expected_results:
   - All old Ops navigation identifiers become their corresponding stable identifiers, preserving record identity, role and every other field.
-  - Effective accessibleRoutes remain identical before and after the migration, including when old and new grants coexist.
+  - accessiblePages returns the migrated identifiers, deduplicating identical values when old and new grants coexist; resource permissions remain identical before and after migration.
   - Unrelated records are unchanged; repeat execution changes zero rows and cleanup removes the UUID database.
   forbidden_side_effects:
   - Adding or deleting grants, modifying resource action permissions or another page, changing user roles, or accessing shared tenant data.
@@ -42,7 +42,7 @@ case:
     expected_results: [1]
     forbidden_side_effects: [1]
   - id: AC-02
-    description: Preserve effective route grants for mixed legacy and new identifiers.
+    description: Preserve page grants as identifiers for frontend resolution and preserve resource permissions.
     steps: [2]
     expected_results: [2]
   - id: AC-03

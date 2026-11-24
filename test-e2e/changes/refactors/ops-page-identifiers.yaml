@@ -3,26 +3,33 @@ change:
   change_id: AUTH-OPS-PAGE-IDS-20261123
   change_type: refactor
   title: Separate Ops navigation permission identifiers from routes
-  description: Store ops-dashboard and ops-configuration as navigation identifiers while preserving existing accessibleRoutes and role grants.
+  description: Store Ops navigation identifiers and return them in accessiblePages; the frontend owns their route mapping while preserving page URLs and role grants.
   affected_features:
-    existing: [AUTH-MULTI-ROLE]
+    existing: [AUTH-MULTI-ROLE, F-018]
     added: []
     modified: []
     retired: []
   affected_cases:
-    existing: [AUTH-MULTI-ROLE-D2-001, AUTH-MULTI-ROLE-D2-002, AUTH-MULTI-ROLE-D2-003, AUTH-MULTI-ROLE-D3-001, AUTH-MULTI-ROLE-D5-001]
+    existing: [AUTH-MULTI-ROLE-D2-002, AUTH-MULTI-ROLE-D2-003, AUTH-MULTI-ROLE-D3-001, AUTH-MULTI-ROLE-D5-001]
     added: [AUTH-MULTI-ROLE-D5-002]
-    modified: []
+    modified: [AUTH-MULTI-ROLE-D2-001, API-AUTO-B0D94398CE6971A3]
     retired: []
   feature_contract_changed: false
-  no_case_change_reason: Existing D2 assertions already require the unchanged Ops route and authorization contract; add D5 for migration preservation and repeatability.
-  notes: Reuse AUTH-MULTI-ROLE-RULE-05 and the existing system responsibility domain. No frontend contract change. D5 owns a UUID PostgreSQL database and drops it in finally; no shared factories or deployed data are used. Mapping behavior belongs in UT, not an additional D1. Existing shared HTTP fixture uses a validated default configuration snapshot with no background tasks; current router and password utility imports replace obsolete paths. Run all five existing fixture consumers as regression.
+  no_case_change_reason: Role and page access rules remain unchanged. D2 and D5 are updated for the authorized accessiblePages response contract; frontend component tests prove route resolution without a new user journey or a duplicate D1.
+  notes: Reuse AUTH-MULTI-ROLE-RULE-05 and the existing system responsibility domain. The authorized accessiblePages API rename requires paired frontend/backend deployment. The frontend alone resolves identifiers to routes; current develop SU configuration restrictions remain intact. D5 owns a UUID PostgreSQL database and drops it in finally. The HTTP fixture applies current role and configuration migrations, uses a validated default snapshot without background tasks, and owns its databases. No shared deployment data or dependency/workflow configuration is changed. The legacy serialization Case executes its deterministic local branch; CAS acceptance completeness is not claimed.
   traditional_ut:
     decision: strengthen
     behaviors:
     - Map both Ops identifiers to their existing routes, preserving route order and deduplicating mixed legacy and new grants.
     - Preserve resource action permissions, unrelated navigation, missing-field handling and empty grant sets without adding access.
-    reason: Existing formatter tests cover legacy inputs but do not cover stable Ops identifiers or coexistence during upgrades.
+    - Return stored page identifiers unchanged in accessiblePages; frontend resolves known identifiers and legacy paths, deduplicates routes and rejects unknown identifiers.
+    reason: Backend tests prove raw identifier serialization and unchanged resource grants; frontend tests prove mapping, menu URLs, actual provider guards, unknown identifiers and malformed-response recovery.
     test_selectors:
     - test/backend/services/test_ops_navigation_permissions.py
     - test/backend/services/test_user_management_service.py
+    - test/backend/app/test_user_management_app.py
+    - test/backend/app/test_mock_user_management_app.py
+    - frontend/tests/component/navigationPages.test.tsx
+    - frontend/tests/component/authServicePages.test.tsx
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    - frontend/tests/component/sidebarHover.test.tsx

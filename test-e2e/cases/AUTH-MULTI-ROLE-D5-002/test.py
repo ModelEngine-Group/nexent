@@ -80,9 +80,15 @@ def test_ops_page_upgrade_preserves_grants_and_is_repeatable():
                         }
                     else:
                         assert updated == original
-                assert effective_grants(after) == effective_grants(before)
-                assert effective_grants(after)["OPS"]["accessibleRoutes"] == [
-                    "/ops/dashboard", "/ops/configuration", "/resource-manage"
+                before_grants, after_grants = effective_grants(before), effective_grants(after)
+                for role in before_grants:
+                    assert after_grants[role]["permissions"] == before_grants[role]["permissions"]
+                    expected_pages = list(dict.fromkeys(
+                        replacements.get(page, page) for page in before_grants[role]["accessiblePages"]
+                    ))
+                    assert after_grants[role]["accessiblePages"] == expected_pages
+                assert effective_grants(after)["OPS"]["accessiblePages"] == [
+                    "ops-dashboard", "ops-configuration", "/resource-manage"
                 ]
             # A separate transaction verifies repeatability across deployment attempts.
             with engine.begin() as connection:

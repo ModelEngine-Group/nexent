@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Keep navigation permission identifiers separate from public route grants."""
+"""Return navigation identifiers without interpreting frontend routes."""
 
 import pytest
 
@@ -17,18 +17,18 @@ def nav(subtype):
 @pytest.mark.parametrize(
     "identifier,route",
     [
-        ("ops-dashboard", "/ops/dashboard"),
-        ("ops-configuration", "/ops/configuration"),
+        ("ops-dashboard", "ops-dashboard"),
+        ("ops-configuration", "ops-configuration"),
         ("/ops/dashboard", "/ops/dashboard"),
         ("/ops/configuration", "/ops/configuration"),
         ("/resource-manage", "/resource-manage"),
         ("agents", "agents"),
     ],
 )
-def test_navigation_identifiers_keep_public_route_contract(identifier, route):
+def test_navigation_identifiers_are_returned_unchanged(identifier, route):
     assert format_role_permissions([nav(identifier)]) == {
         "permissions": [],
-        "accessibleRoutes": [route],
+        "accessiblePages": [route],
     }
 
 
@@ -44,7 +44,10 @@ def test_mixed_legacy_and_new_identifiers_preserve_order_without_duplicates():
     snapshot = [dict(grant) for grant in grants]
     assert format_role_permissions(grants) == {
         "permissions": [],
-        "accessibleRoutes": ["/agents", "/ops/configuration", "/ops/dashboard"],
+        "accessiblePages": [
+            "/agents", "ops-configuration", "/ops/dashboard",
+            "ops-dashboard", "/ops/configuration",
+        ],
     }
     assert grants == snapshot
 
@@ -64,7 +67,7 @@ def test_page_identifiers_do_not_change_resource_action_grants():
         },
     ]) == {
         "permissions": ["ops.dashboard:read", "model:ops-configuration"],
-        "accessibleRoutes": ["/ops/dashboard"],
+        "accessiblePages": ["ops-dashboard"],
     }
 
 
@@ -72,4 +75,4 @@ def test_page_identifiers_do_not_change_resource_action_grants():
     {"permission_type": "OTHER", "permission_subtype": "ops-dashboard"},
 ]])
 def test_missing_or_unrelated_grants_do_not_add_navigation_access(grants):
-    assert format_role_permissions(grants) == {"permissions": [], "accessibleRoutes": []}
+    assert format_role_permissions(grants) == {"permissions": [], "accessiblePages": []}

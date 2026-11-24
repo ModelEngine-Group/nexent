@@ -86,12 +86,6 @@ from infrastructure.rdb.orm import as_dict
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
 
-# Navigation identifiers are independent of routes exposed to existing clients.
-_NAVIGATION_PAGE_ROUTES = {
-    "ops-dashboard": "/ops/dashboard",
-    "ops-configuration": "/ops/configuration",
-}
-
 
 def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     """Return a non-empty username stored for a linked authentication provider."""
@@ -208,7 +202,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
 
     Returns:
         Optional[Dict[str, Any]]: User information dictionary containing:
-            - user: User object with user_id, group_ids, tenant_id, user_email, user_role, permissions, accessibleRoutes
+            - user: User object with user_id, group_ids, tenant_id, user_email, user_role, permissions, accessiblePages
         Returns None if user not found
     """
     try:
@@ -243,7 +237,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "user_role": user_role,
                 "roles": list(roles_from_record(user_tenant)),
                 "permissions": permissions_data["permissions"],
-                "accessibleRoutes": permissions_data["accessibleRoutes"],
+                "accessiblePages": permissions_data["accessiblePages"],
             }
         }
 
@@ -255,19 +249,19 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
 
 def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     """
-    Format role permissions into permissions and accessibleRoutes lists.
+    Format role permissions into permissions and accessiblePages lists.
 
     - permissions: List of permission strings (permission_type:permission_subtype for RESOURCE category)
-    - accessibleRoutes: Routes resolved from LEFT_NAV_MENU page identifiers or legacy paths
+    - accessiblePages: Stored LEFT_NAV_MENU identifiers, resolved into routes by the frontend
 
     Args:
         permissions (List[Dict[str, Any]]): Raw permission records from database
 
     Returns:
-        Dict[str, List[str]]: Dictionary containing permissions and accessibleRoutes lists
+        Dict[str, List[str]]: Dictionary containing permissions and accessiblePages lists
     """
     formatted_permissions = []
-    accessible_routes = []
+    accessible_pages = []
 
     for perm in permissions:
         permission_category = perm.get("permission_category", "")
@@ -280,17 +274,16 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
             formatted_permissions.append(
                 f"{permission_type}:{permission_subtype}".lower())
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
-            accessible_routes.append(
-                _NAVIGATION_PAGE_ROUTES.get(permission_subtype, permission_subtype)
-            )
+            # The frontend owns page identifier to route resolution.
+            accessible_pages.append(permission_subtype)
 
-    accessible_routes = filter_accessible_routes_for_asset_owner_feature(
-        accessible_routes
+    accessible_pages = filter_accessible_routes_for_asset_owner_feature(
+        accessible_pages
     )
 
     return {
         "permissions": list(dict.fromkeys(formatted_permissions)),
-        "accessibleRoutes": list(dict.fromkeys(accessible_routes)),
+        "accessiblePages": list(dict.fromkeys(accessible_pages)),
     }
 
 

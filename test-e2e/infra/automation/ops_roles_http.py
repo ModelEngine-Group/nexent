@@ -40,6 +40,7 @@ def isolated_runtime():
             patch.setenv(name, value)
         from infrastructure.system_configuration import runtime as configuration_runtime
         from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+        from infrastructure.system_configuration.models import SystemConfiguration
 
         configuration = configuration_runtime.SystemConfigurationRuntime(
             loader=AsyncMock(return_value=DEFAULT_CATALOG.defaults)
@@ -65,6 +66,7 @@ def isolated_runtime():
         patch.setattr(db_client, "session_maker", sessionmaker(bind=engine))
         patch.setattr(db_client, "database", params["dbname"])
         tables = [
+            SystemConfiguration,
             models.UserAccount,
             models.UserTenant,
             models.UserOAuthAccount,
@@ -127,8 +129,9 @@ def isolated_runtime():
             if len(upgrades) != 1:
                 raise RuntimeError("Expected the versioned operations-role migration")
             connection.connection.cursor().execute(upgrades[0].read_text(encoding="utf-8"))
-            for migration in sorted((ROOT / "deploy/sql/migrations").glob("*_ops_page_identifiers.sql")):
-                connection.connection.cursor().execute(migration.read_text(encoding="utf-8"))
+            for pattern in ("*_su_system_configuration.sql", "*_ops_page_identifiers.sql"):
+                for migration in sorted((ROOT / "deploy/sql/migrations").glob(pattern)):
+                    connection.connection.cursor().execute(migration.read_text(encoding="utf-8"))
         from management.services.permission.identity import authentication as auth
         from management.api.identity import api_key, user_management, user, invitation, group, tenant
         from management.api.configuration import tenant_config

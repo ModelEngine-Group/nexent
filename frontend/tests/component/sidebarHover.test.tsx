@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 import { useGlobalConfigStore } from "@/stores/global";
+import { resolveAccessibleRoutes } from "@/lib/navigationPages";
 
 const state = vi.hoisted(() => ({
   speed: true,
@@ -93,6 +94,19 @@ beforeEach(() => {
   state.routes = ["/agents", "/models"];
   state.user = null;
   useGlobalConfigStore.getState().setConfig({});
+});
+
+test("Ops identifiers render menus that navigate to the existing URLs", () => {
+  state.user = { role: "SU", roles: ["SU"] };
+  state.routes = resolveAccessibleRoutes([
+    "ops-dashboard",
+    "ops-configuration",
+  ]);
+  render(<SideNavigation />);
+  fireEvent.click(screen.getByRole("button", { name: "ops.dashboard" }));
+  expect(state.push).toHaveBeenLastCalledWith("/zh/ops/dashboard");
+  fireEvent.click(screen.getByRole("button", { name: "ops.configuration" }));
+  expect(state.push).toHaveBeenLastCalledWith("/zh/ops/configuration");
 });
 
 test.each([undefined, "", "   "])(
