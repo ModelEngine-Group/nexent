@@ -362,16 +362,17 @@ def has_model_outlet_credential(model_id, tenant_id, *, db_session=None):
 
 
 def update_model_outlet_connectivity(model_id, tenant_id, expected_revision, status, *, db_session=None):
-    """Reject stale checks without changing configuration revisions or credential values."""
+    """Persist the probe status without changing the model revision used by run snapshots."""
     _active_statement(model_id, tenant_id)
     if (type(expected_revision) is not int or not 0 < expected_revision < 2**31
             or status not in ("available", "unavailable")):
         raise ModelOutletValidationError()
+    # Suppress the shared on-update timestamp for this status-only change.
     statement = update(ModelRecord).where(
         ModelRecord.model_id == model_id, ModelRecord.tenant_id == tenant_id,
         ModelRecord.delete_flag == "N", ModelRecord.model_type == "llm",
         ModelRecord.config_revision == expected_revision,
-    ).values(connect_status=status).returning(ModelRecord.model_id)
+    ).values(connect_status=status, update_time=ModelRecord.update_time).returning(ModelRecord.model_id)
     with get_db_session(db_session) as session:
         if _execute(session, statement).scalar_one_or_none() is None:
             raise ModelOutletConflictError()

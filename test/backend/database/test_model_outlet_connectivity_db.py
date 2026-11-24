@@ -29,7 +29,7 @@ def test_connectivity_status_is_revision_checked_without_config_write(database):
     statement = session.execute.call_args.args[0]
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assignments = sql.split(" SET ")[1].split(" WHERE ")[0]
-    assert assignments == "connect_status=%(connect_status)s, update_time=now()"
+    assert assignments == "connect_status=%(connect_status)s, update_time=nexent.model_record_t.update_time"
     assert "config_revision" in sql and "tenant_id" in sql and "model_type" in sql
     session.execute.return_value.scalar_one_or_none.return_value = None
     with pytest.raises(errors.ModelOutletConflictError):
