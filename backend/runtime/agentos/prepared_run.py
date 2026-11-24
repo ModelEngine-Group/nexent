@@ -32,6 +32,7 @@ from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.prepared_evaluation import (
     discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
 )
+from runtime.agentos.history_sources import discover_summary_sources
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
 from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
 
@@ -135,9 +136,13 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
             minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
         )
+        checkpoint = payload.historical_context.history_summary if payload.historical_context is not None else None
         history = ExecutionHistory(read_conversation_result=partial(
             _read_execution_result, actor.user_id, actor.tenant_id, identity.conversation_id,
-        ))
+        ), discover_summary_sources=(partial(
+            discover_summary_sources, actor.user_id, actor.tenant_id, identity.conversation_id,
+            checkpoint.unit_id, checkpoint.covered_through_message_id,
+        ) if checkpoint is not None else None))
         info.observer.execution_history = history
         facts = {}
         index = 0

@@ -29,6 +29,9 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+      - Discover only loaded-checkpoint-covered original result references through the existing reader, using bound
+        identity and lightweight paginated call metadata without bulk result-body fetch or per-record queries;
+        read exact original values despite an inaccurate summary while preserving explicit suffix/current reads.
       - Restore closed actions, committed summary/preview and raw uncovered facts/errors through authorized storage and signed transport,
         with bounded owner-scoped originals and provider capacity reporting.
       - Each fresh CoreAgent run aligns Core/reader owners and restores only real results in current authorized history;
@@ -70,6 +73,9 @@ change:
     reason: Reuse targeted UT and existing self-contained Case preparation/cleanup; preserve all prior variants and D1
       contracts without a new test framework.
     test_selectors:
+      - test/backend/database/test_summary_source_discovery.py
+      - test/sdk/core/agents/test_summary_source_reader.py
+      - test/sdk/core/model_service/test_agent_context_monitoring_merge.py
       - test/backend/app/test_agentos_prepared_run.py
       - test/backend/app/test_history_source_contracts.py
       - test/backend/database/test_execution_result_read_db.py

@@ -3,6 +3,7 @@
 """Adapter resource registration preserves ownership, authorization and sandbox policy."""
 
 import asyncio
+import json
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -89,7 +90,10 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     from nexent.core.agents.context.execution_history import ExecutionHistory
     from nexent.core.agents.contracts.context import ContextItemInput
     reader = Mock(return_value="old original")
-    history = adapter.run_info.observer.execution_history = ExecutionHistory(read_conversation_result=reader)
+    discovery = Mock(return_value={"results": [{"output_ref": "message:10/unit-index:3"}],
+                                   "next_offset": 1, "eof": True})
+    history = adapter.run_info.observer.execution_history = ExecutionHistory(
+        read_conversation_result=reader, discover_summary_sources=discovery)
     adapter.context_items = [ContextItemInput(id="summary", type="history_summary", content={
         "summary": "Older results summarized", "covered_through_message_id": 50,
     })]
@@ -100,6 +104,9 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     assert adapter.execution_history is history
     assert "old original" in adapter.business_tools["read_execution_output"].forward("message:10/unit-index:3")
     reader.assert_called_once_with(10, 3)
+    discovered = json.loads(adapter.business_tools["read_execution_output"].forward("summary"))
+    assert discovered["results"][0]["output_ref"] == "message:10/unit-index:3"
+    discovery.assert_called_once()
     resources.create_tool.assert_called_once_with(tools[0])
     if retriever:
         assert local._nexent_monitoring_wrapped is True

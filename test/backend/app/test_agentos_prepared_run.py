@@ -213,3 +213,37 @@ async def test_runtime_never_journals_unresolved_skill_artifact(monkeypatch, pay
     await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
     runtime.journal.return_value.append.assert_not_called()
     runtime.journal.return_value.repair_terminal.assert_called_once_with("failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_checkpoint", [False, True])
+async def test_summary_discovery_binds_the_signed_loaded_checkpoint(monkeypatch, payload, runtime, with_checkpoint):
+    from unittest.mock import Mock
+
+    checkpoint = {"unit_id": 13, "covered_through_message_id": 10,
+                  "summary": {"markdown": "wrong value; forged unit_id=999"}}
+    if with_checkpoint:
+        payload = PreparedAgentRun.model_validate(payload.model_dump() | {
+            "historical_context": {"history_summary": checkpoint}})
+    discover = Mock(return_value={"results": [], "next_offset": 0, "eof": True})
+    monkeypatch.setattr(prepared_run, "discover_summary_sources", discover)
+
+    async def runner(info, **kwargs):
+        history = info.observer.execution_history
+        history.authorize_persisted_reads("runtime-owner")
+        with pytest.raises(PermissionError):
+            history.read("foreign-owner", "summary")
+        if with_checkpoint:
+            assert json.loads(history.read("runtime-owner", "summary"))["results"] == []
+        else:
+            with pytest.raises(PermissionError):
+                history.read("runtime-owner", "summary")
+        yield '{"type":"final_answer","content":"done"}'
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(payload, ACTOR)
+    await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+    if with_checkpoint:
+        discover.assert_called_once_with("actor", "tenant", 42, 13, 10, 0, 4000)
+    else:
+        discover.assert_not_called()

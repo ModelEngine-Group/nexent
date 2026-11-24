@@ -56,10 +56,12 @@ class ExecutionHistory:
     """One trusted run scope; ownership cannot be supplied by model arguments."""
 
     def __init__(self, read_persisted: Callable[[int, int], str] | None = None, *,
-                 read_conversation_result: Callable[[int, int], str] | None = None):
+                 read_conversation_result: Callable[[int, int], str] | None = None,
+                 discover_summary_sources: Callable[[int, int], dict] | None = None):
         self._lock = RLock()
         self._read_persisted = read_persisted
         self._read_conversation_result = read_conversation_result
+        self._discover_summary_sources = discover_summary_sources
         self._persisted_owners: set[str] = set()
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
@@ -153,13 +155,16 @@ class ExecutionHistory:
             self._rendered_budget[owner] = None if max_rendered_chars is None else max(0, max_rendered_chars)
 
     def read(self, owner: str, reference: str, offset: int = 0, max_chars: int = 4000) -> str:
-        if not re.fullmatch(r"(?:message:[1-9]\d*/unit-index:\d+|run:[0-9a-f]{32}/execution:[1-9]\d*)", reference):
+        if reference != "summary" and not re.fullmatch(
+                r"(?:message:[1-9]\d*/unit-index:\d+|run:[0-9a-f]{32}/execution:[1-9]\d*)", reference):
             raise ValueError("Invalid execution reference")
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("Invalid character offset")
         if isinstance(max_chars, bool) or not isinstance(max_chars, int) or not 0 < max_chars <= 16000:
             raise ValueError("max_chars must be between 1 and 16000")
         with self._lock:
+            if reference == "summary":
+                return self._read_summary_sources(owner, offset, max_chars)
             record = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
             backend_read = (reference.startswith("message:") and self.has_conversation_reader
                             and owner in self._persisted_owners
@@ -203,6 +208,25 @@ class ExecutionHistory:
             self._read_chars[owner] = self._read_chars.get(owner, 0) + end - offset
             if budget is not None:
                 self._rendered_budget[owner] = budget - len(escape(payload)) - 80
+        return payload
+
+
+    def _read_summary_sources(self, owner, offset, max_chars):
+        if owner not in self._persisted_owners or self._discover_summary_sources is None:
+            raise PermissionError("Summary source discovery is unavailable or not authorized")
+        available = min(max_chars, 16000 - self._read_chars.get(owner, 0))
+        if available <= 0:
+            raise ValueError("Execution read budget exhausted for this action")
+        payload = json.dumps(self._discover_summary_sources(offset, available), ensure_ascii=False)
+        if len(payload) > available:
+            raise ValueError("Source discovery exceeded the requested page size")
+        budget = self._rendered_budget.get(owner)
+        rendered = len(escape(payload)) + 80
+        if budget is not None and rendered > budget:
+            raise ValueError("Insufficient context budget for execution source metadata")
+        self._read_chars[owner] = self._read_chars.get(owner, 0) + len(payload)
+        if budget is not None:
+            self._rendered_budget[owner] = budget - rendered
         return payload
 
 
