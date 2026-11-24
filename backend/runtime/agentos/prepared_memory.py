@@ -57,7 +57,7 @@ def materialize_memory(resource, actor: ServicePrincipal, conversation_id: int |
         receipt = await get_memory_store_service().store(AgentMemoryStore(
             agent_id=resource.agent_id, conversation_id=conversation_id, content=payload["content"],
             idempotency_key=payload["idempotency_key"],
-        ), actor)
+        ), actor, deadline=deadline)
         try:
             async with asyncio.timeout(max(0.001, remaining_time(deadline) - 0.01)):
                 await notify_memory_stored(AgentMemoryStored(

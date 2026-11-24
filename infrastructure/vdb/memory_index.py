@@ -101,6 +101,7 @@ class MemoryIndexService:
         record: Dict[str, Any],
         embedding: Optional[List[float]],
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
+        *, refresh: bool | str = "wait_for",
     ) -> bool:
         """Upsert a single memory record into its target index.
 
@@ -110,6 +111,7 @@ class MemoryIndexService:
             embedding: Embedding vector; required for vector search.
             embedding_model_info: Used to resolve the index name when
                 ``record["es_index_name"]`` is missing.
+            refresh: ES refresh policy; False acknowledges indexing without waiting for visibility.
 
         Returns:
             True if the document was indexed (or already existed), False on
@@ -132,6 +134,7 @@ class MemoryIndexService:
             self.vdb_core.create_chunk(
                 index_name=index_name,
                 chunk=_memory_chunk_payload(record, embedding, index_name),
+                **({"refresh": refresh} if refresh != "wait_for" else {}),
             )
             return True
         except Exception:

@@ -72,15 +72,20 @@ class AgentMemoryStoreService:
                            actor.tenant_id, model.model_id, type(exc).__name__)
         return None
 
-    async def store(self, payload: AgentMemoryStore, actor: ServicePrincipal) -> AgentMemoryReceipt:
-        deadline = memory_write_deadline()
+    async def store(
+        self, payload: AgentMemoryStore, actor: ServicePrincipal, *, deadline: float | None = None,
+    ) -> AgentMemoryReceipt:
+        limit = memory_write_deadline()
+        deadline = min(deadline, limit) if deadline is not None else limit
         async with asyncio.timeout(remaining_time(deadline)):
             return await self._store(payload, actor, deadline)
 
     async def _store(self, payload, actor, deadline):
-        async def control(label, fn, *args, store_deadline=None):
+        async def control(label, fn, *args, store_deadline=None, io_deadline=None):
             callback = partial(fn, *args, deadline=store_deadline) if store_deadline is not None else partial(fn, *args)
-            return await run_memory_io(label, callback, deadline=deadline, lane="memory-write")
+            return await run_memory_io(
+                label, callback, deadline=deadline if io_deadline is None else io_deadline, lane="memory-write",
+            )
 
         scope = (actor.tenant_id, actor.user_id, payload.agent_id, payload.conversation_id, payload.idempotency_key)
         existing = await control("memory-find-existing", find_existing_memory, *scope, payload.content)
@@ -97,12 +102,17 @@ class AgentMemoryStoreService:
         index_name = model.get_index_name()
         memory_id, event = await control("memory-write-record", write_agent_memory, *scope, payload.content, index_name, store_deadline=deadline)
         indexed = False
-        if event != "UNCHANGED":
-            publish = partial(self.index_service.index_record, embedding=embedding, embedding_model_info=model)
+        # Leave time to return the committed SQL receipt before the outer deadline.
+        index_deadline = deadline - 0.05
+        if event != "UNCHANGED" and remaining_time(index_deadline) > 0:
+            publish = partial(
+                self.index_service.index_record, embedding=embedding, embedding_model_info=model, refresh=False,
+            )
             try:
                 mirrored = await control(
                     "memory-index-record", mirror_current_memory, actor.tenant_id, payload.idempotency_key,
-                    memory_id, payload.content, index_name, publish, store_deadline=deadline,
+                    memory_id, payload.content, index_name, publish,
+                    store_deadline=index_deadline, io_deadline=index_deadline,
                 )
                 indexed = bool(mirrored and embedding is not None)
             except Exception as exc:
