@@ -1,9 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { Tooltip } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import type { AgentTokenUsage } from "@/types/agentMonitoring";
 import type { MonitoringPublication } from "@/types/operations";
 import { formatAgentMetric } from "./agentMonitoringValues";
+import { formatCompactMonitoringTokens } from "./components/shared/formatMonitoringTokens";
 import styles from "./agentMonitoring.module.css";
 
 export function PublicationStatus({
@@ -33,6 +35,82 @@ export function PublicationStatus({
         })}
       </span>
     </p>
+  );
+}
+
+function CoverageFlags({
+  publication,
+  partial = false,
+}: {
+  publication?: MonitoringPublication;
+  partial?: boolean;
+}) {
+  const { t } = useTranslation("common");
+  return (
+    <>
+      {(partial || publication?.coverage_state === "partial") && (
+        <span>{t("ops.monitoring.agent.coverage.partial")}</span>
+      )}
+      {publication?.is_stale && (
+        <span className={styles.stale}>{t("ops.monitoring.agent.stale")}</span>
+      )}
+    </>
+  );
+}
+
+const statusTooltip = {
+  color: "var(--color-bg-3)",
+  styles: { container: { color: "var(--color-text-primary)" } },
+};
+
+export function MonitoringTokenCardValue({
+  usage,
+  publication,
+  loading,
+}: {
+  usage: AgentTokenUsage | null;
+  publication?: MonitoringPublication;
+  loading: boolean;
+}) {
+  const { t, i18n } = useTranslation("common");
+  if (loading) return <strong>{t("common.loading")}</strong>;
+  const value = usage?.value ?? null;
+  const display = formatCompactMonitoringTokens(value, i18n.language);
+  if (!publication) return <strong>{display}</strong>;
+  const partial =
+    usage !== null &&
+    usage.known_count > 0 &&
+    usage.known_count < usage.eligible_count;
+  return (
+    <>
+      <Tooltip
+        {...statusTooltip}
+        title={
+          <div className={styles.tokenStatusTooltip}>
+            <strong>
+              {formatAgentMetric(value, "total_tokens", i18n.language)}
+              {value !== null && " tokens"}
+            </strong>
+            <TokenCoverage usage={usage} />
+            <PublicationStatus
+              label={t("ops.monitoring.agent.tokens")}
+              publication={publication}
+            />
+          </div>
+        }
+      >
+        <strong tabIndex={0} className={styles.tokenCardValue}>
+          {display}
+        </strong>
+      </Tooltip>
+      {(partial ||
+        publication.coverage_state === "partial" ||
+        publication.is_stale) && (
+        <small className={styles.dataHint}>
+          <CoverageFlags publication={publication} partial={partial} />
+        </small>
+      )}
+    </>
   );
 }
 

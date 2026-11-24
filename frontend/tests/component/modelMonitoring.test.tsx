@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getModelMetric } from "@/app/ops/dashboard/components/model/modelMonitoringValues";
+import { formatCompactMonitoringTokens } from "@/app/ops/dashboard/components/shared/formatMonitoringTokens";
 import { fetchWithAuth } from "@/lib/auth";
 import {
   getModelMonitoringList,
@@ -9,6 +10,18 @@ import {
 } from "@/services/modelMonitoringService";
 
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
+
+it("compacts Token cards with localized units and exact decimal rounding", () => {
+  expect(formatCompactMonitoringTokens("8253321", "zh-CN")).toBe("825.33 万");
+  expect(formatCompactMonitoringTokens("99999999", "zh")).toBe("1 亿");
+  expect(formatCompactMonitoringTokens("9007199254740993", "zh")).toBe(
+    "9,007.2 万亿"
+  );
+  expect(formatCompactMonitoringTokens("8253321", "en")).toBe("8.25 M");
+  expect(formatCompactMonitoringTokens("999", "zh")).toBe("999");
+  expect(formatCompactMonitoringTokens("0", "zh")).toBe("0");
+  expect(formatCompactMonitoringTokens(null, "zh")).toBe("—");
+});
 
 describe("Model monitoring list requests", () => {
   const fetch = vi.mocked(fetchWithAuth);

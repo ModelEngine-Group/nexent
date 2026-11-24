@@ -85,6 +85,33 @@
   color: var(--color-warning-bold);
 }
 
+.dataHint {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.card dd > .dataHint {
+  display: flex;
+}
+
+.tokenStatusTooltip {
+  display: grid;
+  gap: 4px;
+}
+
+.tokenCardValue {
+  cursor: help;
+}
+
+.modelTrendHeader {
+  min-height: 48px;
+}
+
 .metricsTitle {
   margin: 4px 0 0;
   color: var(--color-text-primary);

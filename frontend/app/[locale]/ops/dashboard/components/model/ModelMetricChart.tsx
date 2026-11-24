@@ -12,7 +12,6 @@ import {
   YAxis,
 } from "recharts";
 import type { ModelMonitoringTrends } from "@/types/modelMonitoring";
-import { PublicationStatus, TokenCoverage } from "../../AgentMonitoringStatus";
 import { formatAgentMetric } from "../../agentMonitoringValues";
 import { getModelMetric, type ModelTrendMetric } from "./modelMonitoringValues";
 import styles from "../../agentMonitoring.module.css";
@@ -36,7 +35,7 @@ export function ModelMetricChart({
   failed: boolean;
   hasRange: boolean;
   headerAction?: ReactNode;
-  description: ReactNode;
+  description?: ReactNode;
 }) {
   const { t, i18n } = useTranslation("common");
   const titleId = useId();
@@ -74,10 +73,10 @@ export function ModelMetricChart({
       aria-busy={loading}
       data-chart-palette="default"
     >
-      <header className={styles.trendHeader}>
+      <header className={`${styles.trendHeader} ${styles.modelTrendHeader}`}>
         <div>
           <h3 id={titleId}>{title}</h3>
-          <span>{description}</span>
+          {description && <span>{description}</span>}
         </div>
         {headerAction}
       </header>
@@ -156,7 +155,22 @@ export function ModelMetricChart({
                         )}
                         {token && value !== null ? " tokens" : ""}
                       </p>
-                      {token && <TokenCoverage usage={day.total_tokens} />}
+                      {percentage && (
+                        <p>
+                          {t("ops.monitoring.model.metrics.errorSamples", {
+                            errors: formatAgentMetric(
+                              day.error_count,
+                              "execution_count",
+                              i18n.language
+                            ),
+                            samples: formatAgentMetric(
+                              day.error_eligible_count,
+                              "execution_count",
+                              i18n.language
+                            ),
+                          })}
+                        </p>
+                      )}
                     </div>
                   );
                 }}
@@ -179,12 +193,6 @@ export function ModelMetricChart({
           className={styles.chartState}
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={emptyText}
-        />
-      )}
-      {trend && !failed && (
-        <PublicationStatus
-          label={t("ops.monitoring.overview.trendStatus")}
-          publication={trend}
         />
       )}
     </section>

@@ -23,7 +23,11 @@ import type {
 } from "@/types/agentMonitoring";
 import { AgentOutcomeDistribution } from "./AgentOutcomeDistribution";
 import { AgentRankings } from "./AgentRankings";
-import { PublicationStatus, TokenCoverage } from "./AgentMonitoringStatus";
+import {
+  MonitoringTokenCardValue,
+  PublicationStatus,
+  TokenCoverage,
+} from "./AgentMonitoringStatus";
 import {
   agentMetricLabels,
   formatAgentMetric,
@@ -309,9 +313,6 @@ export function AgentMonitoringPanels({
       id: "tokens",
       title: t("ops.monitoring.agent.tokenCard"),
       Icon: ChartNoAxesColumnIncreasing,
-      value: renderValue(usage?.value ?? null, "total_tokens"),
-      unit: usage?.value != null ? "tokens" : undefined,
-      note: summary && <TokenCoverage usage={usage} />,
     },
   ];
   return (
@@ -334,7 +335,15 @@ export function AgentMonitoringPanels({
             <div>
               <dt>{title}</dt>
               <dd>
-                <strong>{value}</strong>
+                {id === "tokens" ? (
+                  <MonitoringTokenCardValue
+                    usage={usage}
+                    publication={summary?.token_status}
+                    loading={summaryLoading && !summary}
+                  />
+                ) : (
+                  <strong>{value}</strong>
+                )}
                 {unit && <span>{unit}</span>}
                 {note && <small>{note}</small>}
               </dd>
@@ -347,10 +356,6 @@ export function AgentMonitoringPanels({
           <PublicationStatus
             label={t("ops.monitoring.agent.executionStatus")}
             publication={summary}
-          />
-          <PublicationStatus
-            label={t("ops.monitoring.agent.tokens")}
-            publication={summary.token_status}
           />
         </div>
       )}

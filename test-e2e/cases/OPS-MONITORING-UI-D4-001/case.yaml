@@ -70,7 +70,7 @@ case:
     expected_results: [2]
     forbidden_side_effects: [1]
   - id: AC-03
-    description: Agent cards and trend preserve inventory scope, metric switching and coverage semantics.
+    description: Agent cards and trend preserve scope, with compact Tokens and exact usage details on hover.
     steps: [4]
     expected_results: [3]
   - id: AC-04
@@ -99,7 +99,7 @@ case:
     expected_results: [8]
     forbidden_side_effects: [1]
   - id: AC-09
-    description: The Model page uses distinct inventory, summary and trend boundaries and refreshes the active scope with read-only requests.
+    description: Model cards and charts keep read-only query boundaries, with plain card values and daily error data revealed on chart hover.
     steps: [2]
     expected_results: [9]
     forbidden_side_effects: [1]

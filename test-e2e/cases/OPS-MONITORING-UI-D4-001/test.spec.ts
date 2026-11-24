@@ -807,7 +807,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     expect(listReads).toHaveLength(agentReads);
     const modelCards = page.locator('dl[aria-label="模型指标概览"]');
     const modelCard = (name: string) =>
-      modelCards.getByText(name, { exact: true }).locator("..").locator("dd");
+      modelCards
+        .locator("dt")
+        .filter({ hasText: name })
+        .locator("..")
+        .locator("dd");
     const modelCalls = page.getByRole("region", {
       name: "调用趋势",
       exact: true,
@@ -818,11 +822,9 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     });
     await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
     await expect(modelCard("模型请求数").locator("strong")).toHaveText("7,010");
-    await expect(modelCard("Token 消耗量")).toContainText(
-      "9,007,199,254,740,993",
-    );
-    await expect(modelErrors).toContainText("10 次失败 / 5,000 次纳入统计");
-    await expect(modelErrors).toContainText("0.2% 区间错误率");
+    await expect(modelCard("Token 消耗量")).toContainText("9,007.2 万亿");
+    await expect(modelErrors).not.toContainText("纳入统计");
+    await expect(modelErrors).not.toContainText("区间错误率");
     await expect(modelErrors.getByRole("radio")).toHaveCount(0);
     await expect(modelErrors.locator(".recharts-area-curve")).toHaveAttribute(
       "d",
@@ -851,9 +853,36 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       .toMatchObject({ tenant_id: "a", model_id: "2", page: "1" });
     await expect(modelCard("当前模型数")).toHaveCount(0);
     await expect(modelCard("模型请求数").locator("strong")).toHaveText("3,050");
-    await expect(modelErrors).toContainText("0.5% 区间错误率");
+    await expect(modelErrors).not.toContainText("区间错误率");
     await expect(modelCalls.locator(".recharts-area-curve")).toBeVisible();
-    await screenshot("model-single-metrics");
+    await expect(modelCard("Token 消耗量").locator("strong")).toHaveText(
+      "825.33 万",
+    );
+    const statusText = page.getByText(
+      /覆盖完整|部分覆盖|数据滞后|数据截至|请求覆盖/,
+    );
+    await expect(statusText).toHaveCount(0);
+    await expect(modelCards.getByRole("button")).toHaveCount(0);
+    for (const name of ["模型请求数", "Token 消耗量"]) {
+      await modelCard(name).locator("strong").hover();
+      await expect(page.getByRole("tooltip")).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 1600, height: 1080 });
+    await screenshot("model-clean-display");
+    await modelCalls.locator("circle.recharts-area-dot").nth(2).hover();
+    await expect(
+      modelCalls.getByText("Token · 2,302,000 tokens", { exact: true }),
+    ).toBeVisible();
+    await expect(statusText).toHaveCount(0);
+    await modelErrors.locator("circle.recharts-area-dot").nth(2).hover();
+    await expect(
+      modelErrors.getByText("错误率 · 0.33%", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      modelErrors.getByText("6 次失败 / 1,797 次纳入统计", { exact: true }),
+    ).toBeVisible();
+    await expect(statusText).toHaveCount(0);
+    await page.setViewportSize({ width: 1600, height: 960 });
     const modelRefresh = page.getByRole("button", {
       name: "刷新",
       exact: true,
@@ -958,12 +987,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(card("调用成功率")).toContainText("97.7%");
     await expect(card("调用成功率")).toContainText("1,000 次纳入统计");
     await expect(card("Token 消耗量").locator("strong")).toHaveText(
-      "25,025,913",
+      "2,502.59 万",
     );
-    await expect(
-      card("Token 消耗量").getByText("tokens", { exact: true }),
-    ).toBeVisible();
-    await expect(card("Token 消耗量")).toContainText("请求覆盖 3 / 4（75%）");
+    await expect(card("Token 消耗量")).not.toContainText("请求覆盖");
+    await card("Token 消耗量").locator("strong").hover();
+    const agentTokenTooltip = page
+      .getByRole("tooltip")
+      .filter({ hasText: "25,025,913 tokens" });
+    await expect(agentTokenTooltip).toContainText("请求覆盖 3 / 4（75%）");
+    await heading.hover();
     await expect(
       page
         .getByText("数据截至 2026-11-23 07:08:09 UTC", { exact: true })
@@ -996,7 +1028,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await choose("用户组", "一线运营组");
     await expect(card("调用量").locator("strong")).toHaveText("33");
     await expect(card("Token 消耗量").locator("strong")).toHaveText(
-      "9,007,199,254,740,993",
+      "9,007.2 万亿",
     );
     await page.getByText("近七天", { exact: true }).click();
     await expect(card("调用量").locator("strong")).toHaveText("33");

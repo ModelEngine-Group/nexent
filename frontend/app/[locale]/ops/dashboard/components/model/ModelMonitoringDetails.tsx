@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Alert, Empty, Pagination, Table, Tooltip } from "antd";
+import { Alert, Empty, Pagination, Table } from "antd";
 import type { TableProps } from "antd";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,7 +10,6 @@ import type {
   ModelMonitoringRow,
   ModelMonitoringSelection,
 } from "@/types/modelMonitoring";
-import { PublicationStatus, TokenCoverage } from "../../AgentMonitoringStatus";
 import { formatAgentMetric } from "../../agentMonitoringValues";
 import { resourceKey } from "../../useMonitoringDirectories";
 import { MonitoringColumnSearch } from "../shared/MonitoringColumnSearch";
@@ -143,20 +142,15 @@ export function ModelMonitoringDetails({
       title: label("tokens"),
       key: "total_tokens",
       align: "right",
-      render: (_, row) => {
-        const usage = row.metrics?.total_tokens ?? null;
-        return (
-          <Tooltip title={<TokenCoverage usage={usage} />}>
-            <span className={styles.tokenValue} tabIndex={0}>
-              {formatAgentMetric(
-                usage?.value ?? null,
-                "total_tokens",
-                i18n.language
-              )}
-            </span>
-          </Tooltip>
-        );
-      },
+      render: (_, row) => (
+        <span className={styles.tokenValue}>
+          {formatAgentMetric(
+            row.metrics?.total_tokens?.value ?? null,
+            "total_tokens",
+            i18n.language
+          )}
+        </span>
+      ),
     },
   ];
   return (
@@ -170,12 +164,6 @@ export function ModelMonitoringDetails({
       </h2>
       {details.isError && (
         <Alert type="error" showIcon title={label("failed")} />
-      )}
-      {response && (
-        <PublicationStatus
-          label={label("statusLabel")}
-          publication={response}
-        />
       )}
       <Table<ModelMonitoringRow>
         columns={columns}

@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Segmented } from "antd";
-import { Activity, Box, ChartNoAxesColumnIncreasing } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,10 +8,10 @@ import {
   getModelMonitoringTrends,
 } from "@/services/modelMonitoringService";
 import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
-import { PublicationStatus, TokenCoverage } from "../../AgentMonitoringStatus";
 import { formatAgentMetric } from "../../agentMonitoringValues";
+import { formatCompactMonitoringTokens } from "../shared/formatMonitoringTokens";
 import { ModelMetricChart } from "./ModelMetricChart";
-import { getModelMetric, type ModelTrendMetric } from "./modelMonitoringValues";
+import type { ModelTrendMetric } from "./modelMonitoringValues";
 import styles from "../../agentMonitoring.module.css";
 
 export function ModelMonitoringPanels({
@@ -58,44 +57,33 @@ export function ModelMonitoringPanels({
   const label = (key: string) => t(`ops.monitoring.model.metrics.${key}`);
   const number = (value: number | null) =>
     formatAgentMetric(value, "execution_count", i18n.language);
-  const renderValue = (value: number | string | null, token = false) =>
-    summaryLoading && !metrics
-      ? t("common.loading")
-      : formatAgentMetric(
-          value,
-          token ? "total_tokens" : "execution_count",
-          i18n.language
-        );
+  const renderValue = (value: number | null) =>
+    summaryLoading && !metrics ? t("common.loading") : number(value);
   const cards = [
     ...(!singleModel
       ? [
           {
             id: "inventory",
             title: label("current"),
-            Icon: Box,
             value: inventory.loading
               ? t("common.loading")
               : number(inventory.count),
-            note: inventory.failed
-              ? label("inventoryFailed")
-              : label("currentHint"),
           },
         ]
       : []),
     {
       id: "requests",
       title: label("requests"),
-      Icon: Activity,
       value: renderValue(metrics?.request_count ?? null),
       unit: metrics?.request_count != null ? label("requestUnit") : undefined,
     },
     {
       id: "tokens",
       title: t("ops.monitoring.agent.tokenCard"),
-      Icon: ChartNoAxesColumnIncreasing,
-      value: renderValue(usage?.value ?? null, true),
-      unit: usage?.value != null ? "tokens" : undefined,
-      note: metrics && <TokenCoverage usage={usage} />,
+      value:
+        summaryLoading && !metrics
+          ? t("common.loading")
+          : formatCompactMonitoringTokens(usage?.value ?? null, i18n.language),
     },
   ];
   const trendProps = {
@@ -104,12 +92,12 @@ export function ModelMonitoringPanels({
     failed: trends.isError,
     hasRange,
   };
-  const rate = metrics ? getModelMetric(metrics, "errorRate") : null;
-  const hasSamples =
-    metrics?.error_count != null && Boolean(metrics.error_eligible_count);
 
   return (
     <section className={styles.panels} aria-labelledby={titleId}>
+      {!singleModel && inventory.failed && (
+        <Alert type="error" showIcon title={label("inventoryFailed")} />
+      )}
       {summary.isError && (
         <Alert type="error" showIcon title={label("summaryFailed")} />
       )}
@@ -118,26 +106,18 @@ export function ModelMonitoringPanels({
         aria-label={label("summary")}
         aria-busy={summaryLoading || summary.isFetching}
       >
-        {cards.map(({ id, title, Icon, value, unit, note }) => (
+        {cards.map(({ id, title, value, unit }) => (
           <div className={styles.card} key={id}>
-            <Icon className={styles.icon} size={24} aria-hidden />
             <div>
               <dt>{title}</dt>
               <dd>
                 <strong>{value}</strong>
                 {unit && <span>{unit}</span>}
-                {note && <small>{note}</small>}
               </dd>
             </div>
           </div>
         ))}
       </dl>
-      {summary.data && (
-        <PublicationStatus
-          label={t("ops.monitoring.model.details.statusLabel")}
-          publication={summary.data}
-        />
-      )}
       <h2 id={titleId} className={styles.metricsTitle}>
         {t("ops.monitoring.agent.metrics")}
       </h2>
@@ -166,20 +146,6 @@ export function ModelMonitoringPanels({
           title={label("errorTrend")}
           metric="errorRate"
           metricLabel={labels.errorRate}
-          headerAction={
-            <span>
-              {formatAgentMetric(rate, "success_rate", i18n.language)}{" "}
-              {label("rangeErrorRate")}
-            </span>
-          }
-          description={
-            hasSamples
-              ? t("ops.monitoring.model.metrics.errorSamples", {
-                  errors: number(metrics.error_count),
-                  samples: number(metrics.error_eligible_count),
-                })
-              : t("ops.monitoring.agent.daily")
-          }
         />
       </div>
     </section>
