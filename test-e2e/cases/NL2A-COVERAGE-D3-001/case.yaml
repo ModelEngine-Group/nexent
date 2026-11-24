@@ -5,7 +5,6 @@ case:
   case_id: NL2A-COVERAGE-D3-001
   feature_id: F-045
   business_rule_ids:
-  - F-045-RULE-12
   - F-045-RULE-02
   - F-045-RULE-07
   - F-045-RULE-09
@@ -103,9 +102,6 @@ case:
       controlled embeddings, compatible and mismatched models, empty and revoked knowledge and stale card versions.
     expected: Only visible selectable knowledge is returned. Repeated requests reuse metadata vectors, text fallback remains
       available, stale versions are rejected and no selection, resource coverage or Agent draft is persisted.
-  - order: 15
-    action: Change the in-process configuration snapshot after a resource card is published and confirm that card through the creator endpoint.
-    expected: Only affected requirements are retrieved again. The excluded reference leaves the verification batch and replacement card, and the next ranked candidate is admitted.
   expected_results:
   - Coverage is based on complete checked candidate sets and current evidence.
   - Card actions are authorized, versioned and isolated to their Agent and conversation.
@@ -132,7 +128,6 @@ case:
     evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
   - An authorized current-card HTTP request recommends compatible visible knowledge metadata using real ES and controlled
     embeddings, reuses metadata vectors, falls back to text, rejects stale cards and preserves the draft and resource state.
-  - The updated denylist is applied before lexical ranking and a pending card is safely replaced without draft writes.
   forbidden_side_effects:
   - Candidate discovery and returning to clarification never create a resource or modify the draft.
   integration_boundary:
@@ -144,11 +139,6 @@ case:
   - Release owned ES indices/client/container, disposable Redis keys or instance, PostgreSQL schema, model provider, MCP listener,
     workspace and workers.
   acceptance:
-  - id: AC-RESOURCE-DENYLIST
-    description: The current resource denylist governs recall, model verification and pending cards through the creator runtime.
-    steps: [15]
-    expected_results: [15]
-    forbidden_side_effects: [1]
   - id: AC-KNOWLEDGE-AUTO
     description: Concrete knowledge recommendations use current authorized model-compatible metadata, cached vectors and text fallback without business writes.
     steps: [14]
@@ -260,4 +250,3 @@ case:
     - 1
   requirement_ids:
   - NL2AGENT-UNIFIED-CARD-20261120
-  - NL2AGENT-RESOURCE-DENYLIST-20261123

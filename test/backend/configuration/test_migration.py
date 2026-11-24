@@ -29,17 +29,9 @@ def test_sql_seed_matches_the_shared_catalog_exactly():
         for key, value in {**EXPECTED_DEFAULTS, "MAX_SUPER_ADMIN_COUNT": 1}.items()
     }
 
-    assert seeds == {key: value for key, value in expected.items() if key != "NL2AGENT_RESOURCE_DENYLIST"}
+    assert seeds == expected
     assert ".env" not in sql
     assert "os.getenv" not in sql
-
-
-def test_denylist_migration_preserves_existing_values_and_adds_an_array_default():
-    sql = (ROOT / "deploy/sql/migrations/v2.9.0_014_nl2agent_resource_denylist.sql").read_text(encoding="utf-8")
-    assert "SELECT 'NL2AGENT_RESOURCE_DENYLIST', '[]'::jsonb" in sql
-    assert "WHERE NOT EXISTS" in sql
-    assert "pg_advisory_xact_lock(hashtext('nexent_system_configuration'))" in sql
-    assert "THEN jsonb_typeof(configuration_value) = 'array'" in sql
 
 
 def test_migration_defines_one_audited_scalar_table_and_safe_seed_protocol():

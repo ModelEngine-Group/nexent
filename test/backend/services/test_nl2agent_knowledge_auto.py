@@ -7,16 +7,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
 
 
 @pytest.fixture
 def context(monkeypatch):
     module = importlib.import_module("services.nl2agent_knowledge_recommendations")
-    flow = importlib.import_module("services.nl2agent_resource_flow")
-    snapshot = DEFAULT_CATALOG.build_snapshot(DEFAULT_CATALOG.defaults)
-    monkeypatch.setattr(flow, "get_config_snapshot", lambda: snapshot)
     state = {"conversation_id": "2", "version": 3, "card": {"id": "card", "subtype": "requirement_resources"},
              "requirements": {"r1": {"query": "员工报销政策", "installed": [{"candidate_ref": "tool:7", "resource_type": "tool",
                  "source": "LOCAL_TOOL", "name": "knowledge_base_search", "description": "Search knowledge", "retrieval_score": .9}],

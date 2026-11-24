@@ -6,8 +6,6 @@ implementations:
   file: test_runtime.py
   selector: test_
 acceptance_bindings:
-  AC-RESOURCE-DENYLIST:
-  - test_resource_denylist_refreshes_pending_card
   AC-KNOWLEDGE-AUTO:
   - test_knowledge_recommendation_runtime
   AC-ES-SEARCH-CONCURRENCY:

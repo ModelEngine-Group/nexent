@@ -19,7 +19,7 @@ case:
   steps:
   - order: 1
     action: Query the catalog with each actor and with the database unavailable.
-    expected: Only SU with explicit operations permission returns exactly nineteen entries; OPS and other unauthorized actors receive 401/403 and dependency failure returns a safe 503.
+    expected: Only SU with explicit operations permission returns exactly eighteen entries; OPS and other unauthorized actors receive 401/403 and dependency failure returns a safe 503.
   - order: 2
     action: Attempt writes as SU and OPS, then save valid, unknown, wrong-type, nonpositive and malformed batches with the explicit update grant, including a notification failure after commit.
     expected: Only SU with the explicit update grant can save; OPS and actors without the update grant receive 403 without persistence. Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.

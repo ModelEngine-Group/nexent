@@ -683,7 +683,6 @@ export function RequirementCoverageCard({
                                 <span className="inline-flex min-w-0 items-center gap-1.5">
                                   <span
                                     className="break-all"
-                                    title={resource.candidate_ref}
                                   >
                                     {resource.name}
                                   </span>

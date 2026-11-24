@@ -6,10 +6,10 @@ feature:
   feature_id: SYSTEM-CONFIGURATION
   name: SU-managed hot system configuration
   status: active
-  description: Manage nineteen non-secret hot-update settings through a SU-only workspace with database persistence and shared consumer refresh.
+  description: Manage eighteen non-secret hot-update settings through a SU-only workspace with database persistence and shared consumer refresh.
   business_rules:
   - rule_id: SYS-CONFIG-RULE-01
-    description: Only the frozen nineteen-key catalog is readable and writable through ops; unknown or invalid batches are rejected atomically.
+    description: Only the frozen eighteen-key catalog is readable and writable through ops; unknown or invalid batches are rejected atomically.
   - rule_id: SYS-CONFIG-RULE-02
     description: Page and API access require the SU role and an explicit ops.configuration grant; OPS and other roles cannot use historical configuration grants.
   - rule_id: SYS-CONFIG-RULE-03

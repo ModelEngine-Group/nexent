@@ -28,5 +28,5 @@ class SystemConfiguration(TableBase):
     configuration_value = Column(
         JSONB,
         nullable=False,
-        comment="Validated system configuration value",
+        comment="Validated numeric or boolean configuration scalar",
     )

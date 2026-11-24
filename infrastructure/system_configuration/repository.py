@@ -6,7 +6,7 @@ from collections import Counter
 from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,
-    ConfigInput,
+    ConfigValue,
     SystemConfigurationSnapshot,
 )
 from infrastructure.system_configuration.models import SystemConfiguration
@@ -43,7 +43,7 @@ class SystemConfigurationRepository:
     def save_changes(
         self,
         session: Session,
-        changes: dict[str, ConfigInput],
+        changes: dict[str, ConfigValue],
         *,
         actor: str,
     ) -> SystemConfigurationSnapshot:
@@ -53,8 +53,7 @@ class SystemConfigurationRepository:
         )
         current = self.load_snapshot(session)
         snapshot = DEFAULT_CATALOG.validate_changes(current.values, changes)
-        for key in changes:
-            value = snapshot.get(key)
+        for key, value in changes.items():
             if current.get(key) == value:
                 continue
             session.execute(
@@ -64,7 +63,7 @@ class SystemConfigurationRepository:
                     SystemConfiguration.delete_flag == "N",
                 )
                 .values(
-                    configuration_value=list(value) if isinstance(value, tuple) else value,
+                    configuration_value=value,
                     updated_by=actor[:100] or "unknown",
                     update_time=func.now(),
                 )

@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useMemo, useState } from "react";
-import { Button, InputNumber, Modal, Select, Switch, Table } from "antd";
+import { Button, InputNumber, Modal, Switch, Table } from "antd";
 import type { TableColumnsType } from "antd";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -50,9 +50,7 @@ function ConfigDetail({ item }: ConfigDetailProps) {
       ? t("systemConfig.booleanType")
       : item.kind === "integer"
         ? t("systemConfig.integerType")
-        : item.kind === "resource_refs"
-          ? t("systemConfig.resourceRefsType")
-          : t("systemConfig.decimalType");
+        : t("systemConfig.decimalType");
   const details = [
     {
       key: "key",
@@ -186,20 +184,6 @@ export function ConfigTable({
                   {formatConfigValue(item, value, t)}
                 </span>
               </div>
-            ) : item.kind === "resource_refs" ? (
-              <Select<string[]>
-                id={`config-input-${item.key}`}
-                mode="tags"
-                size="small"
-                open={false}
-                className="w-full"
-                aria-label={label}
-                placeholder={t("systemConfig.resourceRefsPlaceholder")}
-                status={errorKey ? "error" : undefined}
-                tokenSeparators={[","]}
-                value={Array.isArray(value) ? value : []}
-                onChange={(refs) => onValueChange(item, refs.map((ref) => ref.trim()))}
-              />
             ) : (
               <div className="flex items-center justify-center gap-1.5">
                 <InputNumber

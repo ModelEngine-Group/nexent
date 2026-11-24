@@ -43,57 +43,6 @@ def assessed_check(state, key, accepted):
     ]}
 
 
-def test_resource_denylist_refreshes_pending_card(monkeypatch):
-    from infrastructure.system_configuration import runtime as configuration
-    from infrastructure.system_configuration.catalog import NL2AGENT_RESOURCE_DENYLIST
-    from services import nl2agent_resource_flow as flow
-
-    catalog = [{
-        "candidate_ref": f"tool:{index}", "resource_type": "tool", "source": "LOCAL_TOOL",
-        "name": "public_web_search", "description": "Search public web background information.",
-        "names": ["public_web_search"], "labels": ["search"], "descriptions": [],
-        "interfaces": [], "inputs": {}, "installed": True, "quality": 1.0,
-        "config": [], "form_kind": "TOOL_CONFIG",
-    } for index in range(701, 705)]
-    monkeypatch.setattr(nl2agent_service, "_load_installed_resource_catalog", AsyncMock(return_value=catalog))
-    monkeypatch.setattr(nl2agent_service, "_load_internal_uninstalled_resource_catalog", AsyncMock(return_value=[]))
-    monkeypatch.setattr(flow.semantic, "resolve_model", AsyncMock(return_value=None))
-    with owned_runtime(monkeypatch) as (runtime, redis):
-        before = runtime.draft()
-
-        def verify(expected):
-            snapshot = json.loads(redis.get(_state_key(runtime)))
-            offered = {item["candidate_ref"] for item in flow._candidates_in_batch(snapshot["requirements"]["r1"])}
-            assert offered == expected
-            check = assessed_check(snapshot, "r1", sorted(offered))
-            return (f"<code>print(nl2a_verify_requirements(verification_batch_id={snapshot['batch']['id']!r}, "
-                    f"checks={[check]!r}))</code>")
-
-        requirements = [{"query": "Search public web background information", "search_queries": {
-            "zh": "搜索公开网页", "en": "web search public background information",
-        }}]
-        cid, events = post(runtime, "Find web search alternatives.", [
-            f"<code>print(nl2a_discover_requirements(requirements={requirements!r}))</code>",
-            lambda: verify({"tool:701", "tool:702", "tool:703"}),
-        ])
-        old = get_card(events)
-        configuration._process_runtime.store_snapshot({
-            **configuration.DEFAULT_CATALOG.defaults, NL2AGENT_RESOURCE_DENYLIST: ["tool:701"],
-        })
-        _, events = post(runtime, action(old, "confirm_requirements", requirements=[
-            {"requirement_id": "r1", "query": requirements[0]["query"]},
-        ]), [
-            "<code>print(nl2a_discover_requirements())</code>",
-            lambda: verify({"tool:702", "tool:703", "tool:704"}),
-        ], cid)
-        refreshed = get_card(events)
-        assert refreshed["state_version"] > old["state_version"]
-        assert {item["candidate"]["candidate_ref"] for item in refreshed["resources"]} == {
-            "tool:702", "tool:703", "tool:704",
-        }
-        assert runtime.draft() == before
-
-
 def test_search_alternatives_runtime(monkeypatch):
     from services import nl2agent_resource_flow as flow
 

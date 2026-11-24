@@ -27,7 +27,6 @@ import {
 } from "./components/SaveReviewModal";
 import {
   CONFIG_GROUPS,
-  configValuesEqual,
   validateConfigValue,
   type ConfigGroupId,
   type ConfigItem,
@@ -53,8 +52,7 @@ export function SystemConfigPage() {
     Object.prototype.hasOwnProperty.call(drafts, item.key)
       ? drafts[item.key]
       : item.value;
-  const isModified = (item: ConfigItem) =>
-    !configValuesEqual(valueOf(item), item.value);
+  const isModified = (item: ConfigItem) => valueOf(item) !== item.value;
 
   const changes: ConfigChange[] = items.filter(isModified).map((item) => ({
     item,

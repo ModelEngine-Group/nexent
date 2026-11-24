@@ -86,10 +86,9 @@ def _revision(row):
 
 
 async def recommend(scope, request: KnowledgeRecommendationsRequest):
-    from services.nl2agent_resource_flow import coverage_rows, require_recommendation_current
+    from services.nl2agent_resource_flow import coverage_rows
 
     state = require_current_card(await read_resource_state(scope), scope, "requirement_resources", request)
-    require_recommendation_current(state)
     rows = coverage_rows(state)
     tools = {row["candidate_ref"]: row for row in await _tools(scope)}
     models = await run_blocking("knowledge-recommendation-models", _models, scope.tenant_id, lane="control-io", owner=__name__)
@@ -153,7 +152,6 @@ async def recommend(scope, request: KnowledgeRecommendationsRequest):
                           lane="control-io", owner=__name__) != models:
         raise ResourceStateError("knowledge_model_changed", retryable=True)
     state = require_current_card(await read_resource_state(scope), scope, "requirement_resources", request)
-    require_recommendation_current(state)
     visible = {row["candidate_ref"] for row in await _tools(scope)}
     if not set(groups).issubset(visible):
         raise ResourceStateError("resource_not_visible")

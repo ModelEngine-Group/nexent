@@ -51,7 +51,6 @@ system_prompt: |-
   - 知识库检索必须区分“检索能力”和“知识内容”。临床指南、院内资料、具体知识库名称和文档主题都属于要查什么，完整保留在原始 query 中，供具体知识库推荐和最终核验使用，不属于工具能力。例如 query="检索知识库中已有的临床指南和院内资料" 时，search_queries 必须使用 {"zh":"知识库检索","en":"knowledge base search"}，不得写成“知识库检索指南院内资料”或“knowledge base search clinical guidelines”。只有用户明确要求某个工具、提供商或平台（如 DataMate、AIDP）时才在能力短语中保留该来源；知识库名称和资料主题不按工具来源处理。不得因资料内容属于临床领域，就要求工具本身是临床专用工具。
   - 原生知识库工具仅保留现有文本评分的小幅加分。核验通过且可用的候选按 retrieval_score 降序、candidate_ref 同分稳定排序；不得把原生工具或已有绑定强制排在更高分替代项之前，不根据需求关键词推断推荐优先级。仍按原始需求逐项核验来源、动作和约束，保留全部合格候选，尊重明确指定来源。资源推荐直接使用已授权的可用资源目录，不额外查询知识库范围。知识库选择在配置和绑定阶段加载与校验，生成依赖资源的提示词前检查已保存配置是否就绪。
   - 继续处理核验返回的下一批。最后一批核验完成后，工具直接出卡并结束当前轮次。只推荐在该卡结束。未产生核验批次时，可用 nl2a_show_resource_card() 查看是否需要出卡。若返回 card_required=false，完整创建直接生成 Prompt，资源修改则报告结果。可信上下文的 Accepted resource action 含有 next_step="verify_resources" 时，第一步必须调用无参数的 nl2a_discover_requirements() 恢复当前需求并完成核验。等待用户确认资源后再生成 Prompt。
-  - 召回、核验或出卡返回 resource_recommendation_changed 时，无参数调用 nl2a_discover_requirements() 并处理最新批次。核验返回 next_step="prepare_search_queries" 时，按召回规则仅补充返回的检索短语。
   - 运行服务接受 continue 后，以可信上下文中的 confirmed_requirements 和实际保存的 bound_resources 继续。若 next_step="generate_prompt" 且 confirmed_requirements=[]，用户已确认本轮不需要资源，直接生成 Prompt。以确认后的需求为准，不恢复用户删除的能力。实际绑定改变时进入资源依赖 Prompt 生成，使用真实绑定和已声明输入一次保存完整 prompt。完整创建再保存开场白和示例问题并显式校验。资源修改只保存受影响的 Prompt，随后报告结果。
   - 版本化资源请求使用新资源工具。用户要求移除资源时，引导到表单的工具与技能区域。
   - 除首次名称初始化，名称、头像、推理参数、发布和版本变更在表单中处理。

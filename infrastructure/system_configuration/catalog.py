@@ -2,21 +2,13 @@
 """Frozen catalog and immutable snapshots for managed system settings."""
 
 import math
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-ConfigValue = int | float | bool | tuple[str, ...]
-ConfigInput = ConfigValue | list[str]
-ConfigKind = Literal["integer", "number", "boolean", "resource_refs"]
-NL2AGENT_RESOURCE_DENYLIST = "NL2AGENT_RESOURCE_DENYLIST"
-MAX_RESOURCE_REFS = 200
-_RESOURCE_REF = re.compile(
-    r"(?:(?:tool|skill|tenant_skill_repository|tenant_mcp_repository):[1-9][0-9]*"
-    r"|nexent_official_skill:(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2})+)"
-)
+ConfigValue = int | float | bool
+ConfigKind = Literal["integer", "number", "boolean"]
 
 
 class ConfigurationValidationError(ValueError):
@@ -85,7 +77,7 @@ class SystemConfigurationCatalog:
             ) from exc
 
     def build_snapshot(
-        self, values: Mapping[str, ConfigInput]
+        self, values: Mapping[str, ConfigValue]
     ) -> SystemConfigurationSnapshot:
         expected = set(self._by_key)
         actual = set(values)
@@ -108,7 +100,7 @@ class SystemConfigurationCatalog:
     def validate_changes(
         self,
         current: Mapping[str, ConfigValue],
-        changes: Mapping[str, ConfigInput],
+        changes: Mapping[str, ConfigValue],
     ) -> SystemConfigurationSnapshot:
         for key in changes:
             self.definition(key)
@@ -116,22 +108,8 @@ class SystemConfigurationCatalog:
 
     @staticmethod
     def _validate_value(
-        definition: ConfigurationDefinition, value: ConfigInput
+        definition: ConfigurationDefinition, value: ConfigValue
     ) -> ConfigValue:
-        if definition.kind == "resource_refs":
-            if (
-                type(value) not in (list, tuple)
-                or len(value) > MAX_RESOURCE_REFS
-                or any(
-                    type(ref) is not str or len(ref) > 1024 or not _RESOURCE_REF.fullmatch(ref)
-                    for ref in value
-                )
-                or len(set(value)) != len(value)
-            ):
-                raise ConfigurationValidationError(
-                    f"{definition.key} must contain up to {MAX_RESOURCE_REFS} unique candidate references"
-                )
-            return tuple(sorted(value))
         if definition.kind == "boolean":
             if type(value) is not bool:
                 raise ConfigurationValidationError(
@@ -268,13 +246,6 @@ DEFAULT_CATALOG = SystemConfigurationCatalog(
             10,
             "systemConfig.effect.nextUpload",
             "systemConfig.unit.mb",
-        ),
-        ConfigurationDefinition(
-            NL2AGENT_RESOURCE_DENYLIST,
-            "resource_refs",
-            "runtime",
-            (),
-            "systemConfig.effect.nextResourceRecommendation",
         ),
     )
 )

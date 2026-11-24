@@ -1104,7 +1104,6 @@ export const InstalledResourceBindingCard: FC<{
                           <div className="px-3 py-2 text-xs">
                             <p
                               className="font-medium"
-                              title={resource.candidate_ref}
                             >
                               {item.resource.candidate.name}{" "}
                               <span className="font-normal text-muted-foreground">

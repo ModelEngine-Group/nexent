@@ -18,7 +18,7 @@ case:
     outcomes: [saved, notification degraded, database failure, delayed query and delayed save]
   steps:
   - order: 1
-    action: Open the authorized page as SU, inspect the three tabs, search and group nineteen parameters in both locales, open a parameter detail modal and inspect an OPS actor.
+    action: Open the authorized page as SU, inspect the three tabs, search and group eighteen parameters in both locales, open a parameter detail modal and inspect an OPS actor.
     expected: The SU sees system configuration, platform quota overview and system parameters tabs in that order; configuration names, keys, descriptions, types, units, ranges and database values are visible; column widths support pointer and keyboard resizing; details open in a modal; OPS has no configuration entry or API data and no recommendation/version/consumer status appears.
   - order: 2
     action: Edit values, reset one default, discard another edit and save while editing the same field again before the response completes.
@@ -26,14 +26,10 @@ case:
   - order: 3
     action: Repeat with notification degradation, database failure, background query and attempted page exit through links and browser Back/Forward.
     expected: Degradation remains an honest save, failures and queries preserve drafts, and every unsaved navigation path requires confirmation before state can be discarded.
-  - order: 4
-    action: Add an exact resource reference to the recommendation denylist using the configuration editor and confirm the change.
-    expected: The save request contains a JSON array for only this key and the row displays the saved reference.
   expected_results:
   - Authorized localized browsing and denied configuration access follow explicit permission, while every signed-in role retains the personal-profile self-service route.
   - The save bar aligns with the configuration content, and changed-key save, default reset, discard and edit-during-save preserve the correct baseline and drafts.
   - Failure and navigation behavior never claim all consumers applied or discard unsaved edits.
-  - The denylist editor saves an exact reference list through the current configuration route.
   forbidden_side_effects:
   - No browser-local ops port, executable recommendation, revision conflict, application polling or secret displayed.
   actor: SU for read and platform-write checks, and an OPS actor denied by both navigation and direct API access
@@ -59,9 +55,4 @@ case:
     description: Query, save, degraded notification and navigation never lose drafts.
     steps: [3]
     expected_results: [3]
-    forbidden_side_effects: [1]
-  - id: AC-04
-    description: A denylist entry is operable and persists in the browser's saved configuration baseline.
-    steps: [4]
-    expected_results: [4]
     forbidden_side_effects: [1]

@@ -8,7 +8,7 @@ import redis
 from contracts.constants.environment import REDIS_URL
 from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
-    ConfigInput,
+    ConfigValue,
     SystemConfigurationSnapshot,
 )
 from infrastructure.system_configuration.database import configuration_database
@@ -63,7 +63,7 @@ def list_system_configurations() -> list[dict]:
     return _catalog_items(snapshot)
 
 
-def save_system_configurations(changes: dict[str, ConfigInput], *, actor: str) -> dict:
+def save_system_configurations(changes: dict[str, ConfigValue], *, actor: str) -> dict:
     with configuration_database.session() as session:
         snapshot = repository.save_changes(session, changes, actor=actor)
     notification = "published"

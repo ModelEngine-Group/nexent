@@ -3,11 +3,7 @@
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 
-const DENYLIST = "NL2AGENT_RESOURCE_DENYLIST";
-type ConfigValue = number | boolean | string[];
-
 const KEYS = [
-  DENYLIST,
   "MAX_TENANT_COUNT",
   "MAX_USERS_PER_TENANT",
   "MAX_GROUPS_PER_TENANT",
@@ -28,17 +24,15 @@ const KEYS = [
   "MAX_SKILL_UPLOAD_SIZE_MB",
 ];
 
-function item(key: string, value: ConfigValue = 100) {
+function item(key: string, value: number | boolean = 100) {
   const kind =
-    key === DENYLIST
-      ? "resource_refs"
-      : key === "LLM_INCLUDE_LOGPROBS"
+    key === "LLM_INCLUDE_LOGPROBS"
       ? "boolean"
       : key.includes("TIMEOUT")
         ? "number"
         : "integer";
   const group =
-    key === DENYLIST || key.includes("TIMEOUT") || key === "LLM_INCLUDE_LOGPROBS"
+    key.includes("TIMEOUT") || key === "LLM_INCLUDE_LOGPROBS"
       ? "runtime"
       : key.includes("SIZE")
         ? "upload"
@@ -49,9 +43,7 @@ function item(key: string, value: ConfigValue = 100) {
           ? "capacity"
           : "tenant";
   const defaultValue =
-    key === DENYLIST
-      ? []
-      : key === "LLM_INCLUDE_LOGPROBS"
+    key === "LLM_INCLUDE_LOGPROBS"
       ? false
       : key === "MAX_TENANT_COUNT"
         ? 4
@@ -76,9 +68,9 @@ function item(key: string, value: ConfigValue = 100) {
 }
 
 journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
-  const writes: Record<string, ConfigValue>[] = [];
-  const savedValues: Record<string, ConfigValue> = Object.fromEntries(
-    KEYS.map((key) => [key, key === DENYLIST ? [] : key === "LLM_INCLUDE_LOGPROBS" ? false : 100]),
+  const writes: Record<string, number | boolean>[] = [];
+  const savedValues: Record<string, number | boolean> = Object.fromEntries(
+    KEYS.map((key) => [key, key === "LLM_INCLUDE_LOGPROBS" ? false : 100]),
   );
   const leaveWarnings: string[] = [];
   let releaseSave: (() => void) | undefined;
@@ -142,13 +134,13 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
         return route.fulfill({
           json: {
             items: KEYS.map((key) => item(key, savedValues[key])),
-            total: KEYS.length,
+            total: 18,
           },
         });
       }
       const changes = request.postDataJSON().changes as Record<
         string,
-        ConfigValue
+        number | boolean
       >;
       writes.push(changes);
       if (failSave) {
@@ -299,7 +291,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByTestId("config-row-MAX_TENANT_COUNT"),
     ).not.toContainText("MAX_TENANT_COUNT");
-    await expect(page.getByText("共 19 条", { exact: true })).toBeVisible();
+    await expect(page.getByText("共 18 条", { exact: true })).toBeVisible();
     await page.locator(".ant-pagination-next").click();
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(8);
     await expect(
@@ -315,7 +307,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(3);
     await page.getByText("模型与MCP 4", { exact: true }).click();
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(4);
-    await page.getByText("全部 19", { exact: true }).click();
+    await page.getByText("全部 18", { exact: true }).click();
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(10);
 
     await page.goto("/en/ops/configuration");
@@ -561,20 +553,5 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
       "存在未保存的修改，确定离开当前页面吗？",
     ]);
     await expect(page.getByText("全部已生效", { exact: true })).toHaveCount(0);
-  });
-
-  await contract.step(contract.expectedIds("steps")[3], async () => {
-    await page.getByRole("button", { name: "放弃", exact: true }).click();
-    const row = page.getByTestId(`config-row-${DENYLIST}`);
-    const input = row.getByRole("combobox");
-    await input.fill("tool:701");
-    await input.press("Enter");
-    await page.getByRole("button", { name: "保存修改", exact: true }).click();
-    await page.getByRole("button", { name: "确认保存", exact: true }).click();
-    await expect.poll(() => writes.at(-1)).toEqual({ [DENYLIST]: ["tool:701"] });
-    await expect(page.getByRole("button", { name: "保存修改", exact: true })).toHaveCount(0);
-  });
-  await contract.assertion(assertionIds[3], async () => {
-    await expect(page.getByTestId(`config-row-${DENYLIST}`).getByText("tool:701", { exact: true })).toBeVisible();
   });
 });

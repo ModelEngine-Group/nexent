@@ -126,11 +126,6 @@ feature:
       failure. Unified cards stay in coverage until every retained requirement has
       verified installed coverage; partial bindability does not advance the header.
       New gaps roll back the step, including history replay.
-  - rule_id: F-045-RULE-12
-    description: NL2Agent applies the current system denylist by exact candidate reference
-      before ranking visible installed and installable resources. A pending card with
-      affected resources resumes recall and verification for those requirements. The
-      recommendation policy preserves existing bindings.
   required_test_stages:
   - D4
   - D1

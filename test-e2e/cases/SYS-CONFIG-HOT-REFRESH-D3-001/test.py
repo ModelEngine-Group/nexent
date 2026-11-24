@@ -33,7 +33,6 @@ MIGRATIONS = tuple(
         )
     )
 )
-MIGRATIONS = tuple(sorted((*MIGRATIONS, Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_014_nl2agent_resource_denylist.sql")))
 
 
 def _engine():
@@ -59,10 +58,10 @@ def _restore_defaults(engine):
             connection.execute(
                 text(
                     "UPDATE nexent.sys_configuration_t "
-                    "SET configuration_value = CAST(:value AS jsonb), updated_by = 'system', update_time = CURRENT_TIMESTAMP "
+                    "SET configuration_value = to_jsonb(:value), updated_by = 'system', update_time = CURRENT_TIMESTAMP "
                     "WHERE configuration_key = :key AND delete_flag = 'N'"
                 ),
-                {"key": key, "value": json.dumps(value)},
+                {"key": key, "value": value},
             )
 
 
@@ -226,7 +225,7 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
                 "FROM nexent.sys_configuration_t WHERE delete_flag = 'N'"
             )
         ).one()
-    assert (count, tenant_limit) == (19, 100)
+    assert (count, tenant_limit) == (18, 100)
     with engine.connect() as connection:
         assert connection.execute(
             text(
@@ -264,12 +263,8 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
             )
         )
 
-    denylist_key = "NL2AGENT_RESOURCE_DENYLIST"
-    _save_values(engine, {denylist_key: ["tool:7"]})
     with ThreadPoolExecutor(max_workers=2) as executor:
         list(executor.map(lambda _: _apply_migration(), range(2)))
-    with Session(engine) as session:
-        assert SystemConfigurationRepository().load_snapshot(session).get(denylist_key) == ("tool:7",)
 
     with engine.connect() as connection:
         count, distinct_count = connection.execute(
@@ -402,13 +397,6 @@ def test_independent_consumers_reconcile_duplicate_and_invalid_notifications():
     publisher = redis.Redis.from_url(REDIS_URL)
     try:
         with _running_consumers() as workers:
-            key = "NL2AGENT_RESOURCE_DENYLIST"
-            _save_values(engine, {key: ["tool:7"]})
-            publisher.publish(CONFIGURATION_CHANNEL, "configuration_changed")
-            _wait_for_consumer_value(workers, key, ["tool:7"])
-            _save_values(engine, {key: []})
-            _wait_for_consumer_value(workers, key, [])
-
             # Direct commits prove consumers do not depend on an ops process.
             _save_values(engine, {"MAX_TENANT_COUNT": 10})
             _wait_for_consumer_value(workers, "MAX_TENANT_COUNT", 10)

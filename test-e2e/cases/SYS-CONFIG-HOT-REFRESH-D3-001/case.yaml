@@ -19,12 +19,12 @@ case:
   steps:
   - order: 1
     action: Initialize without a mounted installation env file, modify values and rerun migrations concurrently.
-    expected: Exactly nineteen active keys remain after all configuration migrations; the retired super-administrator key is soft-deleted and other saved values and audit fields survive duplicate migration with no duplicate keys.
+    expected: Exactly eighteen active keys remain after all configuration migrations; the retired super-administrator key is soft-deleted and other saved values and audit fields survive duplicate migration with no duplicate keys.
   - order: 2
     action: Save different and same keys concurrently, inject a failure mid-batch and verify each consumer database role.
     expected: Different keys survive, the same key follows commit order, failed batches leave no partial writes and consumers cannot write the table.
   - order: 3
-    action: Start independent config/runtime/northbound workers, save and clear the NL2Agent denylist, publish duplicate and stale notifications, drop Redis and ops, then restore dependencies.
+    action: Start independent config/runtime/northbound workers, publish duplicate and stale notifications, drop Redis and ops, then restore dependencies.
     expected: Each worker reads the current full database snapshot independently, retains its last valid value on invalid refresh and reconciles after reconnection or polling.
   - order: 4
     action: Exercise subsequent tenant/conversation/upload checks and newly prepared Agent parameters while changing related values.

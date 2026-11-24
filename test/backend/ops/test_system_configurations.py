@@ -81,8 +81,8 @@ def test_explicit_operations_permission_returns_exact_catalog(mocker):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 19
-    assert len(payload["items"]) == 19
+    assert payload["total"] == 18
+    assert len(payload["items"]) == 18
     assert {item["key"] for item in payload["items"]} == set(EXPECTED_DEFAULTS)
     assert all(item["recommendation_available"] is False for item in payload["items"])
 

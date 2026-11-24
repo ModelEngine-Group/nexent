@@ -101,7 +101,6 @@ export function Nl2AgentBindingItem({
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span
-              title={candidate.candidate_ref}
               className={`break-words text-[13px] text-foreground ${bound ? "font-normal" : "font-semibold"}`}
             >
               {displayName}
