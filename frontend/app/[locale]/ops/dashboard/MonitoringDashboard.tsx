@@ -27,6 +27,7 @@ import { agentMonitoringSelection } from "./agentMonitoringValues";
 import { ModelMonitoringDetails } from "./components/model/ModelMonitoringDetails";
 import { ModelMonitoringPanels } from "./components/model/ModelMonitoringPanels";
 import { MonitoringOverview } from "./components/overview/MonitoringOverview";
+import { SkillMonitoring } from "./components/skill/SkillMonitoring";
 import {
   dateFormat,
   getMonitoringRange,
@@ -534,6 +535,8 @@ function MonitoringScope({
                 }}
               />
             </>
+          ) : tab === "skill" ? (
+            <SkillMonitoring singleSkill={Boolean(resource)} />
           ) : (
             placeholder
           )}

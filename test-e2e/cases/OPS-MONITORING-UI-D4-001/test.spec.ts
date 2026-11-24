@@ -226,7 +226,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     } else if (pathname === "/api/skills") {
       reads.push(`skills:${tenantId ?? "*"}`);
       if (!tenantId) unexpected.push("Skill request without tenant");
-      json = { skills: [{ skill_id: 7, name: "文档摘要", source: "local" }] };
+      json = {
+        skills: [
+          {
+            skill_id: 7,
+            name: tenantId === "b" ? "设计审阅" : "文档摘要",
+            source: "local",
+          },
+        ],
+      };
     } else if (pathname === "/api/mcp/tools") {
       const service = searchParams.get("mcp_id");
       reads.push(`tools:${service}`);
@@ -657,6 +665,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     details,
     charts,
     modelDrilldown,
+    skillLayout,
   ] = contract.expectedIds("steps");
   await contract.step(dates, async () => {
     await expect(page.getByRole("tab")).toHaveText([
@@ -1516,6 +1525,110 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await tab("MCP").click();
     await choose("MCP", "文件服务");
   });
+  await contract.step(skillLayout, async () => {
+    await tab("Skill").click();
+    const skill = page.getByRole("tabpanel", { name: "Skill", exact: true });
+    const cards = skill.locator('dl[aria-label="Skill 指标概览"]');
+    const trend = skill.getByRole("region", { name: "Skill 使用趋势" });
+    const ranking = skill.getByRole("region", { name: "Skill 使用次数 Top 5" });
+    const details = skill.getByRole("region", { name: "Skill 明细" });
+    const unavailable = (region: typeof skill) =>
+      region.getByText("暂未接入", { exact: true });
+    const filtersBeforeRefresh = () => [
+      stats.length,
+      modelSummaryReads.length,
+      modelTrendReads.length,
+      modelListReads.length,
+    ];
+    const columns = ["名称", "来源", "使用次数"];
+    const expectUnavailableDetails = async () => {
+      await expect(unavailable(details)).toBeVisible();
+      await expect(details.locator("tbody tr[data-row-key]")).toHaveCount(0);
+      await expect(
+        details
+          .getByRole("columnheader", { name: /名称/ })
+          .getByRole("button", { name: "搜索 Skill 名称" }),
+      ).toBeDisabled();
+    };
+    await expect(
+      skill.getByRole("heading", { name: "全部 Skill · 运营中心" }),
+    ).toBeVisible();
+    await choose("用户组", "一线运营组");
+    const statisticsBefore = filtersBeforeRefresh();
+    await expect(cards.locator("dt")).toHaveText([
+      "当前 Skill 总数",
+      "Skill 使用次数",
+    ]);
+    await expect(cards.locator("strong")).toHaveText(["—", "—"]);
+    await expect(unavailable(cards)).toHaveCount(2);
+    await expect(unavailable(trend)).toBeVisible();
+    await expect(unavailable(ranking)).toBeVisible();
+    await expect(details.getByRole("columnheader")).toHaveText([
+      ...columns,
+      "操作",
+    ]);
+    await expectUnavailableDetails();
+    await screenshot("skill-all");
+
+    await choose("Skill", "文档摘要");
+    await expect(
+      skill.getByRole("heading", { name: "文档摘要 · 运营中心" }),
+    ).toBeVisible();
+    await expect(skill.getByText("一线运营组", { exact: true })).toBeVisible();
+    await expect(cards.locator("dt")).toHaveText(["Skill 使用次数"]);
+    await expect(cards.locator("strong")).toHaveText(["—"]);
+    await expect(unavailable(cards)).toBeVisible();
+    await expect(unavailable(trend)).toBeVisible();
+    await expect(ranking).toHaveCount(0);
+    await expect(details.getByRole("columnheader")).toHaveText(columns);
+    await expectUnavailableDetails();
+    await screenshot("skill-single");
+    await choose("Skill", "全部 Skill");
+    await expect(ranking).toBeVisible();
+
+    await choose("Skill", "文档摘要");
+    await skill.getByText("近一个月", { exact: true }).click();
+    await expect(skill.getByPlaceholder("请选择开始日期")).toBeDisabled();
+    await skill.getByText("自定义", { exact: true }).click();
+    const skillReadsBefore = reads.length;
+    await skill.getByRole("button", { name: "刷新", exact: true }).click();
+    await expect
+      .poll(() =>
+        reads
+          .slice(skillReadsBefore)
+          .filter((read) => read.startsWith("skills:")),
+      )
+      .toEqual(["skills:a"]);
+    await expect(
+      skill.getByRole("heading", { name: "文档摘要 · 运营中心" }),
+    ).toBeVisible();
+
+    await choose("租户", "研发中心");
+    await expect(
+      skill.getByRole("heading", { name: "全部 Skill · 研发中心" }),
+    ).toBeVisible();
+    await expect(skill.getByText("全部用户组", { exact: true })).toBeVisible();
+    await expect(ranking).toBeVisible();
+    await expect(skill.getByPlaceholder("请选择开始日期")).toHaveValue(
+      "2026-11-07",
+    );
+    await expect(skill.getByPlaceholder("请选择结束日期")).toHaveValue(
+      "2026-11-12",
+    );
+    await choose("Skill", "设计审阅");
+    await expect(
+      skill.getByRole("heading", { name: "设计审阅 · 研发中心" }),
+    ).toBeVisible();
+    await choose("租户", "全部租户");
+    await expect(select("Skill")).toBeDisabled();
+    await expect(ranking).toBeVisible();
+    expect(filtersBeforeRefresh()).toEqual(statisticsBefore);
+    expect(unexpected).toEqual([]);
+
+    await choose("租户", "运营中心");
+    await tab("MCP").click();
+    await choose("MCP", "文件服务");
+  });
   const [
     dashboard,
     reset,
@@ -1527,6 +1640,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     sharedDetailSearch,
     modelMetrics,
     modelListNavigation,
+    skillMonitoring,
   ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
@@ -1654,6 +1768,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         expect.objectContaining({ tenant_id: "b", model_id: "2", page: "1" }),
       ]),
     );
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(skillMonitoring, async () => {
+    expect(reads).toEqual(expect.arrayContaining(["skills:a", "skills:b"]));
+    expect(reads).not.toContain("skills:*");
     expect(unexpected).toEqual([]);
   });
 });

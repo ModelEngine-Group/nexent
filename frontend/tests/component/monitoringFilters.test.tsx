@@ -106,4 +106,26 @@ describe("monitoring filter dependencies", () => {
       tool: "",
     });
   });
+
+  it("selects and clears a Skill without changing the other filters", () => {
+    const anotherSkill = updateMonitoringFilters(selected, {
+      type: "resource",
+      tab: "skill",
+      value: "another-skill-a",
+    });
+    expect(anotherSkill).toEqual({
+      ...selected,
+      resources: { ...selected.resources, skill: "another-skill-a" },
+    });
+    expect(
+      updateMonitoringFilters(anotherSkill, {
+        type: "resource",
+        tab: "skill",
+        value: "",
+      })
+    ).toEqual({
+      ...selected,
+      resources: { ...selected.resources, skill: "" },
+    });
+  });
 });

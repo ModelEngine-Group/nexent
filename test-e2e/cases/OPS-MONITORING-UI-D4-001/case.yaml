@@ -41,6 +41,9 @@ case:
   - order: 8
     action: Open Model statistics for a historical model in the second tenant when two tenants have the same numeric model ID.
     expected: The chart and table read the second tenant and model ID for the original dates. The selected model is visible and the operator can return to all models.
+  - order: 9
+    action: Open Skill monitoring for a tenant, switch between all and one Skill, change dates, refresh, then change tenants.
+    expected: All Skill and single Skill render the corresponding cards, chart regions and detail columns. Each statistical region is unavailable and detail search is disabled. Refresh reads only applicable directories. Switching tenants clears the group and Skill and keeps the dates.
   expected_results:
   - The dashboard exposes the intended filters with deterministic calendar dates and explicit unavailable statistics for unconnected resources.
   - Tenant and MCP service transitions clear their dependent selections. MCP refresh only re-reads applicable directories.
@@ -52,8 +55,9 @@ case:
   - Both detail tables use column search, keep separate search state and submit to their own list endpoints.
   - Model cards use inventory and the scoped summary. Both charts share a single scoped trends read. Switching the left metric does not request data. Refresh rereads summary, trends and the current list.
   - Model metric sorting retains the search, page size, tenant, group and dates. The sorted list follows server order across pages. The primary-name hint matches server search and a row can open its tenant-qualified Model statistics.
+  - The Skill view uses the tenant-scoped directory, changes layout with the active Skill and displays unavailable statistics without values, chart samples or table rows.
   forbidden_side_effects:
-  - Statistics use the connected Agent and Model GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking or cross-tenant MCP tool directory request is sent.
+  - Statistics use the connected Agent and Model GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking, cross-tenant MCP tool directory request or Skill statistics request is sent.
   actor: Authorized super administrator
   journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
   final_business_result:
@@ -111,4 +115,9 @@ case:
     description: Model sorting, pagination, primary-name search and tenant-qualified statistics navigation use the server scope.
     steps: [2, 8]
     expected_results: [10]
+    forbidden_side_effects: [1]
+  - id: AC-11
+    description: Skill directory selection switches the layout and refresh stays within the existing directory scope.
+    steps: [9]
+    expected_results: [11]
     forbidden_side_effects: [1]
