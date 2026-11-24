@@ -4,7 +4,7 @@ module: SYSTEM-CONFIG
 case:
   case_id: SYS-CONFIG-HOT-REFRESH-D3-001
   feature_id: SYSTEM-CONFIGURATION
-  requirement_ids: [SYSTEM-CONFIGURATION-20261110]
+  requirement_ids: [SYSTEM-CONFIGURATION-20261110, SYSTEM-CONFIGURATION-20261123]
   business_rule_ids: [SYS-CONFIG-RULE-01, SYS-CONFIG-RULE-03, SYS-CONFIG-RULE-04, SYS-CONFIG-RULE-05]
   title: Real database and Redis refresh update subsequent business checks
   type: INTEGRATION
@@ -19,7 +19,7 @@ case:
   steps:
   - order: 1
     action: Initialize without a mounted installation env file, modify values and rerun migrations concurrently.
-    expected: Twenty active keys are seeded, including an empty NL2Agent denylist. Saved values and audit fields survive duplicate migration with no duplicate keys.
+    expected: Exactly nineteen active keys remain after all configuration migrations; the retired super-administrator key is soft-deleted and other saved values and audit fields survive duplicate migration with no duplicate keys.
   - order: 2
     action: Save different and same keys concurrently, inject a failure mid-batch and verify each consumer database role.
     expected: Different keys survive, the same key follows commit order, failed batches leave no partial writes and consumers cannot write the table.

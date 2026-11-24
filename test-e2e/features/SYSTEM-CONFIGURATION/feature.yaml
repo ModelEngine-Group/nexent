@@ -4,14 +4,14 @@ module:
   name: System configuration
 feature:
   feature_id: SYSTEM-CONFIGURATION
-  name: Operations-managed hot system configuration
+  name: SU-managed hot system configuration
   status: active
-  description: Manage twenty non-secret hot-update settings through ops with database persistence and shared consumer refresh.
+  description: Manage nineteen non-secret hot-update settings through a SU-only workspace with database persistence and shared consumer refresh.
   business_rules:
   - rule_id: SYS-CONFIG-RULE-01
-    description: The fixed configuration catalog includes a validated exact-reference list for NL2Agent resource recommendations. Unknown or invalid batches are rejected atomically.
+    description: Only the frozen nineteen-key catalog is readable and writable through ops; unknown or invalid batches are rejected atomically.
   - rule_id: SYS-CONFIG-RULE-02
-    description: Page and API access require an explicit ops.configuration grant; role identity alone never bypasses permission checks.
+    description: Page and API access require the SU role and an explicit ops.configuration grant; OPS and other roles cannot use historical configuration grants.
   - rule_id: SYS-CONFIG-RULE-03
     description: Versioned SQL seeds built-in defaults without importing managed environment values or overwriting saved values.
   - rule_id: SYS-CONFIG-RULE-04
@@ -22,5 +22,5 @@ feature:
     description: Current parameters have no reliable automatic recommendation and expose no executable recommendation action.
   required_test_stages: [D2, D3, D4]
   source:
-    requirement_ids: [SYSTEM-CONFIGURATION-20261110]
+    requirement_ids: [SYSTEM-CONFIGURATION-20261110, SYSTEM-CONFIGURATION-20261123]
     notes: OpenSpec add-system-configuration-page owns the detailed acceptance criteria and frozen parameter catalog.

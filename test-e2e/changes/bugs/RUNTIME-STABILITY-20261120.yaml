@@ -1,0 +1,115 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-STABILITY-20261120
+  change_type: bugfix
+  bug_id: RUNTIME-STABILITY-20261120
+  title: Preserve real execution history, owner boundaries and native public output
+  description: Retain accepted actions and committed views, authorized original reads, actual tool spans and stateful
+    public replay without executing history.
+  observed_behavior: Cross-turn history loses accepted actions or reader ownership, and AgentOS migration bypasses native
+    public mapping and correlated tool observation.
+  expected_behavior: Restore only backend-bound actions/views and authorized real results; preserve original facts, native
+    call identity, existing public output and safe actual tool tracing.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Reuse owner/history, tool observation and public mapping tests; existing D3 Cases prove persistence,
+      protocol and replay collaboration.
+  feature_contract_changed: true
+  affected_features:
+    existing: [CHAT-TRAJECTORY, CMSR-005, JIUWEN-CONTEXT, JIUWEN-OUTPUT]
+    added: []
+    modified: [F-171]
+    retired: []
+  affected_cases:
+    existing: [CHAT-TRAJECTORY-REAL-MODEL-D3-001, CMSR-D3-001, JIUWEN-CONTEXT-D3-001]
+    added: []
+    modified: [AGENT-HISTORY-D3-001, AOS-MODEL-D3-001, AOS-TRANSPORT-D3-001, CONTEXT-POST-RESPONSE-D3-001, JIUWEN-OUTPUT-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Discover only loaded-checkpoint-covered original result references through the existing reader, using bound
+        identity and lightweight paginated call metadata without bulk result-body fetch or per-record queries;
+        read exact original values despite an inaccurate summary while preserving explicit suffix/current reads.
+      - Restore closed actions, committed summary/preview and raw uncovered facts/errors through authorized storage and signed transport,
+        with bounded owner-scoped originals and provider capacity reporting.
+      - Each fresh CoreAgent run aligns Core/reader owners and restores only real results in current authorized history;
+        reject foreign, previous live-only and unproven checkpoint/catalog grants.
+      - Preserve complete native groups and registered LocalFunction schema-default provenance, including original provider
+        IDs, group metadata and raw arguments through storage and tools.
+      - Trace actual Jiuwen calls with stable platform/turn/request/local/provider identities and correct parent scope;
+        distinguish structured error results from execution exceptions without exposing secrets.
+      - Use the existing native public mapper for tool/result pairs, step capacity, localized errors, explicit final/stop/waiting
+        and truthful terminal confirmation; retain ordinary CodeAgent/files/creator behavior.
+      - Resume cursors from the same authorized retained prefix through ACK once, preserving cursor errors, group acknowledgement
+        and transport cleanup without inference/tool replay or new retention/RPC limits.
+      - Keep persistence/failure contracts and source authority; stored legacy summary text grants no source authority.
+        Completion input estimates never reject a send or trigger compression in either runtime.
+      - Accept any completed nonempty history-summary text without fixed headings, literal-preservation or size-gain gates;
+        preserve bounded attempts, prior valid candidates, cancellation and authorized advancing coverage.
+      - Finalize triggered successful root rounds from a valid temporary summary and complete real uncovered tail,
+        even after later usage drops; bind current assistant coverage only in the authorized Management transaction
+        after completed status, and retain old checkpoints on cancellation, failure, partial or stale history.
+      - Keep tool-result representation checks, recent-action boundaries and immutable native actions unchanged.
+      - Replay accepted visible code as assistant then user runtime results, without synthetic actions; cross-turn execution
+        evidence stays user data and actual final answers stay assistant.
+      - AgentOS HTTP fixtures keep retired output-limit inputs as negative tests and the existing authorization allowlist
+        on all three Skill tools.
+      - Preserve successful tools/answers when maintenance admission is full; retry only unaccepted maintenance within
+        existing deadlines off the tool worker, with cancellation, busy errors and preserved provider capacity errors.
+      - Read summary-covered CodeAgent/native originals through a backend-bound conversation reader with unchanged
+        pagination/budgets; reject foreign/deleted/non-result units and never authorize reads from summary references.
+      - Close native context transactions only for parentless results with an exact provider ID; nested same-name
+        successes, structured failures and exceptions cannot consume a pending top-level call or start maintenance early.
+      - Capture actual accepted physical-attempt semantic input privately at the sender boundary; do not substitute telemetry,
+        DB reconstruction, changed tool state or private reasoning. Reuse selected CM history bounds for run-local replacement
+        only, with current tasks/tool groups/new results retained and no checkpoint persistence event.
+      - Keep CodeAgent execution-result views independent, bounded to proven executed results in that sent CM boundary;
+        later tool output stays raw and cancellation commits no new view.
+      - Treat local input estimates as advisory in both runtimes; over-window estimates reach model send boundaries.
+        Only same-completion provider input plus output usage reaching the threshold triggers run-local summaries; missing
+        or unknown usage never substitutes an estimate. No overflow rebuild callback or new recovery flow.
+    reason: Reuse targeted UT and existing self-contained Case preparation/cleanup; preserve all prior variants and D1
+      contracts without a new test framework.
+    test_selectors:
+      - test/backend/database/test_summary_source_discovery.py
+      - test/sdk/core/agents/test_summary_source_reader.py
+      - test/sdk/core/model_service/test_agent_context_monitoring_merge.py
+      - test/backend/app/test_agentos_prepared_run.py
+      - test/backend/app/test_history_source_contracts.py
+      - test/backend/database/test_execution_result_read_db.py
+      - test/backend/database/test_conversation_history_stopped.py
+      - test/backend/services/test_agent_execution_history_stream.py
+      - test/backend/services/test_agent_run_final_answers.py
+      - test/backend/services/test_agentos_conversation_projection.py
+      - test/backend/services/test_agentos_native_projection.py
+      - test/backend/services/test_agentos_native_resume.py
+      - test/backend/services/test_agentos_public_events.py
+      - test/backend/services/test_northbound_answer_preview.py
+      - test/backend/utils/test_nexent_error_diagnostics.py
+      - test/backend/utils/test_nexent_output.py
+      - test/sdk/core/agents/test_context_message_format.py
+      - test/sdk/core/agents/test_context_scope_reduction.py
+      - test/sdk/core/agents/test_execution_owner_lifecycle.py
+      - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+      - test/sdk/core/agents/test_jiuwen_context.py
+      - test/sdk/core/agents/test_jiuwen_errors.py
+      - test/sdk/core/agents/test_jiuwen_context_admission.py
+      - test/backend/database/test_conversation_db.py
+      - test/sdk/core/agents/test_history_context_runtime.py
+      - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
+      - test/sdk/core/agents/test_jiuwen_tool_spans.py
+      - test/sdk/core/agents/test_persisted_codeagent_actions.py
+      - test/sdk/core/agents/test_run_local_completion.py
+      - test/sdk/core/agents/test_completed_turn_checkpoint.py
+      - test/backend/database/test_completed_turn_checkpoint_persistence.py
+      - test/sdk/core/agents/test_post_response_context.py
+      - test/sdk/core/agents/test_core_agent.py
+      - test/sdk/core/agents/test_pr4005_continuation.py
+      - test/sdk/core/model_service/test_legacy_chat_model.py
+  notes: SPEC10 Scope Reduction defines retained behavior; SPEC09 retains original failure evidence. Recovery/catalog
+    extensions and independent Ops fixes remain withdrawn. Raw journal/DB/context history and current mapper contracts
+    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03/04/05/06 in the current technical design
+    cover bounded maintenance admission, backend-authorized originals after summaries and exact root native-result
+    correlation; AC-REVIEW-04 supersedes both runtimes' estimate-based rejection and compression triggers. AC-REVIEW-05 removes history-summary format/gain adoption gates only. AC-REVIEW-06 uses private actual completion pairing and run-local history; WT-001/004 restore successful whole-turn checkpoints without assigning future facts to old coverage. Existing D3 preparation is reused.

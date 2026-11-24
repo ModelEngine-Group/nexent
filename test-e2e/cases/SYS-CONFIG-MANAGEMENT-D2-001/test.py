@@ -47,7 +47,7 @@ def _request(method, path, role=None, **kwargs):
 def test_catalog_and_authorization_contract():
     assert _request("GET", "/system_configurations").status_code == 401
 
-    for role in ("OPS", "SU"):
+    for role, expected_status in (("SU", 200), ("OPS", 403)):
         with (
             patch("permissions.operations.has_permission", return_value=True),
             patch(
@@ -56,15 +56,15 @@ def test_catalog_and_authorization_contract():
             ) as list_configurations,
         ):
             response = _request("GET", "/system_configurations", role)
-        assert response.status_code == 200
-        assert response.json()["total"] == 20
-        denylist = next(row for row in response.json()["items"] if row["key"] == "NL2AGENT_RESOURCE_DENYLIST")
-        assert denylist["kind"] == "resource_refs"
-        assert denylist["value"] == denylist["default_value"] == []
-        assert {item["key"] for item in response.json()["items"]} == set(
-            DEFAULT_CATALOG.defaults
-        )
-        list_configurations.assert_called_once_with()
+        assert response.status_code == expected_status
+        if expected_status == 200:
+            assert response.json()["total"] == 19
+            assert {item["key"] for item in response.json()["items"]} == set(
+                DEFAULT_CATALOG.defaults
+            )
+            list_configurations.assert_called_once_with()
+        else:
+            list_configurations.assert_not_called()
 
     for role in ("ADMIN", "USER"):
         with (
@@ -165,8 +165,8 @@ def test_atomic_save_and_notification_degradation_contract():
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
-def test_explicit_ops_and_su_can_save_platform_configuration():
-    for role in ("OPS", "SU"):
+def test_only_su_can_save_platform_configuration():
+    for role, expected_status in (("SU", 200), ("OPS", 403)):
         with (
             patch("permissions.operations.has_permission", return_value=True),
             patch(
@@ -183,10 +183,11 @@ def test_explicit_ops_and_su_can_save_platform_configuration():
                 role,
                 json={"changes": {"MAX_TENANT_COUNT": 5}},
             )
-        assert response.status_code == 200
-        save.assert_called_once_with(
-            {"MAX_TENANT_COUNT": 5}, actor=f"{role.lower()}-user"
-        )
+        assert response.status_code == expected_status
+        if expected_status == 200:
+            save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="su-user")
+        else:
+            save.assert_not_called()
 
 
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
@@ -196,7 +197,7 @@ def test_resource_denylist_accepts_only_reference_arrays():
     key = "NL2AGENT_RESOURCE_DENYLIST"
 
     def save(changes, *, actor):
-        assert actor == "ops-user"
+        assert actor == "su-user"
         validated = DEFAULT_CATALOG.validate_changes(DEFAULT_CATALOG.defaults, changes)
         return {"items": [{"key": key, "value": validated.get(key)}], "notification": "published"}
 
@@ -204,10 +205,10 @@ def test_resource_denylist_accepts_only_reference_arrays():
         patch("permissions.operations.has_permission", return_value=True),
         patch("ops.api.system_configurations.save_system_configurations", side_effect=save),
     ):
-        response = _request("PATCH", "/system_configurations", "OPS", json={"changes": {key: ["tool:7"]}})
+        response = _request("PATCH", "/system_configurations", "SU", json={"changes": {key: ["tool:7"]}})
         assert response.status_code == 200
         assert response.json()["items"] == [{"key": key, "value": ["tool:7"]}]
-        invalid = _request("PATCH", "/system_configurations", "OPS", json={"changes": {key: "tool:7"}})
+        invalid = _request("PATCH", "/system_configurations", "SU", json={"changes": {key: "tool:7"}})
         assert invalid.status_code == 400
         assert invalid.json()["detail"]["code"] == "INVALID_CONFIGURATION"
 

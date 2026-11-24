@@ -175,13 +175,6 @@ DEFAULT_CATALOG = SystemConfigurationCatalog(
             "systemConfig.unit.group",
         ),
         _integer(
-            "MAX_SUPER_ADMIN_COUNT",
-            "tenant",
-            1,
-            "systemConfig.effect.roleChange",
-            "systemConfig.unit.person",
-        ),
-        _integer(
             "MAX_ADMINS_PER_TENANT",
             "tenant",
             1000,

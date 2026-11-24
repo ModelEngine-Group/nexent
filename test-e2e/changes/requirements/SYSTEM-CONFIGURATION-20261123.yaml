@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: SYSTEM-CONFIGURATION-20261123
+  change_type: requirement
+  requirement_id: SYSTEM-CONFIGURATION-20261123
+  title: SU unified configuration workspace
+  description: Restrict configuration management to SU, add three configuration tabs and a parameter detail modal, move existing resource configuration panels into the page and remove the super-administrator limit from the hot-update catalog while preserving its environment-driven business check.
+  affected_features:
+    existing: [SYSTEM-CONFIGURATION, AUTH-MULTI-ROLE, OPS-BOOTSTRAP, AUTH-LOCAL]
+    added: []
+    modified: [SYSTEM-CONFIGURATION, AUTH-MULTI-ROLE]
+    retired: []
+  affected_cases:
+    existing: [SYS-CONFIG-MANAGEMENT-D2-001, SYS-CONFIG-HOT-REFRESH-D3-001, SYS-CONFIG-JOURNEY-D4-001, AUTH-MULTI-ROLE-D2-001, AUTH-MULTI-ROLE-D4-001, OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, AUTH-LOCAL-D2-001]
+    added: []
+    modified: [SYS-CONFIG-MANAGEMENT-D2-001, SYS-CONFIG-HOT-REFRESH-D3-001, SYS-CONFIG-JOURNEY-D4-001, AUTH-MULTI-ROLE-D2-001, AUTH-MULTI-ROLE-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/ops/test_system_configurations.py
+    - test/backend/configuration/test_catalog.py
+    - test/backend/configuration/test_migration.py
+    - test/backend/database/test_user_tenant_db.py
+    - test/backend/permissions/test_operations.py
+    - frontend/tests/component/systemConfiguration.test.tsx
+    - frontend/tests/component/projectConfigBranding.test.tsx
+    - frontend/tests/systemConfigI18n.test.mjs
+    behaviors:
+    - Enforce SU plus explicit configuration read/update grants while denying OPS with historical grants and preserving unrelated operations scopes.
+    - Validate exactly eighteen hot-update definitions and soft-delete the retired key through a new migration without editing historical SQL.
+    - Preserve the environment-driven super-administrator limit outside the shared snapshot.
+    - Render three configuration tabs, open parameter details in a modal and preserve draft, reset and save behavior.
+    - Reuse existing platform quota and branding panels with their original data and save contracts.
+    reason: Role, catalog and workspace behavior changed across HTTP, migration and browser contracts; existing isolated UT and D2/D3/D4 boundaries are strengthened without duplicating Cases.
+  notes: >-
+    No new Feature or D1 is added. D2 proves the SU-only HTTP contract, D3 applies all configuration migrations and
+    proves the eighteen-key snapshot and consumer refresh, and D4 proves the three-tab browser workspace and detail
+    modal. AUTH-MULTI-ROLE D2/D4 are updated because pure OPS retains dashboard and shared-resource entries but loses
+    the SU-only configuration entry. Historical SQL remains immutable; the new migration soft-deletes the retired key
+    and revokes only OPS configuration grants.

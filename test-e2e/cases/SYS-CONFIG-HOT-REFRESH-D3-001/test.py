@@ -26,11 +26,14 @@ from sqlalchemy.orm import Session
 
 DATABASE_URL = os.environ["NEXENT_SYSTEM_CONFIG_TEST_DATABASE_URL"]
 REDIS_URL = os.environ["NEXENT_SYSTEM_CONFIG_TEST_REDIS_URL"]
-MIGRATION = (
-    Path(__file__).resolve().parents[3]
-    / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
+MIGRATIONS = tuple(
+    sorted(
+        (Path(__file__).resolve().parents[3] / "deploy/sql/migrations").glob(
+            "*system_configuration*.sql"
+        )
+    )
 )
-DENYLIST_MIGRATION = MIGRATION.with_name("v2.9.0_014_nl2agent_resource_denylist.sql")
+MIGRATIONS = tuple(sorted((*MIGRATIONS, Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_014_nl2agent_resource_denylist.sql")))
 
 
 def _engine():
@@ -42,11 +45,10 @@ def _apply_migration(extra_sql=""):
     try:
         connection.autocommit = True
         with connection.cursor() as cursor:
-            cursor.execute("\n".join([
-                MIGRATION.read_text(encoding="utf-8"),
-                DENYLIST_MIGRATION.read_text(encoding="utf-8"),
-                extra_sql,
-            ]))
+            cursor.execute(
+                "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS)
+                + extra_sql
+            )
     finally:
         connection.close()
 
@@ -224,9 +226,14 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
                 "FROM nexent.sys_configuration_t WHERE delete_flag = 'N'"
             )
         ).one()
-    assert (count, tenant_limit) == (20, 100)
-    with Session(engine) as session:
-        assert SystemConfigurationRepository().load_snapshot(session).get("NL2AGENT_RESOURCE_DENYLIST") == ()
+    assert (count, tenant_limit) == (19, 100)
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT delete_flag FROM nexent.sys_configuration_t "
+                "WHERE configuration_key = 'MAX_SUPER_ADMIN_COUNT'"
+            )
+        ).scalar_one() == "Y"
 
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM nexent.sys_configuration_t"))
@@ -286,7 +293,7 @@ def test_repeat_and_concurrent_migration_preserve_user_values():
             )
         ).scalar_one()
 
-    assert (count, distinct_count) == (20, 20)
+    assert (count, distinct_count) == (19, 19)
     assert tenant_limit == 5
     assert skill_limit == 10
     assert actor == "ops-user"

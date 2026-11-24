@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-SKILL-AUTH-20261120
+  change_type: bugfix
+  bug_id: AOS-SKILL-AUTH-20261120
+  title: Preserve published Skill authorization through AgentOS export
+  description: Export and materialize the existing authorized guide, config and script contract from the actual published
+    preparation builder.
+  observed_behavior: Published Skill export rejects required GUIDE/CONFIG authorization parameters before model dispatch.
+  expected_behavior: All three Skill tools require exact sorted bound names and retain strict class, source, metadata,
+    root, files and parameter validation.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Owning fixtures must consume actual preparation output rather than obsolete handcrafted GUIDE/CONFIG
+      parameters.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CMSR-005, F-051, TPC-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CMSR-D3-001, TPC-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Actual published preparation builder exports and materializes the authorized guide, config and script with pinned
+        files.
+      - Missing, incorrect, extra or duplicate authorization names and unknown parameters remain rejected.
+      - Existing wrong-root, unbound, cross-tenant, changed-file and Workbench checks remain strict.
+    reason: Reuse the owning builder/materialization suite with controlled persistence and existing deployed Skill Cases;
+      no duplicate D1.
+    test_selectors:
+      - test/backend/agents/test_create_agent_info_workbench_coverage.py
+      - test/backend/app/test_agentos_prepared_skills.py
+  notes: 'SPEC: four-service-runtime-decoupling/changes/management-agentos-service-boundaries/design.md. F-051 owns authorization;
+    existing Skill read/SSE/persistence and adjacent stream recovery contracts remain required.'

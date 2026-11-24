@@ -7,6 +7,7 @@ import logging
 from concurrent.futures import Future
 from contextlib import aclosing
 from dataclasses import dataclass
+from functools import partial
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
@@ -20,15 +21,18 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import (
     ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
 )
+from infrastructure.rdb.conversation_state import load_execution_result_record
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
 from nexent.core.agents.context.execution_history import ExecutionHistory
+from nexent.core.agents.context.native_history import decode_history_event
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.prepared_evaluation import (
     discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
 )
+from runtime.agentos.history_sources import discover_summary_sources
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
 from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
 
@@ -66,6 +70,19 @@ async def _snapshot_chunks(info):
             yield chunk
 
 
+def _read_execution_result(user_id, tenant_id, conversation_id, message_id, unit_index):
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] == "tool_result":
+        event = decode_history_event(record)
+        if event is None or not event.get("call_id"):
+            raise ValueError("Invalid persisted native execution result")
+        return event["result"]
+    payload = json.loads(record["content"])
+    if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+        raise ValueError("Invalid persisted execution content")
+    return payload["content"]
+
+
 def _execution_record(history, event):
     value = event.get("content")
     try:
@@ -91,6 +108,8 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
         raise
 
     status = "failed"
+    facts = {}
+    index = 0
     try:
         versions = {
             "agent_id": payload.resource.agent_id,
@@ -117,7 +136,13 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
             minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
         )
-        history = ExecutionHistory()
+        checkpoint = payload.historical_context.history_summary if payload.historical_context is not None else None
+        history = ExecutionHistory(read_conversation_result=partial(
+            _read_execution_result, actor.user_id, actor.tenant_id, identity.conversation_id,
+        ), discover_summary_sources=(partial(
+            discover_summary_sources, actor.user_id, actor.tenant_id, identity.conversation_id,
+            checkpoint.unit_id, checkpoint.covered_through_message_id,
+        ) if checkpoint is not None else None))
         info.observer.execution_history = history
         facts = {}
         index = 0
@@ -134,30 +159,37 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
                             continue
                         index += 1
                         fact = record.payload()
-                        for field in ("invocation_id", "tool_call_id"):
+                        for field in ("invocation_id", "tool_call_id", "step_id"):
                             if isinstance(observer_event.get(field), str):
                                 fact[field] = observer_event[field]
                         await _append_event(journal, index, "agentos_execution_fact", fact)
                         history.bind_run(key, identity.run_id, index)
-                        facts[index] = (record, fact.get("summary"))
+                        facts[index] = (record, fact.get("summary"), fact.get("model_view"))
                         continue
                     index += 1
                     await _append_event(journal, index, "agentos_observer", observer_event)
-        for fact_index, (record, original_summary) in facts.items():
-            if record.summary and record.summary != original_summary:
-                index += 1
-                await _append_event(journal, index, "agentos_execution_summary", {
-                    "fact_sequence": fact_index, "summary": record.summary,
-                })
         status = info.attempt_outcome or "completed"
         return status
     except asyncio.CancelledError:
         status = "stopped"
         raise
     finally:
-        if slot is not None:
-            slot.worker = info.thread_future
-        release_prepared_run(info, identity.conversation_id, identity.user_id, status)
+        try:
+            for fact_index, (record, original_summary, original_view) in facts.items():
+                update = {}
+                if record.summary and record.summary != original_summary:
+                    update["summary"] = record.summary
+                if record.model_view is not None and record.model_view != original_view:
+                    update["model_view"] = record.model_view
+                if update:
+                    index += 1
+                    await _append_event(journal, index, "agentos_execution_summary", {
+                        "fact_sequence": fact_index, **update,
+                    })
+        finally:
+            if slot is not None:
+                slot.worker = info.thread_future
+            release_prepared_run(info, identity.conversation_id, identity.user_id, status)
 
 
 async def _finish_producer(runner, monitor, identity, journal, status):

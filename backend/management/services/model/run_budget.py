@@ -11,8 +11,6 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from nexent.core.models.capacity_budget import (
     ContextBudgetCalculator,
     ContextBudgetSnapshot,
-    RequestBudgetOverrides,
-    UncertaintyReserveBasisUnknown,
 )
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
@@ -28,9 +26,7 @@ _TOKEN_THRESHOLD_LEGACY_FALLBACK = 32768
 
 _OPERATOR_OVERRIDE_FIELDS = (
     "context_window_tokens",
-    "max_input_tokens",
     "max_output_tokens",
-    "default_output_reserve_tokens",
     "tokenizer_family",
 )
 
@@ -78,9 +74,6 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
         value = model_info.get(field)
         if value is not None:
             overrides[field] = value
-    if (model_info.get("profile_schema_version") is not None
-            and model_info.get("default_max_output_tokens") is not None):
-        overrides["default_output_reserve_tokens"] = model_info["default_max_output_tokens"]
     return overrides
 
 
@@ -132,39 +125,12 @@ def _resolve_context_budget(
     if capacity_snapshot is None:
         return None
 
-    request_overrides = None
-    if request_requested_output_tokens is not None:
-        request_overrides = RequestBudgetOverrides(
-            requested_output_tokens=request_requested_output_tokens,
-        )
-
-    output_reserve_source = (
-        "agent" if agent_requested_output_tokens is not None else "model_default"
+    # Compatibility-only arguments remain readable until PR2. They must not
+    # participate in policy resolution or introduce historical output limits.
+    snapshot = ContextBudgetCalculator().calculate_context_budget(
+        capacity_snapshot=capacity_snapshot,
+        reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
     )
-    try:
-        snapshot = ContextBudgetCalculator().calculate_context_budget(
-            capacity_snapshot=capacity_snapshot,
-            reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
-            request_overrides=request_overrides,
-            requested_output_tokens=agent_requested_output_tokens,
-            output_reserve_source=output_reserve_source,
-        )
-    except UncertaintyReserveBasisUnknown as exc:
-        # W2 uncertainty reserve needs context_window_tokens as the 10% basis.
-        # Falls through here when a model row has max_input_tokens set but
-        # context_window_tokens is NULL - possible for rows imported before
-        # W11 V1 save-time defaults landed, or for rows written directly via
-        # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
-        # caller already handles (falls back to W1 input_budget).
-        logger.warning(
-            "W2 context budget unavailable (tenant_id=%s model=%s): %s - "
-            "falling back to W1 input_budget. Fill context_window_tokens on the "
-            "model record to enable W2 enforcement.",
-            tenant_id,
-            capacity_snapshot.model_name,
-            exc,
-        )
-        return None
     logger.debug(
         "W2 context budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
         "compaction_trigger_threshold_tokens=%s compaction_target_tokens=%s "
@@ -183,16 +149,13 @@ def _resolve_context_budget(
 def _resolve_input_budget(
     model_info: Optional[dict],
 ) -> tuple[int, Optional[dict], Optional[ModelCapacitySnapshot]]:
-    """Resolve the context-manager input budget for a model_record_t row.
+    """Resolve the selected model's combined capacity without retired limits.
 
-    Calls ModelCapacityResolver with the catalog + operator overrides. Returns
-    snapshot.provider_input_limit_tokens and monitoring fields on success.
-    Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
-    capacity is unknown - this is the migration-window behavior before all
-    model rows are backfilled.
+    Unknown or invalid capacities fail explicitly; they cannot replace a saved
+    window with a fixed threshold or disable runtime enforcement.
     """
     if not isinstance(model_info, dict):
-        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+        raise ProviderCapabilityUnknown("A model with a combined context window is required")
     provider_raw = model_info.get("model_factory")
     provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
     model_id = model_info.get("model_name") or ""
@@ -232,7 +195,7 @@ def _resolve_input_budget(
             model_id,
             detail=provider_missing_detail,
         )
-        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+        raise
     except ResolverError as exc:
         _warn_missing_capacity_once(
             model_info,
@@ -240,7 +203,7 @@ def _resolve_input_budget(
             model_id,
             detail=str(exc),
         )
-        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+        raise
 
 
 def _warn_missing_capacity_once(
@@ -271,14 +234,7 @@ def _warn_missing_capacity_once(
         else "no context_window_tokens or max_output_tokens configured"
     )
     logger.warning(
-        "Output token cap and budget consistency check are not enforced for "
-        "model '%s' (model_id=%s, provider=%s) because %s. "
-        "To enable enforcement, open the Nexent model management UI, edit "
-        "this model, and fill in 'Context window tokens' and 'Max output "
-        "tokens'. Falling back to a default context threshold of %s tokens.",
-        model_id_str,
-        db_model_id,
-        provider,
-        reason,
-        _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+        "Runtime capacity unavailable for model '%s' (model_id=%s, provider=%s): %s. "
+        "Configure the combined context window and output capability before running.",
+        model_id_str, db_model_id, provider, reason,
     )
