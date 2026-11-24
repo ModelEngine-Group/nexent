@@ -30,6 +30,7 @@ MIGRATED_MODULES = {
     'agent/conversation_submission.py',
     'agent/core_policy.py',
     'agent/creator_run.py',
+    'agent/runtime_inputs.py',
     'agent/icon.py',
     'agent/management.py',
     'agent/mcp_passthrough.py',

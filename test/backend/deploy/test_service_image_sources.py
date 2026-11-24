@@ -35,7 +35,7 @@ def test_independent_images_do_not_package_other_service_implementations():
     copies = [line.split() for line in common_and_services.replace("\\\n", " ").splitlines() if line.startswith("COPY ")]
     for parts in copies:
         assert all(
-            not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
+            not source.startswith(("backend/ops", "backend/data_process"))
             for source in parts[1:-1]
         )
     runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
@@ -43,6 +43,31 @@ def test_independent_images_do_not_package_other_service_implementations():
     sql_sources = [source for line in (runtime + common).splitlines() if line.startswith("COPY deploy/sql/")
                    for source in line.split()[1:-1]]
     assert set(sql_sources) <= {"deploy/sql/ops-init.sql", "deploy/sql/migrations/ops/"}
+
+
+def test_management_packages_creator_imports_without_sharing_them_with_runtime():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    packaging = run_path(str(ROOT / "deploy/images/dockerfiles/main/copy_service_sources.py"))
+    creator_sources = packaging["collect_sources"](ROOT, ("management.api.agent.creator",))
+    nl2agent_sources = {
+        path.as_posix()
+        for path in creator_sources
+        if path.as_posix().startswith(("backend/services/", "backend/tool_collection/mcp/"))
+    }
+    assert "backend/services/nl2agent_state_service.py" in nl2agent_sources
+
+    for target in ("management", "runtime", "backend-common", "management-base"):
+        section = dockerfile.split(f" AS {target}\n", 1)[1].split("\nFROM ", 1)[0]
+        sources = {
+            source
+            for line in section.replace("\\\n", " ").splitlines() if line.startswith("COPY ")
+            for source in line.split()[1:-1]
+        }
+        service_sources = {
+            source for source in sources
+            if source.startswith(("backend/services", "backend/tool_collection/mcp"))
+        }
+        assert service_sources == (nl2agent_sources if target == "management" else set())
 
 
 def test_independent_services_package_the_shared_monitoring_producer_and_ops_migrations():
