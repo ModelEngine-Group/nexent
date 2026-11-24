@@ -161,6 +161,7 @@ def test_git_bash_preserves_container_paths_and_converts_host_paths(tmp_path, co
     result = run_shell(shell_function("docker", hook) + r'''
 DEPLOYMENT_SELECTED_DOCKER_SERVICES=nexent-config
 NEXENT_IMAGE=backend:test
+NEXENT_MANAGEMENT_IMAGE=management:test
 docker() { return 0; }
 ROOT_ENV_FILE="$(cygpath -u "$HOST_DIRECTORY")/.env"
 COMPOSE_DIR="$(cygpath -u "$HOST_DIRECTORY")/compose"
@@ -328,7 +329,6 @@ COMPOSE_FILE_SUFFIX=.yml
 NEXENT_IMAGE=backend:test
 NEXENT_MANAGEMENT_IMAGE=management:test
 NEXENT_RUNTIME_IMAGE=runtime:test
-NEXENT_MCP_SERVICE_IMAGE=mcp-service:test
 NEXENT_OPS_IMAGE=ops:test
 docker() {
   if [ "$1" = image ]; then return 1; fi
@@ -339,7 +339,7 @@ prepare_core_service_deployment nexent-config nexent-runtime nexent-mcp nexent-o
 ''')
     assert result.returncode == 0, result.stderr
     assert [line for line in result.stdout.splitlines() if line.startswith("PULL:")] == [
-        "PULL:management:test", "PULL:runtime:test", "PULL:mcp-service:test", "PULL:ops:test",
+        "PULL:management:test", "PULL:runtime:test", "PULL:ops:test",
     ]
     assert result.stdout.index("PULL:ops:test") < result.stdout.index("run --rm")
 

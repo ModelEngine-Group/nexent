@@ -19,9 +19,9 @@ from permissions import rbac
 async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monkeypatch, resource):
     secret = "isolated-ops-model-gateway-signature"
     actor = {"kind": "session", "user_id": "operator", "tenant_id": "tenant", "roles": ["OPS"]}
-    monkeypatch.setattr("gateway.downstream.middleware.enabled", lambda: True)
-    monkeypatch.setattr("gateway.downstream.middleware.signing_key", lambda: secret)
-    monkeypatch.setattr("gateway.downstream.identity.signing_key", lambda: secret)
+    monkeypatch.setattr("gateway.identity.middleware.enabled", lambda: True)
+    monkeypatch.setattr("gateway.identity.middleware.signing_key", lambda: secret)
+    monkeypatch.setattr("gateway.identity.downstream.signing_key", lambda: secret)
     monkeypatch.setattr(ops_application, "OPS_MONITORING_ENABLED", True)
     monkeypatch.setattr(ops_application, "trajectory_enabled", lambda: False)
     monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read", "ops.dashboard:update"}})

@@ -26,7 +26,7 @@ def get_service():
             from infrastructure.trace.trajectory_store import (
                 TrajectoryFileStore,
             )
-            from management.db.trajectory.repository import ExecutionRepository
+            from infrastructure.rdb.trajectory.repository import ExecutionRepository
             from ops.db.trajectory.catalog import TrajectoryCatalog
             from ops.db.trajectory.queries import ExecutionCatalog
 
