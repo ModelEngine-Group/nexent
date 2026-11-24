@@ -15,7 +15,7 @@ from gateway.security.delegation import DELEGATION_PATH, delegate_mcp
 from gateway.configuration import load_settings
 from gateway.exposure.middleware import ExposureMiddleware
 from gateway.exposure.registry import default_registry
-from gateway.security.identity import IDENTITY_HEADER, IdentityError, sign_identity
+from gateway.identity.protocol import IDENTITY_HEADER, IdentityError, sign_identity
 from gateway.proxy.http import forward_http
 from gateway.proxy.websocket import forward_websocket
 from gateway.routing import exposure_target, filtered_headers
@@ -73,7 +73,7 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
 
     app.state.identity_lookup = identity_lookup or unavailable_identity
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-                       allow_methods=["*"], allow_headers=["*"])
+                       allow_methods=["*"], allow_headers=["*"], expose_headers=["run_id", "X-AgentOS-Run-ID"])
     # Last-added middleware runs first, including before CORS preflight handling.
     app.add_middleware(ExposureMiddleware, registry=registry)
     app.state.exposure_revision, app.state.exposure_digest = registry.revision, registry.digest

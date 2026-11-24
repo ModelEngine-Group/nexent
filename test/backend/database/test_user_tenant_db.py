@@ -86,7 +86,8 @@ install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 db_models_mock = MagicMock()
 db_models_mock.UserTenant = MagicMock()
 sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.identity.models'] = db_models_mock
+sys.modules['infrastructure.rdb.account_record'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()
@@ -105,7 +106,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Trajectory persistence is a collaborator of tenant membership writes.
-sys.modules['management.db.trajectory.repository'] = MagicMock()
+sys.modules['infrastructure.rdb.trajectory.repository'] = MagicMock()
 
 # Now import the functions to be tested
 from management.db.identity.user_tenant import (

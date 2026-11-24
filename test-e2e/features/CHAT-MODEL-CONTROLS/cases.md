@@ -9,5 +9,6 @@
 - D4 [CHAT-MODEL-CONTROLS-D4-001](../../cases/CHAT-MODEL-CONTROLS-D4-001/case.yaml) · active
 - D4 [CHAT-MODEL-CONTROLS-D4-002](../../cases/CHAT-MODEL-CONTROLS-D4-002/case.yaml) · active
 - D4 [CHAT-MODEL-CONTROLS-D4-003](../../cases/CHAT-MODEL-CONTROLS-D4-003/case.yaml) · active
+- D4 [CHAT-PREFERENCES-D4-001](../../cases/CHAT-PREFERENCES-D4-001/case.yaml) · active
 - D5 [CHAT-MODEL-CONTROLS-D5-001](../../cases/CHAT-MODEL-CONTROLS-D5-001/case.yaml) · active
 - D5 [USER-MODEL-READ-D5-001](../../cases/USER-MODEL-READ-D5-001/case.yaml) · active

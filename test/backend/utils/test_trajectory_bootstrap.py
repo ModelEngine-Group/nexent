@@ -24,11 +24,15 @@ def forbid_network(*args, **kwargs):
 
 socket.socket.connect = forbid_network
 # PG remains a controlled external boundary for this bootstrap unit test.
-from management.db.trajectory.repository import ExecutionRepository
+from infrastructure.rdb.trajectory.repository import ExecutionRepository
 patch.object(ExecutionRepository, "begin", return_value=1).start()
 patch.object(ExecutionRepository, "initialize", side_effect=lambda _: nullcontext()).start()
 patch.object(ExecutionRepository, "expire", return_value=None).start()
-from infrastructure.trace.bootstrap import monitoring_manager, local_trajectory_processor
+from infrastructure.trace.bootstrap import monitoring_manager
+from runtime.trajectory import configure_runtime_trajectory
+
+assert not monitoring_manager.is_enabled
+local_trajectory_processor = configure_runtime_trajectory()
 from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from nexent.monitor import AgentRunMetadata
 

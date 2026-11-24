@@ -3,22 +3,11 @@
 """Compile deployment policy into detached, application-owned Agent configs."""
 
 from contracts.constants.environment import NEXENT_AGENT_CORE
-from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
+from infrastructure.agent_core_policy import apply_agent_core_policy as apply_deployed_core_policy
 
 
 def apply_agent_core_policy(config):
-    """Keep saved definitions untouched; normalize only this run's Core options."""
-    config.agent_core = NEXENT_AGENT_CORE
-    if NEXENT_AGENT_CORE == "jiuwen":
-        guardrail = config.verification_config.guardrail_config
-        if guardrail is not None and guardrail.enabled:
-            raise UnsupportedAgentCoreConfig("Jiuwen does not support the configured guardrail policy")
-        config.enable_protocol_repair_retry = False
-        config.provide_run_summary = False
-        config.verification_config = config.verification_config.model_copy(update={"enabled": False})
-    for child in config.worker_agents:
-        apply_agent_core_policy(child)
-    return config
+    return apply_deployed_core_policy(config, NEXENT_AGENT_CORE)
 
 
 def prepare_creator_core(run_info, *, tenant_id, user_id=None, user_context=None):

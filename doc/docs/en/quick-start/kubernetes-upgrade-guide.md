@@ -26,6 +26,8 @@ The actual backup directory preserves each PVC's name at the top level, for exam
 
 ## 2. Perform the Upgrade
 
+Web marks authentication cookies `Secure` by default. If users still connect directly over HTTP on an isolated network, set `NEXENT_AUTH_COOKIE_SECURE=false` in `deploy/env/.env` before upgrading so browsers can store the session. Keep the default `true` for HTTPS ingress and reverse proxies.
+
 ### 2.1 Online Upgrade
 
 In an environment that can reach GitHub and the required image registries, perform an online upgrade from the current Nexent repository. Confirm the current branch and target version, then update with fast-forward only.

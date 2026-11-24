@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: DEP-LANGFUSE-MINIO-20261123
+  change_type: bugfix
+  bug_id: BUG-DEP-LANGFUSE-MINIO
+  title: Use the selected MinIO image source for Langfuse
+  description: Resolve both MinIO services from the selected image source for Docker and Helm, and package that image for offline installations.
+  observed_behavior: Langfuse Compose, Helm, and offline packages independently reference the unavailable Quay image even when the core MinIO image uses the selected mirror.
+  expected_behavior: Both MinIO services use the same complete image reference in Docker and Helm, and offline packages contain that reference once per package.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The deployment shell suite asserts the hard-coded Quay reference instead of profile parity. The deployment catalog has no active formal case for image selection or offline packaging.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-173, F-174]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: Image resolution can be checked by rendering Compose and Helm and exercising the existing offline packaging scripts. Existing deployment and telemetry cases cover other contracts.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: The changed behavior is implemented entirely in Compose interpolation and deployment shell scripts. There is no changed Python behavior to exercise through the traditional Python suite.
+  notes: >-
+    SPEC: nexent-doc/docs/Developing/deploy-langfuse-minio-source/design.md.
+    Standalone Helm charts use the general mirror by default. The deployment script applies the selected profile and any configured registry prefix.

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from management.services.model.providers import dashscope_provider, openai_provider
+from runtime.model.providers import dashscope_provider, openai_provider
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ import pytest
 
 
 def test_session_commits_and_closes_on_success():
-    from management.configuration.database import ConfigurationDatabase
+    from infrastructure.system_configuration.database import ConfigurationDatabase
 
     session = Mock()
     database = ConfigurationDatabase(session_factory=lambda: session)
@@ -21,7 +21,7 @@ def test_session_commits_and_closes_on_success():
 
 
 def test_session_rolls_back_without_logging_connection_secrets(caplog):
-    from management.configuration.database import ConfigurationDatabase
+    from infrastructure.system_configuration.database import ConfigurationDatabase
 
     session = Mock()
     database = ConfigurationDatabase(session_factory=lambda: session)
@@ -37,17 +37,17 @@ def test_session_rolls_back_without_logging_connection_secrets(caplog):
 
 
 def test_lazy_engine_creation_and_dispose(mocker):
-    from management.configuration.database import ConfigurationDatabase
+    from infrastructure.system_configuration.database import ConfigurationDatabase
 
     session = Mock()
     engine = Mock()
     session_factory = Mock(return_value=session)
     create_engine = mocker.patch(
-        "management.configuration.database.create_engine",
+        "infrastructure.system_configuration.database.create_engine",
         return_value=engine,
     )
     sessionmaker = mocker.patch(
-        "management.configuration.database.sessionmaker",
+        "infrastructure.system_configuration.database.sessionmaker",
         return_value=session_factory,
     )
     database = ConfigurationDatabase()
@@ -68,15 +68,15 @@ def test_lazy_engine_creation_and_dispose(mocker):
 
 
 def test_engine_bounds_connection_statement_and_lock_waits(mocker):
-    from management.configuration.database import ConfigurationDatabase
+    from infrastructure.system_configuration.database import ConfigurationDatabase
 
     session = Mock()
     create_engine = mocker.patch(
-        "management.configuration.database.create_engine",
+        "infrastructure.system_configuration.database.create_engine",
         return_value=Mock(),
     )
     mocker.patch(
-        "management.configuration.database.sessionmaker",
+        "infrastructure.system_configuration.database.sessionmaker",
         return_value=Mock(return_value=session),
     )
     database = ConfigurationDatabase()

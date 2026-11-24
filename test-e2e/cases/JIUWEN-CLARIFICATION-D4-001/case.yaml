@@ -32,17 +32,22 @@ case:
     action: Ask the original missing-birth-information question through the real chat page, then reload the pending form from history.
     expected: One actual ask_user terminal form renders; one real run completes awaiting_input without an error,
       fake final answer or unrelated tool dispatch.
-      Pending history retains completed/awaiting_input with no error and permits submission without starting a run.
+      Pending public history shows the same completed turn and form without an error or final answer, and permits
+      submission without starting a run. The original completed/awaiting_input terminal is persisted for that message.
   - order: 3
     action: Fill required birth information using the actual form controls and submit once.
     expected: The request includes structured answers and source unit identity; backend atomically saves the answer
-      and the real model produces a successful continuation without re-asking supplied facts.
+      and the real model produces a successful continuation without re-asking supplied facts. The public stream emits
+      one confirmed answer without raw engine text fragments, and the page renders the answer as continuous Markdown.
+      PostgreSQL stores native text and deep reasoning in their respective Nexent thinking units, with one row per
+      model step and block and no raw model_output units.
   - order: 4
     action: Open the persisted conversation through its canonical history route, refresh and reopen it, then ask
       a simple history follow-up.
     expected: Submitted values restore read-only, loading causes no run or DB message rewrite, and an explicit follow-up
       uses saved birth facts without replaying the form.
-      Both history API and page retain the original completed/awaiting_input terminal without JIUWEN_FINAL_OUTPUT_INVALID.
+      Public history and the page continue to show the original clarification without JIUWEN_FINAL_OUTPUT_INVALID.
+      The persisted terminal remains completed/awaiting_input.
   expected_results:
   - Deployed configuration has no per-Agent Core and original assistant configuration/model/history stay unchanged.
   - An actual real-model form completes, submitted answers persist with original form identity, and continuation

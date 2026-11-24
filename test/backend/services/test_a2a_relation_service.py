@@ -3,7 +3,6 @@
 
 import pytest
 
-from test.backend.services import test_agent_service as legacy
 from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
 from management.services.agent import authorization as service
 from contracts.errors.exceptions import AgentDraftEditError

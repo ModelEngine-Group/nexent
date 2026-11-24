@@ -21,7 +21,7 @@ profile = helpers.profile
 def repository(database, monkeypatch):
     _, client, _ = database
     client.db_client = MagicMock()
-    return helpers.load("management.db.model._list_profile_unit", "backend/management/db/model/repository.py", monkeypatch)
+    return helpers.load("infrastructure.rdb._list_profile_unit", "infrastructure/rdb/model_records.py", monkeypatch)
 
 
 def test_batch_rows_decode_with_all_saved_profile_fields(repository, profile, monkeypatch):

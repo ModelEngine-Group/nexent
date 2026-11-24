@@ -1,94 +1,73 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Background admission and cancellation ownership boundaries."""
+
+"""Background admission pins a single scoped run before contacting Runtime."""
 
 import asyncio
-from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
 
-from contracts.agent import AgentRequest
-from management.services.agent import lifecycle, run
-from management.services.agent.background import BackgroundExecutionState
-from runtime.executions import LocalExecutionRegistry
+from contracts.errors.exceptions import RuntimeServiceUnavailableError
+from infrastructure.local_execution_registry import LocalExecutionRegistry
+from management.services.agent import background
+from .test_agentos_background_dispatch import ACTOR, PAYLOAD, REFERENCE, dispatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["reset", "canceled", "context", "stream", "none"])
-async def test_background_admission_resets_once_and_always_releases(monkeypatch, failure):
-    events = []
-    monkeypatch.setattr(run.agent_run_manager, "reserve_agent_run", Mock(return_value="reservation"))
-    release = Mock()
-    monkeypatch.setattr(run.agent_run_manager, "release_agent_run_reservation", release)
+@pytest.mark.parametrize("failure", ["prepare", "start", "projection", None])
+async def test_background_keeps_the_projection_marker_only_after_preparation(dispatch, failure):
+    error = RuntimeServiceUnavailableError("controlled background failure")
+    if failure == "prepare":
+        dispatch.compile.side_effect = error
+    elif failure == "start":
+        dispatch.client.start_prepared_run.side_effect = error
+    elif failure == "projection":
+        dispatch.project.side_effect = error
 
-    async def reset(*args, **kwargs):
-        events.append(("reset", kwargs["generation"]))
-        if failure == "reset":
-            raise RuntimeError("reset failed")
-
-    def context(*args, **kwargs):
-        events.append("context")
-        if failure == "context":
-            raise RuntimeError("context failed")
-        return SimpleNamespace(metadata={}, enable_memory=False)
-
-    async def stream(*args, execution_state, reservation_token, **kwargs):
-        assert reservation_token == "reservation"
-        events.append("stream")
-        if failure == "stream":
-            raise RuntimeError("stream failed")
-        execution_state.assistant_message_id = 7
-        execution_state.outcome = "completed"
-        execution_state.persisted = True
-        yield "done"
-
-    monkeypatch.setattr(run.runtime_state_service, "reset_stream_async", reset)
-    monkeypatch.setattr(run, "build_agent_run_context", context)
-    monkeypatch.setattr(run, "agent_monitoring_context", lambda *a: nullcontext())
-    monkeypatch.setattr(run, "generate_stream", stream)
-    state = BackgroundExecutionState(runtime_generation="77", is_active=lambda: failure != "canceled")
-    call = run.run_agent_background(AgentRequest(query="fixture", agent_id=1, conversation_id=9),
-                                    "owner", "tenant", skip_user_save=True, execution_state=state)
-    if failure == "none":
-        assert (await call)["status"] == "completed"
+    if failure is None:
+        assert await background.dispatch_background(PAYLOAD, ACTOR) == dispatch.result
     else:
-        with pytest.raises(asyncio.CancelledError if failure == "canceled" else RuntimeError):
-            await call
-    assert events[0] == ("reset", "77") and events.count(("reset", "77")) == 1
-    if failure == "canceled":
-        assert events == [("reset", "77")]
-    release.assert_called_once_with(9, "owner", "reservation")
+        with pytest.raises(RuntimeServiceUnavailableError) as caught:
+            await background.dispatch_background(PAYLOAD, ACTOR)
+        assert caught.value is error
 
-
-def test_admission_rejection_does_not_reset_current_turn(monkeypatch):
-    reset = AsyncMock()
-    monkeypatch.setattr(run.runtime_state_service, "reset_stream_async", reset)
-    monkeypatch.setattr(run.agent_run_manager, "reserve_agent_run", Mock(side_effect=RuntimeError("busy")))
-    with pytest.raises(RuntimeError, match="busy"):
-        asyncio.run(run.run_agent_background(AgentRequest(query="x", agent_id=1, conversation_id=9), "owner", "tenant"))
-    reset.assert_not_awaited()
-
-
-@pytest.mark.parametrize("matches", [False, True])
-def test_generation_stop_only_targets_the_matching_local_run(monkeypatch, matches):
-    info = SimpleNamespace(_automation_runtime_generation="77" if matches else "88")
-    manager = lifecycle.agent_run_manager
-    monkeypatch.setattr(manager, "get_agent_run_info", lambda *a: info)
-    signal = Mock(return_value=matches)
-    monkeypatch.setattr(lifecycle.runtime_state_service, "set_cancel_signal", signal)
-    stop = Mock(return_value=True)
-    monkeypatch.setattr(LocalExecutionRegistry, "stop_agent_run", stop)
-    assert manager.stop_agent_run(9, "owner", expected_generation="77") is matches
-    if matches:
-        stop.assert_called_once_with(9, "owner", expected_run_info=info)
+    dispatch.compile.assert_awaited_once()
+    if failure == "prepare":
+        assert not dispatch.writes
+        dispatch.client.start_prepared_run.assert_not_awaited()
     else:
-        stop.assert_not_called()
+        assert dispatch.writes == [{"projection_message_index": 9, "projection_memory_agent_id": 2}]
+        dispatch.client.start_prepared_run.assert_awaited_once()
+    if failure in {"prepare", "start"}:
+        dispatch.project.assert_not_awaited()
+    else:
+        dispatch.project.assert_awaited_once_with(dispatch.client, REFERENCE, dispatch.record)
+    dispatch.finish_task.assert_not_called()
 
 
-def test_identity_guard_cannot_stop_a_replacement_run(monkeypatch):
+@pytest.mark.asyncio
+async def test_cancelled_background_never_writes_or_opens_another_run(dispatch):
+    dispatch.record["status"] = "CANCELED"
+    with pytest.raises(HTTPException) as caught:
+        await background.dispatch_background(PAYLOAD, ACTOR)
+
+    assert caught.value.status_code == 409
+    assert not dispatch.writes
+    dispatch.compile.assert_not_awaited()
+    dispatch.client.start_prepared_run.assert_not_awaited()
+    dispatch.project.assert_not_awaited()
+
+
+@pytest.mark.parametrize("expected_matches", [False, True])
+def test_identity_guard_cannot_stop_or_unregister_a_replacement_run(monkeypatch, expected_matches):
+    monkeypatch.setattr(LocalExecutionRegistry, "_instance", None)
     registry = LocalExecutionRegistry()
-    newer = SimpleNamespace(stop_event=Mock())
-    monkeypatch.setattr(registry, "get_agent_run_info", lambda *a: newer)
-    assert not registry.stop_agent_run(9, "owner", expected_run_info=object())
-    newer.stop_event.set.assert_not_called()
+    replacement = SimpleNamespace(stop_event=asyncio.Event())
+    registry.register_agent_run(9, replacement, "owner")
+    expected = replacement if expected_matches else object()
+
+    assert registry.stop_agent_run(9, "owner", expected_run_info=expected) is expected_matches
+    assert replacement.stop_event.is_set() is expected_matches
+    assert registry.unregister_agent_run(9, "owner", agent_run_info=expected) is expected_matches
+    assert registry.get_agent_run_info(9, "owner") is (None if expected_matches else replacement)

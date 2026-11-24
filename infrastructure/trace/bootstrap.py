@@ -14,117 +14,82 @@ Usage:
         return {"status": "ok"}
 """
 
-from nexent.monitor import MonitoringConfig, get_monitoring_manager
+import logging
+from dataclasses import replace
+from importlib import import_module
+
+from infrastructure.rdb.model_monitoring import write_model_monitoring_record
+from nexent.monitor import MonitoringConfig, configure_monitoring_records, get_monitoring_manager
 
 try:
-    from contracts.constants import environment as trajectory_config
-    from contracts.constants.environment import (
-        ENABLE_TELEMETRY,
-        MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS,
-        MONITORING_EXCLUDED_SPAN_NAMES,
-        MONITORING_FASTAPI_EXCLUDE_SPANS,
-        MONITORING_FASTAPI_EXCLUDED_URLS,
-        MONITORING_FASTAPI_INCLUDED_URLS,
-        MONITORING_INSTRUMENT_REQUESTS,
-        MONITORING_PROJECT_NAME,
-        MONITORING_PROVIDER,
-        MONITORING_TRACE_CONTENT_MODE,
-        MONITORING_TRACE_MAX_CHARS,
-        MONITORING_TRACE_MAX_ITEMS,
-        OTEL_EXPORTER_OTLP_ENDPOINT,
-        OTEL_EXPORTER_OTLP_METRICS_ENABLED,
-        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-        OTEL_EXPORTER_OTLP_PROTOCOL,
-        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-        OTEL_SERVICE_NAME,
-        OTLP_HEADERS,
-        TELEMETRY_SAMPLE_RATE,
-    )
-    from infrastructure.trace.trajectory_runtime import create_local_processor
+    environment = import_module("contracts.constants.environment")
 except ImportError:
-    from backend.contracts.constants import environment as trajectory_config
-    from backend.contracts.constants.environment import (
-        ENABLE_TELEMETRY,
-        MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS,
-        MONITORING_EXCLUDED_SPAN_NAMES,
-        MONITORING_FASTAPI_EXCLUDE_SPANS,
-        MONITORING_FASTAPI_EXCLUDED_URLS,
-        MONITORING_FASTAPI_INCLUDED_URLS,
-        MONITORING_INSTRUMENT_REQUESTS,
-        MONITORING_PROJECT_NAME,
-        MONITORING_PROVIDER,
-        MONITORING_TRACE_CONTENT_MODE,
-        MONITORING_TRACE_MAX_CHARS,
-        MONITORING_TRACE_MAX_ITEMS,
-        OTEL_EXPORTER_OTLP_ENDPOINT,
-        OTEL_EXPORTER_OTLP_METRICS_ENABLED,
-        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-        OTEL_EXPORTER_OTLP_PROTOCOL,
-        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-        OTEL_SERVICE_NAME,
-        OTLP_HEADERS,
-        TELEMETRY_SAMPLE_RATE,
-    )
-    from infrastructure.trace.trajectory_runtime import (
-        create_local_processor,
-    )
-
-import logging
+    environment = import_module("backend.contracts.constants.environment")
 
 logger = logging.getLogger(__name__)
 
 monitoring_manager = get_monitoring_manager()
 
 
-def _agent_metadata():
-    from nexent.monitor import get_agent_monitoring_context
-    return get_agent_monitoring_context()
-
-
-local_trajectory_processor = create_local_processor(trajectory_config, _agent_metadata)
+local_trajectory_processor = None
 
 
 def _initialize_monitoring():
-    """Initialize monitoring configuration with OTLP settings."""
-    from infrastructure.trace.trajectory_execution import execution_observer
-
+    """Configure the shared telemetry defaults before any service adds capture."""
     config = MonitoringConfig(
-        enable_telemetry=ENABLE_TELEMETRY,
-        service_name=OTEL_SERVICE_NAME,
-        provider=MONITORING_PROVIDER or "otlp",
-        otlp_endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
-        otlp_traces_endpoint=OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or None,
-        otlp_metrics_endpoint=OTEL_EXPORTER_OTLP_METRICS_ENDPOINT or None,
-        otlp_protocol=OTEL_EXPORTER_OTLP_PROTOCOL,
-        otlp_headers=OTLP_HEADERS,
-        export_metrics=OTEL_EXPORTER_OTLP_METRICS_ENABLED,
-        instrument_requests=MONITORING_INSTRUMENT_REQUESTS,
-        fastapi_included_urls=MONITORING_FASTAPI_INCLUDED_URLS,
-        fastapi_excluded_urls=MONITORING_FASTAPI_EXCLUDED_URLS,
-        fastapi_exclude_spans=MONITORING_FASTAPI_EXCLUDE_SPANS,
-        excluded_elasticsearch_operations=MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS,
-        excluded_span_names=MONITORING_EXCLUDED_SPAN_NAMES,
-        project_name=MONITORING_PROJECT_NAME or None,
-        telemetry_sample_rate=TELEMETRY_SAMPLE_RATE,
-        trace_content_mode=MONITORING_TRACE_CONTENT_MODE,
-        trace_max_chars=MONITORING_TRACE_MAX_CHARS,
-        trace_max_items=MONITORING_TRACE_MAX_ITEMS,
-        local_span_processor=local_trajectory_processor,
-        local_execution_observer=execution_observer(
-            capturing=ENABLE_TELEMETRY and MONITORING_PROVIDER == "local_file",
-            store=local_trajectory_processor.store if local_trajectory_processor is not None else None,
-        ) if local_trajectory_processor is not None else None,
+        enable_telemetry=environment.ENABLE_TELEMETRY and environment.MONITORING_PROVIDER != "local_file",
+        service_name=environment.OTEL_SERVICE_NAME,
+        provider=environment.MONITORING_PROVIDER or "otlp",
+        otlp_endpoint=environment.OTEL_EXPORTER_OTLP_ENDPOINT,
+        otlp_traces_endpoint=environment.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or None,
+        otlp_metrics_endpoint=environment.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT or None,
+        otlp_protocol=environment.OTEL_EXPORTER_OTLP_PROTOCOL,
+        otlp_headers=environment.OTLP_HEADERS,
+        export_metrics=environment.OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        instrument_requests=environment.MONITORING_INSTRUMENT_REQUESTS,
+        fastapi_included_urls=environment.MONITORING_FASTAPI_INCLUDED_URLS,
+        fastapi_excluded_urls=environment.MONITORING_FASTAPI_EXCLUDED_URLS,
+        fastapi_exclude_spans=environment.MONITORING_FASTAPI_EXCLUDE_SPANS,
+        excluded_elasticsearch_operations=environment.MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS,
+        excluded_span_names=environment.MONITORING_EXCLUDED_SPAN_NAMES,
+        project_name=environment.MONITORING_PROJECT_NAME or None,
+        telemetry_sample_rate=environment.TELEMETRY_SAMPLE_RATE,
+        trace_content_mode=environment.MONITORING_TRACE_CONTENT_MODE,
+        trace_max_chars=environment.MONITORING_TRACE_MAX_CHARS,
+        trace_max_items=environment.MONITORING_TRACE_MAX_ITEMS,
     )
 
     monitoring_manager.configure(config)
+    configure_monitoring_records(
+        write_model_monitoring_record if environment.ENABLE_MODEL_MONITORING else None,
+        batch_size=environment.MODEL_MONITORING_BATCH_SIZE,
+        flush_interval=environment.MODEL_MONITORING_FLUSH_INTERVAL_SECONDS,
+    )
     logger.info(
-        f"OTLP monitoring initialized: service_name={OTEL_SERVICE_NAME}, "
+        f"OTLP monitoring initialized: service_name={environment.OTEL_SERVICE_NAME}, "
         f"enable_telemetry={config.enable_telemetry}, provider={config.provider}, "
         f"endpoint={config.otlp_endpoint}, trace_endpoint={config.get_trace_endpoint()}, "
-        f"protocol={OTEL_EXPORTER_OTLP_PROTOCOL}"
+        f"protocol={environment.OTEL_EXPORTER_OTLP_PROTOCOL}"
     )
+    return config
 
 
-_initialize_monitoring()
+_monitoring_config = _initialize_monitoring()
+
+
+def configure_trajectory(processor, observer):
+    """Attach Runtime capture while preserving an existing remote tracer provider."""
+    global local_trajectory_processor
+    local_trajectory_processor = processor
+    if environment.MONITORING_PROVIDER == "local_file":
+        monitoring_manager.configure(replace(
+            _monitoring_config,
+            enable_telemetry=environment.ENABLE_TELEMETRY,
+            local_span_processor=processor,
+            local_execution_observer=observer,
+        ))
+    else:
+        _monitoring_config.local_execution_observer = observer
+
 
 __all__ = ['monitoring_manager']

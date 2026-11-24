@@ -60,16 +60,29 @@ def test_su_ac_05_selected_model_is_resolved_with_tenant(monkeypatch):
     lookup.assert_called_once_with(42, "tenant")
 
 
-@pytest.mark.parametrize("is_debug,entrypoint,allowed", [(False, None, False), (True, None, True), (False, "workbench", True)])
-def test_su_ac_05_preserves_agent_model_scope(monkeypatch, is_debug, entrypoint, allowed):
-    monkeypatch.setattr(run_controls, "validate_selected_model", Mock())
-    monkeypatch.setattr(run_controls, "_agent_record_for_run", Mock(return_value={"model_ids": [41]}))
-    request = SimpleNamespace(model_id=42, workbench=None, entrypoint=entrypoint, is_debug=is_debug, agent_id=7)
-    if allowed:
-        run_controls.validate_agent_model_selection(request, "tenant", Mock())
+def test_invalid_selected_model_records_fail_closed(mocker):
+    for record, code in [(None, "model_not_available"), ({"delete_flag": "Y"}, "model_not_available"),
+                         ({"model_type": "embedding"}, "model_type_invalid")]:
+        lookup = mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
+        with pytest.raises(RunModelControlsError, match=code):
+            run_controls.validate_selected_model(9, "current-tenant")
+        lookup.assert_called_once_with(9, "current-tenant")
+
+
+@pytest.mark.parametrize("version_no,current,expected", [(3, 7, 3), (None, 7, 7), (None, None, 0)])
+def test_native_selection_preserves_agent_version_and_tenant(mocker, version_no, current, expected):
+    request = AgentRequest(agent_id=42, query="fixture", model_id=9, version_no=version_no)
+    catalog = mocker.patch.object(run_controls, "validate_selected_model")
+    published = mocker.patch("management.db.agent.repository.query_current_version_no", return_value=current)
+    lookup = Mock(return_value={"model_ids": [9]})
+    run_controls.validate_agent_model_selection(request, "tenant", lookup)
+    catalog.assert_called_once_with(9, "tenant")
+    lookup.assert_called_once_with(agent_id=42, tenant_id="tenant", version_no=expected)
+    if version_no is None:
+        published.assert_called_once_with(42, "tenant")
     else:
         with pytest.raises(ForbiddenError):
-            run_controls.validate_agent_model_selection(request, "tenant", Mock())
+            run_controls.validate_agent_model_selection(request, "tenant", Mock(return_value={"model_ids": [8]}))
 
 
 def test_su_ac_05_preflight_uses_shared_profile_validation(monkeypatch):
@@ -150,7 +163,7 @@ def test_debug_selected_model_preferences_preserve_selection_exemption(monkeypat
     monkeypatch.setattr(model_preferences, "validate_model_preferences", validate)
     request = AgentRequest(agent_id=7, query="fixture", is_debug=True,
         model_id=42, model_parameter_preferences={"42": {"temperature": 0}})
-    run_controls.validate_agent_model_selection(request, "tenant", Mock())
+    run_controls.validate_agent_model_selection(request, "tenant", Mock(return_value={"model_ids": [9]}))
     run_controls.preflight_turn_controls(request, "tenant", {"model_ids": [41]})
 
 

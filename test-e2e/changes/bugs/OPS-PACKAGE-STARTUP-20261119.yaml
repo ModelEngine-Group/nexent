@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-PACKAGE-STARTUP-20261119
+  change_type: bugfix
+  bug_id: OPS-PACKAGE-STARTUP-20261119
+  title: Launch packaged backend services without shadowing the standard library
+  description: Use package module commands for Ops Compose and Helm and the shared Config Helm pod specification; verify the configured Ops commands against a real process.
+  observed_behavior: Direct execution of backend/http/ops_service.py places backend/http on sys.path and imports the adjacent logging.py as the standard library logging package, crashing before Uvicorn starts.
+  expected_behavior: Deployment commands launch the backend packages with python -m, Ops becomes ready, and launcher failures remain visible.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Deployment assertions accepted the script path while the process proof independently used run_module, so the deployed command was never exercised.
+  feature_contract_changed: false
+  affected_features:
+    existing: [OPS-BOOTSTRAP]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Require package module entrypoints in Ops Compose and Helm, Require the safe Config command while preserving its bootstrap Job, Preserve launcher settings and logging failures]
+    reason: Existing launcher mocks and chart tests do not detect the mismatch between deployment commands and module-based process tests.
+    test_selectors: [test/backend/deploy/test_ops_chart.py, test/backend/deploy/test_backend_launchers.py, test/backend/ops/test_bootstrap.py, test/backend/ops/test_logging.py]

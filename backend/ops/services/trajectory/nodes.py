@@ -264,8 +264,10 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 ("total", "llm.token_count.total"),
             )
         }
+        shared_attempt = kind == "model" and "nexent.model_attempt.outcome" in attrs
         if (
-            usage["total"] is None
+            not shared_attempt
+            and usage["total"] is None
             and usage["input"] is not None
             and usage["output"] is not None
         ):
@@ -273,6 +275,11 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
         usage["complete"] = kind == "model" and all(
             usage[k] is not None for k in ("input", "output", "total")
         )
+        throughput = None
+        if shared_attempt:
+            throughput = finite_number(attrs.get("llm.generation_rate"))
+        elif kind == "model" and usage["output"] is not None and duration and duration > 0:
+            throughput = usage["output"] / (duration / 1000)
         ttft = finite_number(attrs.get("llm.ttft_ms"))
         if (
             ttft is None
@@ -327,12 +334,7 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
             "tool_call_count": None,
             "ttft_ms": ttft,
             "usage": usage if kind == "model" else None,
-            "throughput": usage["output"] / (duration / 1000)
-            if kind == "model"
-            and usage["output"] is not None
-            and duration
-            and duration > 0
-            else None,
+            "throughput": throughput,
             "model": str(attrs["llm.model_name"])
             if attrs.get("llm.model_name")
             else None,

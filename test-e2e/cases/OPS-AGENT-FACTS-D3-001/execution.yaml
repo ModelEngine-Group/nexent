@@ -1,0 +1,29 @@
+schema_version: '1.0'
+case_id: OPS-AGENT-FACTS-D3-001
+timeout_seconds: 360
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_agent_start_finish_and_replay
+acceptance_bindings:
+  AC-01: [test_agent_start_finish_and_replay]
+  AC-02: [test_real_root_agent_capture_survives_sse_reconnect]
+  AC-03: [test_agent_daily_publication_switches_only_after_success, test_real_root_agent_capture_survives_sse_reconnect]
+  AC-04: [test_real_root_agent_capture_survives_sse_reconnect]
+  AC-05: [test_real_root_agent_capture_survives_sse_reconnect]
+  AC-06: [test_real_parent_and_child_facts_publish_and_replay]
+  AC-07: [test_mixed_agent_results_merge_across_days_and_replay]
+  AC-08: ['test_real_parent_and_child_facts_publish_and_replay[tokens]']
+  AC-09: [test_bulk_model_batch_failures_preserve_scoped_status]
+  AC-10: [test_real_parent_and_child_facts_publish_and_replay, test_real_root_agent_capture_survives_sse_reconnect, test_agent_daily_publication_switches_only_after_success]
+  AC-11: [test_complete_main_timing_matches_raw_trajectory_and_published_queries]
+  AC-12: [test_real_parent_and_child_facts_publish_and_replay, test_child_complete_timing_outcomes_publish_and_replay]
+  AC-13: [test_actual_jiuwen_agent_monitoring_pipeline]
+  AC-14: [test_agent_list_sorts_filtered_published_resource_totals]
+  AC-15: [test_agent_list_sorts_filtered_published_resource_totals]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Supply a dedicated migrated database and an empty Elasticsearch monitoring namespace. The case owns and cleans up its model peer, worker, sample tenant rows, isolated current Agent and model catalog tables and monitoring namespace. Current inventory is read through real SQL against those owned tables.

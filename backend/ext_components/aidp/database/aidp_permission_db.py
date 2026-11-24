@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
-from management.db.models import UserTenant
+from infrastructure.rdb.account_record import UserTenant
 from ext_components.aidp.database.db_models import AidpKbPermission
 
 logger = logging.getLogger("aidp_permission_db")

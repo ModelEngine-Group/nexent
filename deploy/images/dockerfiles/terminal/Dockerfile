@@ -5,6 +5,9 @@ ARG TARGETARCH
 
 ENV CONDA_DIR=/opt/conda
 
+# Bootstrap HTTPS before Ubuntu's ca-certificates package can be installed.
+COPY --from=python:3.11-slim /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
 RUN --mount=type=cache,id=nexent-terminal-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-terminal-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
@@ -13,8 +16,12 @@ RUN --mount=type=cache,id=nexent-terminal-apt-cache-${TARGETARCH},target=/var/ca
         echo "Unsupported TERMINAL_VARIANT: ${TERMINAL_VARIANT}" >&2; \
         exit 1; \
     fi && \
-    apt-get update --fix-missing && \
-    apt-get install -y --no-install-recommends \
+    sed -Ei \
+        -e 's@^URIs: http://(archive|security)\.ubuntu\.com/ubuntu/?$@URIs: https://azure.archive.ubuntu.com/ubuntu/@' \
+        -e 's@^URIs: http://@URIs: https://@' \
+        /etc/apt/sources.list.d/ubuntu.sources && \
+    apt-get -o Acquire::Retries=3 update --error-on=any && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
         ca-certificates \
         openssh-server \
         curl \
@@ -27,7 +34,7 @@ RUN --mount=type=cache,id=nexent-terminal-apt-cache-${TARGETARCH},target=/var/ca
         python3-pip \
         python3-venv && \
     if [ "$TERMINAL_VARIANT" = "conda" ]; then \
-        apt-get install -y --no-install-recommends build-essential; \
+        apt-get -o Acquire::Retries=3 install -y --no-install-recommends build-essential; \
     fi
 
 # Configure SSH - enable root login + enable password authentication.

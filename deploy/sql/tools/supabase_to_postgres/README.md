@@ -22,14 +22,14 @@ from the target's pre-upgrade backup; Supabase cannot reconstruct application ro
 
 | Stage | Docker | Kubernetes |
 | --- | --- | --- |
-| Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
+| Database ready | Start selected infrastructure; PostgreSQL creates an empty database | Install/wait for infrastructure; PostgreSQL creates an empty database |
 | Historical account import | Host Shell `migrate.sh --apply` runs before HTTPS/core service startup | Host Shell `migrate.sh --deployment kubernetes --apply` runs before application Secret replacement and application Helm rollout |
 | Target transaction | Recheck account coverage under the account-writer lock, run historical 001 and account-array 010, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
 | Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
 | Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
 
-The infrastructure baseline `init.sql` does not create `user_account_t`. Account
-SQL is kept out of infrastructure bootstrap. A migration error stops deployment
+The baseline `init.sql` does not create `user_account_t`. Management owns ordinary
+application SQL initialization and migration. Infrastructure creates the database only. A migration error stops deployment
 before the subsequent application/Secret rollout. Direct Compose, Helm or
 `run-sql-migrations.sh` invocation bypasses this deployment sequence; complete the
 manual importer first when upgrading historical accounts.
@@ -77,7 +77,7 @@ runtime, `v2.9.0_001_local_user_accounts.sql`, and
 `v2.9.0_010_account_and_ops_roles.sql`. The worker applies the account schema changes
 inside the credential transaction. The startup SQL runner also applies invitation
 roles and operations grants. Standard deployment selects the image automatically.
-Preload it for offline deployment. The migration worker uses the main backend image.
+Preload it for offline deployment. The migration worker uses the Management image.
 
 `migrate.sh` is the host entry point for both Docker and Kubernetes.
 `migrate_docker.py` runs inside the worker container or Job. Recovery defaults
@@ -160,7 +160,7 @@ Run before application/bootstrap SQL against the original business PostgreSQL.
 The host uses the same Shell entry for both deployment types:
 
 ```bash
-export NEXENT_IMAGE='nexent/nexent:<matching-version>'
+export NEXENT_IMAGE='nexent/nexent-management:<matching-version>'
 # Docker preview, then apply:
 bash deploy/sql/tools/supabase_to_postgres/migrate.sh
 bash deploy/sql/tools/supabase_to_postgres/migrate.sh --apply

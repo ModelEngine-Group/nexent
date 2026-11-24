@@ -73,6 +73,8 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  AOS-MODEL: model
+  AOS-TRANSPORT: runtime
   SI-STORAGE: system
   GW-AUTH: system
   AGENT-CORE-CONFIG: agent_config
@@ -110,6 +112,8 @@ feature_overrides:
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: system
+  OPS-AGENT-FACTS: agent_config
+  OPS-MODEL-MONITORING: model
   SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system

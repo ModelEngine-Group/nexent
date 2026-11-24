@@ -7,8 +7,7 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from contracts.agent import AgentRunContext
-from contracts.constants.constants import MESSAGE_ROLE
-from contracts.constants.environment import APP_VERSION
+from contracts.constants.environment import APP_VERSION, OPS_MONITORING_ENABLED
 from nexent.core.agents.contracts.context import ContextInput, ContextItemInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
@@ -18,61 +17,10 @@ from nexent.core.agents.prompt.user_context import (
 from nexent.monitor import AgentRunMetadata
 
 
-def build_authorized_context_input(
-    agent_run_info,
-    historical_context=None,
-) -> ContextInput:
-    """Freeze configured context and authorized history into one item snapshot."""
-    if historical_context is None:
-        fallback_turns = []
-        pending_user = None
-        for index, entry in enumerate(agent_run_info.history or ()):
-            if entry.role == MESSAGE_ROLE["USER"]:
-                pending_user = (index, entry)
-            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
-                user_index, user_entry = pending_user
-                fallback_turns.append(
-                    {
-                        "user_message": user_entry.content,
-                        "assistant_final_answer": entry.content,
-                        "attachments": [],
-                        "user_message_id": -(user_index + 1),
-                        "assistant_message_id": -(index + 1),
-                    }
-                )
-                pending_user = None
-        historical_context = {"conversation_turns": fallback_turns}
+def build_authorized_context_input(agent_run_info, historical_context=None):
+    from nexent.core.agents.context.authorized_input import build_authorized_context_input as build_context
 
-    history_items = []
-    summary = historical_context.get("history_summary")
-    if summary:
-        history_items.append(
-            ContextItemInput(
-                id=f"history_summary:{summary['unit_id']}",
-                type="history_summary",
-                content=summary,
-                source=("conversation_history",),
-            )
-        )
-    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
-        history_items.append(
-            ContextItemInput(
-                id=(
-                    f"conversation_turn:{turn['user_message_id']}:"
-                    f"{turn['assistant_message_id']}"
-                ),
-                type="conversation_turn",
-                content=turn,
-                source=("conversation_history",),
-                metadata={"layout_order": order},
-            )
-        )
-    return ContextInput(
-        items=(
-            tuple(agent_run_info.agent_config.context_items or ())
-            + tuple(history_items)
-        ),
-    )
+    return build_context(agent_run_info, historical_context)
 
 
 def _composer(language: str, is_manager: bool, prompt_bundle):
@@ -184,6 +132,15 @@ def build_agent_run_context(
     from management.services.monitor.identity import resolve_monitoring_user_email
     from nexent.monitor.local_content import local_capture_enabled
 
+    monitoring_groups = None
+    if OPS_MONITORING_ENABLED and not request.is_debug:
+        from management.db.identity.group import query_group_ids_by_user_in_tenant
+
+        try:
+            monitoring_groups = tuple(query_group_ids_by_user_in_tenant(user_id, tenant_id))
+        except Exception:
+            monitoring_groups = None
+
     memory = build_memory_context(
         user_id, tenant_id, request.agent_id, skip_query=request.is_debug
     )
@@ -200,6 +157,7 @@ def build_agent_run_context(
             agent_id=request.agent_id,
             conversation_id=request.conversation_id,
             user_id=user_id,
+            monitoring_group_ids=monitoring_groups,
             user_email=resolve_monitoring_user_email(user_id, tenant_id),
             tenant_id=tenant_id,
             query=user_query if user_query is not None else request.query,

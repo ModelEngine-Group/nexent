@@ -191,6 +191,21 @@ def test_unknown_usage_and_invalid_ttft_stay_null(ttft):
     assert nodes[1]["throughput"] is None
 
 
+@pytest.mark.parametrize("generation_rate", [None, "42.5", "0"])
+def test_shared_attempt_keeps_provider_total_and_generation_rate(generation_rate):
+    attributes = {
+        "nexent.model_attempt.outcome": "succeeded",
+        "llm.token_count.prompt": "0",
+        "llm.token_count.completion": "2",
+    }
+    if generation_rate is not None:
+        attributes["llm.generation_rate"] = generation_rate
+    nodes, _, _ = build_nodes(request(span("root"), span("m", "root", "LLM", **attributes)), conversation_id="1")
+
+    assert nodes[1]["usage"] == {"input": 0, "output": 2, "total": None, "complete": False}
+    assert nodes[1]["throughput"] == (float(generation_rate) if generation_rate is not None else None)
+
+
 def test_invocation_association_is_preserved_in_node_details():
     nodes, _, _ = build_nodes(
         request(

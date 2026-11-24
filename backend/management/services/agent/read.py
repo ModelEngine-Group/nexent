@@ -14,6 +14,19 @@ from management.db.tool.repository import check_tool_is_available, query_agent_t
 from management.services.model.resolver import is_model_configured, resolve_model_record
 
 
+_DECODE_REQUIRED_COLUMNS = ("base_url", "config_revision", "protocol_id")
+
+
+def _record_has_full_outlet_columns(record: dict) -> bool:
+    """True when the model record carries columns decode_resolved_model_profile needs.
+
+    get_model_records_by_ids intentionally returns a lightweight projection (8 list-only
+    columns without credentials). When read_context.model_cache() feeds those rows into
+    project_agent_models, decode would otherwise blow up with ProfileStorageError.
+    """
+    return any(record.get(col) is not None for col in _DECODE_REQUIRED_COLUMNS)
+
+
 @dataclass
 class AgentListReadContext:
     """Request-local records; never share authorization-scoped data across requests."""
@@ -109,7 +122,15 @@ def project_agent_models(
         for model_id, record in records:
             if (record and record.get("model_type") in {"llm", "chat"}
                     and record.get("profile_schema_version") is not None and str(model_id) in current):
-                profile = decode_resolved_model_profile(record, registered_references=model_service_references())
+                # read_context.model_cache() intentionally holds a lightweight
+                # projection (list columns only, no credentials). decode_resolved_model_profile
+                # needs the full outlet row (base_url, config_revision, resolved_profile, ...).
+                full_record = record
+                if not _record_has_full_outlet_columns(record):
+                    full_record = resolve_model_record(model_id, tenant_id, None)
+                if full_record is None:
+                    continue
+                profile = decode_resolved_model_profile(full_record, registered_references=model_service_references())
                 current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)], profile=profile)
         fields["model_params_override"] = current
     return AgentModelProjection(
