@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Button,
@@ -18,9 +19,11 @@ import { useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { hasRole } from "@/lib/roles";
+import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
 import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
+import { ModelMonitoringDetails } from "./components/model/ModelMonitoringDetails";
 import { MonitoringOverview } from "./components/overview/MonitoringOverview";
 import {
   dateFormat,
@@ -199,6 +202,33 @@ function MonitoringScope({
         )
       : null;
   const agentMonitoring = useAgentMonitoring(userId, userTenant, selection);
+  const selectedModel =
+    tab === "model" && canReadInventory
+      ? directories.inventory.data?.find(
+          (item) =>
+            item.kind === "model" &&
+            resourceKey(item.tenant_id, item.id) === resourceSelection
+        )
+      : undefined;
+  const modelSelection: ModelMonitoringSelection | null =
+    tab === "model" && directories.tenant !== undefined && range
+      ? {
+          tenantId: selectedModel?.tenant_id ?? directories.tenant,
+          modelId: selectedModel?.id ?? null,
+          groupIds: group ? [Number(group)] : [],
+          startDate: range[0],
+          endDate: range[1],
+        }
+      : null;
+  const modelQueryKey = [
+    "modelMonitoringList",
+    userId,
+    userTenant,
+    modelSelection,
+  ] as const;
+  const selectedMonitoringResource = selectedAgent ?? selectedModel;
+  const modelFetching = useIsFetching({ queryKey: modelQueryKey }) > 0;
+  const queryClient = useQueryClient();
   const scopeLoading = Boolean(
     range && scopePending && !directories.scope.isError
   );
@@ -250,10 +280,17 @@ function MonitoringScope({
       {!onOverview && (
         <Button
           icon={<RefreshCw size={15} aria-hidden />}
-          loading={directories.fetching || agentMonitoring.fetching}
+          loading={
+            directories.fetching || agentMonitoring.fetching || modelFetching
+          }
           onClick={() => {
             void directories.refresh();
             if (selection) void agentMonitoring.refresh();
+            if (modelSelection)
+              void queryClient.refetchQueries({
+                queryKey: modelQueryKey,
+                type: "active",
+              });
           }}
         >
           {t("common.refresh")}
@@ -377,11 +414,13 @@ function MonitoringScope({
             ref={resourceHeading}
             tabIndex={-1}
           >
-            {selectedAgent
-              ? selectedAgent.name || selectedAgent.id
+            {selectedMonitoringResource
+              ? selectedMonitoringResource.name || selectedMonitoringResource.id
               : (resource?.label ?? allResources)}{" "}
             ·{" "}
-            {selectedAgent ? tenantLabel(selectedAgent.tenant_id) : scopeLabel}
+            {selectedMonitoringResource
+              ? tenantLabel(selectedMonitoringResource.tenant_id)
+              : scopeLabel}
           </h2>
           {dateLabel}
           {tab === "agent" ? (
@@ -414,7 +453,6 @@ function MonitoringScope({
                 scopeLoading={scopeLoading}
                 hasRange={Boolean(range)}
                 selectedResource={resource?.value ?? ""}
-                tenantLabel={tenantLabel}
                 inventory={directories.inventory.data}
                 canViewStatistics={(key) =>
                   agents?.some(
@@ -427,6 +465,13 @@ function MonitoringScope({
                 }}
               />
             </>
+          ) : tab === "model" ? (
+            <ModelMonitoringDetails
+              key={JSON.stringify([filters.tenant, resourceSelection])}
+              queryKey={modelQueryKey}
+              scopeLoading={scopeLoading}
+              hasRange={Boolean(range)}
+            />
           ) : (
             placeholder
           )}

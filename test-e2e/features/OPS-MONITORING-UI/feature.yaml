@@ -20,7 +20,9 @@ feature:
     description: All Agents show the server's Top 5 for the active metric and authorized scope. A single Agent shows success and failure shares from the summary and the call total separately.
   - rule_id: OPS-MONITORING-UI-RULE-06
     description: The overview counts current Agents and Models for the authorized tenant scope. Dates affect only daily Agent and Model trends. MCP and Skill stay visibly unconnected.
+  - rule_id: OPS-MONITORING-UI-RULE-07
+    description: The Agent and Model detail tables share the name-column search control. Each submits to its own tenant-scoped endpoint and returns to page one on search or clear.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md

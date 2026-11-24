@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Empty, Input, Pagination, Table, Tooltip } from "antd";
+import { Alert, Button, Empty, Pagination, Table, Tooltip } from "antd";
 import type { TableProps } from "antd";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,7 @@ import {
 } from "./agentMonitoringValues";
 import type { useAgentMonitoring } from "./useAgentMonitoring";
 import { resourceKey } from "./useMonitoringDirectories";
+import { MonitoringColumnSearch } from "./components/shared/MonitoringColumnSearch";
 import styles from "./agentMonitoring.module.css";
 
 const defaultList: AgentListRequest = {
@@ -33,7 +34,6 @@ export function AgentMonitoringDetails({
   scopeLoading,
   hasRange,
   selectedResource,
-  tenantLabel,
   inventory,
   canViewStatistics,
   onViewStatistics,
@@ -42,7 +42,6 @@ export function AgentMonitoringDetails({
   scopeLoading: boolean;
   hasRange: boolean;
   selectedResource: string;
-  tenantLabel: (id: string) => string;
   inventory: OperationsResource[] | undefined;
   canViewStatistics: (key: string) => boolean;
   onViewStatistics: (key: string) => void;
@@ -95,22 +94,35 @@ export function AgentMonitoringDetails({
   });
   const columns: NonNullable<TableProps<AgentMonitoringRow>["columns"]> = [
     {
-      title: label("displayName"),
-      key: "display_name",
-      render: (_, row) => (
-        <>
-          <span>
-            {row.display_name ||
-              row.name ||
-              t("ops.monitoring.agent.details.agentId", { id: row.agent_id })}
-          </span>
-          {selection?.tenantId === null && (
-            <small className={styles.rowTenant}>
-              {tenantLabel(row.tenant_id)}
-            </small>
-          )}
-        </>
+      title: (
+        <span className={styles.displayNameHeader}>
+          {label("displayName")}
+          <MonitoringColumnSearch
+            search={list.search}
+            placeholder={label("search")}
+            disabled={!selection}
+            onSubmit={(search) =>
+              setList((current) =>
+                current.search === search && current.page === 1
+                  ? current
+                  : { ...current, page: 1, search }
+              )
+            }
+          />
+        </span>
       ),
+      key: "display_name",
+      render: (_, row) => {
+        const name =
+          row.display_name ||
+          row.name ||
+          t("ops.monitoring.agent.details.agentId", { id: row.agent_id });
+        return (
+          <span className={styles.displayName} title={name}>
+            {name}
+          </span>
+        );
+      },
     },
     {
       title: label("name"),
@@ -230,24 +242,9 @@ export function AgentMonitoringDetails({
       aria-busy={loading || details.isFetching}
       className={styles.details}
     >
-      <header className={styles.detailsHeader}>
-        <h2 id={titleId}>{label("title")}</h2>
-        <Input.Search
-          allowClear
-          aria-label={label("search")}
-          placeholder={label("search")}
-          maxLength={100}
-          disabled={!selection}
-          onSearch={(value) => {
-            const search = value.trim();
-            setList((current) =>
-              current.search === search
-                ? current
-                : { ...current, page: 1, search }
-            );
-          }}
-        />
-      </header>
+      <h2 id={titleId} className={styles.detailsHeading}>
+        {label("title")}
+      </h2>
       {details.isError && (
         <Alert type="error" showIcon title={label("failed")} />
       )}

@@ -35,6 +35,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   const listReads: Record<string, string>[] = [];
   const rankingReads: Record<string, string>[] = [];
   const modelTrendReads: Record<string, string>[] = [];
+  const modelListReads: Record<string, string>[] = [];
   let overviewModelReads = 0;
   let releaseModelTrend = () => {};
   const delayedModelTrend = new Promise<void>((resolve) => {
@@ -233,6 +234,36 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       json = {
         status: "success",
         tools: [{ name: service === "3" ? "语义检索" : "查阅文件" }],
+      };
+    } else if (
+      pathname === "/api/ops/v1/monitoring/models" &&
+      request.method() === "GET"
+    ) {
+      modelListReads.push(Object.fromEntries(searchParams));
+      const modelId = searchParams.get("model_id");
+      const search = searchParams.get("search")?.toLowerCase() ?? "";
+      const rows =
+        tenantId === "b"
+          ? []
+          : Array.from({ length: 12 }, (_, i) => ({
+              tenant_id: "a",
+              model_id: i + 2,
+              display_name: i === 0 ? "文本生成模型" : `向量模型 ${i}`,
+              model_name: `model-${i + 2}`,
+              model_factory: "fixture",
+              model_type: i === 0 ? "llm" : "embedding",
+              connect_status: "available",
+              metrics: null,
+            })).filter(
+              (row) =>
+                (!modelId || String(row.model_id) === modelId) &&
+                row.display_name.toLowerCase().includes(search),
+            );
+      const size = Number(searchParams.get("page_size"));
+      const start = (Number(searchParams.get("page")) - 1) * size;
+      json = {
+        ...executionStatus,
+        data: { items: rows.slice(start, start + size), total: rows.length },
       };
     } else if (
       pathname === "/api/ops/v1/monitoring/models/trends" &&
@@ -695,7 +726,42 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(page.getByPlaceholder("请选择开始日期")).toHaveValue(
       "2026-11-07",
     );
+    const modelDetails = page.getByRole("region", { name: "模型明细" });
+    const modelSearchButton = modelDetails
+      .getByRole("columnheader", { name: /名称/ })
+      .getByRole("button", { name: "搜索模型名称" });
+    const modelSearch = page.getByRole("searchbox", { name: "搜索模型名称" });
+    const agentReads = listReads.length;
+    await modelDetails.locator(".ant-pagination-item-2").click();
+    await expect.poll(() => modelListReads.at(-1)).toMatchObject({ page: "2" });
+    await modelSearchButton.click();
+    await expect(modelSearch).toBeFocused();
+    await modelSearch.fill("文本生成");
+    await modelSearch.press("Enter");
+    await expect
+      .poll(() => modelListReads.at(-1))
+      .toMatchObject({
+        page: "1",
+        search: "文本生成",
+        tenant_id: "a",
+        group_ids: "10",
+        start_date: "2026-11-07",
+        end_date: "2026-11-12",
+      });
+    await expect(modelDetails.locator("tbody tr[data-row-key]")).toHaveCount(1);
+    await modelSearch.locator("..").locator(".ant-input-clear-icon").click();
+    await expect(modelSearch).toHaveValue("");
+    await expect(modelDetails.locator("tbody tr[data-row-key]")).toHaveCount(
+      10,
+    );
+    expect(modelListReads.at(-1)).not.toHaveProperty("search");
+    await modelSearch.press("Escape");
+    await expect(modelSearchButton).toBeFocused();
+    expect(listReads).toHaveLength(agentReads);
     await choose("模型", "文本生成模型");
+    await expect
+      .poll(() => modelListReads.at(-1))
+      .toMatchObject({ tenant_id: "a", model_id: "2", page: "1" });
     await screenshot("model");
     await tab("Skill").click();
     await choose("Skill", "文档摘要");
@@ -744,6 +810,21 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     overview.getByText(title, { exact: true }).locator("..").locator("dd");
   const trend = page.getByRole("region", { name: "调用趋势", exact: true });
   const table = page.getByRole("region", { name: "智能体明细", exact: true });
+  const displayNameSearch = "搜索展示名称或内部名称";
+  const searchTrigger = table
+    .getByRole("columnheader", { name: /展示名称/ })
+    .getByRole("button", { name: displayNameSearch });
+  const detailSearch = page.getByRole("searchbox", { name: displayNameSearch });
+  const openDetailSearch = async () => {
+    if ((await searchTrigger.getAttribute("aria-expanded")) !== "true")
+      await searchTrigger.click();
+    await expect(detailSearch).toBeVisible();
+  };
+  const searchDetails = async (name: string) => {
+    await openDetailSearch();
+    await detailSearch.fill(name);
+    await detailSearch.press("Enter");
+  };
   const ranking = page.getByRole("region", { name: "智能体排行", exact: true });
   const distribution = page.getByRole("region", {
     name: "调用结果分布",
@@ -904,6 +985,14 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const research = body
       .getByRole("row")
       .filter({ hasText: "research-agent" });
+    await expect(support.getByRole("cell").first()).toHaveText("智能问答助手");
+    await expect(research.getByRole("cell").first()).toHaveText("研发助手");
+    await expect(research.getByText("研发助手", { exact: true })).toHaveCSS(
+      "white-space",
+      "nowrap",
+    );
+    await expect(searchTrigger).toBeVisible();
+    await expect(detailSearch).toBeHidden();
     await expect(
       support.getByRole("cell", { name: "文本生成模型", exact: true }),
     ).toBeVisible();
@@ -961,28 +1050,31 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       });
     await expect(body.getByRole("row").first()).toContainText("research-agent");
 
-    const search = table.getByRole("searchbox", {
-      name: "搜索展示名称或内部名称",
-    });
-    const submit = async (name: string) => {
-      await search.fill(name);
-      await search.press("Enter");
-    };
-    await submit("智能问答");
+    await table.locator(".ant-pagination-item-2").click();
+    await expect.poll(() => listReads.at(-1)).toMatchObject({ page: "2" });
+    await openDetailSearch();
+    await expect(detailSearch).toBeFocused();
+    await searchDetails("智能问答");
     await expect
       .poll(() => listReads.at(-1))
       .toMatchObject({ page: "1", search: "智能问答" });
     await expect(body.getByRole("row")).toHaveCount(1);
     await expect(support).toBeVisible();
-    await submit("missing");
+    await openDetailSearch();
+    await expect(detailSearch).toHaveValue("智能问答");
+    await detailSearch.locator("..").locator(".ant-input-clear-icon").click();
+    await expect(detailSearch).toHaveValue("");
+    await expect(research).toBeVisible();
+    expect(listReads.at(-1)).not.toHaveProperty("search");
+    await searchDetails("missing");
     await expect(
       table.getByText("未找到匹配的智能体", { exact: true }),
     ).toBeVisible();
-    await submit("error");
+    await searchDetails("error");
     await expect(
       table.getByText("智能体明细加载失败", { exact: true }),
     ).toBeVisible();
-    await submit("research-agent");
+    await searchDetails("research-agent");
     await expect(research).toBeVisible();
     expect(stats).toHaveLength(before);
     await research.getByRole("button", { name: "查看统计" }).click();
@@ -1031,12 +1123,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       sort_by: "total_tokens",
       descending: "true",
     };
-    const search = table.getByRole("searchbox");
     await table.getByRole("combobox").click();
     await dropdown.getByText(/20.*条\/页/).click();
     await table.getByRole("columnheader", { name: /Token 消耗量/ }).click();
-    await search.fill("queue");
-    await search.press("Enter");
+    await searchDetails("queue");
     await expect
       .poll(() => listReads.at(-1))
       .toMatchObject({ ...tableRequest, page: "1" });
@@ -1057,7 +1147,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           start_date: "2026-10-25",
         }),
       ]);
-    await expect(search).toHaveValue("queue");
+    await openDetailSearch();
+    await expect(detailSearch).toHaveValue("queue");
+    await detailSearch.press("Escape");
+    await expect(searchTrigger).toBeFocused();
     await pageTwo.click();
     await expect
       .poll(() => listReads.at(-1))
@@ -1074,7 +1167,9 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           group_ids: "10",
         }),
       ]);
-    await expect(search).toHaveValue("queue");
+    await openDetailSearch();
+    await expect(detailSearch).toHaveValue("queue");
+    await detailSearch.press("Escape");
     const activeRanking = {
       metric: "total_tokens",
       tenant_id: "a",
@@ -1141,6 +1236,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     agentDetails,
     agentCharts,
     monitoringOverview,
+    sharedDetailSearch,
   ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
@@ -1220,6 +1316,23 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       expect.arrayContaining([
         { start_date: "2026-11-07", end_date: "2026-11-12", tenant_id: "b" },
         { start_date: "2026-11-07", end_date: "2026-11-12" },
+      ]),
+    );
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(sharedDetailSearch, async () => {
+    expect(modelListReads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          search: "文本生成",
+          page: "1",
+          tenant_id: "a",
+        }),
+      ]),
+    );
+    expect(listReads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ search: "智能问答", page: "1" }),
       ]),
     );
     expect(unexpected).toEqual([]);

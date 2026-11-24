@@ -320,22 +320,25 @@
   margin-top: 16px;
 }
 
-.detailsHeader {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  justify-content: space-between;
-}
-
-.detailsHeader h2 {
+.detailsHeading {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
 }
 
-.detailsHeader :global(.ant-input-search) {
-  max-width: 280px;
+.displayNameHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.displayName {
+  display: block;
+  max-inline-size: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detailsPagination {
