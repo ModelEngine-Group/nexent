@@ -416,6 +416,40 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
         prepared_evaluation._remove_skill_files(workspace)
 
 
+def test_runtime_materialization_rebuilds_skill_id_mapping_and_emits_usage(skill_snapshot, mocker, tmp_path):
+    from nexent.monitor.facts import set_fact_sink
+    from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
+    from runtime.agentos import prepared_skills
+
+    agent, binding, _, row, _ = skill_snapshot
+    bound = {**row, "skill_id": 53}
+    for tool in agent.tools:
+        if tool.name in {"run_skill_script", "read_skill_md"}:
+            tool.params["skill_name_to_id"] = {"summarize": 53}
+    mocker.patch.object(evaluation_snapshot, "read_bound_skills", return_value=[bound])
+    snapshot = evaluation_snapshot.export_snapshot(
+        agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+    )
+    mocker.patch.object(prepared_skills, "read_bound_skills", return_value=[bound])
+    resource = snapshot.resource
+    actor = ServicePrincipal("user-a", "tenant-a")
+    workspace = str(tmp_path / "runs" / actor.user_id / "evaluation")
+    events = []
+    set_fact_sink(events.append)
+    try:
+        tools, _ = prepared_skills.materialize_skill_tools(resource, actor, workspace)
+        assert tools["read_skill_md"].params["skill_name_to_id"] == {"summarize": 53}
+        sdk_tool = NexentAgent.create_builtin_tool(None, tools["read_skill_md"])
+        with agent_monitoring_context(AgentRunMetadata(
+            tenant_id="tenant-a", monitoring_run_id="run-1", agent_id=7,
+        )):
+            assert "skill guide" in sdk_tool.forward("summarize")
+        assert events and events[0]["skill_id"] == "53"
+    finally:
+        set_fact_sink(None)
+        prepared_evaluation._remove_skill_files(workspace)
+
+
 @pytest.mark.parametrize(("class_name", "selected", "allowed"), [
     ("AidpSearchTool", None, False),
     ("AidpSearchTool", [], True),
