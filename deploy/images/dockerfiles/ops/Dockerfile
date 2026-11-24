@@ -77,6 +77,7 @@ COPY \
     /opt/backend/management/db/knowledge_base/
 COPY backend/management/db/mcp/__init__.py backend/management/db/mcp/models.py /opt/backend/management/db/mcp/
 COPY backend/management/db/model/__init__.py backend/management/db/model/models.py /opt/backend/management/db/model/
+COPY backend/management/db/skill/__init__.py backend/management/db/skill/models.py /opt/backend/management/db/skill/
 COPY backend/management/services/__init__.py /opt/backend/management/services/
 COPY \
     backend/management/services/permission/__init__.py \
