@@ -84,12 +84,14 @@ class JiuwenExecutionLoop:
             # Each invocation releases its own session before Runner-wide shutdown.
             tasks = tuple(self._tasks.items())
             for task, cancel in tasks:
-                if cancel is not None:
-                    try:
+                try:
+                    if cancel is None:
+                        task.cancel()
+                    else:
                         cancel()
-                    except Exception as error:
-                        logger.warning("Jiuwen shutdown cancel callback failed: %s", type(error).__name__)
-                task.cancel()
+                except Exception as error:
+                    logger.warning("Jiuwen shutdown cancel callback failed: %s", type(error).__name__)
+                    task.cancel()
             if tasks:
                 await asyncio.gather(*(task for task, _ in tasks), return_exceptions=True)
             from openjiuwen.core.runner import Runner

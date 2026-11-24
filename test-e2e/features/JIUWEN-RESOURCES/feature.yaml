@@ -39,6 +39,11 @@ feature:
       Children with a resolved Docker workspace retain authorized Python execution with individual Kernel leases and
       output ownership. Read-only children expose only approved reads. Unsafe calls remain barriers. A parallel child
       deadline cancels its invocation without stopping its peers, and the parent still owns batch cancellation.
+  - rule_id: JIUWEN-RESOURCES-RULE-008
+    description: Jiuwen dispatches configured local and remote collaborators through run-owned AgentCards. A2A uses
+      Jiuwen's client with the authorized endpoint, authentication and TLS configuration. A failed, stopped or
+      incomplete response does not become a successful child answer. Live and restored child cards share the existing
+      Nexent output events, with isolated invocation identifiers and no native envelopes exposed publicly.
   required_test_stages:
   - D3
   - D5
@@ -49,4 +54,5 @@ feature:
     - JIUWEN-SAVED-SKILLS-20261021
     - JIUWEN-STORAGE-UNIFY-20261116
     - JIUWEN-NATIVE-PARALLEL-20261123
+    - JIUWEN-NATIVE-COLLABORATION-20261123
     spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

@@ -8,10 +8,12 @@ case:
   - JIUWEN-M3-20261015
   - JIUWEN-TIMEOUT-CONFIG-20261112
   - JIUWEN-NATIVE-PARALLEL-20261123
+  - JIUWEN-NATIVE-COLLABORATION-20261123
   business_rule_ids:
   - JIUWEN-RESOURCES-RULE-004
   - JIUWEN-RESOURCES-RULE-006
   - JIUWEN-RESOURCES-RULE-007
+  - JIUWEN-RESOURCES-RULE-008
   title: Mixed Core children and A2A D3
   type: AGENT-IT
   priority: P0
@@ -62,6 +64,12 @@ case:
       live and historical projections keep invocation ownership, and all owned resources are reclaimed. On timeout,
       the affected call fails and publishes no partial file. Other children and the parent finish normally.
       Parent cancellation stops all three active programs, publishes no file and releases their Kernel leases.
+  - order: 7
+    action: Exercise native AgentCard dispatch and Jiuwen A2A over JSON-RPC and HTTP+JSON. Stream remote artifact
+      fragments, then exercise a failed terminal state, a partial stream timeout and parent cancellation.
+    expected: Authorized local and remote calls use unique native sessions. Remote endpoints receive trusted identity
+      and bound authentication. Live and restored child cards contain one completed answer. Failed or interrupted
+      calls expose the existing error or stopped state, and known active remote tasks receive a cancellation request.
   expected_results:
   - Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote calls contain
     trusted caller context without parent model overrides. Repeated concurrent roots retain exactly three successful
@@ -75,6 +83,8 @@ case:
   - Native batches overlap and preserve provider call IDs. The public stream and restored history show the same
     tool/result pairs, child invocation IDs, and final answer.
   - Native Python children execute concurrently in distinct Kernel leases with isolated outputs and full cleanup.
+  - Native AgentCards are removed when their owner ends. Both A2A transports use the received terminal state, and
+    no failed partial response, native event envelope, spoofed identity or duplicate remote message is exposed.
   forbidden_side_effects:
   - No parent model/credential/history leakage, unauthorized resources, cross-invocation state, orphan calls or
     false reclamation.
@@ -115,6 +125,11 @@ case:
     - 4
     forbidden_side_effects:
     - 1
+  - id: AC-06
+    description: Native dispatch and both A2A transports preserve trusted identity, result display and cleanup.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [1]
   execution:
     profiles:
     - name: mock

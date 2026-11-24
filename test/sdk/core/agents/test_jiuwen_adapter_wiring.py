@@ -43,8 +43,10 @@ def capture_registration(adapter, mocker):
 
 
 @pytest.mark.parametrize("text_protocol", [True, False])
-def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker, text_protocol):
-    from openjiuwen.harness import factory as native_factory
+def test_prepare_registers_agent_cards_separately_from_tools(adapter, mocker, text_protocol):
+    from openjiuwen.core.single_agent import AgentCard
+
+    from nexent.core.agents.cores.jiuwen import collaboration
 
     child = AgentConfig(name="child", description="Child", model_name="child-model", tools=[])
     tools = [ToolConfig(name="lookup", class_name="Lookup", source="local"),
@@ -69,7 +71,7 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     mocker.patch("nexent.core.agents.cores.jiuwen.adapter._wrap_tool_with_monitoring", side_effect=lambda tool, name: tool)
     capture_registration(adapter, mocker)
     native = adapter.native_agent
-    factory = mocker.patch.object(native_factory, "create_deep_agent", return_value=native)
+    factory = mocker.patch.object(collaboration, "create_collaboration_host", return_value=native)
     context_type = mocker.patch("nexent.core.agents.cores.jiuwen.context.JiuwenContextBridge")
     model = SimpleNamespace()
     mocker.patch.object(adapter, "_create_model", return_value=model)
@@ -80,8 +82,6 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     executor = mocker.patch.object(adapter, "_bind_text_executor")
     adapter.context_items = []
     adapter.run_info.tool_call_timeout_seconds = 900
-    proxies = [Mock(return_value="first"), Mock(return_value="second")]
-    proxy_type = mocker.patch("nexent.core.agents.resources.a2a.ExternalA2AAgentWrapper", side_effect=proxies)
     adapter.prepare()
     resources.create_tool.assert_called_once_with(tools[0])
     resources._create_subagent_definition.assert_called_once_with(child, {}, scope_factory=ANY)
@@ -91,8 +91,7 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     assert resource_type.call_args.kwargs["user_id"] == "user"
     settings = factory.call_args.kwargs
     assert settings["system_prompt"] == "shared instructions" and settings["language"] == "cn"
-    assert len(settings["tools"]) == 3 and settings["tool_owner_id"] == adapter.owner_id
-    # Every native business/child/A2A card uses the run's deployment deadline.
+    assert len(settings["tools"]) == 1 and settings["tool_owner_id"] == adapter.owner_id
     from openjiuwen.core.single_agent.ability_manager import AbilityManager
     assert all(AbilityManager._resolve_call_timeout(tool.card) == 900 for tool in settings["tools"])
     for key in ("enable_task_loop", "enable_sys_operation", "enable_read_image_multimodal",
@@ -104,16 +103,14 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     context_type.assert_called_once_with(adapter.run_info, adapter.scope, adapter.manager, model, [])
     assert parallel.call_count == int(text_protocol)
     executor.assert_called_once()
-    remote = adapter.business_tools["remote"]
-    assert remote.forward("task one") == "first" and remote.forward("task two") == "second"
-    assert proxy_type.call_count == 2
-    for proxy, task in zip(proxies, ["task one", "task two"]):
-        proxy.set_runtime_metadata.assert_called_once_with(adapter.run_info.runtime_metadata)
-        proxy.assert_called_once_with(task=task)
-    adapter.scope.cancel()
-    with pytest.raises(RunTerminated):
-        remote.forward("forbidden after stop")
-    assert proxy_type.call_count == 2
+    calls = native.ability_manager.add_collaborator.call_args_list
+    assert [call.args[0].card.name for call in calls] == ["child", "remote"]
+    for call in calls:
+        delegate = call.args[0]
+        assert isinstance(delegate.card, AgentCard) and delegate.card.input_params["additionalProperties"] is False
+        assert delegate.card.id.startswith(adapter.owner_id)
+        assert delegate.parent_session == adapter.session_id
+        assert call.kwargs == {"parallel_safe": False}
     card, terminal = native.ability_manager.add_ability.call_args.args
     assert card.name == adapter.clarification.name
     with pytest.raises(RuntimeError, match="escaped the model boundary"):

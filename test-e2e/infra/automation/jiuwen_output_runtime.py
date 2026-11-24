@@ -2,53 +2,68 @@
 
 """Feed real runtime output through the production stream and isolated PostgreSQL DAL."""
 
-import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from uuid import uuid4
 
-from jiuwen_context_runtime import context_database
+from starlette.responses import StreamingResponse
+
+from jiuwen_context_runtime import context_database as context_database
 
 
 async def persist_output(monkeypatch, info, output):
-    from contracts.agent import AgentRequest
-    from contracts.conversation import HistoryItem
-    from management.db.conversation.repository import create_conversation, create_conversation_message, get_conversation_history
-    from management.services.agent import execution as application
+    from contracts.agentos import AgentResume, AgentRunReference
+    from contracts.conversation import MessageSource
+    from management.db.conversation.repository import (
+        create_conversation, create_conversation_message, get_conversation_history,
+    )
+    from management.services.agent import prepared_projection
+    from management.services.agent.agentos_events import present_public_resume
 
     conversation = create_conversation("Output contract", "owner", agent_id=42)["conversation_id"]
-    create_conversation_message({"conversation_id":conversation,"message_idx":0,"role":"user",
-                                 "content":"Current task"}, "owner")
+    create_conversation_message({
+        "conversation_id": conversation, "message_idx": 0, "role": "user", "content": "Current task",
+    }, "owner")
     info.conversation_id, info.user_id = conversation, "owner"
-    request = AgentRequest(agent_id=42, conversation_id=conversation, query="Current task", is_debug=False,
-                           history=[HistoryItem(role="user",content="Current task")])
+    reference = AgentRunReference(conversation_id=conversation, run_id=uuid4().hex)
+    terminal = {"status": info.run_result.status}
 
-    async def source(*args, **kwargs):
-        for event in output:
-            yield json.dumps(event)
+    async def resume(request, user_id, tenant_id):
+        assert request.run_id == reference.run_id
+        assert request.conversation_id == conversation and request.after_event_id is None
+        assert (user_id, tenant_id) == ("owner", "spike-tenant")
 
-    class InlinePersistence:
-        async def run(self, lane, spec, function, *args, **kwargs):
-            return function(*args, **kwargs)
+        async def frames():
+            for index, event in enumerate(output, 1):
+                yield f"id: {reference.run_id}:{index}\nevent: agentos_observer\ndata: {json.dumps(event)}\n\n"
+            yield (f"id: {reference.run_id}:{len(output) + 1}\nevent: agentos_terminal\n"
+                   f"data: {json.dumps(terminal)}\n\n")
 
-    # Runtime execution has already drained its own manager. This boundary controls only
-    # transport delivery and bookkeeping, retaining the production stream and actual DAL.
-    monkeypatch.setattr(application,"agent_run",source)
-    monkeypatch.setattr(application,"runtime_thread_manager",InlinePersistence())
-    monkeypatch.setattr(application,"_poll_runtime_cancel_signal",AsyncMock())
-    monkeypatch.setattr(application,"_unregister_agent_run_after_execution",lambda *a,**k:None)
-    monkeypatch.setattr(application,"_cleanup_channel_later",AsyncMock())
-    monkeypatch.setattr(application.streaming_channel_manager,"complete_channel",AsyncMock())
-    channel = SimpleNamespace(publish=AsyncMock())
-    wire = [chunk async for chunk in application._stream_agent_chunks(request,"owner","spike-tenant",info,None,
-                                                                    channel=channel)]
-    assert [call.args[0] for call in channel.publish.await_args_list] == wire, "Subscriber cache differs from public SSE"
-    await asyncio.sleep(0)
-    history = get_conversation_history(conversation,"owner")
-    assistant = next(m for m in history["message_records"] if m["role"]=="assistant")
-    envelopes=[]
+        return StreamingResponse(frames())
+
+    async def inline(_name, operation, *, lane, owner, **kwargs):
+        return operation(**kwargs)
+
+    monkeypatch.setattr(prepared_projection, "run_blocking", inline)
+
+    async def persist():
+        result = await prepared_projection.resume_assistant_projection(
+            resume, reference, "owner", "spike-tenant", message_index=1, message_source=MessageSource.CHAT,
+        )
+        assert result.status == terminal["status"] and result.chunks == len(output)
+        return True
+
+    request = AgentResume(**reference.model_dump())
+    response = await resume(request, "owner", "spike-tenant")
+    public = present_public_resume(response, request, "owner", on_terminal=persist, include_journal_controls=False)
+    wire = [frame.decode("utf-8") async for frame in public.body_iterator]
+    history = get_conversation_history(conversation, "owner")
+    assistant = next(message for message in history["message_records"] if message["role"] == "assistant")
+    envelopes = []
     for unit in assistant["units"]:
-        try: value=json.loads(unit["unit_content"])
-        except (TypeError,ValueError):continue
-        if isinstance(value,dict) and value.get("runtime_mode")=="native_agent":envelopes.append(value)
-    return assistant,envelopes,wire
+        try:
+            value = json.loads(unit["unit_content"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict) and value.get("runtime_mode") == "native_agent":
+            envelopes.append(value)
+    return assistant, envelopes, wire

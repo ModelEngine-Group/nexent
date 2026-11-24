@@ -58,9 +58,11 @@ def context_database(monkeypatch):
             raise AssertionError("Isolated history PostgreSQL did not start")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres")
         from infrastructure.rdb import client
-        from management.configuration import runtime as configuration_runtime
-        from management.configuration.catalog import DEFAULT_CATALOG
+        from infrastructure.rdb.account_record import UserAccount
+        from infrastructure.system_configuration import runtime as configuration_runtime
+        from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
         from management.db.conversation import repository as conversation_db
+        from management.db.conversation.projection_receipt import ConversationProjectionReceipt
         from management.db.identity.models import UserTenant
         from management.db.models import (
             AgentInfo,
@@ -70,7 +72,7 @@ def context_database(monkeypatch):
             ConversationSourceSearch,
             ConversationSourceImage,
         )
-        from management.db.trajectory.models import TrajectoryExecution
+        from management.db.trajectory.models import TrajectoryExecution, TrajectoryStatistics
 
         monkeypatch.setattr(client.db_client, "session_maker", sessionmaker(bind=engine))
 
@@ -86,8 +88,13 @@ def context_database(monkeypatch):
         with engine.begin() as connection:
             connection.execute(text("CREATE SCHEMA nexent"))
         for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
-                      ConversationSourceSearch, ConversationSourceImage, UserTenant, TrajectoryExecution):
+                      ConversationSourceSearch, ConversationSourceImage, UserTenant, TrajectoryExecution,
+                      TrajectoryStatistics, ConversationProjectionReceipt, UserAccount):
             model.__table__.create(engine)
+        with engine.begin() as connection:
+            connection.execute(insert(UserTenant).values(
+                user_id="owner", tenant_id="spike-tenant", created_by="fixture", delete_flag="N",
+            ))
         yield engine
     finally:
         if engine is not None:

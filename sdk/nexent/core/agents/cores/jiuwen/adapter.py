@@ -340,6 +340,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         from openjiuwen.core.single_agent import AgentCard
         from openjiuwen.harness.factory import create_deep_agent
 
+        from nexent.core.agents.cores.jiuwen.collaboration import CollaborationAgent, create_collaboration_host
         from nexent.core.agents.orchestration.children import child_invocation_factory
         from nexent.core.agents.orchestration.execution import _get_default_agent_thread_manager
 
@@ -357,7 +358,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             child_invocation_factory=child_invocation_factory(info, parallel_mode=lambda: self._child_context.get()[1]),
         )
         self.resources.core_run_info = info
-        native_tools = []
+        native_tools, collaborators = [], []
         for config in self.tool_configs:
             if config.source == "mcp" or config.class_name == "ParallelExecutorTool":
                 continue
@@ -376,41 +377,22 @@ class JiuwenAdapter(AgentCoreAdapter):
             mode = child_parallel_mode(child, info) if self.native_parallel else None
             if mode is not None:
                 self._parallel_children[tool.name] = mode
-            native_tools.append(LocalFunction(
-                self._tool_card(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs),
-                                parallel_safe=mode is not None),
-                self._business_handler(tool.name, tool, lane="control-io", local_child=True),
-            ))
+            collaborators.append((tool, mode is not None,
+                                  self._business_handler(tool.name, tool, lane="control-io", local_child=True)))
         for external in self.external_agents:
-            from nexent.core.agents.resources.a2a import ExternalA2AAgentWrapper
             from nexent.core.agents.resources.subagents import SubAgentDefinition
 
             definition = SubAgentDefinition(external.invocation_name, external.description or external.name)
-
-            def invoke_remote(task, _config=external):
-                # A proxy owns a single call; parallel siblings never share client/task state.
-                if self.scope.cancelled:
-                    raise RunTerminated()
-                remote = ExternalA2AAgentWrapper(
-                    _config.to_a2a_agent_info(), stop_event=self.scope.stop_event,
-                    observer=info.observer, cancellation_scope=self.scope, user_context=info.user_context,
-                )
-                remote.set_runtime_metadata(info.runtime_metadata)
-                return remote(task=task)
-
-            definition.forward = invoke_remote
             tool = self.resources._wrap_subagent(definition, external, agent_id=str(external.agent_id))
             self.business_tools[tool.name] = tool
-            native_tools.append(LocalFunction(
-                self._tool_card(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
-                self._business_handler(tool.name, tool.forward, lane="control-io"),
-            ))
+            collaborators.append((tool, False, self._business_handler(tool.name, self._remote_handler(tool, external))))
         # Reuse file/sandbox infrastructure, never construct a smolagents Agent.
         self.resources.agent = SimpleNamespace(tools=self.business_tools, python_executor=None)
         if self.clarification is not None:
             # A configured class may expose a different runtime tool name.
             self.clarification = JiuwenClarification(set(self.business_tools) | self.visible_tool_names)
         self._parallel_tools = {tool.card.name for tool in native_tools if tool.card.parallel_safe}
+        self._parallel_tools.update(self._parallel_children)
         if info.parallel_child_mode != "read_only":
             self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
@@ -422,7 +404,8 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items)
         model.prepare_messages = self._prepare_model_messages
         model.prefix = []
-        self.native_agent = create_deep_agent(
+        create_agent = create_collaboration_host if collaborators else create_deep_agent
+        self.native_agent = create_agent(
             model, card=AgentCard(id=self.owner_id, name=info.agent_config.name,
                                  description=info.agent_config.description),
             tool_owner_id=self.owner_id, system_prompt=prompt, tools=native_tools, rails=rails,
@@ -432,6 +415,14 @@ class JiuwenAdapter(AgentCoreAdapter):
             enable_tool_resilience_rail=False, enable_skill_discovery=False,
             parallel_tool_calls=self.native_parallel,
         )
+        for tool, parallel_safe, handler in collaborators:
+            card = AgentCard(
+                id=f"{self.owner_id}_agent_{tool.name}", name=tool.name, description=tool.description,
+                input_params={**_tool_schema(tool.inputs), "additionalProperties": False},
+            )
+            self.native_agent.ability_manager.add_collaborator(
+                CollaborationAgent(card, self.session_id, handler), parallel_safe=parallel_safe,
+            )
         if self.clarification is not None:
             # Publish the schema for native callers. The model boundary handles
             # terminal forms before Runner can dispatch any tool in the response.
@@ -447,6 +438,49 @@ class JiuwenAdapter(AgentCoreAdapter):
             self._bind_parallel_tool()
         if not self.artifact_output and info.parallel_child_mode != "read_only":
             self._bind_text_executor()
+
+    def _remote_handler(self, tool, external):
+        from nexent.core.agents.cores.jiuwen.a2a import invoke_native_a2a
+        from nexent.core.agents.output.answer import normalize_public_answer
+
+        async def invoke(task):
+            info = self.run_info
+            events = JiuwenEventAdapter(info.observer, external.name)
+            try:
+                timeout = min(external.timeout, self._collaboration_deadline() - time.monotonic())
+                if timeout <= 0:
+                    raise TimeoutError("Collaboration deadline exceeded")
+                answer = await invoke_native_a2a(
+                    external.to_a2a_agent_info(), task, scope=self.scope, runtime_metadata=info.runtime_metadata,
+                    user_context=info.user_context, timeout=timeout, close_timeout=info.mcp_close_timeout_seconds,
+                )
+                events.final_answer = normalize_public_answer(answer)
+            except asyncio.CancelledError:
+                events.finish("stopped")
+                raise
+            except Exception as error:
+                diagnostic = failure_error(
+                    error, source="a2a", name=tool.name, request_id=events.turn_id, lang=info.observer.lang,
+                )
+                events.finish("failed", error=diagnostic)
+                # Upstream framework exceptions may contain remote response bodies or credentials.
+                logger.warning("event=jiuwen_a2a_failed agent_id=%s error_type=%s",
+                               external.agent_id, type(error).__name__)
+                if diagnostic is not None and diagnostic.category == "a2a_timeout":
+                    raise TimeoutError("A2A request timed out") from None
+                raise RuntimeError("A2A request failed") from None
+            events.finish()
+            return events.final_answer
+
+        async def observed(task):
+            return await tool.invoke_async(invoke, task=task)
+
+        return observed
+
+    def _collaboration_deadline(self):
+        info = self.run_info
+        deadline = time.monotonic() + min(info.collaboration_timeout_seconds, info.tool_call_timeout_seconds)
+        return min(deadline, info.model_deadline) if info.model_deadline is not None else deadline
 
     def _tool_card(self, *, parallel_safe=False, **values):
         """Set the outer invocation limit per run, including A2A exposed as tools."""
@@ -481,9 +515,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                     parallel_mode = self._active_parallel_child() if local_child else None
                     deadline = None
                     if lane == "control-io":
-                        deadline = time.monotonic() + self.run_info.collaboration_timeout_seconds
-                        if self.run_info.model_deadline is not None:
-                            deadline = min(deadline, self.run_info.model_deadline)
+                        deadline = self._collaboration_deadline()
                     sandbox_slot = parallel_mode == "sandbox"
                     if sandbox_slot:
                         loop = asyncio.get_running_loop()
@@ -838,18 +870,26 @@ class JiuwenAdapter(AgentCoreAdapter):
     async def _run_async(self):
         from openjiuwen.core.runner import Runner
 
+        from nexent.core.agents.cores.jiuwen.collaboration import remove_run_abilities
         info = self.run_info
         current = asyncio.current_task()
         loop = asyncio.get_running_loop()
         from nexent.core.agents.cores.jiuwen.resources import JiuwenResourceBridge
 
-        self.resource_bridge = JiuwenResourceBridge(self.native_agent, loop, self.scope, self.visible_tool_names)
-        token = self.scope.register_closer(lambda: loop.call_soon_threadsafe(current.cancel))
+        self.resource_bridge = JiuwenResourceBridge(
+            self.native_agent, loop, self.scope, self.visible_tool_names, self.session_id,
+        )
+
+        def cancel_run():
+            if not current.done() and not current.cancelling():
+                current.cancel()
+
+        token = self.scope.register_closer(lambda: loop.call_soon_threadsafe(cancel_run))
 
         async def watch_stop():
             while not info.stop_event.is_set():
                 await asyncio.sleep(0.05)
-            current.cancel()
+            self.scope.cancel()
 
         watcher = asyncio.create_task(watch_stop())
         events = self.events
@@ -881,8 +921,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                     await Runner.release(self.session_id)
                 finally:
                     if self.native_agent is not None:
-                        for card in self.native_agent.ability_manager.list():
-                            Runner.resource_mgr.remove_tool(card.id)
+                        remove_run_abilities(self.native_agent)
 
     def close(self):
         if self._closed:
@@ -909,11 +948,9 @@ class JiuwenAdapter(AgentCoreAdapter):
         if self.context_bridge is not None:
             self.context_bridge.close()
         if self.native_agent is not None:
-            from openjiuwen.core.runner import Runner
+            from nexent.core.agents.cores.jiuwen.collaboration import remove_run_abilities
 
-            for card in self.native_agent.ability_manager.list():
-                if Runner.resource_mgr.get_tool(card.id) is not None:
-                    Runner.resource_mgr.remove_tool(card.id)
+            remove_run_abilities(self.native_agent)
         for execution in self._tool_executions:
             if not execution.future.done():
                 outcome = self.manager.cancel(execution.execution_id, reason="Jiuwen tool cleanup",

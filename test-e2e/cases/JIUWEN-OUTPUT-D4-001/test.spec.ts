@@ -1,13 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { journey } from "../../infra/automation/d4/runner/journey";
-import { baseUrl, installEditor } from "../../infra/automation/d4/fixtures/agent-editor-workflows";
+import { baseUrl, installEditor, label } from "../../infra/automation/d4/fixtures/agent-editor-workflows";
 import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 function project(events: unknown[], history = false, status = "completed") {
   const script = `import json,sys
-from infrastructure.nexent_output import NexentOutputAdapter,normalize_nexent_history
+from management.services.conversation.nexent_output import NexentOutputAdapter,normalize_nexent_history
 d=json.load(sys.stdin)
 if d["history"]:
     output=normalize_nexent_history(d["events"],d["status"])[0]
@@ -27,6 +27,12 @@ print(json.dumps(output,ensure_ascii=False))`;
 }
 
 journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
+  await page.context().addCookies([{
+    name:"nexent_token_expires_at",value:String(Math.floor(Date.now()/1000)+3600),url:new URL(baseUrl).origin,
+  }]);
+  await page.addInitScript(()=>localStorage.setItem("user_info",JSON.stringify({
+    id:"output-fixture",tenantId:"output-tenant",email:"fixture@nexent.test",role:"SPEED",
+  })));
   const fixture=await installEditor(page);
   Object.assign(fixture.draft,{agent_core:"jiuwen",enable_context_manager:true});
   const messages:any[]=[{role:"user",message_id:1,message_index:1,status:"completed",message:"Old task"},
@@ -71,6 +77,10 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
   await page.route("**/api/**",async route=>{
     const path=new URL(route.request().url()).pathname.replace(/^.*\/api/,"");
     const respond=(data:unknown)=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(data)});
+    if(path==="/user/current_user_info")return respond({data:{user:{
+      user_id:"output-fixture",tenant_id:"output-tenant",user_email:"fixture@nexent.test",user_role:"SPEED",
+      auth_provider:"local",permissions:["agent:create"],accessibleRoutes:["/","/agents","/newchat"],
+    }}});
     if(path==="/memory/config/load")return respond({MEMORY_SWITCH:"N"});
     if(path==="/conversation/list")return respond({code:0,data:{items:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,create_time:Date.now(),update_time:Date.now()}],metadata:{total:1,today:1,last_7_days:0,older:0}}});
     if(path==="/conversation/101")return respond({code:0,data:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,chat_mode:"execution",create_time:Date.now(),runtime_metadata:{},runtime_metadata_version:0,message:messages.map(message=>message.role==="assistant"?{...message,message:project(message.message,true,message.status)}:message)}]});
@@ -162,11 +172,12 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
     fixture.draft.agent_core="smolagents";
     await page.reload();await verify();
     await openGroups(page.locator('[data-slot="aui_assistant-message-root"]'));
-    for(const partial of ["PARTIAL_failed","PARTIAL_stopped"]){
+    for(const [partial,status] of [["PARTIAL_failed",label("chat.thread.failed")],
+                                  ["PARTIAL_stopped",label("chat.thread.stopped")]]){
       const process=page.locator('[data-slot="aui_assistant-message-root"]').filter({hasText:partial}).first();
       await openGroups(process);
       await expect(process.getByText(partial,{exact:true})).toBeVisible();
-      await expect(process.locator('[data-slot="aui_assistant-message-completion-indicator"]')).toHaveCount(0);
+      await expect(process.locator('[data-slot="aui_assistant-message-completion-indicator"]')).toHaveText(status);
     }
     await expect(page.getByText("LEGACY_ANSWER",{exact:true})).toBeVisible();
     const simpleMessage=messageFor("SIMPLE_FINAL");

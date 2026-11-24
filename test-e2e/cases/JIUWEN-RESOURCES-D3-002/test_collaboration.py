@@ -68,6 +68,9 @@ def test_configured_collaboration(monkeypatch, parent, child, protocol, remote_p
     assert state["parent_effects"] == []
     assert ("parent", parent) in cores
     assert state["auth_ok"] and all(state["auth_ok"])
+    assert len(state["native_invocations"]) == int(parent == "jiuwen")
+    for agent_card, child_session in state["native_invocations"]:
+        assert agent_card.rsplit("_agent_", 1)[0] in child_session
     assert sum(event.get("type") == "subagent_start" for event in output) == 1
     assert sum(event.get("type") == "subagent_end" for event in output) == 1
     start = next(event for event in output if event.get("type") == "subagent_start")
@@ -76,9 +79,11 @@ def test_configured_collaboration(monkeypatch, parent, child, protocol, remote_p
     assert "CHILD_DONE" in str(output) and "PARENT_DONE" in str(output)
     if child == "a2a":
         assert len(state["remote"]) == 1 and not state["child"]
+        assert state["remote_auth"] == [True]
         body = state["remote"][0]
         message = body.get("params", body)["message"]
         assert message["metadata"]["user_context"] == {"user_id": "trusted"}
+        assert message["metadata"]["request_tag"] == "authorized-metadata"
         assert message["parts"] == [{"text": "CHILD_TASK_ONLY"}]
         assert "model" not in str(body) and "history" not in body
     else:
@@ -92,6 +97,79 @@ def test_configured_collaboration(monkeypatch, parent, child, protocol, remote_p
         assert "PARENT_SYSTEM_ONLY" not in str(body) and "PARENT_TASK_ONLY" not in str(body)
         assert "CHILD_TASK_ONLY" in str(body)
         assert "parent-only" not in str(body) and "child-only" not in str(body)
+
+
+@pytest.mark.parametrize("remote_protocol", ["JSONRPC", "HTTP+JSON"])
+def test_native_a2a_stream_has_same_child_result_live_and_in_history(monkeypatch, remote_protocol):
+    from management.services.agent.stream import AssistantMessageProjection, finalize_buffered_unit_fragments
+    from management.services.conversation.nexent_output import NexentOutputAdapter, normalize_nexent_history
+    from management.services.conversation.runtime_output import project_runtime_history
+
+    info, state, events, _ = asyncio.run(run_collaboration(
+        monkeypatch, child_core="a2a", remote_protocol=remote_protocol, remote_stream=True,
+    ))
+    assert info.attempt_outcome == "completed"
+    assert state["remote_methods"] == ["SendStreamingMessage" if remote_protocol == "JSONRPC"
+                                       else "/remote/message:stream"]
+    assert len(state["native_invocations"]) == 1 and state["remote_auth"] == [True]
+    storage, projection = AssistantMessageProjection(persist_units=True), NexentOutputAdapter()
+    live = []
+    for event in events:
+        live.extend(projection.push(event))
+        storage.project(json.dumps(event))
+    live.extend(projection.close("completed"))
+    finalize_buffered_unit_fragments(storage.units)
+    answer, units, invalid = project_runtime_history(info.run_result.final_content, storage.units)
+    restored, status = normalize_nexent_history([
+        {"type": unit["unit_type"], "content": unit["unit_content"], "unit_index": unit["unit_index"],
+         "tool_call_id": unit["tool_call_id"], "invocation_id": unit["invocation_id"]}
+        for unit in units
+    ], "completed")
+    assert not invalid and status == "completed" and answer == "PARENT_DONE"
+    for stream in (live, restored):
+        start, = [event for event in stream if event["type"] == "subagent_start"]
+        end, = [event for event in stream if event["type"] == "subagent_end"]
+        child_id = start["invocation_id"]
+        assert child_id == end["invocation_id"]
+        assert json.loads(end["content"])["status"] == "completed"
+        assert [(event.get("invocation_id"), event["content"]) for event in stream
+                if event["type"] == "final_answer"] == [(child_id, "CHILD_DONE"), (None, "PARENT_DONE")]
+        assert not {"model_output", "run_terminal", "tool_result"} & {event["type"] for event in stream}
+
+
+def test_native_a2a_polls_known_task_without_resending_message(monkeypatch):
+    info, state, events, _ = asyncio.run(run_collaboration(
+        monkeypatch, child_core="a2a", fault="remote_poll",
+    ))
+    assert info.attempt_outcome == "completed" and state["remote_methods"] == ["SendMessage", "GetTask"]
+    assert state["remote"][1]["params"]["id"] == "remote-task" and state["remote_auth"] == [True, True]
+    child, = [event for event in events if event["type"] == "run_terminal" and event.get("invocation_id")]
+    assert child["status"] == "completed" and child["final_content"] == "CHILD_DONE"
+
+
+@pytest.mark.parametrize("fault,status", [("partial_timeout", "failed"), ("partial_cancel", "stopped"),
+                                          ("partial_timeout_unresponsive_cancel", "failed"),
+                                          ("remote_failed", "failed")])
+def test_native_a2a_ends_child_without_publishing_failed_partial_result(monkeypatch, caplog, fault, status):
+    _, state, events, _ = asyncio.run(run_collaboration(
+        monkeypatch, child_core="a2a", fault=fault, remote_stream=True,
+        run_timeouts={"mcp_close_timeout_seconds": 0.25},
+    ))
+    child_turns = [event for event in events if event["type"] == "run_terminal" and event.get("invocation_id")]
+    assert len(child_turns) == 1 and child_turns[0]["status"] == status
+    assert not child_turns[0]["final_content"]
+    assert [event["type"] for event in events if event["type"] in {"subagent_start", "subagent_end"}] == [
+        "subagent_start", "subagent_end",
+    ]
+    if fault != "remote_failed":
+        assert state["remote_methods"] == ["SendStreamingMessage", "CancelTask"]
+        assert state["remote"][1]["params"]["id"] == "remote-task"
+        assert state["closed"]
+    else:
+        assert state["remote_methods"] == ["SendStreamingMessage"]
+    if fault == "partial_timeout_unresponsive_cancel":
+        assert "event=a2a_remote_cancel_failed" in caplog.text
+    assert all(state["remote_auth"])
 
 
 @pytest.mark.parametrize("protocol", ["native", "text"])
