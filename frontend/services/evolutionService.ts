@@ -1,5 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import { API_BASE_URL, API_ENDPOINTS } from "./api";
+import { API_BASE_URL, API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { getAuthHeaders } from "@/lib/auth";
 
 const root = `${API_BASE_URL}/agent-evolution`;
@@ -116,6 +116,28 @@ export interface ExperimentReport {
     skill_vs_absent?: { base: string; result: string } }>;
 }
 
+export interface PublicBenchmarkInput {
+  dataset: string;
+  revision: string;
+  subset: string;
+  scoring_protocol: string;
+  adaptation?: string;
+  run_reference?: string;
+  metric: string;
+  sample_count: number;
+  baseline_score: number;
+  candidate_score: number;
+}
+
+export interface PublicBenchmarkReport extends PublicBenchmarkInput {
+  report_id: number;
+  experiment_id: number;
+  base_snapshot_digest: string;
+  candidate_snapshot_digest: string;
+  created_by: string;
+  create_time: string;
+}
+
 export interface NewSkillBrief {
   name: string;
   creator_id: string;
@@ -160,6 +182,25 @@ async function read<T>(url: string, body?: unknown): Promise<T> {
 }
 
 export const evolutionService = {
+  async publicBenchmarks(id: number, before: number | null) {
+    const endpoint = API_ENDPOINTS.evolutionPublicBenchmarks(id);
+    const response = await fetchWithErrorHandling(
+      before === null ? endpoint : `${endpoint}?before=${before}`,
+      { headers: getAuthHeaders() },
+    );
+    const payload: { data: { items: PublicBenchmarkReport[]; next_before: number | null } } =
+      await response.json();
+    return payload.data;
+  },
+  async recordPublicBenchmark(id: number, values: PublicBenchmarkInput) {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.evolutionPublicBenchmarks(id), {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(values),
+    });
+    const payload: { data: PublicBenchmarkReport } = await response.json();
+    return payload.data;
+  },
   release: (id: number) => read<{
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
     candidate_digest: string; candidate_type: string; supported_type: boolean; paused: boolean; excluded_tools?: string[];

@@ -10,6 +10,7 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
+from contracts.evolution import PublicBenchmarkRequest
 from contracts.skill_script_repair import ReviewedScriptBuild, ScriptDraftRequest, ScriptRepairFeedback
 from management.services.evaluation.skill_script_repairs import build_reviewed_script, draft_script, share_script_feedback
 from contracts.tool_repair import ReviewedToolBuild, ToolCallerApproval, ToolRepairRequest
@@ -34,6 +35,7 @@ from management.services.evaluation.prompt_candidates import generate_prompt_can
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
 from management.services.evaluation.replay_cases import freeze_development_case, get_development_case, preview_trace_case
 from management.services.evaluation.experiments import create_experiment, experiment_report, workspace_choices
+from management.services.evaluation.public_benchmarks import read_reports, record_report
 from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
 from management.services.evaluation.feedback_handoff import tool_mapping_from_experiment, tool_sets_from_experiment
 from contracts.evolution import RegressionMembershipRequest, ToolMappingProposal, ToolSetProposal
@@ -43,6 +45,29 @@ from nexent.core.concurrency import run_blocking
 
 
 router = APIRouter(prefix="/agent-evolution")
+
+
+@router.get("/experiments/{experiment_id}/public_benchmark_reports")
+async def read_public_benchmarks(
+    experiment_id: int,
+    before: int | None = Query(None, gt=0),
+    limit: int = Query(20, ge=1, le=100),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    data = await run_blocking("read-public-benchmarks", read_reports, tenant, user, experiment_id, before, limit,
+                              lane="control-io", owner="management")
+    return {"data": data}
+
+
+@router.post("/experiments/{experiment_id}/public_benchmark_reports")
+async def record_public_benchmark(
+    experiment_id: int, request: PublicBenchmarkRequest, authorization: str | None = Header(None)
+):
+    user, tenant = get_current_user_id(authorization)
+    data = await run_blocking("record-public-benchmark", record_report, tenant, user, experiment_id, request,
+                              lane="control-io", owner="management")
+    return {"data": data}
 
 
 @router.put("/agents/{agent_id}/release-owners")

@@ -4,8 +4,25 @@
 import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, field_validator, model_validator
 from contracts.replay_files import FileStateCheck, TextFiles
+
+
+class PublicBenchmarkRequest(BaseModel):
+    """Aggregate results supplied by an external public-benchmark run."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, strict=True)
+
+    dataset: str = Field(min_length=1, max_length=128)
+    revision: str = Field(min_length=1, max_length=128)
+    subset: str = Field(min_length=1, max_length=128)
+    scoring_protocol: str = Field(min_length=1, max_length=512)
+    adaptation: str = Field(default="", max_length=512)
+    run_reference: str = Field(default="", max_length=512)
+    metric: str = Field(min_length=1, max_length=80)
+    sample_count: int = Field(gt=0, le=2_147_483_647)
+    baseline_score: FiniteFloat
+    candidate_score: FiniteFloat
 
 
 class DevelopmentFeedback(BaseModel):

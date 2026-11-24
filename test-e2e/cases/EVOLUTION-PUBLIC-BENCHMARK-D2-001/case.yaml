@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-PUBLIC-BENCHMARK-D2-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-10]
+  title: 公开评测报告独立记录并且无法覆盖业务门槛
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 通过管理接口验证报告录入、读取和提名的边界。
+  preconditions: [可创建临时数据库的 PostgreSQL 实例，测试 API 使用隔离租户及临时账号。]
+  test_data:
+    comparisons: 一份关键业务题仍失败的候选和一份通过所有业务门槛的候选。
+    report: 模拟外部公开评测对照，固定版本、子集、协议和聚合分数。
+  steps:
+  - order: 1
+    action: 编辑者在业务未达标的候选实验上并发录入相同的公开分数，再读取报告。
+    expected: 只登记一次。回读可追溯的来源、分数及该实验的候选和基线摘要。
+  - order: 2
+    action: 普通用户和另一租户尝试读写，提交含逐题内容的报告，尝试关联只有基线的实验。
+    expected: 均拒绝，原报告不变。
+  - order: 3
+    action: 读取失败候选的业务报告，再提交提名。对没有公开报告的业务达标候选提交提名。
+    expected: 公开分提高的失败候选仍被拒绝，业务达标的候选成功提名。
+  expected_results:
+  - 公开结果只在独立报告接口返回，并按候选实验关联。
+  - 只有同租户有编辑权的人可读写，报告接受已定义的元数据和聚合指标。
+  - 两种候选的提名由业务报告决定。
+  forbidden_side_effects:
+  - 公开录入不能改写业务逐题结果、业务覆盖或候选实验计划。
+  integration_boundary: [运行 Management HTTP 路由和真实 PostgreSQL。冻结的业务回执与重编译结果使用固定试验数据。]
+  cleanup: [销毁临时测试数据库。]
+  contract:
+    protocol: HTTP API
+    request_expectations: [使用登录身份、候选实验编号及聚合报告字段。]
+    response_expectations: [录入后可读回带摘要的公开报告，提名按业务筛选结果返回。]
+  acceptance:
+  - id: AC-01
+    description: 公开报告可追溯且并发重提交只登记一次。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 访问范围、报告字段及实验类型受校验。
+    steps: [2]
+    expected_results: [2]
+  - id: AC-03
+    description: 公开报告没有业务门槛的写入权重。
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

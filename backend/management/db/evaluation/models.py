@@ -5,11 +5,13 @@ from sqlalchemy import (
     Boolean,
     Column,
     Float,
+    Identity,
     Index,
     Integer,
     Sequence,
     String,
     Text,
+    text,
 )
 
 
@@ -17,6 +19,25 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 from management.db.base import SCHEMA, TableBase, _PRIMARY_KEY_DOC, _TENANT_ID_DOC
+
+
+class EvolutionPublicBenchmark(TableBase):
+    """Reported diagnostic metrics outside the business-trial ledger."""
+
+    __tablename__ = "evolution_public_benchmark_t"
+    __table_args__ = (
+        Index("ix_evolution_public_benchmark_experiment", "tenant_id", "experiment_id", "report_id",
+              postgresql_where=text("delete_flag='N'")),
+        {"schema": SCHEMA, "comment": "Public benchmark aggregates recorded against a development comparison."},
+    )
+
+    report_id = Column(BigInteger, Identity(always=True), primary_key=True, comment="Public benchmark report identifier.")
+    tenant_id = Column(String(100), nullable=False, comment="Tenant owning the associated experiment.")
+    experiment_id = Column(BigInteger, nullable=False, comment="Logical reference to the frozen development experiment.")
+    base_snapshot_digest = Column(String(64), nullable=False, comment="Baseline snapshot fingerprint from the experiment.")
+    candidate_snapshot_digest = Column(String(64), nullable=False, comment="Candidate snapshot fingerprint from the experiment.")
+    report_digest = Column(String(64), nullable=False, comment="Canonical aggregate report digest for idempotent submission.")
+    report = Column(JSONB, nullable=False, comment="Validated public benchmark provenance, metric and aggregate scores.")
 
 
 class EvaluationSet(TableBase):

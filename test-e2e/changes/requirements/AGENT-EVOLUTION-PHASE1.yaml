@@ -12,7 +12,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [EVOLUTION-SANDBOX-RECOVERY-D5-001, EVOLUTION-DEVELOPMENT-RECOVERY-D5-001, EVOLUTION-PRIVATE-RECOVERY-D5-001, EVOLUTION-ONLINE-DIAGNOSIS-D3-001, EVOLUTION-RUN-BUDGET-D3-001, EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
+    added: [EVOLUTION-PUBLIC-BENCHMARK-D2-001, EVOLUTION-SANDBOX-RECOVERY-D5-001, EVOLUTION-DEVELOPMENT-RECOVERY-D5-001, EVOLUTION-PRIVATE-RECOVERY-D5-001, EVOLUTION-ONLINE-DIAGNOSIS-D3-001, EVOLUTION-RUN-BUDGET-D3-001, EVOLUTION-RELEASE-MONITOR-D2-001, EVOLUTION-TOOL-BUILD-D3-001, EVOLUTION-MCP-RESULT-D2-001, EVOLUTION-MCP-RESULT-D3-001, EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
     modified: []
     retired: []
   traditional_ut:
@@ -50,6 +50,7 @@ change:
     - test/sdk/core/agents/test_replay_file_directory.py
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
+    - test/backend/services/test_evolution_public_benchmarks.py
     - test/backend/services/test_evolution_screening.py
     - test/backend/services/test_evolution_new_skill.py
     - test/backend/services/test_evolution_releases.py
@@ -59,6 +60,7 @@ change:
     - test/backend/utils/test_logging_utils.py
     - test/backend/services/test_prepared_public_turn.py
     behaviors:
+    - 公开评测报告按实验记录并受智能体编辑权限约束，只接收来源和聚合分数，不影响业务判分或提名。
     - MCP 构建候选核对新旧实参、初态和业务终态。按智能体发布版本装载构建，拒绝普通会话改写绑定，试评与独立确认分别使用隔离服务。
     - 本人查询建议可区分目标题改善、保护题失败、缺少对照及独立确认暂缓；其他题的改善不能覆盖该建议的目标题失败。
     - 模型生成预占次数和时间，超额时不访问模型。迟到回复不能存为候选。启用用量限额后，每次向供应商发请求前预留 token 和费用，收到有效供应商回执后按实际用量结算。

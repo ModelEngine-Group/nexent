@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperiments";
 import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
@@ -38,6 +38,8 @@ vi.mock("@/services/evolutionService", () => ({
     traceCaseDraft: vi.fn(),
     createCase: vi.fn(),
     report: vi.fn(),
+    publicBenchmarks: vi.fn(),
+    recordPublicBenchmark: vi.fn(),
     nominate: vi.fn(),
     confirmationResults: vi.fn().mockResolvedValue([]),
     submit: vi.fn(),
@@ -132,6 +134,31 @@ it("selects a published scope and opens its paired results with the original sta
   expect(screen.getByText("evolution.skillCoverage")).toBeInTheDocument();
   expect(screen.getByText("evolution.screen.incomplete")).toBeInTheDocument();
   expect(screen.getByText("evolution.screen.no_fixed_regression")).toBeInTheDocument();
+  const publicResult = {
+    report_id: 2, experiment_id: 42, dataset: "Instruction public fixture", revision: "v1",
+    subset: "format", scoring_protocol: "exact match v2", metric: "accuracy (%)", sample_count: 30,
+    baseline_score: 40, candidate_score: 90, base_snapshot_digest: "base", candidate_snapshot_digest: "candidate",
+    created_by: "editor", create_time: "2026-11-23T00:00:00Z",
+  };
+  vi.mocked(evolutionService.publicBenchmarks).mockResolvedValue({ items: [publicResult], next_before: null });
+  vi.mocked(evolutionService.recordPublicBenchmark).mockResolvedValue(publicResult);
+  expect(evolutionService.publicBenchmarks).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("evolution.publicBenchmark.title"));
+  expect(await screen.findByText("Instruction public fixture · v1 · format")).toBeInTheDocument();
+  expect(screen.getByText("exact match v2")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "evolution.confirmation.submit" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.publicBenchmark.add" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("evolution.publicBenchmark.add")).toBeInTheDocument();
+  for (const field of ["dataset", "revision", "subset", "scoring_protocol", "metric",
+    "sample_count", "baseline_score", "candidate_score"] as const) {
+    fireEvent.change(within(dialog).getByLabelText("evolution.publicBenchmark." + field),
+      { target: { value: String(publicResult[field]) } });
+  }
+  fireEvent.click(within(dialog).getByRole("button", { name: "OK" }));
+  await waitFor(() => expect(evolutionService.recordPublicBenchmark).toHaveBeenCalledWith(42,
+    expect.objectContaining({ baseline_score: 40, candidate_score: 90, sample_count: 30 })));
+  expect(screen.getByText("evolution.screen.incomplete")).toBeInTheDocument();
   expect(screen.getByText("missing owner")).toBeInTheDocument();
   expect(screen.getByText("evolution.state.improved")).toBeInTheDocument();
   expect(evolutionService.workspace).toHaveBeenCalledWith(7, 1);

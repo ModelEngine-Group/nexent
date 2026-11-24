@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-PUBLIC-BENCHMARK-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_public_report_is_separate_from_business_nomination
+acceptance_bindings:
+  AC-01: [test_public_report_is_separate_from_business_nomination]
+  AC-02: [test_public_report_is_separate_from_business_nomination]
+  AC-03: [test_public_report_is_separate_from_business_nomination]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

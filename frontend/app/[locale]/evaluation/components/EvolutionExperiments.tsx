@@ -31,6 +31,7 @@ import { ScriptFeedbackForm, ScriptDraftForm } from "./SkillScriptRepair";
 import ToolMappingCandidate from "./ToolMappingCandidate";
 import ToolSetCandidates from "./ToolSetCandidates";
 import FixedRegressionCases from "./FixedRegressionCases";
+import PublicBenchmarkReports from "./PublicBenchmarkReports";
 
 function CaseForm({
   agent,
@@ -605,6 +606,13 @@ function Experiments({
               </Button>
             )}
           </Flex>
+          {report.data.status === "finished" && !baselineReport && (
+            <PublicBenchmarkReports
+              key={report.data.experiment_id}
+              experiment={report.data.experiment_id}
+              viewer={viewer}
+            />
+          )}
           {development && report.data.status === "finished" && !baselineReport && (
             <ExampleCandidates key={`ExampleCandidates-${report.data.experiment_id}`} report={development} cases={choices?.cases || []}
               onGenerated={(id) => {

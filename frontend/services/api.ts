@@ -20,6 +20,8 @@ export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   systemConfigurations: `${API_BASE_URL}/system_configurations`,
+  evolutionPublicBenchmarks: (id: number) =>
+    `${API_BASE_URL}/agent-evolution/experiments/${id}/public_benchmark_reports`,
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
     importArchive: `${API_BASE_URL}/trajectory/import`,
