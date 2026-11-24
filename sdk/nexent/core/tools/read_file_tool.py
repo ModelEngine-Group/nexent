@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 import os
 from pydantic import Field
 from smolagents.tools import Tool
 
+from ..agents.resources.replay_files import ReplayFileDirectory
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
@@ -137,7 +139,9 @@ class ReadFileTool(Tool):
 
             # Prepare success message
             # Show relative path in response for better UX
-            relative_path = os.path.relpath(abs_path, self.init_path)
+            relative_path = (self.workspace_mapping.relative_path(abs_path)
+                             if isinstance(self.workspace_mapping, ReplayFileDirectory)
+                             else os.path.relpath(abs_path, self.init_path))
             success_msg = {
                 "status": "success",
                 "file_path": relative_path,

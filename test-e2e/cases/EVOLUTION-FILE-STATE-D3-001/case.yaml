@@ -10,19 +10,19 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: 验证 Management 按轮发送已核验的状态，Runtime 运行本地文件工具，再把独立读取的状态交回评分。
+  objective: 验证 Runtime 预加载获准的附件，按 Management 提供的初态运行本地文件工具，再把独立读取的终态交回评分。
   preconditions: [正式 pytest 环境和可用的临时目录。]
   test_data:
-    profile: 两轮会议交付，初始一个受保护文件，每组使用相同材料。
+    profile: 两轮会议交付，初始一个受保护文件，每组首轮使用一份获准附件。
   steps:
   - order: 1
-    action: 三组首轮都写草稿，末轮分别只回复、写终稿、原样写回受保护文件，三组最终回答相同。
-    expected: 每组均独立从初态开始，第二轮承接本组草稿；只回复和触碰保护文件失败，写终稿通过。
+    action: 三组首轮读取附件并写草稿，末轮分别只回复、写终稿、原样写回受保护文件，三组最终回答相同。
+    expected: 每组独立从初态开始，仅首轮挂载只读附件，模型使用工作区路径。第二轮承接本组草稿，只回复和触碰保护文件失败，写终稿通过。
   expected_results: [六个独立目录均已释放，覆盖文件判分与口头回答不一致。]
   forbidden_side_effects: [每组的写入不能更改其他组的初始文件或发送到外部服务。]
   acceptance:
   - id: AC-01
-    description: 跨边界核对重置、跨轮传递、文件差异、受保护写入及回收。
+    description: 跨边界核对附件按轮提供、状态重置、跨轮传递、文件差异、受保护写入及回收。
     steps: [1]
     expected_results: [1]
     forbidden_side_effects: [1]
@@ -32,5 +32,5 @@ case:
       required_services: []
   integration_boundary:
   - 真实 Management 重放、签名 AgentOS HTTP、Runtime 文件目录和 SDK 文件工具；HTTP 使用进程内传输，受控执行器代替模型及模型配置加载。
-  observations: [每轮输入与文件摘要、实际写入、目录归属、独立终态判定。]
+  observations: [每轮输入与文件摘要、附件路径和传输记录、实际写入、目录归属、独立终态判定。]
   cleanup: [核对所有试跑临时目录均已删除。]

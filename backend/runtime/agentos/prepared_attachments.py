@@ -15,7 +15,7 @@ from infrastructure.object_storage.read_access import build_attachment_proxy_url
 from nexent.multi_modal.utils import parse_s3_url
 
 
-def materialize_evaluation_input(run_input, actor, language, *, include_history_in_query=True):
+def materialize_evaluation_input(run_input, actor, language, *, include_history_in_query=True, workspace_attachments=False):
     refs = [*run_input.attachment_refs, *(item for turn in run_input.history for item in turn.attachment_refs)]
     try:
         validate_attachment_references(list({file.url for file in refs}), actor.user_id, actor.tenant_id)
@@ -34,7 +34,8 @@ def materialize_evaluation_input(run_input, actor, language, *, include_history_
 
     def rebuild(files):
         return [
-            {"name": file.name, "url": file.url, "presigned_url": sign(file.url) if file.presign else ""}
+            {"name": file.name, "url": file.url,
+             "presigned_url": sign(file.url) if file.presign and not workspace_attachments else ""}
             for file in files
         ]
 
@@ -44,8 +45,12 @@ def materialize_evaluation_input(run_input, actor, language, *, include_history_
         for turn in run_input.history
     ]
     effective = _collect_run_minio_files(current, history)
+    if workspace_attachments:
+        # The core adds the local paths after staging. Keep object URLs out of the dialogue.
+        for turn in history:
+            turn.minio_files = []
     return (
-        render_query_with_attachments(
+        run_input.query if workspace_attachments else render_query_with_attachments(
             current, run_input.query, history if include_history_in_query else None, language=language,
         ),
         _convert_history_with_minio_files([turn for turn in history if turn.role != "attachment"], language=language),

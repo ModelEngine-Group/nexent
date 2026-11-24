@@ -114,3 +114,62 @@ async def test_only_verified_final_files_carry_to_next_turn(evidence):
     result = judge_file_state(rule, [o.replay_receipt for o in obs])
     assert result["status"] == "fail" and result["protected_writes"] == ["keep.txt"]
     assert result["expected_digest"] == result["final_digest"]
+def test_replay_workspace_loads_only_prepared_attachments_and_excludes_them_from_file_state(tmp_path):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from nexent.core.agents.contracts.config import ToolConfig
+    from nexent.core.agents.resources.replay_files import ReplayFileDirectory
+    from nexent.core.agents.resources.tools import ToolResources
+    from nexent.core.agents.resources.workspace import WorkspaceResources
+
+    fixture = ReplayFileDirectory({"handoff.txt": "OPEN"})
+    transfers = []
+
+    def download(key, path, bucket):
+        transfers.append((bucket, key))
+        Path(path).write_text("DISPATCH-731Q", encoding="utf8")
+        return True, ""
+
+    storage = SimpleNamespace(default_bucket="pilot", get_file_size=lambda *_: 13, download_file=download)
+    observer = SimpleNamespace(lang="en", add_message=lambda *_: None, replay_file_directory=fixture)
+    class ReplayResources(ToolResources, WorkspaceResources):
+        pass
+
+    provider = ReplayResources()
+    provider.workspace_path = str(tmp_path)
+    provider.user_id = "editor"
+    provider.tenant_id = "tenant"
+    provider.observer = observer
+    downloader = provider.create_tool(ToolConfig(source="builtin", class_name="DownloadFromS3Tool", name="download_from_s3",
+        params={"workspace_path": str(tmp_path)}, metadata={"minio_client": storage, "user_id": "editor", "tenant_id": "tenant"}))
+    reader = provider.create_tool(ToolConfig(source="local", class_name="ReadFileTool", name="read_file",
+                                          params={"init_path": str(fixture.root)}))
+    writer = provider.create_tool(ToolConfig(source="local", class_name="CreateFileTool", name="create_file",
+                                          params={"init_path": str(fixture.root)}))
+    provider.agent = SimpleNamespace(tools={"download_from_s3": downloader})
+    provider.minio_files = [{"name": "dispatch.txt", "object_name": "attachments/editor/approved"}]
+    provider._push_file_workspace_to_sandbox = lambda: None
+    provider._initialize_sandbox_workspaces = lambda: None
+    try:
+        query = provider._prepare_file_workspace("Read the approved attachment")
+        assert query.startswith("Read the approved attachment")
+        assert "Use read_file" in query and "- inputs/000_dispatch.txt" in query
+        assert "attachments/editor/approved" not in query
+        assert transfers == [("pilot", "attachments/editor/approved")]
+        approved = json.loads(reader.forward("inputs/000_dispatch.txt"))
+        assert approved["content"] == "DISPATCH-731Q" and approved["file_path"] == "inputs/000_dispatch.txt"
+        assert json.loads(reader.forward("/inputs/000_dispatch.txt"))["content"] == approved["content"]
+        assert json.loads(reader.forward(approved["absolute_path"]))["content"] == approved["content"]
+        writer.forward("handoff.txt", approved["content"])
+        assert fixture.receipt()["files"] == {"handoff.txt": "DISPATCH-731Q"}
+        with pytest.raises(Exception):
+            writer.forward("inputs/000_dispatch.txt", "overwrite")
+        with pytest.raises(ValueError):
+            downloader.forward("s3://pilot/attachments/editor/other", "inputs/other.txt")
+        assert transfers == [("pilot", "attachments/editor/approved")]
+        assert (tmp_path / "inputs/000_dispatch.txt").read_text(encoding="utf8") == approved["content"]
+        assert not fixture.receipt()["complete"]
+    finally:
+        fixture.close()

@@ -42,6 +42,8 @@ class ReplayFileDirectory:
         validate_files(initial)
         self.temp = TemporaryDirectory(prefix="nexent-file-trial-")
         self.root = Path(self.temp.name)
+        self.input_paths = {}
+        self.input_names = {}
         self.bound = set()
         self.writes = set()
         self.writes_by_tool = {}
@@ -80,6 +82,12 @@ class ReplayFileDirectory:
             raise ValueError("Unsupported replay file binding")
 
         def resolve(path):
+            if class_name == "ReadFileTool" and isinstance(path, str) and path in self.input_paths:
+                target = self.input_paths[path]
+                if target.is_symlink() or not target.is_file():
+                    self.unsupported_call = True
+                    raise ValueError("Prepared replay input is unavailable")
+                return str(target)
             try:
                 name = file_name(path.removeprefix("/replay/") if isinstance(path, str) else path)
             except ValueError:
@@ -103,12 +111,25 @@ class ReplayFileDirectory:
         tool._validate_path = resolve
         self.bound.add(class_name)
 
+    def add_input(self, relative_path, local_path, displayed_path):
+        """Expose one prepared attachment to the read tool without adding it to writable state."""
+        target = Path(local_path)
+        if target.is_symlink() or not target.is_file():
+            raise ValueError("Prepared replay input is unavailable")
+        for alias in (relative_path, f"/{relative_path}", str(target), displayed_path, f"/replay/{relative_path}"):
+            self.input_paths[alias] = target
+        self.input_names[target] = relative_path
+
     def unsupported(self, *args, **kwargs):
         self.unsupported_call = True
         raise ValueError("This operation requires a different replay state adapter")
 
+    def relative_path(self, path):
+        path = Path(path)
+        return self.input_names[path] if path in self.input_names else path.relative_to(self.root).as_posix()
+
     def to_container(self, path):
-        return "/replay/" + Path(path).relative_to(self.root).as_posix()
+        return "/replay/" + self.relative_path(path)
 
     def receipt(self):
         return {"initial_digest": self.initial_digest, "files": self.read_files(), "complete": not self.unsupported_call,

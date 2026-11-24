@@ -12,6 +12,7 @@ history_file_with_presigned_url: "  - {{ name }}: {{ s3_url }} (for non-MCP tool
 history_file_without_presigned_url: "  - {{ name }}: {{ s3_url }}"
 history_file_overflow: "  - ... (and {{ count }} more files)"
 workspace_note: "\n\nRun workspace: {{ workspace }}"
+replay_attachments: "\n\nThese attachments are already staged as read-only inputs. Use read_file with the paths below. Do not download them again.\n{{ paths }}"
 delegated_workspace_marker: "Run workspace:"
 delegated_workspace: "{{ task }}\n\nRun workspace: {{ workspace }}"
 additional_arguments: "\nYou have been provided with these additional arguments, that you can access using the keys as variables in your python code:\n{{ arguments }}."

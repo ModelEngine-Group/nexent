@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from nexent.core.agents.prompt.user_context import render_user_context
 from nexent.core.agents.resources.compatibility.smolagents_tools import deferred_executor_type
+from nexent.core.agents.resources.replay_files import ReplayFileDirectory
 from nexent.core.utils.observer import ProcessType
 
 
@@ -241,7 +242,9 @@ class WorkspaceResources:
         (workspace / "inputs").mkdir(parents=True, exist_ok=True)
         (workspace / "outputs").mkdir(parents=True, exist_ok=True)
         download_tool = (getattr(self.agent, "tools", {}) or {}).get("download_from_s3")
-        downloaded: List[Dict[str, str]] = []
+        fixture = getattr(self.observer, "replay_file_directory", None)
+        replay = isinstance(fixture, ReplayFileDirectory)
+        replay_paths = []
         if self.minio_files and download_tool is None:
             raise RuntimeError("Uploaded files are present but download_from_s3 is unavailable")
 
@@ -257,8 +260,17 @@ class WorkspaceResources:
                 continue
             filename = os.path.basename(str(item.get("name") or object_name or f"file_{index}"))
             local_filename = f"inputs/{index:03d}_{filename}"
-            result = json.loads(download_tool.forward(source_url, local_filename))
-            downloaded.append({"name": filename, "path": result["local_path"]})
+            if replay:
+                # The model's forward is blocked for replay. Only the authorized run inputs come through here.
+                from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool
+
+                if not isinstance(download_tool, DownloadFromS3Tool):
+                    raise RuntimeError("Prepared replay attachments require the builtin download tool")
+                result = json.loads(DownloadFromS3Tool.forward(download_tool, source_url, local_filename))
+                fixture.add_input(local_filename, workspace / local_filename, result["local_path"])
+                replay_paths.append(local_filename)
+            else:
+                json.loads(download_tool.forward(source_url, local_filename))
 
         language = getattr(self.observer, "lang", "en")
         mapping = getattr(self, "workspace_mapping", None)
@@ -266,6 +278,10 @@ class WorkspaceResources:
         workspace_note = render_user_context(language, "workspace_note", {
             "workspace": display_workspace,
         })
+        if replay_paths:
+            workspace_note += render_user_context(language, "replay_attachments", {
+                "paths": "\n".join(f"- {path}" for path in replay_paths),
+            })
         self._push_file_workspace_to_sandbox()
         self._initialize_sandbox_workspaces()
         return query + workspace_note

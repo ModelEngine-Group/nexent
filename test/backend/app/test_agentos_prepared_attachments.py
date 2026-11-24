@@ -82,19 +82,39 @@ def test_attachment_only_history_rejects_text():
         }]})
 
 
+def test_file_replay_keeps_all_authorized_refs_for_staging_without_exposing_urls(storage_boundary):
+    request = RunInput.model_validate({
+        "query": "latest",
+        "attachment_refs": [{"name": "current.txt", "url": "s3://nexent/attachments/actor/current", "presign": True}],
+        "history": [{"role": "user", "content": "earlier", "attachment_refs": [
+            {"name": "prior.txt", "url": "s3://nexent/attachments/actor/prior", "presign": True},
+        ]}],
+    })
+    query, restored, files = prepared_attachments.materialize_evaluation_input(
+        request, ACTOR, "en", workspace_attachments=True,
+    )
+    assert query == "latest" and restored[0].content == "earlier"
+    assert [entry["url"] for entry in files] == [
+        "s3://nexent/attachments/actor/current", "s3://nexent/attachments/actor/prior",
+    ]
+    assert all(not entry["presigned_url"] for entry in files)
+    storage_boundary.assert_not_called()
+
+
 @pytest.mark.parametrize("url", [
     "s3://nexent/attachments/other/private.txt",
     "s3://other-bucket/attachments/actor/report.txt",
 ])
 @pytest.mark.parametrize("role", ["user", "attachment"])
-def test_all_attachment_references_are_checked_before_any_signing(storage_boundary, url, role):
+@pytest.mark.parametrize("workspace_attachments", [False, True])
+def test_all_attachment_references_are_checked_before_any_signing(storage_boundary, url, role, workspace_attachments):
     first = {"name": "ok", "url": "s3://nexent/attachments/actor/report.txt", "presign": True}
     request = RunInput.model_validate({
         "query": "query", "attachment_refs": [first],
         "history": [{"role": role, "content": "", "attachment_refs": [{"name": "bad", "url": url, "presign": True}]}],
     })
     with pytest.raises(HTTPException) as error:
-        prepared_attachments.materialize_evaluation_input(request, ACTOR, "en")
+        prepared_attachments.materialize_evaluation_input(request, ACTOR, "en", workspace_attachments=workspace_attachments)
     assert error.value.status_code == 403
     assert error.value.detail == {"code": "AGENTOS_ATTACHMENT_FORBIDDEN"}
     storage_boundary.assert_not_called()

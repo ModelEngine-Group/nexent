@@ -12,6 +12,7 @@ history_file_with_presigned_url: "  - {{ name }}: {{ s3_url }}（供非 MCP 工�
 history_file_without_presigned_url: "  - {{ name }}: {{ s3_url }}"
 history_file_overflow: "  - ……（另有 {{ count }} 个文件）"
 workspace_note: "\n\nRun workspace: {{ workspace }}"
+replay_attachments: "\n\n以下附件已放入工作区，只读。请通过 read_file 使用下列路径，无需再次下载。\n{{ paths }}"
 delegated_workspace_marker: "Run workspace:"
 delegated_workspace: "{{ task }}\n\nRun workspace: {{ workspace }}"
 additional_arguments: "\n你还可以在 Python 代码中通过同名变量访问以下参数：\n{{ arguments }}。"

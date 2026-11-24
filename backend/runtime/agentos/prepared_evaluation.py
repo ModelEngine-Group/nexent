@@ -393,6 +393,7 @@ def prepare_run_snapshot(
     )
     query, history, files = materialize_evaluation_input(
         payload.input, actor, payload.language, include_history_in_query=NEXENT_AGENT_CORE != "jiuwen",
+        workspace_attachments=isinstance(payload, PreparedEvaluationRun) and payload.replay_files is not None,
     )
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
     mcp = (PreparedMCP(actor, mapping_trial=True)
