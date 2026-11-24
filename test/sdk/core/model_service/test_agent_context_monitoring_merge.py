@@ -10,12 +10,14 @@ from test_model_service import setup as setup
 from nexent.core.model_service.http_contracts import ModelTransportError, RawHttpResponse
 from nexent.core.model_service.sse import SSEEvent
 from nexent.monitor.facts import get_fact_sink, set_fact_sink
+from nexent.monitor.private_logging import private_evaluation_logging
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("streaming", [False, True])
-async def test_private_pairing_and_attempt_facts_share_the_successful_physical_attempt(setup, asynchronous, streaming):
+@pytest.mark.parametrize("private", [False, True])
+async def test_agent_input_pairing_and_ops_attempt_facts_are_independent(setup, asynchronous, streaming, private):
     profile, request, limiter, factory = setup
     usage = {"prompt_tokens": 70, "completion_tokens": 30}
     outcome = ([frame({"content": "accepted"}), frame(finish="stop"),
@@ -35,27 +37,32 @@ async def test_private_pairing_and_attempt_facts_share_the_successful_physical_a
     set_fact_sink(facts.append)
     request = request.model_copy(update={"stream": streaming})
     try:
-        if streaming and asynchronous:
-            async with service.astream(request, profile, agent_context=boundary) as events:
-                response = [event async for event in events][-1].message
-        elif streaming:
-            with service.stream(request, profile, agent_context=boundary) as events:
-                response = list(events)[-1].message
-        elif asynchronous:
-            response = await service.ainvoke(request, profile, agent_context=boundary)
-        else:
-            response = service.invoke(request, profile, agent_context=boundary)
+        with private_evaluation_logging(private):
+            if streaming and asynchronous:
+                async with service.astream(request, profile, agent_context=boundary) as events:
+                    response = [event async for event in events][-1].message
+            elif streaming:
+                with service.stream(request, profile, agent_context=boundary) as events:
+                    response = list(events)[-1].message
+            elif asynchronous:
+                response = await service.ainvoke(request, profile, agent_context=boundary)
+            else:
+                response = service.invoke(request, profile, agent_context=boundary)
     finally:
         set_fact_sink(previous)
 
     snapshot = response._agent_input
     assert snapshot.binding is boundary and snapshot.attempt == 2
     assert json.loads(snapshot.semantic_json) == {"messages": json.loads(sender.calls[-1].body_bytes)["messages"]}
-    assert [fact["outcome"] for fact in facts] == ["started", "failed", "started", "succeeded"]
-    assert facts[2]["fact_id"] == facts[3]["fact_id"] != facts[0]["fact_id"]
-    assert facts[-1]["call_context_id"] == snapshot.request_id
-    assert facts[-1]["input_tokens"] == response.usage.input_tokens == 70
-    assert facts[-1]["output_tokens"] == response.usage.output_tokens == 30
     assert "_agent_input" not in response.model_dump_json()
-    assert not any("messages" in fact or "agent_context" in fact for fact in facts)
+    assert response.usage.input_tokens == 70 and response.usage.output_tokens == 30
     assert len(sender.calls) == 2 and not limiter._entries
+    if private:
+        assert not facts
+    else:
+        assert [fact["outcome"] for fact in facts] == ["started", "failed", "started", "succeeded"]
+        assert facts[2]["fact_id"] == facts[3]["fact_id"] != facts[0]["fact_id"]
+        assert facts[-1]["call_context_id"] == snapshot.request_id
+        assert facts[-1]["input_tokens"] == response.usage.input_tokens
+        assert facts[-1]["output_tokens"] == response.usage.output_tokens
+        assert not any("messages" in fact or "agent_context" in fact for fact in facts)

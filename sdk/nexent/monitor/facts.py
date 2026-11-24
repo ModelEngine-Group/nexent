@@ -4,6 +4,8 @@
 import logging
 from collections.abc import Callable
 
+from .private_logging import private_evaluation_active
+
 
 logger = logging.getLogger(__name__)
 _sink: Callable[[dict], None] | None = None
@@ -17,7 +19,7 @@ def set_fact_sink(sink: Callable[[dict], None] | None) -> None:
 
 def get_fact_sink() -> Callable[[dict], None] | None:
     """Capture the current sink for a multi-event operation."""
-    return _sink
+    return None if private_evaluation_active.get() else _sink
 
 
 def emit_fact(event: dict) -> None:
