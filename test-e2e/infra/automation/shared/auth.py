@@ -1,8 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Authentication fixtures for black-box API integration tests."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from typing import Any
 
 import httpx
@@ -31,7 +34,7 @@ def configured_user(identity_id: str) -> tuple[dict[str, Any], str]:
     if not record:
         raise RuntimeError(f"config/users.yaml has no user id={identity_id!r}")
     password_key = str(record.get("password_env_key") or "")
-    password = load_secret_env().get(password_key, "")
+    password = os.environ.get(password_key) or load_secret_env().get(password_key, "")
     if not password:
         raise RuntimeError(f"config/secrets.env has no value for {password_key}")
     return record, password

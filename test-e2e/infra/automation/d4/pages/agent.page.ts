@@ -70,9 +70,8 @@ export class AgentPage {
       .locator("xpath=ancestor::article[1]");
     await expect(card).toHaveCount(1);
     await card.hover();
-    await card.getByRole("button", { name: "更多操作", exact: true }).click();
-    await this.page.getByRole("menuitem", { name: "配置", exact: true }).click();
-    // The configure action routes to the agent's own editor page.
+    await card.getByTestId("agent-card-body").click();
+    // The card body routes to the agent's own editor page.
     await expect(this.page).toHaveURL(/\/agents\/\d+/);
     await expect(this.page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
     await expect(this.page.getByText("模型与提示词", { exact: true }).first()).toBeVisible();
@@ -412,7 +411,17 @@ export class AgentPage {
       const payload = await persisted.json();
       expect((payload.data || payload).tools.some((tool: any) => Number(tool.tool_id || tool.id) === expectedToolId)).toBe(true);
     }
-    await expect(this.page.getByText(toolName, { exact: true }).first()).toBeVisible();
+    if (serviceName) {
+      const service = this.page.getByTestId(`agent-selected-mcp-service-${serviceName}`);
+      const selector = service.getByRole("button", { name: `选择 ${serviceName} 的工具`, exact: true });
+      await expect(selector).toBeVisible();
+      await selector.click();
+      const selectedTool = this.page.getByRole("checkbox", { name: toolName, exact: true });
+      await expect(selectedTool).toBeVisible();
+      await expect(selectedTool).toBeChecked();
+    } else {
+      await expect(this.page.getByText(toolName, { exact: true }).first()).toBeVisible();
+    }
   }
 
   async bindSkill(skillName: string): Promise<void> {

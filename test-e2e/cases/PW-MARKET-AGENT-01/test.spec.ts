@@ -38,7 +38,21 @@ journey("PW-MARKET-AGENT-01", async (context) => {
       async () => "same-tenant consumer with Repository access uses tenant_a_admin, distinct from tenant_a_dev author",
     ],
     steps: [
-      async () => { const card = page.getByRole("button", { name, exact: true }).locator(".."); await card.getByRole("button", { name: "更多操作", exact: true }).click(); await page.getByRole("menuitem", { name: /申请上架|上架/ }).click(); const dialog = page.getByRole("dialog", { name: "申请上架" }); await dialog.locator("textarea").fill(`Owned market listing ${token}`); await dialog.getByRole("button",{name:"编辑标签",exact:true}).click(); const tagsDialog=page.getByRole("dialog",{name:"编辑标签",exact:true}); const libraries = await page.request.get("/api/tag-libraries"); expect(libraries.ok()).toBe(true);
+      async () => {
+        await agents.open();
+        const card = page.locator("article").filter({
+          has: page.getByRole("button", { name, exact: true }),
+        });
+        await expect(card).toHaveCount(1);
+        await card.hover();
+        await card.getByRole("button", { name: "更多操作", exact: true }).click();
+        await page.getByRole("menuitem", { name: "上架", exact: true }).click();
+        const dialog = page.getByRole("dialog", { name: "申请上架" });
+        await dialog.locator("textarea").fill(`Owned market listing ${token}`);
+        await dialog.getByRole("button",{name:"编辑标签",exact:true}).click();
+        const tagsDialog=page.getByRole("dialog",{name:"编辑标签",exact:true});
+        const libraries = await page.request.get("/api/tag-libraries");
+        expect(libraries.ok()).toBe(true);
         const library = (await libraries.json()).find((item:any)=>item.bucket_key==="default_resource"&&item.status==="active");
         expect(library).toBeTruthy();
         const definitions = await page.request.get(`/api/tag-libraries/${library.bucket_id}/definitions`); expect(definitions.ok()).toBe(true);
@@ -58,8 +72,8 @@ journey("PW-MARKET-AGENT-01", async (context) => {
           if((await active.textContent())?.trim()===valueLabel) break;
           await selector.press("ArrowDown");
         }
-        await expect(active).toHaveText(valueLabel); await selector.press("Enter"); await page.keyboard.press("Escape"); await tagsDialog.getByRole("button",{name:/保\s*存/}).click(); await expect(tagsDialog).toBeHidden(); const submitted=page.waitForResponse((r)=>r.request().method()==="POST"&&/\/api\/repository\/agent\/\d+\/versions\/\d+/.test(r.url())); await dialog.getByRole("button", { name: "提交申请", exact: true }).click(); if(!(await submitted).ok()) throw new Error("Agent listing application failed"); return `author applied published version ${versionName} from Mine through the card menu with explicit icon and tag`; },
-      async () => { await expect(page.getByText(/审核中|待审核/).first()).toBeVisible({ timeout: 120_000 }); return "Mine entered pending review"; },
+        await expect(active).toHaveText(valueLabel); await selector.press("Enter"); await page.keyboard.press("Escape"); await tagsDialog.getByRole("button",{name:/保\s*存/}).click(); await expect(tagsDialog).toBeHidden(); const submitted=page.waitForResponse((r)=>r.request().method()==="POST"&&/\/api\/repository\/agent\/\d+\/versions\/\d+/.test(r.url())); await dialog.getByRole("button", { name: "提交申请", exact: true }).click(); if(!(await submitted).ok()) throw new Error("Agent listing application failed"); return `author applied published version ${versionName} from the current configuration-list menu with explicit icon and tag`; },
+      async () => { await page.goto(appPath("/agent-space")); await page.getByRole("tab", { name: /^我的智能体/ }).click(); await expect(page.getByText(/审核中|待审核/).first()).toBeVisible({ timeout: 120_000 }); return "Mine entered pending review"; },
       async () => { const admin = await loginIsolated(page, setting("NEXENT_TEST_MARKET_ADMIN", "tenant_a_admin")); adminContext=admin.context; await admin.page.goto(appPath("/agent-space")); await admin.page.getByRole("tab", { name: /审核中心/ }).click(); const row=admin.page.getByRole("heading", { name, exact: true }).locator("xpath=ancestor::li[1]"); await row.getByRole("button",{name:/通\s*过/}).click(); const dialog=admin.page.locator('[role="dialog"]:visible'); await expect(dialog).toHaveCount(1); const approved=admin.page.waitForResponse((r)=>r.request().method()==="PATCH"&&/\/api\/repository\/agent\//.test(r.url())); await dialog.getByRole("button",{name:/通\s*过/}).click(); const approvalResponse=await approved; if(!approvalResponse.ok()) throw new Error(`Agent approval returned ${approvalResponse.status()}`); await expect(dialog).toBeHidden(); return "tenant administrator approved from the Review-only surface and the PATCH completed"; },
       async () => { const consumer=await loginIsolated(page, "tenant_a_admin"); consumerContext=consumer.context; const before=await consumer.page.request.get("/api/agent/list"); expect(before.ok()).toBe(true); consumerAgentIdsBefore=new Set((await before.json()).map((row:any)=>Number(row.agent_id))); await consumer.page.goto(appPath("/agent-space")); await consumer.page.getByRole("tab",{name:/^仓库/}).click(); await consumer.page.getByPlaceholder("搜索 Agent 名称、描述或标签",{exact:true}).locator("visible=true").fill(name); await expect(consumer.page.getByRole("button",{name,exact:true}).locator("visible=true")).toBeVisible({timeout:120_000}); return "same-tenant consumer with Repository access found the approved Agent and captured its pre-copy Agent IDs"; },
       async () => {

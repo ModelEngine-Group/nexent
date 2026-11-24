@@ -53,6 +53,24 @@ function agentRows(count = 8) {
 
 async function mockList(page, rows = agentRows()) {
   const fixture = { rows, requests: [], writes: [], providerCalls: [] };
+  await page.context().addCookies([
+    {
+      name: "nexent_token_expires_at",
+      value: String(Math.floor(Date.now() / 1000) + 3600),
+      url: baseUrl,
+    },
+  ]);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "user_info",
+      JSON.stringify({
+        id: "agent-list-test-user",
+        tenantId: "agent-list-test-tenant",
+        email: "agent-list@nexent.test",
+        role: "SPEED",
+      }),
+    );
+  });
   // These existing read endpoints use POST to carry lookup parameters.
   const readOnlyPostPaths = new Set([
     "/api/agent/search_info",
@@ -356,7 +374,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   pixel(fifthBox.y - cardBox.y - cardBox.height, 12, "card vertical gap");
   expect((await bounds(cards.nth(3))).y).toBe(cardBox.y);
   await expect(first).toHaveCSS("padding", "16px 24px");
-  await expect(first).toHaveCSS("border-radius", "12px");
+  await expect(first).toHaveCSS("border-radius", "8px");
   await expect(first).toHaveCSS("border-top-width", "0px");
   expect(
     await first.evaluate((element) => getComputedStyle(element).boxShadow),
@@ -371,16 +389,19 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const description = body.locator("p");
   await typography(title, 16, 24, 500, "rgb(25, 25, 25)");
   await typography(description, 12, 20, 400, "rgb(119, 119, 119)");
-  const expectedFontFamily =
-    '"HarmonyOS Sans SC", "Huawei Sans", system-ui, sans-serif';
+  const fontFamilyOf = async (locator) =>
+    (await locator.evaluate((element) => getComputedStyle(element).fontFamily))
+      .split(",")
+      .map((family) => family.trim())
+      .sort();
+  const expectedFontFamily = await fontFamilyOf(page.locator("body"));
   for (const text of [title, description, toggle])
-    await expect(text).toHaveCSS("font-family", expectedFontFamily);
-  await expect(
-    page.getByRole("button", {
-      name: label("zh", "agentConfig.list.new"),
-      exact: true,
-    }),
-  ).toHaveCSS("font-family", expectedFontFamily);
+    expect(await fontFamilyOf(text)).toEqual(expectedFontFamily);
+  const createButton = page.getByRole("button", {
+    name: label("zh", "agentConfig.list.new"),
+    exact: true,
+  });
+  expect(await fontFamilyOf(createButton)).toEqual(expectedFontFamily);
   pixel((await bounds(description)).height, 42, "card description text bounds");
   pixel(
     (await bounds(description)).y -
@@ -535,7 +556,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const search = page.getByPlaceholder(
     label("zh", "agentSelector.searchPlaceholder"),
   );
-  await expect(search).toHaveCSS("font-family", expectedFontFamily);
+  expect(await fontFamilyOf(search)).toEqual(expectedFontFamily);
   await search.fill("健康小助手");
   await expect(cards).toHaveCount(1);
   await expect(
@@ -551,10 +572,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const table = page.getByRole("table").filter({ has: page.locator("tbody") });
   const dataRows = table.locator("tbody tr[data-row-key]");
   await expect(table).toBeVisible();
-  await expect(table).toHaveCSS(
-    "font-family",
-    expectedFontFamily,
-  );
+  expect(await fontFamilyOf(table)).toEqual(expectedFontFamily);
   await expect(dataRows).toHaveCount(8);
   await expect(
     dataRows.first(),

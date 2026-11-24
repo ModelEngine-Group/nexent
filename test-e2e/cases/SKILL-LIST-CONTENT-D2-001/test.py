@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Verify list body selection against the running Skill HTTP API."""
 
 import os
@@ -14,7 +15,12 @@ from shared.http import assert_status, client
 @pytest.mark.case_id("SKILL-LIST-CONTENT-D2-001")
 @pytest.mark.asyncio
 async def test_skill_list_content_selection_and_cleanup(tenant_a_user):
-    batch = re.sub(r"[^a-z0-9-]", "-", os.environ["TEST_BATCH"].lower())[:36]
+    batch_source = (
+        os.environ.get("TEST_BATCH")
+        or os.path.basename(os.environ.get("RESULT_DIR", ""))
+        or "manual"
+    )
+    batch = re.sub(r"[^a-z0-9-]", "-", batch_source.lower())[:36]
     created = await _create_skill(tenant_a_user, prefix=f"list-content-{batch}")
     skill_id, name = int(created["skill_id"]), str(created["name"])
     try:

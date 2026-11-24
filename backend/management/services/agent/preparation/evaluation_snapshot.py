@@ -614,8 +614,7 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs
-        if workbench_skills:
-            expected["authorized_skill_names"] = sorted(configs)
+        expected["authorized_skill_names"] = sorted(configs)
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):
             raise ValueError("Unsupported evaluation skill tool configuration")
