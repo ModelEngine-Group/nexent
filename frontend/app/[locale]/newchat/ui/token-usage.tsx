@@ -127,11 +127,11 @@ interface SingleTurnTokenUsageProps {
 }
 
 /**
- * Displays per-step token consumption with a stacked progress bar.
- * Each step shows input tokens (blue) + output tokens (amber) relative to the token threshold.
+ * Displays the highest observed request-context occupancy in an Agent run.
  *
+ * Each request is compared with its own context window. Model calls are not
+ * accumulated because cumulative traffic is a cost metric, not context usage.
  * Usage belongs to each message, for both live streams and restored history.
- * Missing usage must never inherit another turn's global counters.
  */
 export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
   className,
@@ -150,15 +150,36 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
   if (steps.length === 0) return null;
 
   const latestStep = steps[steps.length - 1];
-  const contextWindowTokens = latestStep.contextWindowTokens;
-  const tokenThreshold = latestStep.tokenThreshold;
-  const maxTokens = contextWindowTokens ?? tokenThreshold;
+  const observedSteps = steps.flatMap((step) => {
+    if (
+      step.inputKnown === false ||
+      step.contextWindowTokens === null ||
+      step.contextWindowTokens <= 0
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        step,
+        contextWindowTokens: step.contextWindowTokens,
+        usageRatio: step.stepInputTokens / step.contextWindowTokens,
+      },
+    ];
+  });
+
+  const peakContext = observedSteps.reduce<
+    (typeof observedSteps)[number] | undefined
+  >(
+    (peak, current) =>
+      peak === undefined || current.usageRatio > peak.usageRatio
+        ? current
+        : peak,
+    undefined
+  );
 
   const unknown = t("chat.tokenUsage.unknown");
-  const usageKnown = steps.every(
-    (step) => step.inputKnown !== false && step.outputKnown !== false
-  );
-  if (maxTokens === null || !usageKnown)
+  if (peakContext === undefined)
     return (
       <span
         className="text-xs text-muted-foreground"
@@ -175,14 +196,9 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
     );
 
   const stepCount = steps.length;
-
-  // Calculate total tokens used (sum of step_input_tokens + step_output_tokens for all steps)
-  const totalTokensUsed = steps.reduce(
-    (sum, step) => sum + step.stepInputTokens + step.stepOutputTokens,
-    0
-  );
-
-  const usagePercent = Math.round((totalTokensUsed / maxTokens) * 100);
+  const peakInputTokens = peakContext.step.stepInputTokens;
+  const maxTokens = peakContext.contextWindowTokens;
+  const usagePercent = Math.round(peakContext.usageRatio * 100);
 
   return (
     <div className="relative">
@@ -194,7 +210,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
         <Zap className="size-3 text-amber-500" />
         <span className="font-medium text-foreground">{usagePercent}%</span>
         <span className="text-muted-foreground/70">
-          {t("chat.tokenUsage.turn")}
+          {t("chat.tokenUsage.peakContext")}
         </span>
       </button>
 
@@ -227,96 +243,54 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
             </button>
           </div>
 
-          {/* Stacked progress bar */}
+          {/* Peak request context */}
           <div className="mb-3">
             <div className="mb-1.5 flex justify-between text-xs">
               <span className="text-muted-foreground">
-                {t("chat.tokenUsage.context")}
+                {t("chat.tokenUsage.peakRequestContext")}
               </span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} /{" "}
+                {peakInputTokens.toLocaleString()} /{" "}
                 {maxTokens.toLocaleString()}
               </span>
             </div>
-            <div className="flex h-3 overflow-hidden rounded-full bg-muted">
-              {steps.map((step, index) => {
-                const stepTotal = step.stepInputTokens + step.stepOutputTokens;
-                const stepPercent = (stepTotal / maxTokens) * 100;
-                const inputPercent = (step.stepInputTokens / maxTokens) * 100;
-                const outputPercent = (step.stepOutputTokens / maxTokens) * 100;
-
-                return (
-                  <div
-                    key={step.stepNumber}
-                    className="group relative"
-                    style={{
-                      width: `${Math.min(stepPercent, 100 - (index > 0 ? steps.slice(0, index).reduce((sum, s) => sum + ((s.stepInputTokens + s.stepOutputTokens) / maxTokens) * 100, 0) : 0))}%`,
-                    }}
-                    title={t("chat.tokenUsage.stepSummary", {
-                      step: step.stepNumber,
-                      input: step.stepInputTokens,
-                      output: step.stepOutputTokens,
-                    })}
-                  >
-                    {/* Input portion (blue) */}
-                    <div
-                      className="absolute inset-y-0 left-0 bg-blue-500"
-                      style={{
-                        width: `${(inputPercent / stepPercent) * 100}%`,
-                      }}
-                    />
-                    {/* Output portion (amber) */}
-                    <div
-                      className="absolute inset-y-0 bg-amber-500"
-                      style={{
-                        left: `${(inputPercent / stepPercent) * 100}%`,
-                        width: `${(outputPercent / stepPercent) * 100}%`,
-                      }}
-                    />
-                    {/* Step number label on hover */}
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                      <span className="text-[9px] font-medium text-white drop-shadow-md">
-                        {step.stepNumber}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+            <div
+              className="h-3 overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-label={t("chat.tokenUsage.peakRequestContext")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(usagePercent, 100)}
+            >
+              <div
+                className="h-full bg-blue-500"
+                data-token-usage="peak-context-bar"
+                style={{ width: `${Math.min(usagePercent, 100)}%` }}
+              />
             </div>
           </div>
 
-          {/* Legend */}
           <div className="mb-3 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-sm bg-blue-500" />
-                <span className="text-muted-foreground">
-                  {t("chat.tokenUsage.input")}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-sm bg-amber-500" />
-                <span className="text-muted-foreground">
-                  {t("chat.tokenUsage.output")}
-                </span>
-              </div>
+            <div className="flex items-center gap-1.5">
+              <span className="size-2.5 rounded-sm bg-blue-500" />
+              <span className="text-muted-foreground">
+                {t("chat.tokenUsage.input")}
+              </span>
             </div>
             <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
               {t("chat.tokenUsage.steps", { count: stepCount })}
             </span>
           </div>
 
-          {/* Step details */}
           <div className="space-y-2 text-xs">
             <div className="flex items-center justify-between border-t border-border pt-2">
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <span className="font-medium">
-                  {t("chat.tokenUsage.total")}
+                  {t("chat.tokenUsage.peakStep")}
                 </span>
               </span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} /{" "}
-                {maxTokens.toLocaleString()}
+                {peakContext.step.stepNumber}
               </span>
             </div>
           </div>
