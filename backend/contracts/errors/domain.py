@@ -20,9 +20,9 @@ Governance rules
   domain errors share that base class.
 - The most specific registered class wins. Resolution walks the exception MRO,
   so a subclass keeps its own status code even when its base is registered.
-- Wording is static unless the exception class owns the message (see
-  ``use_exception_message``). Never interpolate ``str(exc)`` of an unexpected
-  exception into a response: internal paths and table names must stay in logs.
+- Wording is static. Never interpolate ``str(exc)`` into a response: exception
+  text is untrusted data (SQL fragments, object paths, stack detail) and must
+  stay in logs. ``use_exception_message`` is kept for table compatibility only.
 
 Changelog
 ---------
@@ -118,13 +118,15 @@ def resolve_domain_error(exc: BaseException) -> Optional[DomainErrorSpec]:
 
 
 def domain_error_message(exc: BaseException, spec: DomainErrorSpec) -> str:
-    """Resolve the client-facing wording for a registered domain exception."""
-    if not spec.use_exception_message:
-        return spec.message
-    text = str(exc).strip()
-    if not text or len(text) > MAX_MESSAGE_LENGTH:
-        return spec.message
-    return text
+    """Resolve the client-facing wording for a registered domain exception.
+
+    Always the static, reviewed wording. Exception text is attacker- or
+    bug-controlled data (it can carry SQL fragments, object paths or stack
+    detail), so it stays in server logs and never enters a response body.
+    The ``use_exception_message`` flag is retained for table compatibility
+    but no longer copies exception text into responses.
+    """
+    return spec.message
 
 
 def domain_error_body(exc: BaseException, request_id: Optional[str] = None) -> Optional[dict]:
