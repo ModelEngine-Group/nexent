@@ -322,6 +322,34 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
     )
 
 
+def resolve_agent_title_model_id(agent_id: Optional[int], tenant_id: str) -> Optional[int]:
+    """Pick the model the conversation's agent runs on, mirroring runtime selection.
+
+    Falls back to the published version's bound models first, then the draft
+    record, matching ``run.py`` version resolution. Returns ``None`` when no
+    usable bound model exists so callers keep the tenant default.
+    """
+    if not agent_id:
+        return None
+    from management.db.agent.repository import search_agent_info_by_agent_id
+    from management.db.agent.version import query_current_version_no
+    try:
+        version_no = query_current_version_no(agent_id=agent_id, tenant_id=tenant_id)
+        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no or 0)
+    except Exception:
+        logger.warning(
+            "title_generation: agent %s lookup failed, using tenant default model", agent_id)
+        return None
+    bound_model_ids = (agent_info or {}).get("model_ids") or []
+    from management.services.model.resolver import is_model_available
+    from management.services.model.run_controls import select_configured_model_id
+    return select_configured_model_id(
+        bound_model_ids,
+        lambda candidate: is_model_available(
+            get_model_by_model_id(candidate, tenant_id=tenant_id)),
+    )
+
+
 async def call_llm_for_title(
     question: str,
     tenant_id: str,
@@ -1271,6 +1299,8 @@ async def generate_conversation_title_service(conversation_id: int, question: st
             raise ConversationNotFoundError("Conversation does not exist or has been deleted")
         snapshot = {"conversation_title": initial["conversation_title"],
                     "title_version": initial["title_version"]}
+        if model_id is None:
+            model_id = resolve_agent_title_model_id(initial.get("agent_id"), tenant_id)
         title = await call_llm_for_title(question, tenant_id, language, model_id, user_id=user_id)
 
         # A manual rename during the model call wins. No database lock is held
