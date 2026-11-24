@@ -12,7 +12,7 @@ from .trajectory_store import CaptureIdentity
 logger = logging.getLogger(__name__)
 
 
-def execution_observer(*, capturing, store=None):
+def execution_observer(*, capturing, store=None, repository=None):
     @contextmanager
     def observe(metadata):
         if (
@@ -22,9 +22,9 @@ def execution_observer(*, capturing, store=None):
         ):
             yield metadata
             return
-        from management.db.trajectory.repository import ExecutionRepository
+        from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
-        repository = ExecutionRepository()
+        execution_repository = repository if repository is not None else ExecutionRepository()
         identity = CaptureIdentity(
             str(metadata.tenant_id),
             str(metadata.user_id),
@@ -43,7 +43,7 @@ def execution_observer(*, capturing, store=None):
                 # PG remains authoritative when an archive cannot be inspected.
                 logger.warning("trajectory.prior_turn_unavailable")
         run_id = (metadata.extra_metadata or {}).get("agentos_run_id")
-        turn = repository.begin(
+        turn = execution_repository.begin(
             identity,
             trajectory_id,
             agent_version_no=metadata.agent_version_no,

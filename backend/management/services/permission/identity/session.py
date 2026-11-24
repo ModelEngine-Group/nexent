@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
-from gateway.security import token_codec
+from gateway.identity import token_codec
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from contracts.authentication import (
@@ -50,7 +50,7 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from gateway.downstream.internal_tokens import (
+from gateway.identity.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
     INTERNAL_RUNTIME_JWT_SCOPE,
@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 
 def _gateway_identity(kind="session"):
-    from gateway.downstream.identity import IdentityError, enabled, trusted_identity
+    from gateway.identity.downstream import IdentityError, enabled, trusted_identity
 
     try:
         identity = trusted_identity(kind)
@@ -522,7 +522,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
 
 def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     """Translate the shared bearer syntax failure into the backend domain error."""
-    from gateway.downstream.identity import IdentityError, bearer_token
+    from gateway.identity.downstream import IdentityError, bearer_token
 
     try:
         return bearer_token(authorization)
@@ -532,7 +532,7 @@ def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Compatibility export of the common service-token verifier."""
-    from gateway.downstream.internal_tokens import verify_internal_runtime_jwt as verify
+    from gateway.identity.internal_tokens import verify_internal_runtime_jwt as verify
 
     return verify(authorization, secret=JWT_SECRET)
 

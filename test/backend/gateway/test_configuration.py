@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from gateway.configuration import GatewaySettings, load_settings
-from gateway.security.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
+from gateway.identity.protocol import IdentityError, derive_signing_key, sign_identity, verify_identity
 
 
 BACKEND = Path(__file__).resolve().parents[3] / "backend"
@@ -54,7 +54,7 @@ def test_invalid_configuration_fails_before_startup(name, value):
 
 def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monkeypatch):
     from contracts.constants import environment
-    from gateway.downstream.identity import sign_identity as backend_sign, signing_key
+    from gateway.identity.downstream import sign_identity as backend_sign, signing_key
 
     identity = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
     key = derive_signing_key("master-fixture")
@@ -71,8 +71,9 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
     allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "infrastructure"}
+    downstream_modules = {"downstream", "internal_tokens", "middleware"}
     for path in (BACKEND / "gateway").rglob("*.py"):
-        if path.relative_to(BACKEND / "gateway").parts[0] == "downstream":
+        if path.parent.name == "identity" and path.stem in downstream_modules:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -81,7 +82,9 @@ def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
                 assert module and module.split(".")[0] in allowed, (path, module)
                 if module.startswith("infrastructure"):
                     assert module == "infrastructure.rdb.identity", (path, module)
-                assert not module.startswith("gateway.downstream"), (path, module)
+                assert module not in {f"gateway.identity.{name}" for name in downstream_modules}, (path, module)
+            if isinstance(node, ast.ImportFrom) and node.module == "gateway.identity":
+                assert not downstream_modules.intersection(item.name for item in node.names), path
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
                 assert path.name == "configuration.py", path
 
@@ -106,7 +109,7 @@ def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_p
                     output.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(entry, output)
     backend = tmp_path / "backend"
-    assert not (backend / "gateway/downstream").exists()
+    assert (backend / "gateway/identity/protocol.py").is_file()
     code = """import json,sys
 sys.path[:0] = sys.argv[1:3]
 sys.modules["bcrypt"] = None
@@ -116,7 +119,8 @@ from backend.http import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app
 app=create_gateway_app(settings=load_settings({'GATEWAY_AUTH_ENABLED':'false'}))
-assert not {'management','runtime','contracts','infrastructure.rdb.client','gateway.downstream','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
+assert not {'management','runtime','contracts','infrastructure.rdb.client','gateway.identity.downstream',
+            'gateway.identity.middleware','gateway.identity.internal_tokens','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
 print(json.dumps({'imported':True,'routes':len(app.routes)}))
 """
     env = os.environ.copy()

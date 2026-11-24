@@ -93,7 +93,7 @@ async def test_authorized_workbench_stages_skill_root(flow, mocker):
     assert response.headers["X-Workbench-Config-Version"] == "3"
     turn = prepared_turn.store.stage_turn.call_args.args[5]
     assert turn["workbench_skill_root"] == {"agent_id": 7, "version_no": 4}
-    assert turn["automation"]["model_id"] == 11
+    assert turn["automation"]["model_id"] is None
     assert turn["workbench_update"] == {"config": config.model_dump(mode="json"), "expected_version": 2, "version": 3}
 
 

@@ -17,7 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 
 # isort: split
-from management.db.base import SCHEMA, TableBase
+from infrastructure.rdb.base import SCHEMA, TableBase
 
 
 class TrajectoryExecution(TableBase):
