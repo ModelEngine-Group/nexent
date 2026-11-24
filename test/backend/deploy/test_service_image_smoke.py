@@ -25,8 +25,16 @@ def smoke(tmp_path):
         ):
             target = base / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("", encoding="utf-8")
+            target.write_text("#!/usr/bin/env bash\n" if target.suffix == ".sh" else "",
+                              encoding="utf-8", newline="\n")
             target.chmod(0o755)
+    for relative in (
+        "backend/configs/model_catalog.json", "backend/configs/models_dev_catalog.json",
+        "nexent/litellm_models.json", "backend/tool_collection/langchain/compute_tool.py",
+    ):
+        target = images / "mcp/opt" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("fixture", encoding="utf-8")
     binary = tmp_path / "bin"
     binary.mkdir()
     docker = binary / "docker"
@@ -46,6 +54,10 @@ case "$1" in
     if [ "$1" = sh ]; then
       shift 2
       code="${1//\/opt\//$SMOKE_IMAGES/$role/opt/}"
+      if [ "$role" = mcp ]; then
+        python() { :; }
+        export -f python
+      fi
       bash -ec "$code"
     elif [ "$role" = "${SMOKE_UNREADY:-none}" ]; then
       exit 1
@@ -64,7 +76,7 @@ esac
             **os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
             "SMOKE_IMAGES": images.as_posix(), "SMOKE_LOG": log.as_posix(), "SMOKE_UNREADY": unready,
         }
-        arguments = ["management-image", "runtime-image"] + (["mcp-image", "ops-image"] if full else [])
+        arguments = ["management-image", "runtime-image"] + (["ops-image"] if full else [])
         result = subprocess.run([bash, str(SCRIPT), *arguments], cwd=ROOT, env=environment,
                                 capture_output=True, text=True, timeout=30)
         calls = [line.rstrip("\t").split("\t") for line in log.read_text().splitlines()]
@@ -79,7 +91,13 @@ def test_smoke_retains_monitoring_and_prepares_its_dependencies(smoke, full):
     result, calls = run(full=full)
     assert result.returncode == 0, result.stdout + result.stderr
     runs = [call for call in calls if call[0] == "run"]
-    assert not any("OPS_MONITORING_ENABLED=false" in call for call in runs)
+    mcp, = [call for call in runs if "backend.http.mcp_service" in call]
+    assert "management-image" in mcp and "OPS_MONITORING_ENABLED=false" in mcp
+    assert all("OPS_MONITORING_ENABLED=false" not in call for call in runs if call != mcp)
+    runtime_runs = [call for call in runs if "backend.http.runtime_service" in call]
+    assert len(runtime_runs) == 2
+    assert any({"MONITORING_PROVIDER=local_file", "ENABLE_TELEMETRY=true"} <= set(call) for call in runtime_runs)
+    assert any({"TRAJECTORY_READ_ENABLED=true", "ENABLE_TELEMETRY=false"} <= set(call) for call in runtime_runs)
     if full:
         es, = [call for call in runs if "--network-alias" in call and "elasticsearch" in call]
         assert "discovery.type=single-node" in es and "xpack.security.enabled=false" in es
