@@ -73,14 +73,14 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
 def _extract_upstream_code(response: httpx.Response) -> int | None:
     """Read the business code from AIDP's fixed error body.
 
-    AIDP error responses use ``{"error": {"code": <int>, "message": <str>}}``.
-    A non-JSON body (for example an empty proxy response) carries no code.
+    AIDP business errors use ``{"error": {"code": <int>, "message": <str>}}``.
+    Non-JSON bodies and plain HTTP-layer errors carry no business code.
     """
     try:
         payload = response.json()
     except ValueError:
         return None
-    return payload["error"]["code"]
+    return (payload.get("error") or {}).get("code")
 
 
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
