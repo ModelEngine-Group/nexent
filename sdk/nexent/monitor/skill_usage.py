@@ -68,7 +68,8 @@ class SkillUsageObservation:
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()).hexdigest()
-        now = datetime.now(timezone.utc).isoformat()
+        triggered_at = datetime.now(timezone.utc)
+        started_at = context.monitoring_started_at or triggered_at
         return cls({
             "tenant_id": context.tenant_id,
             "fact_kind": "skill",
@@ -81,8 +82,8 @@ class SkillUsageObservation:
             "skill_id": skill_id,
             "skill_name": skill_name,
             "trigger_kind": trigger_kind,
-            "started_at": now,
-            "triggered_at": now,
+            "started_at": started_at.isoformat(),
+            "triggered_at": triggered_at.isoformat(),
             "record_revision": 1,
             "outcome": "succeeded",
             "duration_ms": 0,

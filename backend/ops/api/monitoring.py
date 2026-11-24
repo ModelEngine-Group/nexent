@@ -310,8 +310,8 @@ class RefreshSelection(BaseModel):
     end_date: date
 
 
-def _refresh_key():
-    return digest(JWT_SECRET.encode(), b"ops-model-monitoring-refresh", sha256)
+def _refresh_key(kind="model"):
+    return digest(JWT_SECRET.encode(), f"ops-{kind}-monitoring-refresh".encode(), sha256)
 
 
 @ops_router.post("/models/refresh", status_code=202)
@@ -341,7 +341,7 @@ def refresh_models(request: Request, scope: RefreshSelection,
         "revisions": {},  # An older worker can report the target as uncovered during a rollout.
         "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
         "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
-    }, _refresh_key(), algorithm="HS256")
+    }, _refresh_key("model"), algorithm="HS256")
     return {"data": {"refresh_id": token, "status": "queued"}}
 
 
@@ -352,7 +352,7 @@ def model_refresh_status(request: Request, refresh_id: str,
     if service is None or not JWT_SECRET:
         raise HTTPException(503, "Model monitoring refresh is unavailable")
     try:
-        target = jwt.decode(refresh_id, _refresh_key(), algorithms=["HS256"], audience="ops-model-monitoring-refresh")
+        target = jwt.decode(refresh_id, _refresh_key("model"), algorithms=["HS256"], audience="ops-model-monitoring-refresh")
         tenant_id = target["tenant"]
         start, end = date.fromisoformat(target["start"]), date.fromisoformat(target["end"])
         if not 0 <= (end - start).days < 366:
@@ -373,6 +373,76 @@ def model_refresh_status(request: Request, refresh_id: str,
         rows = service.store.states(tenant, "model", start, end)
     except Exception:
         raise HTTPException(503, "Model monitoring refresh is temporarily unavailable") from None
+    available = {row["statistic_date"].isoformat(): row["published_source_revision"] for row in rows}
+    if set(dates) - (available.keys() & revisions.keys()):
+        status = "uncovered"
+    elif all(available[day] is not None and available[day] >= revisions[day] for day in dates):
+        status = "completed"
+    else:
+        elapsed = datetime.now(timezone.utc).timestamp() - target["requested"]
+        status = "timed_out" if elapsed >= 5 else "running"
+    snapshot_at = min((row["source_snapshot_at"] for row in rows if row["source_snapshot_at"]), default=None)
+    return {"data": {"status": status, "data_as_of": snapshot_at}}
+
+
+@ops_router.post("/skills/refresh", status_code=202, tags=["skill monitoring"])
+def refresh_skills(request: Request, scope: RefreshSelection,
+                   user: Annotated[CurrentUser, Depends(authenticate)]):
+    tenant = operations_scope(user, scope.tenant_id, "ops.dashboard:update")
+    if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
+        raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None or not JWT_SECRET:
+        raise HTTPException(503, "Skill monitoring refresh is unavailable")
+    try:
+        rows = service.store.states(tenant, "skill", scope.start_date, scope.end_date)
+    except Exception:
+        raise HTTPException(503, "Skill monitoring refresh is temporarily unavailable") from None
+    revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
+    dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
+    missing_dates = [day for day in dates if day not in revisions]
+    if missing_dates:
+        raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
+    now = datetime.now(timezone.utc)
+    revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
+    token = jwt.encode({
+        "aud": "ops-skill-monitoring-refresh", "tenant": tenant,
+        "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
+        "revisions": {}, "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
+        "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
+    }, _refresh_key("skill"), algorithm="HS256")
+    return {"data": {"refresh_id": token, "status": "queued"}}
+
+
+@ops_router.get("/skills/refreshes/{refresh_id}", tags=["skill monitoring"])
+def skill_refresh_status(request: Request, refresh_id: str,
+                         user: Annotated[CurrentUser, Depends(authenticate)]):
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None or not JWT_SECRET:
+        raise HTTPException(503, "Skill monitoring refresh is unavailable")
+    try:
+        target = jwt.decode(refresh_id, _refresh_key("skill"), algorithms=["HS256"],
+                           audience="ops-skill-monitoring-refresh")
+        tenant_id = target["tenant"]
+        start, end = date.fromisoformat(target["start"]), date.fromisoformat(target["end"])
+        if not 0 <= (end - start).days < 366:
+            raise ValueError("Invalid signed refresh date range")
+        dates = [day.isoformat() for day in days_inclusive(start, end)]
+        encoded = target.get("revision_bytes")
+        if encoded is None:
+            revisions = target["revisions"]
+            if not isinstance(revisions, dict):
+                raise ValueError("Invalid signed refresh revisions")
+        else:
+            versions = unpack(f"!{len(dates)}Q", urlsafe_b64decode(encoded))
+            revisions = dict(zip(dates, versions, strict=True))
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError, StructError):
+        raise HTTPException(404, "Monitoring refresh was not found") from None
+    tenant = operations_scope(user, tenant_id, "ops.dashboard:update")
+    try:
+        rows = service.store.states(tenant, "skill", start, end)
+    except Exception:
+        raise HTTPException(503, "Skill monitoring refresh is temporarily unavailable") from None
     available = {row["statistic_date"].isoformat(): row["published_source_revision"] for row in rows}
     if set(dates) - (available.keys() & revisions.keys()):
         status = "uncovered"

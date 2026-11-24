@@ -221,7 +221,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
     manager = get_monitoring_manager()
     timing = getattr(agent_run_info, "run_timing", None) or RunTiming()
     timing.bind_run_id(run_id)
-    timing.start()
+    started_at = timing.start()
+    metadata = replace(metadata, monitoring_started_at=started_at)
     agent_run_info.run_timing = timing
     with manager.start_agent_run(metadata, run_timing=timing) as span:
         observation = AgentRunObservation.from_context(get_agent_monitoring_context())

@@ -221,7 +221,8 @@ class SubAgentToolWrapper:
                 **({"parent.agent.name": parent.agent_name} if parent.agent_name is not None else {}),
             })
             timing = RunTiming(run_id=str(invocation_id))
-            timing.start()
+            started_at = timing.start()
+            metadata = replace(metadata, monitoring_started_at=started_at)
             with agent_monitoring_context(metadata), manager.trace_operation(
                 f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT,
                 run_timing=timing, **attributes,
