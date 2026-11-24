@@ -14,6 +14,11 @@ def test_grade_and_compare(monkeypatch):
     rule = {"evaluator_type": "code", "name": "deliver", "pass_threshold": 1.0,
             "code": "def evaluate(query, expected, actual, runtime_events):\n    return {'score': int(expected == actual)}"}
     job = {"plan": {"evaluator": rule}, "tenant_id": "tenant", "created_by": "editor"}
+    partial = EvaluationAgentResult(answer="y", events=[
+        {"type": "final_answer", "answer_phase": "delta", "content": "y"},
+        {"type": "final_answer", "invocation_id": "subtask", "content": "y"},
+    ])
+    assert service._grade(request, job, {"query": "deliver", "expected": "y"}, partial)["status"] == "missing_evidence"
     rows = []
     for case_id, answers in enumerate([("n","y"),("y","n"),("y","y"),("n","n"),(None,"y"),("y","pending")], 1):
         for variant, answer in zip(("base", "result"), answers):

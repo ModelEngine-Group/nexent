@@ -15,6 +15,7 @@ from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest
+from contracts.evaluation_answer import has_completed_root_answer
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial
 from management.db.conversation.evolution_review import recent_reviews
@@ -411,7 +412,7 @@ def _grade(request, job, task, observed):
     scoring = (plan.get("regression_cases", {}).get(str(job.get("case_id"))) or {}).get("scoring")
     rule = scoring["evaluator"] if scoring else plan["evaluator"]
     eid = rule["evaluator_id"] if scoring else request.evaluator_id
-    closed = any(e.get("type") == "final_answer" for e in observed.events)
+    closed = has_completed_root_answer(observed.events)
     language = scoring["language"] if scoring else request.language
     judge_model_id = scoring["judge_model_id"] if scoring else request.judge_model_id
     frozen_judges = plan.get("judges")

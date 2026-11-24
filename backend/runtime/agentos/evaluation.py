@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
+from contracts.evaluation_answer import completed_root_answer
 from starlette.responses import JSONResponse
 
 from contracts.agentos import (
@@ -36,7 +37,6 @@ def create_evaluation_router() -> APIRouter:
 
 
 async def collect_observer_output(agent_run_info, runner, thread_manager) -> EvaluationAgentResult:
-    final_answer_parts: list[str] = []
     runtime_events: list[dict] = []
     async for chunk in runner(
         agent_run_info,
@@ -46,10 +46,6 @@ async def collect_observer_output(agent_run_info, runner, thread_manager) -> Eva
             data = json.loads(chunk)
             if isinstance(data, dict):
                 runtime_events.append(data)
-                if data.get("type") == "final_answer":
-                    content = data.get("content")
-                    if isinstance(content, str):
-                        final_answer_parts.append(content)
         except Exception:
             logger.debug(
                 "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
@@ -60,10 +56,8 @@ async def collect_observer_output(agent_run_info, runner, thread_manager) -> Eva
             data = json.loads(msg)
             if isinstance(data, dict):
                 runtime_events.append(data)
-                if data.get("type") == "final_answer" and isinstance(data.get("content"), str):
-                    final_answer_parts.append(data["content"])
         except Exception:
             logger.debug(
                 "Failed to parse straggler observer message", exc_info=True
             )
-    return EvaluationAgentResult(answer="".join(final_answer_parts).strip(), events=runtime_events)
+    return EvaluationAgentResult(answer=completed_root_answer(runtime_events) or "", events=runtime_events)

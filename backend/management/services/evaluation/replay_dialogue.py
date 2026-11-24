@@ -6,6 +6,7 @@ from collections import Counter
 from hashlib import sha256
 
 from contracts.agentos import MCPReplyProbe, RunHistoryMessage
+from contracts.evaluation_answer import has_completed_root_answer
 from nexent.core.agents.resources.replay_tools import argument_digest
 from contracts.errors.exceptions import RuntimeUpstreamError
 from management.db.evaluation.replay_cases import task_digest
@@ -107,7 +108,7 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
                 error = {"error": "unverified_file_state"}
             else:
                 files = state.files
-        if followups and not error and not any(e.get("type") == "final_answer" for e in observed.events):
+        if followups and not error and not has_completed_root_answer(observed.events):
             error = {"error": "missing_final_answer_event"}
         if followups:
             records.append({"turn": index + 1, "query": current.query, "receipt_id": attempt,

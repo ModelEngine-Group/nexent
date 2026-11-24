@@ -7,10 +7,28 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import PreparedEvaluationRun
+from contracts.evaluation_answer import completed_root_answer, has_completed_root_answer
 from infrastructure.agentos_identity import ServicePrincipal
 from runtime.agentos.prepared_evaluation import prepare_evaluation_run
 from test.backend.services.model_profile_helpers import canonical_record, legacy_record
 from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
+
+
+def test_evaluation_grades_only_the_accepted_root_attempt():
+    step = {"step_id": "route"}
+    events = [
+        {**step, "type": "final_answer", "answer_phase": "delta", "attempt_id": "first", "content": "FIN"},
+        {**step, "type": "model_attempt_control", "phase": "rollback", "attempt_id": "first"},
+        {**step, "type": "model_output_thinking", "attempt_id": "second", "content": "OP"},
+        {**step, "type": "model_output_deep_thinking", "content": "private reasoning"},
+        {**step, "type": "model_output_code", "attempt_id": "second", "content": "S"},
+        {**step, "type": "final_answer", "invocation_id": "child", "content": "child result"},
+    ]
+    assert not has_completed_root_answer(events) and completed_root_answer(events) is None
+    events.append({**step, "type": "final_answer", "answer_phase": "complete", "reclassify_step": True, "content": ""})
+    assert has_completed_root_answer(events) and completed_root_answer(events) == "OPS"
+    events[-1]["content"] = "verified"
+    assert completed_root_answer(events) == "verified"
 
 
 @pytest.fixture(autouse=True)
