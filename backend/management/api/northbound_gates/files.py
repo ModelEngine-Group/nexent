@@ -5,9 +5,8 @@
 The partner contract locks ``download`` to ``ignore`` and ``stream``: the
 ``redirect`` mode hands out a MinIO presigned URL (internal topology) and
 ``base64`` inlines the whole object, and neither belongs in the partner
-contract. The lock is declared on the signature — the manifest's
-``params_lock`` is the gateway-side pre-check, this pattern is the second
-layer (§5.8 example three).
+contract. The lock is declared on the signature (``Query(pattern=...)``),
+which is the enforced pre-check for this capability (§5.8 example three).
 
 The gate shares the same service implementations as the internal route
 (``check_file_access`` + ``get_file_url_impl`` / ``get_file_stream_impl``);
@@ -21,6 +20,7 @@ from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, Path as PathParam, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from contracts.authentication import AuthenticatedIdentity
 from contracts.northbound_exposure import nb_exposed
@@ -54,11 +54,11 @@ def _error_response(exc: Exception, request) -> JSONResponse:
 @nb_file_router.get("/download/{object_name:path}")
 @nb_exposed("file.download")
 async def nb_get_storage_file(
+    request: Request,
     object_name: str = PathParam(..., description="File object name"),
     download: str = Query("ignore", pattern="^(ignore|stream)$", description="Download mode"),
-    expires: int = Query(86400, description="URL validity period (seconds)"),
+    expires: int = Query(86400, ge=1, le=604800, description="URL validity period (seconds, 1..604800)"),
     filename: Optional[str] = Query(None, description="Original filename for download (optional)"),
-    request: Request = None,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
 ):
@@ -99,9 +99,10 @@ async def nb_get_storage_file(
         )
 
     # Presigning skips storage, so check existence here to avoid 200 + dead URL.
+    # The probe is a synchronous MinIO round trip; keep it off the event loop.
     from management.db.file.attachment import get_file_size_from_minio_strict
 
-    if get_file_size_from_minio_strict(object_name) is None:
+    if await run_in_threadpool(get_file_size_from_minio_strict, object_name) is None:
         return _error_response(NotFoundException("Storage object does not exist"), request)
     try:
         result = await get_file_url_impl(object_name=object_name, expires=expires)

@@ -12,8 +12,6 @@ from contracts.errors.domain import (  # noqa: F401 - re-exported for existing c
     DOMAIN_ERROR_SPECS,
     DomainErrorSpec,
     domain_error_body,
-    domain_error_message,
-    registered_domain_errors,
     resolve_domain_error,
 )
 
@@ -21,7 +19,5 @@ __all__ = [
     "DOMAIN_ERROR_SPECS",
     "DomainErrorSpec",
     "domain_error_body",
-    "domain_error_message",
-    "registered_domain_errors",
     "resolve_domain_error",
 ]

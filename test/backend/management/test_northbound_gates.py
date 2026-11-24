@@ -27,9 +27,10 @@ def gate_client(monkeypatch):
     from management.services.file import access as file_access
     from management.services.file import service as file_service
 
-    auto_gates.agent_automation_facade = MagicMock()
-    auto_gates.agent_automation_facade.list_tasks.return_value = {"items": [], "total": 0}
-    auto_gates.agent_automation_facade.get_task.return_value = {"id": 1, "status": "paused"}
+    automation_facade = MagicMock()
+    automation_facade.list_tasks.return_value = {"items": [], "total": 0}
+    automation_facade.get_task.return_value = {"id": 1, "status": "paused"}
+    monkeypatch.setattr(auto_gates, "agent_automation_facade", automation_facade)
 
     async def fake_delete(cid, uid, tenant_id=None):
         return True
@@ -37,8 +38,8 @@ def gate_client(monkeypatch):
     async def fake_batch_delete(ids, uid, tenant_id=None):
         return {"deleted_count": len(ids), "failed_ids": []}
 
-    conv_gates.delete_conversation_service = fake_delete
-    conv_gates.delete_conversations_batch_service = fake_batch_delete
+    monkeypatch.setattr(conv_gates, "delete_conversation_service", fake_delete)
+    monkeypatch.setattr(conv_gates, "delete_conversations_batch_service", fake_batch_delete)
 
     async def fake_url_impl(object_name, expires=86400):
         return {"object_name": object_name, "url": f"presigned://{object_name}"}
@@ -150,7 +151,7 @@ def test_file_download_stream_mode_bypasses_the_envelope(gate_client):
     assert not response.headers["content-type"].startswith("application/json")
 
 
-def test_denied_delete_still_records_audit(gate_client):
+def test_denied_delete_still_records_audit(gate_client, monkeypatch):
     client, audit_calls = gate_client
     import management.api.northbound_gates.conversations as conv_gates
     from contracts.errors.exceptions import ForbiddenError
@@ -158,7 +159,7 @@ def test_denied_delete_still_records_audit(gate_client):
     async def deny(cid, uid, tenant_id=None):
         raise ForbiddenError("not yours")
 
-    conv_gates.delete_conversation_service = deny
+    monkeypatch.setattr(conv_gates, "delete_conversation_service", deny)
     response = client.delete("/nb/v1/conversations/999")
     assert response.status_code == 403
     body = response.json()
@@ -169,7 +170,7 @@ def test_denied_delete_still_records_audit(gate_client):
     assert audit_calls[0][1]["details"]["target"] == {"conversation_id": 999}
 
 
-def test_missing_conversation_delete_maps_to_404_not_500(gate_client):
+def test_missing_conversation_delete_maps_to_404_not_500(gate_client, monkeypatch):
     """Regression: the gate must await the async service call.
 
     The gate previously called the async delete service without await, so the
@@ -184,8 +185,52 @@ def test_missing_conversation_delete_maps_to_404_not_500(gate_client):
     async def missing(cid, uid, tenant_id=None):
         raise ConversationNotFoundError(f"Conversation {cid} does not exist")
 
-    conv_gates.delete_conversation_service = missing
+    monkeypatch.setattr(conv_gates, "delete_conversation_service", missing)
     response = client.delete("/nb/v1/conversations/99999")
     assert response.status_code == 404
     body = response.json()
     assert body["code"] == "NOT_FOUND"
+
+
+@pytest.mark.parametrize("expires", [0, -1, 604801])
+def test_file_download_gate_rejects_out_of_range_expires(gate_client, expires):
+    """Partner contract bounds URL validity to 1..604800 seconds (7 days)."""
+    client, _ = gate_client
+    response = client.get("/nb/v1/file/download/kb/x.pdf", params={"expires": expires})
+    assert response.status_code == 422
+
+
+def test_file_download_gate_accepts_expires_boundaries(gate_client):
+    client, _ = gate_client
+    for expires in (1, 604800):
+        response = client.get("/nb/v1/file/download/kb/x.pdf", params={"expires": expires})
+        assert response.status_code == 200
+
+
+def test_batch_delete_gate_caps_id_count(gate_client):
+    """The partner contract caps one batch at NB_BATCH_DELETE_MAX_IDS ids."""
+    client, audit_calls = gate_client
+    from management.api.northbound_gates.conversations import NB_BATCH_DELETE_MAX_IDS
+
+    oversized = list(range(1, NB_BATCH_DELETE_MAX_IDS + 2))
+    response = client.post("/nb/v1/conversations/batch-delete", json={"conversation_ids": oversized})
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert audit_calls[0][1]["result"] == "failed"
+
+    at_limit = list(range(1, NB_BATCH_DELETE_MAX_IDS + 1))
+    ok = client.post("/nb/v1/conversations/batch-delete", json={"conversation_ids": at_limit})
+    assert ok.status_code == 200
+    assert ok.json()["data"]["deleted_count"] == NB_BATCH_DELETE_MAX_IDS
+
+
+@pytest.mark.parametrize("method,path", [
+    ("DELETE", "/nb/v1/conversations/0"),
+    ("DELETE", "/nb/v1/conversations/-3"),
+    ("GET", "/nb/v1/automations/0"),
+    ("GET", "/nb/v1/automations/-1/runs"),
+])
+def test_gate_path_ids_must_be_positive(gate_client, method, path):
+    client, _ = gate_client
+    response = client.request(method, path)
+    assert response.status_code == 422

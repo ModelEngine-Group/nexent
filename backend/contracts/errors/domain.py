@@ -15,9 +15,11 @@ Governance rules
 ----------------
 - Append-only. Repurposing an existing code breaks a published contract; a new
   meaning needs a new entry and a new code.
-- Narrow domain classes only. Registering a bare built-in such as ``ValueError``
-  would flatten ``TenantResourceLimitError`` (429) into 400, because several
-  domain errors share that base class.
+- Narrow domain classes only, plus the built-in ``PermissionError`` mapped to
+  403. Never register a base class shared by domain errors with different
+  statuses: registering ``ValueError`` would flatten
+  ``TenantResourceLimitError`` (429) into 400, because several domain errors
+  share that base class.
 - The most specific registered class wins. Resolution walks the exception MRO,
   so a subclass keeps its own status code even when its base is registered.
 - Wording is static. Never interpolate ``str(exc)`` into a response: exception
@@ -32,7 +34,7 @@ Changelog
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Type
+from typing import Dict, Optional, Type
 
 from contracts.errors.exceptions import (
     AgentAutomationError,
@@ -106,29 +108,20 @@ def resolve_domain_error(exc: BaseException) -> Optional[DomainErrorSpec]:
     return None
 
 
-def domain_error_message(exc: BaseException, spec: DomainErrorSpec) -> str:
-    """Resolve the client-facing wording for a registered domain exception.
-
-    Always the static, reviewed wording. Exception text is attacker- or
-    bug-controlled data (it can carry SQL fragments, object paths or stack
-    detail), so it stays in server logs and never enters a response body.
-    """
-    return spec.message
-
-
 def domain_error_body(exc: BaseException, request_id: Optional[str] = None) -> Optional[dict]:
-    """Build the ``{code, message, status, requestId}`` body, or ``None``."""
+    """Build the ``{code, message, status, requestId}`` body, or ``None``.
+
+    The wording is always the static, reviewed ``spec.message``. Exception
+    text is attacker- or bug-controlled data (it can carry SQL fragments,
+    object paths or stack detail), so it stays in server logs and never
+    enters a response body.
+    """
     spec = resolve_domain_error(exc)
     if spec is None:
         return None
     return {
         "code": spec.code,
-        "message": domain_error_message(exc, spec),
+        "message": spec.message,
         "status": spec.status,
         "requestId": request_id,
     }
-
-
-def registered_domain_errors() -> Tuple[Type[BaseException], ...]:
-    """Every registered class, for framework handler installation."""
-    return tuple(DOMAIN_ERROR_SPECS)

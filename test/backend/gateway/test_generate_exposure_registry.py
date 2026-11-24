@@ -164,3 +164,57 @@ def test_emergency_exclusion_warns_on_unknown_id(monkeypatch, caplog):
         assert any("Did you mean" in record.message for record in caplog.records)
     finally:
         registry_module.default_registry.cache_clear()
+
+
+def test_emergency_exclusion_by_raw_path_does_not_warn_unknown(monkeypatch, caplog):
+    """Regression: gate rows may be excluded by raw path without a false warning.
+
+    The known-identifier set must include raw paths as well as capability ids,
+    otherwise a successful path-based exclusion is reported as unknown.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "backend"))
+    sys.path.insert(0, str(REPO_ROOT))
+    import logging
+
+    import gateway.configuration as configuration
+    import gateway.exposure.registry as registry_module
+
+    settings = configuration.load_settings(
+        {**dict(GATEWAY_AUTH_ENABLED="true"),
+         "GATEWAY_NB_EXCLUDED_CAPABILITIES": "/nb/v1/conversations/{conversation_id}"}
+    )
+    monkeypatch.setattr(configuration, "load_settings", lambda: settings)
+    registry_module.default_registry.cache_clear()
+    try:
+        with caplog.at_level(logging.WARNING):
+            registry = registry_module.default_registry()
+        assert registry.match("DELETE", "/nb/v1/conversations/123") is None
+        assert not any("matched nothing" in record.message for record in caplog.records)
+    finally:
+        registry_module.default_registry.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_gateway_app_honors_injected_exclusion_settings():
+    """create_gateway_app must apply the injected settings, not only process env."""
+    sys.path.insert(0, str(REPO_ROOT / "backend"))
+    sys.path.insert(0, str(REPO_ROOT))
+    import httpx
+
+    from gateway.application import create_gateway_app
+    from gateway.configuration import GatewaySettings
+
+    seen = []
+
+    def upstream(request):
+        seen.append(request.url.path)
+        return httpx.Response(200, stream=httpx.ByteStream(b'{"ok": true}'),
+                              headers={"content-type": "application/json"})
+
+    settings = GatewaySettings(jwt_secret="fixture", nb_excluded_capabilities=("conversations.delete",))
+    app = create_gateway_app(settings=settings, authentication=False, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
+            assert (await client.delete("/nb/v1/conversations/123")).status_code == 404
+            assert (await client.post("/nb/v1/conversations/batch-delete")).status_code == 200
+    assert seen == ["/nb/v1/conversations/batch-delete"]

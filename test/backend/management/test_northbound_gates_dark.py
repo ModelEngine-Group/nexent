@@ -42,7 +42,7 @@ def dark_client(monkeypatch):
     facade.delete_task = AsyncMock(return_value=True)
     facade.cancel_run = AsyncMock(return_value={"run_id": 9, "status": "cancelled"})
     facade.list_runs.return_value = {"items": [], "total": 0}
-    auto_gates.agent_automation_facade = facade
+    monkeypatch.setattr(auto_gates, "agent_automation_facade", facade)
 
     audit_calls = []
     from management.services.monitor import audit as audit_mod

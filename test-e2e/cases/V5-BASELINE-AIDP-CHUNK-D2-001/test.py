@@ -17,7 +17,7 @@ import pytest
 
 from shared.http import assert_status, client, response_message
 
-CASE_ID = 'API-AIDP-CHUNK-01'
+CASE_ID = 'V5-BASELINE-AIDP-CHUNK-D2-001'
 
 
 def _run_tag() -> str:

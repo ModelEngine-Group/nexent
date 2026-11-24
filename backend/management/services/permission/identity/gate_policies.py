@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 AUDIT_OUTCOME_SUCCESS = "success"
 AUDIT_OUTCOME_DENIED = "denied"
-DENIED_STATUS_CODES = frozenset({401, 403})
 
 
 def northbound_envelope_factory(request: Request) -> Callable[[Any], Dict[str, Any]]:

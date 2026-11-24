@@ -14,7 +14,6 @@ import pytest
 from contracts.errors.domain import (
     DOMAIN_ERROR_SPECS,
     domain_error_body,
-    domain_error_message,
 )
 from contracts.errors.exceptions import (
     ForbiddenError,
@@ -39,8 +38,9 @@ LEAKY_TEXT = "SELECT * FROM nexent.conversation_record_t WHERE id=42 -- /var/lib
 )
 def test_exception_text_never_reaches_the_message(exc):
     spec = DOMAIN_ERROR_SPECS[type(exc)]
-    assert domain_error_message(exc, spec) == spec.message
-    assert LEAKY_TEXT not in domain_error_message(exc, spec)
+    body = domain_error_body(exc, "req-wording")
+    assert body["message"] == spec.message
+    assert LEAKY_TEXT not in str(body)
 
 
 def test_error_body_carries_static_wording_only():

@@ -17,7 +17,7 @@ change:
     retired: []
   affected_cases:
     existing: [API-AUTO-FECE331C989B771F, PW-KB-AIDP-01]
-    added: [API-AIDP-CHUNK-01, PW-KB-AIDP-02]
+    added: [V5-BASELINE-AIDP-CHUNK-D2-001, V5-BASELINE-KB-AIDP-CHUNK-D4-001]
     modified: []
     retired: []
   traditional_ut:

@@ -2194,6 +2194,8 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
     rows cascade by conversation_id, and only when the owned conversation
     row itself matched, so a caller passing an id it does not own cannot
     touch another user's data (aligned with delete_conversations_batch).
+    A None user_id matches no row (created_by = NULL never compares equal),
+    so the call is a safe no-op; callers must pass the authenticated owner.
 
     Args:
         conversation_id: Conversation ID (integer)
@@ -2211,7 +2213,8 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
-        # 1. Mark conversation as deleted (ownership filter: created_by == user_id)
+        # 1. Mark conversation as deleted (ownership filter: created_by == user_id).
+        # Not owned (or already deleted): rowcount 0 refuses before any child row.
         conversation_stmt = (
             update(ConversationRecord)
             .where(
@@ -2221,18 +2224,12 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             )
             .values(update_data)
         )
-        if user_id:
-            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
         if conversation_result.rowcount == 0:
             return False
 
         from infrastructure.rdb.trajectory.repository import delete_summaries
         delete_summaries(session, [conversation_id], user_id)
-
-        # Not owned (or already deleted): refuse without touching child rows.
-        if conversation_result.rowcount == 0:
-            return False
 
         # 2. Mark related messages as deleted
         message_stmt = (

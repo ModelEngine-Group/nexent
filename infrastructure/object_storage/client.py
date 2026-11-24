@@ -9,6 +9,7 @@ from contracts.constants.environment import (
     MINIO_EXTERNAL_ENDPOINT,
     MINIO_REGION,
     MINIO_SECRET_KEY,
+    MINIO_SECURE,
 )
 from nexent.storage.storage_client_factory import MinIOStorageConfig, create_storage_client_from_config
 
@@ -140,7 +141,10 @@ class MinioClient:
 
             endpoint = external_endpoint
             if "://" not in endpoint:
-                endpoint = f"https://{endpoint}"
+                # A bare host:port follows the deployment's MINIO_SECURE flag so
+                # http-only setups do not silently receive https URLs.
+                scheme = "https" if MINIO_SECURE else "http"
+                endpoint = f"{scheme}://{endpoint}"
             self._external_url_client = boto3.client(
                 "s3",
                 endpoint_url=endpoint,

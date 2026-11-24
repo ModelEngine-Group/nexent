@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D4
 module: V5-BASELINE
 case:
-  case_id: PW-KB-AIDP-02
+  case_id: V5-BASELINE-KB-AIDP-CHUNK-D4-001
   feature_id: V5-PW-KB-AIDP-01
   business_rule_ids:
   - V5-PW-KB-AIDP-01-RULE-01

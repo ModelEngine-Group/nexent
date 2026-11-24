@@ -13,13 +13,14 @@ generic exception handler, so gates that let an exception propagate get the
 same three-field body.
 """
 
-from typing import Callable
+from typing import Annotated, Callable
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path as PathParam, Request
 from fastapi.responses import JSONResponse
 
 from contracts.authentication import AuthenticatedIdentity
 from contracts.conversation import BatchDeleteConversationRequest
+from contracts.errors.exceptions import ValidationError
 from contracts.northbound_exposure import nb_exposed
 from management.services.permission.identity.dependency import unified_identity
 from management.services.permission.identity.gate_policies import (
@@ -35,6 +36,10 @@ from management.utils.domain_errors import domain_error_body
 from management.utils.request_context import get_request_id
 
 nb_conversation_router = APIRouter(prefix="/nb/v1/conversations", tags=["northbound-gates"])
+
+# Partner-contract bound for one batch request; the shared internal model
+# stays unbounded so the internal route contract is preserved.
+NB_BATCH_DELETE_MAX_IDS = 100
 
 
 def _error_response(exc: Exception, request) -> JSONResponse:
@@ -61,7 +66,7 @@ def _error_response(exc: Exception, request) -> JSONResponse:
 @nb_conversation_router.delete("/{conversation_id}")
 @nb_exposed("conversations.delete", audit=True)
 async def nb_delete_conversation(
-    conversation_id: int,
+    conversation_id: Annotated[int, PathParam(ge=1)],
     request: Request,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
@@ -90,6 +95,8 @@ async def nb_delete_conversations_batch(
     """Batch-delete conversations; per-item failures surface in failed_ids."""
     target = {"conversation_ids": list(getattr(request, "conversation_ids", []) or [])}
     try:
+        if len(request.conversation_ids) > NB_BATCH_DELETE_MAX_IDS:
+            raise ValidationError(f"Batch delete accepts at most {NB_BATCH_DELETE_MAX_IDS} conversation ids")
         result = await delete_conversations_batch_service(request.conversation_ids, ctx.user_id, ctx.tenant_id)
     except Exception as exc:
         audit(audit_outcome(exc), target)

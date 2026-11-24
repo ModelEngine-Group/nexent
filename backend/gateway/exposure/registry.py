@@ -2,9 +2,11 @@
 """Immutable public exposure snapshot; downstream declarations never open routes."""
 
 from dataclasses import dataclass, field
+import difflib
 from functools import lru_cache
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 
@@ -12,6 +14,8 @@ from starlette.convertors import CONVERTOR_TYPES
 from starlette.routing import compile_path
 
 from gateway.identity.policy import is_public_request
+
+logger = logging.getLogger(__name__)
 
 
 def valid_path(path, raw_path=None):
@@ -97,12 +101,27 @@ class ExposureRegistry:
                      and r.pattern.fullmatch(path)), None)
 
 
-@lru_cache(maxsize=1)
-def default_registry():
+@lru_cache(maxsize=8)
+def default_registry(excluded=None):
+    """Load the committed snapshot with the emergency exclusion applied.
+
+    ``excluded`` defaults to the deployment environment (the deployment
+    truth); callers assembling an app from injected settings pass their own
+    list so the registry matches those settings instead of the process env.
+    """
     document = json.loads(Path(__file__).with_name("registry.json").read_text(encoding="utf-8"))
-    excluded = _excluded_capabilities()
+    if excluded is None:
+        excluded = _excluded_capabilities()
     if excluded:
-        known_before = {r.get("capability_id") or r["path"] for r in document["routes"]}
+        excluded = set(excluded)
+        # Known identifiers include both capability ids and raw paths: gate
+        # rows may be excluded by either, so a successful path exclusion must
+        # not be reported as an unknown entry.
+        known = set()
+        for row in document["routes"]:
+            known.add(row["path"])
+            if row.get("capability_id"):
+                known.add(row["capability_id"])
         kept, removed = [], []
         for row in document["routes"]:
             # match by capability_id, or raw path for non-gate rows
@@ -112,24 +131,16 @@ def default_registry():
                 kept.append(row)
         if removed:
             document = {**document, "routes": kept}
-            import logging
-
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Northbound emergency exclusion removed %d exposure row(s): %s",
                 len(removed),
                 ", ".join(sorted(set(removed))),
             )
-        # warn on ids that matched nothing; build the known set from the full
-        # document (pre-removal) so an id that just excluded its own row is
-        # not falsely reported as unknown
-        import difflib
-        import logging
-
-        known = known_before
-        for unknown in set(excluded) - known:
-            suggestions = difflib.get_close_matches(unknown, known, n=2)
+        # warn on entries that matched nothing, with a spelling suggestion
+        for unknown in excluded - known:
+            suggestions = difflib.get_close_matches(unknown, sorted(known), n=2)
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "GATEWAY_NB_EXCLUDED_CAPABILITIES entry %r matched nothing.%s",
                 unknown,
                 hint,

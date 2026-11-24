@@ -11,7 +11,7 @@ until then (indistinguishable from nonexistent).
 
 from typing import Annotated, Callable, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path as PathParam, Query, Request
 
 from contracts.authentication import AuthenticatedIdentity
 from contracts.northbound_exposure import nb_exposed
@@ -52,7 +52,7 @@ async def nb_list_automations(
 @nb_automation_router.get("/{task_id}")
 @nb_exposed("automations.detail")
 async def nb_get_automation(
-    task_id: int,
+    task_id: Annotated[int, PathParam(ge=1)],
     request: Request,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
@@ -68,7 +68,7 @@ async def nb_get_automation(
 @nb_automation_router.post("/{task_id}/pause")
 @nb_exposed("automations.pause", audit=True, enabled=False)
 async def nb_pause_automation(
-    task_id: int,
+    task_id: Annotated[int, PathParam(ge=1)],
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
     audit: Callable = Depends(audit_hook("automations.pause")),
@@ -86,7 +86,7 @@ async def nb_pause_automation(
 @nb_automation_router.post("/{task_id}/resume")
 @nb_exposed("automations.resume", audit=True, enabled=False)
 async def nb_resume_automation(
-    task_id: int,
+    task_id: Annotated[int, PathParam(ge=1)],
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
     audit: Callable = Depends(audit_hook("automations.resume")),
@@ -104,7 +104,7 @@ async def nb_resume_automation(
 @nb_automation_router.post("/{task_id}/run")
 @nb_exposed("automations.run", audit=True, enabled=False)
 async def nb_run_automation(
-    task_id: int,
+    task_id: Annotated[int, PathParam(ge=1)],
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
     audit: Callable = Depends(audit_hook("automations.run")),
@@ -122,7 +122,7 @@ async def nb_run_automation(
 @nb_automation_router.delete("/{task_id}")
 @nb_exposed("automations.delete", audit=True, enabled=False)
 async def nb_delete_automation(
-    task_id: int,
+    task_id: Annotated[int, PathParam(ge=1)],
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
     audit: Callable = Depends(audit_hook("automations.delete")),
@@ -140,7 +140,7 @@ async def nb_delete_automation(
 @nb_automation_router.get("/{task_id}/runs")
 @nb_exposed("automations.runs", enabled=False)
 async def nb_list_automation_runs(
-    task_id: int,
+    task_id: Annotated[int, PathParam(ge=1)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
@@ -154,7 +154,7 @@ async def nb_list_automation_runs(
 @nb_automation_router.post("/runs/{run_id}/cancel")
 @nb_exposed("automations.run_cancel", audit=True, enabled=False)
 async def nb_cancel_automation_run(
-    run_id: int,
+    run_id: Annotated[int, PathParam(ge=1)],
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
     audit: Callable = Depends(audit_hook("automations.run_cancel")),

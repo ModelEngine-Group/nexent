@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D2
 module: V5-BASELINE
 case:
-  case_id: API-AIDP-CHUNK-01
+  case_id: V5-BASELINE-AIDP-CHUNK-D2-001
   feature_id: F-111
   business_rule_ids:
   - F-111-RULE-01

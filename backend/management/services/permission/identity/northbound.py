@@ -161,6 +161,11 @@ def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None
     if not token_id or token_id <= 0:
         return
     path = request.url.path if request is not None else ""
+    # These three legacy northbound routes account their own usage inside the
+    # business service (run_chat / stop_chat / update_conversation_title in
+    # management/services/northbound.py call log_token_usage themselves);
+    # skipping them here avoids double counting. Keep this list in sync if
+    # those routes move or new self-accounting routes are added.
     if path == "/nb/v1/chat/run" or path.startswith("/nb/v1/chat/stop/") or (
         path.startswith("/nb/v1/conversations/") and path.endswith("/title")
     ):

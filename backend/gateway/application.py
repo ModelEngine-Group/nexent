@@ -34,7 +34,7 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
     targets = dict(upstreams or {"management": settings.management_url, "runtime": settings.runtime_url,
                                 "ops": settings.ops_url})
     authenticate = settings.auth_enabled if authentication is None else authentication
-    registry = default_registry() if registry is None else registry
+    registry = default_registry(settings.nb_excluded_capabilities) if registry is None else registry
     for target in targets.values():
         parsed = urlsplit(target)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:

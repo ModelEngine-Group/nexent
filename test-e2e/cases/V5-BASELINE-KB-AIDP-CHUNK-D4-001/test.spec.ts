@@ -5,7 +5,7 @@ import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { AidpKnowledgePage } from "../../infra/automation/d4/pages/aidp-knowledge.page";
 
 /**
- * PW-KB-AIDP-02 — AIDP knowledge base chunk settings, end to end.
+ * V5-BASELINE-KB-AIDP-CHUNK-D4-001 — AIDP knowledge base chunk settings, end to end.
  *
  * Proves the user-visible chunk configuration introduced by commit 01400d399:
  * the create page shows the AIDP defaults (512 tokens, 10 percent overlap,
@@ -26,7 +26,7 @@ const EXPECTED_OVERLAP_PERCENT = "10";
 const EXPECTED_TOPK = "10";
 const EDIT_TO_CHUNK_TOKENS = 1024;
 
-journey("PW-KB-AIDP-02", async (context) => {
+journey("V5-BASELINE-KB-AIDP-CHUNK-D4-001", async (context) => {
   const { page, contract } = context;
   const aidp = new AidpKnowledgePage(page);
   const runTag = `aidp-chunk-${Date.now().toString(36)}`;

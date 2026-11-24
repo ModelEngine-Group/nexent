@@ -34,14 +34,6 @@ def parse_port(raw_value: object, name: str, default: int) -> int:
     return port
 
 
-def parse_bool_flag(raw_value: object, name: str) -> bool:
-    """Parse a strict true/false flag while keeping environment declarations assignment-only."""
-    value = ("" if raw_value is None else str(raw_value)).strip().lower()
-    if value not in {"true", "false"}:
-        raise ValueError(f"{name} must be true or false")
-    return value == "true"
-
-
 def parse_positive_float(raw_value: object, name: str, default: float) -> float:
     """Parse a finite positive float, falling back to ``default`` when unset."""
     value = default if raw_value is None else raw_value
