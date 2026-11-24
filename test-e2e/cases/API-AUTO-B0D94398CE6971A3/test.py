@@ -9,7 +9,7 @@ backend/management/services/permission/identity/authentication.py:63-79:
 * data.user.username is serialized only for the CAS branch; the local branch
   must not contain the field at all.
 * The remaining identity fields (user_id / group_ids / tenant_id / user_email /
-  user_role / permissions / accessibleRoutes) survive intact.
+  user_role / permissions / accessiblePages) survive intact.
 
 The CAS branch (auth_provider == cas and username == provider_username)
 depends on an external CAS provider, a linked provider=cas OAuth account and a
@@ -38,7 +38,7 @@ REQUIRED_USER_FIELDS = (
     'user_email',
     'user_role',
     'permissions',
-    'accessibleRoutes',
+    'accessiblePages',
     'auth_provider',
 )
 
@@ -107,6 +107,6 @@ async def test_current_user_info_auth_provider_and_username_contract(tenant_a_us
     assert isinstance(user['user_role'], str), 'user_role must be a string'
     assert isinstance(user['group_ids'], list), 'group_ids must be a list'
     assert isinstance(user['permissions'], list), 'permissions must be a list'
-    assert isinstance(user['accessibleRoutes'], list), 'accessibleRoutes must be a list'
+    assert isinstance(user['accessiblePages'], list), 'accessiblePages must be a list'
 
     _assert_no_plaintext_secrets(payload)
