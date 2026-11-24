@@ -90,11 +90,7 @@ def test_dark_action_denied_records_audit(
     dark_client, capability, method, path, facade_method, _awaited
 ):
     client, facade, audit_calls = dark_client
-    method_mock = getattr(facade, facade_method)
-    if isinstance(method_mock, AsyncMock):
-        method_mock.side_effect = ForbiddenError("not yours")
-    else:
-        method_mock.side_effect = ForbiddenError("not yours")
+    getattr(facade, facade_method).side_effect = ForbiddenError("not yours")
     response = client.request(method, path)
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"

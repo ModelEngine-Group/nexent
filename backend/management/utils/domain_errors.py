@@ -10,7 +10,6 @@ here; new code should import ``contracts.errors.domain`` directly.
 
 from contracts.errors.domain import (  # noqa: F401 - re-exported for existing callers
     DOMAIN_ERROR_SPECS,
-    MAX_MESSAGE_LENGTH,
     DomainErrorSpec,
     domain_error_body,
     domain_error_message,
@@ -20,7 +19,6 @@ from contracts.errors.domain import (  # noqa: F401 - re-exported for existing c
 
 __all__ = [
     "DOMAIN_ERROR_SPECS",
-    "MAX_MESSAGE_LENGTH",
     "DomainErrorSpec",
     "domain_error_body",
     "domain_error_message",

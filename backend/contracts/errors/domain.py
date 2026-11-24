@@ -22,7 +22,7 @@ Governance rules
   so a subclass keeps its own status code even when its base is registered.
 - Wording is static. Never interpolate ``str(exc)`` into a response: exception
   text is untrusted data (SQL fragments, object paths, stack detail) and must
-  stay in logs. ``use_exception_message`` is kept for table compatibility only.
+  stay in logs.
 
 Changelog
 ---------
@@ -51,10 +51,6 @@ from contracts.errors.exceptions import (
     ValidationError,
 )
 
-# Longest exception-owned wording copied into a response body. Anything longer
-# is treated as unexpected detail and replaced by the static wording.
-MAX_MESSAGE_LENGTH = 200
-
 
 @dataclass(frozen=True)
 class DomainErrorSpec:
@@ -63,26 +59,19 @@ class DomainErrorSpec:
     status: int
     code: str
     message: str
-    use_exception_message: bool = False
 
 
 DOMAIN_ERROR_SPECS: Dict[Type[BaseException], DomainErrorSpec] = {
     # Rate limiting and quota
-    LimitExceededError: DomainErrorSpec(
-        429, "RATE_LIMIT_EXCEEDED", "Too many requests", use_exception_message=True
-    ),
-    TenantResourceLimitError: DomainErrorSpec(
-        429, "TENANT_RESOURCE_EXCEEDED", "Tenant resource limit exceeded", use_exception_message=True
-    ),
+    LimitExceededError: DomainErrorSpec(429, "RATE_LIMIT_EXCEEDED", "Too many requests"),
+    TenantResourceLimitError: DomainErrorSpec(429, "TENANT_RESOURCE_EXCEEDED", "Tenant resource limit exceeded"),
     # Identity and permission
-    UnauthorizedError: DomainErrorSpec(
-        401, "UNAUTHORIZED", "Authentication is required", use_exception_message=True
-    ),
-    ForbiddenError: DomainErrorSpec(403, "FORBIDDEN", "Forbidden", use_exception_message=True),
+    UnauthorizedError: DomainErrorSpec(401, "UNAUTHORIZED", "Authentication is required"),
+    ForbiddenError: DomainErrorSpec(403, "FORBIDDEN", "Forbidden"),
     PermissionError: DomainErrorSpec(403, "FORBIDDEN", "Forbidden"),
     # Resource state
-    NotFoundException: DomainErrorSpec(404, "NOT_FOUND", "Resource not found", use_exception_message=True),
-    ValidationError: DomainErrorSpec(400, "VALIDATION_ERROR", "Invalid request", use_exception_message=True),
+    NotFoundException: DomainErrorSpec(404, "NOT_FOUND", "Resource not found"),
+    ValidationError: DomainErrorSpec(400, "VALIDATION_ERROR", "Invalid request"),
     RuntimeMetadataVersionConflict: DomainErrorSpec(
         409, "CHAT_METADATA_VERSION_CONFLICT", "Runtime metadata version conflict"
     ),
@@ -123,8 +112,6 @@ def domain_error_message(exc: BaseException, spec: DomainErrorSpec) -> str:
     Always the static, reviewed wording. Exception text is attacker- or
     bug-controlled data (it can carry SQL fragments, object paths or stack
     detail), so it stays in server logs and never enters a response body.
-    The ``use_exception_message`` flag is retained for table compatibility
-    but no longer copies exception text into responses.
     """
     return spec.message
 

@@ -22,7 +22,6 @@ from contracts.errors.exceptions import (
     TokenExpiredError,
     UnauthorizedError,
 )
-from fastapi import HTTPException, Request
 from contracts.roles import roles_from_record
 from management.services.permission.identity.credentials import (
     extract_bearer_token,
