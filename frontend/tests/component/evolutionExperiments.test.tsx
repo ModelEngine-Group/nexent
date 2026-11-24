@@ -205,6 +205,31 @@ it("selects a published scope and opens its paired results with the original sta
   })));
 });
 
+it("offers prompt examples from a finished baseline report with passing and failing tasks", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Routing agent" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1 }]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({
+    candidates: [], experiments: [{ experiment_id: 42, create_time: "2026-11-24T00:00:00Z" }],
+    cases: [{ case_id: 9, family: "Billing", query: "Wrong queue" }, { case_id: 10, family: "Operations", query: "Correct queue" }],
+  });
+  vi.mocked(evolutionService.report).mockResolvedValue({
+    experiment_id: 42, agent_id: 7, version_no: 1, status: "finished", total_pairs: 0, valid_pairs: 0,
+    total_tasks: 2, valid_baselines: 2, pairs: {
+      "9": { base: { status: "fail" }, comparison: "baseline_only" },
+      "10": { base: { status: "pass" }, comparison: "baseline_only" },
+    },
+  });
+  render(<QueryClientProvider client={new QueryClient()}>
+    <EvolutionExperiments focusParams={new URLSearchParams("agent_id=7&version_no=1&experiment_id=42")} />
+  </QueryClientProvider>);
+  expect(await screen.findByText("evolution.baselineCoverage")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.selectExamples" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  await choose("evolution.failedTarget", "Billing");
+  await choose("evolution.passingTrial", "Operations · evolution.base");
+});
+
 it("submits an eligible candidate only when its editor requests independent confirmation", async () => {
   vi.mocked(evolutionService.agents).mockResolvedValue([{agent_id:7,name:"Meeting agent"}]);
   vi.mocked(evolutionService.versions).mockResolvedValue([{version_no:1,version_name:"Pilot"}]);

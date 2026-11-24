@@ -633,7 +633,7 @@ function Experiments({
               viewer={viewer}
             />
           )}
-          {development && report.data.status === "finished" && !baselineReport && (
+          {development && report.data.status === "finished" && (
             <ExampleCandidates key={`ExampleCandidates-${report.data.experiment_id}`} report={development} cases={choices?.cases || []}
               onGenerated={(id) => {
                 setCandidate(`prompt:${id}`);
