@@ -152,3 +152,19 @@ async def test_catalog_failure_does_not_become_an_empty_recommendation(context, 
     monkeypatch.setattr(module, "_catalog", unavailable)
     with pytest.raises(ResourceStateError, match="knowledge_recommendations_unavailable"):
         await module.recommend(scope, request)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_ranking_receives_content_not_tool_capability(context, monkeypatch):
+    module, scope, request, state, _, _ = context
+    original = "检索知识库中已有的临床指南和院内资料"
+    state["requirements"]["r1"].update(query=original,
+        search_queries={"zh": "知识库检索", "en": "knowledge base search"})
+    calls = []
+    rank = module.rank_knowledge
+    def capture(rows, queries, *args, **kwargs):
+        calls.append(queries)
+        return rank(rows, queries, *args, **kwargs)
+    monkeypatch.setattr(module, "rank_knowledge", capture)
+    await module.recommend(scope, request)
+    assert calls == [[original]]

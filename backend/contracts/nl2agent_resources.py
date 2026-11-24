@@ -35,8 +35,14 @@ class RequirementInput(BaseModel):
 class BilingualSearchQueries(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    zh: SearchQuery
-    en: SearchQuery
+    zh: SearchQuery = Field(description=(
+        "Chinese tool capability only. For knowledge retrieval use 知识库检索; keep knowledge-base names, "
+        "document topics and clinical/internal materials in the original requirement query."
+    ))
+    en: SearchQuery = Field(description=(
+        "English equivalent tool capability only, e.g. knowledge base search. Exclude knowledge-base names "
+        "and document subjects; retain an explicitly required tool/provider/platform."
+    ))
 
 
 class RequirementDiscoveryInput(RequirementInput):

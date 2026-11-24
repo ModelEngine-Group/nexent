@@ -71,6 +71,8 @@ it("previews without writes and applies only an identity-scoped action once", as
   });
   expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
   request.runConfig.custom.onRunStarted();
+  expect(screen.queryByRole("status")).toBeNull();
+  request.runConfig.custom.onNl2AgentCardResult({ type: "nl2a", content: { ...payload, status: "applied" } });
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Applied")
   );
@@ -91,6 +93,10 @@ it("retains a failed proposal for retry and cancels without a text payload", asy
     append.mock.calls[1][0].metadata.custom.nl2agentCardAction.action
   ).toBe("cancel");
   append.mock.calls[1][0].runConfig.custom.onRunStarted();
+  expect(screen.queryByRole("status")).toBeNull();
+  append.mock.calls[1][0].runConfig.custom.onNl2AgentCardResult({
+    type: "nl2a", content: { ...payload, status: "cancelled" },
+  });
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Cancelled")
   );
@@ -148,6 +154,10 @@ it("edits multiline text locally, retains it after rejection and applies the exa
     append.mock.calls[1][0].metadata.custom.nl2agentCardAction.result.prompt
   ).toBe(edited);
   append.mock.calls[1][0].runConfig.custom.onRunStarted();
+  expect(screen.queryByRole("status")).toBeNull();
+  append.mock.calls[1][0].runConfig.custom.onNl2AgentCardResult({
+    type: "nl2a", content: { ...payload, status: "applied", proposed_prompt: edited },
+  });
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Applied")
   );
@@ -180,4 +190,23 @@ it("blocks empty edits, restores generated content, and never sends cancelled ed
     card_id: "card",
     prompt_revision: "revision",
   });
+});
+
+it("retains edits and retry after HTTP acceptance followed by an SSE failure", async () => {
+  append.mockClear();
+  render(<Nl2AgentFlowProvider><PromptGenerationCard payload={payload} /></Nl2AgentFlowProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const editor = screen.getByRole("textbox", { name: "Prompt content" });
+  fireEvent.change(editor, { target: { value: "Retain this draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm and apply" }));
+  const callbacks = append.mock.calls[0][0].runConfig.custom;
+  callbacks.onRunStarted();
+  expect(screen.queryByRole("status")).toBeNull();
+  callbacks.onNl2AgentCardResult(null);
+  await waitFor(() => expect(editor).toBeEnabled());
+  expect(editor).toHaveValue("Retain this draft");
+  expect(screen.getByRole("alert")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("button", { name: /Confirm and apply/ })).not.toHaveClass("ant-btn-loading"));
+  fireEvent.click(screen.getByRole("button", { name: /Confirm and apply/ }));
+  expect(append.mock.calls[1][0].metadata.custom.nl2agentCardAction.result.prompt).toBe("Retain this draft");
 });

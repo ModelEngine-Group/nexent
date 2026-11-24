@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import type {
   Nl2AgentCardAction,
+  Nl2aMessage,
   Nl2aPromptGenerationPayload,
 } from "../adapter/remote-chat-model-adapter";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
@@ -79,16 +80,30 @@ export function PromptGenerationCard({
         ],
         metadata: { custom: { nl2agentCardAction: cardAction } },
         runConfig: nl2AgentCardRunConfig(
-          aui.thread().composer().getState().runConfig,
+          {
+            ...aui.thread().composer().getState().runConfig,
+            custom: {
+              ...aui.thread().composer().getState().runConfig.custom,
+              onNl2AgentCardResult: (card: Nl2aMessage | null) => {
+                if (!inFlight.current) return;
+                const result = card?.content;
+                if (result && (result.subtype !== "prompt_generation" || result.card_id !== payload.card_id)) return;
+                if (result?.subtype === "prompt_generation" && result.status !== "pending") {
+                  setOutcome(result.status);
+                  setDraftPrompt(result.proposed_prompt);
+                  setEditing(false);
+                  submitCard(payload.card_id);
+                } else {
+                  registerCard(payload.card_id, payload.subtype, true);
+                  setFailed(true);
+                }
+                setSubmitting(false);
+                inFlight.current = false;
+              },
+            },
+          },
           payload.agent_id,
           {
-            onAccepted: () => {
-              setOutcome(action === "apply" ? "applied" : "cancelled");
-              setEditing(false);
-              submitCard(payload.card_id);
-              setSubmitting(false);
-              inFlight.current = false;
-            },
             onRejected: () => {
               registerCard(payload.card_id, payload.subtype, true);
               setFailed(true);

@@ -420,6 +420,7 @@ interface NexentRunConfig {
   onGenerationStopped?: (conversationId: number) => void;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
+  onNl2AgentCardResult?: (card: Nl2aMessage | null) => void;
   onMessageAccepted?: (submittedText: string) => void;
   onRunRejected?: (error: unknown, message?: ThreadMessage) => void;
   // Structured reply annotations for the outgoing message; set when the
@@ -2073,6 +2074,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     if ("type" in agentResponse) {
+      custom?.onNl2AgentCardResult?.(null);
       cleanupAbortHandler();
       log.log(
         "[ChatModelAdapter] JSON response (resume finished):",
@@ -2482,6 +2484,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const consumedImageMetadata = new Set<SearchSource>();
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
+    let promptCardResultDelivered = false;
     const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
       const parsedNl2a = parseNl2aMessage(chunk);
       if (!parsedNl2a) return false;
@@ -2496,6 +2499,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return false;
       }
       nl2a = parsedNl2a;
+      if (
+        structuredNl2AgentInput?.subtype === "prompt_generation" &&
+        parsedNl2a.content.subtype === "prompt_generation" &&
+        parsedNl2a.content.card_id === structuredNl2AgentInput.result?.card_id
+      ) {
+        promptCardResultDelivered = true;
+        custom?.onNl2AgentCardResult?.(parsedNl2a);
+      }
       return true;
     };
     const deliveredNl2AgentStates = new Set<string>();
@@ -3712,6 +3723,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
       } as any;
     } finally {
+      if (structuredNl2AgentInput?.subtype === "prompt_generation" && !promptCardResultDelivered)
+        custom?.onNl2AgentCardResult?.(null);
       cleanupAbortHandler();
       if (isNl2Skill) {
         custom?.onNl2SkillEvent?.({

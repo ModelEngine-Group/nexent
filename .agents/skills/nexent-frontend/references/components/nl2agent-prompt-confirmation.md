@@ -9,8 +9,9 @@ Pending cards support local editing with native AntD TextArea, preview and resto
 generated content. Apply actions carry `card_id`, `prompt_revision` and the exact
 edited `prompt` through the existing creator run endpoint. Cancel remains
 identity-only. Reject blank edits and retain local text after rejection. Disable
-duplicate submissions immediately, restore retry on HTTP rejection, and mark the
-accepted operation read-only. Ordinary dialogue stays available while pending.
+duplicate submissions immediately, restore retry on HTTP rejection, SSE errors or closure without a matching terminal
+card, and mark the operation read-only only after its server card reports applied
+or cancelled. HTTP acceptance alone does not prove persistence. Ordinary dialogue stays available while pending.
 
 History outcomes come from parsed server cards. Only the latest proposal can
 register as interactive; a later persisted prompt also disables old proposals.

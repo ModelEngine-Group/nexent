@@ -29,7 +29,7 @@ case:
     expected: Full multiline text is readable; input remains enabled and no write is requested.
   - order: 2
     action: Edit the complete multiline text locally, preview it, confirm application and restore the resulting history.
-    expected: Editing sends no write; one apply action carries card identity, revision and exact edited prompt. Restored history shows the applied edit read-only.
+    expected: Editing sends no write; HTTP acceptance followed by an SSE save error retains the exact edited draft and retry controls; retry carries card identity, revision and the same edited prompt. Only a matching server terminal card confirms application. Restored history shows the applied edit read-only.
   - order: 3
     action: Open another pending result, edit it and cancel it.
     expected: One identity-only cancel action is sent; the result shows cancelled without saving the edited draft.

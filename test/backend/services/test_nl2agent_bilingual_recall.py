@@ -211,3 +211,16 @@ def test_creator_instructs_bilingual_preparation_and_original_query_verification
     assert 'search_queries.zh' in prompt and 'search_queries.en' in prompt
     assert 'prepare_search_queries' in prompt
     assert 'nl2a_verify_requirements' in prompt
+
+
+async def test_knowledge_content_is_preserved_but_tool_recall_uses_capability(memory):
+    scope, state, installed, _ = memory
+    query = "检索知识库中已有的临床指南和院内资料，用于对照筛选值得关注的变化"
+    pair = {"zh": "知识库检索", "en": "knowledge base search"}
+    installed.return_value = [resource("tool:113", "knowledge_base_search", "Performs a local knowledge base search")]
+    result = await flow.discover(scope, [RequirementDiscoveryInput(query=query, search_queries=pair)], "recommend")
+    row = state["requirements"]["r1"]
+    assert row["query"] == query
+    assert row["search_queries"] == pair
+    assert [item["candidate_ref"] for item in row["installed"]] == ["tool:113"]
+    assert result["verification_batch_id"]

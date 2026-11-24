@@ -78,7 +78,10 @@ async def discover_requirements(
     requirements: list[dict] | None = None, purpose: ResourcePurpose = "generate",
     search_queries: dict[str, dict[str, str]] | None = None,
 ) -> dict:
-    """Discover candidates; prepare requested zh/en search_queries by requirement ID on resume."""
+    """Keep knowledge content in query for KB recommendation; search_queries describe only tool capability.
+    For clinical guidelines/internal hospital materials use knowledge retrieval / knowledge base search.
+    A named knowledge base is content scope, not a tool/provider constraint.
+    Discover candidates; prepare requested zh/en search_queries by requirement ID on resume."""
     if requirements is not None and len(requirements) > MAX_REQUIREMENTS:
         return {**_error("requirements_limit_exceeded"), "max_requirements": MAX_REQUIREMENTS}
     try:

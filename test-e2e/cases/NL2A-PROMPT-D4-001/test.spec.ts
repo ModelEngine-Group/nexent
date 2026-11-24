@@ -135,6 +135,11 @@ journey("NL2A-PROMPT-D4-001", async ({ page, contract, expect }) => {
       expect(action.agent_id).toBe(42);
       expect(action.subtype).toBe("prompt_generation");
       const apply = action.action === "apply";
+      if (apply && actions.length === 1) return route.fulfill({
+        contentType: "text/event-stream",
+        headers: { conversation_id: "601" },
+        body: frame({ type: "error", content: "Prompt revision conflict" }),
+      });
       if (apply) draft.prompt = action.result.prompt;
       card = { ...card, proposed_prompt: apply ? action.result.prompt : card.proposed_prompt,
         status: apply ? "applied" : "cancelled" };
@@ -218,8 +223,15 @@ journey("NL2A-PROMPT-D4-001", async ({ page, contract, expect }) => {
     await preview.getByRole("button", { name: "预览", exact: true }).click();
     await expect(preview.locator("pre")).toHaveText(editedText);
     await preview.getByRole("button", { name: "确认应用" }).click();
+    await expect(preview.getByRole("alert")).toBeVisible();
+    await expect(preview).not.toContainText("已应用");
+    expect(draft.prompt).toBe(original);
+    await preview.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(preview.getByRole("textbox", { name: "提示词内容" })).toHaveValue(editedText);
+    await expect(preview.getByRole("button", { name: "确认应用" })).toBeEnabled();
+    await preview.getByRole("button", { name: "确认应用" }).click();
     await expect(preview).toContainText("已应用");
-    expect(actions.map((action) => action.action)).toEqual(["apply"]);
+    expect(actions.map((action) => action.action)).toEqual(["apply", "apply"]);
     expect(draft.prompt).toBe(editedText);
     await page.reload();
     await openHistory();
@@ -228,7 +240,7 @@ journey("NL2A-PROMPT-D4-001", async ({ page, contract, expect }) => {
     await expect(preview.getByRole("button", { name: "确认应用" })).toHaveCount(
       0,
     );
-    expect(actions).toHaveLength(1);
+    expect(actions).toHaveLength(2);
   });
   await contract.step(contract.expectedIds("steps")[2], async () => {
     olderCard = { ...card, card_id: "superseded-prompt", status: "pending" };
@@ -259,7 +271,7 @@ journey("NL2A-PROMPT-D4-001", async ({ page, contract, expect }) => {
     await expect(preview.getByRole("button", { name: "确认应用" })).toHaveCount(
       0,
     );
-    expect(actions.map((action) => action.action)).toEqual(["apply", "cancel"]);
+    expect(actions.map((action) => action.action)).toEqual(["apply", "apply", "cancel"]);
   });
   const assertions = contract.expectedIds("assertions");
   await contract.assertion(assertions[0], async () => {
@@ -277,7 +289,7 @@ journey("NL2A-PROMPT-D4-001", async ({ page, contract, expect }) => {
     expect(writes).toEqual([]);
   });
   await contract.assertion(assertions[2], async () => {
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(3);
     await expect(preview.getByRole("button", { name: "确认应用" })).toHaveCount(
       0,
     );
