@@ -56,3 +56,69 @@ def test_unset_empty_internal_equal_or_non_string_keeps_internal_signing(externa
     monkeypatch.setattr(client_mod, "MINIO_EXTERNAL_ENDPOINT", value)
     assert instance._get_external_url_client() is None
     assert captured == {}
+
+
+class _FakeInternalStorage:
+    def get_file_url(self, object_name, bucket, expires):
+        return True, f"http://nexent-minio:9000/{object_name}?X-Amz-Signature=internal"
+
+
+class _FakeExternalSigner:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    def generate_presigned_url(self, operation, Params=None, ExpiresIn=None):
+        self.calls.append((operation, Params, ExpiresIn))
+        if self.error is not None:
+            raise self.error
+        return f"https://files.example.com/{Params['Key']}?X-Amz-Signature=external"
+
+
+@pytest.fixture()
+def signing_client(monkeypatch):
+    """MinioClient with both signing authorities faked and external configured."""
+    instance = MinioClient()
+    monkeypatch.setattr(instance, "_storage_client", _FakeInternalStorage())
+    monkeypatch.setattr(client_mod, "MINIO_EXTERNAL_ENDPOINT", "https://files.example.com")
+    external = _FakeExternalSigner()
+    monkeypatch.setattr(instance, "_external_url_client", external, raising=False)
+    return instance, external
+
+
+def test_default_caller_keeps_internal_authority(signing_client):
+    """P1 regression: internal proxy consumers must stay same-origin even when
+    an external endpoint is configured; only explicit opt-in signs external."""
+    instance, external = signing_client
+    success, url = instance.get_file_url("kb/a.txt")
+    assert success is True
+    assert url.startswith("http://nexent-minio:9000/")
+    assert external.calls == []
+
+
+def test_external_opt_in_uses_external_authority(signing_client):
+    instance, external = signing_client
+    success, url = instance.get_file_url("kb/a.txt", external=True)
+    assert success is True
+    assert url.startswith("https://files.example.com/")
+    assert len(external.calls) == 1
+
+
+def test_external_signing_failure_falls_back_to_internal(signing_client, monkeypatch):
+    """P2 regression: the fallback branch logged via an undefined ``logger``
+    and raised NameError, so the internal fallback never ran."""
+    instance, external = signing_client
+    monkeypatch.setattr(external, "error", RuntimeError("external signing down"))
+    success, url = instance.get_file_url("kb/a.txt", external=True)
+    assert success is True
+    assert url.startswith("http://nexent-minio:9000/")
+
+
+def test_external_opt_in_without_configuration_keeps_internal(signing_client, monkeypatch):
+    instance, external = signing_client
+    monkeypatch.setattr(client_mod, "MINIO_EXTERNAL_ENDPOINT", "")
+    monkeypatch.setattr(instance, "_external_url_client", None, raising=False)
+    success, url = instance.get_file_url("kb/a.txt", external=True)
+    assert success is True
+    assert url.startswith("http://nexent-minio:9000/")
+    assert external.calls == []

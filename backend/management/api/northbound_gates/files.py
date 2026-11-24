@@ -68,10 +68,14 @@ async def nb_get_storage_file(
     implementation; domain failures are translated by the shared registry
     into the three-field error body (403 for foreign objects, 404 for
     missing ones in both modes).
+
+    Info mode signs against the external endpoint (partner direct links);
+    stream mode iterates the raw storage body in chunks so neither the
+    event loop nor memory carries the whole object.
     """
     # Late import: keeps the MinIO stack out of module import time.
     from management.services.file.access import check_file_access
-    from management.services.file.service import get_file_stream_impl, get_file_url_impl
+    from management.services.file.service import get_file_stream_raw_impl, get_file_url_impl
     from management.api.file.http import _build_object_etag, build_content_disposition_header
 
     if not check_file_access(object_name, ctx.user_id, ctx.tenant_id):
@@ -81,15 +85,29 @@ async def nb_get_storage_file(
 
     if download == "stream":
         try:
-            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
+            file_stream, content_type = await get_file_stream_raw_impl(object_name=object_name)
         except Exception as exc:
             return _error_response(exc, request)
         download_filename = filename
         if not download_filename:
             download_filename = object_name.split("/")[-1] if "/" in object_name else object_name
+
+        def iter_chunks():
+            # Sync iterator: StreamingResponse runs each next() in the framework
+            # threadpool, so blocking storage reads never stall the event loop.
+            # finally closes the body on completion, error and client disconnect.
+            try:
+                while True:
+                    chunk = file_stream.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                file_stream.close()
+
         # Streams are envelope-exempt.
         return StreamingResponse(
-            file_stream,
+            iter_chunks(),
             media_type=content_type,
             headers={
                 "Content-Disposition": build_content_disposition_header(download_filename),
@@ -105,7 +123,9 @@ async def nb_get_storage_file(
     if await run_in_threadpool(get_file_size_from_minio_strict, object_name) is None:
         return _error_response(NotFoundException("Storage object does not exist"), request)
     try:
-        result = await get_file_url_impl(object_name=object_name, expires=expires)
+        # Partner direct links need the external signing authority; internal
+        # proxy consumers keep the default internal authority (same-origin).
+        result = await get_file_url_impl(object_name=object_name, expires=expires, external=True)
     except Exception as exc:
         return _error_response(exc, request)
     return envelope(result)

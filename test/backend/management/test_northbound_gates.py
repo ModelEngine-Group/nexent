@@ -19,6 +19,29 @@ from backend.http.server.app_factory import create_app
 IDENTITY = AuthenticatedIdentity("user-1", "tenant-1", kind=CredentialKind.API_KEY, token_id=42)
 
 
+class _FakeRawBody:
+    """Raw storage body double: records chunk read sizes and close."""
+
+    def __init__(self, data=b"file-bytes"):
+        self._data = data
+        self._pos = 0
+        self.read_sizes = []
+        self.closed = False
+
+    def read(self, amt=-1):
+        self.read_sizes.append(amt)
+        if amt is None or amt < 0:
+            chunk = self._data[self._pos:]
+            self._pos = len(self._data)
+        else:
+            chunk = self._data[self._pos:self._pos + amt]
+            self._pos += len(chunk)
+        return chunk
+
+    def close(self):
+        self.closed = True
+
+
 @pytest.fixture()
 def gate_client(monkeypatch):
     """A client over the real gate routers with the business lanes mocked."""
@@ -41,19 +64,26 @@ def gate_client(monkeypatch):
     monkeypatch.setattr(conv_gates, "delete_conversation_service", fake_delete)
     monkeypatch.setattr(conv_gates, "delete_conversations_batch_service", fake_batch_delete)
 
-    async def fake_url_impl(object_name, expires=86400):
+    url_calls = []
+
+    async def fake_url_impl(object_name, expires=86400, *, external=False):
+        url_calls.append({"object_name": object_name, "expires": expires, "external": external})
         return {"object_name": object_name, "url": f"presigned://{object_name}"}
 
-    async def fake_stream_impl(object_name):
-        class _Stream:
-            def __iter__(self):
-                yield b"file-bytes"
+    fake_url_impl.calls = url_calls
 
-        return _Stream(), "application/octet-stream"
+    raw_bodies = []
+
+    async def fake_raw_stream_impl(object_name):
+        body = _FakeRawBody()
+        raw_bodies.append(body)
+        return body, "application/octet-stream"
+
+    fake_raw_stream_impl.bodies = raw_bodies
 
     monkeypatch.setattr(file_access, "check_file_access", lambda name, uid, tid: True)
     monkeypatch.setattr(file_service, "get_file_url_impl", fake_url_impl)
-    monkeypatch.setattr(file_service, "get_file_stream_impl", fake_stream_impl)
+    monkeypatch.setattr(file_service, "get_file_stream_raw_impl", fake_raw_stream_impl)
     # The ignore branch checks object existence before presigning; keep that
     # storage probe out of these behavioural tests.
     from management.db.file import attachment as file_attachment
@@ -234,3 +264,90 @@ def test_gate_path_ids_must_be_positive(gate_client, method, path):
     client, _ = gate_client
     response = client.request(method, path)
     assert response.status_code == 422
+
+
+def test_file_download_info_mode_opts_into_external_signing(gate_client):
+    """Partner direct links must sign against the external authority.
+
+    Regression for the P1 review finding: a global external switch broke the
+    internal same-origin proxy; only the partner gate opts in, internal
+    consumers keep the default internal authority.
+    """
+    client, _ = gate_client
+    from management.services.file import service as file_service
+
+    response = client.get("/nb/v1/file/download/kb/x.pdf")
+    assert response.status_code == 200
+    assert file_service.get_file_url_impl.calls[-1]["external"] is True
+
+
+def test_file_download_stream_reads_in_chunks_and_closes_the_body(gate_client):
+    """True streaming: bounded chunk reads, no full-object read, close on end."""
+    client, _ = gate_client
+    from management.services.file import service as file_service
+
+    response = client.get("/nb/v1/file/download/reports/x.bin", params={"download": "stream"})
+    assert response.status_code == 200
+    assert response.content == b"file-bytes"
+    body = file_service.get_file_stream_raw_impl.bodies[-1]
+    assert body.closed is True
+    # Every read is a bounded chunk request; never a full-object read(-1).
+    assert body.read_sizes and all(size == 65536 for size in body.read_sizes)
+
+
+def test_file_download_stream_splits_large_objects_into_chunks(gate_client, monkeypatch):
+    client, _ = gate_client
+    from management.services.file import service as file_service
+
+    payload = b"x" * 150000  # > 2 chunks
+    bodies = []
+
+    async def big_raw_impl(object_name):
+        body = _FakeRawBody(payload)
+        bodies.append(body)
+        return body, "application/octet-stream"
+
+    monkeypatch.setattr(file_service, "get_file_stream_raw_impl", big_raw_impl)
+    response = client.get("/nb/v1/file/download/reports/big.bin", params={"download": "stream"})
+    assert response.status_code == 200
+    assert response.content == payload
+    body = bodies[-1]
+    assert len(body.read_sizes) >= 3
+    assert all(size == 65536 for size in body.read_sizes)
+    assert body.closed is True
+
+
+def test_file_download_stream_missing_object_maps_to_404(gate_client, monkeypatch):
+    client, _ = gate_client
+    from management.services.file import service as file_service
+    from contracts.errors.exceptions import NotFoundException
+
+    async def missing_impl(object_name):
+        raise NotFoundException("Storage object does not exist")
+
+    monkeypatch.setattr(file_service, "get_file_stream_raw_impl", missing_impl)
+    response = client.get("/nb/v1/file/download/reports/gone.bin", params={"download": "stream"})
+    assert response.status_code == 404
+    assert response.json()["code"] == "NOT_FOUND"
+
+
+def test_file_download_stream_closes_body_when_a_read_fails(gate_client, monkeypatch):
+    client, _ = gate_client
+    from management.services.file import service as file_service
+
+    class _BrokenBody(_FakeRawBody):
+        def read(self, amt=-1):
+            super().read(amt)
+            raise RuntimeError("storage connection reset")
+
+    body_holder = []
+
+    async def broken_impl(object_name):
+        body = _BrokenBody()
+        body_holder.append(body)
+        return body, "application/octet-stream"
+
+    monkeypatch.setattr(file_service, "get_file_stream_raw_impl", broken_impl)
+    with pytest.raises(Exception):
+        client.get("/nb/v1/file/download/reports/broken.bin", params={"download": "stream"})
+    assert body_holder[0].closed is True

@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import logging
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from contracts.constants.environment import (
@@ -12,6 +13,8 @@ from contracts.constants.environment import (
     MINIO_SECURE,
 )
 from nexent.storage.storage_client_factory import MinIOStorageConfig, create_storage_client_from_config
+
+logger = logging.getLogger(__name__)
 
 
 class MinioClient:
@@ -155,25 +158,36 @@ class MinioClient:
             )
         return self._external_url_client
 
-    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Tuple[bool, str]:
+    def get_file_url(
+        self,
+        object_name: str,
+        bucket: Optional[str] = None,
+        expires: int = 86400,
+        *,
+        external: bool = False,
+    ) -> Tuple[bool, str]:
         """
         Get presigned URL for file
 
-        When ``MINIO_EXTERNAL_ENDPOINT`` is configured, the URL is signed
-        against that external authority so callers outside the container
-        network can actually use it; otherwise the internal endpoint signs it
-        (existing behavior).
+        The signing authority is caller-selected. ``external=True`` opts into
+        the ``MINIO_EXTERNAL_ENDPOINT`` authority for partner direct links;
+        the default keeps the internal authority so internal proxy flows stay
+        same-origin with ``MINIO_ENDPOINT`` (a presigned signature covers the
+        Host, so the two authorities are not interchangeable). When no external
+        endpoint is configured, ``external=True`` falls back to internal signing.
 
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
             expires: URL expiration time in seconds (default 86400 = 24 hours)
+            external: Sign against the configured external endpoint instead of
+                the internal one (partner direct-link callers only)
 
         Returns:
             Tuple[bool, str]: (Success status, Presigned URL or error message)
         """
         self._ensure_initialized()
-        external_client = self._get_external_url_client()
+        external_client = self._get_external_url_client() if external else None
         if external_client is not None:
             try:
                 url = external_client.generate_presigned_url(

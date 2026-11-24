@@ -610,8 +610,8 @@ async def upload_to_minio(
     return results
 
 
-async def get_file_url_impl(object_name: str, expires: int):
-    result = get_file_url(object_name=object_name, expires=expires)
+async def get_file_url_impl(object_name: str, expires: int, *, external: bool = False):
+    result = get_file_url(object_name=object_name, expires=expires, external=external)
     if not result["success"]:
         # Typed domain exception: the shared northbound registry maps it to
         # 404 (presigned signing never validates existence, so absence is
@@ -620,6 +620,37 @@ async def get_file_url_impl(object_name: str, expires: int):
         raise NotFoundException(
             f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}")
     return result
+
+
+async def get_file_stream_raw_impl(object_name: str):
+    """Open an unbuffered storage stream without blocking the event loop.
+
+    Unlike ``get_file_stream_impl`` (legacy full-object BytesIO buffering),
+    the returned body is the raw storage stream: the caller iterates it in
+    chunks and owns its close. Opening goes through the managed control-io
+    lane so a saturated lane rejects before any response stream is created.
+    """
+    body = await run_blocking(
+        "open-storage-file-stream",
+        get_file_stream_raw,
+        lane="control-io",
+        owner="config",
+        object_name=object_name,
+    )
+    if body is None:
+        # The raw helper collapses missing keys and operational errors;
+        # confirm absence without treating denied/unavailable storage as 404.
+        size = await run_blocking(
+            "probe-storage-file-size",
+            get_file_size_from_minio_strict,
+            lane="control-io",
+            owner="config",
+            object_name=object_name,
+        )
+        if size is None:
+            raise NotFoundException("Storage object does not exist")
+        raise Exception("File not found or failed to read from storage")
+    return body, get_content_type(object_name)
 
 
 async def get_file_stream_impl(object_name: str):
