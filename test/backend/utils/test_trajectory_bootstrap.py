@@ -20,8 +20,9 @@ from infrastructure.trace.trajectory_store import TrajectoryFileStore
         (True, True, True, "otlp"),
         (True, True, False, "otlp"),
         (False, False, True, "local_file"),
+        (False, False, True, "otlp"),
     ],
-    ids=["local", "local-with-remote-disabled", "remote", "both", "both-unsampled", "disabled"],
+    ids=["local", "local-with-remote-disabled", "remote", "both", "both-unsampled", "disabled", "read-only"],
 )
 def test_backend_bootstrap_routes_agent_model_and_tool_traces(tmp_path, local, remote, sampled, provider):
     TrajectoryFileStore.provision(tmp_path)
@@ -46,7 +47,7 @@ def forbid_network(*args, **kwargs):
 socket.socket.connect = forbid_network
 # PG remains a controlled external boundary for this bootstrap unit test.
 from infrastructure.rdb.trajectory.repository import ExecutionRepository
-patch.object(ExecutionRepository, "begin", return_value=1).start()
+begin_execution = patch.object(ExecutionRepository, "begin", return_value=1).start()
 patch.object(ExecutionRepository, "initialize", side_effect=lambda _: nullcontext()).start()
 patch.object(ExecutionRepository, "expire", return_value=None).start()
 from infrastructure.trace.bootstrap import monitoring_manager
@@ -90,6 +91,8 @@ try:
             with existing_tracer.start_as_current_span("startup.cached.tracer"):
                 pass
     assert local_trajectory_processor.force_flush(5000)
+    begin_execution.assert_called_once()
+    assert begin_execution.call_args.kwargs["capturing"] is local
     documents = [json.loads(line) for path in local_trajectory_processor.store.root.rglob("*.otlp.jsonl") for line in path.read_text().splitlines()]
     spans = {span["name"]: span for doc in documents for resource in doc["resourceSpans"] for scope in resource["scopeSpans"] for span in scope["spans"]}
     assert bool(spans) is local
