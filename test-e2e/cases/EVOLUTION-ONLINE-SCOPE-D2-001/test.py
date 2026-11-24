@@ -160,7 +160,7 @@ def test_online_scope_http(runtime):
             with get_db_session() as session:
                 session.execute(text("UPDATE nexent.ag_tenant_agent_t SET created_by=:owner WHERE agent_id=7 AND version_no=0"), {"owner": owner})
 
-            def workbench():
+            def workbench(*, expired_turn=None):
                 result = client.get(workspace, headers=headers)
                 assert result.status_code == 200 and "no-store" in result.headers["Cache-Control"], result.text
                 assert "private" not in result.text
@@ -168,6 +168,10 @@ def test_online_scope_http(runtime):
                 assert [s["expected_behavior"] for s in data["suggestions"]] == ["target"]
                 assert [batch["batch_id"] for batch in data["review_batches"]] == [pending_batch, finished_batch]
                 assert data["review_batches"][0] == {"batch_id": pending_batch, "state": "pending"}
+                if expired_turn is not None:
+                    [expired] = [row for row in data["reviews"] if row["turn_id"] == expired_turn]
+                    assert expired["state"] == "missing" and expired["signals"] == []
+                    assert expired["diagnosis"] == {"status": "needs_evidence", "reason": "trajectory_expired"}
                 return data["review_batches"][1]
 
             completed = workbench()
@@ -221,9 +225,9 @@ def test_online_scope_http(runtime):
             assert client.delete(path.replace("17","18"), headers=headers).status_code == 404 and has_evidence(18)
             with get_db_session() as session:
                 session.execute(text("UPDATE nexent.trajectory_execution_t SET status='expired' WHERE conversation_id=19"))
-            current = workbench()
-            assert current["findings"][0]["turn_ids"] == [turn_ids[18]] and current["excluded"] == 2
-            assert current["reviewed"] == 3 and current["reference_workflows"] == []
+            current = workbench(expired_turn=turn_ids[19])
+            assert current["findings"][0]["turn_ids"] == [turn_ids[18]] and current["excluded"] == 1
+            assert current["reviewed"] == 4 and current["missing"] == 2 and current["reference_workflows"] == []
             assert {row["turn_id"] for row in current["draft_turns"]} == {turn_ids[18], turn_ids[20]}
             assert client.get(base + str(turn_ids[19]) + "/case-draft", headers=headers).status_code == 404
     finally:
