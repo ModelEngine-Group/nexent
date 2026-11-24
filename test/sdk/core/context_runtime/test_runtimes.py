@@ -185,20 +185,20 @@ def test_managed_runtime_uses_item_snapshot_without_explicit_prepare_run():
         _restore(snapshot)
 
 
-def test_managed_runtime_forces_compaction_for_both_overflow_recovery_paths():
+def test_managed_runtime_prepares_step_and_final_answer_without_forced_compaction():
     managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
         runtime = managed_module.ManagedContextRuntime(manager)
         memory = _Memory()
 
-        step = runtime.recover_step(
+        step = runtime.prepare_step(
             model=None,
             memory=memory,
             current_run_start_idx=0,
             tools=[{"name": "search"}],
         )
-        final_answer = runtime.recover_final_answer(
+        final_answer = runtime.prepare_final_answer(
             model=None,
             memory=memory,
             current_run_start_idx=0,
@@ -206,7 +206,7 @@ def test_managed_runtime_forces_compaction_for_both_overflow_recovery_paths():
             final_answer_templates={"final_answer": {}},
         )
 
-        assert manager.force_compactions == [True, True]
+        assert manager.force_compactions == [False, False]
         assert step.messages == [{"role": "system", "content": "step"}]
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
         assert runtime.finalize_evidence(status="completed").model_call_count == 2

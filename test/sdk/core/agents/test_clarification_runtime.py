@@ -325,10 +325,15 @@ def test_clarification_uses_existing_content_guardrail(build_agent, action):
         assert result == "1. Filtered question"
 
 
-def test_clarification_fixture_keeps_the_configured_hard_capacity_guard(build_agent):
-    """Protocol retry tests use a large window; small windows still reject before inference."""
+def test_clarification_small_window_remains_advisory_before_inference(build_agent, monkeypatch):
+    """An over-window estimate still reaches inference without pre-send compression."""
     agent, model, observer = build_agent([f"<code>{CODE}</code>"], context_window=1000)
-    with pytest.raises(ValueError, match="combined context window"):
-        agent.run("Help", max_steps=1)
-    assert model.calls == []
-    assert not any(event["type"] == "human_interaction" for event in events(observer))
+    manager = agent.context_runtime.context_manager
+    summary = MagicMock(side_effect=AssertionError("Unexpected pre-send summary"))
+    monkeypatch.setattr(manager._llm, "generate_summary", summary)
+    result = str(agent.run("Help with " * 1000, max_steps=1))
+    assert len(model.calls) == 1
+    assert manager._message_tokens(model.calls[0]) > manager.config.context_window_tokens == 1000
+    summary.assert_not_called()
+    assert result == "1. Which region?"
+    assert len([event for event in events(observer) if event["type"] == "human_interaction"]) == 1
