@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from infrastructure.monitoring.contracts import Fact, FactKind, Outcome, stable_key
+from infrastructure.monitoring.contracts import MAX_LONG, Fact, FactKind, Outcome, stable_key
 from infrastructure.monitoring.facts import SkillFact
 
 
