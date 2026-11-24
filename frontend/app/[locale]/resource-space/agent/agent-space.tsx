@@ -2,6 +2,7 @@
 "use client";
 import { hasRole } from "@/lib/roles";
 
+import RepositorySearchBar from "@/app/resource-space/components/RepositorySearchBar";
 import RepositoryDisplayControls from "@/app/resource-space/components/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useRepositoryTagPredicates } from "@/hooks/useRepositoryTagPredicates";
@@ -10,9 +11,9 @@ import {
   useRepositoryPageSize,
   useRepositoryQueryState,
 } from "@/hooks/useRepositoryQueryState";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { MenuProps } from "antd";
-import { App, Button, Dropdown, Empty, Input, Modal, Spin } from "antd";
+import { App, Button, Dropdown, Empty, Modal, Spin } from "antd";
 import {
   Bot,
   Copy,
@@ -20,7 +21,6 @@ import {
   Download,
   MoreHorizontal,
   PackageX,
-  Search,
   ShieldCheck,
 } from "lucide-react";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
@@ -67,8 +67,6 @@ export function AgentSpace({ active }: { active: boolean }) {
         !!user?.tenantId &&
         user.tenantId === listing.publisher_tenant_id));
   const [searchQuery, setSearchQuery] = useRepositoryQueryState("search", "");
-  const composingSearch = useRef(false);
-  const [searchDraft, setSearchDraft] = useState<string | null>(null);
   const [tagPredicates, setTagPredicates] = useRepositoryTagPredicates();
   const [page, setPage] = useRepositoryQueryState("page", 1);
   const [pageSize, setPageSize] = useRepositoryPageSize();
@@ -374,61 +372,27 @@ export function AgentSpace({ active }: { active: boolean }) {
             : "space-y-5"
       }
     >
-      <div
-        className={
-          presentation
-            ? "flex shrink-0 flex-wrap items-center gap-2"
-            : "flex items-center gap-3"
+      <RepositorySearchBar
+        repository={Boolean(presentation)}
+        value={searchQuery}
+        onChange={onSearchChange}
+        placeholder={t("agentRepository.page.searchPlaceholder")}
+        filter={
+          <TagFilterPopover
+            appearance={presentation ? "select" : "button"}
+            definitions={tagDefinitions ?? []}
+            value={tagPredicates}
+            onChange={onTagPredicatesChange}
+            buttonClassName={
+              presentation
+                ? "!h-8 !w-full !justify-start !rounded !px-3 !text-sm"
+                : undefined
+            }
+          />
         }
       >
-        <div
-          className={
-            presentation
-              ? "relative repository-search-field"
-              : "relative min-w-0 flex-1"
-          }
-        >
-          <Input
-            value={searchDraft ?? searchQuery}
-            onCompositionStart={(event) => {
-              composingSearch.current = true;
-              setSearchDraft(event.currentTarget.value);
-            }}
-            onCompositionEnd={(event) => {
-              composingSearch.current = false;
-              onSearchChange(event.currentTarget.value);
-              setSearchDraft(null);
-            }}
-            onChange={(event) => {
-              if (composingSearch.current) {
-                setSearchDraft(event.target.value);
-              } else {
-                onSearchChange(event.target.value);
-              }
-            }}
-            placeholder={t("agentRepository.page.searchPlaceholder")}
-            prefix={<Search className="size-4 text-[#777777]" aria-hidden />}
-            className={
-              presentation
-                ? "h-8 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
-                : "rounded-xl"
-            }
-            allowClear
-          />
-        </div>
-        <TagFilterPopover
-          appearance={presentation ? "select" : "button"}
-          definitions={tagDefinitions ?? []}
-          value={tagPredicates}
-          onChange={onTagPredicatesChange}
-          buttonClassName={
-            presentation
-              ? "!h-8 !w-[296px] max-w-full !justify-start !rounded !border-[#C9C9C9] !px-3 !text-sm"
-              : undefined
-          }
-        />
         <RepositoryDisplayControls showSort={false} />
-      </div>
+      </RepositorySearchBar>
       <div
         aria-busy={isPlaceholderData || undefined}
         className={

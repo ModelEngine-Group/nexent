@@ -3,10 +3,11 @@
 "use client";
 
 import RepositoryCardActions from "@/app/resource-space/components/RepositoryCardActions";
+import RepositorySearchBar from "@/app/resource-space/components/RepositorySearchBar";
 import RepositoryDisplayControls from "@/app/resource-space/components/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
-import { Button, Input } from "antd";
-import { Copy, Search } from "lucide-react";
+import { Button } from "antd";
+import { Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
@@ -109,48 +110,29 @@ export function RepositoryView({
   };
   return (
     <div className={presentation ? "space-y-4" : "space-y-5"}>
-      <div
-        className={
-          presentation
-            ? "flex flex-wrap items-center gap-2"
-            : "flex items-center gap-3"
-        }
-      >
-        <div
-          className={
-            presentation
-              ? "relative repository-search-field"
-              : "relative min-w-0 flex-1"
-          }
-        >
-          <Input
-            allowClear
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={t("skillRepository.searchPlaceholder")}
-            prefix={<Search className="size-4 text-[#777777]" aria-hidden />}
-            className={
+      <RepositorySearchBar
+        repository={Boolean(presentation)}
+        value={searchQuery}
+        onChange={onSearchChange}
+        placeholder={t("skillRepository.searchPlaceholder")}
+        filter={
+          <TagFilterPopover
+            appearance={presentation ? "select" : "button"}
+            definitions={tagDefinitions}
+            value={tagPredicates}
+            onChange={onTagPredicatesChange}
+            buttonClassName={
               presentation
-                ? "h-8 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
-                : "rounded-xl"
+                ? "!h-8 !w-full !justify-start !rounded !px-3 !text-sm"
+                : undefined
             }
           />
-        </div>
-        <TagFilterPopover
-          appearance={presentation ? "select" : "button"}
-          definitions={tagDefinitions}
-          value={tagPredicates}
-          onChange={onTagPredicatesChange}
-          buttonClassName={
-            presentation
-              ? "!h-8 !w-[296px] max-w-full !justify-start !rounded !border-[#C9C9C9] !px-3 !text-sm"
-              : undefined
-          }
-        />
+        }
+      >
         {!presentation || presentation.layout === "list" ? (
           <RepositoryDisplayControls />
         ) : null}
-      </div>
+      </RepositorySearchBar>
 
       <div className="min-h-0">
         <AsyncContent

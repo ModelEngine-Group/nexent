@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import RepositoryDisplayControls from "@/app/resource-space/components/RepositoryDisplayControls";
+import RepositorySearchBar from "@/app/resource-space/components/RepositorySearchBar";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { Input, Select } from "antd";
 import { Search } from "lucide-react";
@@ -83,77 +84,60 @@ export default function McpToolsSearchFilterBar({
         ) : null}
       </div>
     ) : null;
+  const placeholder =
+    searchPlaceholder || t("mcpTools.page.searchNameTagPlaceholder");
+  const statusSelect =
+    statusOptions && onStatusChange ? (
+      <Select
+        value={status}
+        onChange={onStatusChange}
+        className="h-8 w-full min-w-[150px]"
+        popupMatchSelectWidth={false}
+        options={statusOptions}
+      />
+    ) : null;
 
-  return (
-    <div>
-      <div
-        className={
-          repositoryToolbar
-            ? "flex shrink-0 flex-wrap items-center gap-2"
-            : "flex flex-row items-center gap-3 overflow-x-auto"
-        }
-      >
-        <div
-          className={
-            repositoryToolbar
-              ? "contents"
-              : "flex min-w-[240px] flex-1 items-center gap-3"
-          }
+  if (repositoryToolbar) {
+    return (
+      <div>
+        <RepositorySearchBar
+          value={search}
+          onChange={onSearchChange}
+          placeholder={placeholder}
+          filter={searchActions}
         >
-          <Input
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={
-              searchPlaceholder || t("mcpTools.page.searchNameTagPlaceholder")
-            }
-            allowClear
-            prefix={
-              <Search
-                className={
-                  repositoryToolbar
-                    ? "size-4 text-[#777777]"
-                    : "h-4 w-4 text-slate-400"
-                }
-              />
-            }
-            className={
-              repositoryToolbar
-                ? "repository-search-field h-8 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
-                : "h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
-            }
-          />
-          {searchActions ? (
-            <div
-              className={
-                repositoryToolbar ? "w-[240px] max-w-full shrink-0" : "shrink-0"
-              }
-            >
-              {searchActions}
-            </div>
-          ) : null}
-          {statusOptions && onStatusChange ? (
-            <Select
-              value={status}
-              onChange={onStatusChange}
-              className="h-8 w-full min-w-[150px]"
-              popupMatchSelectWidth={false}
-              options={statusOptions}
-            />
-          ) : null}
-        </div>
-        {repositoryToolbar ? (
+          {statusSelect}
           <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
             {actions}
             <RepositoryDisplayControls showSort={false} />
           </div>
-        ) : (
-          <>
-            {actions ? (
-              <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div>
-            ) : null}
-            <RepositoryDisplayControls showSort={false} />
-          </>
-        )}
+        </RepositorySearchBar>
+        {tabsContent}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-row items-center gap-3 overflow-x-auto">
+        <div className="flex min-w-[240px] flex-1 items-center gap-3">
+          <Input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={placeholder}
+            allowClear
+            prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+            className="h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
+          />
+          {searchActions ? (
+            <div className="shrink-0">{searchActions}</div>
+          ) : null}
+          {statusSelect}
+        </div>
+        {actions ? (
+          <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div>
+        ) : null}
+        <RepositoryDisplayControls showSort={false} />
       </div>
       {tabsContent}
     </div>

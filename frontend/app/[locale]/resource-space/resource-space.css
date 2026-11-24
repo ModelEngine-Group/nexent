@@ -11,12 +11,6 @@
   margin-bottom: 16px;
 }
 
-.resource-space .repository-search-field {
-  flex: none;
-  width: min(100%, 800px);
-  min-width: 0;
-}
-
 .resource-space .ant-table-wrapper:not(.resource-scroll-table) {
   overflow-x: auto;
 }

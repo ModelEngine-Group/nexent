@@ -32,7 +32,7 @@ export default function RepositoryTagFilter({
         aria-label={t("repository.tagFilter.button")}
         allowClear
         showSearch
-        className="w-[240px] max-w-full"
+        className="h-8 w-full"
         value={value}
         placeholder={t("resourceCenter.tags")}
         optionFilterProp="label"
