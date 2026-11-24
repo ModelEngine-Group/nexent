@@ -13,7 +13,12 @@ from types import SimpleNamespace
 from openjiuwen.core.foundation.tool.mcp.base import McpServerConfig, MCPTool, McpToolCard
 from openjiuwen.core.foundation.tool.mcp.client.streamable_http_client import StreamableHttpClient
 
-from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.consts.mcp_errors import (
+    MCPConnectionFailure,
+    MCPConnectionTimeoutError,
+    MCPToolResultError,
+    MCPToolTimeoutError,
+)
 from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.core.agents.resources.tool_user_context import USER_CONTEXT_FIELDS
 from nexent.core.concurrency import ManagedTaskSpec
@@ -125,14 +130,16 @@ class _ManagedNativeClient:
             arguments[name] = owner.user_context.get(name)
         # Caller-observed monitoring window: one fact per invocation, spanning
         # the lane submission and the deadline-capped await.
-        with observe_mcp_tool_call(resolve_mcp_server_identity(self.server_url, tool_name), tool_name):
+        with observe_mcp_tool_call(
+            resolve_mcp_server_identity(self.server_url, tool_name), tool_name
+        ) as observation:
             execution = owner.manager.submit(
                 "model-tool-io",
                 ManagedTaskSpec(task_name="jiuwen-mcp-tool", owner=__name__, close_hook=owner.request_close),
                 owner._call_tool, self.client, self.remote_name, arguments,
             )
             try:
-                return await asyncio.wait_for(asyncio.wrap_future(execution.future), owner.tool_timeout_seconds)
+                result = await asyncio.wait_for(asyncio.wrap_future(execution.future), owner.tool_timeout_seconds)
             except asyncio.TimeoutError as exc:
                 logger.warning("event=mcp_tool_timeout tool_name=%s timeout_seconds=%s phase=execution",
                                tool_name, owner.tool_timeout_seconds)
@@ -144,6 +151,11 @@ class _ManagedNativeClient:
             except asyncio.CancelledError:
                 owner.request_close()
                 raise
+            if getattr(result, "isError", False):
+                # The native client returns CallToolResult unchanged, so the
+                # protocol failure reaches the fact without changing the result.
+                observation.finish(MCPToolResultError())
+            return result
 
 
 class _ObservedMCPTool(MCPTool):

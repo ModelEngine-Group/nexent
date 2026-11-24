@@ -9,8 +9,9 @@ from unittest.mock import MagicMock
 import mcp.types
 import mcpadapt.core
 import pytest
-from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
+
 from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 from nexent.monitor.facts import set_fact_sink
 from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
@@ -486,3 +487,92 @@ def test_mcp_tool_timeout_emits_single_failed_fact():
     assert facts[1]["outcome"] == "failed"
     assert facts[1]["error_category"] == "TIMEOUT"
     assert facts[1]["fact_id"] == facts[0]["fact_id"]
+
+
+class _ResultErrorSession:
+    """Return a protocol-level tool error exactly as FastMCP/MCP sends it."""
+
+    async def call_tool(self, name, arguments):
+        return SimpleNamespace(isError=True, content=[])
+
+
+class _MixedResultSession:
+    """Succeed or fail per invocation so concurrent calls must stay distinct."""
+
+    async def call_tool(self, name, arguments):
+        failed = bool((arguments or {}).get("fail"))
+        return SimpleNamespace(isError=failed, content=[])
+
+
+def test_mcp_tool_is_error_result_emits_failed_fact_without_changing_result():
+    manager = _manager()
+    scope = RunCancellationScope()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_ResultErrorSession(), exited)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with (
+            ManagedMCPToolCollection(
+                manager=manager,
+                server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+                cancellation_scope=scope,
+                tool_timeout_seconds=1,
+                close_timeout_seconds=0.5,
+                tool_adapter_factory=_PassthroughAdapter,
+                session_context_factory=_async_context_factory(context),
+            ) as collection,
+            agent_monitoring_context(_metadata()),
+        ):
+            result = collection.tools[0].forward(value="secret-tool-argument")
+    finally:
+        set_fact_sink(None)
+        asyncio.run(manager.shutdown(timeout=1))
+
+    assert result.isError is True
+    assert [fact["outcome"] for fact in facts] == ["started", "failed"]
+    assert facts[1]["error_category"] == "TOOL_ERROR"
+    assert facts[1]["fact_id"] == facts[0]["fact_id"]
+    assert "secret-tool-argument" not in str(facts)
+
+
+def test_mcp_tool_result_errors_are_tracked_per_invocation():
+    from concurrent.futures import ThreadPoolExecutor
+
+    manager = _manager()
+    scope = RunCancellationScope()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_MixedResultSession(), exited)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with (
+            ManagedMCPToolCollection(
+                manager=manager,
+                server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+                cancellation_scope=scope,
+                tool_timeout_seconds=5,
+                close_timeout_seconds=0.5,
+                tool_adapter_factory=_PassthroughAdapter,
+                session_context_factory=_async_context_factory(context),
+            ) as collection,
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            def invoke(arguments):
+                # The monitoring context is a context variable, so each worker
+                # enters its own before the observed call.
+                with agent_monitoring_context(_metadata()):
+                    return collection.tools[0].forward(arguments)
+
+            outcomes = [
+                pool.submit(invoke, {"fail": True}),
+                pool.submit(invoke, {"fail": False}),
+            ]
+            results = [future.result(timeout=5) for future in outcomes]
+    finally:
+        set_fact_sink(None)
+        asyncio.run(manager.shutdown(timeout=1))
+
+    assert [result.isError for result in results] == [True, False]
+    terminal = [fact for fact in facts if fact["record_revision"] == 2]
+    assert sorted(fact["outcome"] for fact in terminal) == ["failed", "succeeded"]

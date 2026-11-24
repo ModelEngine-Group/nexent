@@ -12,6 +12,8 @@ never interrupt the business run.
 import logging
 import re
 
+from infrastructure.monitoring.contracts import LOCAL_MCP_NAME
+
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +93,11 @@ def build_mcp_server_catalog(used_mcp_urls, mcp_records, local_server_url, conve
     """Map the used MCP URLs to monitoring identity entries (design section 3).
 
     Entries are plain dicts ``{url, mcp_server_id, mcp_server_name,
-    mcp_server_type}``. The tenant-local endpoint hosts both built-in and
-    OpenAPI-converted tools, so it carries a URL-level ``builtin`` type plus
-    ``tool_types`` overrides marking converted tools as ``api_convert``; the
-    SDK consults the override after the URL-level entry. URLs without a record
+    mcp_server_type}``. The tenant-local endpoint is synthesized from the
+    configured URL even when no database record exists: it hosts both built-in
+    and OpenAPI-converted tools, so it carries a URL-level ``builtin`` type plus
+    ``tool_types`` overrides marking converted tools as ``api_convert``; the SDK
+    consults the override after the URL-level entry. Other URLs without a record
     are omitted so the SDK falls back to ``unknown``.
     """
     records_by_url = {}
@@ -105,32 +108,36 @@ def build_mcp_server_catalog(used_mcp_urls, mcp_records, local_server_url, conve
     catalog = []
     for url in used_mcp_urls or []:
         record = records_by_url.get(url)
+        if local_server_url and url == local_server_url:
+            entry = {
+                "url": url,
+                "mcp_server_id": record.get("mcp_id") if record else None,
+                "mcp_server_name": (record.get("remote_mcp_server_name") if record else None) or LOCAL_MCP_NAME,
+                "mcp_server_type": "builtin",
+            }
+            tool_types = {name: "api_convert" for name in (converted_tool_names or ())}
+            if tool_types:
+                entry["tool_types"] = tool_types
+            catalog.append(entry)
+            continue
         if record is None:
             continue
-        if url == local_server_url:
-            server_type = "builtin"
-            tool_types = {name: "api_convert" for name in (converted_tool_names or ())}
-        elif is_container_record(record):
+        if is_container_record(record):
             server_type = "container"
-            tool_types = None
         else:
             server_type = "remote"
-            tool_types = None
-        entry = {
+        catalog.append({
             "url": url,
             "mcp_server_id": record.get("mcp_id"),
             "mcp_server_name": record.get("remote_mcp_server_name"),
             "mcp_server_type": server_type,
-        }
-        if tool_types:
-            entry["tool_types"] = tool_types
-        catalog.append(entry)
+        })
     return catalog
 
 
 def select_run_monitoring_catalog(mcp_records, used_mcp_urls, local_server_url, converted_tool_names):
     """Assemble the per-run catalog; returns None when empty or inputs are omitted."""
-    if not used_mcp_urls or not mcp_records:
+    if not used_mcp_urls:
         return None
     try:
         catalog = build_mcp_server_catalog(

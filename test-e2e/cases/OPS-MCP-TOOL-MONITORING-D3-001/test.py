@@ -63,10 +63,15 @@ def _stub_mcp_app(with_slow_tool):
         @mcp.tool
         def slow_tool(text: str) -> str:
             # Failing call: exceeds the caller deadline so the transport itself
-            # fails (mcpadapt returns isError results as plain text, so a tool
-            # that raises would be reported as a success by the adapter).
+            # fails.
             time.sleep(3.5)
             return "late"
+
+        @mcp.tool
+        def error_tool(text: str) -> str:
+            # Protocol-level tool failure: FastMCP reports it as CallToolResult
+            # with isError=true, which the adapter renders as plain content.
+            raise RuntimeError("controlled-tool-error")
 
     return mcp.http_app(path="/mcp")
 
@@ -223,11 +228,18 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         spans = {}
         with _open_collection(manager, stub_url) as collection:
             tools = {tool.name: tool for tool in collection.tools}
-            assert set(tools) == {"echo_tool", "slow_tool"}
+            assert set(tools) == {"echo_tool", "slow_tool", "error_tool"}
             with tracer.start_as_current_span("agent.tool.echo_tool") as echo_span:
                 with agent_monitoring_context(metadata):
                     tools["echo_tool"].forward(text="probe-payload")
             spans["echo_tool"] = echo_span
+            with tracer.start_as_current_span("agent.tool.error_tool") as error_span:
+                with agent_monitoring_context(metadata):
+                    error_result = tools["error_tool"].forward(text="probe-payload")
+            # The Agent still receives the rendered content, not an exception.
+            assert "controlled-tool-error" in str(error_result)
+            spans["error_tool"] = error_span
+            # The deadline-exceeded call closes the collection, so it runs last.
             with tracer.start_as_current_span("agent.tool.slow_tool") as slow_span:
                 with agent_monitoring_context(metadata):
                     with pytest.raises(MCPToolTimeoutError):
@@ -238,14 +250,15 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         day = datetime.fromisoformat(observations[0]["started_at"]).astimezone(ops_store.zone).date()
         terminal = {fact["tool_name"]: fact for fact in observations if fact["record_revision"] == 2}
         assert {name: fact["outcome"] for name, fact in terminal.items()} == {
-            "echo_tool": "succeeded", "slow_tool": "failed"}
+            "echo_tool": "succeeded", "slow_tool": "failed", "error_tool": "failed"}
         assert terminal["slow_tool"]["error_category"] == "TIMEOUT"
+        assert terminal["error_tool"]["error_category"] == "TOOL_ERROR"
         assert all(fact["mcp_server_id"] == 3 and fact["mcp_server_name"] == "stub"
                    and fact["mcp_server_type"] == "container" for fact in terminal.values())
         assert all(fact["duration_ms"] >= 0 for fact in terminal.values())
         assert all("probe-payload" not in json.dumps(fact) and "echo:" not in json.dumps(fact)
                    for fact in observations)
-        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 2
+        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 3
 
         # -- Case step 2: tenant-scoped endpoints agree with the stored facts.
         monkeypatch.setattr(ops_application, "OPS_MONITORING_ENABLED", True)
@@ -262,26 +275,26 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
             response = client.get(route, params=interval)
             assert response.status_code == 200
             data = response.json()["data"]
-            assert data["request_count"] == 2
+            assert data["request_count"] == 3
             assert data["service_count"] == 1 and data["active_services"] == 1
             # The deadline-exceeded call still counts as an attempt (its started
             # revision is published), so both tools are active.
-            assert data["tool_count"] == 2 and data["active_tools"] == 2
-            assert data["error_count"] == 1
+            assert data["tool_count"] == 3 and data["active_tools"] == 3
+            assert data["error_count"] == 2
             assert client.get(route.removeprefix("/api"), params=interval).json() == response.json()
             assert client.get(route, params={**interval, "tenant_id": "someone-else"}).status_code == 403
             tools_list = client.get("/api/ops/v1/monitoring/mcp-tools", params={
                 **interval, "dimension": "services"}).json()["data"]["items"]
             assert tools_list[0]["mcp_server_name"] == "stub"
-            assert tools_list[0]["active_tools"] == 2
+            assert tools_list[0]["active_tools"] == 3
 
         # -- Case step 3: replaying the confirmed batch does not inflate anything.
         replay = json.dumps([event for event in observations], separators=(",", ":"))
         ops_store.store.enqueue(uuid4(), tenant, "mcp_tool", replay, [])
         assert ops_store.apply_batch(tenant, "mcp_tool")
         ops_store.publish(tenant, "mcp_tool")
-        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 2
-        assert _matching_documents(ops_store, DAILY, day, "mcp_tool") == 2
+        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 3
+        assert _matching_documents(ops_store, DAILY, day, "mcp_tool") == 3
 
         # -- Case step 4: the same invocation as a debug run stays silent.
         with _open_collection(manager, stub_url) as collection:
@@ -292,8 +305,8 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
             ops_store.store.enqueue(*batch)
         # Debug calls are inert: no batch may land in the control store.
         assert not ops_store.apply_batch(tenant, "mcp_tool")
-        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 2
-        assert len(observations) == 4  # exactly the two facts from case step 1
+        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 3
+        assert len(observations) == 6  # exactly the three facts from case step 1
 
         # -- Case step 5: an endpoint absent from the catalog degrades to unknown.
         missing_catalog = _metadata(tenant, [{"url": stub_url, "mcp_server_id": 3,
@@ -307,7 +320,7 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
                          if fact.get("mcp_server_type") == "unknown" and fact["record_revision"] == 2]
         assert len(unknown_facts) == 1
         assert unknown_facts[0]["mcp_server_id"] is None and unknown_facts[0]["tool_name"] == "echo_tool"
-        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 3
+        assert _matching_documents(ops_store, FACTS, day, "mcp_tool") == 4
 
         # -- Case step 6: stored facts share identity and measurements with spans.
         fact_by_tool = {}
@@ -320,6 +333,7 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
             assert fact_by_tool[name]["span_id"] == f"{context.span_id:016x}"
         assert fact_by_tool["echo_tool"]["outcome"] == "succeeded"
         assert fact_by_tool["slow_tool"]["outcome"] == "failed"
+        assert fact_by_tool["error_tool"]["outcome"] == "failed"
 
         # -- Case step 7: blocked Elasticsearch writes surface as staleness.
         late_metadata = _metadata(tenant, catalog)
@@ -342,6 +356,6 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         ops_store.publish(tenant, "mcp_tool")
         recovered = client.get("/api/ops/v1/monitoring/mcp-tools/summary", params=interval).json()
         assert recovered["is_stale"] is False
-        assert recovered["data"]["request_count"] == 4
+        assert recovered["data"]["request_count"] == 5
     finally:
         set_fact_sink(None)

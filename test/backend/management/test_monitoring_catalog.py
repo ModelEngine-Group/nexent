@@ -86,6 +86,19 @@ def test_catalog_local_endpoint_without_converted_tools_has_no_overrides():
     assert "tool_types" not in catalog[0]
 
 
+def test_catalog_local_endpoint_without_record_is_synthesized():
+    """The tenant-local endpoint is configured, not persisted in mcp_record_t."""
+    catalog = build_mcp_server_catalog([LOCAL], [], LOCAL, {"search_docs"})
+    assert catalog == [{
+        "url": LOCAL, "mcp_server_id": None, "mcp_server_name": "outer-apis",
+        "mcp_server_type": "builtin", "tool_types": {"search_docs": "api_convert"},
+    }]
+
+
+def test_catalog_without_configured_local_endpoint_skips_missing_records():
+    assert build_mcp_server_catalog([LOCAL], [], "", set()) == []
+
+
 def test_catalog_skips_urls_without_records():
     assert build_mcp_server_catalog(["http://missing.invalid/mcp"], [], LOCAL, set()) == []
 
@@ -230,12 +243,22 @@ def test_prepare_tenant_monitoring_catalog_assembles_and_degrades(monkeypatch):
     assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", "")[0]["mcp_server_type"] == "remote"
 
     monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: [])
-    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL) is None
+    # No records and no local endpoint: nothing to describe.
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", None) is None
+    # The tenant-local endpoint needs no database record.
+    local_only = catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL)
+    assert local_only == [{
+        "url": LOCAL, "mcp_server_id": None, "mcp_server_name": "outer-apis",
+        "mcp_server_type": "builtin",
+    }]
 
     monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: records)
     catalog = catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL)
-    assert catalog and catalog[0]["url"] == "http://remote.invalid/mcp"
-    assert catalog[0]["mcp_server_type"] == "remote"
+    assert {entry["url"] for entry in catalog} == {"http://remote.invalid/mcp", LOCAL}
+    remote = next(entry for entry in catalog if entry["url"] == "http://remote.invalid/mcp")
+    assert remote["mcp_server_type"] == "remote"
+    local = next(entry for entry in catalog if entry["url"] == LOCAL)
+    assert local["mcp_server_type"] == "builtin"
 
     def broken_records(tenant_id):
         raise RuntimeError("db down")
@@ -268,6 +291,10 @@ def test_prepare_tenant_monitoring_catalog_maps_persistence_rows(monkeypatch):
         "http://container.invalid/mcp": {
             "url": "http://container.invalid/mcp", "mcp_server_id": 6,
             "mcp_server_name": "boxed", "mcp_server_type": "container",
+        },
+        LOCAL: {
+            "url": LOCAL, "mcp_server_id": None,
+            "mcp_server_name": "outer-apis", "mcp_server_type": "builtin",
         },
     }
 

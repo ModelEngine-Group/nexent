@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.consts.mcp_errors import MCPToolTimeoutError
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from nexent.consts.mcp_errors import MCPToolResultError, MCPToolTimeoutError
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.monitor import mcp_fact
 from nexent.monitor.facts import set_fact_sink
@@ -18,9 +22,6 @@ from nexent.monitor.mcp_fact import (
     suppress_mcp_tool_calls,
 )
 from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 
 def _metadata(**overrides):
@@ -362,3 +363,19 @@ def test_server_identity_tool_override_takes_precedence(monkeypatch):
     url_level = resolve_mcp_server_identity(url, "builtin_tool")
     assert url_level["mcp_server_type"] == "builtin"
     assert resolve_mcp_server_identity("http://other.invalid/mcp", "search_docs") is None
+
+
+def test_protocol_tool_error_maps_to_failed_outcome():
+    """CallToolResult.isError is carried into the terminal fact as TOOL_ERROR."""
+    facts = []
+
+    def run_call():
+        with agent_monitoring_context(_metadata()):
+            observation = McpToolCallObservation("search")
+            observation.dispatch()
+            observation.finish(MCPToolResultError())
+
+    _record(facts, run_call)
+    assert [fact["record_revision"] for fact in facts] == [1, 2]
+    assert facts[1]["outcome"] == "failed"
+    assert facts[1]["error_category"] == "TOOL_ERROR"

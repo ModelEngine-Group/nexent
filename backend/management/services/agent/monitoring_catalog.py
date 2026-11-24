@@ -93,19 +93,23 @@ def prepare_tenant_monitoring_catalog(tenant_id, local_server_url, *, enabled=Tr
 
     Management attaches this to the prepared run payload; Runtime filters it to
     the URLs each run materializes. Tenant lookups return unified ``McpRecord``
-    persistence rows, so they are mapped before assembly. Failures degrade to
-    an omitted catalog.
+    persistence rows, so they are mapped before assembly. The tenant-local
+    endpoint has no database record, so it is added from the configured URL.
+    Failures degrade to an omitted catalog.
     """
     if not enabled:
         return None
     try:
         local_server_url = local_server_url if local_server_url else None
         records = _catalog_records(_mcp_records_for_tenant(tenant_id))
-        if not records:
+        used_urls = [record["remote_mcp_server"] for record in records if record["remote_mcp_server"]]
+        if local_server_url and local_server_url not in used_urls:
+            used_urls.append(local_server_url)
+        if not used_urls:
             return None
         return select_run_monitoring_catalog(
             records,
-            [record["remote_mcp_server"] for record in records if record["remote_mcp_server"]],
+            used_urls,
             local_server_url,
             query_converted_tool_names(tenant_id),
         )

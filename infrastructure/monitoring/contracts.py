@@ -13,6 +13,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 FactKind = Literal["model", "mcp_tool", "agent", "skill"]
 Outcome = Literal["started", "succeeded", "failed", "cancelled", "unknown"]
 MAX_LONG = 2**63 - 1
+# Tenant-local MCP endpoint that hosts built-in and OpenAPI-converted tools.
+LOCAL_MCP_NAME = "outer-apis"
 
 
 class Fact(BaseModel):
