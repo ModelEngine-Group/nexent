@@ -91,7 +91,7 @@ class RuntimeFinalAnswer(Exception):
 _FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z", re.IGNORECASE)
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
 _RUNTIME_RECORD_RE = re.compile(
-    r"</?(?:completed_action_history|completed_action|code_exec_result|summaried_result|output_ref)\b",
+    r"</?(?:(?:completed_action_history|completed_action|code_exec_result|summaried_result|output_ref)\b|result>)",
     re.IGNORECASE,
 )
 _CODE_MARKER_RE = re.compile(r"</?code>", re.IGNORECASE)
@@ -101,8 +101,13 @@ _MARKDOWN_RE = re.compile(
     r"[\s\S]*?(?:^[ \t]{0,3}(?P=fence)[ \t]*(?:\n|$)|\Z)"
     r"|(?P<ticks>`+)[\s\S]*?(?P=ticks)"
 )
+_PYTHON_FENCE_RE = re.compile(
+    r"```python[^\S\r\n]*\r?\n(?P<body>[\s\S]*?)\r?\n[ \t]*```",
+    re.IGNORECASE,
+)
 _CODE_OPEN = "<code>"
 _CODE_CLOSE = "</code>"
+_TRAILING_CODE_CLOSERS_RE = re.compile(r"(?:</code>\s*)+\Z", re.IGNORECASE)
 _PYTHON_DATA_TOKEN_TYPES = {
     tokenize.STRING,
     tokenize.COMMENT,
@@ -252,6 +257,35 @@ def _markdown_spans(text: str) -> list[tuple[int, int]]:
             if not match.group(0).lower().startswith("```<run>")]
 
 
+def has_unquoted_match(text: str, pattern: re.Pattern[str]) -> bool:
+    """Find a protocol marker outside Markdown code examples."""
+    examples = _markdown_spans(text)
+    return any(not _position_in_spans(match.start(), examples) for match in pattern.finditer(text))
+
+
+def restore_stopped_code_closer(output: Any, finish_reason: str | None) -> Any:
+    """Restore a delimiter removed by a stop-capable text provider."""
+    if finish_reason != "stop" or not isinstance(output, str):
+        return output
+    examples = _markdown_spans(output)
+    first_marker = next(
+        (marker for marker in _PROTOCOL_MARKER_RE.finditer(output)
+         if marker.group().lower() != _CODE_CLOSE and not _position_in_spans(marker.start(), examples)),
+        None,
+    )
+    if first_marker is None or first_marker.group().lower() != _CODE_OPEN:
+        return output
+    markers = _outer_code_markers(output[first_marker.start():])
+    if len(markers) != 1:
+        return output
+    separator = "" if output.endswith("\n") else "\n"
+    return output + separator + _CODE_CLOSE
+
+
+def is_stray_code_closer_only(output: Any) -> bool:
+    return _TRAILING_CODE_CLOSERS_RE.fullmatch(strip_protocol_padding(output)) is not None
+
+
 def is_raw_final_answer_candidate(output: Any) -> bool:
     """Keep reserved protocol records out of the exhaustion-only fallback."""
     text = strip_protocol_padding(output)
@@ -291,8 +325,12 @@ def _classify_code_action(
         start = position + marker.start()
         end = position + marker.end()
         tag = marker.group().lower()
+        if tag == _CODE_CLOSE:
+            position = end
+            continue
         if tag == "<final_answer>":
-            final = _classify_final_envelope(text[start:], protocol=protocol, logger=logger)
+            envelope = _TRAILING_CODE_CLOSERS_RE.sub("", text[start:]).rstrip()
+            final = _classify_final_envelope(envelope, protocol=protocol, logger=logger)
             final_answer = final.answer
             break
         if tag == "```<run>":
@@ -310,6 +348,9 @@ def _classify_code_action(
         if len(markers) < 2 or markers[1].group().lower() != _CODE_CLOSE:
             _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
         body = strip_protocol_padding(region[markers[0].end():markers[1].start()])
+        fence = _PYTHON_FENCE_RE.fullmatch(body)
+        if fence:
+            body = strip_protocol_padding(fence.group("body"))
         if not has_meaningful_visible_content(body):
             _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
         bodies.append(body)
