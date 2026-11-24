@@ -23,7 +23,7 @@ def claim():
                 available_at=now()+interval '90 seconds', attempts=attempts+1
             FROM due WHERE r.turn_id=due.turn_id
             RETURNING r.turn_id, r.claim_id, r.conversation_id, r.owner_id AS user_id, r.tenant_id,
-                      r.agent_id, r.agent_version_no, r.source_message_id,
+                      r.agent_id, r.agent_version_no, r.source_message_id, r.run_id,
                       r.trajectory_id::text AS trajectory_id, r.attempts
         """), {"claim": str(uuid4())}).mappings().first()
 

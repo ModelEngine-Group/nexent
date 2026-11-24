@@ -67,18 +67,40 @@ def observation(message, nodes=(), coverage="missing"):
     return facts
 
 
+def _track_root_execution(requests, roots):
+    """Read the trusted root correlation without exposing it in public trajectory nodes."""
+    for request in requests:
+        for resource in request.get("resourceSpans", []):
+            for scope in resource.get("scopeSpans", []):
+                for span in scope.get("spans", []):
+                    if span.get("name") != "agent.run":
+                        continue
+                    attrs = {item["key"]: item["value"] for item in span.get("attributes", [])}
+                    if attrs.get("nexent.trajectory.root", {}).get("boolValue") is True:
+                        execution = attrs.get("nexent.agent_run_id", {}).get("stringValue")
+                        roots.add((span["traceId"], span["spanId"], execution))
+        yield request
+
+
 def inspect_archive(job, message):
     service = get_service()
     budget = service.budget()
     identity = {**job, "conversation_id": str(job["conversation_id"]), "agent_id": str(job["agent_id"])}
     with service.archive.opened(identity, job["trajectory_id"], budget) as (fd, _, run):
-        if (run.get("root_agent_id"), run.get("root_agent_version_no"), run.get("source_message_id")) != (
-            identity["agent_id"], job["agent_version_no"], str(job["source_message_id"]),
-        ):
+        if (run.get("root_agent_id"), run.get("root_agent_version_no")) != (identity["agent_id"], job["agent_version_no"]):
+            return observation(message)
+        source = run.get("source_message_id")
+        if source is not None and source != str(job["source_message_id"]):
             return observation(message)
         reader = JSONReader(fd, run["confirmed_bytes"], check=budget.check)
-        nodes, _, coverage = build_nodes(reader.requests(), conversation_id=identity["conversation_id"],
+        requests = reader.requests()
+        roots = set()
+        if source is None:
+            requests = _track_root_execution(requests, roots)
+        nodes, _, coverage = build_nodes(requests, conversation_id=identity["conversation_id"],
                                          complete=run["capture_state"] == "ready", check=budget.check)
+        if source is None and (len(roots) != 1 or next(iter(roots))[2] != job["run_id"]):
+            return observation(message)
         complete = coverage["complete"] and not coverage["capture_gap"]
         return observation(message, nodes, "complete" if complete else "partial")
 

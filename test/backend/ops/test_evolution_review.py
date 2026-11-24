@@ -1,7 +1,41 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import pytest
+
+from ops.services.trajectory import evolution
 from ops.services.trajectory.evolution import observation
 from management.db.conversation.evolution_review import _batch_view, summarize_batch
+
+
+@pytest.mark.parametrize(("source", "executions", "coverage"), [
+    (None, ["a" * 32], "complete"),
+    (None, ["b" * 32], "missing"),
+    (None, [None], "missing"),
+    (None, ["a" * 32, "a" * 32], "missing"),
+    ("20", ["a" * 32], "missing"),
+    ("19", [None], "complete"),
+])
+def test_review_correlates_archived_root_with_the_authorized_original_run(mocker, source, executions, coverage):
+    manifest = {"root_agent_id": "3", "root_agent_version_no": 1, "source_message_id": source,
+                "confirmed_bytes": 10, "capture_state": "ready"}
+    archive = mocker.Mock()
+    archive.opened.return_value = nullcontext((0, None, manifest))
+    mocker.patch.object(evolution, "get_service", return_value=SimpleNamespace(archive=archive, budget=mocker.Mock()))
+    spans = []
+    for index, execution in enumerate(executions):
+        attrs = [{"key": "nexent.trajectory.root", "value": {"boolValue": True}}]
+        if execution:
+            attrs.append({"key": "nexent.agent_run_id", "value": {"stringValue": execution}})
+        spans.append({"name": "agent.run", "traceId": "c" * 32, "spanId": f"{index:016x}", "attributes": attrs})
+    requests = [{"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}]
+    reader = mocker.patch.object(evolution, "JSONReader")
+    reader.return_value.requests.return_value = iter(requests)
+    job = {"conversation_id": 1, "agent_id": 3, "agent_version_no": 1, "source_message_id": 19,
+           "run_id": "a" * 32, "trajectory_id": "7ac1b2c9-3770-431c-8437-91205db79e6e"}
+    assert evolution.inspect_archive(job, {})["coverage"] == coverage
 
 
 def test_evidence_minimization_and_incomplete_coverage():
