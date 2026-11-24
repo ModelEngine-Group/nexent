@@ -24,7 +24,7 @@ dependencies = [
     "rapidfuzz>=3.0.0",
     "jsonref>=1.1.0",
     "ruamel-yaml==0.19.1",
-    "redis>=5.0.0,<8.2",
+    "redis>=5.0.0",
     "fastmcp>=2.14.2,<3.0",
     "langchain>=0.3.26",
     "numpy>=1.24.0",
@@ -61,6 +61,8 @@ test = [
     "mock",
     "pytest-mock",
     "fakeredis[lua]>=2.31,<3",
+    # Keep redis-py below 8.2 until fakeredis releases the fix for issue #636.
+    "redis<8.2",
     "httpx>=0.28.1",
     "selenium",
     "botocore"
