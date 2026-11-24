@@ -276,7 +276,8 @@ async def revoke_api_key_endpoint(
     summary="Upload chat attachments for northbound runs",
     description=(
         "Upload one or more files for later use in `/nb/v1/chat/run`. "
-        "Successful uploads return reusable `s3_url` references."
+        "Each uploaded file is returned with `object_name`, `name`, `type`, `size`, `url` "
+        "and, when available, `presigned_url`."
     ),
 )
 async def upload_chat_attachments(
@@ -314,8 +315,8 @@ async def upload_chat_attachments(
     summary="Start a northbound chat run with optional attachments",
     description=(
         "Run a northbound chat request. Upload attachments first through "
-        "`/nb/v1/chat/attachments/upload`, then pass the returned `s3_url` values "
-        "through the `attachments` field."
+        "`/nb/v1/chat/attachments/upload`, then pass each returned `url` "
+        "(or the whole file object) through the `attachments` field."
     ),
 )
 async def run_chat(
