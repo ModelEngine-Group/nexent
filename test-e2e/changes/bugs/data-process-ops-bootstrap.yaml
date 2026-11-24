@@ -28,6 +28,7 @@ change:
     - The generic launcher never executes Ops SQL, regardless of shared monitoring settings; existing business SQL policy is preserved.
     - Only the Ops launcher initializes control storage, with failures blocking application launch and no business database initialization.
     - Producer images contain no Ops initializer or SQL; queued facts retry unchanged while Ops is unavailable.
+    - Image smoke checks Ops schema access only after the Ops service is ready; producer-only smoke does not require Ops storage, and failed Ops startup still cleans up all owned resources.
     reason: Reuse launcher, packaging, image smoke, Helm and producer retry contracts; preserve the required deployment boundary without a duplicate D1.
     test_selectors:
     - test/backend/deploy/test_ops_monitoring_bootstrap.py

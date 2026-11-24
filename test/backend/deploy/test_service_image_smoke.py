@@ -60,6 +60,13 @@ case "$1" in
       bash -ec "$code"
     elif [ "$role" = "${SMOKE_UNREADY:-none}" ]; then
       exit 1
+    elif [[ "$*" == *store.verify_schema* ]]; then
+      if [ ! -f "$SMOKE_LOG.ops-ready" ]; then
+        echo "Ops schema checked before Ops was ready" >&2
+        exit 1
+      fi
+    elif [[ "$role" == ops && "$*" == *build_opener* ]]; then
+      touch "$SMOKE_LOG.ops-ready"
     fi
     ;;
 esac
@@ -97,6 +104,8 @@ def test_smoke_retains_monitoring_and_prepares_its_dependencies(smoke, full):
     assert len(runtime_runs) == 2
     assert any({"MONITORING_PROVIDER=local_file", "ENABLE_TELEMETRY=true"} <= set(call) for call in runtime_runs)
     assert any({"TRAJECTORY_READ_ENABLED=true", "ENABLE_TELEMETRY=false"} <= set(call) for call in runtime_runs)
+    schema_checks = [call for call in calls if any("store.verify_schema()" in part for part in call)]
+    assert len(schema_checks) == (1 if full else 0)
     if full:
         es, = [call for call in runs if "--network-alias" in call and "elasticsearch" in call]
         assert "discovery.type=single-node" in es and "xpack.security.enabled=false" in es
@@ -138,6 +147,7 @@ def test_smoke_cleans_up_when_ops_is_not_ready(smoke):
     result, calls = run(unready="ops")
     assert result.returncode != 0
     assert "ops did not become ready" in result.stderr
+    assert not any("store.verify_schema()" in part for call in calls for part in call)
     removed, = [call for call in calls if call[:2] == ["rm", "-fv"]]
     assert any(name.endswith("-elasticsearch") for name in removed)
     assert any(name.endswith("-ops") for name in removed)
