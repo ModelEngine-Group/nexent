@@ -7,7 +7,7 @@ import socket
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 
 import httpx
@@ -185,7 +185,29 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
     with monkeypatch.context() as memory_patches:
-        await _assert_memory_store_over_signed_http(memory_patches)
+        async with memory_worker(memory_patches, "memory-write"):
+            await _assert_memory_store_over_signed_http(memory_patches)
+
+
+@asynccontextmanager
+async def memory_worker(monkeypatch, lane):
+    from infrastructure import memory_io
+    from nexent.core.concurrency import LanePolicy, ThreadManager
+
+    manager = ThreadManager("agentos-transport", {
+        lane: LanePolicy(
+            name=lane, max_workers=1, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=0, shutdown_grace_seconds=1,
+        ),
+    })
+    manager.start()
+    try:
+        with monkeypatch.context() as memory_patches:
+            memory_patches.setattr(memory_io, "get_default_thread_manager", lambda: manager)
+            yield
+    finally:
+        shutdown = await manager.shutdown(timeout=1)
+        assert not shutdown.stuck_execution_ids
 
 
 async def _assert_memory_store_over_signed_http(monkeypatch):
@@ -207,13 +229,10 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
             raise memory.MemoryStoreScopeError
         return rows.get((tenant, key, content))
 
-    def write(tenant, user, agent, conversation, key, content, index):
+    def write(tenant, user, agent, conversation, key, content, index, *, deadline):
         assert (tenant, user, agent, conversation, index) == ("tenant-a", "user-a", 7, 42, "mem_embed_2")
         rows[tenant, key, content] = 17
         return 17, "ADD"
-
-    async def controlled_io(_label, fn, *args, **_options):
-        return fn(*args)
 
     model_service = AsyncMock()
     model_service.invoke.return_value = SimpleNamespace(output=[[0.1, 0.2]])
@@ -221,11 +240,10 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     index_service.index_record.return_value = True
     write_record = Mock(side_effect=write)
     fanout = AsyncMock()
-    monkeypatch.setattr(memory, "run_blocking", controlled_io)
     monkeypatch.setattr(memory, "_load_embedding", lambda tenant: model if tenant == actor.tenant_id else None)
     monkeypatch.setattr(memory, "find_existing_memory", find)
     monkeypatch.setattr(memory, "write_agent_memory", write_record)
-    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args: args[-1]({"memory_id": 17}))
+    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args, deadline: args[-1]({"memory_id": 17}))
     monkeypatch.setattr(provider, "_fanout_external_ingest", fanout)
     monkeypatch.setattr(provider, "get_memory_record_service", Mock(side_effect=AssertionError("legacy store loaded")))
 
@@ -1451,16 +1469,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from contracts.agentos import AgentMemoryReceipt, AgentMemoryStored, ManagementOperation, PreparedMemorySearch
     from contracts.conversation import MessageSource
     from contracts.errors.exceptions import RuntimeServiceUnavailableError
-    from management.services.automation import runner as automation
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_store_memory_tool
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
     from management.api.memory import agentos_callback as memory_api
-    from management.services.memory import agentos_callback as memory_callback
     from management.services.agent import agentos_events, prepared_projection, runtime_client
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
+    from management.services.automation import runner as automation
+    from management.services.memory import agentos_callback as memory_callback
     from nexent.core.agents.contracts.config import AgentConfig
     from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
@@ -1597,12 +1615,13 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         lambda model_id, tenant_id, **_: create_model_config_from_record(model_record).resolved_profile
         if (model_id, tenant_id) == (11, actor.tenant_id) else None,
     )
-    request = await evaluation_snapshot.prepare_conversation_snapshot(
-        AgentRequest(
-            query="question", conversation_id=42, agent_id=7, version_no=3, enable_automation_tool=False,
-        ),
-        reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
-    )
+    async with memory_worker(monkeypatch, "memory-read"):
+        request = await evaluation_snapshot.prepare_conversation_snapshot(
+            AgentRequest(
+                query="question", conversation_id=42, agent_id=7, version_no=3, enable_automation_tool=False,
+            ),
+            reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
+        )
     assert isinstance(request, PreparedAgentRun)
     assert request.resource.version_no == 3
     assert request.native_knowledge is True and "kb-excluded" not in request.model_dump_json()

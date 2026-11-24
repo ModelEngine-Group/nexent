@@ -412,7 +412,7 @@ def test_parallel_delegation_validates_the_exact_action_with_quoted_protocol_tag
     agent.observer.rollback_model_attempt.assert_not_called()
     if strict:
         assert agent.model.call_args_list[0].kwargs["stop_sequences"] is None
-        assert agent.model.call_args_list[1].kwargs["stop_sequences"] == ["<RESULT>", "</code>"]
+        assert agent.model.call_args_list[1].kwargs["stop_sequences"] == ["<RESULT>"]
 
 
 def test_legacy_parallel_delegation_recovers_after_bad_quotes(monkeypatch):

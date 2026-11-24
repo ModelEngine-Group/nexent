@@ -233,7 +233,14 @@ class MessageObserver:
             ProcessType.FINAL_ANSWER,
             "" if streamed and streamed.strip() == answer.strip() else answer,
             agent_name=agent_name,
-            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
+            metadata={
+                "answer_phase": "complete",
+                "reclassify_step": state.get("reclassify_step", False),
+                # Authoritative answer carried alongside the phase marker so
+                # consumers (evaluation, exports) never have to guess whether
+                # the content field holds the answer or an empty trailer.
+                "accepted_answer": answer,
+            },
         )
 
     @property

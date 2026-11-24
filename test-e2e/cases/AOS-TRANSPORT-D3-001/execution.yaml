@@ -159,3 +159,4 @@ preparation:
   anchors: false
   special_assets: false
   d4_groups: []
+notes: Self-contained HTTP fixtures own their servers and memory workers, and close them during teardown.

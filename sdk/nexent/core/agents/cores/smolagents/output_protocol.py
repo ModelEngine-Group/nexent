@@ -294,25 +294,6 @@ def has_unquoted_match(text: str, pattern: re.Pattern[str]) -> bool:
     return any(not _position_in_spans(match.start(), examples) for match in pattern.finditer(text))
 
 
-def restore_stopped_code_closer(output: Any, finish_reason: str | None) -> Any:
-    """Restore a delimiter removed by a stop-capable text provider."""
-    if finish_reason != "stop" or not isinstance(output, str):
-        return output
-    examples = _markdown_spans(output)
-    first_marker = next(
-        (marker for marker in _PROTOCOL_MARKER_RE.finditer(output)
-         if marker.group().lower() != _CODE_CLOSE and not _position_in_spans(marker.start(), examples)),
-        None,
-    )
-    if first_marker is None or first_marker.group().lower() != _CODE_OPEN:
-        return output
-    markers = _outer_code_markers(output[first_marker.start():])
-    if len(markers) != 1:
-        return output
-    separator = "" if output.endswith("\n") else "\n"
-    return output + separator + _CODE_CLOSE
-
-
 def is_stray_code_closer_only(output: Any) -> bool:
     return _TRAILING_CODE_CLOSERS_RE.fullmatch(strip_protocol_padding(output)) is not None
 

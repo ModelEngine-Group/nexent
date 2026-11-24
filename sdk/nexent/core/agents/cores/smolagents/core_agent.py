@@ -63,7 +63,6 @@ from nexent.core.agents.cores.smolagents.output_protocol import (
     has_meaningful_visible_content,
     is_raw_final_answer_candidate,
     is_stray_code_closer_only,
-    restore_stopped_code_closer,
     unicode_category_summary,
 )
 from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
@@ -1442,7 +1441,7 @@ Additional Args:
         if legacy_code_action:
             stop_sequences = ["Observation:", "Calling tools:"]
         elif use_result_stops:
-            stop_sequences = ["<RESULT>", "</code>"]
+            stop_sequences = ["<RESULT>"]
 
         # Prepare additional arguments
         additional_args: dict[str, Any] = {}
@@ -1543,11 +1542,7 @@ Additional Args:
         if finish_reason is None:
             diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
             finish_reason = diagnostics.get("finish_reason")
-        parser_input = model_output
-        if use_result_stops:
-            parser_input = restore_stopped_code_closer(model_output, finish_reason)
-
-        output_text = str(parser_input or "")
+        output_text = str(model_output or "")
         rejected_format = None
         if contains_provider_tool_markup(output_text):
             rejected_format = ProtocolErrorReason.PROVIDER_TOOL_MARKUP
@@ -1561,7 +1556,7 @@ Additional Args:
                 logger=self.logger,
             )
 
-        delegated_action, parent_preparation = self._validate_delegation_output(parser_input, finish_reason=finish_reason)
+        delegated_action, parent_preparation = self._validate_delegation_output(model_output, finish_reason=finish_reason)
 
         # Parse using the configured closed output protocol.
         try:
@@ -1609,13 +1604,13 @@ Additional Args:
 
             else:
                 classified_output = classify_model_output(
-                    parser_input,
+                    model_output,
                     protocol=getattr(self, "output_protocol", "code_action"),
                     finish_reason=finish_reason,
                     logger=self.logger,
                 )
             if isinstance(classified_output, NonterminalThought):
-                if strict_code_action and is_stray_code_closer_only(parser_input):
+                if strict_code_action and is_stray_code_closer_only(model_output):
                     self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
                     raise RuntimeFinalAnswer(self._empty_model_response_hint(), "empty_model_output")
                 raise NonterminalThoughtTurn()
