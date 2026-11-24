@@ -39,7 +39,7 @@ export function ModelMonitoringDetails({
   }
   const request = listScope === scope ? list : { ...list, page: 1 };
   const details = useQuery({
-    queryKey: [...queryKey, request],
+    queryKey: [...queryKey, "list", request],
     queryFn: ({ signal }) =>
       getModelMonitoringList(selection!, request, signal),
     enabled: selection !== null,

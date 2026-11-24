@@ -24,6 +24,7 @@ import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
 import { ModelMonitoringDetails } from "./components/model/ModelMonitoringDetails";
+import { ModelMonitoringPanels } from "./components/model/ModelMonitoringPanels";
 import { MonitoringOverview } from "./components/overview/MonitoringOverview";
 import {
   dateFormat,
@@ -202,14 +203,13 @@ function MonitoringScope({
         )
       : null;
   const agentMonitoring = useAgentMonitoring(userId, userTenant, selection);
-  const selectedModel =
-    tab === "model" && canReadInventory
-      ? directories.inventory.data?.find(
-          (item) =>
-            item.kind === "model" &&
-            resourceKey(item.tenant_id, item.id) === resourceSelection
-        )
+  const models =
+    tab === "model" && canReadInventory && !scopePending
+      ? directories.inventory.data?.filter((item) => item.kind === "model")
       : undefined;
+  const selectedModel = models?.find(
+    (item) => resourceKey(item.tenant_id, item.id) === resourceSelection
+  );
   const modelSelection: ModelMonitoringSelection | null =
     tab === "model" && directories.tenant !== undefined && range
       ? {
@@ -221,7 +221,7 @@ function MonitoringScope({
         }
       : null;
   const modelQueryKey = [
-    "modelMonitoringList",
+    "modelMonitoring",
     userId,
     userTenant,
     modelSelection,
@@ -466,12 +466,38 @@ function MonitoringScope({
               />
             </>
           ) : tab === "model" ? (
-            <ModelMonitoringDetails
-              key={JSON.stringify([filters.tenant, resourceSelection])}
-              queryKey={modelQueryKey}
-              scopeLoading={scopeLoading}
-              hasRange={Boolean(range)}
-            />
+            <>
+              <ModelMonitoringPanels
+                queryKey={modelQueryKey}
+                inventory={{
+                  count: models
+                    ? new Set(
+                        models.map((item) =>
+                          resourceKey(item.tenant_id, item.id)
+                        )
+                      ).size
+                    : null,
+                  loading:
+                    canReadInventory &&
+                    !models &&
+                    !directories.scope.isError &&
+                    (scopePending || directories.inventory.isPending),
+                  failed:
+                    canReadInventory &&
+                    (directories.scope.isError ||
+                      directories.inventory.isError),
+                }}
+                singleModel={Boolean(selectedModel)}
+                scopeLoading={scopeLoading}
+                hasRange={Boolean(range)}
+              />
+              <ModelMonitoringDetails
+                key={JSON.stringify([filters.tenant, resourceSelection])}
+                queryKey={modelQueryKey}
+                scopeLoading={scopeLoading}
+                hasRange={Boolean(range)}
+              />
+            </>
           ) : (
             placeholder
           )}

@@ -35,6 +35,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   const listReads: Record<string, string>[] = [];
   const rankingReads: Record<string, string>[] = [];
   const modelTrendReads: Record<string, string>[] = [];
+  const modelSummaryReads: Record<string, string>[] = [];
   const modelListReads: Record<string, string>[] = [];
   let overviewModelReads = 0;
   let releaseModelTrend = () => {};
@@ -266,6 +267,33 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         data: { items: rows.slice(start, start + size), total: rows.length },
       };
     } else if (
+      pathname === "/api/ops/v1/monitoring/models/summary" &&
+      request.method() === "GET"
+    ) {
+      modelSummaryReads.push(Object.fromEntries(searchParams));
+      const single = searchParams.has("model_id");
+      const grouped = searchParams.has("group_ids");
+      const requests =
+        (single ? 3050 : grouped ? 7010 : 8010) +
+        (searchParams.get("start_date") === "2026-11-17" ? 10 : 0);
+      const eligible = single ? 2000 : 5000;
+      json = {
+        ...executionStatus,
+        data: {
+          current_model_count: 1,
+          request_count: requests,
+          total_tokens: {
+            value: single ? "8253321" : "9007199254740993",
+            known_count: requests - 10,
+            eligible_count: requests,
+            coverage_rate: (requests - 10) / requests,
+          },
+          error_count: 10,
+          error_eligible_count: eligible,
+          error_rate: 10 / eligible,
+        },
+      };
+    } else if (
       pathname === "/api/ops/v1/monitoring/models/trends" &&
       request.method() === "GET"
     ) {
@@ -287,11 +315,30 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         day <= new Date(`${end}T00:00Z`);
         day.setUTCDate(day.getUTCDate() + 1)
       ) {
+        const index = data.length % 7;
+        const count = unavailable
+          ? null
+          : [2500, 1200, 1800, 0, 2700, 3600, 1600][index];
+        const eligible = count === null ? null : count ? count - 3 : 0;
+        const errors =
+          count === null ? null : count ? [3, 2, 6, 0, 5, 2, 8][index] : 0;
         data.push({
           statistic_date: day.toISOString().slice(0, 10),
-          request_count: unavailable
-            ? null
-            : [2500, 1200, 1800, 0, 2700, 3600, 1600][data.length % 7],
+          request_count: count,
+          error_count: errors,
+          error_eligible_count: eligible,
+          error_rate: eligible && errors !== null ? errors / eligible : null,
+          total_tokens:
+            count === null
+              ? null
+              : {
+                  value: count
+                    ? String(1400000 + ((index * 451000) % 1200000))
+                    : "0",
+                  known_count: count,
+                  eligible_count: count,
+                  coverage_rate: count ? 1 : null,
+                },
         });
       }
       json = { ...(unavailable ? missing : tokenStatus), data };
@@ -758,11 +805,81 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await modelSearch.press("Escape");
     await expect(modelSearchButton).toBeFocused();
     expect(listReads).toHaveLength(agentReads);
+    const modelCards = page.locator('dl[aria-label="模型指标概览"]');
+    const modelCard = (name: string) =>
+      modelCards.getByText(name, { exact: true }).locator("..").locator("dd");
+    const modelCalls = page.getByRole("region", {
+      name: "调用趋势",
+      exact: true,
+    });
+    const modelErrors = page.getByRole("region", {
+      name: "错误率趋势",
+      exact: true,
+    });
+    await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
+    await expect(modelCard("模型请求数").locator("strong")).toHaveText("7,010");
+    await expect(modelCard("Token 消耗量")).toContainText(
+      "9,007,199,254,740,993",
+    );
+    await expect(modelErrors).toContainText("10 次失败 / 5,000 次纳入统计");
+    await expect(modelErrors).toContainText("0.2% 区间错误率");
+    await expect(modelErrors.getByRole("radio")).toHaveCount(0);
+    await expect(modelErrors.locator(".recharts-area-curve")).toHaveAttribute(
+      "d",
+      /M.+M/,
+    );
+    await expect(modelCalls.locator(".recharts-area-curve")).toBeVisible();
+    const beforeMetric = modelTrendReads.length;
+    await modelCalls.getByText("Token", { exact: true }).click();
+    await expect(
+      modelCalls.getByRole("group", { name: "Token", exact: true }),
+    ).toBeVisible();
+    expect(modelTrendReads).toHaveLength(beforeMetric);
+    await screenshot("model-all-metrics");
+
+    await page.getByText("近七天", { exact: true }).click();
+    await expect(modelCard("模型请求数").locator("strong")).toHaveText("7,020");
+    await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
+    await choose("用户组", "全部用户组");
+    await expect(modelCard("模型请求数").locator("strong")).toHaveText("8,020");
+    await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
+    await choose("用户组", "一线运营组");
+    await page.getByText("自定义", { exact: true }).click();
     await choose("模型", "文本生成模型");
     await expect
       .poll(() => modelListReads.at(-1))
       .toMatchObject({ tenant_id: "a", model_id: "2", page: "1" });
-    await screenshot("model");
+    await expect(modelCard("当前模型数")).toHaveCount(0);
+    await expect(modelCard("模型请求数").locator("strong")).toHaveText("3,050");
+    await expect(modelErrors).toContainText("0.5% 区间错误率");
+    await expect(modelCalls.locator(".recharts-area-curve")).toBeVisible();
+    await screenshot("model-single-metrics");
+    const modelRefresh = page.getByRole("button", {
+      name: "刷新",
+      exact: true,
+    });
+    const refetch = {
+      tenant_id: "a",
+      model_id: "2",
+      group_ids: "10",
+      start_date: "2026-11-07",
+      end_date: "2026-11-12",
+    };
+    const beforeRefresh = [
+      modelSummaryReads.length,
+      modelTrendReads.length,
+      modelListReads.length,
+    ];
+    await modelRefresh.click();
+    for (const [index, reads] of [
+      modelSummaryReads,
+      modelTrendReads,
+      modelListReads,
+    ].entries()) {
+      await expect
+        .poll(() => reads.slice(beforeRefresh[index]))
+        .toEqual([expect.objectContaining(refetch)]);
+    }
     await tab("Skill").click();
     await choose("Skill", "文档摘要");
     await screenshot("skill");
@@ -1237,6 +1354,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     agentCharts,
     monitoringOverview,
     sharedDetailSearch,
+    modelMetrics,
   ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
@@ -1311,8 +1429,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     expect(unexpected).toEqual([]);
   });
   await contract.assertion(monitoringOverview, async () => {
-    expect(modelTrendReads).toHaveLength(overviewModelReads);
-    expect(modelTrendReads).toEqual(
+    expect(modelTrendReads.slice(0, overviewModelReads)).toEqual(
       expect.arrayContaining([
         { start_date: "2026-11-07", end_date: "2026-11-12", tenant_id: "b" },
         { start_date: "2026-11-07", end_date: "2026-11-12" },
@@ -1335,6 +1452,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         expect.objectContaining({ search: "智能问答", page: "1" }),
       ]),
     );
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(modelMetrics, async () => {
+    const single = expect.objectContaining({
+      tenant_id: "a",
+      model_id: "2",
+      group_ids: "10",
+    });
+    expect(modelSummaryReads).toEqual(expect.arrayContaining([single]));
+    expect(modelTrendReads).toEqual(expect.arrayContaining([single]));
     expect(unexpected).toEqual([]);
   });
 });

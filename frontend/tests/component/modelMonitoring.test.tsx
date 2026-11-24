@@ -1,7 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getModelMetric } from "@/app/ops/dashboard/components/model/modelMonitoringValues";
 import { fetchWithAuth } from "@/lib/auth";
-import { getModelMonitoringList } from "@/services/modelMonitoringService";
+import {
+  getModelMonitoringList,
+  getModelMonitoringSummary,
+  getModelMonitoringTrends,
+} from "@/services/modelMonitoringService";
 
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
 
@@ -29,7 +34,7 @@ describe("Model monitoring list requests", () => {
       payload
     );
     expect(fetch).toHaveBeenCalledWith(
-      "/api/ops/v1/monitoring/models?start_date=2026-11-17&end_date=2026-11-23&page=1&page_size=10&tenant_id=a%26b&model_id=2&group_ids=10&group_ids=20&search=Qwen+%26+DeepSeek",
+      "/api/ops/v1/monitoring/models?start_date=2026-11-17&end_date=2026-11-23&tenant_id=a%26b&model_id=2&group_ids=10&group_ids=20&page=1&page_size=10&search=Qwen+%26+DeepSeek",
       { signal }
     );
   });
@@ -49,4 +54,42 @@ describe("Model monitoring list requests", () => {
       { signal }
     );
   });
+
+  it("uses the same reporting scope for summary and trends", async () => {
+    fetch.mockImplementation(
+      async () => new Response(JSON.stringify({ data: [] }))
+    );
+    await getModelMonitoringSummary(scope, signal);
+    await getModelMonitoringTrends(scope, signal);
+    const params =
+      "start_date=2026-11-17&end_date=2026-11-23&tenant_id=a%26b&model_id=2&group_ids=10&group_ids=20";
+    expect(fetch.mock.calls).toEqual([
+      [`/api/ops/v1/monitoring/models/summary?${params}`, { signal }],
+      [`/api/ops/v1/monitoring/models/trends?${params}`, { signal }],
+    ]);
+  });
+});
+
+it("keeps known zero and exact Tokens and hides rates without eligible samples", () => {
+  const counts = {
+    request_count: 0,
+    total_tokens: {
+      value: "9007199254740993",
+      known_count: 1,
+      eligible_count: 1,
+      coverage_rate: 1,
+    },
+    error_count: 0,
+    error_eligible_count: 0,
+    error_rate: 0,
+  };
+  expect(getModelMetric(counts, "tokens")).toBe("9007199254740993");
+  expect(
+    getModelMetric({ ...counts, total_tokens: null }, "tokens")
+  ).toBeNull();
+  expect(getModelMetric(counts, "requests")).toBe(0);
+  expect(getModelMetric(counts, "errorRate")).toBeNull();
+  expect(
+    getModelMetric({ ...counts, error_eligible_count: 1 }, "errorRate")
+  ).toBe(0);
 });

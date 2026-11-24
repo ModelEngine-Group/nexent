@@ -3,7 +3,23 @@ import type { AgentTokenUsage } from "./agentMonitoring";
 import type { MonitoringDateScope, MonitoringPublication } from "./operations";
 
 export interface ModelMonitoringTrends extends MonitoringPublication {
-  data: { statistic_date: string; request_count: number | null }[];
+  data: ModelMonitoringDay[];
+}
+
+export interface ModelMonitoringCounts {
+  request_count: number | null;
+  total_tokens: AgentTokenUsage | null;
+  error_count: number | null;
+  error_eligible_count: number | null;
+  error_rate: number | null;
+}
+
+export interface ModelMonitoringDay extends ModelMonitoringCounts {
+  statistic_date: string;
+}
+
+export interface ModelMonitoringSummary extends MonitoringPublication {
+  data: ModelMonitoringCounts & { current_model_count: number };
 }
 
 export interface ModelMonitoringSelection extends MonitoringDateScope {

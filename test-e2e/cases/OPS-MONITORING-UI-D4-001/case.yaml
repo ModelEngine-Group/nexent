@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-MONITORING-UI-D4-001
   feature_id: OPS-MONITORING-UI
-  requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124]
-  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02, OPS-MONITORING-UI-RULE-03, OPS-MONITORING-UI-RULE-04, OPS-MONITORING-UI-RULE-05, OPS-MONITORING-UI-RULE-06, OPS-MONITORING-UI-RULE-07]
+  requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124]
+  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02, OPS-MONITORING-UI-RULE-03, OPS-MONITORING-UI-RULE-04, OPS-MONITORING-UI-RULE-05, OPS-MONITORING-UI-RULE-06, OPS-MONITORING-UI-RULE-07, OPS-MONITORING-UI-RULE-08]
   title: Scope monitoring filters and Agent metrics in the browser
   type: E2E
   priority: P1
@@ -21,7 +21,7 @@ case:
     action: Visit the dashboard, inspect its tabs and overview, and change the tenant and dates using presets and a custom interval.
     expected: The overview presents four cards and four trend positions. Tenant changes update authorized totals and trends. Date changes update only the trends. Loading, error, unavailable, missing and zero values remain distinct.
   - order: 2
-    action: Select a tenant, group and Agent, open Model details, page, search and clear from the name column, then switch tenants and return.
+    action: Select a tenant, group and Agent, inspect Model cards and trends, page, search and clear Model details, scope a Model and refresh, then switch tenants and return.
     expected: Model search and clear submit to the Model endpoint on page one with the selected scope. Escape returns focus to the icon. Tabs share tenant, group and dates, and changing tenants clears group and resource selections.
   - order: 3
     action: Select an MCP service in the session tenant and one of its tools, then select another service and refresh.
@@ -47,8 +47,9 @@ case:
   - All-Agent ranking and single-Agent outcomes follow the active filters. Date and group changes reset only list pagination.
   - The overview shows current Agent and Model inventory and daily calls while preserving coverage. MCP and Skill placeholders issue no monitoring reads.
   - Both detail tables use column search, keep separate search state and submit to their own list endpoints.
+  - Model cards use inventory and the scoped summary. Both charts share a single scoped trends read. Switching the left metric does not request data. Refresh rereads summary, trends and the current list.
   forbidden_side_effects:
-  - Statistics requests are limited to Agent summary, trend, detail and all-Agent ranking GETs, the overview Model trend GET and the Model detail list GET. Table controls do not refresh the cards, trend or ranking. No forced rebuild, single-Agent ranking or cross-tenant MCP tool directory request is sent.
+  - Statistics use the connected Agent and Model GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking or cross-tenant MCP tool directory request is sent.
   actor: Authorized super administrator
   journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
   final_business_result:
@@ -96,4 +97,9 @@ case:
     description: Both name search controls submit and clear server filters independently and return to page one.
     steps: [2, 6]
     expected_results: [8]
+    forbidden_side_effects: [1]
+  - id: AC-09
+    description: The Model page uses distinct inventory, summary and trend boundaries and refreshes the active scope with read-only requests.
+    steps: [2]
+    expected_results: [9]
     forbidden_side_effects: [1]
