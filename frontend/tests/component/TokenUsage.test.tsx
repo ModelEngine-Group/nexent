@@ -78,7 +78,7 @@ it.each(["passthrough", "adaptive_compact"])(
   }
 );
 
-it("shows peak request context instead of cumulative usage across steps", () => {
+it("shows the final request instead of cumulative usage across steps", () => {
   state.steps = [
     {
       stepNumber: 1,
@@ -106,7 +106,7 @@ it("shows peak request context instead of cumulative usage across steps", () => 
   expect(screen.getByRole("button")).not.toHaveTextContent("150%");
 });
 
-it("compares each request with its own context window", () => {
+it("uses the final request even when an earlier request had higher occupancy", () => {
   state.steps = [
     {
       stepNumber: 1,
@@ -130,9 +130,11 @@ it("compares each request with its own context window", () => {
 
   render(<SingleTurnTokenUsage />);
 
-  expect(screen.getByRole("button")).toHaveTextContent("75%");
+  expect(screen.getByRole("button")).toHaveTextContent("38%");
   fireEvent.click(screen.getByRole("button"));
-  expect(screen.getByText("6,000 / 8,000")).toBeVisible();
+  expect(screen.getByText("12,000 / 32,000")).toBeVisible();
+  expect(screen.getByText("12,000 · 38%")).toBeVisible();
+  expect(screen.getByText("20,000 · 62%")).toBeVisible();
 });
 
 it("does not treat generated output as request context input", () => {
@@ -149,7 +151,7 @@ it("does not treat generated output as request context input", () => {
   expect(screen.getByRole("button")).toHaveTextContent("25%");
 });
 
-it("uses known requests when another step has unknown usage", () => {
+it("does not borrow an earlier known request when the final request is unknown", () => {
   state.steps = [
     {
       stepNumber: 1,
@@ -173,5 +175,6 @@ it("uses known requests when another step has unknown usage", () => {
 
   render(<SingleTurnTokenUsage />);
 
-  expect(screen.getByRole("button")).toHaveTextContent("50%");
+  expect(screen.getByText(/input Unknown \/.*output Unknown/)).toBeVisible();
+  expect(screen.queryByRole("button")).toBeNull();
 });
