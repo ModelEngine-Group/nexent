@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from contracts.agent import AgentRunContext
-from contracts.constants.environment import APP_VERSION
+from contracts.constants.environment import APP_VERSION, OPS_MONITORING_ENABLED
 from nexent.core.agents.contracts.context import ContextInput, ContextItemInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
@@ -132,6 +132,15 @@ def build_agent_run_context(
     from management.services.monitor.identity import resolve_monitoring_user_email
     from nexent.monitor.local_content import local_capture_enabled
 
+    monitoring_groups = None
+    if OPS_MONITORING_ENABLED and not request.is_debug:
+        from management.db.identity.group import query_group_ids_by_user_in_tenant
+
+        try:
+            monitoring_groups = tuple(query_group_ids_by_user_in_tenant(user_id, tenant_id))
+        except Exception:
+            monitoring_groups = None
+
     memory = build_memory_context(
         user_id, tenant_id, request.agent_id, skip_query=request.is_debug
     )
@@ -148,6 +157,7 @@ def build_agent_run_context(
             agent_id=request.agent_id,
             conversation_id=request.conversation_id,
             user_id=user_id,
+            monitoring_group_ids=monitoring_groups,
             user_email=resolve_monitoring_user_email(user_id, tenant_id),
             tenant_id=tenant_id,
             query=user_query if user_query is not None else request.query,

@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MODEL-TRACE-20261117
+  change_type: requirement
+  requirement_id: OPS-MODEL-TRACE-20261117
+  title: Share physical model measurements between Trace and Ops
+  description: Measure a dispatched model attempt once and associate its sanitized Ops fact with the recorded span when available.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MODEL-MONITORING]
+    retired: []
+  affected_cases:
+    existing: [OPS-MODEL-MONITORING-D5-001]
+    added: []
+    modified: [OPS-MODEL-MONITORING-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Verify sync and async attempt correlation across retries, Preserve provider zeros and absent totals, Count attempts without Trace, Preserve the shared measurement in the trajectory projection]
+    reason: Unit proof covers collection and projection rules. The integration case verifies the association survives the Ops replay and publication pipeline.
+    test_selectors: [test/sdk/core/model_service/test_model_attempt_capture.py, test/sdk/core/model_service/test_legacy_model_measurements.py, test/backend/ops/test_monitoring.py, test/backend/services/trajectory/test_nodes.py]

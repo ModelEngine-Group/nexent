@@ -109,9 +109,6 @@ def test_conversation_share_and_pins_are_mounted_by_management():
     ("POST", "/api/model/outlet_validations"),
     ("POST", "/api/model/outlets"),
     ("PATCH", "/api/model/outlets/7"),
-    ("POST", "/api/conversation/branch"),
-    ("GET", "/api/conversation/1/model_preferences"),
-    ("PATCH", "/api/conversation/1/model_preferences/7"),
     ("GET", "/api/ops/authorization"),
     ("GET", "/api/ops/scope"),
     ("GET", "/api/indices/kb/documents/error-info"),
@@ -132,6 +129,46 @@ def test_nl2agent_card_operations_have_explicit_session_routes(operation):
     assert match.target == "management" and match.credential_kinds == ("session",)
     assert default_registry().match("GET", path) is None
     assert default_registry().match("GET", path, transport="websocket") is None
+
+WEB_CREATOR_OPERATIONS = [
+    ("GET", "/api/users/{user_id}/assignable_roles", "management"),
+    ("POST", "/api/conversation/{conversation_id}/creation_mode_responses", "management"),
+    ("GET", "/api/conversation/creator_histories", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/target", "management"),
+    ("POST", "/api/conversation/branch", "management"),
+    ("GET", "/api/conversation/{conversation_id}/model_preferences", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/model_preferences", "management"),
+    ("GET", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "management"),
+]
+
+
+@pytest.mark.parametrize("method,template,target", WEB_CREATOR_OPERATIONS)
+def test_web_creator_operations_have_precise_session_exposures(method, template, target):
+    path = template.format(user_id="member", conversation_id=42, model_id=7)
+    registry = default_registry()
+    match = registry.match(method, path)
+    assert match is not None
+    assert (match.path, match.target, match.credential_kinds) == (template, target, ("session",))
+    assert registry.match("HEAD", path) is None
+    assert registry.match("GET", path, transport="websocket") is None
+
+
+@pytest.mark.parametrize("method,template,target", WEB_CREATOR_OPERATIONS)
+@pytest.mark.asyncio
+async def test_web_creator_operations_reject_anonymous_before_upstream(method, template, target):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Anonymous operation reached identity storage")
+
+    def upstream(request):
+        pytest.fail("Anonymous operation reached a business handler")
+
+    app = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret="fixture"),
+                             identity_lookup=forbidden, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
+            response = await client.request(method, template.format(user_id="member", conversation_id=42, model_id=7))
+            assert response.status_code == 401
 
 
 @pytest.mark.parametrize("method,path", [

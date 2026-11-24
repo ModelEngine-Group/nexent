@@ -1311,6 +1311,17 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/api/conversation/creator_histories",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-creator-histories",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/api/conversation/generate_title",
       "transport": "http",
@@ -1421,6 +1432,17 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/conversation/{conversation_id}/creation_mode_responses",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-creation-mode-responses",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "PUT",
       "path": "/api/conversation/{conversation_id}/knowledge-scope",
       "transport": "http",
@@ -1471,6 +1493,17 @@
       "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-1cfa509729cfba5f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/conversation/{conversation_id}/target",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-target",
       "credential_kinds": [
         "session"
       ]
@@ -5724,6 +5757,17 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/api/users/{user_id}/assignable_roles",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user.py",
+      "route_id": "web-user-assignable-roles",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/api/voice/connectivity",
       "transport": "http",
@@ -6425,7 +6469,117 @@
       "credential_kinds": [
         "session"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/models/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
     }
   ],
-  "revision": "2026-11-23.1"
+  "revision": "2026-11-24.nl2agent-ops-monitoring"
 }

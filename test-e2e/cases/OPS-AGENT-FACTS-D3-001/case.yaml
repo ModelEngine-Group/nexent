@@ -1,0 +1,229 @@
+schema_version: '1.0'
+stage: D3
+module: OPS-PLATFORM
+case:
+  case_id: OPS-AGENT-FACTS-D3-001
+  feature_id: OPS-AGENT-FACTS
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120, OPS-AGENT-RANKINGS-20261120]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09, OPS-AGENT-FACTS-RULE-10, OPS-AGENT-FACTS-RULE-11, OPS-AGENT-FACTS-RULE-12, OPS-AGENT-FACTS-RULE-13]
+  title: Main Agent start, end and replay share one searchable fact
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove sample revisions, real main Agent capture, daily publication and the authorized Ops summary.
+  integration_boundary: [Real Agent worker and model HTTP transport, SSE recovery, Public SDK emit_fact, Shared producer and writer, Ops PostgreSQL, Elasticsearch, Ops HTTP and tenant authorization]
+  observations: [Confirmed batches, Elasticsearch document identity and source fields]
+  cleanup: [Stop the model fixture and managed worker, Close producer and clients, Remove sample tenant rows and test-owned Agent and model catalog tables and Elasticsearch indices and templates]
+  preconditions: [A disposable migrated Ops database and a clean isolated Elasticsearch instance]
+  test_data: {workload: Main Agent execution crossing a UTC month boundary with a 350 ms duration}
+  steps:
+  - order: 1
+    action: Send the start sample and apply its batch through the shared writer.
+    expected: Exactly one searchable start document is present in the start month's partition.
+  - order: 2
+    action: Send the terminal revision using the same execution ID and apply its batch.
+    expected: The same document now reports succeeded and a duration of 350 ms.
+  - order: 3
+    action: Replay the terminal event as a separate batch and inspect Elasticsearch.
+    expected: All batches are confirmed and the same single document retains its terminal fields and write version.
+  - order: 4
+    action: Run a real main Agent worker with telemetry disabled against a controlled HTTP model.
+    expected: The worker emits two revisions with the same root execution ID and starting snapshot. Elasticsearch exposes one succeeded document with the observed execution timestamps and duration.
+  - order: 5
+    action: Resume the SSE stream of that execution and read back its replayed final answer.
+    expected: The replay returns the original answer and leaves the provider request count, Agent observations and ES document unchanged.
+  - order: 6
+    action: Apply and publish the start observation for a run crossing midnight.
+    expected: The published start day contains one execution and no measured duration samples.
+  - order: 7
+    action: Apply the later terminal revision, interrupt the next publication before switching its pointer, then retry.
+    expected: After the failure readers still see the original version. The retry publishes one execution with a 350 ms duration and one sample on the start day.
+  - order: 8
+    action: Replay the terminal revision and run the normal Ops tick.
+    expected: The published version, confirmed source revision and aggregate counters are unchanged.
+  - order: 9
+    action: Run the normal Ops tick on the real worker fact.
+    expected: One published execution and one duration sample match the recorded worker fact.
+  - order: 10
+    action: Query the root run through the Ops summary with overlapping groups, an Agent filter and a selected day in the presence of contrasting published data.
+    expected: Counts and duration match the real run. Filters and inclusive dates select the correct records. Published zero and uncovered data are distinguishable.
+  - order: 11
+    action: Repeat the query using single-tenant Ops, global Super Admin, unauthorized and missing session contexts.
+    expected: Ops reads its own tenant and receives 403 for another tenant. Super Admin can select a tenant or aggregate both. Unauthorized and missing sessions receive 403 and 401 respectively.
+  - order: 12
+    action: Read directory pages, daily trends and rankings for the real run together with controlled zero-use and historical Agent records.
+    expected: Metadata and current count come from the current catalog, published metrics match the summary, search and sort precede pagination, and rankings return the exact top five counts. Overlapping groups count once. Uncovered days and tenants retain unknown metrics.
+  - order: 13
+    action: Request every added view as Ops, Super Admin, a regular user and an unauthenticated client.
+    expected: All views enforce the same tenant boundary and preserve distinct identities across tenants.
+  - order: 14
+    action: Run an actual main Agent that invokes the same child twice with trajectory capture disabled, then persist and publish all observed facts.
+    expected: There are three independent execution IDs and one final ES document per actual execution. Both child executions retain the root and immediate parent, their own duration and their inherited tenant and initiating groups.
+  - order: 15
+    action: Replay the terminal facts, publish again and compare Agent-specific and combined HTTP summaries, trends and resource pages to the observed executions.
+    expected: Main and child count one and two respectively, with duration sums and sample counts matching the ES facts. Replay changes neither counts nor duration and creates no additional document.
+  - order: 16
+    action: Submit start and terminal revisions with mixed main and child outcomes on two dates, including explicit timed_out failure and excluded results, and publish through the normal Ops worker.
+    expected: Succeeded and failed counts match explicit terminal outcomes by Agent and day, including missing timing fields. A zero denominator returns null. Cross-day success rate divides merged counts and differs from an average of daily rates.
+  - order: 17
+    action: Replay terminal observations and query existing summaries, resource pages and daily trends, including a selection with no matching executions.
+    expected: Published counters and rates remain identical after replay, all interfaces agree, and the empty covered selection returns zero counts and a null rate.
+  - order: 18
+    action: Execute a real main Agent that invokes children against an HTTP model peer reporting complete, zero and missing usage, then publish model observations and read Agent Token views.
+    expected: Every request carries the executing Agent and execution identity. Main and child Tokens match their own model facts and model daily rows. Combined Tokens count each request once, with provider missing usage preserved.
+  - order: 19
+    action: Replay model terminal facts, add cross-day attributed requests and orphan requests, and compare Agent summaries, directory and trends before and after publication.
+    expected: Replay leaves usage and eligibility unchanged. Filters use request start dates and groups. Orphans are excluded and Token publication time, coverage and lag remain independent of Agent metrics.
+  - order: 20
+    action: Seed failed and excluded ingest batches in two owned tenants and compare one scoped bulk read with the existing per-tenant predicate, including empty scopes and inclusive date boundaries.
+    expected: The returned tenant set is equivalent with one SQL statement for any nonempty scope and none for an empty scope. Other kinds, confirmed or deleted batches and dates outside the range are excluded; legacy empty dates remain included.
+  - order: 21
+    action: Capture the first effective public answer during real main and child runs, inspect terminal ES facts and compare Agent summary, list and daily trend timings before and after terminal and SSE replay.
+    expected: Main and child observations retain their own optional TTFT and execution identity. Published sums and sample counts agree with the measured facts and HTTP averages. Tool and thinking output do not trigger the parent measurement, and replay leaves the samples unchanged.
+  - order: 22
+    action: Publish controlled no-answer, zero-time and cross-day timing samples alongside the real runs and query the selected dates, groups, Agent and tenant.
+    expected: Missing answers yield no samples and a null average, measured zero remains zero, and cross-day averages use combined sums divided by combined sample counts under the existing permission and filter boundary.
+  - order: 23
+    action: Run real main executions through normal, failed, cancelled, midnight and capture-disabled paths using the common complete-lifecycle clock, and publish monitoring results.
+    expected: Enabled raw Agent spans and ES facts consume the same complete start, end and measured duration. Disabled capture still produces the complete monitoring duration. Preparation failures before execution retain the existing no-count behavior.
+  - order: 24
+    action: Compare start/terminal facts and existing statistics, replay terminal facts, and inspect actual execution anchors and child regressions.
+    expected: Identities and complete start remain stable across revisions, statistics and partitions retain actual-execution date ownership, and counts, success results, Tokens, TTFT retain their contracts.
+  - order: 25
+    action: Execute repeated child calls through normal, failed, cancelled and capture-disabled paths and publish their facts.
+    expected: Each actual execution owns one distinct complete clock; enabled raw child spans exactly match its frozen timestamps and duration.
+  - order: 26
+    action: Replay child terminal events and compare ES, published rows and HTTP metrics; inspect parent, sibling and nested identities and actual-execution dates.
+    expected: Replay does not change counts, dates, outcomes, Tokens or first-answer samples, and no invocation inherits another clock.
+  - order: 27
+    action: Execute actual Jiuwen main and child Cores through a controlled HTTP/SSE model, including repeated child requests, failures, cancellation and disabled trajectory.
+    expected: Actual Runner and model requests produce independently attributed execution and usage facts, with matching complete duration and first-answer observations.
+  - order: 28
+    action: Apply Jiuwen facts to real ES, publish daily rows and reconcile authorized HTTP metrics, independent model Token publication and terminal replay.
+    expected: Main and child counts, confirmed outcomes, actual Token ownership, nullable usage coverage and measured durations match the actual execution, without replay inflation.
+  - order: 29
+    action: Publish multi-day Agent result and model Token samples in two owned tenants with contrasting groups, ties, known zero, missing usage and absent result denominators. Query both new list sort keys in both directions.
+    expected: Numeric ordering uses merged resource values, preserves nulls and status, and resolves ties by tenant ID and Agent ID.
+  - order: 30
+    action: Apply tenant, group, inclusive date and single-Agent filters, request successive pages and repeat unauthorized requests.
+    expected: Only authorized filtered aggregates participate; sorting precedes paging and rejected tenants are not queried.
+  - order: 31
+    action: Query existing Agent rankings with omitted and explicit execution_count metric, total_tokens and success_rate over the multi-day publications used by the list proof.
+    expected: Default count ranking is unchanged; new ranks use the same filtered resource totals and stable descending order, exclude nulls, and return merged success_sample_count.
+  - order: 32
+    action: Apply tenant, group, inclusive dates and single-Agent selection, including a zero value, absent samples, ties and fewer than five eligible resources.
+    expected: Only authorized filtered values enter at most five ranked rows; zero remains valid, no eligible resources returns an empty array, and samples agree with merged successful and failed counts.
+  expected_results:
+  - The same document ID and index hold revisions 1 and 2.
+  - The terminal replay retains revision 2 and the original terminal write version.
+  - A real root execution emits both revisions with telemetry disabled and has one searchable terminal document.
+  - SSE recovery returns the original answer and preserves monitoring counts.
+  - The current Agent day points to one exact daily row with the valid duration sample.
+  - Publication failure and same-revision replay preserve the correct published pointer.
+  - The real worker fact is reflected in its published daily row.
+  - The Ops summary matches the real run and applies date, group and Agent filters.
+  - Ops authorization controls explicit and implicit tenant selection.
+  - Agent directory, trends and rankings agree with published metrics and distinguish current metadata from historical usage.
+  - Actual child invocations preserve their independent identity and timing through source facts, daily publication and queries with trajectory disabled.
+  - Ended-result success metrics follow the confirmed outcome contract across dates and remain idempotent through all existing query surfaces.
+  - Agent Token views match attributed published model usage and provider coverage independently of parent execution and publication timing.
+  - One scoped PostgreSQL read returns exactly the failed model batch tenants selected by the existing per-tenant predicate, including inclusive dates and legacy batches.
+  - First-answer timing is independently measured and published per actual execution, with null missing answers, known zero and weighted cross-day averages.
+  - Main monitoring and raw trajectory share one complete execution measurement without changing counting, actual execution dates or other metric contracts.
+  - Complete child invocation timing agrees exactly between raw trajectory, source facts, daily publication and queries, with independent invocation clocks and original execution dates.
+  - Real Jiuwen main and child execution reconciles through source facts, published daily metrics and Ops queries with trajectory capture on or off.
+  - Agent list Token and success-rate ordering matches exact filtered published resource aggregates before paging, with stable ties and nulls last.
+  - Agent Token and success-rate Top 5 match published filtered list values, with merged success samples and unchanged default count ranking.
+  forbidden_side_effects:
+  - An extra fact document or a document in the end month's partition.
+  - An additional worker, provider request or Agent fact on SSE reconnection.
+  - An Agent aggregate on the end day or a premature switch to an unconfirmed publication.
+  - Duplicate counts from matching multiple groups or unauthorized cross-tenant results.
+  - Inflated current totals from published snapshots or lost historical usage for absent catalog entries.
+  - An extra child execution or duration sample from terminal replay, or child attribution to its parent's execution ID.
+  - A success denominator containing cancelled, ongoing or unknown executions, a guessed timeout, or a mean of daily success rates.
+  - Double-counting child usage under the parent, including unassociated model requests, replacing missing usage with zero, or inheriting Agent publication status for Tokens.
+  - Per-tenant SQL growth, failures from an unselected tenant or changes to existing Token lag semantics.
+  - A TTFT sample from tools, reasoning, fallback text, another Agent execution or replay, or an average of daily averages.
+  - A second main clock or terminal report, a span/monitoring timestamp mismatch, a count from preparation-only failure, a shifted statistic date or a changed main duration boundary.
+  - Mixed parent or sibling clocks, duplicate child reports, changed execution dates or eligibility, or a changed success, Token or TTFT contract.
+  - Replacing Jiuwen Runner or model transport with a fake, mixed main/child usage, lost execution context or metrics gated by trajectory configuration.
+  - Lexical or floating-point Token ordering, missing values coerced to zero, per-page or per-day sorting, unauthorized rows or changes to collection or the default execution-count ranking behavior.
+  - Null ranked values, invented success samples, averaging daily rates, unstable ties or changes to capture, storage, aggregation, other modules or northbound authentication.
+  acceptance:
+  - id: AC-01
+    description: Main Agent observations update one source fact and replay is idempotent.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Agent capture emits independently of telemetry, and SSE reconnection reuses the execution.
+    steps: [4, 5]
+    expected_results: [3, 4]
+    forbidden_side_effects: [2]
+  - id: AC-03
+    description: Agent daily publication preserves the start day and switches versions only after successful writes.
+    steps: [6, 7, 8, 9]
+    expected_results: [5, 6, 7]
+    forbidden_side_effects: [3]
+  - id: AC-04
+    description: The Ops summary exposes the correct published metrics within the authenticated tenant scope.
+    steps: [10, 11]
+    expected_results: [8, 9]
+    forbidden_side_effects: [4]
+  - id: AC-05
+    description: Authorized Agent views join current inventory and published metrics without losing coverage or resource identity.
+    steps: [12, 13]
+    expected_results: [10]
+    forbidden_side_effects: [4, 5]
+  - id: AC-06
+    description: Actual child executions are independently measured and remain idempotent through the shared monitoring pipeline.
+    steps: [14, 15]
+    expected_results: [11]
+    forbidden_side_effects: [6]
+  - id: AC-07
+    description: Agent success metrics merge confirmed result counts across dates and remain stable after terminal replay.
+    steps: [16, 17]
+    expected_results: [12]
+    forbidden_side_effects: [7]
+  - id: AC-08
+    description: Agent Token queries reuse actual model usage with correct execution attribution and independent publication metadata.
+    steps: [18, 19]
+    expected_results: [13]
+    forbidden_side_effects: [8]
+  - id: AC-09
+    description: Batched failure-state reads preserve the existing scoped and dated model failure contract through real PostgreSQL.
+    steps: [20]
+    expected_results: [14]
+    forbidden_side_effects: [9]
+  - id: AC-10
+    description: Main and child first-answer timing reconciles from actual runtime events to published Agent queries, without replay duplication or samples for missing answers.
+    steps: [21, 22]
+    expected_results: [15]
+    forbidden_side_effects: [10]
+  - id: AC-11
+    description: Complete main timing is shared across raw trajectory and monitoring while preserving actual execution eligibility and all other metric boundaries.
+    steps: [23, 24]
+    expected_results: [16]
+    forbidden_side_effects: [11]
+  - id: AC-12
+    description: Independent child complete timing is shared through raw trajectory and monitoring without changing actual execution eligibility or other metrics.
+    steps: [25, 26]
+    expected_results: [17]
+    forbidden_side_effects: [12]
+  - id: AC-13
+    description: Actual Jiuwen main and child execution reconciles all confirmed Agent metrics through the real monitoring pipeline, independently of trajectory capture.
+    steps: [27, 28]
+    expected_results: [18]
+    forbidden_side_effects: [13]
+  - id: AC-14
+    description: Agent list sorting by total Tokens and success rate preserves authorized filtered aggregation, nullable metrics and stable pagination.
+    steps: [29, 30]
+    expected_results: [19]
+    forbidden_side_effects: [14]
+  - id: AC-15
+    description: Token and success-rate Top 5 reuse authorized filtered published resource totals and stable list sorting while preserving default call ranking.
+    steps: [31, 32]
+    expected_results: [20]
+    forbidden_side_effects: [15]

@@ -353,7 +353,8 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
         max_tokens=512,
         ssl_verify=True,
         model_factory=None,
-        display_name=None
+        display_name=None,
+        monitoring_identity=("tenant-1", None, "vlm"),
     )
     assert result == mock_model_instance
 
