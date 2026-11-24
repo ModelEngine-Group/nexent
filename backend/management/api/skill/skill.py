@@ -8,20 +8,28 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse
 
 from contracts.constants.constants import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FOUND_TEXT
-from contracts.errors.exceptions import (
-    AgentDraftEditError, AppException, ForbiddenError, ResourceBindingError, SkillException, UnauthorizedError,
+from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
+from permissions.depends import require
+from permissions.models import CurrentUser
+from contracts.errors.exceptions import RunModelControlsError
+from management.services.permission.asset_owner import can_view_skill
+from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
+from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
+from management.services.agent.authorization import require_agent_draft_edit
+from management.services.conversation.creation_history import (
+    prepare_creation_history,
+    persist_creation_stream,
 )
 from contracts.skill import InstallSkillsRequest, SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.asset_owner import can_view_skill
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
-from management.services.skill.transfer import (
-    get_official_skills_with_status,
-    install_skills_from_zip_for_tenant,
-    update_skill_list,
-)
+from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from management.utils.managed_read import managed_read
 from permissions.resource_access import resource_read_tenant
 

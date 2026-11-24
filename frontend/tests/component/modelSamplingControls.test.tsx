@@ -10,6 +10,7 @@ import {
   buildInferenceParamsPayload,
   type ModelAdvancedSettingsValue,
 } from "@/app/models/components/model/ModelAdvancedSettings";
+import type { ReasoningCapability } from "@/types/modelConfig";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -44,8 +45,8 @@ describe("model sampling controls", () => {
   it("displays inherited defaults without emitting values and preserves explicit zero and clearing", () => {
     const change = modelForm({ max_output_tokens: 512 });
     const temperature = screen.getByRole("spinbutton", { name: "温度" });
-    expect(temperature).toHaveValue(1);
-    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(1);
+    expect(temperature).toHaveValue("");
+    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue("");
     expect(change).not.toHaveBeenCalled();
     fireEvent.change(temperature, { target: { value: "0" } });
     const explicit = change.mock.lastCall![0];
@@ -59,41 +60,81 @@ describe("model sampling controls", () => {
     ).not.toHaveProperty("temperature");
   });
 
+  it("drops enable_thinking for budget-only reasoning outlets", () => {
+    const capability = {
+      status: "supported",
+      control: "budget_tokens",
+      levels: [],
+      controls: [{ type: "budget_tokens", min: 128, max: 32768 }],
+      source: "catalog",
+    } as ReasoningCapability;
+    const payload = buildInferenceParamsPayload(
+      { enable_thinking: true, reasoning_budget_tokens: 2048 },
+      capability
+    );
+    expect(payload).not.toHaveProperty("enable_thinking");
+    expect(payload.extra_params).toEqual({ reasoning_budget_tokens: 2048 });
+  });
+
+  it("keeps enable_thinking for outlets that declare a thinking toggle", () => {
+    const capability = {
+      status: "supported",
+      control: "toggle",
+      levels: [],
+      controls: [{ type: "toggle" }],
+      source: "catalog",
+    } as ReasoningCapability;
+    const payload = buildInferenceParamsPayload(
+      { enable_thinking: false },
+      capability
+    );
+    expect(payload).toHaveProperty("extra_params", { enable_thinking: false });
+  });
+
   it("applies separate numeric ranges and synchronizes the sliders", () => {
     modelForm();
     fireEvent.change(screen.getByRole("spinbutton", { name: "温度" }), {
       target: { value: "3" },
     });
-    expect(screen.getByRole("slider", { name: "温度" })).toHaveAttribute(
-      "aria-valuenow",
-      "2"
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveAttribute(
+      "aria-invalid",
+      "true"
     );
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Top P" }), {
-      target: { value: "3" },
-    });
-    expect(screen.getByRole("slider", { name: "Top P" })).toHaveAttribute(
-      "aria-valuenow",
-      "1"
-    );
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Top P" }), {
-      target: { value: "-1" },
-    });
-    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(0);
+    const input = screen.getByRole("spinbutton", { name: "Top P" });
+    const slider = screen.getByRole("slider", { name: "Top P" });
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    fireEvent.keyDown(slider, { key: "Home" });
+    expect(input).toHaveValue("0.01");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyUp(input, { key: "ArrowDown" });
+    expect(input).toHaveValue("0.01");
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    expect(input).toHaveValue("0.02");
+    fireEvent.change(input, { target: { value: "0.995" } });
+    fireEvent.blur(input);
+    expect(input).toHaveValue("0.995");
+    fireEvent.change(input, { target: { value: "0.005" } });
+    expect(input).toHaveValue("0.005");
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveValue("");
   });
 
   it("supports keyboard limits and decimal stepping", () => {
     modelForm({ temperature: 0.2 });
     const slider = screen.getByRole("slider", { name: "温度" });
     fireEvent.keyDown(slider, { key: "ArrowRight" });
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.3);
-    fireEvent.click(screen.getByRole("button", { name: "温度 −" }));
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.2);
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.3");
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowDown" });
+    fireEvent.keyUp(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowDown" });
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.2");
     fireEvent.keyDown(slider, { key: "End" });
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(2);
-    fireEvent.click(screen.getByRole("button", { name: "温度 +" }));
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(2);
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("2");
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowUp" });
+    fireEvent.keyUp(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowUp" });
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("2");
     fireEvent.keyDown(slider, { key: "Home" });
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0);
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0");
   });
 
   it("updates the numeric input when the slider is dragged", () => {
@@ -107,9 +148,9 @@ describe("model sampling controls", () => {
         width: 200,
       } as DOMRect);
       fireEvent.pointerDown(slider, { clientX: 150 });
-      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.5);
+      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.5");
       fireEvent.pointerMove(slider, { clientX: 200 });
-      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(1);
+      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("1");
       fireEvent.pointerUp(slider);
     } finally {
       vi.unstubAllGlobals();

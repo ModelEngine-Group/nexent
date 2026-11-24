@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import os
@@ -941,9 +942,11 @@ class ElasticSearchCore(VectorDatabaseCore):
             "page_size": result_page_size,
         }
 
-    def create_chunk(self, index_name: str, chunk: Dict[str, Any]) -> Dict[str, Any]:
+    def create_chunk(
+        self, index_name: str, chunk: Dict[str, Any], *, refresh: bool | str = "wait_for",
+    ) -> Dict[str, Any]:
         """
-        Create a single chunk document.
+        Create a single chunk document; optionally wait for search visibility.
         """
         try:
             payload = chunk.copy()
@@ -952,7 +955,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 index=index_name,
                 id=document_id,
                 document=payload,
-                refresh="wait_for",
+                refresh=refresh,
             )
             logger.info(
                 "Created chunk %s in index %s", response.get("_id"), index_name
@@ -1163,9 +1166,11 @@ class ElasticSearchCore(VectorDatabaseCore):
         self,
         index_names: List[str],
         query_text: str,
-        embedding_model: EmbeddingAdapter,
+        embedding_model: Optional[EmbeddingAdapter] = None,
         top_k: int = 5,
         filter: Optional[Any] = None,
+        *,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for similar documents using vector similarity across multiple indices.
@@ -1185,12 +1190,14 @@ class ElasticSearchCore(VectorDatabaseCore):
         # Join index names for multi-index search
         index_pattern = ",".join(index_names)
 
-        # Get query embedding
-        query_embedding = embedding_model.get_embeddings(query_text)[0]
+        if query_embedding is None:
+            if embedding_model is None:
+                raise ValueError("Semantic search requires an embedding model or a query embedding")
+            query_embedding = embedding_model.get_embeddings(query_text)[0]
 
         # Prepare the search query
         knn_filter = filter if isinstance(filter, dict) else None
-        if embedding_model.model_type == "multimodal":
+        if getattr(embedding_model, "model_type", None) == "multimodal":
             search_text_query = {
                 "knn": {
                     "field": "embedding",
@@ -1234,10 +1241,12 @@ class ElasticSearchCore(VectorDatabaseCore):
         self,
         index_names: List[str],
         query_text: str,
-        embedding_model: EmbeddingAdapter,
+        embedding_model: Optional[EmbeddingAdapter] = None,
         top_k: int = 5,
         weight_accurate: Optional[float] = None,
         filter: Optional[Any] = None,
+        *,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search method, combining accurate matching and semantic search results across multiple indices.
@@ -1269,8 +1278,10 @@ class ElasticSearchCore(VectorDatabaseCore):
         # Get results from both searches
         accurate_results = self.accurate_search(
             index_names, query_text, top_k=top_k, filter=filter)
+        vector_options = {"query_embedding": query_embedding} if query_embedding is not None else {}
         semantic_results = self.semantic_search(
-            index_names, query_text, embedding_model=embedding_model, top_k=top_k, filter=filter)
+            index_names, query_text, embedding_model=embedding_model, top_k=top_k, filter=filter, **vector_options,
+        )
 
         # Create a mapping from document ID to results
         combined_results = {}
@@ -1316,7 +1327,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                            for r in accurate_results]) if accurate_results else 1
         max_semantic = max([r.get("score", 0)
                            for r in semantic_results]) if semantic_results else 1
-        is_multimodal = embedding_model.model_type == "multimodal"
+        is_multimodal = getattr(embedding_model, "model_type", None) == "multimodal"
         image_semantic_scores = [
             r.get("score", 0)
             for r in semantic_results

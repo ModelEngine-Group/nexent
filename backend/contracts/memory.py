@@ -49,6 +49,7 @@ class DreamingScheduleRequest(BaseModel):
     min_unique_queries: Optional[int] = Field(default=None, ge=0)
     source_limit: Optional[int] = Field(default=None, ge=1, le=100)
     long_term_max_chars: Optional[int] = Field(default=None, ge=100, le=1000000)
+    long_term_length_tolerance_percent: Optional[int] = Field(default=None, ge=0, le=100, strict=True)
     summarization_max_attempts: Optional[int] = Field(default=None, ge=0, le=10)
     target_user_id: Optional[str] = None
 

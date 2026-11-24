@@ -123,6 +123,7 @@ def _run_auto_summary_for_kb(index_name: str, tenant_id: str):
             cluster_max_words=150,
             model_id=model_id,
             tenant_id=tenant_id,
+            user_id="auto_scheduler",
         )
         final_summary = merge_cluster_summaries(cluster_summaries)
 

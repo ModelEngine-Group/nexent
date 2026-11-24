@@ -16,7 +16,7 @@ class TestBuildA2AHeaders:
 
     def test_default_headers(self):
         """Test headers without API key."""
-        from infrastructure.http.a2a import build_a2a_headers
+        from management.services.agent.a2a.http_client import build_a2a_headers
 
         headers = build_a2a_headers()
         assert headers["Content-Type"] == "application/json"
@@ -25,7 +25,7 @@ class TestBuildA2AHeaders:
 
     def test_headers_with_api_key(self):
         """Test headers with API key."""
-        from infrastructure.http.a2a import build_a2a_headers
+        from management.services.agent.a2a.http_client import build_a2a_headers
 
         headers = build_a2a_headers(api_key="test-api-key-123")
         assert headers["Content-Type"] == "application/json"
@@ -34,7 +34,7 @@ class TestBuildA2AHeaders:
 
     def test_headers_with_none_api_key(self):
         """Test headers with None API key."""
-        from infrastructure.http.a2a import build_a2a_headers
+        from management.services.agent.a2a.http_client import build_a2a_headers
 
         headers = build_a2a_headers(api_key=None)
         assert headers["Content-Type"] == "application/json"
@@ -42,7 +42,7 @@ class TestBuildA2AHeaders:
 
     def test_headers_with_empty_api_key(self):
         """Test headers with empty API key."""
-        from infrastructure.http.a2a import build_a2a_headers
+        from management.services.agent.a2a.http_client import build_a2a_headers
 
         headers = build_a2a_headers(api_key="")
         assert "Authorization" not in headers
@@ -54,7 +54,7 @@ class TestA2AHttpClientInit:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
     async def test_certificate_verification_connector(self, mocker, preference):
-        from infrastructure.http import a2a
+        from management.services.agent.a2a import http_client as a2a
 
         connector = mocker.patch.object(a2a.aiohttp, "TCPConnector")
         session = mocker.patch.object(a2a.aiohttp, "ClientSession")
@@ -64,7 +64,7 @@ class TestA2AHttpClientInit:
 
     def test_default_initialization(self):
         """Test default initialization values."""
-        from infrastructure.http.a2a import A2AHttpClient, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES
+        from management.services.agent.a2a.http_client import A2AHttpClient, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES
         from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
 
         client = A2AHttpClient()
@@ -75,21 +75,21 @@ class TestA2AHttpClientInit:
 
     def test_custom_timeout(self):
         """Test custom timeout value."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient(timeout=60.0)
         assert client.timeout.total == 60.0
 
     def test_custom_max_retries(self):
         """Test custom max retries value."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient(max_retries=5)
         assert client.max_retries == 5
 
     def test_aggressive_timeout_for_agent_card(self):
         """Test agent card timeout constant."""
-        from infrastructure.http.a2a import A2AHttpClient, AGENT_CARD_TIMEOUT
+        from management.services.agent.a2a.http_client import A2AHttpClient, AGENT_CARD_TIMEOUT
 
         client = A2AHttpClient(timeout=AGENT_CARD_TIMEOUT)
         assert client.timeout.total == 10.0
@@ -101,7 +101,7 @@ class TestA2AHttpClientContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_creates_session(self):
         """Test that context manager creates session on entry."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         async with A2AHttpClient() as client:
             assert client._session is not None
@@ -109,7 +109,7 @@ class TestA2AHttpClientContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_closes_session(self):
         """Test that context manager closes session on exit."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient()
         async with client:
@@ -122,7 +122,7 @@ class TestA2AHttpClientContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_error_on_missing_session(self):
         """Test that methods raise error when session not initialized."""
-        from infrastructure.http.a2a import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
+        from management.services.agent.a2a.http_client import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
 
         client = A2AHttpClient()
         # Session not initialized - should raise error
@@ -136,7 +136,7 @@ class TestA2AHttpClientGetJson:
     @pytest.mark.asyncio
     async def test_get_json_success(self):
         """Test successful GET request."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         mock_response_data = {"name": "Test Agent", "version": "1.0"}
 
@@ -160,7 +160,7 @@ class TestA2AHttpClientGetJson:
 
     @pytest.mark.asyncio
     async def test_get_json_rejects_unauthorized_response(self):
-        from infrastructure.http.a2a import A2AHttpClient, A2AHttpStatusError
+        from management.services.agent.a2a.http_client import A2AHttpClient, A2AHttpStatusError
 
         client = A2AHttpClient()
         async with client:
@@ -175,7 +175,7 @@ class TestA2AHttpClientGetJson:
     @pytest.mark.asyncio
     async def test_get_json_with_headers(self):
         """Test GET request with custom headers."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         custom_headers = {"Authorization": "Bearer token123"}
 
@@ -198,7 +198,7 @@ class TestA2AHttpClientPostJson:
     @pytest.mark.asyncio
     async def test_post_json_success(self):
         """Test successful POST request."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         request_payload = {"message": "Hello"}
         response_data = {"result": "Hi there!"}
@@ -217,7 +217,7 @@ class TestA2AHttpClientPostJson:
     @pytest.mark.asyncio
     async def test_post_json_rejects_non_success_response(self):
         """Test POST requests raise an error for non-success responses."""
-        from infrastructure.http.a2a import A2AHttpClient, A2AHttpStatusError
+        from management.services.agent.a2a.http_client import A2AHttpClient, A2AHttpStatusError
 
         client = A2AHttpClient()
         async with client:
@@ -235,7 +235,7 @@ class TestA2AHttpClientPostJson:
     @pytest.mark.asyncio
     async def test_post_json_requires_initialized_session(self):
         """Test POST requests fail when the client session is not initialized."""
-        from infrastructure.http.a2a import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
+        from management.services.agent.a2a.http_client import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
 
         client = A2AHttpClient()
 
@@ -248,7 +248,7 @@ class TestA2AHttpClientPostJson:
     @pytest.mark.asyncio
     async def test_post_json_with_headers(self):
         """Test POST request with custom headers."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         custom_headers = {"X-Custom-Header": "value"}
 
@@ -271,7 +271,7 @@ class TestA2AHttpClientPostJson:
     @pytest.mark.asyncio
     async def test_post_json_with_json_payload(self):
         """Test that POST request sends JSON payload correctly."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         request_payload = {
             "message": {
@@ -301,7 +301,7 @@ class TestA2AHttpClientPostStream:
     @pytest.mark.asyncio
     async def test_post_stream_requires_initialized_session(self):
         """Test streaming POST requests fail when the session is not initialized."""
-        from infrastructure.http.a2a import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
+        from management.services.agent.a2a.http_client import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
 
         client = A2AHttpClient()
 
@@ -315,7 +315,7 @@ class TestA2AHttpClientPostStream:
     @pytest.mark.asyncio
     async def test_post_stream_success(self):
         """Test successful streaming POST request."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         # Mock SSE lines
         sse_lines = [
@@ -358,7 +358,7 @@ class TestA2AHttpClientPostStream:
     @pytest.mark.asyncio
     async def test_post_stream_invalid_json(self):
         """Test streaming with invalid JSON is handled gracefully."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         sse_lines = [
             b'data: valid-json\n',
@@ -404,7 +404,7 @@ class TestA2AHttpClientRetry:
     @pytest.mark.asyncio
     async def test_handle_retryable_success(self):
         """Test _handle_retryable does not raise when retries remaining."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient(max_retries=3)
         # Should not raise when attempt < max_retries - 1
@@ -418,7 +418,7 @@ class TestA2AHttpClientRetry:
     @pytest.mark.asyncio
     async def test_handle_retryable_exhausted(self):
         """Test _handle_retryable raises when retries exhausted."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient(max_retries=3)
         # Should raise when attempt >= max_retries - 1
@@ -433,7 +433,7 @@ class TestA2AHttpClientRetry:
     @pytest.mark.asyncio
     async def test_request_with_retry_success_on_first_attempt(self):
         """Test successful request on first attempt."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         mock_response = MagicMock()
         mock_response.status = 200
@@ -456,7 +456,7 @@ class TestA2AHttpClientRetry:
     @pytest.mark.asyncio
     async def test_request_with_retry_handles_500_error_with_retry(self):
         """Test retry on 500 server error."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         # First call returns 500, second call succeeds
         success_response = MagicMock()
@@ -497,7 +497,7 @@ class TestA2AHttpClientErrorHandling:
     @pytest.mark.asyncio
     async def test_connection_reset_error_triggers_retry(self):
         """Test that connection reset errors trigger retry."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient(max_retries=2)
@@ -514,7 +514,7 @@ class TestA2AHttpClientErrorHandling:
     @pytest.mark.asyncio
     async def test_server_disconnected_error_triggers_retry(self):
         """Test that server disconnected errors trigger retry."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient(max_retries=2)
@@ -531,7 +531,7 @@ class TestA2AHttpClientErrorHandling:
     @pytest.mark.asyncio
     async def test_timeout_error_triggers_retry(self):
         """Test that timeout errors trigger retry."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient(max_retries=2)
         mock_session = MagicMock()
@@ -551,7 +551,7 @@ class TestA2AHttpClientGetJsonErrors:
     @pytest.mark.asyncio
     async def test_get_json_timeout(self):
         """Test GET request timeout is raised with proper error message."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient()
@@ -565,7 +565,7 @@ class TestA2AHttpClientGetJsonErrors:
     @pytest.mark.asyncio
     async def test_get_json_http_error(self):
         """Test GET request HTTP error (ClientResponseError) is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient()
@@ -585,7 +585,7 @@ class TestA2AHttpClientGetJsonErrors:
     @pytest.mark.asyncio
     async def test_get_json_generic_exception(self):
         """Test GET request generic exception is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient()
         async with client:
@@ -603,7 +603,7 @@ class TestA2AHttpClientPostJsonErrors:
     @pytest.mark.asyncio
     async def test_post_json_timeout(self):
         """Test POST request timeout is raised with proper error message."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient()
@@ -620,7 +620,7 @@ class TestA2AHttpClientPostJsonErrors:
     @pytest.mark.asyncio
     async def test_post_json_http_error(self):
         """Test POST request HTTP error (ClientResponseError) is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient()
@@ -643,7 +643,7 @@ class TestA2AHttpClientPostJsonErrors:
     @pytest.mark.asyncio
     async def test_post_json_generic_exception(self):
         """Test POST request generic exception is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         client = A2AHttpClient()
         async with client:
@@ -664,7 +664,7 @@ class TestA2AHttpClientPostStreamErrors:
     @pytest.mark.asyncio
     async def test_post_stream_timeout(self):
         """Test streaming request timeout is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         mock_response = MagicMock()
@@ -693,7 +693,7 @@ class TestA2AHttpClientPostStreamErrors:
     @pytest.mark.asyncio
     async def test_post_stream_http_error(self):
         """Test streaming HTTP error (ClientResponseError) is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         mock_session = MagicMock()
@@ -722,7 +722,7 @@ class TestA2AHttpClientPostStreamErrors:
     @pytest.mark.asyncio
     async def test_post_stream_generic_exception(self):
         """Test streaming request generic exception is raised."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
 
         mock_session = MagicMock()
         mock_session.post = AsyncMock(
@@ -749,7 +749,7 @@ class TestA2AHttpClientRequestWithRetryErrors:
     @pytest.mark.asyncio
     async def test_request_with_retry_client_error(self):
         """Test that aiohttp.ClientError triggers retry and raises after exhaustion."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient(max_retries=2)
@@ -766,7 +766,7 @@ class TestA2AHttpClientRequestWithRetryErrors:
     @pytest.mark.asyncio
     async def test_request_with_retry_all_retries_exhausted_fallback_error(self):
         """Test that ClientError is raised when all retries exhausted (not connection error)."""
-        from infrastructure.http.a2a import A2AHttpClient
+        from management.services.agent.a2a.http_client import A2AHttpClient
         import aiohttp
 
         client = A2AHttpClient(max_retries=3)
@@ -786,26 +786,26 @@ class TestConstants:
 
     def test_default_timeout_value(self):
         """Test DEFAULT_TIMEOUT tracks the A2A invocation timeout (default 15 minutes)."""
-        from infrastructure.http.a2a import DEFAULT_TIMEOUT
+        from management.services.agent.a2a.http_client import DEFAULT_TIMEOUT
         from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
         assert DEFAULT_TIMEOUT == A2A_AGENT_INVOCATION_TIMEOUT_SECONDS == 900.0
 
     def test_agent_card_timeout_value(self):
         """Test AGENT_CARD_TIMEOUT constant."""
-        from infrastructure.http.a2a import AGENT_CARD_TIMEOUT
+        from management.services.agent.a2a.http_client import AGENT_CARD_TIMEOUT
         assert AGENT_CARD_TIMEOUT == 10.0
 
     def test_default_max_retries_value(self):
         """Test DEFAULT_MAX_RETRIES constant."""
-        from infrastructure.http.a2a import DEFAULT_MAX_RETRIES
+        from management.services.agent.a2a.http_client import DEFAULT_MAX_RETRIES
         assert DEFAULT_MAX_RETRIES == 3
 
     def test_retry_backoff_factor_value(self):
         """Test RETRY_BACKOFF_FACTOR constant."""
-        from infrastructure.http.a2a import RETRY_BACKOFF_FACTOR
+        from management.services.agent.a2a.http_client import RETRY_BACKOFF_FACTOR
         assert RETRY_BACKOFF_FACTOR == 0.5
 
     def test_content_type_json_value(self):
         """Test CONTENT_TYPE_JSON constant."""
-        from infrastructure.http.a2a import CONTENT_TYPE_JSON
+        from management.services.agent.a2a.http_client import CONTENT_TYPE_JSON
         assert CONTENT_TYPE_JSON == "application/json"

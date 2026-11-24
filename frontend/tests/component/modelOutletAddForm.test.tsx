@@ -558,7 +558,7 @@ it("offers Top P as an explicit numeric value without creating a default", async
     { timeout: 7000 }
   );
   expect(field).toHaveValue("");
-  expect(field).toHaveAttribute("aria-valuemin", "0");
+  expect(field).toHaveAttribute("aria-valuemin", "0.01");
   expect(field).toHaveAttribute("aria-valuemax", "1");
   fireEvent.change(field, { target: { value: "0.85" } });
   await waitForSaveReady();

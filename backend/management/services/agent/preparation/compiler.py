@@ -3,17 +3,20 @@
 """Compile the current Nexent configuration from Management-owned resources."""
 
 import asyncio
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
-    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
-from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
+from infrastructure.agent_tool_config import (
+    build_automation_proposal_tool, build_parallel_executor_tool_config, build_store_memory_tool,
+)
 from management.db.agent.repository import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
@@ -27,7 +30,6 @@ from management.services.agent.preparation.resources import (
     _get_external_a2a_agents,
 )
 from management.services.agent.preparation.tools import (
-    _build_parallel_executor_tool_config,
     _get_skill_script_tools,
     _inject_plan_tools,
     _normalize_tool_params_request,
@@ -40,20 +42,23 @@ from management.services.agent.prompt import (
 )
 from management.services.agent.resource_resolver import _get_skills_for_template
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.services.configuration.user.memory import build_memory_context
 from management.services.memory.access import tenant_memory_enabled
-from management.services.memory.runtime_io import memory_deadline, optional_memory_io
+from management.services.configuration.user.memory import build_memory_context
+from infrastructure.memory_io import memory_deadline, optional_memory_io
 from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
 from management.services.model.resolver import is_model_available
-from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
-    _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     _resolve_context_budget,
     _resolve_input_budget,
 )
-from nexent.core.agents.contracts.config import AgentConfig, AgentVerificationConfig, ToolConfig
+from management.services.model.run_controls import select_configured_model_id
+from nexent.core.agents.contracts.config import (
+    AgentConfig,
+    AgentVerificationConfig,
+    ToolConfig,
+)
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
@@ -61,9 +66,9 @@ from nexent.core.agents.context import (
 )
 from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
-from nexent.core.concurrency import ManagedTaskSpec
-from infrastructure.concurrency import runtime_thread_manager
+from nexent.core.concurrency import ManagedTaskSpec, get_default_thread_manager
 from nexent.memory import models as memory_models
+from nexent.monitor.phase_capture import trace_phase
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -92,9 +97,15 @@ async def create_agent_config(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    *,
+    portable_evaluation: bool = False,
+    authorized_knowledge_tools: dict | None = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
     memory_query_deadline: float | None = None,
 ):
+    portable_options = {"portable_evaluation": True} if portable_evaluation else {}
+    if authorized_knowledge_tools is not None:
+        portable_options["authorized_knowledge_tools"] = authorized_knowledge_tools
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -108,7 +119,6 @@ async def create_agent_config(
             "memory-policy", _load_authorized_memory_context, user_id, tenant_id, agent_id,
             deadline=memory_query_deadline,
         )
-    allow_memory_search = memory_context is not None
 
     # create sub agent
     child_tool_params = normalized_tool_params
@@ -130,93 +140,117 @@ async def create_agent_config(
                 if name not in managed_names
             }
         child_knowledge_context = None
-    sub_agent_relations = query_sub_agent_relations(
-        main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
-    )
-    worker_agents = []
-    for rel in sub_agent_relations:
-        sub_agent_id = rel["selected_agent_id"]
-        sub_agent_version_no = resolve_sub_agent_version_no(
-            selected_agent_id=sub_agent_id,
-            selected_agent_version_no=rel.get("selected_agent_version_no"),
-            tenant_id=tenant_id,
-        )
-        sub_agent_config = await create_agent_config(
-            agent_id=sub_agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            language=language,
-            last_user_query=last_user_query,
-            allow_memory_search=allow_memory_search,
-            memory_query_deadline=memory_query_deadline,
-            version_no=sub_agent_version_no,
-            override_model_id=None,
-            tool_params=child_tool_params,
-            conversation_id=conversation_id,
-            include_automation_tool=False,
-            runtime_knowledge_context=child_knowledge_context,
-            runtime_file_context=runtime_file_context,
-            # Workbench overlays replace Skills on the effective root only.
-            runtime_skill_snapshot=None,
-            runtime_model_records=runtime_model_records,
-        )
-        # Persisted Agent relations are rendered into the manager prompt by
-        # their configured business name. Keep the callable registered in the
-        # Python executor under that same name; the generic runtime identity
-        # assigned by the recursive builder is only appropriate for roots and
-        # Workbench-selected dynamic children.
-        sub_agent_config.invocation_name = sub_agent_config.name
-        worker_agents.append(sub_agent_config)
-
-    # Workbench-selected Agents are request-scoped children. They are built
-    # from pinned published versions but never persisted as Agent relations.
-    used_invocation_names = {
-        str(agent.invocation_name or agent.name) for agent in worker_agents
+    memory_phase_attributes = {
+        "agent.id": str(agent_id), "agent.name": agent_info.get("name", ""),
     }
-    for mount in runtime_sub_agent_mounts or []:
-        sub_agent_id = int(mount["agent_id"])
-        sub_agent_version_no = int(mount["version_no"])
-        if sub_agent_id == int(agent_id) and sub_agent_version_no == int(version_no):
-            raise WorkbenchError("WORKBENCH_AGENT_CYCLE")
-        sub_agent_config = await create_agent_config(
-            agent_id=sub_agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            language=language,
-            last_user_query=last_user_query,
-            allow_memory_search=allow_memory_search,
-            memory_query_deadline=memory_query_deadline,
-            version_no=sub_agent_version_no,
-            override_model_id=None,
-            tool_params=child_tool_params,
-            conversation_id=conversation_id,
-            include_automation_tool=False,
-            runtime_knowledge_context=child_knowledge_context,
-            runtime_file_context=runtime_file_context,
-            runtime_skill_snapshot=None,
-            runtime_model_records=runtime_model_records,
-            runtime_knowledge_tools=None,
-            runtime_sub_agent_mounts=None,
+    display_name = agent_info.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        memory_phase_attributes["agent.display_name"] = display_name.strip()
+    # Start this Agent's optional context before awaiting recursive compilation.
+    memory_task = asyncio.create_task(_prepare_traced_runtime_memory(
+        tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
+        conversation_id=str(conversation_id) if conversation_id is not None else None,
+        query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
+        deadline=memory_query_deadline, phase_attributes=memory_phase_attributes,
+    )) if memory_context is not None else None
+    prepared_memory = ([], None)
+    try:
+        sub_agent_relations = query_sub_agent_relations(
+            main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
         )
-        invocation_name = str(
-            mount.get("invocation_name")
-            or f"agent_{sub_agent_id}_v{sub_agent_version_no}"
-        )
-        if invocation_name in used_invocation_names:
-            raise WorkbenchError("WORKBENCH_AGENT_NAME_CONFLICT")
-        used_invocation_names.add(invocation_name)
-        sub_agent_config.name = invocation_name
-        sub_agent_config.invocation_name = invocation_name
-        sub_agent_config.runtime_ref = str(
-            mount.get("runtime_ref") or f"agent:{sub_agent_id}:v{sub_agent_version_no}"
-        )
-        sub_agent_config.display_name = str(
-            mount.get("display_name")
-            or sub_agent_config.display_name
-            or invocation_name
-        )
-        sub_agent_config.origin = "PERSISTED"
-        worker_agents.append(sub_agent_config)
+        worker_agents = []
+        for rel in sub_agent_relations:
+            sub_agent_id = rel["selected_agent_id"]
+            sub_agent_version_no = resolve_sub_agent_version_no(
+                selected_agent_id=sub_agent_id,
+                selected_agent_version_no=rel.get("selected_agent_version_no"),
+                tenant_id=tenant_id,
+            )
+            sub_agent_config = await create_agent_config(
+                agent_id=sub_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                language=language,
+                last_user_query=last_user_query,
+                allow_memory_search=allow_memory_search,
+                memory_query_deadline=memory_query_deadline,
+                version_no=sub_agent_version_no,
+                override_model_id=None,
+                tool_params=child_tool_params,
+                conversation_id=conversation_id,
+                include_automation_tool=False,
+                runtime_knowledge_context=child_knowledge_context,
+                runtime_file_context=runtime_file_context,
+                # Workbench overlays replace Skills on the effective root only.
+                runtime_skill_snapshot=None,
+                **portable_options,
+                runtime_model_records=runtime_model_records,
+            )
+            # Persisted Agent relations are rendered into the manager prompt by
+            # their configured business name. Keep the callable registered in the
+            # Python executor under that same name; the generic runtime identity
+            # assigned by the recursive builder is only appropriate for roots and
+            # Workbench-selected dynamic children.
+            sub_agent_config.invocation_name = sub_agent_config.name
+            worker_agents.append(sub_agent_config)
+
+        # Workbench-selected Agents are request-scoped children. They are built
+        # from pinned published versions but never persisted as Agent relations.
+        used_invocation_names = {
+            str(agent.invocation_name or agent.name) for agent in worker_agents
+        }
+        for mount in runtime_sub_agent_mounts or []:
+            sub_agent_id = int(mount["agent_id"])
+            sub_agent_version_no = int(mount["version_no"])
+            if sub_agent_id == int(agent_id) and sub_agent_version_no == int(version_no):
+                raise WorkbenchError("WORKBENCH_AGENT_CYCLE")
+            sub_agent_config = await create_agent_config(
+                agent_id=sub_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                language=language,
+                last_user_query=last_user_query,
+                allow_memory_search=allow_memory_search,
+                memory_query_deadline=memory_query_deadline,
+                version_no=sub_agent_version_no,
+                override_model_id=None,
+                tool_params=child_tool_params,
+                conversation_id=conversation_id,
+                include_automation_tool=False,
+                runtime_knowledge_context=child_knowledge_context,
+                runtime_file_context=runtime_file_context,
+                runtime_skill_snapshot=None,
+                runtime_model_records=runtime_model_records,
+                runtime_knowledge_tools=None,
+                runtime_sub_agent_mounts=None,
+                **portable_options,
+            )
+            invocation_name = str(
+                mount.get("invocation_name")
+                or f"agent_{sub_agent_id}_v{sub_agent_version_no}"
+            )
+            if invocation_name in used_invocation_names:
+                raise WorkbenchError("WORKBENCH_AGENT_NAME_CONFLICT")
+            used_invocation_names.add(invocation_name)
+            sub_agent_config.name = invocation_name
+            sub_agent_config.invocation_name = invocation_name
+            sub_agent_config.runtime_ref = str(
+                mount.get("runtime_ref") or f"agent:{sub_agent_id}:v{sub_agent_version_no}"
+            )
+            sub_agent_config.display_name = str(
+                mount.get("display_name")
+                or sub_agent_config.display_name
+                or invocation_name
+            )
+            sub_agent_config.origin = "PERSISTED"
+            worker_agents.append(sub_agent_config)
+        if memory_task is not None:
+            prepared_memory = await memory_task
+    finally:
+        if memory_task is not None:
+            if not memory_task.done():
+                memory_task.cancel()
+            await asyncio.gather(memory_task, return_exceptions=True)
 
     # create external A2A agents (synchronous function, no await needed)
     external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
@@ -230,6 +264,7 @@ async def create_agent_config(
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
         language=language,
+        **portable_options,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [
@@ -237,12 +272,13 @@ async def create_agent_config(
         if tool.name not in memory_tool_names
         and tool.class_name not in {"StoreMemoryTool", "SearchMemoryTool"}
     ]
+    parallel_timeout = get_config_snapshot().get("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS")
 
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
     tool_list.append(
-        _build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
+        build_parallel_executor_tool_config(parallel_timeout)
     )
 
     if (
@@ -250,24 +286,27 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from management.services.automation.proposal import (
-            agent_loop_automation_tool_adapter,
-        )
-
-        tool_list.append(
-            agent_loop_automation_tool_adapter.build_tool_config(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                conversation_id=int(conversation_id),
-                agent_id=int(agent_id),
-                user_message=automation_user_message,
-                agent_version_no=version_no,
-                model_id=automation_model_id,
-                tool_params=normalized_tool_params.model_dump(mode="json"),
-                has_attachments=automation_has_attachments,
-                language=language,
+        if portable_evaluation:
+            tool_list.append(build_automation_proposal_tool())
+        else:
+            from management.services.automation.proposal import (
+                agent_loop_automation_tool_adapter,
             )
-        )
+
+            tool_list.append(
+                agent_loop_automation_tool_adapter.build_tool_config(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    conversation_id=int(conversation_id),
+                    agent_id=int(agent_id),
+                    user_message=automation_user_message,
+                    agent_version_no=version_no,
+                    model_id=automation_model_id,
+                    tool_params=normalized_tool_params.model_dump(mode="json"),
+                    has_attachments=automation_has_attachments,
+                    language=language,
+                )
+            )
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")
@@ -285,15 +324,11 @@ async def create_agent_config(
         store_tool = _build_runtime_store_tool(
             memory_context, tenant_id=tenant_id, user_id=user_id, agent_id=str(agent_id),
             version_no=version_no, conversation_id=conversation_id,
+            phase_attributes=memory_phase_attributes,
         )
         if store_tool is not None:
             tool_list.append(store_tool)
-        long_term_memory_items, fixed_search_result = await _prepare_runtime_memory(
-            tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
-            conversation_id=str(conversation_id) if conversation_id is not None else None,
-            query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
-            deadline=memory_query_deadline,
-        )
+        long_term_memory_items, fixed_search_result = prepared_memory
         if fixed_search_result:
             pre_run_tool_events = [
                 {"type": "tool", "content": "", "tool_name": "search_memory",
@@ -380,9 +415,8 @@ async def create_agent_config(
         )
     else:
         model_name = "main_model"
-        input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
-        capacity_snapshot = None
-        resolved_capacity_snapshot = None
+        model_info = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+        input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
 
     requested_output_tokens = None
     context_budget_snapshot = _resolve_context_budget(
@@ -498,7 +532,7 @@ async def create_agent_config(
         context_items=context_items,
         prompt_tool_policy_snapshot=prompt_tool_policy_snapshot,
         pre_run_tool_events=pre_run_tool_events,
-        automatic_memory_enabled=allow_memory_search,
+        automatic_memory_enabled=memory_context is not None,
         capacity_snapshot=capacity_snapshot,
         context_budget_snapshot=context_budget_snapshot,
         verification_config=verification_config,
@@ -549,19 +583,23 @@ def _load_authorized_memory_context(user_id, tenant_id, agent_id):
     return context
 
 
-def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, version_no, conversation_id):
+def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, version_no, conversation_id,
+                              phase_attributes=None):
     try:
         from management.services.memory.provider import build_memory_service_for_agent
 
-        memory_service = build_memory_service_for_agent(
-            tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, version_no=version_no,
-        )
+        with trace_phase(
+            "memory.initialize", input_value={"service": "memory"}, attributes=phase_attributes,
+        ) as phase:
+            memory_service = build_memory_service_for_agent(
+                tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
+            )
+            if memory_service is None:
+                raise RuntimeError("MemoryService builder returned no service")
+            phase.set_output({"service": "memory", "ready": True})
     except Exception as exc:
         logger.warning("event=memory_service_init_failed error_type=%s", type(exc).__name__)
         return None
-    if memory_service is None:
-        return None
-
     memory_metadata = {
         "memory_user_config": memory_context.user_config,
         "tenant_id": tenant_id,
@@ -572,50 +610,36 @@ def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, v
         "embedding_configured": True,
         "memory_service": memory_service,
     }
-    return ToolConfig(
-        class_name="StoreMemoryTool",
-        name="store_memory",
-        description=(
-            "Store one model-selected and summarized short-term memory extracted only "
-            "from the conversation between the user and the current agent. Eligible "
-            "information is limited to process-level observations made during intermediate "
-            "action steps: user preferences, task goals, action plans and latest progress, "
-            "or reflections on user feedback and errors. Do not store whole conversations, "
-            "transient calculations, unverified guesses, duplicates, secrets, or information "
-            "the user asks to forget. Call this tool only during intermediate action steps, "
-            "not when generating the final answer."
-        ),
-        inputs=json.dumps(
-            {
-                "content": {
-                    "type": "string",
-                    "description": (
-                        "One concise, reusable short-term memory entry already judged, "
-                        "summarized, and deduplicated by the model"
-                    ),
-                    "description_zh": (
-                        "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                    ),
-                }
-            },
-            ensure_ascii=False,
-        ),
-        output_type="string",
-        params={},
-        source="local",
-        usage=None,
-        metadata=memory_metadata,
-    )
+    return build_store_memory_tool(memory_metadata)
 
 
-async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline):
+async def _prepare_traced_runtime_memory(**kwargs):
+    with trace_phase(
+        "memory.presearch", input_value={"query": kwargs["query"], "top_k": 5},
+        attributes=kwargs["phase_attributes"],
+    ) as phase:
+        result = await _prepare_runtime_memory(**kwargs)
+        phase.set_output(result[1])
+        return result
+
+
+async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline,
+                                  phase_attributes=None):
     from management.services.memory.context import get_memory_context_service
     from management.services.memory.records import _resolve_tenant_embedding_model_info
     from management.services.memory.runtime_embedding import compute_runtime_embedding
 
-    service = await optional_memory_io(
-        "memory-context-service", get_memory_context_service, deadline=deadline,
-    )
+    def initialize_context():
+        with trace_phase(
+            "memory.initialize", input_value={"service": "context"}, attributes=phase_attributes,
+        ) as phase:
+            service = get_memory_context_service()
+            if service is None:
+                raise RuntimeError("MemoryContextService provider returned no service")
+            phase.set_output({"service": "context", "ready": True})
+            return service
+
+    service = await optional_memory_io("memory-context-service", initialize_context, deadline=deadline)
     if service is None:
         return [], "Memory search unavailable: retrieval pipeline is not configured. Continuing without memory results."
     scope = dict(tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, conversation_id=conversation_id)
@@ -624,7 +648,12 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
     )
 
     def load_long_term():
-        return asyncio.run(service.build_context(**scope, layers=["tenant", "user"], external_results=[]))
+        with trace_phase(
+            "memory.load_context", input_value={"layers": ["tenant", "user"]}, attributes=phase_attributes,
+        ) as phase:
+            context = asyncio.run(service.build_context(**scope, layers=["tenant", "user"], external_results=[]))
+            phase.set_output(_build_long_term_memory_items(context) if context else [])
+            return context
 
     async def search_vectors():
         if not query:
@@ -632,7 +661,7 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
         model = _resolve_tenant_embedding_model_info(tenant_id)
         if model is None:
             return None
-        vector = await compute_runtime_embedding(query, model, tenant_id=tenant_id, deadline=deadline)
+        vector = await compute_runtime_embedding(query, model, tenant_id=tenant_id, user_id=user_id, deadline=deadline)
         if vector is None:
             return None
         return await service.retrieval_service.search(
@@ -645,9 +674,14 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
         if provider is None or not query:
             return []
         ext_request = request.model_copy(update={"top_k": external_top_k})
-        results = asyncio.run(provider.search_all_enabled(
-            tenant_id=tenant_id, request=ext_request, limit=external_top_k, deadline=deadline - 0.05,
-        ))
+        with trace_phase(
+            "memory.external_search", input_value={"query": query, "top_k": external_top_k},
+            attributes=phase_attributes,
+        ) as phase:
+            results = asyncio.run(provider.search_all_enabled(
+                tenant_id=tenant_id, request=ext_request, limit=external_top_k, deadline=deadline - 0.05,
+            ))
+            phase.set_output(results)
         return [
             memory_models.ExternalMemoryItem(
                 id=str(result.memory_id or result.external_id or ""), content=result.content,
@@ -677,7 +711,7 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
         selected_hits = [item for item in local or () if item.memory_id in selected_ids]
         if selected_hits:
             try:
-                runtime_thread_manager.submit(
+                get_default_thread_manager().submit(
                     "memory-write", ManagedTaskSpec(task_name="memory-recall-hits", owner="memory"),
                     service.retrieval_service._record_hits, request=request, results=selected_hits,
                 )

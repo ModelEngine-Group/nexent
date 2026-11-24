@@ -19,8 +19,8 @@ from contracts.constants.environment import ENABLE_TELEMETRY, MONITORING_DASHBOA
 from contracts.conversation import ConversationResponse
 from contracts.errors.exceptions import TokenExpiredError
 from management.utils.managed_read import managed_read
-from management.db.client import get_monitoring_db_session
-from gateway.authentication.auth import get_current_user_id
+from infrastructure.rdb.client import get_monitoring_db_session
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
 
@@ -79,7 +79,7 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None, 
             m.model_id,
             m.model_name,
             MAX(COALESCE(m.model_type, 'llm')) AS model_type,
-            MAX(COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown')) AS display_name,
+            COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown') AS display_name,
             COUNT(*) AS request_count,
             ROUND(
                 COALESCE(
@@ -95,7 +95,7 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None, 
         WHERE {time_filter}
         {tenant_filter}
         AND m.delete_flag = 'N'
-        GROUP BY m.model_id, m.model_name
+        GROUP BY m.model_id, m.model_name, COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown')
         ORDER BY request_count DESC
     """
 

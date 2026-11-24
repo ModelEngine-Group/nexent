@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-DAILY-CLEANUP-20261117
+  change_type: requirement
+  requirement_id: OPS-MONITORING-DAILY-CLEANUP-20261117
+  title: Sweep superseded daily monitoring publications
+  description: Keep the current PostgreSQL publication per tenant, kind and date and remove superseded Elasticsearch daily documents on a schedule.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MODEL-MONITORING]
+    retired: []
+  affected_cases:
+    existing: [OPS-MODEL-MONITORING-D5-001]
+    added: []
+    modified: [OPS-MODEL-MONITORING-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [test/backend/ops/test_monitoring.py]
+    behaviors:
+    - Delete exact document IDs and handle missing or rejected deletes.
+    - Retry on the next hourly sweep without skipping other scopes.
+    reason: The existing tests did not exercise Elasticsearch deletion or periodic scheduling.
+  notes: The D3 case owns real disposable PostgreSQL and Elasticsearch resources and interleaves a running API read with publication and cleanup.

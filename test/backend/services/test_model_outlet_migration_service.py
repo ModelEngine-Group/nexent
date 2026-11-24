@@ -45,6 +45,10 @@ def test_unmatched_model_automatically_uses_agreed_defaults_and_retains_identity
 
 
 def test_old_explicit_window_and_sampling_values_override_atom_suggestions():
+    from contracts.model import ModelOutletPatchRequest
+    from management.services.model.profiles import apply_outlet_patch
+    from nexent.core.model_service.adapters.openai_chat import ModelAdapterError
+
     profile = build(row(model_name="qwen3.5-plus", model_factory="alibaba-cn",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", context_window_tokens=65536,
         max_input_tokens=32000, max_output_tokens=4096, default_output_reserve_tokens=2048,
@@ -54,14 +58,21 @@ def test_old_explicit_window_and_sampling_values_override_atom_suggestions():
     assert profile.capabilities.context.input_limit == 32000 and profile.capabilities.context.output_limit == 4096
     assert profile.context_configuration.output_reserve_tokens == 2048
     assert profile.connection.ssl_verify is False and profile.connection.timeout_seconds == 23
-    assert wire(profile)["temperature"] == wire(profile)["top_p"] == 0
+    assert profile.parameter_values["temperature"] == profile.parameter_values["top_p"] == 0
+    with pytest.raises(ModelAdapterError, match="TOP_P_OUT_OF_RANGE"):
+        wire(profile)
+    repaired = apply_outlet_patch(profile, ModelOutletPatchRequest(
+        expected_revision=profile.config_revision, parameter_values={"top_p": None}))
+    repaired_wire = wire(repaired)
+    assert repaired_wire["temperature"] == 0 and "top_p" not in repaired_wire
     from nexent.core.models.capacity_resolver import resolve_capacity
 
     legacy_capacity = resolve_capacity(model_id="qwen3.5-plus", provider="alibaba-cn", capability_profiles={},
         operator_overrides={"context_window_tokens": 65536, "max_input_tokens": 32000,
             "max_output_tokens": 4096, "default_output_reserve_tokens": 2048})
-    assert legacy_capacity.requested_output_tokens == 2048
-    assert wire(profile)["max_tokens"] == legacy_capacity.requested_output_tokens
+    assert legacy_capacity.requested_output_tokens is None
+    assert legacy_capacity.provider_input_limit_tokens == 65536
+    assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(repaired_wire)
 
 
 def test_old_deepseek_toggle_and_custom_nested_body_survive_actual_adapter():
@@ -92,7 +103,7 @@ def test_auto_effort_is_preserved_without_sending_an_auto_wire_field():
 def test_repo_model_identity_and_legacy_large_output_alias_use_current_rules():
     profile = build(row(model_repo="repo", model_name="exact", max_tokens=65536))
     assert profile.identity.request_model_id == "repo/exact"
-    assert wire(profile)["max_tokens"] == 4096
+    assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(wire(profile))
 
 
 def test_already_saved_row_is_not_recombined_with_current_toml(monkeypatch):
@@ -125,7 +136,7 @@ def test_unmatched_snapshot_declares_legacy_runtime_options_without_setting_defa
 
     profile = build(row())
     configured = LegacyInvocationOptions({"max_output_tokens": 512}, stop_sequences=["Observation:"]).resolve(profile)
-    assert wire(configured)["max_tokens"] == 512
+    assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(wire(configured))
     assert wire(configured)["stop"] == ["Observation:"]
     assert "max_output_tokens" not in profile.parameter_values
 

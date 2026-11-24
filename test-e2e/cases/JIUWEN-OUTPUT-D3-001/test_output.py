@@ -11,6 +11,80 @@ from jiuwen_resource_runtime import resource_provider,run_resources
 from jiuwen_collaboration_runtime import run_collaboration
 from jiuwen_bridge_runtime import run_worker,stop_infrastructure
 
+
+@pytest.mark.parametrize("protocol", ["native", "text"])
+@pytest.mark.parametrize("lang", ["zh", "en"])
+@pytest.mark.parametrize("scenario", ["auth", "tool_recovered", "mcp_timeout", "mcp_auth"])
+def test_failure_diagnostics_roundtrip(monkeypatch, tmp_path, protocol, lang, scenario):
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+    from management.services.conversation.service import get_conversation_history_service
+
+    private = "PRIVATE_EXCEPTION_NOT_FOR_CLIENTS"
+    if scenario == "tool_recovered":
+        original = JiuwenAdapter._business_handler
+
+        def bind(adapter, name, forward, **kwargs):
+            if name == "add":
+                def forward(**arguments):
+                    raise RuntimeError(private)
+            return original(adapter, name, forward, **kwargs)
+
+        monkeypatch.setattr(JiuwenAdapter, "_business_handler", bind)
+
+    with context_database(monkeypatch):
+        if scenario in {"mcp_timeout", "mcp_auth"}:
+            from nexent.core.utils.observer import MessageObserver
+            monkeypatch.setattr("jiuwen_resource_runtime.MessageObserver", lambda **kwargs: MessageObserver(lang=lang))
+            if scenario == "mcp_auth":
+                from jiuwen_bridge_fixture import provider
+
+                async def startup_auth_failure():
+                    async with provider("auth", "native") as (url, _):
+                        with resource_provider(tmp_path) as model_url:
+                            return await run_resources(monkeypatch, tmp_path, model_url, protocol,
+                                                       "startup_auth", mcp_url=url + "/mcp")
+
+                info, _, output, *_ = asyncio.run(startup_auth_failure())
+            else:
+                with resource_provider(tmp_path) as url:
+                    info, _, output, *_ = asyncio.run(run_resources(monkeypatch, tmp_path, url, protocol, "timeout"))
+        else:
+            info, _, output = asyncio.run(run_worker(monkeypatch, protocol,
+                "auth" if scenario == "auth" else "normal",
+                configure_run=lambda run: setattr(run.observer, "lang", lang)))
+        expected = "completed" if scenario == "tool_recovered" else "failed"
+        assert info.run_result.status == expected
+        if scenario != "tool_recovered":
+            code = {"auth": "MODEL_AUTHENTICATION_ERROR", "mcp_auth": "mcp_auth_failed",
+                    "mcp_timeout": "mcp_timeout"}[scenario]
+            assert info.run_result.error.category == code
+            if scenario == "auth":
+                assert ("模型" if lang == "zh" else "model") in info.run_result.error.safe_message.lower()
+            else:
+                assert "MCP" in info.run_result.error.safe_message
+                expected_text = (("鉴权" if lang == "zh" else "authentication") if scenario == "mcp_auth"
+                                 else ("超时" if lang == "zh" else "timed out"))
+                assert expected_text in info.run_result.error.safe_message
+        else:
+            errors = [item for item in output if item["type"] == "tool_result" and item["is_error"]]
+            assert any(item.get("error_code") == "tool_execution_error" for item in errors)
+            assert info.run_result.error is None
+        assistant, saved, wire = asyncio.run(persist_output(monkeypatch, info, output))
+        assert assistant["status"] == expected
+        public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines() if line.startswith("data:")]
+        restored = get_conversation_history_service(info.conversation_id, "owner")[0]
+        history = next(item for item in restored["message"] if item["role"] == "assistant")["message"]
+        assert private not in json.dumps([saved, public, history])
+        if scenario != "tool_recovered":
+            live_error = next(item for item in public if item["type"] == "error")
+            old_error = next(item for item in history if item["type"] == "error")
+            for key in ("content", "error_code", "retryable", "request_id"):
+                assert live_error[key] == old_error[key]
+            assert live_error["error_code"] == code
+            assert not any(item["type"] == "final_answer" for item in public)
+        else:
+            assert not any(item["type"] == "error" for item in public)
+
 @pytest.fixture(scope="module",autouse=True)
 def cleanup():
     yield
@@ -62,6 +136,8 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
             assert result["result"]
         if protocol=="native":assert any(e["provider_call_id"] for e in tools)
         assistant,saved,wire=asyncio.run(persist_output(monkeypatch,info,output))
+        if resource == "chain" and protocol == "native":
+            assert_defaulted_skill_history(info, output, state)
         public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines()
                   if line.startswith("data:")]
         forbidden = {"model_output", "tool_result", "step_observation", "run_terminal"}
@@ -111,7 +187,7 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
 
 @pytest.mark.parametrize("protocol", ["native", "text"])
 def test_clarification_terminal_history_before_and_after_submission(monkeypatch, protocol):
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.models import ConversationMessage, ConversationMessageUnit
     from management.db.conversation.repository import create_conversation_message, get_conversation_history
     from management.services.conversation.service import get_conversation_history_service
@@ -170,3 +246,85 @@ def test_clarification_terminal_history_before_and_after_submission(monkeypatch,
         assert response["unit_index"] == card["unit_index"]
         check_public_history()
         assert records() == before
+
+
+def assert_defaulted_skill_history(info, output, state):
+    """Prove actual SDK formatting survives the backend-bound cross-turn loader."""
+    from management.db.conversation.repository import get_historical_context
+    from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
+    from nexent.core.agents.context.action_history import register_historical_results
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+
+    call = next(event for event in output if event["type"] == "tool"
+                and event.get("tool_name") == "read_skill_md")
+    assert call["tool_arguments"] == {"skill_name": "fixture_skill", "additional_files": None}
+    assert json.loads(call["raw_arguments"]) == {"skill_name": "fixture_skill"}
+    assert call["provider_call_id"] == "fixture_read_skill_md"
+    assert call["source_protocol"] == "model_native_fc"
+    assert call["call_index"] == 0 and call["call_count"] == 1 and call["call_group_id"]
+    result = next(event for event in output if event["type"] == "tool_result"
+                  and event["local_call_id"] == call["local_call_id"])
+    assert result["provider_call_id"] == call["provider_call_id"]
+    assert "SKILL_GUIDE_MARKER" in result["result"]
+    assert any(message.get("tool_call_id") == call["provider_call_id"]
+               for request in state["requests"] for message in request["messages"])
+    history = get_historical_context(info.conversation_id, None, "owner", "spike-tenant",
+                                     before_message_index=2)
+    assert history and len(history["conversation_turns"]) == 1
+    item = ContextItem.from_input(ContextItemInput(id="restored", type="conversation_turn",
+                                                  content=history["conversation_turns"][0]))
+    messages = ContextManager(message_format="openai_chat_completions").build_context_messages([item])
+    restored_call = next(tool for message in messages for tool in message.get("tool_calls", [])
+                         if tool["id"] == call["provider_call_id"])
+    assert json.loads(restored_call["function"]["arguments"]) == {"skill_name": "fixture_skill"}
+    restored_result = next(message for message in messages
+                           if message.get("tool_call_id") == call["provider_call_id"])
+    assert restored_result["role"] == "tool" and restored_result["content"] == result["result"]
+    store = ExecutionHistory()
+    register_historical_results([item], store, "restored-owner")
+    result_record = next(record for record in item.content['execution_records']
+                         if record['record_type'] == 'tool_result' and record['tool_call_id'] == call['local_call_id'])
+    reference = f"message:{item.content['assistant_message_id']}/unit-index:{result_record['unit_index']}"
+    assert json.loads(store.read('restored-owner', reference))['text'] == result['result']
+
+
+@pytest.mark.parametrize("protocol", ["native", "text"])
+def test_persisted_original_is_readable_by_fresh_codeagent(
+    monkeypatch, tmp_path, protocol
+):
+    from execution_owner_runtime import run_historical_reader
+    from management.db.conversation.repository import (
+        get_conversation_history,
+        get_historical_context,
+    )
+
+    with context_database(monkeypatch):
+        with monkeypatch.context() as seed:
+            info, output, state = asyncio.run(
+                run_historical_reader(
+                    seed, None, None, None, seed=True, protocol=protocol
+                )
+            )
+        assert state["business_calls"] == 1
+        assistant, _, _ = asyncio.run(persist_output(monkeypatch, info, output))
+        before = get_conversation_history(info.conversation_id, "owner")
+        historical = get_historical_context(
+            info.conversation_id, None, "owner", "spike-tenant", before_message_index=2
+        )
+        result = next(
+            record
+            for turn in historical["conversation_turns"]
+            for record in turn["execution_records"]
+            if record["record_type"] == "execution_result"
+        )
+        event = json.loads(result["content"])
+        reference = (
+            f"message:{assistant['message_id']}/unit-index:{result['unit_index']}"
+        )
+        asyncio.run(
+            run_historical_reader(
+                monkeypatch, historical, reference, event["content"], protocol=protocol
+            )
+        )
+        assert get_conversation_history(info.conversation_id, "owner") == before
+        assert state["business_calls"] == 1

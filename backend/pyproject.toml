@@ -9,9 +9,12 @@ dependencies = [
     "python-multipart>=0.0.9",
     "email-validator>=2.0.0",
     "aiohttp>=3.8.0",
+    "httpx>=0.28.1,<0.29",
+    "websockets>=15.0.1,<16",
     "nest_asyncio>=1.5.6",
     "authlib>=1.3.0",
     "psycopg2-binary>=2.9.9",
+    "asyncpg==0.30.0",
     "PyJWT>=2.8.0",
     "sqlalchemy~=2.0.37",
     "greenlet<3.5.0",
@@ -21,10 +24,9 @@ dependencies = [
     "rapidfuzz>=3.0.0",
     "jsonref>=1.1.0",
     "ruamel-yaml==0.19.1",
-    "redis>=5.0.0",
+    "redis>=5.0.0,<8.0.0",
     "fastmcp>=2.14.2,<3.0",
     "langchain>=0.3.26",
-    "scikit-learn>=1.0.0",
     "numpy>=1.24.0",
     "defusedxml>=0.7.1",
     "openjiuwen==0.1.19",
@@ -32,8 +34,6 @@ dependencies = [
     "python-docx>=1.1.0",
     "xlrd>=2.0.1",
     "croniter>=2.0.0",
-    "matplotlib>=3.9.0,<3.12",
-    "reportlab>=4.2.0,<5.1",
     "charset-normalizer>=3.4.0",
 ]
 
@@ -60,9 +60,36 @@ test = [
     "unittest2",
     "mock",
     "pytest-mock",
+    "fakeredis[lua]>=2.31,<3",
+    # Keep redis-py below 8.2 until fakeredis releases the fix for issue #636.
+    "redis<8.2",
     "httpx>=0.28.1",
     "selenium",
     "botocore"
+]
+
+[dependency-groups]
+management = [
+    "scikit-learn>=1.0.0",
+    "matplotlib>=3.9.0,<3.12",
+    "reportlab>=4.2.0,<5.1",
+]
+ops = [
+    "bcrypt>=4.2,<6",
+    "elasticsearch==8.17.2",
+    "fastapi>=0.115.12,<=0.141.1",
+    "greenlet<3.5.0",
+    "opentelemetry-exporter-otlp>=1.20",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+    "psycopg2-binary>=2.9.9",
+    "pydantic[email]>=2.11.1",
+    "PyJWT>=2.8",
+    "python-dotenv>=1.1",
+    "python-multipart>=0.0.20",
+    "redis>=5",
+    "sqlalchemy~=2.0.37",
+    "uvicorn>=0.34",
 ]
 
 [tool.setuptools]
@@ -71,6 +98,7 @@ packages = []
 # CPU is the default; select the NVIDIA index by name when needed.
 [tool.uv]
 required-version = ">=0.13.6"
+default-groups = ["management"]
 preview-features = ["index-by-name"]
 # PyTorch also hosts older shared dependencies; fall through when incompatible.
 index-strategy = "unsafe-first-match"

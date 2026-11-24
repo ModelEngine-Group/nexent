@@ -25,6 +25,8 @@ class ExecutionRecord:
     attempted: bool = False
     called: bool = False
     persisted: bool = False
+    model_action: dict | None = None
+    model_view: dict | None = None
     ready: Event = field(default_factory=Event)
     summary_lock: Lock = field(default_factory=Lock)
 
@@ -32,29 +34,83 @@ class ExecutionRecord:
     def text(self) -> str:
         return result_text(self.fields)
 
-    def payload(self) -> dict[str, str]:
+    def payload(self) -> dict[str, Any]:
         payload = {"content": self.text}
         if self.summary:
             payload["summary"] = self.summary
+        if self.model_action is not None:
+            payload["model_action"] = self.model_action
+        if self.model_view is not None:
+            payload["model_view"] = self.model_view
         return payload
+
+
+@dataclass(frozen=True)
+class HistoricalExecutionResult:
+    owner: str
+    text: str
+    persisted: bool = False
 
 
 class ExecutionHistory:
     """One trusted run scope; ownership cannot be supplied by model arguments."""
 
-    def __init__(self, read_persisted: Callable[[int, int], str] | None = None):
+    def __init__(self, read_persisted: Callable[[int, int], str] | None = None, *,
+                 read_conversation_result: Callable[[int, int], str] | None = None,
+                 discover_summary_sources: Callable[[int, int], dict] | None = None):
         self._lock = RLock()
         self._read_persisted = read_persisted
+        self._read_conversation_result = read_conversation_result
+        self._discover_summary_sources = discover_summary_sources
+        self._persisted_owners: set[str] = set()
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
+        self._restored: dict[tuple[str, str], HistoricalExecutionResult] = {}
         self._read_chars: dict[str, int] = {}
         self._rendered_budget: dict[str, int | None] = {}
+
+    @property
+    def has_conversation_reader(self) -> bool:
+        return self._read_conversation_result is not None
+
+    def authorize_persisted_reads(self, owner: str) -> None:
+        """Bind a runtime owner to the backend-scoped callback, never to summary text."""
+        if self.has_conversation_reader:
+            with self._lock:
+                self._persisted_owners.add(owner)
 
     def register(self, owner: str, fields: dict[str, str]) -> str:
         key = uuid4().hex
         with self._lock:
             self._records[key] = ExecutionRecord(owner, dict(fields))
         return key
+
+    def restore(self, owner: str, message_id: int, unit_index: int, fields: dict[str, str]) -> None:
+        """Register one backend-authorized canonical execution result."""
+        self.restore_many(owner, [(message_id, unit_index, fields)])
+
+    def restore_many(self, owner: str, sources) -> None:
+        self.restore_results(owner, [(message, index, result_text(fields)) for message, index, fields in sources])
+
+    def restore_results(self, owner: str, sources) -> None:
+        """Atomically register only actual results selected by the trusted history loader."""
+        pending = {}
+        for message, index, text in sources:
+            if type(message) is not int or message <= 0 or type(index) is not int or index < 0:
+                raise ValueError("Invalid persisted execution reference")
+            if not isinstance(text, str):
+                raise ValueError("Invalid persisted execution content")
+            reference = f"message:{message}/unit-index:{index}"
+            record = HistoricalExecutionResult(owner, text)
+            if reference in pending and pending[reference] != record:
+                raise PermissionError("Conflicting persisted execution reference")
+            pending[reference] = record
+        with self._lock:
+            for reference, record in pending.items():
+                existing = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
+                if existing is not None and existing.text != record.text:
+                    raise PermissionError("Conflicting persisted execution reference")
+            self._restored.update({(owner, reference): record for reference, record in pending.items()})
 
     def get(self, key: str) -> ExecutionRecord | None:
         with self._lock:
@@ -65,7 +121,15 @@ class ExecutionHistory:
             raise ValueError("A persisted parent message is required")
         if isinstance(unit_index, bool) or not isinstance(unit_index, int) or unit_index < 0:
             raise ValueError("Invalid unit index")
-        reference = f"message:{message_id}/unit-index:{unit_index}"
+        self._bind_reference(key, f"message:{message_id}/unit-index:{unit_index}")
+
+    def bind_run(self, key: str, run_id: str, sequence: int) -> None:
+        """Expose an authenticated journal fact to its owning worker."""
+        if not re.fullmatch(r"[0-9a-f]{32}", run_id) or type(sequence) is not int or sequence < 1:
+            raise ValueError("Invalid run execution reference")
+        self._bind_reference(key, f"run:{run_id}/execution:{sequence}")
+
+    def _bind_reference(self, key: str, reference: str) -> None:
         with self._lock:
             record = self._records[key]
             if record.reference and record.reference != reference:
@@ -91,19 +155,26 @@ class ExecutionHistory:
             self._rendered_budget[owner] = None if max_rendered_chars is None else max(0, max_rendered_chars)
 
     def read(self, owner: str, reference: str, offset: int = 0, max_chars: int = 4000) -> str:
-        if not re.fullmatch(r"message:[1-9]\d*/unit-index:\d+", reference):
+        if reference != "summary" and not re.fullmatch(
+                r"(?:message:[1-9]\d*/unit-index:\d+|run:[0-9a-f]{32}/execution:[1-9]\d*)", reference):
             raise ValueError("Invalid execution reference")
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("Invalid character offset")
         if isinstance(max_chars, bool) or not isinstance(max_chars, int) or not 0 < max_chars <= 16000:
             raise ValueError("max_chars must be between 1 and 16000")
         with self._lock:
-            record = self._records.get(self._references.get(reference, ""))
-            if record is None or record.owner != owner:
+            if reference == "summary":
+                return self._read_summary_sources(owner, offset, max_chars)
+            record = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
+            backend_read = (reference.startswith("message:") and self.has_conversation_reader
+                            and owner in self._persisted_owners
+                            and (record is None or isinstance(record, HistoricalExecutionResult)))
+            if not backend_read and (record is None or record.owner != owner):
                 raise PermissionError("Execution result is unavailable or not authorized")
-            if record.persisted and self._read_persisted is not None:
+            if backend_read or record.persisted and self._read_persisted is not None:
                 message, index = reference.split("/unit-index:")
-                text = self._read_persisted(int(message.removeprefix("message:")), int(index))
+                reader = self._read_conversation_result if backend_read else self._read_persisted
+                text = reader(int(message.removeprefix("message:")), int(index))
                 if not isinstance(text, str):
                     raise ValueError("Invalid persisted execution content")
             else:
@@ -140,10 +211,30 @@ class ExecutionHistory:
         return payload
 
 
+    def _read_summary_sources(self, owner, offset, max_chars):
+        if owner not in self._persisted_owners or self._discover_summary_sources is None:
+            raise PermissionError("Summary source discovery is unavailable or not authorized")
+        available = min(max_chars, 16000 - self._read_chars.get(owner, 0))
+        if available <= 0:
+            raise ValueError("Execution read budget exhausted for this action")
+        payload = json.dumps(self._discover_summary_sources(offset, available), ensure_ascii=False)
+        if len(payload) > available:
+            raise ValueError("Source discovery exceeded the requested page size")
+        budget = self._rendered_budget.get(owner)
+        rendered = len(escape(payload)) + 80
+        if budget is not None and rendered > budget:
+            raise ValueError("Insufficient context budget for execution source metadata")
+        self._read_chars[owner] = self._read_chars.get(owner, 0) + len(payload)
+        if budget is not None:
+            self._rendered_budget[owner] = budget - rendered
+        return payload
+
+
 
 def summarize_record(record: ExecutionRecord, model: Any, input_limit: int) -> str | None:
     """Generate at most once per record; never summarize truncated input."""
     from nexent.core.agents.contracts.context import ContextMessage
+
     from .llm_summary import _summary_model_call_context
 
     with record.summary_lock:

@@ -43,9 +43,9 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from gateway.authentication.auth import calculate_expires_at, generate_session_jwt
-from infrastructure.security.passwords import hash_password
-from management.db.client import get_db_session
+from management.services.permission.identity.session import calculate_expires_at, generate_session_jwt
+from management.utils.account_passwords import hash_password
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import create_account, get_account_by_email
 from management.db.identity.oauth_account import (
     delete_oauth_account,
@@ -340,7 +340,9 @@ def generate_pending_oauth_token(
         "iat": now,
         "exp": now + expires_in,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    from gateway.identity.token_codec import encode_token
+
+    return encode_token(payload, key=JWT_SECRET)
 
 
 def get_pending_oauth_info(payload: PendingOAuthIdentity) -> Dict[str, Any]:

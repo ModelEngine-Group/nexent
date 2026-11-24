@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 
 from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
 from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
-from gateway.authentication.auth import authenticate, get_current_user_id
+from management.services.permission.identity.session import authenticate, get_current_user_id
 from management.utils.managed_read import managed_read
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.groups import (
@@ -22,6 +22,7 @@ from management.services.permission.identity.groups import (
     get_groups_by_tenant, update_group_members
 )
 from management.services.permission.identity.tenants import get_tenant_info
+from management.services.permission.identity.session import get_current_user_id
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_tenant_scope
 

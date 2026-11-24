@@ -101,8 +101,6 @@ assert_eq "zh" "$(DEPLOYMENT_LANG="" LC_ALL="zh_CN.UTF-8" LC_MESSAGES="" LANGUAG
 assert_eq "en" "$(DEPLOYMENT_LANG="en" LC_ALL="" LC_MESSAGES="" LANGUAGE="" LANG="zh_CN.UTF-8" deployment_detect_language)" "DEPLOYMENT_LANG should force English"
 assert_eq "zh" "$(DEPLOYMENT_LANG=zh bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache Chinese"
 assert_eq "en" "$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache forced English"
-assert_eq "后端 API 服务" "$(DEPLOYMENT_LANGUAGE=zh deployment_i18n image_build.detail.main)" "image build TUI details should support Chinese"
-assert_eq "backend API service" "$(DEPLOYMENT_LANGUAGE=en deployment_i18n image_build.detail.main)" "image build TUI details should preserve English"
 
 ZH_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$ZH_DEPLOY_HELP" "用法：" "deploy wrapper help should follow Chinese locale"
@@ -142,9 +140,16 @@ ZH_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/..
 assert_contains "$ZH_OFFLINE_DRY_RUN" "=== DRY RUN 模式 ===" "offline dry-run should follow Chinese locale"
 assert_contains "$ZH_OFFLINE_DRY_RUN" "目标：docker" "offline dry-run target label should follow Chinese locale"
 
-LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,monitoring --monitoring-provider langfuse --image-source general --target docker --dry-run)"
-assert_contains "$LANGFUSE_OFFLINE_DRY_RUN" "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" "offline Langfuse package should use the Quay MinIO image"
-assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" "docker.io/minio/minio" "offline Langfuse package should not use the Docker Hub MinIO image"
+for image_source in general mainland; do
+  expected_minio="$(APP_VERSION=v2.2.0; source "$SCRIPT_DIR/../env/image-source.$image_source.env"; printf '%s' "$MINIO_IMAGE")"
+  for target in docker k8s all; do
+    LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" \
+      --version v2.2.0 --platform amd64 --components monitoring --monitoring-provider langfuse \
+      --image-source "$image_source" --image-registry-prefix registry.local/nexent --target "$target" --dry-run)"
+    assert_eq '1' "$(grep -Fxc "registry.local/nexent/$expected_minio" <<< "$LANGFUSE_OFFLINE_DRY_RUN")" "offline $target should list the selected MinIO image once for $image_source"
+    assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" 'quay.io/minio/minio:' "offline $target should only use the selected mirror for $image_source"
+  done
+done
 
 if DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --unknown >/tmp/nexent-image-build-zh-invalid.log 2>&1; then
   echo "FAIL: unknown image build option should fail"
@@ -233,7 +238,9 @@ PREFIXED_HELM_VALUES="$TMP_DIR/prefixed-generated-values.yaml"
 deployment_render_helm_values "$PREFIXED_HELM_VALUES"
 PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
-assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-management"' "helm values should use prefixed Management repositories"
+assert_contains "$(sed -n '/^nexent-mcp:$/,/^[^ ]/p' "$PREFIXED_HELM_VALUES")" 'repository: "registry.local/nexent/nexent/nexent-management"' "the MCP chart should use the prefixed Management image"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-ops"' "helm values should use prefixed Ops repositories"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
 unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
@@ -330,7 +337,8 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
 deployment_render_helm_values "$LOCAL_HELM_VALUES"
 LOCAL_HELM_CONTENT="$(cat "$LOCAL_HELM_VALUES")"
-assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
+assert_contains "$(sed -n '/^nexent-mcp:$/,/^[^ ]/p' "$LOCAL_HELM_VALUES")" 'repository: "nexent/nexent-management"' "local-latest should render the shared Management image for MCP"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-ops\"" "local-latest should render the Ops image"
 assert_contains "$LOCAL_HELM_CONTENT" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
 assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
 
@@ -422,9 +430,9 @@ assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-runtime/templates/deplo
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend-image" "mcp deployment should include backend image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-env" "mcp deployment should include env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend:" "mcp deployment should not keep removed backend rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend-image" "northbound deployment should include backend image rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-env" "northbound deployment should include env rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-gateway-image" "northbound deployment should include gateway image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-env" "northbound deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web-image" "web deployment should include web image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-env" "web deployment should include env rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-data-process-image" "data-process deployment should include data-process image rollout annotation"
@@ -535,11 +543,11 @@ EXPECTED_LANGFUSE_AUTH_HEADER="Basic $(printf "%s:%s" "pk-test" "sk-test" | base
 assert_eq "$EXPECTED_LANGFUSE_AUTH_HEADER" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER")" "monitoring.env should refresh derived Langfuse OTLP auth header"
 assert_eq "../assets/monitoring/otel-collector-langfuse-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record Docker collector config file"
 assert_eq "http://localhost:3001" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "empty monitoring dashboard URL should use the selected provider default"
-deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL" "https://monitor.example.com/grafana"
-deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider grafana --app-version latest
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL" "https://monitor.example.com/custom"
+deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider phoenix --app-version latest
 deployment_prepare_monitoring_env docker
-assert_eq "https://monitor.example.com/grafana" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "explicit monitoring dashboard URL should be preserved"
-deployment_prepare_config --components infrastructure,application --monitoring-provider grafana --app-version latest
+assert_eq "https://monitor.example.com/custom" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "explicit monitoring dashboard URL should be preserved"
+deployment_prepare_config --components infrastructure,application --monitoring-provider phoenix --app-version latest
 deployment_prepare_monitoring_env docker
 assert_eq "" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "disabled monitoring should clear dashboard URL"
 while IFS='=' read -r key _; do
@@ -600,8 +608,6 @@ assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'deployment_update_monitoring_
 assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-phoenix-config.yml' "common deploy should map phoenix to its collector config"
 assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-langfuse-config.yml' "common deploy should map langfuse to its collector config"
 assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-langsmith-config.yml' "common deploy should map langsmith to its collector config"
-assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-grafana-config.yml' "common deploy should map grafana to its collector config"
-assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-zipkin-config.yml' "common deploy should map zipkin to its collector config"
 assert_not_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'update_env_var "OTEL_EXPORTER_OTLP_ENDPOINT"' "common monitoring prep should not write monitoring keys to deploy/env/.env"
 
 DOCKER_MONITORING_CONFIG_BLOCK="$(awk '/docker_monitoring_active_services\(\)/,/^pull_mcp_image\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
@@ -632,8 +638,8 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_contains "$RUNTIME_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
   assert_contains "$CONFIG_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker config service should mount external memory provider plugins"
   assert_contains "$RUNTIME_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker runtime service should mount external memory provider plugins"
-  assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-northbound:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
-  assert_not_contains "$(awk '/^  nexent-northbound:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
+  assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-gateway:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
+  assert_not_contains "$(awk '/^  nexent-gateway:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
   assert_contains "$WEB_COMPOSE_BLOCK" '${ROOT_DIR}/project-config:/mnt/nexent-data/project-config' "docker web should mount persistent project configuration"
   assert_contains "$WEB_COMPOSE_BLOCK" 'PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config' "docker web should read and write the persistent project configuration path"
@@ -828,9 +834,6 @@ assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "ENABLE_TELEMETRY=" "root .env.e
 assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "MONITORING_PROVIDER=" "root .env.example should not contain monitoring provider"
 assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "OTEL_EXPORTER_OTLP_ENDPOINT=" "root .env.example should not contain OTLP endpoint"
 assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "TELEMETRY_SAMPLE_RATE=" "root .env.example should not contain telemetry sampling"
-assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "GRAFANA_ADMIN_PASSWORD=nexent@4321" "docker monitoring defaults should define Grafana admin password"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexent@4321}' "docker compose Grafana password fallback should match monitoring.env.example"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "adminPassword: nexent@4321" "k8s monitoring Grafana password should match docker monitoring default"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_POSTGRES_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse postgres password"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_POSTGRES_PASSWORD:-nexent@4321' "docker compose Langfuse postgres password fallback should match monitoring.env.example"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "password: nexent@4321" "k8s monitoring Langfuse postgres password should match docker monitoring default"
@@ -839,8 +842,8 @@ assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'quay.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}' "docker compose Langfuse should use the Quay MinIO image"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: quay.io/minio/minio" "k8s Langfuse should use the Quay MinIO image"
+assert_eq '    image: ${MINIO_IMAGE}' "$(grep -A1 '^  langfuse-minio:$' "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml" | tail -n 1)" "docker compose Langfuse should use the core MinIO image reference"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: nexent/minio" "standalone Helm Langfuse should default to the general MinIO mirror"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
@@ -1355,7 +1358,7 @@ assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should reset to disabl
 
 assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase" "selected deployment must not start retired auth services"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/secrets.yaml")" ".Values.secrets.jwtSecret" "JWT signing secret must be independent of optional components"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" "/opt/backend/account_admin.py bootstrap-su" "K8s bootstrap must use local accounts"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "python -m management.cli.account bootstrap-su" "K8s bootstrap must use local accounts"
 
 assert_not_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "bootstrap should not print plaintext credentials"
 assert_not_contains "$K8S_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "K8s bootstrap should not print plaintext credentials"
@@ -1367,8 +1370,9 @@ assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must kee
 assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
 # The host hook delegates to Shell without looking up any Python interpreter.
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
-bash() { printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
+bash() { printf '%s\n' "$NEXENT_IMAGE" "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
 deployment_upgrade_local_accounts docker
+assert_eq "$NEXENT_MANAGEMENT_IMAGE" "$(head -n 1 "$AUTH_HOOK_ARGUMENTS")" "deployment must select Management for the migration worker"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.sh" "deployment must use the Shell migration coordinator"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete migration before rollout"
@@ -1405,15 +1409,26 @@ else
   assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
 fi
 assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
-assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
-for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-postgresql/templates/deployment.yaml")" '/docker-entrypoint-initdb.d/' "PostgreSQL must leave application SQL initialization to Management"
+for renderer in yaml_quote env_or_default render_yaml_literal_file sql_files_checksum render_infrastructure_runtime_values render_k8s_runtime_config_values; do
   eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
 done
 SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
-assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must not render application initialization SQL"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+render_k8s_runtime_config_values "$TMP_DIR/application-sql-values.yaml"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'init: |' "Management values must include baseline SQL"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'CREATE SCHEMA IF NOT EXISTS nexent;' "Management values must include the real baseline"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'migrations:' "Management values must include versioned SQL"
+original_sql_checksum="$(sql_files_checksum)"
+cp "$SQL_INIT_FILE" "$TMP_DIR/init-checksum.sql"
+printf '\n-- initialization checksum regression\n' >> "$TMP_DIR/init-checksum.sql"
+SQL_INIT_FILE="$TMP_DIR/init-checksum.sql"
+assert_not_eq "$original_sql_checksum" "$(sql_files_checksum)" "Management rollout checksum must include init.sql"
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
 
 export AUTH_HOOK_EXIT=17
 if deployment_upgrade_local_accounts docker; then

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.util
 import time
 import types
@@ -1261,7 +1263,8 @@ def test_delete_documents_success(elasticsearch_core_instance):
         mock_delete.assert_called_once()
 
 
-def test_create_chunk_success(elasticsearch_core_instance):
+@pytest.mark.parametrize("refresh", ["wait_for", False])
+def test_create_chunk_success(elasticsearch_core_instance, refresh):
     """Test creating a single chunk document."""
     elasticsearch_core_instance.client = MagicMock()
     elasticsearch_core_instance.client.index.return_value = {
@@ -1271,11 +1274,13 @@ def test_create_chunk_success(elasticsearch_core_instance):
     }
 
     payload = {"id": "chunk-1", "content": "A"}
-    result = elasticsearch_core_instance.create_chunk("kb-index", payload)
+    options = {} if refresh == "wait_for" else {"refresh": refresh}
+    result = elasticsearch_core_instance.create_chunk("kb-index", payload, **options)
 
     assert result["id"] == "es-id-1"
     assert result["result"] == "created"
     elasticsearch_core_instance.client.index.assert_called_once()
+    assert elasticsearch_core_instance.client.index.call_args.kwargs["refresh"] == refresh
 
 
 def test_update_chunk_success(elasticsearch_core_instance):
@@ -1691,6 +1696,18 @@ def test_semantic_search_sets_knn_parameters(elasticsearch_core_instance):
         assert search_query["knn"]["num_candidates"] == 8
         assert search_query["size"] == 4
         assert search_query["_source"]["excludes"] == ["embedding"]
+
+
+def test_hybrid_search_uses_a_precomputed_vector_with_both_filters(elasticsearch_core_instance):
+    isolation = {"term": {"metadata.tenant_id.keyword": "tenant-a"}}
+    with patch.object(elasticsearch_core_instance, "exec_query", return_value=[]) as execute:
+        assert elasticsearch_core_instance.hybrid_search(
+            ["memory-index"], "query", filter=isolation, query_embedding=[0.1, 0.2],
+        ) == []
+    first, second = (call.args[1] for call in execute.call_args_list)
+    assert first["query"]["bool"]["filter"] == [isolation]
+    assert second["knn"]["filter"] == isolation
+    assert second["knn"]["query_vector"] == [0.1, 0.2]
 
 
 def test_hybrid_search_success(elasticsearch_core_instance):

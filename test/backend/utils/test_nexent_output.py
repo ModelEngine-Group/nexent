@@ -4,7 +4,7 @@
 import json
 
 import pytest
-from infrastructure.nexent_output import (
+from management.services.conversation.nexent_output import (
     NexentOutputAdapter,
     NexentSSEAdapter,
     adapt_nexent_stream,
@@ -131,6 +131,27 @@ def test_history_is_normalized_once_without_modifying_source_or_interpreting_lit
     assert output[0]["content"] == literal
     assert [e["type"] for e in output] == ["model_output_thinking", "step_count", "final_answer"]
     assert normalize_nexent_history(output, status) == (output, status)
+
+
+def test_compacted_native_history_matches_legacy_chunks():
+    step = event("step_count", 1, content="1", step_id="first")
+    thought = event("model_output", 2, content="Review ", block_id="work", step_id="first")
+    next_thought = {**thought, "sequence": 3, "content": "the plan"}
+    final = body(4, step_id="last")
+    result = terminal(5)
+    legacy = saved([step, thought, next_thought, final, result])
+    compacted = [legacy[0],
+                 {**legacy[1], "type": "model_output_thinking", "content": json.dumps(
+                     {**thought, "type": "model_output_thinking", "content": "Review the plan"})},
+                 {**legacy[3], "type": "model_output_thinking", "content": json.dumps(
+                     {**final, "type": "model_output_thinking"})}, legacy[-1]]
+
+    for rows in (legacy, compacted):
+        output, status = normalize_nexent_history(rows, "completed")
+        assert status == "completed"
+        assert "".join(e["content"] for e in output if e["type"] == "model_output_thinking") == "Review the plan"
+        answer = [e for e in output if e["type"] == "final_answer"]
+        assert len(answer) == 1 and answer[0]["step_id"] == "last" and answer[0]["content"] == "Answer"
 
 
 @pytest.mark.asyncio

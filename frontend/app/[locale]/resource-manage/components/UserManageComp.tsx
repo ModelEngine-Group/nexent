@@ -66,6 +66,7 @@ import TagList from "./resources/TagList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
+import TenantMemorySettingsTab from "./resources/TenantMemorySettingsTab";
 import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -77,8 +78,6 @@ import {
   getStrengthLevel,
   validatePassword as validatePasswordUtil,
 } from "@/lib/utils";
-import ProjectConfigTab from "./resources/projectConfig";
-import TenantMemorySettingsTab from "./resources/TenantMemorySettingsTab";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 // Default page size for pagination
@@ -1075,16 +1074,6 @@ export default function UserManageComp() {
   const params = useParams();
   const locale = (params as { locale?: string })?.locale || "en";
 
-  const [open, setOpen] = useState(false);
-
-  const showModal = () => {
-    setOpen(true);
-  };
-
-  const hideModal = () => {
-    setOpen(false);
-  };
-
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || hasRole(user, "SU");
   const readOnly = hasRole(user, "OPS") && !hasRole(user, "ADMIN", "SU");
@@ -1249,24 +1238,6 @@ export default function UserManageComp() {
             </p>
           </div>
         </div>
-        {isSuperAdmin && (
-          <div className="flex items-center gap-3">
-            <Button type="default" onClick={showModal}>
-              {t("project.config")}
-            </Button>
-            <Modal
-              title={t("project.config")}
-              open={open}
-              onOk={hideModal}
-              onCancel={hideModal}
-              footer={null}
-              width={800}
-              destroyOnHidden
-            >
-              <ProjectConfigTab showPlatformQuota />
-            </Modal>
-          </div>
-        )}
       </div>
       {readOnly && <Alert type="info" title={t("ops.readOnly")} showIcon />}
       <div className="flex-1 min-h-0 h-full">
@@ -1365,12 +1336,22 @@ export default function UserManageComp() {
                         {
                           key: "groups",
                           label: t("tenantResources.tabs.groups") || "Groups",
-                          children: <GroupList tenantId={tenantId} readOnly={readOnly} />,
+                          children: (
+                            <GroupList
+                              tenantId={tenantId}
+                              readOnly={readOnly}
+                            />
+                          ),
                         },
                         {
                           key: "models",
                           label: t("tenantResources.tabs.models") || "Models",
-                          children: <ModelList tenantId={tenantId} readOnly={readOnly} />,
+                          children: (
+                            <ModelList
+                              tenantId={tenantId}
+                              readOnly={readOnly}
+                            />
+                          ),
                         },
                         // When AIDP knowledge is enabled, the knowledge tab is managed
                         // via the unified `/knowledges` entry and must not appear here.
@@ -1381,14 +1362,24 @@ export default function UserManageComp() {
                                 label:
                                   t("tenantResources.tabs.knowledge") ||
                                   "Knowledge Base",
-                                children: <KnowledgeList tenantId={tenantId} readOnly={readOnly} />,
+                                children: (
+                                  <KnowledgeList
+                                    tenantId={tenantId}
+                                    readOnly={readOnly}
+                                  />
+                                ),
                               },
                             ]
                           : []),
                         {
                           key: "agents",
                           label: t("tenantResources.tabs.agents") || "Agents",
-                          children: <AgentList tenantId={tenantId} readOnly={readOnly} />,
+                          children: (
+                            <AgentList
+                              tenantId={tenantId}
+                              readOnly={readOnly}
+                            />
+                          ),
                         },
                         ...(tenantId === user?.tenantId
                           ? [
@@ -1407,12 +1398,19 @@ export default function UserManageComp() {
                         {
                           key: "mcp",
                           label: t("tenantResources.tabs.mcp") || "MCP",
-                          children: <McpList tenantId={tenantId} readOnly={readOnly} />,
+                          children: (
+                            <McpList tenantId={tenantId} readOnly={readOnly} />
+                          ),
                         },
                         {
                           key: "skills",
                           label: "Skills",
-                          children: <SkillList tenantId={tenantId} readOnly={readOnly} />,
+                          children: (
+                            <SkillList
+                              tenantId={tenantId}
+                              readOnly={readOnly}
+                            />
+                          ),
                         },
                         {
                           key: "tags",

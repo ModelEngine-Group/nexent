@@ -124,5 +124,6 @@ def test_effective_fixed_value_and_range_still_reject_user_changes():
     assert resolve(catalog).parameter_values["temperature"] == 0.6
     with pytest.raises(ParameterValidationError, match="FIXED_PARAMETER"):
         resolve(catalog, {"temperature": 0.9})
+    range_limited = parameter(0.2, schema={"type": "number", "minimum": 0, "maximum": 1.5})
     with pytest.raises(ParameterValidationError, match="PARAMETER_VALUE_INVALID"):
-        resolve(definitions(model={"parameters": [parameter(0.2)]}), {"temperature": 3})
+        resolve(definitions(model={"parameters": [range_limited]}), {"temperature": 1.8})

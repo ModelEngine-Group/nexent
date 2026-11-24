@@ -1,5 +1,4 @@
 {{- $global := default dict .Values.global -}}
-{{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $logsStorage := default dict $sharedStorage.logs -}}
@@ -24,9 +23,16 @@ spec:
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
-        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
-        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "managementImage" "" .Values.global | quote }}
     spec:
+      initContainers:
+        - name: wait-for-management
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - until python -c "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://nexent-config:5010/health/ready', timeout=3).close()" 2>/dev/null; do sleep 2; done
       containers:
         - name: nexent-mcp
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -39,7 +45,8 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/mcp_service.py
+            - -m
+            - backend.http.mcp_service
           envFrom:
             - configMapRef:
                 name: nexent-config
@@ -48,9 +55,20 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
+            - name: GATEWAY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_SERVICE_URL
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
-              value: "wait"
+              value: "off"
+            - name: OPS_MONITORING_ENABLED
+              value: "false"
+            - name: PYTHON_DOTENV_DISABLED
+              value: "1"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy
@@ -58,9 +76,6 @@ spec:
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
           volumeMounts:
-            - name: nexent-sql-files
-              mountPath: /opt/nexent/sql
-              readOnly: true
             - name: nexent-workspace
               mountPath: /mnt/nexent
             - name: nexent-logs
@@ -86,19 +101,6 @@ spec:
             periodSeconds: 10
             failureThreshold: 3
       volumes:
-        - name: nexent-sql-files
-          configMap:
-            name: nexent-sql-files
-            items:
-              - key: init.sql
-                path: init.sql
-              - key: migrations-.keep
-                path: migrations/.keep
-{{ range $name := default (list) $sqlFileNames.migrations }}
-              - key: {{ printf "migrations-%s" $name | quote }}
-                path: {{ printf "migrations/%s" $name | quote }}
-{{ end }}
-
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
 import json
 import logging
 
@@ -11,7 +12,6 @@ from management.services.agent.context import (
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
 from contracts.constants.constants import LANGUAGE
@@ -27,6 +27,7 @@ from contracts.conversation import (
 )
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
+from infrastructure.trace.trajectory_runtime import request_conversation_cleanup
 from management.db.conversation.repository import branch_conversation, create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 # Public read facade consumed by Agent subscriptions; these are intentional re-exports.
 from management.db.conversation.repository import (  # noqa: F401
@@ -34,20 +35,23 @@ from management.db.conversation.repository import (  # noqa: F401
     get_latest_assistant_message,
 )
 from management.db.model.repository import get_model_by_model_id
+from contracts.agentos import ChatOptions
+from management.clients.model import invoke_chat_prompt
 from management.db.conversation.repository import append_conversation_user_message, resolve_conversation_retry_user
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
-from infrastructure.runtime_output import is_runtime_event, project_runtime_history
-from infrastructure.nexent_output import normalize_nexent_history
+from management.services.conversation.runtime_output import is_runtime_event, project_runtime_history
+from management.services.conversation.nexent_output import normalize_nexent_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
-                  status: str = 'completed', *, message_source: MessageSource = MessageSource.CHAT) -> int:
+                  status: str = 'completed', *, message_source: MessageSource = MessageSource.CHAT,
+                  execution_identity=None, streaming_owner: str | None = None) -> int:
     """
     Insert only the ConversationMessage row for a new message.
 
@@ -100,10 +104,13 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
     }
     if message_data.get('clarification_response') is not None:
         message_data_copy['clarification_response'] = message_data['clarification_response']
+    options = {"execution_identity": execution_identity} if execution_identity is not None else {}
+    if streaming_owner is not None:
+        options["streaming_owner"] = streaming_owner
     if message_data.get('annotations') is not None:
         message_data_copy['annotations'] = message_data['annotations']
     return create_conversation_message(
-        message_data_copy, user_id, status=status, message_source=message_source,
+        message_data_copy, user_id, status=status, message_source=message_source, **options,
     )
 
 
@@ -158,8 +165,10 @@ def persist_assistant_run_batch(
     automation_proposals: List[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    projection_run_id: str | None = None,
 ) -> Dict[int, int]:
     """Persist one assistant run and its related records atomically."""
+    projection_options = {"projection_run_id": projection_run_id} if projection_run_id is not None else {}
     return persist_assistant_run_batch_db(
         message_id=message_id,
         conversation_id=conversation_id,
@@ -172,6 +181,7 @@ def persist_assistant_run_batch(
         automation_proposals=automation_proposals,
         user_id=user_id,
         tenant_id=tenant_id,
+        **projection_options,
     )
 
 
@@ -265,10 +275,8 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist the user-side message (one message row only).
-
-    User text and optional annotations share the atomic turn reservation.
-    """
+    """Reserve one user turn and bind its committed identity to trajectory capture."""
+    request.__dict__.pop("_trajectory_message_receipt", None)
     source = MessageSource(getattr(request, "_message_source", MessageSource.CHAT))
     retry_id = getattr(request, "retry_user_message_id", None)
     if type(retry_id) is int:
@@ -276,19 +284,24 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
             request.conversation_id, user_id, retry_id, request.retry_message_index,
             strip_current_time_prefix(request.query), request.minio_files,
         )
-        request._runtime_user_message_id = message_id
-        request._runtime_user_message_index = message_index
-        return
-    annotations = normalize_message_annotations(getattr(request, "annotations", None))
-    message_id, message_index = append_conversation_user_message(
-        request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
-        **({"message_source": source} if source != MessageSource.CHAT else {}),
-        **({"annotations": annotations} if annotations is not None else {}),
-        **({"clarification_response": request.clarification_response.model_dump(mode="json")}
-           if getattr(request, "clarification_response", None) is not None else {}),
-    )
+    else:
+        annotations = normalize_message_annotations(getattr(request, "annotations", None))
+        message_id, message_index = append_conversation_user_message(
+            request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
+            **({"message_source": source} if source != MessageSource.CHAT else {}),
+            **({"annotations": annotations} if annotations is not None else {}),
+            **({"clarification_response": request.clarification_response.model_dump(mode="json")}
+               if getattr(request, "clarification_response", None) is not None else {}),
+        )
     request._runtime_user_message_id = message_id
     request._runtime_user_message_index = message_index
+    if type(message_id) is int and 0 < message_id <= 2147483647:
+        request.__dict__["_trajectory_message_receipt"] = {
+            "message_id": str(message_id),
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "conversation_id": str(request.conversation_id),
+        }
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -309,23 +322,16 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
     )
 
 
-def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"],
-                       model_id: Optional[int] = None) -> str:
-    """
-    Call LLM to generate a title from a user question
-
-    Args:
-        question: User's question content
-        tenant_id: Tenant ID
-        language: Language code ('zh' for Chinese, 'en' for English)
-        model_id: Optional tenant-scoped LLM model ID
-
-    Returns:
-        str: Generated title
-    """
-    prompt = compose_auxiliary_prompt(language, "chat_title", {"question": question})
-    set_monitoring_context(tenant_id=tenant_id, user_id=None)
-
+async def call_llm_for_title(
+    question: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    model_id: Optional[int] = None,
+    *,
+    user_id: str,
+) -> str:
+    """Generate a title through the signed Runtime model interface."""
+    default_title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
     if model_id is not None:
         model_config = get_model_by_model_id(model_id, tenant_id)
         if not model_config:
@@ -334,40 +340,25 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
             raise ValidationError("Selected model is not an LLM model")
     else:
         model_config = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    display_name = model_config.get("display_name", "") if model_config else ""
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id,
+        )
+        model_id = (model_config or {}).get("model_id")
+        if not model_id:
+            return default_title
+
+    display_name = model_config.get("display_name") or ""
+    set_monitoring_context(tenant_id=tenant_id, user_id=user_id)
     set_monitoring_operation("title_generation", display_name=display_name or None)
-
-    timeout_seconds = model_config.get("timeout_seconds") if model_config else None
-
-    # Create OpenAIModel instance via the gateway
-    llm = get_llm_adapter_from_config(
-        model_config,
-        tenant_id,
-        temperature=0.7,
-        top_p=0.95,
-        stream=False,
-        timeout_seconds=timeout_seconds,
-        display_name=display_name or None,
+    prompt = compose_auxiliary_prompt(language, "chat_title", {"question": question})
+    content = await invoke_chat_prompt(
+        model_id=model_id,
+        system_prompt=prompt.system,
+        user_prompt=prompt.user,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        options=ChatOptions(temperature=0.7, top_p=0.95),
     )
-
-    # Build messages - use new template variable 'question' instead of 'content'
-    messages = [{"role": MESSAGE_ROLE["SYSTEM"],
-                 "content": prompt.system},
-                {"role": MESSAGE_ROLE["USER"],
-                 "content": prompt.user}]
-
-    # ModelEngine accepts role/content in a simple structure, ensure flattening before passing
-    if model_config.get("model_factory", "").lower() == "modelengine":
-        messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
-
-    # Call the model (gateway adapter forwards to the wrapped OpenAIModel)
-    response = llm(messages)
-    if not response or not response.content or not response.content.strip():
-        title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
-    else:
-        title = remove_think_blocks(response.content.strip())
-
+    title = remove_think_blocks(content.strip()) if content and content.strip() else default_title
     logger.info("title_generation: %s -> %s", display_name or "unknown", title)
     return title
 
@@ -733,7 +724,23 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
         raise Exception(str(e))
 
 
-def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
+def _request_trajectory_cleanup(conversation_ids, user_id):
+    """Keep committed deletes successful; maintenance retries a missed handoff."""
+    if not conversation_ids:
+        return
+    try:
+        if request_conversation_cleanup(conversation_ids, user_id):
+            return
+    except Exception as error:  # noqa: BLE001 - A telemetry handoff cannot roll back the committed conversation delete.
+        logger.warning(
+            "trajectory.conversation_cleanup_deferred count=%s exception_type=%s",
+            len(conversation_ids), type(error).__name__,
+        )
+        return
+    logger.warning("trajectory.conversation_cleanup_deferred count=%s", len(conversation_ids))
+
+
+async def delete_conversation_service(conversation_id: int, user_id: str, tenant_id: str) -> bool:
     """
     Delete specified conversation
 
@@ -747,7 +754,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     try:
         try:
             from management.services.automation.service import agent_automation_facade
-            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+            await agent_automation_facade.on_conversation_deleted(conversation_id, user_id, tenant_id)
         except Exception as automation_error:
             logging.warning(
                 "Failed to cleanup automation task for conversation %s: %s",
@@ -759,13 +766,14 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
 
+        _request_trajectory_cleanup([conversation_id], user_id)
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
         raise Exception(str(e))
 
 
-def delete_conversations_batch_service(conversation_ids: List[int], user_id: str) -> Dict[str, Any]:
+async def delete_conversations_batch_service(conversation_ids: List[int], user_id: str, tenant_id: str) -> Dict[str, Any]:
     """
     Batch-delete conversations owned by the user.
 
@@ -784,15 +792,19 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
     try:
         try:
             from management.services.automation.service import agent_automation_facade
-            for conversation_id in conversation_ids:
+            async def cleanup(conversation_id):
                 try:
-                    agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+                    await agent_automation_facade.on_conversation_deleted(conversation_id, user_id, tenant_id)
                 except Exception as automation_error:
                     logging.warning(
                         "Failed to cleanup automation task for conversation %s: %s",
                         conversation_id,
                         automation_error,
                     )
+
+            batch_size = 8
+            for start in range(0, len(conversation_ids), batch_size):
+                await asyncio.gather(*(cleanup(cid) for cid in conversation_ids[start:start + batch_size]))
         except Exception as automation_error:
             logging.warning(
                 "Failed to setup automation cleanup for batch delete: %s",
@@ -800,6 +812,7 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
             )
 
         deleted_ids = delete_conversations_batch(conversation_ids, user_id)
+        _request_trajectory_cleanup(deleted_ids, user_id)
         deleted_set = set(deleted_ids)
         failed_ids = [cid for cid in conversation_ids if cid not in deleted_set]
 
@@ -1258,17 +1271,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
             raise ConversationNotFoundError("Conversation does not exist or has been deleted")
         snapshot = {"conversation_title": initial["conversation_title"],
                     "title_version": initial["title_version"]}
-        # Call LLM to generate title from question in a separate thread to avoid blocking
-        title = await run_blocking(
-            "conversation-title",
-            call_llm_for_title,
-            question,
-            tenant_id,
-            language,
-            model_id,
-            lane="model-tool-io",
-            owner="runtime",
-        )
+        title = await call_llm_for_title(question, tenant_id, language, model_id, user_id=user_id)
 
         # A manual rename during the model call wins. No database lock is held
         # while waiting for the external model, and the response returns the

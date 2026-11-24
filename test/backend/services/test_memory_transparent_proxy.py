@@ -15,6 +15,8 @@ consts_const.MMR_DUPLICATE_THRESHOLD = 0.92
 consts_const.MMR_FINAL_TOP_K = 5
 consts_const.MMR_LAMBDA = 0.7
 consts_const.MEMORY_TOKEN_BUDGET = 2000
+consts_const.MEMORY_QUERY_TIMEOUT_SECONDS = 9.0
+consts_const.MEMORY_WRITE_TIMEOUT_SECONDS = 2.0
 consts_const.W_AGENT_SHORT_TERM = 0.6
 consts_const.W_EXTERNAL = 0.4
 consts_const.VectorDatabaseType = MagicMock()
@@ -23,6 +25,22 @@ install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 
 nexent_pkg = types.ModuleType("nexent")
+core_pkg = types.ModuleType("nexent.core")
+core_pkg.__path__ = []
+concurrency_pkg = types.ModuleType("nexent.core.concurrency")
+
+
+async def _run_memory_job(_label, job, *args, lane, owner, **kwargs):
+    assert (lane, owner) == ("background-service", "management.memory")
+    return job(*args, **kwargs)
+
+
+concurrency_pkg.run_blocking = _run_memory_job
+concurrency_pkg.ManagedTaskSpec = MagicMock
+concurrency_pkg.get_current_thread_manager = MagicMock(return_value=None)
+concurrency_pkg.get_default_thread_manager = MagicMock(return_value=None)
+sys.modules["nexent.core"] = core_pkg
+sys.modules["nexent.core.concurrency"] = concurrency_pkg
 memory_pkg = types.ModuleType("nexent.memory")
 memory_pkg.__path__ = []
 

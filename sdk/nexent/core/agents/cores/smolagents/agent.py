@@ -21,6 +21,7 @@ from nexent.consts.mcp_errors import (
     classify_mcp_failure, find_mcp_server_url, is_mcp_timeout_error, mcp_failure_message,
 )
 from nexent.core.agents.contracts.clarification import choose_clarification_tool_name
+from nexent.core.agents.contracts.identity import root_clarification_allowed
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent, convert_code_format
@@ -156,6 +157,12 @@ class NexentAgent(AgentResources):
         ):
             raise ValueError("Model configuration does not match its outlet snapshot")
         scope = self.cancellation_scope if self.cancellation_scope is not None else RunCancellationScope(self.stop_event)
+        if model_config.extra_body:
+            from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+
+            profile = LegacyInvocationOptions(
+                {}, custom_overrides=model_config.extra_body
+            ).resolve(profile)
         return LegacyChatModel.from_profile(
             profile, model_config.api_key, http_headers=model_config.http_headers,
             observer=self.observer, cancellation_scope=scope,
@@ -224,6 +231,7 @@ class NexentAgent(AgentResources):
                     _wrap_tool_with_monitoring(
                         self.create_tool(tool_config),
                         agent_config.name,
+                        observer=self.observer,
                     )
                     for tool_config in tool_configs
                 ]
@@ -284,6 +292,7 @@ class NexentAgent(AgentResources):
             context_manager = ContextManager(
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
+                message_format="codeagent",
             )
             from nexent.core.agents.prompt.policies import with_common_behavior
 
@@ -309,7 +318,7 @@ class NexentAgent(AgentResources):
             from nexent.core.agents.context import ContextItemInput, ContextItemType
 
             enable_clarification = (
-                not _managed_context
+                root_clarification_allowed(self.core_run_info, managed_context=_managed_context)
                 and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
             )
@@ -342,7 +351,9 @@ class NexentAgent(AgentResources):
                 )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                items=(with_common_behavior(context_items, self.observer.lang)
+                items=(with_common_behavior(context_items, self.observer.lang,
+                       is_subagent=not root_clarification_allowed(
+                           self.core_run_info, managed_context=_managed_context))
                        if any(item.type == ContextItemType.SYSTEM for item in context_items) else context_items),
             )
 
@@ -363,7 +374,7 @@ class NexentAgent(AgentResources):
                         if group is not None and getattr(group, "_closed", False):
                             _sandbox_tree_context.pop("session_container_group", None)
 
-                def create_executor():
+                def build_executor():
                     python_executor = None
                     script_runner = None
                     with _sandbox_tree_context["initialization_lock"]:
@@ -532,6 +543,25 @@ class NexentAgent(AgentResources):
                                 finally:
                                     release_executor(python_executor)
                             raise
+
+                def create_executor():
+                    from nexent.monitor.phase_capture import trace_phase
+
+                    with trace_phase(
+                        "agent.sandbox.initialize",
+                        input_value={
+                            "level": self.sandbox_config.level.value,
+                            "scope": self.sandbox_config.scope.value,
+                        },
+                        attributes={"agent.name": agent_config.name},
+                    ) as phase:
+                        executor = build_executor()
+                        backend = getattr(executor, "_nexent_backend", "unknown")
+                        phase.set_output({
+                            "backend": backend,
+                            "fallback": backend == "local" and self.sandbox_config.level != SandboxLevel.LOCAL,
+                        })
+                        return executor
 
                 if deferred:
                     from nexent.core.agents.cores.smolagents.tool_fastpath import (
@@ -854,6 +884,8 @@ class NexentAgent(AgentResources):
                     # Remove thinking prefix content (until two newlines)
                     final_answer_str = re.sub(
                         THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+                    if final_answer is None or not final_answer_str.strip():
+                        observer.mark_answer_fallback()
                     final_answer_str = _ensure_non_empty_final_answer(
                         final_answer_str,
                         getattr(observer, "lang", "en"),

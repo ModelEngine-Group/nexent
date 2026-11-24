@@ -20,6 +20,11 @@ def _session(monkeypatch):
         yield session
 
     monkeypatch.setattr(conversation_db, "get_db_session", get_session)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        conversation_db, "get_config_snapshot", lambda: system_config_snapshot()
+    )
     return session
 
 

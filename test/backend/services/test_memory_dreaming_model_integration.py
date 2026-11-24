@@ -7,7 +7,7 @@ import pytest
 
 from nexent.memory.dreaming import DreamingMemoryUnit, build_user_memory_summary
 from management.services.memory.dreaming.summarizer import TenantDreamingSummarizer
-from infrastructure.observability.bootstrap import monitoring_manager
+from infrastructure.trace.bootstrap import monitoring_manager
 
 
 pytestmark = pytest.mark.skipif(

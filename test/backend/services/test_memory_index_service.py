@@ -381,36 +381,20 @@ def test_hybrid_branch_falls_back_when_backend_is_not_elasticsearch(embedding):
     assert results[0]["memory_id"] == "13"
 
 
-def test_hybrid_branch_retries_without_filter_on_typeerror(service, embedding):
-    """If a future SDK implementation is wired in that doesn't accept the
-    ``filter`` kwarg the index service should still produce a result by
-    retrying without the filter (matches the pre-refactor SDK contract)."""
-    calls = {"n": 0}
-
-    def fake_hybrid(*args, **kwargs):
-        calls["n"] += 1
-        if "filter" in kwargs:
-            raise TypeError("unexpected kwarg 'filter'")
-        return [{
-            "index": "mem_baai_bge-m3_1024",
-            "score": 0.6,
-            "document": {"id": "5", "content": "fallback", "metadata": {}},
-        }]
-
-    service.vdb_core.hybrid_search.side_effect = fake_hybrid
+def test_hybrid_falls_back_to_filtered_knn_when_filter_is_unsupported(service, embedding):
+    service.vdb_core.hybrid_search.side_effect = TypeError("unexpected kwarg 'filter'")
+    service.vdb_core.search.return_value = _es_response([_es_hit(5, "fallback", 0.6)])
 
     results = service.search_similar(
-        index_name="mem_baai_bge-m3_1024",
-        embedding=embedding,
-        tenant_id="tn",
-        user_id="u1",
-        top_k=5,
-        hybrid=True,
-        query_text="hello",
-        embedding_model=MagicMock(name="embedding_model"),
+        index_name="mem_baai_bge-m3_1024", embedding=embedding,
+        tenant_id="tn", user_id="u1", agent_id="a1", hybrid=True, query_text="hello",
     )
 
-    assert calls["n"] == 2  # tried twice: with filter, then without
+    service.vdb_core.hybrid_search.assert_called_once()
+    options = service.vdb_core.hybrid_search.call_args.kwargs
+    assert options["query_embedding"] == embedding
+    knn = service.vdb_core.search.call_args.kwargs["query"]["knn"]
+    assert knn["filter"] == options["filter"]
     assert results[0]["memory_id"] == "5"
 
 
@@ -485,17 +469,20 @@ def test_index_lifecycle_returns_false_when_backend_fails(service):
     assert service.drop_index("memory-index") is False
 
 
-def test_index_record_resolves_model_index_and_writes_payload(service):
+@pytest.mark.parametrize("refresh", ["wait_for", False])
+def test_index_record_resolves_model_index_and_writes_payload(service, refresh):
     model_info = _FakeEmbeddingModelInfo(model_repo="repo", model_name="model", dimension=4)
     record = {"memory_id": 12, "layer": "agent", "content": "remember this"}
 
-    assert service.index_record(record, [0.1] * 4, model_info) is True
+    options = {} if refresh == "wait_for" else {"refresh": refresh}
+    assert service.index_record(record, [0.1] * 4, model_info, **options) is True
 
     service.vdb_core.create_index.assert_called_once_with(
         "mem_repo_model_4", embedding_dim=4
     )
     create_call = service.vdb_core.create_chunk.call_args
     assert create_call.kwargs["index_name"] == "mem_repo_model_4"
+    assert create_call.kwargs.get("refresh", "wait_for") == refresh
     assert create_call.kwargs["chunk"]["id"] == "12"
     assert create_call.kwargs["chunk"]["content"] == "remember this"
 

@@ -11,8 +11,7 @@ For versions before 0.1.18, this module works around circular imports by:
 Native versions use their real packages so the Agent Core can coexist with
 prompt optimization in the same service process.
 
-The adapters/__init__.py wraps the import in try/except so the server
-starts even when openjiuwen is not installed.
+The prompt and evaluation services handle an unavailable SDK at the import boundary.
 """
 import asyncio
 import importlib.abc
@@ -228,7 +227,7 @@ def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
 
 logger = logging.getLogger("jiuwen_adapter")
 
-from adapters.exception import JiuwenSDKError
+from contracts.errors.capabilities import JiuwenSDKError
 
 
 # ----------------------------------------------------------------------
@@ -380,6 +379,8 @@ def _build_openai_client(
         OpenAIModelClient,
     )
 
+    from nexent.core.models.sampling import validate_sampling_value, without_unset_sampling
+
     class _DirectClient:
         """对 OpenAIModelClient 的薄封装，只暴露 invoke() 方法"""
 
@@ -388,11 +389,13 @@ def _build_openai_client(
             self._model = request_config.model_name
 
         async def invoke(self, messages: list[dict]) -> Any:
+            sampling = without_unset_sampling({"temperature": request_config.temperature, "top_p": request_config.top_p})
+            for field, value in sampling.items():
+                validate_sampling_value(field, value)
             return await self._inner.invoke(
                 model=self._model,
                 messages=messages,
-                temperature=request_config.temperature,
-                top_p=request_config.top_p,
+                **sampling,
             )
 
     client = OpenAIModelClient(
@@ -486,7 +489,7 @@ class JiuwenSDKAdapter:
     Jiuwen SDK 调用适配器
 
     封装 Jiuwen SDK 的所有调用，内部不处理降级，
-    失败时抛出 JiuwenSDKError，由上层 PromptOptimizationService 决定是否降级
+    Raises JiuwenSDKError when optimization fails.
     """
 
     def __init__(self, model_id: int, tenant_id: str):
@@ -604,6 +607,7 @@ class JiuwenSDKAdapter:
         expected_answer: str,
         model_answer: str,
         user_metrics: str = "",
+        judge_invoker=None,
     ) -> Tuple[float, str]:
         """LLM-as-judge semantic consistency scoring.
 
@@ -620,23 +624,30 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        try:
-            from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
-                LLMAsJudgeMetric,
+        if judge_invoker is None:
+            try:
+                from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
+                    LLMAsJudgeMetric,
+                )
+            except Exception as exc:
+                raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
+
+            request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+
+            metric = LLMAsJudgeMetric(
+                model_config=request_config,
+                model_client_config=client_config,
+                user_metrics=user_metrics or "",
             )
-        except Exception as exc:
-            raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
 
-        request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+            template = metric._template
+        else:
+            from openjiuwen.agent_evolving.evaluator.templates import LLM_METRIC_TEMPLATE
 
-        metric = LLMAsJudgeMetric(
-            model_config=request_config,
-            model_client_config=client_config,
-            user_metrics=user_metrics or "",
-        )
+            template = LLM_METRIC_TEMPLATE.format({"user_metrics": user_metrics or ""})
 
         # Build the same prompt that ``metric.compute()`` uses.
-        messages = metric._template.format({
+        messages = template.format({
             "question": str(question or ""),
             "expected_answer": str(expected_answer),
             "model_answer": str(model_answer),
@@ -663,7 +674,10 @@ class JiuwenSDKAdapter:
                 messages.append(UserMessage(content=chinese_directive.lstrip("\n")))
 
         try:
-            response = asyncio.run(metric._model.invoke(messages)).content
+            if judge_invoker is None:
+                response = asyncio.run(metric._model.invoke(messages)).content
+            else:
+                response = judge_invoker(messages)
         except Exception as exc:
             raise JiuwenSDKError(f"Judge LLM invoke failed: {exc}") from exc
 

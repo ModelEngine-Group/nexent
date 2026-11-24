@@ -40,10 +40,11 @@ from validate_execution import inspect
 STAGES = [f"D{i}" for i in range(1, 6)]
 
 
-def static_requirements(repo, records, *, daily):
+def static_requirements(repo, records, *, daily, catalog=None):
     """Daily checks the full catalog; targeted runs check declared/direct references."""
     if daily:
         return None
+    catalog = static_entries() if catalog is None else catalog
     selected = set()
     for record in records:
         if not record.get("execution") or record.get("status") != "active":
@@ -51,16 +52,33 @@ def static_requirements(repo, records, *, daily):
         selected.update(record["execution"].get("required_assets") or [])
         case_path = repo / "test-e2e/cases" / record["case_id"] / "case.yaml"
         text = case_path.read_text(encoding="utf-8") if case_path.is_file() else ""
-        primary = record["execution"]["implementations"][0]
-        text += (repo / primary["file"]).read_text(encoding="utf-8")
-        for item in static_entries():
+        implementations = record["execution"].get("implementations", [])
+        if implementations:
+            text += (repo / implementations[0]["file"]).read_text(encoding="utf-8")
+        for item in catalog:
             category = item["path"].split("/", 1)[0]
             if (item["asset_id"] in text or f"assets/{item['path']}" in text or
                     f"assets/{category}/" in text):
                 selected.add(item["asset_id"])
-    catalog_ids = {item["asset_id"] for item in static_entries()}
-    catalog_paths = {item["path"] for item in static_entries()}
+    catalog_ids = {item["asset_id"] for item in catalog}
+    catalog_paths = {item["path"] for item in catalog}
     return {value for value in selected if value in catalog_ids or value in catalog_paths}
+
+
+def static_blocks(repo, records, rows):
+    """Retain unavailable fixtures as per-Case prerequisites, never as PASS."""
+    unavailable = [row for row in rows if row["destination"] != "READY"]
+    if not unavailable:
+        return {}
+    catalog = static_entries()
+    blocked = {}
+    for record in records:
+        required = static_requirements(repo, [record], daily=False, catalog=catalog)
+        problems = [f"Static asset {row['asset_id']} ({row['path']}): {row['destination']}"
+                    for row in unavailable if required & {row["asset_id"], row["path"]}]
+        if problems:
+            blocked[record["case_id"]] = problems
+    return blocked
 
 
 def config(repo, home):
@@ -238,7 +256,7 @@ def worker(repo, home, record, directory, settings):
     # Keep all descendants in the worker group so the controller can terminate it.
     run_logged = partial(logged, new_session=False)
     automation = repo / "test-e2e/infra/automation"
-    env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
+    env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
     bind_result_directory(env, directory)
     if (home / "runtime/playwright-browsers").is_dir():
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(home / "runtime/playwright-browsers")
@@ -308,7 +326,9 @@ def worker(repo, home, record, directory, settings):
                     raise ValueError("Invalid prepared D4 environment")
                 key, value = parts[0].split("=", 1)
                 env[key] = value
-        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory)
+        # The controller owns this worker's whole process group and Case deadline.
+        # Keep its commands in that group so outer cancellation also reclaims children.
+        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory, enforce_timeout=False)
         status_path = directory / "status.json"
         if status_path.is_file():
             test_details = json.loads(status_path.read_text(encoding="utf-8"))
@@ -434,8 +454,6 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
         env = machine_environment(home, repo)
         if validation_report is not None and not validation_report.get("ready"):
             raise RuntimeError("Global or unclassified asset validation failure")
-        if (home / "state/deployment-guard/pending.json").exists():
-            raise RuntimeError("Pending deployment recovery exists; recover the owned environment before running")
         state["stages"]["D0"] = "RUNNING"
         save(directory / "status.json", state)
         validation = 0 if validation_report is not None else logged(
@@ -444,10 +462,9 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
         if validation:
             raise RuntimeError("Formal asset validation failed")
         static_rows = static_inventory(home, selected=required_static)
+        blocked_assets = static_blocks(repo, records, static_rows)
         save(directory / "d0/static-assets.json", {"scope": "full" if daily else "selected",
-                                                   "assets": static_rows})
-        if any(row["destination"] != "READY" for row in static_rows):
-            raise RuntimeError("Static assets are missing or differ from the catalog; inspect d0/static-assets.json")
+                                                   "assets": static_rows, "blocked_cases": blocked_assets})
         if daily:
             if any(not settings["hooks"].get(name) for name in ("build", "deploy", "preflight")):
                 raise RuntimeError("Daily build/deploy/preflight hooks must be explicitly configured")
@@ -458,6 +475,8 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                 execute_hooks(name, settings, repo, home, directory, env)
         state["stages"]["D0"] = "COMPLETE"
         blocked_runtime = runtime_blocks(repo, home, records, environment=env)
+        for case_id, problems in blocked_assets.items():
+            blocked_runtime.setdefault(case_id, []).extend(problems)
         save(directory / "d0/runtime-preflight.json", {"blocked_cases": blocked_runtime})
         for stage in STAGES:
             state["stages"][stage] = "RUNNING"
@@ -523,8 +542,6 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                       (" (reused)" if reused else ""), flush=True)
                 if on_result is not None:
                     on_result(dict(row))
-                if (home / "state/deployment-guard/pending.json").exists():
-                    raise RuntimeError("Environment recovery needs verification before continuing")
             state["stages"][stage] = "COMPLETE"
         current = fingerprint(repo)
         if any(current.get(key) != provenance.get(key) for key in

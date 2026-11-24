@@ -5,52 +5,63 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
+from starlette.responses import StreamingResponse
 
-# Reuse the existing service suite's isolated dependency setup. Product stream
-# processing and final-answer projection remain real in these unit tests.
-from . import test_agent_service as service_tests
+from contracts.conversation import MessageSource
+from management.services.agent import agentos_events, prepared_projection, prepared_turn
+from .test_agentos_conversation_projection import REFERENCE, event, response
 
 
 @pytest.fixture
 def stream_capture(monkeypatch):
-    service = service_tests.agent_execution
-    batches = []
-    monkeypatch.setattr(service, "save_message", MagicMock(return_value=42))
-    monkeypatch.setattr(service, "persist_assistant_run_batch", lambda **kwargs: batches.append(kwargs))
-    monkeypatch.setattr(service, "_unregister_agent_run_after_execution", MagicMock())
-    monkeypatch.setattr(service.streaming_channel_manager, "complete_channel", AsyncMock())
-    monkeypatch.setattr(service, "_cleanup_channel_later", AsyncMock())
+    persist = AsyncMock(return_value=42)
+    monkeypatch.setattr(prepared_projection, "run_blocking", persist)
 
-    async def capture(source_events, *, outcome="completed", stopped=False, core="smolagents", **stream_kwargs):
-        async def source(*_args, **_kwargs):
-            for event in source_events:
-                if isinstance(event, BaseException):
-                    raise event
-                yield json.dumps(event)
+    turn = SimpleNamespace(reference=REFERENCE, user_id="user", tenant_id="tenant", message_index=3)
 
-        monkeypatch.setattr(service, "agent_run", source)
-        info = SimpleNamespace(
-            observer=SimpleNamespace(),
-            agent_config=SimpleNamespace(pre_run_tool_events=(), agent_core=core), cancellation_scope=None,
-            stop_event=asyncio.Event(), human_interaction=None,
-            attempt_outcome=outcome, thread_future=None,
+    async def capture(source_events, *, status="completed", final_answer_mode="delta", core="smolagents"):
+        monkeypatch.setattr(agentos_events, "NEXENT_AGENT_CORE", core)
+        frames = []
+        published = []
+        capture.published = published
+
+        async def source():
+            current_status = status
+            for index, item in enumerate(source_events, 1):
+                if isinstance(item, asyncio.CancelledError):
+                    raise item
+                if isinstance(item, Exception):
+                    current_status = "failed"
+                    break
+                frame = event(index, "agentos_observer", json.dumps(item))
+                frames.append(frame)
+                yield frame
+            terminal = event(len(frames) + 1, "agentos_terminal", json.dumps({"status": current_status}))
+            frames.append(terminal)
+            yield terminal
+
+        async def project(_turn, _client):
+            return await prepared_projection.resume_assistant_projection(
+                AsyncMock(return_value=response(*frames)), REFERENCE, "user", "tenant",
+                message_index=3, message_source=MessageSource.CHAT,
+            )
+
+        monkeypatch.setattr(prepared_turn, "_finish_projection", project)
+        client = SimpleNamespace(resume=AsyncMock(return_value=StreamingResponse(source())))
+        public = await prepared_turn._stream_turn(
+            turn, client, include_journal_controls=False, complete_answer=final_answer_mode == "complete",
         )
-        if stopped:
-            info.stop_event.set()
-        channel = SimpleNamespace(publish=AsyncMock())
-        capture.channel = channel
-        request = service_tests.AgentRequest(
-            agent_id=1, conversation_id=999, query="test", history=[], minio_files=[], is_debug=False)
-        raw = [chunk async for chunk in service._stream_agent_chunks(
-            request, "user", "tenant", info, None, channel=channel, **stream_kwargs)]
-        published = [json.loads(chunk.removeprefix("data: ").strip())
-                     for chunk in raw if chunk.startswith("data: {" )]
-        assert channel.publish.await_count == len(raw)
-        assert len(batches) <= 1
-        return published, batches[0] if batches else None
+        async for frame in agentos_events.iter_sse_frames(public):
+            if frame.startswith(b"data: {"):
+                published.append(json.loads(frame.removeprefix(b"data: ")))
+        persist.assert_awaited_once()
+        return published, persist.await_args.kwargs if persist.side_effect is None else None
+
+    capture.persist = persist
+
 
     return capture
 

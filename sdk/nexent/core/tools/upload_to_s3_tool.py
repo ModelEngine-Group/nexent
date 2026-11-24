@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 import mimetypes
@@ -159,8 +160,15 @@ class UploadToS3Tool(Tool):
         ]
 
     def forward(self, file_path: str, target_filename: str = None) -> str:
+        return self._upload(file_path, target_filename, notify=True)
+
+    def upload_artifact(self, file_path: str, target_filename: str) -> dict:
+        """Upload a declared artifact without emitting a local-path progress card."""
+        return json.loads(self._upload(file_path, target_filename, notify=False, allow_empty=True))
+
+    def _upload(self, file_path: str, target_filename: str | None, *, notify: bool, allow_empty: bool = False) -> str:
         try:
-            if self.observer:
+            if notify and self.observer:
                 card_content = [{"icon": "upload", "text": f"Uploading {file_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
@@ -198,7 +206,7 @@ class UploadToS3Tool(Tool):
                     f"File too large: {file_size} bytes (max {self.MAX_UPLOAD_SIZE} bytes). "
                     f"Please use a smaller file."
                 )
-            if file_size == 0:
+            if file_size == 0 and not allow_empty:
                 raise Exception(f"File is empty: {file_path}")
 
             # 5. Determine target filename and S3 key
@@ -235,7 +243,7 @@ class UploadToS3Tool(Tool):
                 "message": f"File uploaded successfully to {s3_url}",
             }
             self.uploaded_paths.add(os.path.normcase(os.path.abspath(abs_path)))
-            if self.on_upload is not None:
+            if notify and self.on_upload is not None:
                 self.on_upload(dict(response))
             return json.dumps(response, ensure_ascii=False)
 

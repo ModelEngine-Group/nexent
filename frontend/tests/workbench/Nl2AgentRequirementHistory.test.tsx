@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { Nl2AgentFlowProvider } from "@/contexts/nl2AgentFlow";
+import { Nl2AgentFlowProvider, useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { RequirementClarificationCard } from "@/app/newchat/ui/requirement-clarification-card";
 import type { Nl2aRequirementClarificationPayload } from "@/app/newchat/adapter/remote-chat-model-adapter";
 
@@ -15,7 +15,14 @@ vi.mock("@assistant-ui/react", () => ({
     }),
   }),
 }));
-beforeEach(() => append.mockClear());
+beforeEach(() => {
+  sessionStorage.clear();
+  append
+    .mockReset()
+    .mockImplementation((request) =>
+      request?.runConfig?.custom?.onRunStarted?.()
+    );
+});
 
 const payload: Nl2aRequirementClarificationPayload = {
   subtype: "requirement_clarification",
@@ -204,4 +211,75 @@ it("validates required answers and submits a live card only once", async () => {
       },
     })
   );
+});
+
+function ResetFlow() {
+  const { resetFlow } = useNl2AgentFlow();
+  return <button onClick={() => resetFlow(42)}>Restore target</button>;
+}
+
+it("re-registers an unanswered card after delayed target restoration without dropping choices", () => {
+  render(
+    <Nl2AgentFlowProvider>
+      <ResetFlow />
+      <RequirementClarificationCard
+        payload={payload}
+        sourceMessageId="pending"
+      />
+    </Nl2AgentFlowProvider>
+  );
+  const choice = screen.getByRole("radio", { name: "Internal team" });
+  fireEvent.click(choice);
+  fireEvent.click(screen.getByRole("button", { name: "Restore target" }));
+  expect(choice).toBeEnabled();
+  expect(choice).toBeChecked();
+});
+
+it("restores unsent answers after remount while isolating authenticated owners", () => {
+  const active = (owner: string) => (
+    <Nl2AgentFlowProvider draftScope={owner}>
+      <RequirementClarificationCard
+        payload={{ ...payload, card_id: "message-10:3" }}
+        sourceMessageId="live"
+      />
+    </Nl2AgentFlowProvider>
+  );
+  const first = render(active("tenant:user-a"));
+  fireEvent.click(screen.getByRole("radio", { name: "Internal team" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Constraints?" }), {
+    target: { value: "Unsent draft" },
+  });
+  first.unmount();
+  const second = render(active("tenant:user-a"));
+  expect(screen.getByRole("radio", { name: "Internal team" })).toBeChecked();
+  expect(screen.getByRole("textbox", { name: "Constraints?" })).toHaveValue(
+    "Unsent draft"
+  );
+  second.unmount();
+  render(active("tenant:user-b"));
+  expect(
+    screen.getByRole("radio", { name: "Internal team" })
+  ).not.toBeChecked();
+  expect(screen.getByRole("textbox", { name: "Constraints?" })).toHaveValue("");
+});
+
+it("a rejected request keeps the unanswered card editable and preserves its answers", async () => {
+  append.mockImplementation((request) =>
+    request.runConfig.custom.onRunRejected(new Error("Unavailable"))
+  );
+  render(
+    <Nl2AgentFlowProvider>
+      <RequirementClarificationCard
+        payload={payload}
+        sourceMessageId="pending"
+      />
+    </Nl2AgentFlowProvider>
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Internal team" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Text" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await screen.findByRole("alert");
+  expect(screen.getByRole("radio", { name: "Internal team" })).toBeEnabled();
+  expect(screen.getByRole("radio", { name: "Internal team" })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
 });

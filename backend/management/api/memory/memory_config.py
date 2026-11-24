@@ -49,7 +49,7 @@ from management.services.memory.records import (
     get_tenant_embedding_status,
 )
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.auth import get_current_user_context, get_current_user_id
+from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
 logger.setLevel(logging.INFO)

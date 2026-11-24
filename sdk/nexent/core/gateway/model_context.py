@@ -31,6 +31,7 @@ class ModelContext:
     observer: Any = None                 # cross-cutting: LLM/VLM/ModelEngine STT/TTS
     timeout_seconds: Optional[float] = None  # cross-cutting: all HTTP-backed adapters
     extra_body: Optional[dict] = None    # Provider-specific JSON request fields
+    catalog_model_id: Optional[int] = None
 
 
 @dataclass

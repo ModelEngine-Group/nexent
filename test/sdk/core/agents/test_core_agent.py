@@ -373,7 +373,6 @@ def test_ut_sdk_cftp_003_core_agent_removes_framework_final_answer_tool():
     )
 
     assert "final_answer" not in agent.tools
-    assert "final_answer" not in agent._verification_tool_names()
     assert "final_answer" not in agent.python_executor.static_tools
     assert agent.python_executor.static_tools["print"] is print
 
@@ -422,24 +421,6 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
 
     assert agent._get_context_summary() is None
     context_manager.get_summary.assert_called_once_with()
-
-
-def test_provider_overflow_recovery_is_disabled_after_a_tool_call():
-    agent = object.__new__(core_agent_module.CoreAgent)
-    agent.stop_event = threading.Event()
-    agent._history_step_count = 1
-    agent.memory = SimpleNamespace(steps=[
-        SimpleNamespace(tool_calls=["previous-run-tool"]),
-        SimpleNamespace(tool_calls=None),
-    ])
-
-    assert agent._provider_overflow_recovery_safe() is True
-
-    agent.memory.steps.append(SimpleNamespace(tool_calls=["current-run-tool"]))
-    assert agent._provider_overflow_recovery_safe() is False
-
-
-
 
 
 # ----------------------------------------------------------------------------
@@ -523,27 +504,45 @@ def test_final_verification_pass_message_explains_reason():
     assert any("最终自检通过" in message and "轻量对话无需外部证据" in message for message in messages)
 
 
-def test_verification_feedback_does_not_count_as_tool_error():
-    """Self-verification feedback should not poison the next final-answer check."""
-    controller, _ = _make_verification_controller()
-    memory_summary = """
-Step 1:
-Observation:
-Verification feedback:
-- Event: final_answer
-- Severity: blocking
-- Failed criteria: evidence_grounding, tool_error_handling
-- Repair instruction: Provide more evidence.
-"""
-
-    result = controller.verify_before_final_answer(
-        candidate="你好！有什么我可以帮你的吗？",
-        observation=memory_summary,
-        step_number=2,
+@pytest.mark.parametrize("execution_failed", [False, True])
+def test_final_verifier_uses_executor_status(execution_failed):
+    controller, model = _make_verification_controller()
+    model.return_value.content = '{"passed": true, "score": 1, "criteria": []}'
+    controller._build_verifier_messages = MagicMock(wraps=controller._build_verifier_messages)
+    controller.verify_final_answer(
+        task="Produce a report.",
+        candidate="Done.",
+        memory_summary="Observation: no error: all good; failed is a column name.",
+        round_number=2,
+        execution_failed=execution_failed,
     )
 
-    assert result.passed is True
-    assert "previous_errors_acknowledged" not in result.failed_criteria
+    policy = controller._build_verifier_messages.call_args.args[3]
+    assert policy["tool_error_check_required"] is execution_failed
+
+
+@pytest.mark.parametrize("code", [
+    'print("subprocess")',
+    'value = 2  # eval( is quoted here as documentation',
+    'items = sorted([2, 1])',
+])
+def test_action_precheck_allows_literals_comments_and_preparation(code):
+    controller, _ = _make_verification_controller(strictness="strict")
+
+    result = controller.verify_before_tool_call(code, step_number=1)
+
+    assert result.passed and not result.failed_criteria
+
+
+def test_final_verification_allows_template_examples():
+    controller, _ = _make_verification_controller(strictness="strict")
+
+    result = controller.verify_before_final_answer(
+        "Use {{name}} in the template. TODO: document the literal `<code>` tag.",
+        step_number=1,
+    )
+
+    assert result.passed and not result.failed_criteria
 
 
 def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
@@ -1888,7 +1887,7 @@ class TestRunStreamRealExecution:
     def _stub_sandbox_context(self, monkeypatch):
         """Keep executor tests independent of the sandbox's external imports."""
         sandbox_module = ModuleType("nexent.core.agents.sandbox.execution")
-        sandbox_module._execute_with_tool_context = lambda executor, code: executor(code)
+        sandbox_module._execute_with_tool_context = lambda executor, code, *, trace_execution=False: executor(code)
         monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
 
     class _FakeActionStep:
@@ -2297,8 +2296,8 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
-    def test_step_stream_provider_overflow_callback_rebuilds_from_runtime(self):
-        """The model receives a callback that records and returns rebuilt context."""
+    def test_step_stream_sends_without_provider_overflow_rebuild(self):
+        """The send boundary never installs a context compression callback."""
         module = self._load_core_agent_in_isolation()
         agent = object.__new__(module.CoreAgent)
         agent.enable_protocol_repair_retry = True
@@ -2313,11 +2312,8 @@ class TestRunStreamRealExecution:
         agent.context_runtime = self._context_runtime_mock()
         agent.context_runtime.chars_per_token = 1.0
         initial_context = MagicMock(messages=[MagicMock()])
-        rebuilt_context = MagicMock(messages=[MagicMock()])
         initial_context.memory_messages = ["original history"]
-        rebuilt_context.memory_messages = ["rebuilt history"]
         agent.context_runtime.prepare_step.return_value = initial_context
-        agent.context_runtime.recover_step.return_value = rebuilt_context
         agent._history_step_count = 0
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
@@ -2327,7 +2323,7 @@ class TestRunStreamRealExecution:
 
         def invoke_rebuild(messages, **kwargs):
             assert messages is initial_context.messages
-            assert kwargs["context_rebuild"]() is rebuilt_context
+            assert "context_rebuild" not in kwargs
             return response
 
         agent.model = MagicMock(side_effect=invoke_rebuild)
@@ -2340,16 +2336,8 @@ class TestRunStreamRealExecution:
             # Parsing the synthetic response is outside this callback contract test.
             pass
 
-        agent.context_runtime.recover_step.assert_called_once_with(
-            model=agent.model,
-            memory=agent.memory,
-            current_run_start_idx=0,
-            tools=[],
-            request_system_messages=agent.context_runtime.prepare_step.call_args.kwargs["request_system_messages"],
-            request_tail_messages=agent.context_runtime.prepare_step.call_args.kwargs["request_tail_messages"],
-        )
-        assert module.get_monitoring_manager().record_final_context_evidence.call_count >= 2
-        assert action_step.model_input_messages == ["rebuilt history"]
+        agent.context_runtime.recover_step.assert_not_called()
+        assert action_step.model_input_messages == ["original history"]
 
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
@@ -3379,11 +3367,13 @@ class TestRunStreamRealExecution:
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
 
-    def test_cmsr_007_enabled_plain_text_still_requires_explicit_protocol(self):
+    @pytest.mark.parametrize("supports_stop", [True, False])
+    def test_cmsr_007_enabled_plain_text_still_requires_explicit_protocol(self, supports_stop):
         """CMSR-007 / AC-020: disabling the strict path is Agent-scoped."""
         module = core_agent_module
         agent, action_step, response = self._create_cmsr_007_step_agent("答案是 4")
         agent.enable_protocol_repair_retry = True
+        agent.model.supports_stop_parameter = supports_stop
 
         with pytest.raises(module.NonterminalThoughtTurn):
             list(agent._step_stream(action_step))
@@ -3391,7 +3381,8 @@ class TestRunStreamRealExecution:
         agent.observer.commit_model_attempt.assert_not_called()
         agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
         assert response.model_attempt_commit_deferred is False
-        assert agent.model.call_args.kwargs["stop_sequences"] is None
+        expected_stops = ["<RESULT>", "</code>"] if supports_stop else None
+        assert agent.model.call_args.kwargs["stop_sequences"] == expected_stops
 
     @pytest.mark.parametrize("content", [
         "A complete plain answer.",

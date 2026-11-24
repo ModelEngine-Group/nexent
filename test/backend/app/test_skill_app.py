@@ -6,6 +6,8 @@ Unit tests for management.api.skill.skill module.
 from test.common.contract_stubs import install_shared_contract_stub
 from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 from contracts import skill as skill_app_management_skill_skill_skill
+# Resolve ownership exceptions before this endpoint suite replaces environment modules.
+from contracts.errors.exceptions import AgentRunAlreadyActiveError  # noqa: F401
 import sys
 import os
 import io
@@ -205,6 +207,7 @@ class MockSkillResponse(BaseModel):
 
 class MockNL2SkillRunRequest(BaseModel):
     query: str
+    request_id: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     conversation_id: Optional[int] = None
@@ -226,19 +229,16 @@ services_mock.__path__ = [
     os.path.join(os.path.dirname(__file__), "../../../backend/services")
 ]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('management.services.skill.service')
-services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_creation_history_mock = types.ModuleType('management.services.conversation.creation_history')
 services_asset_owner_visibility_mock = types.ModuleType('management.services.permission.asset_owner')
 services_agent_draft_permission_mock = types.ModuleType('management.services.agent.authorization')
 sys.modules['services'] = services_mock
 sys.modules['management.services.skill.service'] = services_skill_service_mock
 sys.modules['management.services.skill.transfer'] = services_skill_service_mock
-sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
 sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
 sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
-setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'workbench_creation_history_service', services_creation_history_mock)
 setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
 
@@ -271,7 +271,6 @@ services_skill_service_mock.get_skill_manager = MagicMock()
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
-services_nl2skill_service_mock.create_nl2skill_stream = AsyncMock()
 services_creation_history_mock.prepare_creation_history = MagicMock(return_value=(42, 1))
 services_creation_history_mock.persist_creation_stream = MagicMock()
 
@@ -281,7 +280,6 @@ def setup_function():
     sys.modules['services'] = services_mock
     sys.modules['management.services.skill.service'] = services_skill_service_mock
     sys.modules['management.services.skill.transfer'] = services_skill_service_mock
-    sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
     sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
     sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
@@ -290,10 +288,10 @@ services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=Tru
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('gateway.authentication.auth')
+utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.session')
 utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_auth_utils_mock
+sys.modules['management.services.permission.identity.session'] = utils_auth_utils_mock
 sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
@@ -349,7 +347,6 @@ sys.modules["management.services.conversation.creator_execution"] = creator_exec
 # Now import the app module
 from management.api.skill import skill as skill_app
 from contracts.constants import constants as skill_app_management_skill_skill
-from runtime.api.skill import creation as skill_app_creation
 
 
 # ===== List Skills Endpoint Tests =====
@@ -2657,122 +2654,6 @@ class TestScanSkillEndpoint:
                 assert response.status_code == 500
 
 
-# ===== Create Skill Interactive Endpoint Tests =====
-class TestCreateSkillInteractiveEndpoint:
-    """Test POST /skills/nl2skill/run endpoint."""
-
-    def test_create_skill_interactive_success(self, mocker):
-        """Test successful interactive skill creation."""
-        with patch('runtime.api.skill.creation.get_current_user_info') as mock_auth:
-            mock_auth.return_value = ("user123", "tenant123", "zh")
-            async def stream():
-                yield 'data: {"type":"done","content":""}\n\n'
-
-            with patch(
-                'runtime.api.skill.creation.create_nl2skill_stream',
-                new_callable=AsyncMock,
-                return_value=stream(),
-            ) as mock_stream:
-                app = FastAPI()
-                app.include_router(skill_app_creation.skill_creator_router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/nl2skill/run",
-                    json={"query": "Create a skill", "language": "zh"},
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 200
-                assert '"type":"done"' in response.text
-                mock_stream.assert_awaited_once()
-
-    def test_create_skill_interactive_uses_user_language_when_request_omits_it(self):
-        with patch('runtime.api.skill.creation.get_current_user_info', return_value=("user123", "tenant123", "en")):
-            async def stream():
-                yield 'data: {"type":"done","content":""}\n\n'
-
-            with patch(
-                'runtime.api.skill.creation.create_nl2skill_stream',
-                new_callable=AsyncMock,
-                return_value=stream(),
-            ) as mock_stream:
-                app = FastAPI()
-                app.include_router(skill_app_creation.skill_creator_router)
-                response = TestClient(app).post(
-                    "/skills/nl2skill/run",
-                    json={"query": "Create a skill"},
-                    headers={"Authorization": "Bearer token123"},
-                )
-
-        assert response.status_code == 200
-        assert mock_stream.await_args.kwargs["tenant_id"] == "tenant123"
-        assert mock_stream.await_args.kwargs["language"] == "en"
-
-    def test_create_skill_interactive_maps_runtime_error_to_server_error(self):
-        with patch('runtime.api.skill.creation.get_current_user_info', return_value=("user123", "tenant123", "zh")):
-            with patch(
-                'runtime.api.skill.creation.create_nl2skill_stream',
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("failed"),
-            ):
-                app = FastAPI()
-                app.include_router(skill_app_creation.skill_creator_router)
-                response = TestClient(app).post(
-                    "/skills/nl2skill/run",
-                    json={"query": "Create a skill"},
-                    headers={"Authorization": "Bearer token123"},
-                )
-
-        assert response.status_code == 500
-        assert response.json()["detail"] == "NL2Skill run error."
-
-    def test_create_skill_interactive_unauthorized(self, mocker):
-        """Test interactive skill creation without auth."""
-        with patch('runtime.api.skill.creation.get_current_user_info') as mock_auth:
-            mock_auth.side_effect = Exception("Unauthorized")
-
-            app = FastAPI()
-            app.include_router(skill_app_creation.skill_creator_router)
-            client = TestClient(app)
-
-            response = client.post(
-                "/skills/nl2skill/run",
-                json={"query": "Create a skill"}
-            )
-
-            assert response.status_code == 401
-
-
-# ===== Stop Skill Creation Endpoint Tests =====
-class TestStopSkillCreationEndpoint:
-    """The legacy stop endpoint is intentionally removed."""
-
-    def test_stop_skill_creation_success(self, mocker):
-        """Test successful stop skill creation."""
-        app = FastAPI()
-        app.include_router(skill_app_creation.skill_creator_router)
-        client = TestClient(app)
-        response = client.get("/skills/stop/task123")
-        assert response.status_code == 404
-
-    def test_stop_skill_creation_not_found(self, mocker):
-        """Test stop skill creation when task not found."""
-        app = FastAPI()
-        app.include_router(skill_app_creation.skill_creator_router)
-        client = TestClient(app)
-        response = client.get("/skills/stop/nonexistent")
-        assert response.status_code == 404
-
-    def test_stop_skill_creation_unauthorized(self, mocker):
-        """Removed routes return not found before authentication."""
-        app = FastAPI()
-        app.include_router(skill_app_creation.skill_creator_router)
-        client = TestClient(app)
-        response = client.get("/skills/stop/task123")
-        assert response.status_code == 404
-
-
 # ===== Update Skill Instance with config_values merge tests =====
 class TestUpdateSkillInstanceWithConfigMerge:
     """Test config_values merge in update skill instance."""
@@ -3439,26 +3320,6 @@ class TestSkillAppRemainingExceptionMappings:
 
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
-    async def test_nl2skill_preserves_http_exception(self, mocker):
-        mocker.patch.object(
-            skill_app_creation,
-            "get_current_user_info",
-            return_value=("user", "tenant", "en"),
-        )
-        expected = skill_app_creation.HTTPException(status_code=409, detail="conflict")
-        mocker.patch.object(skill_app_creation, "create_nl2skill_stream", side_effect=expected)
-        request = MagicMock(
-            conversation_id=None,
-            language=None,
-            persist_history=False,
-            workbench_config=None,
-        )
-
-        with pytest.raises(skill_app_creation.HTTPException) as exc_info:
-            await skill_app_creation.nl2skill_run_api(request=request, authorization="token")
-
-        assert exc_info.value is expected
 
 
 # ===== Security Audit Entries =====

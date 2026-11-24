@@ -10,12 +10,13 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from sqlalchemy import func, text
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import (
     MemoryDreamingAudit,
     MemoryDreamingDecision,
     MemoryDreamingSchedule,
     MemoryLongTermVersion,
+    MemoryUserConfig,
 )
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 from contracts.automation import ScheduleTrigger
@@ -67,6 +68,52 @@ def create_audit(
         return int(row.run_id)
 
 
+_UNSET = object()
+_DREAMING_PARAMETER_TYPES = {
+    "min_score": float,
+    "min_recall_count": int,
+    "min_unique_queries": int,
+    "source_limit": int,
+    "long_term_max_chars": int,
+    "long_term_length_tolerance_percent": int,
+    "summarization_max_attempts": int,
+}
+
+
+def _user_parameters(session, user_id: str) -> Dict[str, Any]:
+    rows = session.query(MemoryUserConfig).filter(
+        MemoryUserConfig.user_id == user_id,
+        MemoryUserConfig.value_type == "single",
+        MemoryUserConfig.config_key.in_(["DREAMING_" + key.upper() for key in _DREAMING_PARAMETER_TYPES]),
+        MemoryUserConfig.delete_flag == "N",
+    ).all()
+    values = {row.config_key: row.config_value for row in rows}
+    return {
+        key: value_type(values["DREAMING_" + key.upper()])
+        if values.get("DREAMING_" + key.upper()) is not None else None
+        for key, value_type in _DREAMING_PARAMETER_TYPES.items()
+    }
+
+
+def _save_user_parameters(session, user_id: str, actor_user_id: str, parameters: Dict[str, Any]) -> None:
+    for key, value in parameters.items():
+        if value is _UNSET:
+            continue
+        config_key = "DREAMING_" + key.upper()
+        row = session.query(MemoryUserConfig).filter(
+            MemoryUserConfig.user_id == user_id,
+            MemoryUserConfig.config_key == config_key,
+            MemoryUserConfig.value_type == "single",
+            MemoryUserConfig.delete_flag == "N",
+        ).first()
+        if row is None:
+            row = MemoryUserConfig(user_id=user_id, config_key=config_key, value_type="single",
+                                   created_by=actor_user_id)
+            session.add(row)
+        row.config_value = str(value) if value is not None else None
+        row.updated_by = actor_user_id
+
+
 def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
     return {
         "schedule_id": row.schedule_id,
@@ -80,12 +127,6 @@ def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
         "next_fire_at": (row.next_fire_at.replace(tzinfo=timezone.utc).isoformat() if row.next_fire_at else None),
         "last_fire_at": (row.last_fire_at.replace(tzinfo=timezone.utc).isoformat() if row.last_fire_at else None),
         "fire_count": row.fire_count,
-        "min_score": row.min_score,
-        "min_recall_count": row.min_recall_count,
-        "min_unique_queries": row.min_unique_queries,
-        "source_limit": row.source_limit,
-        "long_term_max_chars": row.long_term_max_chars,
-        "summarization_max_attempts": row.summarization_max_attempts,
     }
 
 
@@ -101,7 +142,7 @@ def get_schedule(tenant_id: str, user_id: str, agent_id: str) -> Optional[Dict[s
             )
             .first()
         )
-        return _schedule_to_dict(row) if row else None
+        return {**_schedule_to_dict(row), **_user_parameters(session, user_id)} if row else None
 
 
 def upsert_schedule(
@@ -122,6 +163,7 @@ def upsert_schedule(
     min_unique_queries: Optional[int] = None,
     source_limit: Optional[int] = None,
     long_term_max_chars: Optional[int] = None,
+    long_term_length_tolerance_percent: Optional[int] | object = _UNSET,
     summarization_max_attempts: Optional[int] = None,
 ) -> Dict[str, Any]:
     with get_db_session() as session:
@@ -154,51 +196,25 @@ def upsert_schedule(
         row.cron_expr = cron_expr
         row.interval_seconds = interval_seconds
         row.next_fire_at = next_fire_at if enabled else None
-        row.min_score = min_score
-        row.min_recall_count = min_recall_count
-        row.min_unique_queries = min_unique_queries
-        row.source_limit = source_limit
-        row.long_term_max_chars = long_term_max_chars
-        row.summarization_max_attempts = summarization_max_attempts
+        _save_user_parameters(session, user_id, actor_user_id, {
+            "min_score": min_score,
+            "min_recall_count": min_recall_count,
+            "min_unique_queries": min_unique_queries,
+            "source_limit": source_limit,
+            "long_term_max_chars": long_term_max_chars,
+            "long_term_length_tolerance_percent": long_term_length_tolerance_percent,
+            "summarization_max_attempts": summarization_max_attempts,
+        })
         row.updated_by = actor_user_id
         session.flush()
-        return _schedule_to_dict(row)
+        return {**_schedule_to_dict(row), **_user_parameters(session, user_id)}
 
 
 def get_thresholds(tenant_id: str, user_id: str, agent_id: str) -> Optional[Dict[str, Any]]:
-    """Return per-user threshold overrides, or None if not configured."""
+    """Read user-level parameters shared by manual and scheduled Dreaming."""
     with get_db_session() as session:
-        row = (
-            session.query(
-                MemoryDreamingSchedule.min_score,
-                MemoryDreamingSchedule.min_recall_count,
-                MemoryDreamingSchedule.min_unique_queries,
-                MemoryDreamingSchedule.source_limit,
-                MemoryDreamingSchedule.long_term_max_chars,
-                MemoryDreamingSchedule.summarization_max_attempts,
-            )
-            .filter(
-                MemoryDreamingSchedule.tenant_id == tenant_id,
-                MemoryDreamingSchedule.user_id == user_id,
-                MemoryDreamingSchedule.agent_id == agent_id,
-                MemoryDreamingSchedule.delete_flag == "N",
-            )
-            .first()
-        )
-        if row is None:
-            return None
-        result = {
-            "min_score": row.min_score,
-            "min_recall_count": row.min_recall_count,
-            "min_unique_queries": row.min_unique_queries,
-            "source_limit": row.source_limit,
-            "long_term_max_chars": row.long_term_max_chars,
-            "summarization_max_attempts": row.summarization_max_attempts,
-        }
-        # Return None if ALL thresholds are unset
-        if all(v is None for v in result.values()):
-            return None
-        return result
+        result = _user_parameters(session, user_id)
+        return result if any(value is not None for value in result.values()) else None
 
 
 def _next_schedule_fire(row: MemoryDreamingSchedule, after: datetime) -> Optional[datetime]:

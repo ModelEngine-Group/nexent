@@ -24,6 +24,10 @@ change:
     - test/backend/apps/test_memory_tenant_config_app.py
     - test/backend/services/test_memory_external_provider_service.py
     - test/backend/services/test_agent_service.py
+    - test/backend/app/test_agentos_memory_store.py
+    - test/backend/services/test_agentos_memory_callback.py
+    - test/backend/services/test_prepared_memory_completion.py
+    - test/backend/agents/test_create_agent_info.py
     behaviors:
     - Preserve explicit disabled settings and enforce all three scopes at execution and write boundaries.
     - Recheck the scope of Dreaming evidence before publishing.

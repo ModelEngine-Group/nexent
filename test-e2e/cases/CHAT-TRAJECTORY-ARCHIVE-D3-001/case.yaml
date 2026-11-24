@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ARCHIVE-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  business_rule_ids:
+  - TRJ-RULE-010
+  - TRJ-RULE-011
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-import-export/proposal.md
+    acceptance_criteria:
+    - AC-IE-001
+    - AC-IE-002
+    - AC-IE-003
+    - AC-IE-006
+    - AC-IE-007
+    - AC-IE-008
+  title: 原meta与OTLP包可在无来源实体的本地服务临时解析查看
+  objective: 原meta与OTLP包可在无来源实体的本地服务临时解析查看
+  preconditions:
+  - 产品接口和当前Case固定脚本可执行；受控身份/目录边界使用Case独占夹具，轨迹写入、HTTP路由、受管线程和原格式解析使用真实实现。
+  - 使用本Case独占的来源轨迹、身份、服务和浏览器上下文，登记资源所有权并验证清理；沿用runtime责任域。
+  test_data:
+    profile: mock
+    corpus:
+    - 超过一页的多轮轨迹与长Unicode正文
+    - 缺失/partial/expired/unarchived轮次
+    - 同一文件重复选择和同Trace ID不同文件
+  steps:
+  - order: 1
+    action: 真实写入器产生多轮轨迹，通过运行的Ops及真实来源授权/存储导出ZIP，将包交给另一套本地服务的临时导入接口。
+    expected: 全部节点、父子关系、顺序、历史名称/版本、指标、缺失状态和正文一致；长Unicode分块拼接逐字节相同，直接使用原meta/JSONL及内嵌正文，不使用已加载DTO或原服务content_id。
+  - order: 2
+    action: 浏览器加载本地产品后禁用来源网络，本地没有来源身份和Agent，TRAJECTORY_READ_ENABLED=false；本地服务在本次上传请求中复用原OTLP解析并返回所有字段。
+    expected: 本地查看成功，仅本次上传用于临时解析，后续查看无来源/正文HTTP请求，无模型工具调用，不创建目标数据库记录；同一文件可重复上传解析，不需要去重。
+  - order: 3
+    action: 对同一ZIP重复执行独立上传请求，逐次核对请求期文件句柄释放和源文件未变；浏览器切换文件、迟到响应及重新挂载由ARCHIVE-D4与RECOVERY-D5验证。
+    expected: 重复上传均成功，无永久标识或去重记录；每次响应前临时文件关闭、线程退出，来源身份查询次数与文件hash不变。
+  expected_results:
+  - 全部节点、父子关系、顺序、历史名称/版本、指标、缺失状态和正文一致；长Unicode分块拼接逐字节相同，直接使用原meta/JSONL及内嵌正文，不使用已加载DTO或原服务content_id。
+  - 本地查看成功，仅本次上传用于临时解析，后续查看无来源/正文HTTP请求，无模型工具调用，不创建目标数据库记录；同一文件可重复上传解析，不需要去重。
+  - 重复上传均成功，无永久标识或去重记录；每次响应前临时文件关闭、线程退出，来源身份查询次数与文件hash不变。
+  forbidden_side_effects:
+  - 不得新增持久导入记录、数据库记录、持久档案、导入列表或业务用量，不得请求来源资源或调用模型工具。
+  - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
+  integration_boundary:
+  - 真实来源Ops HTTP、权限存储与持久文件→原目录结构ZIP→本地服务请求期OTLP解析/页面只读数据源；不替换meta/OTLP校验与解码。
+  - 目标无需新增数据库或持久导入服务，只有请求期临时解析接口；本Case只证明数据交换，完整UI在D4验证。
+  observations:
+  - 文件/原文hash、节点及引用映射、HTTP调用和存储写入计数、解析请求释放及冷挂载状态。
+  cleanup:
+  - 删除本Case自有来源夹具/身份及后端导出暂存，关闭独占浏览器与服务，核对解析请求/URL及连接释放。
+  acceptance:
+  - id: AC-01
+    description: 全部节点、父子关系、顺序、历史名称/版本、指标、缺失状态和正文一致；长Unicode分块拼接逐字节相同，直接使用原meta/JSONL及内嵌正文，不使用已加载DTO或原服务content_id。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 本地查看成功，仅本次上传用于临时解析，后续查看无来源/正文HTTP请求，无模型工具调用，不创建目标数据库记录；同一文件可重复上传解析，不需要去重。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 重复上传均成功，无永久标识或去重记录；每次响应前临时文件关闭、线程退出，来源身份查询次数与文件hash不变。
+    steps:
+    - 3
+    expected_results:
+    - 3

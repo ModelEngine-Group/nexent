@@ -32,6 +32,7 @@ def test_ac011_parameters_show_effective_read_only_configuration(monkeypatch):
     assert result == {
         "source_limit": memory_dreaming_app.DREAMING_SOURCE_LIMIT,
         "long_term_max_chars": memory_dreaming_app.DREAMING_LONG_TERM_MAX_CHARS,
+        "long_term_length_tolerance_percent": 5,
         "summarization_max_attempts": (
             memory_dreaming_app.DREAMING_SUMMARIZATION_MAX_ATTEMPTS
         ),
@@ -48,12 +49,14 @@ def test_ac078_parameters_apply_persisted_overrides(monkeypatch):
         lambda *_args: {
             "source_limit": 42,
             "long_term_max_chars": 8000,
+            "long_term_length_tolerance_percent": 0,
             "summarization_max_attempts": 4,
         },
     )
     assert memory_dreaming_app.get_dreaming_parameters(None) == {
         "source_limit": 42,
         "long_term_max_chars": 8000,
+        "long_term_length_tolerance_percent": 0,
         "summarization_max_attempts": 4,
     }
 
@@ -185,16 +188,25 @@ def test_ac033_schedule_defaults_disabled(monkeypatch):
         memory_dreaming_app.memory_dreaming_db, "get_schedule", lambda *_args: None
     )
 
+    monkeypatch.setattr(
+        memory_dreaming_app.memory_dreaming_db, "get_thresholds",
+        lambda *_args: {"long_term_length_tolerance_percent": 0},
+    )
     result = memory_dreaming_app.get_dreaming_schedule(
         agent_id="agent-1", authorization="Bearer token"
     )
+    assert result["long_term_length_tolerance_percent"] == 0
 
     assert result["enabled"] is False
     assert result["cron_expr"] == "0 3 * * *"
     assert result["next_fire_at"] is None
 
 
-def test_ac033_schedule_is_validated_and_saved(monkeypatch):
+@pytest.mark.parametrize(
+    "length_settings",
+    [{}, {"long_term_length_tolerance_percent": None}, {"long_term_length_tolerance_percent": 0}],
+)
+def test_ac033_schedule_is_validated_and_saved(monkeypatch, length_settings):
     monkeypatch.setattr(
         memory_dreaming_app,
         "get_current_user_id",
@@ -210,6 +222,7 @@ def test_ac033_schedule_is_validated_and_saved(monkeypatch):
         rule_type="CRON",
         timezone="Asia/Shanghai",
         cron_expr="30 3 * * *",
+        **length_settings,
     )
 
     result = memory_dreaming_app.put_dreaming_schedule(payload, "Bearer token")
@@ -218,6 +231,17 @@ def test_ac033_schedule_is_validated_and_saved(monkeypatch):
     kwargs = saved.call_args.kwargs
     assert kwargs["rule_type"] == "CRON"
     assert kwargs["next_fire_at"] is not None
+    key = "long_term_length_tolerance_percent"
+    assert (key in kwargs) == (key in length_settings)
+    assert kwargs.get(key) == length_settings.get(key)
+
+
+@pytest.mark.parametrize("value", [-1, 101, 1.5])
+def test_ac007_invalid_dreaming_length_tolerance_is_rejected(value):
+    with pytest.raises(ValidationError, match="long_term_length_tolerance_percent"):
+        memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(
+            enabled=False, cron_expr="0 3 * * *", long_term_length_tolerance_percent=value,
+        )
 
 
 @pytest.mark.parametrize(

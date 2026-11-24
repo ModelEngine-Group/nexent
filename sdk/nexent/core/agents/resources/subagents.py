@@ -29,6 +29,8 @@ from nexent.monitor import (
     get_agent_monitoring_context,
     get_monitoring_manager,
 )
+from nexent.monitor.agent_fact import child_run_scope
+from nexent.monitor.run_timing import RunTiming
 
 
 class SubAgentDefinition:
@@ -83,6 +85,7 @@ class SubAgentToolWrapper:
         "_agent_name",
         "_invocation_name",
         "_runtime_identity",
+        "_agent_version_name",
         "_task_extractor",
         "_invocation_factory",
         "_on_success",
@@ -107,6 +110,7 @@ class SubAgentToolWrapper:
         object.__setattr__(self, "_invocation_factory", invocation_factory)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_agent_id", agent_id)
+        object.__setattr__(self, "_agent_version_name", (runtime_identity or {}).get("version_name"))
         object.__setattr__(self, "_runtime_identity", {
             key: value for key, value in (runtime_identity or {}).items()
             if key in {"runtime_ref", "version_no", "display_name", "origin"} and value is not None
@@ -206,28 +210,36 @@ class SubAgentToolWrapper:
             metadata = replace(
                 parent, agent_id=self._agent_id, agent_name=self._agent_name,
                 agent_display_name=getattr(self._inner, "display_name", None), query=task_text,
+                agent_version_no=self._runtime_identity.get("version_no"),
+                agent_version_name=self._agent_version_name,
+                monitoring_run_id=str(invocation_id),
+                monitoring_parent_run_id=parent.monitoring_run_id,
             )
             attributes = manager.build_agent_run_attributes(metadata, attributes={
                 "subagent.invocation_id": invocation_id,
                 **({"parent.agent.id": parent.agent_id} if parent.agent_id is not None else {}),
                 **({"parent.agent.name": parent.agent_name} if parent.agent_name is not None else {}),
             })
+            timing = RunTiming(run_id=str(invocation_id))
+            timing.start()
             with agent_monitoring_context(metadata), manager.trace_operation(
-                f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT, **attributes
+                f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT,
+                run_timing=timing, **attributes,
             ):
-                invocation = (
-                    self._invocation_factory()
-                    if self._invocation_factory is not None
-                    else nullcontext(self._inner)
-                )
-                with invocation as agent:
-                    if self._invocation_factory is not None:
-                        target = getattr(agent, "forward", agent) if forward_call else agent
-                    result = target(*args, **kwargs)
-                manager.set_openinference_output(result)
-                if self._on_success is not None:
-                    self._on_success(self.name)
-                return result
+                with child_run_scope(metadata, timing):
+                    invocation = (
+                        self._invocation_factory()
+                        if self._invocation_factory is not None
+                        else nullcontext(self._inner)
+                    )
+                    with invocation as agent:
+                        if self._invocation_factory is not None:
+                            target = getattr(agent, "forward", agent) if forward_call else agent
+                        result = target(*args, **kwargs)
+                    manager.set_openinference_output(result)
+                    if self._on_success is not None:
+                        self._on_success(self.name)
+                    return result
         finally:
             end_kwargs = dict(self._runtime_identity)
             if self._invocation_name is not None:

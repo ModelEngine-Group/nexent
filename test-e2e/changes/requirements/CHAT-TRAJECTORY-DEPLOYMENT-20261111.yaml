@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-DEPLOYMENT-20261111
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-DEPLOYMENT-20261111
+  title: 统一互斥轨迹部署选项与本地目录默认值
+  description: MONITORING_PROVIDER选择local_file或远端提供方；默认目录、无根UUID和固定30秒扫描预算；移除Grafana/Zipkin部署资源。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-TTFT-D3-001
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-RECOVERY-D5-001
+    - CHAT-TRAJECTORY-DEPLOYMENT-D5-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    - CHAT-TRAJECTORY-LOAD-D5-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 本地与远端互斥，非法提供方及移除的both拒绝。
+    - 自动初始化默认目录、无根UUID，保留归属/模式/路径安全检查。
+    - 固定30秒扫描预算，移除环境变量无效。
+    - 部署选项、持久卷和离线镜像选择保持一致。
+    reason: 复用配置及本地存储UT和部署Shell测试，复用原CAPTURE-D3/DEPLOYMENT-D5证明更高边界，无新增D1。
+    test_selectors:
+    - test/backend/utils/test_trajectory_deployment_options.py
+    - test/backend/utils/test_trajectory_environment.py
+    - test/backend/utils/test_trajectory_runtime.py
+    - test/backend/utils/test_trajectory_storage_mode.py
+    - test/backend/services/trajectory/test_contracts_and_cache.py
+    - test/sdk/monitor/test_monitoring_local_sink.py
+  notes: 'Primary responsibility runtime. Existing self-contained CAPTURE-D3 owns temporary roots, local receiver, threads
+    and final teardown. DEPLOYMENT-D5 remains blocked on actual persistent/shared deployment. User deferred formal live acceptance;
+    run UT and static/shell checks only. Preserve uncommitted Agent version changes. Local deployment shell proof: deploy/tests/test_monitoring_local_file.sh,
+    test_common.sh and test_build_offline_package.sh. These scripts render Helm and inspect deployment logic without executing
+    a deployment. Agent local-capture UT remains blocked on missing pymysql.'

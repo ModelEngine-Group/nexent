@@ -148,11 +148,10 @@ class TestMonitoringConfig:
 
         assert config.provider == "langsmith"
 
-    def test_zipkin_provider_is_supported(self):
-        """Test Zipkin is a supported OTLP provider profile."""
-        config = MonitoringConfig(provider="zipkin")
-
-        assert config.provider == "zipkin"
+    def test_removed_zipkin_provider_is_rejected(self):
+        """Retired deployment providers must fail configuration."""
+        with pytest.raises(ValueError, match="provider"):
+            MonitoringConfig(provider="zipkin")
 
     def test_langsmith_grpc_protocol_defaults_to_http(self):
         """LangSmith OTLP profile uses HTTP trace ingestion."""
@@ -1004,7 +1003,8 @@ class TestLLMTokenTracker:
         """Test completion uses OpenInference attribute names."""
         self.manager.is_enabled = True
 
-        with patch('time.time', side_effect=[123.456, 123.956, 125.456]):
+        with patch('time.time', side_effect=[123.456, 123.956]), \
+                patch('time.perf_counter', side_effect=[100, 100.5, 102]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.record_first_token()
             tracker.token_count = 10
@@ -1017,10 +1017,13 @@ class TestLLMTokenTracker:
                 "llm.token_count.total": 50,
                 "llm.usage_details": '{"input": 20, "output": 30, "total": 50}',
                 "llm.generation_rate": 5.0,
-                "llm.duration.total": 2.0,
-                "llm.time_to_first_token": 0.5
+                "llm.duration.total": 2.0
             }
-            self.span.set_attributes.assert_called_once_with(expected_attrs)
+            self.span.set_attributes.assert_any_call({
+                "llm.time_to_first_token": 0.5, "llm.ttft_ms": 500, "llm.ttft_basis": "content",
+            })
+            assert self.span.set_attributes.call_count == 2
+            self.span.set_attributes.assert_called_with(expected_attrs)
 
     def test_record_metrics_openinference_labels(self):
         """Test metrics recording uses OpenInference labels."""
@@ -1365,79 +1368,40 @@ class TestDetectModelType:
 class TestWriteBatchIsolation:
     """Verify _write_batch isolates individual record failures."""
 
-    def _make_buffer(self):
-        """Create a MonitoringRecordBuffer with flush thread disabled."""
-        with patch.dict("os.environ", {"ENABLE_MODEL_MONITORING": "false"}):
-            buf = MonitoringRecordBuffer()
-        buf._enabled = True
-        return buf
+    def test_unconfigured_sdk_does_not_enable_persistence(self, monkeypatch):
+        import sdk.nexent.monitor.monitoring as monitoring
 
-    def _setup_db_mocks(self):
-        """Inject mock database modules into sys.modules for lazy imports."""
-        mock_db_models = MagicMock()
-        mock_db_client = MagicMock()
-        sys.modules["database"] = MagicMock()
-        sys.modules["management.db.models"] = mock_db_models
-        sys.modules["management.db.client"] = mock_db_client
-        from test.common.database_stubs import install_serialization_stub
-        install_serialization_stub(sys.modules["management.db.client"])
-        from test.common.database_stubs import install_serialization_stub
-        install_serialization_stub(sys.modules["management.db.client"])
-        return (
-            mock_db_client.get_monitoring_db_session,
-            mock_db_models.ModelMonitoringRecord,
-        )
+        monkeypatch.setattr(monitoring, "_monitoring_buffer_factory", None)
+        assert get_monitoring_buffer() is None
 
-    def test_mixed_valid_and_invalid_records(self):
-        """Valid records succeed; invalid ones are skipped silently."""
-        mock_session_fn, _ = self._setup_db_mocks()
-        call_count = {"n": 0}
+    def test_configured_buffer_reuses_writer_and_settings(self, mocker, monkeypatch):
+        import sdk.nexent.monitor.monitoring as monitoring
 
-        def _session_ctx():
-            class _Ctx:
-                def __enter__(self_inner):
-                    call_count["n"] += 1
-                    if call_count["n"] == 2:
-                        raise RuntimeError("DB error on second record")
-                    return MagicMock()
+        monkeypatch.setattr(monitoring, "_monitoring_buffer_factory", None)
+        mocker.patch.object(MonitoringRecordBuffer, "_start_flush_thread")
+        writer = mocker.Mock()
+        monitoring.configure_monitoring_records(writer, batch_size=2, flush_interval=7)
+        buffer = get_monitoring_buffer()
+        assert buffer is get_monitoring_buffer()
+        assert buffer.is_enabled
+        assert buffer._flush_interval == 7
+        records = [{"model_name": f"m{i}", "tenant_id": "tenant-a"} for i in range(3)]
+        for record in records:
+            buffer.add_record(record)
+        buffer._flush_to_db()
+        assert writer.call_args_list == [mocker.call(record) for record in records[:2]]
+        assert buffer.buffer_size == 1
 
-                def __exit__(self_inner, *args):
-                    pass  # Intentionally empty: no cleanup needed for mock context
+    def test_mixed_valid_and_invalid_records(self, mocker):
+        writer = mocker.Mock(side_effect=[None, ValueError("invalid record"), None])
+        buffer = MonitoringRecordBuffer(writer, enabled=False)
+        records = [{"model_name": f"m{i}", "tenant_id": "tenant-a"} for i in range(3)]
+        buffer._write_batch(records)
+        assert writer.call_args_list == [mocker.call(record) for record in records]
 
-            return _Ctx()
-
-        mock_session_fn.side_effect = _session_ctx
-        buf = self._make_buffer()
-
-        batch = [
-            {"model_name": "m1", "tenant_id": "t1"},
-            {"model_name": "m2", "tenant_id": "t2"},
-            {"model_name": "m3", "tenant_id": "t3"},
-        ]
-        buf._write_batch(batch)
-
-    def test_all_valid_records(self):
-        """All valid records are written successfully."""
-        mock_session_fn, _ = self._setup_db_mocks()
-        mock_session = MagicMock()
-        mock_session_fn.return_value.__enter__ = Mock(
-            return_value=mock_session)
-        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
-
-        buf = self._make_buffer()
-        batch = [{"model_name": f"m{i}"} for i in range(3)]
-        buf._write_batch(batch)
-
-        assert mock_session.add.call_count == 3
-
-    def test_capacity_snapshot_fields_pass_to_model_monitoring_record(self):
-        """Capacity snapshot fields are persisted through the ORM row payload."""
-        mock_session_fn, mock_model_monitoring_record = self._setup_db_mocks()
-        mock_session = MagicMock()
-        mock_session_fn.return_value.__enter__ = Mock(return_value=mock_session)
-        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
-
-        buf = self._make_buffer()
+    def test_capacity_snapshot_fields_pass_to_writer(self, mocker):
+        writer = mocker.Mock()
+        buf = MonitoringRecordBuffer(writer, enabled=False)
         record = {
             "model_name": "m1",
             "tenant_id": "t1",
@@ -1466,19 +1430,13 @@ class TestWriteBatchIsolation:
         }
         buf._write_batch([record])
 
-        mock_model_monitoring_record.assert_called_once_with(**record)
+        writer.assert_called_once_with(record)
 
-    def test_all_invalid_records(self):
-        """When every record fails, _write_batch still does not raise."""
-        mock_session_fn, _ = self._setup_db_mocks()
-        mock_session_fn.return_value.__enter__ = Mock(
-            side_effect=RuntimeError("DB down")
-        )
-        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
-
-        buf = self._make_buffer()
-        batch = [{"model_name": f"m{i}"} for i in range(3)]
-        buf._write_batch(batch)
+    def test_all_invalid_records(self, mocker):
+        writer = mocker.Mock(side_effect=RuntimeError("DB down"))
+        buf = MonitoringRecordBuffer(writer, enabled=False)
+        buf._write_batch([{"model_name": f"m{i}"} for i in range(3)])
+        assert writer.call_count == 3
 
 
 # =========================================================================
@@ -1808,10 +1766,7 @@ class TestBufferDegradation:
 
     def _make_buffer(self):
         """Create a buffer with flush thread disabled."""
-        with patch.dict("os.environ", {"ENABLE_MODEL_MONITORING": "false"}):
-            buf = MonitoringRecordBuffer()
-        buf._enabled = True
-        return buf
+        return MonitoringRecordBuffer(enabled=False)
 
     def test_consecutive_failures_trigger_degradation(self):
         """After 3 consecutive failures, buffer enters degraded mode."""

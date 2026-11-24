@@ -1,48 +1,50 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Internal Northbound mode negotiation and native-route isolation."""
-
-from unittest.mock import AsyncMock, patch
+"""Preserve the native presentation and propagate Northbound mode into prepared turns."""
 
 import pytest
-from fastapi.responses import StreamingResponse
+from starlette.responses import StreamingResponse
 
-from test.backend.app.test_agent_app import runtime_client
-
-
-@pytest.mark.parametrize("query,expected", [("", "complete"),
-                                          ("?final_answer_mode=complete", "complete"),
-                                          ("?final_answer_mode=delta", "delta")])
-def test_internal_northbound_forwards_answer_mode(query, expected):
-    async def events():
-        yield "data: done\n\n"
-
-    with patch("runtime.api.agent.execution.verify_internal_runtime_jwt", return_value=("user", "tenant")), \
-            patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock) as run:
-        run.return_value = StreamingResponse(events(), media_type="text/event-stream")
-        response = runtime_client.post("/agent/internal/northbound/run" + query,
-                                       json={"agent_id": 1, "query": "hello"})
-    assert response.status_code == 200
-    assert run.await_args.kwargs["final_answer_mode"] == expected
-    assert run.await_args.kwargs["skip_user_save"] is True
-    assert run.await_args.kwargs["user_id"] == "user"
+from contracts.agent import AgentRequest
+from contracts.agentos import CompatibilityConversationRun
+from management.services.agent import conversation_submission, prepared_turn, runtime_client
 
 
-def test_internal_northbound_rejects_invalid_mode_before_running():
-    with patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock) as run:
-        response = runtime_client.post("/agent/internal/northbound/run?final_answer_mode=invalid",
-                                       json={"agent_id": 1, "query": "hello"})
-    assert response.status_code == 422
-    run.assert_not_awaited()
+@pytest.fixture
+def prepare(mocker):
+    async def submit(command, user, tenant, dispatch, **_headers):
+        claimed = command.model_copy(update={"claimed_run_id": "a" * 32})
+        return await dispatch(claimed, user, tenant)
+
+    mocker.patch.object(runtime_client, "_agentos_client")
+    mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
+    return mocker.patch.object(prepared_turn, "start_turn", return_value=StreamingResponse(iter(())))
 
 
-def test_native_route_does_not_opt_in_to_complete_mode():
-    async def events():
-        yield "data: done\n\n"
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options,complete", [({}, True), ({"final_answer_mode": "complete"}, True),
+                                             ({"final_answer_mode": "delta"}, False)])
+async def test_northbound_chooses_presentation_without_changing_the_prepared_request(prepare, options, complete):
+    request = AgentRequest(agent_id=7, query="hello", conversation_id=42)
 
-    with patch("runtime.api.agent.execution.get_current_user_id", return_value=("user", "tenant")), \
-            patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock) as run:
-        run.return_value = StreamingResponse(events(), media_type="text/event-stream")
-        response = runtime_client.post("/agent/run", json={"agent_id": 1, "query": "hello"})
-    assert response.status_code == 200
-    assert "final_answer_mode" not in run.await_args.kwargs
+    response = await runtime_client.forward_northbound_run(request, "user", "tenant", **options)
+
+    assert response is prepare.return_value
+    prepare.assert_awaited_once()
+    command, parsed, user, tenant, _ = prepare.await_args.args
+    assert command.request == request.model_dump(mode="json")
+    assert parsed == request and (user, tenant) == ("user", "tenant")
+    assert prepare.await_args.kwargs.get("complete_answer", False) is complete
+    assert prepare.await_args.kwargs["include_journal_controls"] is False
+
+
+@pytest.mark.asyncio
+async def test_native_route_keeps_journal_controls_and_uses_delta_presentation(prepare):
+    command = CompatibilityConversationRun(request={"agent_id": 7, "query": "hello", "conversation_id": 42})
+
+    response = await runtime_client.forward_conversation_run(command, "user", "tenant")
+
+    assert response is prepare.return_value
+    prepare.assert_awaited_once()
+    assert prepare.await_args.kwargs["include_journal_controls"] is True
+    assert "complete_answer" not in prepare.await_args.kwargs

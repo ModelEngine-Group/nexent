@@ -5,8 +5,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 import { useGlobalConfigStore } from "@/stores/global";
+import { resolveAccessibleRoutes } from "@/lib/navigationPages";
 
-const state = vi.hoisted(() => ({ speed: true, push: vi.fn() }));
+const state = vi.hoisted(() => ({
+  speed: true,
+  push: vi.fn(),
+  routes: ["/agents", "/models"],
+  user: null as { role: string; roles?: string[] } | null,
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -24,7 +30,17 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
-  useAuthorizationContext: () => ({ accessibleRoutes: ["/agents", "/models"] }),
+  useAuthorizationContext: () => ({
+    accessibleRoutes: state.routes,
+    user: state.user,
+    canAccessRoute: (route: string) => {
+      if (!state.routes.includes(route)) return false;
+      if (route !== "/ops/configuration") return true;
+      return state.user?.roles
+        ? state.user.roles.includes("SU")
+        : state.user?.role === "SU";
+    },
+  }),
 }));
 vi.mock("@/components/providers/AuthenticationProvider", () => ({
   useAuthenticationContext: () => ({
@@ -75,7 +91,22 @@ vi.mock("@/components/navigation/NotificationBell", () => ({
 beforeEach(() => {
   vi.useFakeTimers();
   state.speed = true;
+  state.routes = ["/agents", "/models"];
+  state.user = null;
   useGlobalConfigStore.getState().setConfig({});
+});
+
+test("Ops identifiers render menus that navigate to the existing URLs", () => {
+  state.user = { role: "SU", roles: ["SU"] };
+  state.routes = resolveAccessibleRoutes([
+    "ops-dashboard",
+    "ops-configuration",
+  ]);
+  render(<SideNavigation />);
+  fireEvent.click(screen.getByRole("button", { name: "ops.dashboard" }));
+  expect(state.push).toHaveBeenLastCalledWith("/zh/ops/dashboard");
+  fireEvent.click(screen.getByRole("button", { name: "ops.configuration" }));
+  expect(state.push).toHaveBeenLastCalledWith("/zh/ops/configuration");
 });
 
 test.each([undefined, "", "   "])(
@@ -270,4 +301,41 @@ test("unmount releases the pinned layout reservation for standalone pages", () =
   expect(onPinnedChange).toHaveBeenLastCalledWith(true);
   unmount();
   expect(onPinnedChange).toHaveBeenLastCalledWith(false);
+});
+
+test.each([
+  ["OPS", undefined, true],
+  ["SU", undefined, true],
+  ["ADMIN", ["ADMIN", "OPS"], true],
+  ["DEV", ["DEV", "OPS"], true],
+  ["ADMIN", undefined, false],
+  ["DEV", undefined, false],
+  ["USER", undefined, false],
+  ["SU", [], false],
+  ["ADMIN", ["ADMIN"], false],
+  ["SU", ["SU", "OPS"], false],
+])(
+  "gates the trajectory menu by effective roles (%s, %j)",
+  (role, roles, allowed) => {
+    state.user = { role, roles };
+    state.routes = ["/observability"];
+    render(<SideNavigation />);
+    const link = screen.queryByRole("button", {
+      name: "sidebar.observability",
+    });
+    if (allowed) expect(link).toBeInTheDocument();
+    else expect(link).not.toBeInTheDocument();
+  }
+);
+
+test.each([
+  ["OPS", ["OPS"], false],
+  ["SU", ["SU"], true],
+])("gates system configuration for %s", (role, roles, allowed) => {
+  state.user = { role, roles };
+  state.routes = ["/ops/configuration"];
+  render(<SideNavigation />);
+  const item = screen.queryByRole("button", { name: "ops.configuration" });
+  if (allowed) expect(item).toBeInTheDocument();
+  else expect(item).not.toBeInTheDocument();
 });

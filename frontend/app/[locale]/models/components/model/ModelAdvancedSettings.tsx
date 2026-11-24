@@ -2,6 +2,8 @@
 
 "use client";
 
+import { SamplingInput } from "@/components/model/SamplingInput";
+import { isSamplingField } from "@/lib/modelSamplingParameters";
 import { t as translate } from "i18next";
 
 import { Fragment, useEffect } from "react";
@@ -538,6 +540,14 @@ export const buildInferenceParamsPayload = (
   const extraParams: Record<string, unknown> = {};
   const thinkingEnabled = value.enable_thinking === true;
   const reasoningSupported = reasoningCapability?.status === "supported";
+  // A budget-only outlet keeps reasoning always on and declares no thinking
+  // toggle, so `enable_thinking` is not a valid saved parameter there.
+  const declaredControlTypes: string[] = reasoningCapability?.controls?.length
+    ? reasoningCapability.controls.map((control) => control.type)
+    : reasoningCapability
+      ? [reasoningCapability.control]
+      : [];
+  const thinkingToggleDeclared = declaredControlTypes.includes("toggle");
 
   for (const [key, raw] of Object.entries(value)) {
     if (
@@ -548,6 +558,7 @@ export const buildInferenceParamsPayload = (
     ) {
       continue;
     }
+    if (key === "enable_thinking" && !thinkingToggleDeclared) continue;
     if (shouldSkipInferenceParam(key, raw, thinkingEnabled)) continue;
     assignInferenceParam(key, raw, result, extraParams);
   }
@@ -834,6 +845,19 @@ const renderFieldControl = (
   disabled: boolean,
   placeholder?: string
 ) => {
+  if (isSamplingField(spec.key)) {
+    return (
+      <SamplingInput
+        field={spec.key}
+        label={spec.label}
+        value={value}
+        inherited={placeholder === undefined ? undefined : Number(placeholder)}
+        schema={{ minimum: spec.range?.[0], maximum: spec.range?.[1] }}
+        disabled={disabled}
+        onChange={(next) => onChange(next ?? undefined)}
+      />
+    );
+  }
   const type: InferenceFieldType = spec.type;
   switch (type) {
     case "str":

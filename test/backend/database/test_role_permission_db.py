@@ -33,7 +33,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -50,14 +50,16 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -78,8 +80,7 @@ class MockRolePermission:
 
 
 # Add the mocked db_models module to sys.modules
-sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.identity.models'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()

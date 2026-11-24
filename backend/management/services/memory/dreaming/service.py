@@ -7,7 +7,19 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.environment import DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS, DREAMING_SUMMARIZATION_MAX_ATTEMPTS, DREAMING_LONG_TERM_MAX_CHARS, DREAMING_MAX_AGE_DAYS, DREAMING_SOURCE_LIMIT, LIGHT_SLEEP_WINDOW_DAYS, MIN_PROMOTION_SCORE, MIN_RECALL_COUNT, MIN_UNIQUE_QUERIES, RECENCY_HALF_LIFE_DAYS
+from contracts.constants.environment import (
+    DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT,
+    DREAMING_LONG_TERM_MAX_CHARS,
+    DREAMING_MAX_AGE_DAYS,
+    DREAMING_SOURCE_LIMIT,
+    DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS,
+    DREAMING_SUMMARIZATION_MAX_ATTEMPTS,
+    LIGHT_SLEEP_WINDOW_DAYS,
+    MIN_PROMOTION_SCORE,
+    MIN_RECALL_COUNT,
+    MIN_UNIQUE_QUERIES,
+    RECENCY_HALF_LIFE_DAYS,
+)
 from management.db.memory import dreaming as memory_dreaming_db
 from management.db.memory import long_term as memory_long_term_db
 from management.db.memory import record as memory_record_db
@@ -190,6 +202,9 @@ class MemoryDreamingService:
             parent_units=parent_units,
             new_units=new_units,
             max_chars=effective_long_term_max_chars,
+            length_tolerance_percent=(config_snapshot or {}).get(
+                "long_term_length_tolerance_percent", DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT,
+            ),
             summarizer=self.summarizer or self._tenant_summarizer(tenant_id, user_id),
             prior_source=(active or {}).get("source", "none"),
             max_attempts=effective_summarization_max_attempts,
@@ -322,6 +337,7 @@ class MemoryDreamingService:
                 effective_min_queries = min_unique_queries
                 effective_source_limit = DREAMING_SOURCE_LIMIT
                 effective_long_term_max_chars = DREAMING_LONG_TERM_MAX_CHARS
+                effective_length_tolerance = DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT
                 effective_summarization_max_attempts = DREAMING_SUMMARIZATION_MAX_ATTEMPTS
                 if user_thresholds:
                     if user_thresholds.get("min_score") is not None:
@@ -334,6 +350,8 @@ class MemoryDreamingService:
                         effective_source_limit = user_thresholds["source_limit"]
                     if user_thresholds.get("long_term_max_chars") is not None:
                         effective_long_term_max_chars = user_thresholds["long_term_max_chars"]
+                    if user_thresholds.get("long_term_length_tolerance_percent") is not None:
+                        effective_length_tolerance = user_thresholds["long_term_length_tolerance_percent"]
                     if user_thresholds.get("summarization_max_attempts") is not None:
                         effective_summarization_max_attempts = user_thresholds["summarization_max_attempts"]
 
@@ -356,6 +374,7 @@ class MemoryDreamingService:
                     "min_unique_queries": effective_min_queries,
                     "source_limit": effective_source_limit,
                     "long_term_max_chars": effective_long_term_max_chars,
+                    "long_term_length_tolerance_percent": effective_length_tolerance,
                     "summarization_max_attempts": effective_summarization_max_attempts,
                 }
                 logger.info("event=dreaming_thresholds run_id=%s parameters=%s", run_id, config_snapshot)

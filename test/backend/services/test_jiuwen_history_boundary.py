@@ -2,24 +2,61 @@
 
 """An existing chat cannot fall back to client history when its DB boundary is unknown."""
 
-from unittest.mock import AsyncMock
-
 import pytest
-from contracts.errors.exceptions import ForbiddenError
+
 from contracts.agent import AgentRequest
-from management.services.agent import run as service
+from contracts.agentos import AgentRunReference
+from contracts.errors.exceptions import ForbiddenError
+from management.services.agent.preparation import evaluation_snapshot, run
 
 
-@pytest.mark.parametrize("boundary", [None, True, "12", 12])
-async def test_invalid_database_boundary_rejects_before_runtime_allocation(mocker, boundary):
-    mocker.patch.object(service, "get_current_run_user_message_id", return_value=boundary)
-    load = mocker.patch.object(service, "load_historical_context", return_value=None)
-    memory = mocker.patch.object(service, "build_memory_context")
-    allocate = mocker.patch.object(service, "create_agent_run_info", new=AsyncMock())
-    request = AgentRequest(agent_id=42, conversation_id=101, query="Continue",
-        history=[{"role": "assistant", "content": "Client supplied history"}])
+@pytest.mark.asyncio
+@pytest.mark.parametrize("saved_turn", [False, True])
+async def test_unavailable_history_boundary_rejects_before_prepared_compilation(mocker, saved_turn):
+    mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+    load = mocker.patch.object(evaluation_snapshot, "get_historical_context", return_value=None)
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    reference = AgentRunReference(conversation_id=101, run_id="a" * 32)
+    request = AgentRequest(
+        agent_id=42, conversation_id=101, query="Continue",
+        history=[{"role": "assistant", "content": "Client supplied history"}],
+    )
+    boundary = {"current_user_message_id": 12} if saved_turn else {"before_message_index": 4}
+
     with pytest.raises(ForbiddenError, match="history boundary"):
-        await service.prepare_agent_run(request, "owner", "tenant")
-    memory.assert_not_called()
-    allocate.assert_not_awaited()
-    assert load.call_count == (1 if boundary == 12 else 0)
+        await evaluation_snapshot.prepare_conversation_snapshot(
+            request, reference, "owner", "tenant", owned_conversation={}, **boundary,
+        )
+
+    if saved_turn:
+        load.assert_called_once_with(101, 12, "owner", "tenant")
+    else:
+        load.assert_called_once_with(101, None, "owner", "tenant", before_message_index=4)
+    compile_run.assert_not_awaited()
+
+
+def test_prepared_history_preserves_read_only_execution_records():
+    from contracts.agentos import PreparedConversationHistory
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.agentos.prepared_evaluation import _restore_conversation_history
+
+    records = [
+        {"record_type": "tool", "content": "Lookup", "tool_call_id": "call-1", "invocation_id": None},
+        {"record_type": "execution_logs", "content": "Found result", "tool_call_id": "call-1", "invocation_id": "child-1"},
+        {"record_type": "error", "content": None, "tool_call_id": None, "invocation_id": None},
+    ]
+    turn = {"user_message": "Continue", "assistant_final_answer": "Done", "user_message_id": 21,
+            "assistant_message_id": 22}
+    history = {"conversation_turns": [turn | {"execution_records": records}, turn | {"user_message_id": 23}]}
+
+    prepared = evaluation_snapshot._prepare_conversation_history(history, "owner", "tenant")
+    wire = prepared.model_dump(mode="json")
+    assert "execution_records" not in wire["conversation_turns"][1]
+    received = PreparedConversationHistory.model_validate(wire)
+    restored = _restore_conversation_history(received, ServicePrincipal("owner", "tenant"))
+
+    # Optional provenance stays unknown for older rows; no IDs/events are invented.
+    assert restored["conversation_turns"][0]["execution_records"] == [
+        record | {"unit_index": None, "execution_event": None} for record in records
+    ]
+    assert "execution_records" not in restored["conversation_turns"][1]

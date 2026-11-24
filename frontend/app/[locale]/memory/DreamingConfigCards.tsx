@@ -30,6 +30,12 @@ import {
 
 const { Text } = Typography;
 
+const NO_PUBLICATION_REASONS = new Set([
+  "no_candidates",
+  "no_eligible_candidates",
+  "no_new_evidence",
+]);
+
 type FrequencyMode = "daily" | "weekly" | "interval";
 
 const DEFAULT_VALUES = {
@@ -38,6 +44,7 @@ const DEFAULT_VALUES = {
   min_unique_queries: 3,
   source_limit: 10,
   long_term_max_chars: 10000,
+  long_term_length_tolerance_percent: 5,
   summarization_max_attempts: 2,
 } as const;
 
@@ -47,6 +54,7 @@ const INPUT_RANGES = {
   minUniqueQueries: { min: 0, max: 50 },
   sourceLimit: { min: 1, max: 100 },
   longTermMaxChars: { min: 100, max: 1_000_000 },
+  lengthTolerancePercent: { min: 0, max: 100 },
   summarizationMaxAttempts: { min: 0, max: 10 },
 } as const;
 
@@ -104,6 +112,9 @@ export function DreamingConfigCards({
   const [minUniqueQueries, setMinUniqueQueries] = useState<number | null>(null);
   const [sourceLimit, setSourceLimit] = useState<number | null>(null);
   const [longTermMaxChars, setLongTermMaxChars] = useState<number | null>(null);
+  const [lengthTolerancePercent, setLengthTolerancePercent] = useState<
+    number | null
+  >(null);
   const [summarizationMaxAttempts, setSummarizationMaxAttempts] = useState<
     number | null
   >(null);
@@ -139,6 +150,9 @@ export function DreamingConfigCards({
         setMinUniqueQueries(data.min_unique_queries ?? null);
         setSourceLimit(data.source_limit ?? null);
         setLongTermMaxChars(data.long_term_max_chars ?? null);
+        setLengthTolerancePercent(
+          data.long_term_length_tolerance_percent ?? null
+        );
         setSummarizationMaxAttempts(data.summarization_max_attempts ?? null);
       })
       .finally(() => {
@@ -212,6 +226,7 @@ export function DreamingConfigCards({
       min_unique_queries: minUniqueQueries,
       source_limit: sourceLimit,
       long_term_max_chars: longTermMaxChars,
+      long_term_length_tolerance_percent: lengthTolerancePercent,
       summarization_max_attempts: summarizationMaxAttempts,
     };
   }, [
@@ -226,6 +241,7 @@ export function DreamingConfigCards({
     minUniqueQueries,
     sourceLimit,
     longTermMaxChars,
+    lengthTolerancePercent,
     summarizationMaxAttempts,
   ]);
 
@@ -314,15 +330,14 @@ export function DreamingConfigCards({
     return { status: "warning" as const, text: t("dreaming.run.skipped") };
   })();
   const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
-  const noVersionReason = latestRun?.reason;
-  const showReason =
-    noVersionReason &&
-    [
-      "memory_disabled",
-      "no_candidates",
-      "no_eligible_candidates",
-      "no_new_evidence",
-    ].includes(noVersionReason);
+  const runReason =
+    latestRun &&
+    ["completed", "skipped"].includes(latestRun.status) &&
+    latestRun.reason &&
+    (latestRun.reason === "memory_disabled" ||
+      NO_PUBLICATION_REASONS.has(latestRun.reason))
+      ? t(`dreaming.reason.${latestRun.reason}`)
+      : null;
 
   if (loading) {
     return <Card className="memory-config-card" loading />;
@@ -445,6 +460,28 @@ export function DreamingConfigCards({
             </Text>
             <Text type="secondary" className="block mt-1 text-xs">
               {t("dreaming.thresholds.longTermMaxCharsGuide")}
+            </Text>
+          </div>
+
+          <div>
+            <Text strong>
+              {t("dreaming.thresholds.lengthTolerancePercent")}
+            </Text>
+            <InputNumber
+              aria-label={t("dreaming.thresholds.lengthTolerancePercent")}
+              style={{ width: "100%" }}
+              min={INPUT_RANGES.lengthTolerancePercent.min}
+              max={INPUT_RANGES.lengthTolerancePercent.max}
+              precision={0}
+              value={lengthTolerancePercent}
+              placeholder={String(
+                DEFAULT_VALUES.long_term_length_tolerance_percent
+              )}
+              onChange={setLengthTolerancePercent}
+              className="mt-1"
+            />
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.lengthTolerancePercentGuide")}
             </Text>
           </div>
 
@@ -608,9 +645,9 @@ export function DreamingConfigCards({
                   : t("dreaming.schedule.neverRun"),
               })}
             </Text>
-            {showReason && (
+            {runReason && (
               <Text type="secondary" className="w-full text-xs">
-                {t(`dreaming.reason.${noVersionReason}`)}
+                {runReason}
               </Text>
             )}
             {latestRun?.status === "failed" && latestRun.error && (

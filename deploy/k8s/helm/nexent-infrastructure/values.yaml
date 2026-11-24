@@ -1,7 +1,5 @@
 global:
   namespace: nexent
-  rolloutChecksums:
-    sql: ""
 
 nexent-infrastructure-common:
   secrets:
@@ -12,8 +10,6 @@ nexent-infrastructure-common:
       rootPassword: "nexent@4321"
       accessKey: ""
       secretKey: ""
-  sqlFiles:
-    init: ""
 
 nexent-elasticsearch:
   enabled: true

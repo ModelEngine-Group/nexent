@@ -3,6 +3,7 @@ import asyncio
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,6 +17,7 @@ from management.services.automation.intent import (
 
 REFERENCE_TIME = datetime(2026, 7, 13, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
 MODEL_CONFIG = {
+    "model_id": 42,
     "model_name": "test-model",
     "model_repo": "",
     "model_type": "llm",
@@ -24,11 +26,11 @@ MODEL_CONFIG = {
 
 class _StubLLMStrategy(LLMAutomationIntentStrategy):
     def __init__(self, response):
-        super().__init__(MODEL_CONFIG, RuleBasedAutomationIntentStrategy())
+        super().__init__(MODEL_CONFIG["model_id"], RuleBasedAutomationIntentStrategy())
         self.response = response
         self.calls = 0
 
-    def _generate_sync(self, context):
+    async def _generate(self, context):
         self.calls += 1
         if isinstance(self.response, Exception):
             raise self.response
@@ -38,6 +40,7 @@ class _StubLLMStrategy(LLMAutomationIntentStrategy):
 def _context(message: str) -> AutomationIntentContext:
     return AutomationIntentContext(
         tenant_id="tenant",
+        user_id="actor",
         message=message,
         timezone="Asia/Shanghai",
         reference_time=REFERENCE_TIME,
@@ -195,8 +198,8 @@ async def test_llm_analyzer_force_mode_checks_trusted_user_message_without_rule_
     assert result["analysis_source"] == "llm"
 
 
-def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
-    """The real _generate_sync must invoke the LLM adapter as a callable (llm([...]))."""
+@pytest.mark.asyncio
+async def test_llm_analyzer_uses_agentos_with_actor_and_sampling(monkeypatch):
     from types import SimpleNamespace
 
     from management.services.automation.intent import (
@@ -221,23 +224,8 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
         "schedule_error": None,
     }, ensure_ascii=False)
 
-    captured = {}
-
-    class FakeModel:
-        def __init__(self):
-            self.calls = None
-
-        def __call__(self, messages):
-            self.calls = messages
-            return SimpleNamespace(content=fake_payload)
-
-    fake_model = FakeModel()
-
-    def build_fake_model(**kwargs):
-        captured["config"] = kwargs
-        return fake_model
-
-    monkeypatch.setattr("nexent.core.models.OpenAIModel", build_fake_model)
+    invoke = AsyncMock(return_value=fake_payload)
+    monkeypatch.setattr("management.services.automation.intent.invoke_chat_prompt", invoke)
     monkeypatch.setattr(
         "management.services.automation.intent.compose_auxiliary_prompt",
         lambda language, operation, values: SimpleNamespace(
@@ -245,24 +233,26 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
         ),
     )
 
-    strategy = LLMAutomationIntentStrategy(MODEL_CONFIG, RuleBasedAutomationIntentStrategy())
+    strategy = LLMAutomationIntentStrategy(MODEL_CONFIG["model_id"], RuleBasedAutomationIntentStrategy())
     context = AutomationIntentContext(
         tenant_id="tenant",
+        user_id="actor",
         message="每天早上八点查询状态",
         timezone="Asia/Shanghai",
         reference_time=REFERENCE_TIME,
         force_llm=True,
     )
-    result = asyncio.run(strategy.analyze(context))
+    result = await strategy.analyze(context)
 
     assert result["analysis_source"] == "llm"
     assert result["is_automation_intent"] is True
     assert result["schedule_trigger"].cron_expr == "0 8 * * *"
-    from nexent.core.utils.observer import MessageObserver
-
-    assert isinstance(captured["config"]["observer"], MessageObserver)
-    assert fake_model.calls[0] == {"role": "system", "content": "sys"}
-    assert fake_model.calls[1]["content"].startswith("msg: ")
+    invoke.assert_awaited_once()
+    call = invoke.await_args.kwargs
+    assert (call["model_id"], call["user_id"], call["tenant_id"]) == (42, "actor", "tenant")
+    assert call["system_prompt"] == "sys"
+    assert call["user_prompt"].startswith("msg: ")
+    assert call["options"].model_dump() == {"temperature": 0.1, "top_p": 0.9, "max_output_tokens": 700}
 
 
 def test_strategy_factory_prefers_selected_llm_model(monkeypatch):
@@ -278,6 +268,7 @@ def test_strategy_factory_prefers_selected_llm_model(monkeypatch):
     )
     context = AutomationIntentContext(
         tenant_id="tenant",
+        user_id="actor",
         message="每天八点检查状态",
         model_id=42,
     )

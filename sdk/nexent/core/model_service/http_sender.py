@@ -182,6 +182,8 @@ class HttpRequestSender:
         token = scope.register_closer(abort_once) if scope else None
         try:
             _check_cancelled(scope)
+            if request.on_dispatch is not None:
+                request.on_dispatch()
             with client.stream(
                 request.method,
                 request.url,
@@ -220,6 +222,9 @@ class HttpRequestSender:
             async with httpx.AsyncClient(
                 verify=request.ssl_verify, timeout=request.timeout_seconds, trust_env=False
             ) as client:
+                _check_cancelled(scope)
+                if request.on_dispatch is not None:
+                    request.on_dispatch()
                 async with client.stream(
                     request.method, request.url, headers=headers, content=request.body_bytes
                 ) as response:

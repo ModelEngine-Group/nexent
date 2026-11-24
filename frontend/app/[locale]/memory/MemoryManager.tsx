@@ -549,7 +549,9 @@ export function MemoryManager() {
         </Card>
         <DreamingConfigCards
           memoryAllowed={
-            config.memoryEnabled && tenantMemory?.enabled !== false
+            config.memoryEnabled &&
+            tenantMemory?.enabled !== false &&
+            config.dreamingEnabled !== false
           }
         />
         <ProviderConfigCard

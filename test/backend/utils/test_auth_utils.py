@@ -17,13 +17,22 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "sdk"))
 
+# Import the real ORM models BEFORE the sqlalchemy stub below.  pytest imports
+# every test module into a single process, so stubbing ``sqlalchemy`` here would
+# otherwise poison any later ``import management.db.models`` (other test files,
+# e.g. test_local_account_cli.py, need the real UserTenant/TenantConfig).
+try:
+    import management.db.models  # noqa: F401
+except Exception:  # pragma: no cover - only when optional runtime deps are absent
+    pass
+
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
 
 # ---------------------------------------------------------------------------
 # Pre-mock heavy dependencies BEFORE importing the module under test.
 # This avoids side-effects such as Minio/S3 network calls that are triggered
-# during import time of management.db.client when auth_utils is imported.
+# during import time of infrastructure.rdb.client when auth_utils is imported.
 # ---------------------------------------------------------------------------
 
 # Stub `nexent.storage.*` modules early so unittest.mock.patch does not import the real
@@ -50,12 +59,12 @@ sys.modules["nexent.storage"] = _nexent_storage_mod
 sys.modules["nexent.storage.storage_client_factory"] = _nexent_storage_factory_mod
 sys.modules["nexent.storage.minio_config"] = _nexent_minio_config_mod
 
-# Stub `management.db.client` early so patch() can resolve the target even when
+# Stub `infrastructure.rdb.client` early so patch() can resolve the target even when
 # backend/ and backend/database/ are namespace packages (no __init__.py).
 _backend_mod = sys.modules.get("backend") or types.ModuleType("backend")
 _backend_mod.__path__ = [str(Path(__file__).resolve().parents[3] / "backend")]
 _backend_database_mod = types.ModuleType("backend.database")
-_backend_database_client_mod = types.ModuleType("management.db.client")
+_backend_database_client_mod = types.ModuleType("infrastructure.rdb.client")
 _backend_database_client_mod.MinioClient = MagicMock()
 
 _backend_mod.database = _backend_database_mod
@@ -63,9 +72,9 @@ _backend_database_mod.client = _backend_database_client_mod
 
 sys.modules["backend"] = _backend_mod
 sys.modules["backend.database"] = _backend_database_mod
-sys.modules["management.db.client"] = _backend_database_client_mod
+sys.modules["infrastructure.rdb.client"] = _backend_database_client_mod
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -73,7 +82,10 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+object_storage_stub = types.ModuleType("infrastructure.object_storage.client")
+object_storage_stub.MinioClient = MagicMock(return_value=minio_client_mock)
+object_storage_stub.minio_client = minio_client_mock
+sys.modules[object_storage_stub.__name__] = object_storage_stub
 
 # Stub out the database package hierarchy expected by auth_utils
 sys.modules['database'] = MagicMock()
@@ -82,9 +94,9 @@ sys.modules['database'] = MagicMock()
 mock_minio_class = MagicMock()
 mock_minio_class.return_value = MagicMock()
 
-# Provide a lightweight module for management.db.client with the attributes used
+# Provide a lightweight module for infrastructure.rdb.client with the attributes used
 # by auth_utils so that any direct attribute access works as expected.
-db_client_stub = types.ModuleType("management.db.client")
+db_client_stub = types.ModuleType("infrastructure.rdb.client")
 db_client_stub.MinioClient = mock_minio_class
 db_client_stub.get_db_session = MagicMock()
 db_client_stub.as_dict = MagicMock()
@@ -94,11 +106,11 @@ mock_minio_instance = MagicMock()
 db_client_stub.minio_client = mock_minio_instance
 db_client_stub.db_client = MagicMock()
 
-sys.modules['management.db.client'] = db_client_stub
+sys.modules['infrastructure.rdb.client'] = db_client_stub
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Stub management.db.identity.user_tenant to avoid real DB interactions
 sys.modules['management.db.identity.user_tenant'] = MagicMock(
@@ -107,6 +119,12 @@ sys.modules['management.db.identity.user_tenant'] = MagicMock(
 # Stub management.db.identity.token to avoid real DB interactions (used by auth_utils)
 sys.modules['management.db.identity.token'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
+
+# NOTE: ``management.db.models`` must NOT be stubbed at module scope — pytest
+# imports every test module during collection, so a global sys.modules entry
+# here leaks into unrelated test files (e.g. test_local_account_cli.py fails
+# with "cannot import name 'UserTenant'").  The tests that need a fake
+# TenantConfig patch it locally via monkeypatch.setitem instead.
 
 # Mock contracts.constants.environment but provide real LANGUAGE values for tests.
 # We must keep the real ``UnauthorizedError``/``SignatureValidationError``/
@@ -194,8 +212,8 @@ sys.modules['management.db.identity.account'] = MagicMock()
 sys.modules['management.db.identity.cas_session'] = MagicMock()
 
 # Now import the module under test
-import gateway.authentication.auth as au
-import gateway.authentication.northbound_auth as nb_auth
+import management.services.permission.identity.session as au
+import management.services.permission.identity.northbound as nb_auth
 
 # Ensure exceptions in module under test are real exception classes, not mocks
 au.UnauthorizedError = UnauthorizedError
@@ -937,12 +955,69 @@ class TestResolveTenantIdFromUserTenantRecord:
         record = {"tenant_id": "", "user_role": "ASSET_OWNER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.ASSET_OWNER_TENANT_ID
 
-    def test_empty_tenant_other_role_falls_back_to_default(self):
+    def test_empty_tenant_db_has_real_tenant_uses_it(self, monkeypatch):
+        """Runtime guard: when DB has a real tenant it wins over DEFAULT_TENANT_ID."""
+        set_import_attribute(monkeypatch, au, "_lookup_first_active_tenant",
+                            lambda: "real-tenant-from-db")
+        record = {"tenant_id": None, "user_role": "USER", "user_id": "suadmin"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == "real-tenant-from-db"
+
+    def test_empty_tenant_db_lookup_falls_back_to_default(self, monkeypatch):
+        """When DB lookup returns None (no real tenant yet) we land on DEFAULT_TENANT_ID."""
+        set_import_attribute(monkeypatch, au, "_lookup_first_active_tenant",
+                            lambda: None)
         record = {"tenant_id": None, "user_role": "USER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID
 
 
+class TestLookupFirstActiveTenant:
+    """Tests for _lookup_first_active_tenant — DB-side runtime guard."""
+
+    def setup_method(self):
+        au.DEFAULT_TENANT_ID = "tenant_id"
+        au.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+    def test_returns_first_real_tenant_from_db(self, monkeypatch):
+        """Happy path: session.execute returns a real tenant_id that filters pass."""
+        session = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = "fe7f7c1e-e113-4976-8a48-773b1304b00b"
+        session.execute.return_value = result
+
+        ctx_mgr = MagicMock()
+        ctx_mgr.__enter__.return_value = session
+        get_db_session = MagicMock(return_value=ctx_mgr)
+
+        # _lookup_first_active_tenant imports get_db_session lazily from
+        # infrastructure.rdb.client — patch that module attribute before the
+        # lazy import fires.
+        import infrastructure.rdb.client as _dbc
+        monkeypatch.setattr(_dbc, "get_db_session", get_db_session)
+
+        tid = au._lookup_first_active_tenant()
+        assert tid == "fe7f7c1e-e113-4976-8a48-773b1304b00b"
+
+    def test_db_lookup_exception_returns_none(self, monkeypatch):
+        """try/except swallow any DB failure and return None so caller can fallback."""
+        import infrastructure.rdb.client as _dbc
+        monkeypatch.setattr(
+            _dbc, "get_db_session",
+            MagicMock(side_effect=RuntimeError("db down")),
+        )
+
+        assert au._lookup_first_active_tenant() is None
+
+
 class TestGetCurrentUserContext:
+    def test_trusted_gateway_preserves_all_roles_without_querying_membership(self, monkeypatch):
+        monkeypatch.setattr(au, "_gateway_identity", lambda *args: {
+            "user_id": "user-1", "tenant_id": "tenant-1", "roles": ["DEV", "OPS"],
+        })
+        def forbidden(uid):
+            raise AssertionError("Trusted identity was queried again")
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", forbidden)
+        assert au.get_current_user_context(None) == ("user-1", "tenant-1", ("DEV", "OPS"))
+
     """Tests for authenticated tenant and role resolution."""
 
     def test_returns_normalized_role_and_tenant(self, monkeypatch):
@@ -1061,8 +1136,10 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def active_local_account(monkeypatch):
+    # These units exercise the explicitly disabled-boundary session adapter.
+    monkeypatch.setattr("gateway.identity.downstream.enabled", lambda: False)
     # Credential/account-state integration is proved separately by native auth tests.
     monkeypatch.setattr(au, "JWT_ISSUER", "nexent")
-    from gateway.authentication import northbound_auth
+    from management.services.permission.identity import northbound as northbound_auth
     monkeypatch.setattr(northbound_auth, "require_active_account", lambda uid: {})
     monkeypatch.setattr(au, "require_active_account", lambda user_id: {"user_id": user_id, "token_version": 0})

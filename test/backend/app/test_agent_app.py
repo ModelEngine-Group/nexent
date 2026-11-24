@@ -7,6 +7,7 @@ Tests all agent management API endpoints including runtime and configuration ope
 """
 from contracts.authentication import AuthenticatedIdentity
 import atexit
+import json
 from http import HTTPStatus
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
@@ -25,10 +26,17 @@ from fastapi.testclient import TestClient
 from contracts.constants.constants import AGENT_PROMPTS_HIDDEN_FLAG
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import AppException, ForbiddenError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.agent import NL2AgentRunRequest
-from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError
+from contracts.errors.exceptions import AgentDraftEditError, AgentRunAlreadyActiveError
+from management.services.agent.nl2agent import Nl2AgentDraftSaveError
+from infrastructure.agentos_identity import ServicePrincipal
+# Load the Runtime dependencies before the local SDK stubs.
+import runtime.agentos.ephemeral
+import management.services.model.adapter
+from management.api import northbound
+from management.api.agent.creator import nl2agent_run_api, require_agent_create_permission, router as agent_creator_router
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -62,15 +70,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Apply patches before importing any app modules (similar to test_config_app.py)
 patches = [
     # Mock database sessions
-    patch('management.db.client.get_db_session', return_value=Mock())
+    patch('infrastructure.rdb.client.get_db_session', return_value=Mock())
 ]
 
 for p in patches:
@@ -104,6 +112,7 @@ def pass_through_decorator(*args, **kwargs):
 
 
 monitoring_stub = types.ModuleType("monitor")
+monitoring_stub.agent_monitoring_context = MagicMock()
 monitoring_manager_mock = MagicMock()
 monitoring_manager_mock.monitor_endpoint = pass_through_decorator
 monitoring_manager_mock.monitor_llm_call = pass_through_decorator
@@ -116,6 +125,8 @@ monitoring_stub.get_monitoring_manager = lambda: monitoring_manager_mock
 monitoring_stub.monitoring_manager = monitoring_manager_mock
 monitoring_stub.MonitoringManager = MagicMock
 monitoring_stub.MonitoringConfig = MagicMock
+monitoring_stub.AgentRunMetadata = AgentRunMetadata
+monitoring_stub.agent_monitoring_context = agent_monitoring_context
 
 # Mock all external dependencies that agent_app.py imports
 # These must be in sys.modules BEFORE we import management.api.agent.agent
@@ -125,26 +136,29 @@ sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
-sys.modules['management.db.client'] = MagicMock()
+sys.modules['infrastructure.rdb.client'] = MagicMock()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules["management.services.agent.preparation.run"] = MagicMock()
 sys.modules["management.services.agent.preparation.tools"] = MagicMock()
 
 sys.modules['nexent.core.agents.orchestration.entry'] = MagicMock()
-sys.modules['gateway.authentication.auth'] = MagicMock()
-sys.modules['gateway.authentication.auth'].get_current_user_id.return_value = ('test_user', 'test_tenant')
+sys.modules['management.services.permission.identity.session'] = MagicMock()
+sys.modules['management.services.permission.identity.session'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
-sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
+sys.modules['infrastructure.trace.bootstrap'] = MagicMock()
+sys.modules['infrastructure.trace.bootstrap'].monitoring_manager = monitoring_manager_mock
+sys.modules['infrastructure.trace.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
+sys.modules['management.services.agent.lifecycle'].AgentRunAlreadyActiveError = AgentRunAlreadyActiveError
 sys.modules['management.services.agent.service'] = MagicMock()
+sys.modules['management.services.agent.subscription'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()
 sys.modules['management.services.configuration.user.memory'] = MagicMock()
@@ -161,15 +175,17 @@ for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.mod
 
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
-from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
-from management.utils.app_factory import register_exception_handlers
+from management.api.agent import conversation_run
+from backend.http.server.app_factory import register_exception_handlers
 
 
 
 # Create FastAPI apps for runtime and config routers
 runtime_app = FastAPI()
-runtime_app.include_router(agent_runtime_router)
-runtime_app.dependency_overrides[require_agent_create_permission] = lambda: None
+runtime_app.include_router(conversation_run.router)
+config_creator_app = FastAPI()
+config_creator_app.include_router(agent_creator_router)
+config_creator_app.dependency_overrides[require_agent_create_permission] = lambda: None
 runtime_client = TestClient(runtime_app)
 
 config_app = FastAPI()
@@ -182,20 +198,32 @@ def mock_auth_header():
     return {"Authorization": "Bearer test_token"}
 
 
-@pytest.fixture
-def mock_conversation_id():
-    return 123
+@pytest.fixture(autouse=True)
+def conversation_identity(mocker):
+    return mocker.patch.object(conversation_run, "get_current_user_id", return_value=("test_user", "test_tenant"))
 
 
 # Agent Runtime API Tests
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(("method", "path"), [("POST", "/agent/run"), ("GET", "/agent/stop/123")])
+def test_conversation_endpoints_reject_invalid_authentication(mocker, method, path):
+    mocker.patch.object(conversation_run, "get_current_user_id", side_effect=UnauthorizedError("invalid"))
+    run = mocker.patch.object(conversation_run, "forward_conversation_run")
+    stop = mocker.patch.object(conversation_run, "forward_scoped_stop")
+    request = {"json": {"query": "hello"}} if method == "POST" else {}
+    response = runtime_client.request(method, path, headers={"Authorization": "Bearer invalid"}, **request)
+    assert response.status_code == 401
+    run.assert_not_awaited()
+    stop.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_agent_run_api(mocker, mock_auth_header):
     """Test agent_run_api endpoint."""
     mock_run_agent_stream = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
+        "management.api.agent.conversation_run.forward_conversation_run", new_callable=AsyncMock)
 
     # Mock the streaming response
     async def mock_stream():
@@ -227,96 +255,41 @@ async def test_agent_run_api(mocker, mock_auth_header):
     assert "data: chunk2" in content
 
 
-@pytest.mark.parametrize(
-    ("error", "expected_code", "expected_retry_after"),
-    [
-        (RuntimeCapacityExceededError(), "RUNTIME_CAPACITY_FULL", "1"),
-        (RuntimeQueueTimeoutError(2.2), "RUNTIME_QUEUE_TIMEOUT", "3"),
-    ],
-)
-def test_ut_be_tlm_027_agent_run_overload_is_json_before_sse(
-    mocker,
-    mock_auth_header,
-    error,
-    expected_code,
-    expected_retry_after,
-):
-    mocker.patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock, side_effect=error)
+@pytest.mark.parametrize(("expected_code", "message", "retry_after"), [
+    ("RUNTIME_CAPACITY_FULL", "Agent runtime is at capacity.", "1"),
+    ("RUNTIME_QUEUE_TIMEOUT", "Agent runtime queue wait timed out.", "3"),
+])
+def test_ut_be_tlm_027_agent_run_overload_is_json_before_sse(mocker, mock_auth_header, expected_code, message, retry_after):
+    from contracts.errors.exceptions import RuntimeUpstreamError
 
-    response = runtime_client.post(
-        "/agent/run",
-        json={"agent_id": 1, "query": "test", "is_debug": True},
-        headers=mock_auth_header,
+    body = {"code": expected_code, "message": message, "retryable": True}
+    mocker.patch.object(
+        conversation_run, "forward_conversation_run",
+        side_effect=RuntimeUpstreamError(
+            429, json.dumps(body).encode(), {"Retry-After": retry_after, "Content-Type": "application/json"},
+        ),
     )
-
+    response = runtime_client.post("/agent/run", json={"agent_id": 1, "query": "test", "is_debug": True},
+                                   headers=mock_auth_header)
     assert response.status_code == 429
-    assert response.headers["retry-after"] == expected_retry_after
+    assert response.headers["retry-after"] == retry_after
     assert response.headers["content-type"].startswith("application/json")
-    assert response.json() == {
-        "code": expected_code,
-        "message": (
-            "Agent runtime is at capacity."
-            if expected_code == "RUNTIME_CAPACITY_FULL"
-            else "Agent runtime queue wait timed out."
-        ),
-        "retryable": True,
-    }
+    assert response.json() == body
 
 
-@pytest.mark.parametrize(
-    ("route", "error_code", "reason", "expected_status"),
-    [
-        (
-            "/agent/run",
-            ErrorCode.CHAT_METADATA_TOO_LARGE,
-            "METADATA_TOO_LARGE",
-            413,
-        ),
-        (
-            "/agent/run",
-            ErrorCode.CHAT_METADATA_INVALID,
-            "INVALID_METADATA_TYPE",
-            422,
-        ),
-        (
-            "/agent/internal/northbound/run",
-            ErrorCode.CHAT_METADATA_TOO_LARGE,
-            "METADATA_TOO_LARGE",
-            413,
-        ),
-    ],
-)
-def test_agent_run_preserves_runtime_metadata_app_exceptions(
-    mocker,
-    route,
-    error_code,
-    reason,
-    expected_status,
-):
-    """Runtime metadata errors must reach the shared AppException handler."""
+@pytest.mark.parametrize(("error_code", "reason", "expected_status"), [
+    (ErrorCode.CHAT_METADATA_TOO_LARGE, "METADATA_TOO_LARGE", 413),
+    (ErrorCode.CHAT_METADATA_INVALID, "INVALID_METADATA_TYPE", 422),
+])
+def test_agent_run_preserves_runtime_metadata_app_exceptions(mocker, error_code, reason, expected_status):
     app = FastAPI()
     register_exception_handlers(app)
-    app.include_router(agent_runtime_router)
+    app.include_router(conversation_run.router)
     client = TestClient(app, raise_server_exceptions=False)
+    mocker.patch.object(conversation_run, "forward_conversation_run",
+                        side_effect=AppException(error_code, details={"reason": reason}))
 
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream",
-        new_callable=AsyncMock,
-        side_effect=AppException(
-            error_code,
-            details={"reason": reason},
-        ),
-    )
-
-    response = client.post(
-        route,
-        json={"agent_id": 1, "query": "test", "is_debug": True},
-        headers={"Authorization": "Bearer test-token"},
-    )
+    response = client.post("/agent/run", json={"agent_id": 1, "query": "test", "is_debug": True})
 
     assert response.status_code == expected_status
     assert response.json()["code"] == error_code.value
@@ -335,14 +308,15 @@ async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
 
 
 @pytest.fixture(autouse=True)
-def creator_history_boundary(mocker):
+def creator_history_boundary(mocker, monkeypatch):
     mocker.patch("permissions.resource_access.get_current_user_context", return_value=("test_user", "test_tenant", ("DEV",)))
     from contracts.agent import SystemAgentRef
     from management.services.conversation import creator_execution
     mocker.patch.object(creator_execution.system_agent_provider, "get_creator_ref", return_value=SystemAgentRef("shared", "nl2agent_main", 77, 0))
     mocker.patch.object(creator_execution, "authorize_target", side_effect=lambda target, *_: target)
     mocker.patch.object(creator_execution, "prepare_creation_history", return_value=(42, 1))
-    mocker.patch.object(creator_execution, "persist_creation_stream", side_effect=lambda stream, **_: stream)
+    from test.common.creator_runtime_boundary import isolate_creator_runtime
+    return isolate_creator_runtime(monkeypatch, creator_execution)
 
 
 @pytest.mark.asyncio
@@ -350,18 +324,18 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    from contracts.agentos import AgentVersionReference
+
+    prepared = Mock()
+    compile_run = mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=prepared)
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
 
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -372,6 +346,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
 
     chunks = [chunk async for chunk in response.body_iterator]
@@ -379,47 +354,33 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     assert response.status_code == 200
     assert response.media_type == "text/event-stream"
     assert "final_answer" in "".join(chunks)
-    request = create_stream.call_args.kwargs["request"]
+    request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    assert (
-        create_stream.call_args.kwargs["authorization"]
-        == mock_auth_header["Authorization"]
-    )
+    prepared.model_copy.assert_called_once_with(update={"system_agent": AgentVersionReference(agent_id=77, version_no=0)})
+    create_stream.assert_called_once_with(prepared.model_copy.return_value, ServicePrincipal("user-a", "tenant-a"))
     assert request.conversation_id is None
     assert request.persist_history is True
-    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
-    assert create_stream.call_args.kwargs["language"] == "en"
+    assert actor == ServicePrincipal("user-a", "tenant-a")
+    assert language == "en"
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
-    mocker, mock_auth_header
+    mocker, mock_auth_header, creator_history_boundary
 ):
-    mocker.patch("runtime.api.agent.execution.ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch("management.api.agent.creator.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
-    mocker.patch(
-        "runtime.api.agent.execution.get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=Mock())
+    mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
     prepare = mocker.patch(
         "management.services.conversation.creator_execution.prepare_creation_history", return_value=(42, 1)
-    )
-    persist = mocker.patch(
-        "management.services.conversation.creator_execution.persist_creation_stream",
-        side_effect=lambda stream, **kwargs: stream,
     )
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -434,168 +395,186 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
     assert response.headers["conversation_id"] == "42"
     assert prepare.call_args.kwargs["agent_id"] == 77
     assert prepare.call_args.kwargs["target"] == {"type": "agent", "id": 17}
     chunks = [chunk async for chunk in response.body_iterator]
     assert chunks
-    assert persist.call_args.kwargs["assistant_index"] == 1
+    assistant = creator_history_boundary.save.call_args.args[0]
+    assert assistant.role == "assistant" and assistant.message_idx == 1
+    assert creator_history_boundary.save.call_args.kwargs["status"] == "streaming"
+    creator_history_boundary.checkpoint.assert_called_once()
+    assert creator_history_boundary.checkpoint.call_args.kwargs == {
+        "message_id": 101, "conversation_id": 42, "user_id": "user-a",
+    }
+    creator_history_boundary.launch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_northbound_agent_run_api_uses_internal_identity(mocker):
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        return_value=("user-a", "tenant-a"),
-    )
-    run_agent = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream",
-        new_callable=AsyncMock,
-    )
+async def test_northbound_run_uses_authenticated_context_and_preserves_metadata(mocker):
+    context = AuthenticatedIdentity("user-a", "tenant-a")
+    auth = mocker.patch.object(northbound, "_get_northbound_context", return_value=context)
+    start = mocker.patch.object(northbound, "start_streaming_chat", return_value=StreamingResponse(iter(())))
 
-    async def mock_stream():
-        yield b"data: done\n\n"
-
-    run_agent.return_value = StreamingResponse(
-        mock_stream(),
-        media_type="text/event-stream",
-    )
-    response = runtime_client.post(
-        "/agent/internal/northbound/run",
-        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
-        headers={"Authorization": "Bearer internal-token"},
+    app = FastAPI()
+    app.include_router(northbound.router)
+    response = TestClient(app).post(
+        "/nb/v1/chat/run",
+        json={"agent_name": "test", "conversation_id": 123, "query": "hello", "metadata": {"project": "alpha"}},
+        headers={"Authorization": "Bearer key"},
     )
 
     assert response.status_code == 200
-    call_kwargs = run_agent.call_args.kwargs
-    assert call_kwargs["user_id"] == "user-a"
-    assert call_kwargs["tenant_id"] == "tenant-a"
-    assert call_kwargs["skip_user_save"] is True
-    assert call_kwargs["http_request"] is None
+    auth.assert_awaited_once()
+    options = start.await_args.kwargs
+    assert options["ctx"] is context and options["conversation_id"] == 123
+    assert options["metadata"] == {"project": "alpha"}
+    assert options["query"] == "hello" and options["final_answer_mode"] == "complete"
 
 
-@pytest.mark.asyncio
-async def test_northbound_agent_run_api_rejects_invalid_token(mocker):
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        side_effect=UnauthorizedError("Invalid internal runtime token"),
-    )
-
-    response = runtime_client.post(
-        "/agent/internal/northbound/run",
-        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
-        headers={"Authorization": "Bearer invalid"},
-    )
-
-    assert response.status_code == 401
-
-
-@pytest.mark.parametrize(
-    ("error", "expected_status"),
-    [
-        (ForbiddenError("forbidden"), 403),
-        (ValidationError("invalid"), 422),
-    ],
-)
-def test_northbound_agent_run_api_maps_domain_errors(
-    mocker,
-    error,
-    expected_status,
-):
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream",
-        new_callable=AsyncMock,
-        side_effect=error,
-    )
-
-    response = runtime_client.post(
-        "/agent/internal/northbound/run",
-        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
-        headers={"Authorization": "Bearer internal-token"},
+@pytest.mark.parametrize(("error", "expected_status", "detail"), [
+    (PermissionError("forbidden"), 403, "forbidden"),
+    (ValueError("invalid"), 400, "invalid"),
+    (RuntimeError("unexpected sensitive failure"), 500, "Internal Server Error"),
+    (AppException(ErrorCode.CHAT_METADATA_TOO_LARGE, details={"reason": "METADATA_TOO_LARGE"}), 413, None),
+])
+def test_northbound_run_maps_errors(mocker, error, expected_status, detail):
+    mocker.patch.object(northbound, "_get_northbound_context", return_value=AuthenticatedIdentity("user-a", "tenant-a"))
+    mocker.patch.object(northbound, "start_streaming_chat", side_effect=error)
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(northbound.router)
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/nb/v1/chat/run", json={"agent_name": "test", "query": "hello"},
     )
 
     assert response.status_code == expected_status
+    if detail is None:
+        assert response.json()["code"] == ErrorCode.CHAT_METADATA_TOO_LARGE.value
+        assert response.json()["details"] == {"reason": "METADATA_TOO_LARGE"}
+    else:
+        assert response.json()["message"] == detail
 
 
-def test_northbound_agent_run_api_maps_unexpected_error(mocker):
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("unexpected"),
-    )
+@pytest.mark.parametrize(("method", "path"), [
+    ("POST", "/nb/v1/chat/run"), ("GET", "/nb/v1/chat/stop/123"),
+])
+def test_northbound_run_and_stop_reject_unauthenticated_requests(mocker, method, path):
+    mocker.patch.object(northbound, "_get_northbound_context", side_effect=HTTPException(401, "Invalid API key"))
+    start = mocker.patch.object(northbound, "start_streaming_chat")
+    stop = mocker.patch.object(northbound, "stop_chat")
+    app = FastAPI()
+    app.include_router(northbound.router)
+    request = {"json": {"agent_name": "test", "query": "hello"}} if method == "POST" else {}
+    response = TestClient(app).request(method, path, **request)
 
+    assert response.status_code == 401
+    start.assert_not_awaited()
+    stop.assert_not_awaited()
+
+
+def test_northbound_stop_uses_authenticated_context(mocker):
+    actor = AuthenticatedIdentity("user-a", "tenant-a")
+    mocker.patch.object(northbound, "_get_northbound_context", return_value=actor)
+    stop = mocker.patch.object(northbound, "stop_chat", return_value={"message": "stopped"})
+    app = FastAPI()
+    app.include_router(northbound.router)
+    response = TestClient(app).get("/nb/v1/chat/stop/123")
+
+    assert response.json() == {"message": "stopped"}
+    stop.assert_awaited_once_with(ctx=actor, conversation_id=123, meta_data=None)
+
+
+def test_conversation_dispatch_preserves_identity_and_request_context(mocker, mock_auth_header):
+    forward = mocker.patch.object(conversation_run, "forward_conversation_run", return_value=StreamingResponse(iter(())))
     response = runtime_client.post(
-        "/agent/internal/northbound/run",
-        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
-        headers={"Authorization": "Bearer internal-token"},
-    )
-
-    assert response.status_code == 500
-    assert response.json()["detail"] == "Agent run error."
-
-
-@pytest.mark.asyncio
-async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        return_value=("user-a", "tenant-a"),
-    )
-    stop_agent = mocker.patch(
-        "runtime.api.agent.execution.stop_agent_tasks",
-        return_value={"message": "stopped"},
-    )
-
-    response = runtime_client.post(
-        "/agent/internal/northbound/stop/123",
-        headers={"Authorization": "Bearer internal-token"},
+        "/agent/run", json={"query": "question", "agent_id": 7, "conversation_id": 42},
+        headers={**mock_auth_header, "x-user-timezone": "Asia/Shanghai"}, cookies={"NEXT_LOCALE": "en"},
     )
 
     assert response.status_code == 200
-    assert response.json() == {"message": "stopped"}
-    stop_agent.assert_called_once_with(123, "user-a")
-
-
-def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
-    mocker.patch(
-        "runtime.api.agent.execution.verify_internal_runtime_jwt",
-        side_effect=UnauthorizedError("Invalid internal runtime token"),
-    )
-
-    response = runtime_client.post(
-        "/agent/internal/northbound/stop/123",
-        headers={"Authorization": "Bearer invalid"},
-    )
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid internal runtime token"
+    payload, owner, tenant = forward.await_args.args
+    assert (owner, tenant) == ("test_user", "test_tenant")
+    assert payload.request["conversation_id"] == 42
+    assert payload.language == "en" and payload.timezone == "Asia/Shanghai"
 
 
 @pytest.mark.asyncio
-async def test_nl2agent_editor_run_uses_persistent_history(
+@pytest.mark.parametrize("run_found", [False, True])
+async def test_cursorless_resume_uses_existing_projection_before_legacy_runtime(mocker, run_found):
+    from contracts.agentos import AgentLegacyResume, CompatibilityConversationRun
+    from management.services.agent import prepared_turn
+    from management.services.agent import runtime_client as forwarder
+
+    client = mocker.patch.object(forwarder, "_agentos_client").return_value
+    client.resume_legacy = AsyncMock(return_value=object())
+    existing = object() if run_found else None
+    resume = mocker.patch.object(prepared_turn, "resume_cursorless", return_value=existing)
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+    result = await forwarder.forward_conversation_run(payload, "actor", "tenant")
+
+    resume.assert_awaited_once_with(42, "actor", "tenant", client)
+    if run_found:
+        assert result is existing
+        client.resume_legacy.assert_not_awaited()
+    else:
+        assert result is client.resume_legacy.return_value
+        client.resume_legacy.assert_awaited_once_with(AgentLegacyResume(conversation_id=42), "actor", "tenant")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_id,is_debug", [(None, False), (0, False), (-1, False), (42, True)])
+async def test_invalid_resume_never_reaches_runtime(mocker, conversation_id, is_debug):
+    from contracts.agentos import CompatibilityConversationRun
+    from management.services.agent import runtime_client as forwarder
+
+    client = mocker.patch.object(forwarder, "_agentos_client")
+    payload = CompatibilityConversationRun(
+        request={"query": "", "conversation_id": conversation_id, "is_debug": is_debug}, resume=True,
+    )
+    with pytest.raises(HTTPException) as error:
+        await forwarder.forward_conversation_run(payload, "actor", "tenant")
+
+    assert (error.value.status_code, error.value.detail) == (422, {"code": "AGENTOS_INVALID_RESUME_REQUEST"})
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_background_dispatch_checks_owner_before_opening_runtime(mocker):
+    from contracts.agentos import BackgroundRun
+    from management.services.agent import background
+    from management.services.agent import runtime_client as forwarder
+
+    owner = mocker.patch.object(background, "conversation_belongs_to", return_value=False)
+    client = mocker.patch.object(forwarder, "_agentos_client")
+    actor = ServicePrincipal("user-a", "tenant-a")
+    payload = BackgroundRun(run_id="a" * 32, request={"query": "hello", "agent_id": 1, "conversation_id": 123})
+
+    with pytest.raises(HTTPException) as error:
+        await background.dispatch_background(payload, actor)
+
+    assert error.value.status_code == 404
+    owner.assert_called_once_with(123, user_id="user-a", tenant_id="tenant-a")
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    prepared = object()
+    compile_run = mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=prepared)
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
 
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -603,9 +582,11 @@ async def test_nl2agent_editor_run_uses_persistent_history(
             history=[],
             minio_files=[],
             agent_id=42,
+            persist_history=False,
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
 
     chunks = [chunk async for chunk in response.body_iterator]
@@ -613,29 +594,24 @@ async def test_nl2agent_editor_run_uses_persistent_history(
     assert response.status_code == 200
     assert response.media_type == "text/event-stream"
     assert "final_answer" in "".join(chunks)
-    request = create_stream.call_args.kwargs["request"]
+    request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    assert (
-        create_stream.call_args.kwargs["authorization"]
-        == mock_auth_header["Authorization"]
-    )
+    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"))
     assert request.conversation_id is None
-    assert request.persist_history is True
-    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
-    assert create_stream.call_args.kwargs["language"] == "en"
+    assert request.persist_history is False
+    assert "conversation_id" not in response.headers
+    assert actor == ServicePrincipal("user-a", "tenant-a")
+    assert language == "en"
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         side_effect=UnauthorizedError("Invalid access token"),
     )
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-    )
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream")
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
@@ -645,21 +621,22 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
             ),
             http_request=MagicMock(),
             authorization="Bearer invalid-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid access token"
-    create_stream.assert_not_awaited()
+    create_stream.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
+        "management.api.agent.creator.prepare_nl2agent_snapshot",
         new_callable=AsyncMock,
         side_effect=RuntimeError("private model configuration"),
     )
@@ -672,6 +649,7 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
             ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == 500
@@ -701,11 +679,11 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
     expected_code,
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
+        "management.api.agent.creator.prepare_nl2agent_snapshot",
         new_callable=AsyncMock,
         side_effect=error,
     )
@@ -718,6 +696,7 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
             ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == expected_status
@@ -726,9 +705,10 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_requires_target_for_new_conversation(mocker):
-    mocker.patch("runtime.api.agent.execution.get_current_user_info", return_value=("user", "tenant", "en"))
+    mocker.patch("management.api.agent.creator.get_current_user_info", return_value=("user", "tenant", "en"))
+    mocker.patch("management.services.conversation.creator_execution.system_agent_provider.get_creator_ref")
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=runtime_app),
+        transport=httpx.ASGITransport(app=config_creator_app),
         base_url="http://test",
     ) as client:
         response = await client.post(
@@ -740,186 +720,64 @@ async def test_nl2agent_run_api_requires_target_for_new_conversation(mocker):
     assert response.json()["detail"] == "Invalid Workbench creation session."
 
 
-async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
-    """Test agent_run_api error case in debug mode - should expose actual error."""
-    mock_run_agent_stream = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
-    mock_run_agent_stream.side_effect = Exception("Test error")
+@pytest.mark.parametrize("is_debug", [True, False])
+def test_agent_run_unexpected_errors_omit_exception_details(mocker, mock_auth_header, is_debug):
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(conversation_run.router)
+    client = TestClient(app, raise_server_exceptions=False)
+    mocker.patch.object(conversation_run, "forward_conversation_run", side_effect=RuntimeError("private fixture error"))
 
-    response = runtime_client.post(
-        "/agent/run",
-        json={
-            "agent_id": 1,
-            "conversation_id": 123,
-            "query": "test query",
-            "history": [],
-            "minio_files": [],
-            "is_debug": True,  # Debug mode
-        },
-        headers=mock_auth_header
+    response = client.post(
+        "/agent/run", json={"agent_id": 1, "query": "test", "is_debug": is_debug}, headers=mock_auth_header,
     )
 
     assert response.status_code == 500
-    # In debug mode, actual error should be exposed
-    assert "Test error" in response.json()["detail"]
+    assert "private fixture error" not in response.text
 
 
-async def test_agent_run_api_error_normal_mode(mocker, mock_auth_header):
-    """Test agent_run_api error case in normal mode - should show generic error."""
-    mock_run_agent_stream = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
-    mock_run_agent_stream.side_effect = Exception("Test internal error")
-
+@pytest.mark.parametrize(("error", "status"), [
+    (ForbiddenError("Conversation is not accessible"), 403),
+    (ValidationError("Selected knowledge bases are incompatible"), 422),
+])
+def test_agent_run_maps_scope_errors(mocker, mock_auth_header, error, status):
+    mocker.patch.object(conversation_run, "forward_conversation_run", side_effect=error)
     response = runtime_client.post(
-        "/agent/run",
-        json={
-            "agent_id": 1,
-            "conversation_id": 123,
-            "query": "test query",
-            "history": [],
-            "minio_files": [],
-            "is_debug": False,  # Normal mode
-        },
-        headers=mock_auth_header
+        "/agent/run", json={"agent_id": 1, "conversation_id": 123, "query": "test query"}, headers=mock_auth_header,
     )
-
-    assert response.status_code == 500
-    # In normal mode, generic error message should be shown
-    assert response.json()["detail"] == "Agent run error."
-    # Actual error should NOT be exposed in normal mode
-    assert "Test internal error" not in response.json()["detail"]
+    assert response.status_code == status
+    assert response.json()["detail"] == str(error)
 
 
-def test_agent_run_api_exception(mocker, mock_auth_header):
-    """Test agent_run_api exception handling."""
-    mock_run_agent_stream = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
-    mock_logger = mocker.patch("runtime.api.agent.execution.logger")
-    mock_run_agent_stream.side_effect = Exception("Test error")
+@pytest.mark.parametrize("cancelled", [True, False])
+def test_agent_stop_looks_up_and_stops_only_the_scoped_run(mocker, mock_auth_header, cancelled):
+    from contracts.agentos import AgentRunState, AgentStop
+    from management.services.conversation import creator_runtime
 
-    response = runtime_client.post(
-        "/agent/run",
-        json={
-            "agent_id": 1,
-            "conversation_id": 123,
-            "query": "test query",
-            "history": [],
-            "minio_files": [],
-            "is_debug": False,
-        },
-        headers=mock_auth_header
-    )
-
-    assert response.status_code == 500
-    assert "Agent run error" in response.json()["detail"]
-    mock_logger.error.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
-    from contracts.errors.exceptions import ForbiddenError
-    from contracts.agent import AgentRequest
-    from fastapi import HTTPException
-    from starlette.requests import Request
-
-    from runtime.api.agent.execution import agent_run_api
-
-    mock_run_agent_stream = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream",
-        new_callable=AsyncMock,
-    )
-    mock_run_agent_stream.side_effect = ForbiddenError("Conversation is not accessible")
-
-    request = AgentRequest(
-        agent_id=1,
-        conversation_id=123,
-        query="test query",
-        history=[],
-        minio_files=[],
-        is_debug=False,
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        await agent_run_api(
-            agent_request=request,
-            http_request=Request({"type": "http", "headers": []}),
-            authorization="Bearer token",
-            resume=False,
-        )
-
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Conversation is not accessible"
-
-
-@pytest.mark.asyncio
-async def test_agent_run_api_maps_scope_validation_to_422(mocker):
-    from contracts.errors.exceptions import ValidationError
-    from contracts.agent import AgentRequest
-    from starlette.requests import Request
-
-    from runtime.api.agent.execution import agent_run_api
-
-    mock_run_agent_stream = mocker.patch(
-        "runtime.api.agent.execution.run_agent_stream",
-        new_callable=AsyncMock,
-        side_effect=ValidationError("Selected knowledge bases are incompatible"),
-    )
-    request = AgentRequest(
-        agent_id=1,
-        query="test query",
-        knowledge_scope={
-            "local": {"mode": "disabled", "knowledge_ids": []},
-            "aidp": {"mode": "disabled", "kds_ids": []},
-        },
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        await agent_run_api(
-            agent_request=request,
-            http_request=Request({"type": "http", "headers": []}),
-            authorization="Bearer token",
-            resume=False,
-        )
-
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == "Selected knowledge bases are incompatible"
-
-
-def test_agent_stop_api_success(mocker, mock_conversation_id):
-    """Test agent_stop_api success case."""
-    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-
-    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
-    mock_stop_tasks.return_value = {"status": "success"}
-
-    response = runtime_client.get(
-        f"/agent/stop/{mock_conversation_id}",
-        headers={"Authorization": "Bearer test_token"}
-    )
+    run_id = "a" * 32
+    mocker.patch.object(creator_runtime, "stop_creator", return_value=None)
+    active = mocker.patch.object(conversation_run, "forward_active_run", return_value=run_id)
+    stop = mocker.patch.object(conversation_run, "forward_scoped_stop", return_value=AgentRunState(
+        run_id=run_id, conversation_id=123, status="running" if cancelled else "completed",
+        latest_event_id=None, cancellation_requested=cancelled,
+    ))
+    response = runtime_client.get("/agent/stop/123", headers=mock_auth_header)
 
     assert response.status_code == 200
-    mock_get_user_id.assert_called_once_with("Bearer test_token")
-    mock_stop_tasks.assert_called_once_with(
-        mock_conversation_id, "test_user_id")
-    assert response.json()["status"] == "success"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["cancellation_requested"] is cancelled
+    active.assert_awaited_once_with(123, "test_user", "test_tenant")
+    stop.assert_awaited_once_with(AgentStop(run_id=run_id, conversation_id=123), "test_user", "test_tenant")
 
 
-def test_agent_stop_api_exception(mocker, mock_conversation_id):
-    """Test agent_stop_api exception handling - exception propagates without catch."""
-    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+def test_agent_stop_hides_runtime_transport_error(mocker, mock_auth_header):
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError
 
-    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
-    mock_stop_tasks.side_effect = Exception("Stop error")
+    mocker.patch.object(conversation_run, "forward_scoped_stop", side_effect=RuntimeServiceUnavailableError("internal address"))
+    response = runtime_client.get("/agent/stop/" + "a" * 32, headers=mock_auth_header)
 
-    # The endpoint doesn't catch exceptions, so they propagate
-    # This test verifies the function raises the exception as expected
-    with pytest.raises(Exception, match="Stop error"):
-        runtime_client.get(
-            f"/agent/stop/{mock_conversation_id}",
-            headers={"Authorization": "Bearer test_token"}
-        )
+    assert response.status_code == 503
+    assert "internal address" not in response.text
 
 
 # Agent Configuration API Tests

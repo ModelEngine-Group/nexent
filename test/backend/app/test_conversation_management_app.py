@@ -38,9 +38,9 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import target endpoints with all external dependencies patched
@@ -441,7 +441,7 @@ async def test_delete_conversation_success(conversation_mocks):
 
     assert result.code == 0 and result.data is True
     conversation_mocks['delete_conversation'].assert_called_once_with(
-        conversation_id, "user_id")
+        conversation_id, "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio
@@ -484,7 +484,7 @@ async def test_delete_conversations_batch_success(conversation_mocks):
     assert result.code == 0
     assert result.data["deleted_count"] == 2
     conversation_mocks['delete_conversations_batch'].assert_called_once_with(
-        [1, 2, 3], "user_id")
+        [1, 2, 3], "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio

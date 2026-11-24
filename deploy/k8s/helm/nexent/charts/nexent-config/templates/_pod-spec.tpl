@@ -18,7 +18,8 @@ containers:
     command:
       - /opt/nexent/scripts/start-backend.sh
       - python
-      - backend/config_service.py
+      - -m
+      - backend.http.config_service
     envFrom:
       - configMapRef:
           name: nexent-config
@@ -29,6 +30,8 @@ containers:
       - secretRef:
           name: nexent-secrets
     env:
+      - name: GATEWAY_AUTH_ENABLED
+        value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 6 }}
       - name: NEXENT_SQL_STARTUP_MODE
         value: "migrate"
@@ -70,6 +73,8 @@ containers:
         mountPath: /mnt/nexent-data/memory-provider-plugins
       - name: nexent-logs
         mountPath: /mnt/nexent-data/logs
+      - name: nexent-trajectory
+        mountPath: {{ default "/mnt/nexent-data/trajectory" .Values.global.monitoring.trajectoryRootDir | quote }}
     resources:
       requests:
         memory: {{ .Values.resources.backend.requests.memory }}
@@ -102,4 +107,7 @@ volumes:
   - name: nexent-logs
     persistentVolumeClaim:
       claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}
+  - name: nexent-trajectory
+    persistentVolumeClaim:
+      claimName: {{ default "nexent-trajectory" (default dict .Values.global.sharedStorage.trajectory).existingClaim }}
 {{- end -}}

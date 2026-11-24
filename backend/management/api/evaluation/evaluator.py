@@ -28,7 +28,7 @@ from management.services.evaluation.evaluators import (
     restore_evaluator_version_impl,
     update_evaluator_impl,
 )
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 
 
 logger = logging.getLogger("evaluator_app")
@@ -319,9 +319,10 @@ async def generate_evaluator_api(
 ):
     """Generate an evaluator configuration from a natural language description."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        data = generate_evaluator_by_llm_impl(
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = await generate_evaluator_by_llm_impl(
             description=payload.description,
+            user_id=user_id,
             tenant_id=tenant_id,
             model_id=payload.model_id,
             agent_id=payload.agent_id,

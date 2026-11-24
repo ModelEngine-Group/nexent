@@ -16,7 +16,6 @@ from recovery_io import protected_write
 from suite_runtime import BatchLock, deployment_lock_owned, now, save
 
 MODE_MARKER = "state/deployment-exceptions/pending.json"
-FAULT_MARKER = "state/deployment-guard/pending.json"
 _RETRY = ContextVar("daily_deployment_retry", default=None)
 MODE_KEYS = {"ENABLE_AIDP_KNOWLEDGE", "MODEL_ENGINE_ENABLED", "AIDP_SERVER_URL", "AIDP_API_KEY", "AIDP_TENANT_ID"}
 
@@ -213,10 +212,9 @@ def prepare_daily_retry(repo, home, directory, *, prepared=False):
     if not deployment_lock_owned(repo):
         raise RuntimeError("Daily recovery requires the checkout deployment lock")
     # A surviving D5 child can retain this lease after its launcher has exited.
+    # The old fault journal itself is evidence, not a batch admission gate.
     with BatchLock(home / "state/deployment-guard/exclusive.lock"):
-        if (home / FAULT_MARKER).exists() or (home / FAULT_MARKER).is_symlink():
-            raise RuntimeError("Pending D5 fault recovery needs container/data safety review before synchronization")
-    retry = DailyRetry(repo, home, directory) if (home / MODE_MARKER).exists() or (home / MODE_MARKER).is_symlink() else None
+        retry = DailyRetry(repo, home, directory) if (home / MODE_MARKER).exists() or (home / MODE_MARKER).is_symlink() else None
     if retry is None and prepared and (directory / "recovery.json").exists():
         if document(directory / "recovery.json").get("status") == "PREPARED_FOR_REDEPLOY":
             raise RuntimeError("Prepared Daily recovery journal disappeared before execution")

@@ -16,7 +16,9 @@ import { User, AuthInfoResponse, AuthorizationContextType } from "@/types/auth";
 import { authService } from "@/services/authService";
 import { authEvents, authzEventUtils } from "@/lib/authEvents";
 import { AUTH_EVENTS } from "@/const/auth";
+import { OPS_PAGES } from "@/const/navigationPages";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { resolveAccessibleRoutes } from "@/lib/navigationPages";
 import log from "@/lib/logger";
 import { checkSessionValid } from "@/lib/session";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -52,7 +54,10 @@ export function useAuthorization(): AuthorizationContextType {
       if (
         !result?.user ||
         !Array.isArray(result.user.permissions) ||
-        !Array.isArray(result.user.accessibleRoutes)
+        !Array.isArray(result.user.accessiblePages) ||
+        !result.user.accessiblePages.every(
+          (pageId) => typeof pageId === "string"
+        )
       ) {
         throw new Error("Invalid authorization response");
       }
@@ -76,15 +81,16 @@ export function useAuthorization(): AuthorizationContextType {
       return false;
     }
 
-    const { permissions, accessibleRoutes, groupIds, ...userInfo } = userData;
-    if (!permissions || !accessibleRoutes) {
-      log.warn("Missing permissions or accessibleRoutes", {
+    const { permissions, accessiblePages, groupIds, ...userInfo } = userData;
+    if (!permissions || !accessiblePages) {
+      log.warn("Missing permissions or accessiblePages", {
         hasPermissions: !!permissions,
-        hasAccessibleRoutes: !!accessibleRoutes,
+        hasAccessiblePages: !!accessiblePages,
       });
       return false;
     }
 
+    const accessibleRoutes = resolveAccessibleRoutes(accessiblePages);
     setUser(userInfo as User);
     setGroupIds(groupIds);
     setPermissions(permissions);
@@ -189,21 +195,34 @@ export function useAuthorization(): AuthorizationContextType {
   const isSharePage =
     !isOperationsOnly(user) && cleanPath.startsWith("/share/");
 
+  // Personal profile is a self-service page available to every signed-in role.
+  const isUserProfilePage = cleanPath === "/users";
+  const isSystemConfigAlias =
+    cleanPath === "/system-config" &&
+    accessibleRoutes.includes(OPS_PAGES.configuration.path);
+  const isSystemConfigRoute =
+    cleanPath === OPS_PAGES.configuration.path || isSystemConfigAlias;
+
   // Support prefix matching so nested routes such as /evaluation/{id} are
   // covered by /evaluation.
   const isWithinAccessiblePrefix = accessibleRoutes.some(
     (route) => route !== "/" && cleanPath.startsWith(route + "/")
   );
 
-  const hasAccess =
+  const hasRouteAccess =
+    cleanPath === "/" ||
     isSharePage ||
+    isUserProfilePage ||
+    isSystemConfigAlias ||
     accessibleRoutes.includes(cleanPath) ||
     isWithinAccessiblePrefix;
+  const hasAccess =
+    hasRouteAccess && (!isSystemConfigRoute || hasRole(user, "SU"));
 
   // Route guard
   useLayoutEffect(() => {
     if (isOperationsOnly(user) && cleanPath === "/") {
-      router.replace("/ops/dashboard");
+      router.replace(OPS_PAGES.dashboard.path);
       return;
     }
     if (isSharePage) {
@@ -224,16 +243,16 @@ export function useAuthorization(): AuthorizationContextType {
         pathname: cleanPath,
         accessibleRoutes,
       });
-      if (user) {
-        openAuthzPromptModal();
-      }
       setTimeout(() => {
+        if (user) {
+          openAuthzPromptModal();
+        }
         router.replace("/");
       }, 0);
       return;
     }
 
-    setLastCheckedPath(pathname);
+    setTimeout(() => setLastCheckedPath(pathname), 0);
   }, [
     pathname,
     isLoading,
@@ -264,9 +283,18 @@ export function useAuthorization(): AuthorizationContextType {
 
   const canAccessRoute = useCallback(
     (route: string): boolean => {
+      if (
+        route === OPS_PAGES.configuration.path ||
+        route === "/system-config"
+      ) {
+        return (
+          accessibleRoutes.includes(OPS_PAGES.configuration.path) &&
+          hasRole(user, "SU")
+        );
+      }
       return accessibleRoutes.includes(route);
     },
-    [accessibleRoutes]
+    [accessibleRoutes, user]
   );
 
   // Internal group list query - fetches all groups for the user's tenant

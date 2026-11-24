@@ -10,6 +10,8 @@ from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
+from nexent.core.agents.contracts.identity import root_clarification_allowed
+
 
 _NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
 _NL2A_STATE_PATTERN = re.compile(
@@ -142,6 +144,11 @@ class MessageObserver:
     MAX_TOKEN_BUFFER_SIZE = 10
     MAX_PROTOCOL_LOOKAHEAD_CHARS = 32
 
+    @property
+    def turn_complete(self) -> bool:
+        """Whether a trusted interaction boundary gracefully ends this turn."""
+        return False
+
     def __init__(self, lang="zh", enable_nl2a_wrapper=False):
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []
@@ -209,6 +216,10 @@ class MessageObserver:
     def mark_direct_final_answer(self) -> None:
         """Identify an untagged body as final after runtime classification."""
         self._step_output()["reclassify_step"] = True
+
+    def mark_answer_fallback(self) -> None:
+        """Keep an empty-answer placeholder outside measured answer output."""
+        self._step_output()["answer_fallback"] = True
 
     def complete_final_answer(self, agent_name: str, answer: str) -> None:
         """Finalize the existing answer slot without appending its body twice."""
@@ -339,6 +350,12 @@ class MessageObserver:
         explicit ``agent_id`` from the tool still wins.
         """
         active = self._active_subagent()
+        if process_type == ProcessType.HUMAN_INTERACTION and (
+            not root_clarification_allowed() or active is not None
+        ):
+            # Legacy Core paths can return missing inputs as child-task text,
+            # but must not publish a child form to the user-facing channel.
+            return
         if active is not None:
             active_invocation, active_agent_id, _active_agent_name = active
         else:
@@ -358,6 +375,15 @@ class MessageObserver:
         step_id = self._step_output().get("step_id")
         if step_id:
             metadata.setdefault("step_id", step_id)
+        if process_type in {ProcessType.FINAL_ANSWER, ProcessType.MODEL_OUTPUT}:
+            from nexent.monitor.agent_fact import record_agent_answer
+
+            state = self._step_output()
+            if not state.get("answer_fallback"):
+                answer = (
+                    state.get("accepted_answer", content) if metadata.get("answer_phase") == "complete" else content
+                )
+                record_agent_answer(answer, agent_id=resolved_agent_id, invocation_id=resolved_invocation)
         self._append_message(
             Message(
                 process_type,
@@ -735,10 +761,16 @@ class MessageObserver:
                    if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
                               "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
                               "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "source_protocol", "call_group_id", "call_index", "call_count", "parent_call_id",
                               "step_number", "duration", "step_error", "status", "end_reason", "final_content",
                               "final_block_ids", "error", "context_capacity"}}
             },
         )
+
+    @property
+    def current_tool_call_id(self) -> str | None:
+        """Return the actual invocation in this execution context."""
+        return self._tool_call_id.get()
 
     @contextmanager
     def tool_call_context(self, tool_call_id: str):

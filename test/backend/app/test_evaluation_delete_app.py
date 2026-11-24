@@ -30,7 +30,7 @@ _STUB_SYMBOLS = {
         "create_agent_evaluation_run_impl", "delete_agent_evaluation_run_impl",
         "generate_analysis_report_impl", "get_agent_evaluation_run_impl",
         "get_evaluation_stats_impl", "list_agent_evaluation_cases_impl",
-        "list_agent_evaluations_by_agent_impl", "trial_run_evaluator_impl",
+        "list_agent_evaluations_by_agent_impl", "run_evaluation_trial_in_worker",
     ),
     "management.services.evaluation.reporting.report": ("generate_agent_evaluation_report_impl",),
     "management.services.evaluation.sets": (
@@ -42,11 +42,11 @@ _STUB_SYMBOLS = {
         "update_evaluation_set_case_impl",
     ),
     "management.db.evaluation.runs": ("update_annotation_schema_ids",),
-    "gateway.authentication.auth": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
+    "management.services.permission.identity.session": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
     "management.services.evaluation.spreadsheet": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
-    "infrastructure.concurrency": ("config_thread_manager",),
+    "management.thread_management": ("config_thread_manager",),
 }
 for _module_name, _symbols in _STUB_SYMBOLS.items():
     _module = types.ModuleType(_module_name)
@@ -75,7 +75,7 @@ for _module_name, _symbols in _STUB_SYMBOLS.items():
 _PATCH_TARGETS = [
     "management.services.evaluation.runs.delete_agent_evaluation_run_impl",
     "management.services.evaluation.sets.delete_evaluation_set_impl",
-    "gateway.authentication.auth.get_current_user_id",
+    "management.services.permission.identity.session.get_current_user_id",
     "management.services.evaluation.runs.create_agent_evaluation_run_impl",
     "management.services.evaluation.reporting.report.generate_agent_evaluation_report_impl",
     "management.services.evaluation.runs.get_agent_evaluation_run_impl",
@@ -86,7 +86,7 @@ _PATCH_TARGETS = [
     "management.services.evaluation.sets.get_evaluation_set_impl",
     "management.services.evaluation.sets.list_evaluation_set_cases_impl",
     "management.services.evaluation.sets.list_evaluation_sets_impl",
-    "gateway.authentication.auth.get_current_user_info",
+    "management.services.permission.identity.session.get_current_user_info",
 ]
 
 
@@ -96,7 +96,7 @@ def _build_app():
     # ``AppException`` raised by endpoints is translated to a JSON HTTP
     # response (matching production behaviour) instead of propagating out
     # of ``TestClient`` as a raw exception.
-    from middleware.exception_handler import ExceptionHandlerMiddleware
+    from runtime.api.exception_handler import ExceptionHandlerMiddleware
 
     app.add_middleware(ExceptionHandlerMiddleware)
     from management.api.evaluation.agent_evaluation import router as eval_router

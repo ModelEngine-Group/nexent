@@ -236,7 +236,6 @@ def test_launcher_reports_preflight_failures_without_product_configuration(tmp_p
     runtime = tmp_path / "runtime/test-venv" / ("Scripts/python.exe" if launcher.os.name == "nt" else "bin/python")
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
-    monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "notify_terminal", lambda repo, home, directory: suite_notify.notify_launch(directory, home))
 
     def sync(*args, **kwargs):
@@ -291,7 +290,6 @@ def test_launcher_uses_explicit_batch_link_or_reports_preparation_failure(tmp_pa
     runtime = tmp_path / "runtime/test-venv" / ("Scripts/python.exe" if launcher.os.name == "nt" else "bin/python")
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
-    monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "notify_terminal", lambda repo, home, directory: suite_notify.notify_launch(directory, home))
     monkeypatch.setattr(launcher, "sync_checkout", lambda *a, **k: "fixed-revision")
     monkeypatch.setattr(launcher, "git", lambda *a, **k: "")

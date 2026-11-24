@@ -97,7 +97,7 @@ for _name in (
     "database",
     "management.db.evaluation.runs",
     "utils",
-    "gateway.authentication.auth",
+    "management.services.permission.identity.session",
 ):
     _register_package(_name)
 sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_svc")
@@ -108,7 +108,7 @@ sys.modules["management.db.evaluation.runs"] = MagicMock(name="agent_eval_db")
 # imports lazily; an unset attribute would make monkeypatch.setattr fail.
 _auth_utils_mock = MagicMock(name="auth_utils")
 _auth_utils_mock.parse_language_from_request = MagicMock(return_value="zh")
-sys.modules["gateway.authentication.auth"] = _auth_utils_mock
+sys.modules["management.services.permission.identity.session"] = _auth_utils_mock
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
@@ -156,7 +156,7 @@ def _code(name):
 def client():
     """Build a FastAPI TestClient with the agent-evaluation router mounted."""
     from fastapi import FastAPI
-    from middleware.exception_handler import ExceptionHandlerMiddleware
+    from runtime.api.exception_handler import ExceptionHandlerMiddleware
 
     app = FastAPI()
     app.add_middleware(ExceptionHandlerMiddleware)
@@ -168,7 +168,11 @@ def client():
 
 def _mock_impls(**overrides):
     """Replace the imported service/auth names on the app module with mocks."""
+    async def run_blocking(_label, fn, *, lane, owner, **kwargs):
+        return fn(**kwargs)
+
     defaults = {
+        "run_blocking": run_blocking,
         "get_current_user_id": MagicMock(return_value=("u1", "t1")),
         "get_current_user_info": MagicMock(return_value=("u1", "t1", "zh")),
         "create_agent_evaluation_run_impl": MagicMock(
@@ -186,7 +190,7 @@ def _mock_impls(**overrides):
             return_value={"items": [], "total": 0}
         ),
         "list_agent_evaluations_by_agent_impl": MagicMock(return_value=[{"id": 1}]),
-        "forward_agent_evaluation_trial_run": AsyncMock(return_value={"result": "ok"}),
+        "run_evaluation_trial_in_worker": MagicMock(return_value={"result": "ok"}),
         "generate_agent_evaluation_report_impl": MagicMock(
             return_value=(b"%PDF-1.4 fake", 0)
         ),
@@ -624,7 +628,7 @@ class TestTrialRun:
         )
         assert response.status_code == 200
         assert response.json()["data"] == {"result": "ok"}
-        assert app.forward_agent_evaluation_trial_run.call_args.kwargs["query"] == "hello"
+        assert app.run_evaluation_trial_in_worker.call_args.kwargs["query"] == "hello"
 
     def test_401_on_unauthorized(self, client):
         from contracts.errors.exceptions import UnauthorizedError
@@ -638,7 +642,7 @@ class TestTrialRun:
 
     def test_500_on_exception(self, client):
         _mock_impls(
-            forward_agent_evaluation_trial_run=AsyncMock(side_effect=RuntimeError("boom"))
+            run_evaluation_trial_in_worker=MagicMock(side_effect=RuntimeError("boom"))
         )
         response = client.post(
             "/agent-evaluations/trial-run",
@@ -648,7 +652,7 @@ class TestTrialRun:
 
     def test_app_exception_propagates(self, client):
         _mock_impls(
-            forward_agent_evaluation_trial_run=AsyncMock(
+            run_evaluation_trial_in_worker=MagicMock(
                 side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "missing")
             )
         )
@@ -662,7 +666,7 @@ class TestTrialRun:
         from contracts.errors.exceptions import RuntimeUpstreamError
 
         _mock_impls(
-            forward_agent_evaluation_trial_run=AsyncMock(
+            run_evaluation_trial_in_worker=MagicMock(
                 side_effect=RuntimeUpstreamError(
                     status_code=400,
                     content=b'{"code":"160209","message":"At least one published evaluator is required.","details":null}',
@@ -714,7 +718,7 @@ class TestSafeExtractors:
     def test_language_from_request(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["gateway.authentication.auth"],
+            sys.modules["management.services.permission.identity.session"],
             "parse_language_from_request",
             MagicMock(return_value="en"),
         )
@@ -723,7 +727,7 @@ class TestSafeExtractors:
     def test_language_fallback_on_error(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["gateway.authentication.auth"],
+            sys.modules["management.services.permission.identity.session"],
             "parse_language_from_request",
             MagicMock(side_effect=RuntimeError("boom")),
         )

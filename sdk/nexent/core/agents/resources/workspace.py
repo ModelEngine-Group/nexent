@@ -166,6 +166,50 @@ class WorkspaceResources:
             raise CancelledError("Sandbox initialization cancelled")
 
 
+    def _resolve_skill_artifact_path(self, value: str) -> str:
+        workspace = Path(self.workspace_path).resolve()
+        mapping = self.workspace_mapping
+        if mapping is not None and PurePosixPath(value).is_relative_to(mapping.container_root):
+            path = mapping.to_host(value)
+        else:
+            path = Path(value)
+            if not path.is_absolute():
+                raise ValueError("Skill artifact path must be absolute")
+            path = path.resolve(strict=True)
+        relative = path.relative_to(workspace)
+        if (
+            not relative.parts or relative.parts[0] in {"inputs", "skills"}
+            or any(part in _WORKSPACE_UPLOAD_EXCLUDED_DIRS for part in relative.parts[:-1])
+        ):
+            raise ValueError("Skill artifact path is not a run output")
+        return str(path)
+
+    def _upload_skill_artifacts(self, artifacts: list[dict]) -> list[dict]:
+        uploader = (getattr(self.agent, "tools", {}) or {}).get("upload_to_s3")
+        if uploader is None:
+            logger.warning("Skill artifact upload is unavailable for this run")
+            return []
+        workspace = Path(self.workspace_path).resolve()
+        uploaded = {}
+        for artifact in artifacts:
+            try:
+                path = Path(self._resolve_skill_artifact_path(artifact["absolute_path"]))
+                if path in uploaded:
+                    continue
+                name = PurePosixPath(artifact["file_name"].replace("\\", "/")).name
+                target = path.relative_to(workspace).with_name(name).as_posix()
+                mapping = uploader.workspace_mapping
+                source = str(mapping.to_container(path)) if mapping is not None else str(path)
+                stored = uploader.upload_artifact(source, target)
+                uploaded[path] = {
+                    key: stored[key] for key in ("object_name", "name", "size", "url", "mime_type")
+                }
+            except (KeyError, OSError, TypeError, ValueError):
+                logger.warning("Ignoring invalid declared skill artifact", exc_info=True)
+            except Exception:
+                logger.exception("Failed to upload declared skill artifact")
+        return list(uploaded.values())
+
     def _record_workspace_upload(self, upload: Dict[str, Any]) -> None:
         """Collect one upload result for the frontend artifact event."""
         object_name = str(upload.get("object_name") or "")
@@ -297,6 +341,22 @@ class WorkspaceResources:
 
 
     def _initialize_sandbox_workspaces(self, executors: Optional[List[Any]] = None) -> None:
+        """Trace actual workspace setup without recording host filesystem paths."""
+        from nexent.monitor.phase_capture import trace_phase
+
+        candidates = self._sandbox_executors if executors is None else executors
+        if not self.workspace_path or not any(
+            getattr(executor, "_nexent_backend", None) != "local" and (
+                getattr(executor, "_nexent_backend", None) == "docker"
+                or getattr(executor, "container", None) is not None
+            ) for executor in candidates
+        ):
+            return
+        with trace_phase("agent.sandbox.workspace") as phase:
+            self._initialize_sandbox_workspaces_impl(executors)
+            phase.set_output({"ready": True})
+
+    def _initialize_sandbox_workspaces_impl(self, executors: Optional[List[Any]] = None) -> None:
         """Set every Docker kernel's cwd and workspace environment for this run."""
         if not self.workspace_path:
             return

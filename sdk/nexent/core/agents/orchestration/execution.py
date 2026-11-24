@@ -3,6 +3,7 @@
 """Common run context helpers and Adapter lifetime; no engine loop."""
 import json
 import logging
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Dict
 
@@ -89,13 +90,33 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
         logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
 
 
-def execute_adapter(info):
+def execute_adapter(info, *, run_scope=None):
+    """Apply Core-neutral identity before constructing any Core resources."""
+    from nexent.core.agents.contracts.identity import run_identity_scope
+
+    with run_identity_scope(getattr(info, "run_role", "root")):
+        return _execute_adapter(info, run_scope=run_scope)
+
+
+def _execute_adapter(info, *, run_scope=None):
     """Release an Adapter even when validation or preparation raises."""
     from nexent.core.agents.factory import AgentCoreFactory
     adapter = AgentCoreFactory.create(info)
+    phase = "configuration"
     try:
         adapter.validate()
+        phase = "preparation"
         adapter.prepare()
-        return adapter.run()
+        phase = "execution"
+        with run_scope if run_scope is not None else nullcontext():
+            return adapter.run()
+    except Exception as error:
+        record = getattr(adapter, "record_failure", None)
+        if callable(record):
+            try:
+                record(error, phase=phase)
+            except Exception:
+                logger.error("event=adapter_failure_reporting_failed phase=%s", phase)
+        raise
     finally:
         adapter.close()

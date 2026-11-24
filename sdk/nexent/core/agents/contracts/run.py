@@ -8,8 +8,10 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.identity import RunRole
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 from nexent.core.utils.observer import MessageObserver
+from nexent.monitor.run_timing import RunTiming
 
 
 class AgentHistory(BaseModel):
@@ -18,6 +20,12 @@ class AgentHistory(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    run_timing: RunTiming | None = Field(default=None, exclude=True, repr=False)
+    run_role: RunRole = Field(default="root", exclude=True,
+        description="Internal caller-owned run identity; children cannot initiate user clarification")
+    preparation_trace: List[Dict[str, Any]] = Field(
+        default_factory=list, exclude=True, description="Local preparation phase facts awaiting the authorized worker"
+    )
     # Hosts inject deployment values; child runs inherit them without SDK environment reads.
     collaboration_timeout_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False,
         description="Jiuwen child/A2A queue-plus-execution deadline in seconds, capped by the parent deadline")

@@ -61,6 +61,7 @@ async function requestJson(
 // ---------------------------------------------------------------------------
 export interface MemoryConfig {
   memoryEnabled: boolean;
+  dreamingEnabled?: boolean;
   shareOption: "always" | "ask" | "never";
   disableAgentIds: string[];
   disableUserAgentIds: string[];
@@ -185,6 +186,7 @@ export async function loadMemoryConfig(
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
+      dreamingEnabled: (cfg.DREAMING_SWITCH ?? "Y") === "Y",
       shareOption: (shareVal || "always") as "always" | "ask" | "never",
       disableAgentIds,
       disableUserAgentIds,
@@ -595,6 +597,7 @@ export interface DreamingAudit {
 export interface DreamingParameters {
   source_limit: number;
   long_term_max_chars: number;
+  long_term_length_tolerance_percent: number;
   summarization_max_attempts: number;
 }
 
@@ -615,6 +618,7 @@ export interface DreamingSchedule {
   min_unique_queries?: number | null;
   source_limit?: number | null;
   long_term_max_chars?: number | null;
+  long_term_length_tolerance_percent?: number | null;
   summarization_max_attempts?: number | null;
 }
 
