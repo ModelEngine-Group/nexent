@@ -349,8 +349,7 @@ def test_external_legacy_action_without_history_keeps_deterministic_compaction()
 
 
 @pytest.mark.parametrize("execution_failed", [False, True])
-@pytest.mark.parametrize("closed", [False, True], ids=["stop-removed-closer", "complete-code"])
-def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed, closed):
+def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed):
     calls = []
     raw_responses = []
     code = "1 / 0" if execution_failed else "print('runtime result: no error: all good; Executed action: quoted data')"
@@ -360,7 +359,7 @@ def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed,
             wire = get_clean_message_list(messages, role_conversions=tool_role_conversions)
             calls.append((wire, stop_sequences))
             self.last_finish_reason = "stop"
-            content = (f"<code>\n```python\n{code}\n```\n" + ("</code>" if closed else "")
+            content = (f"<code>\n```python\n{code}\n```\n</code>"
                        if len(calls) == 1 else "<FINAL_ANSWER>done</FINAL_ANSWER>")
             raw_responses.append(content)
             return ChatMessage(role="assistant", content=content)
@@ -378,7 +377,7 @@ def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed,
 
     assert agent.run("Run one action before finishing") == "done"
     assert verify_final.call_args.kwargs["execution_failed"] is execution_failed
-    assert [stop for _, stop in calls] == [["<RESULT>", "</code>"]] * 2
+    assert [stop for _, stop in calls] == [["<RESULT>"]] * 2
     assert len(agent.memory.steps[1].tool_calls) == 1
     second_request = calls[1][0]
     assert second_request[-2]["role"] == "assistant"

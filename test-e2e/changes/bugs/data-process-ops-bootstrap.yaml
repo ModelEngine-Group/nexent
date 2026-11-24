@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-DATA-PROCESS-BOOTSTRAP-20261124
+  change_type: bugfix
+  bug_id: OPS-DATA-PROCESS-BOOTSTRAP-20261124
+  title: Keep DataProcess independent of Ops SQL initialization
+  description: Move Ops SQL initialization to an Ops-only launcher and remove it from the generic backend launcher and producer images, without introducing environment switches.
+  observed_behavior: Shared monitoring defaults cause DataProcess to execute a missing Ops migration helper and exit before its application command.
+  expected_behavior: Only the Ops service initializes Ops storage. DataProcess and producer services start without Ops migration files; producers retain retry behavior until Ops is available.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_boundary
+    description: Existing launcher UT and deployment proof cover monitoring-enabled consumers but omit non-Ops images with the shared monitoring flag enabled and no migration files.
+  feature_contract_changed: true
+  affected_features:
+    existing: [OPS-BOOTSTRAP]
+    added: []
+    modified: [OPS-MODEL-MONITORING]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MODEL-MONITORING-D5-001, OPS-BOOTSTRAP-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - The generic launcher never executes Ops SQL, regardless of shared monitoring settings; existing business SQL policy is preserved.
+    - Only the Ops launcher initializes control storage, with failures blocking application launch and no business database initialization.
+    - Producer images contain no Ops initializer or SQL; queued facts retry unchanged while Ops is unavailable.
+    - Image smoke checks Ops schema access only after the Ops service is ready; producer-only smoke does not require Ops storage, and failed Ops startup still cleans up all owned resources.
+    reason: Reuse launcher, packaging, image smoke, Helm and producer retry contracts; preserve the required deployment boundary without a duplicate D1.
+    test_selectors:
+    - test/backend/deploy/test_ops_monitoring_bootstrap.py
+    - test/backend/deploy/test_service_image_sources.py
+    - test/backend/deploy/test_backend_launchers.py
+    - test/backend/deploy/test_ops_chart.py
+    - test/backend/deploy/test_service_image_smoke.py
+    - test/backend/ops/test_monitoring_producer.py
+  notes: The fixed service entrypoint owns initialization; no new environment variable is needed. Real PostgreSQL D5 retains repeat/concurrency/failure and read-only helper-wait checks; non-Ops launch has no helper or new Ops database. Ops bootstrap D5 executes both deployed commands and checks process startup/restart. All owned databases/processes are cleaned in finally. Existing model/system ownership routing is preserved. No module-path change, shared monitoring disable, historical SQL edit or workflow change.

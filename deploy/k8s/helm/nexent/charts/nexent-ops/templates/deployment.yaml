@@ -38,7 +38,7 @@ spec:
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
           command:
-            - /opt/nexent/scripts/start-backend.sh
+            - /opt/nexent/scripts/start-ops.sh
             - python
             - -m
             - backend.http.ops_service
