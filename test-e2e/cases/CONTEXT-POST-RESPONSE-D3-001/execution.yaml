@@ -7,6 +7,7 @@ implementations:
   profiles: [mock]
 acceptance_bindings:
   AC-POST-RESPONSE: [test_usage_calibrates_post_response_maintenance]
+  AC-WHOLE-TURN: [test_usage_calibrates_post_response_maintenance]
 preparation:
   families: []
   anchors: false

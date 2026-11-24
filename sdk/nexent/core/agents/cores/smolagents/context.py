@@ -21,6 +21,7 @@ from smolagents.models import ChatMessage, MessageRole, Model
 from nexent.core.agents.context.budget import extract_message_text
 from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.agents.context.maintenance import complete_agent_context as complete_context
+from nexent.core.agents.context.maintenance import finish_agent_context
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
 from nexent.core.agents.context.run_context import ManagedRunContext
@@ -273,6 +274,20 @@ class ManagedContextRuntime:
 
     def consume_history_summary_event(self) -> dict[str, object] | None:
         return self.context_manager.consume_history_summary_event()
+
+    def finish_run(self, *, model, memory, current_run_start_idx, final_output, cancelled=None):
+        """Only the successful root loop may propose a completed-turn checkpoint."""
+        stop = getattr(model, "stop_event", None)
+        try:
+            projection = SmolagentsMemoryAdapter(self.context_manager)
+            # Final facts may have completed after the last request-time projection.
+            projection._current_item_cache = {}
+            return finish_agent_context(manager=self.context_manager, run_context=self._ensure_run_context(memory),
+                current_items=projection._project_current_run(memory, current_run_start_idx), final_output=final_output, model=adapt_context_model(model),
+                cancelled=cancelled or (lambda: stop is not None and stop.is_set() is True))
+        except Exception:
+            logger.warning("event=context_completed_turn_checkpoint_failed", exc_info=True)
+            return None
 
     def finalize_evidence(self, *, status: str) -> ContextEvidence:
         return self._evidence.finalize(status=status)

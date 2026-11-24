@@ -2070,8 +2070,25 @@ Additional Args:
 
         status = "error"
         try:
-            yield from self._run_stream(task=task, max_steps=max_steps, images=images)
+            last_step = None
+            for step in self._run_stream(task=task, max_steps=max_steps, images=images):
+                last_step = step
+                yield step
+            final_output = last_step.output if isinstance(last_step, FinalAnswerStep) else None
             status = "cancelled" if self.stop_event.is_set() else "completed"
+            from nexent.core.agents.contracts.identity import root_clarification_allowed
+
+            finish = getattr(self.context_runtime, "finish_run", None)
+            if (status == "completed" and final_output is not None and callable(finish)
+                    and root_clarification_allowed() and getattr(self.observer, "turn_complete", False) is not True):
+                checkpoint = finish(model=self.model, memory=self.memory,
+                    current_run_start_idx=self._history_step_count, final_output=str(final_output),
+                    cancelled=self.stop_event.is_set)
+                if self.stop_event.is_set():
+                    status = "cancelled"
+                if isinstance(checkpoint, dict) and status == "completed":
+                    self.observer.add_message(self.agent_name, ProcessType.HISTORY_SUMMARY,
+                                              json.dumps(checkpoint, ensure_ascii=False))
         except RunTerminated:
             status = "cancelled"
             raise

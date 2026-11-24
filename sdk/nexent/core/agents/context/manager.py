@@ -85,6 +85,10 @@ class ContextManager:
         self._selected_agent_history = ()
         self._selected_agent_executions = ()
         self._agent_completions = set()
+        self._agent_triggered = False
+        self._agent_checkpoint_finished = False
+        self._agent_summary_current = ()
+        self._selected_agent_current = ()
         self._representation_overrides: dict[str, tuple[str, ContextItem]] = {}
 
     @property
@@ -129,6 +133,10 @@ class ContextManager:
         self._selected_agent_history = ()
         self._selected_agent_executions = ()
         self._agent_completions = set()
+        self._agent_triggered = False
+        self._agent_checkpoint_finished = False
+        self._agent_summary_current = ()
+        self._selected_agent_current = ()
         self._current_item_cache.clear()
         self._representation_overrides.clear()
         source = self._item_source(items)
@@ -366,6 +374,9 @@ class ContextManager:
         final_items.sort(key=lambda item: item.layout_key)
         self._selected_agent_history = tuple((item.id, self._fingerprint(item.content)) for item in final_items
             if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN})
+        self._selected_agent_current = tuple((item.id, self._fingerprint(item.content)) for item in final_items
+            if item.type not in {ContextItemType.SYSTEM, ContextItemType.HISTORY_SUMMARY,
+                                 ContextItemType.CONVERSATION_TURN})
         self._selected_agent_executions = tuple(item.model_dump_json() for item in final_items
             if item.type == ContextItemType.CURRENT_ACTION and item.content.get("execution_key")
             and not item.content.get("loaded_result") and item.metadata.get("representation") != "compact")
@@ -647,7 +658,8 @@ class ContextManager:
     def agent_history_boundary(self):
         from .maintenance import AgentHistoryBoundary
 
-        return AgentHistoryBoundary(self._agent_epoch, self._selected_agent_history, self._selected_agent_executions)
+        return AgentHistoryBoundary(self._agent_epoch, self._selected_agent_history, self._selected_agent_executions,
+                                    self._selected_agent_current)
 
     def adopt_agent_summary(self, boundary, text, request_id):
         """Replace only the selected old history; never current items or DB units."""

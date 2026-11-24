@@ -8,15 +8,24 @@ from contextlib import aclosing
 from dataclasses import dataclass
 
 import httpx
-
-from contracts.agentos import AgentResume, AgentRunReference, HistoryCheckpointCandidate
+from contracts.agentos import (
+    AgentResume,
+    AgentRunReference,
+    CompletedTurnHistoryCheckpointCandidate,
+    HistoryCheckpointCandidate,
+)
 from contracts.conversation import MessageSource
-from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.exceptions import (
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+)
 from management.db.conversation.repository import persist_prepared_assistant_projection
 from management.services.agent.agentos_events import iter_sse_frames
 from management.services.agent.artifacts import is_run_output_object, transform_skill_files_to_standard_format
 from management.services.agent.persistence import canonicalize_assistant_units
 from management.services.agent.stream import AssistantMessageProjection
+
 from nexent.core.concurrency import run_blocking
 
 
@@ -109,9 +118,9 @@ def _collect_checkpoint(checkpoints, content):
             return
         if content.get("persist_status") != "not_configured":
             return
-        candidate = HistoryCheckpointCandidate.model_validate({
-            name: content[name] for name in HistoryCheckpointCandidate.model_fields if name in content
-        })
+        contract = (CompletedTurnHistoryCheckpointCandidate if content.get("coverage_scope") == "current_completed_turn"
+                    else HistoryCheckpointCandidate)
+        candidate = contract.model_validate({name: content[name] for name in contract.model_fields if name in content})
         checkpoints.append(candidate.model_dump(exclude_none=True, exclude_unset=True))
     except (TypeError, ValueError):
         logger.warning("Ignoring invalid AgentOS history checkpoint")

@@ -858,6 +858,13 @@ class JiuwenAdapter(AgentCoreAdapter):
                 status = "stopped"
             else:
                 status = "completed" if self._run_completed else "failed"
+            if (status == "completed" and not self.events.waiting_for_input and self.context_bridge is not None
+                    and root_clarification_allowed(self.run_info) and self.events.final_answer is not None):
+                checkpoint = self.context_bridge.finish_run(str(self.events.final_answer))
+                if self.run_info.stop_event.is_set():
+                    status, checkpoint = "stopped", None
+                if isinstance(checkpoint, dict):
+                    self.events.output(ProcessType.HISTORY_SUMMARY, json.dumps(checkpoint, ensure_ascii=False))
             self.run_info.run_result = self.events.finish(status)
 
     def _close_resources(self):

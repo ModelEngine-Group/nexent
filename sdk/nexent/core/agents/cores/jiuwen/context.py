@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from nexent.core.agents.context import ContextItem, ContextManager, ContextManagerConfig
 from nexent.core.agents.context.maintenance import complete_agent_context as complete_context
+from nexent.core.agents.context.maintenance import finish_agent_context
 from nexent.core.agents.context.models import CurrentActionContextItem
 from nexent.core.agents.context.usage import ContextUsageBaseline
 from nexent.core.agents.contracts.context import ContextItemInput
@@ -101,6 +102,7 @@ class JiuwenContextBridge:
         self._maintenance_execution = None
         self._pending_maintenance = None
         self._maintenance_deadline = None
+        self._finalization_blocked = False
         self._current_items = []
         self._tools = []
         base = list(items)
@@ -338,15 +340,43 @@ class JiuwenContextBridge:
                                 mark_stuck_on_timeout=False)
             raise
 
+    def finish_run(self, final_output):
+        """Finalize through the owned bounded lane after all native work completed."""
+        if self._finalization_blocked or self._pending_calls or self.scope.cancelled:
+            return None
+        abandoned = False
+        def work():
+            return finish_agent_context(manager=self.context_manager, run_context=self.run_context,
+                current_items=self._current_items, final_output=final_output, model=self.summary_model,
+                cancelled=lambda: abandoned or self.scope.cancelled)
+        execution = None
+        try:
+            execution = self.manager.submit(
+                "model-tool-io", ManagedTaskSpec(task_name="jiuwen-completed-turn-checkpoint", owner=__name__,
+                    run_id=self.summary_model.model.run_id,
+                    deadline_monotonic=time.monotonic() + self.context_timeout), work)
+            return execution.future.result(timeout=self.context_timeout)
+        except Exception:
+            abandoned = True
+            if execution is not None and not execution.future.done():
+                self.manager.cancel(execution.execution_id, reason="Completed-turn checkpoint abandoned",
+                    wait_timeout=self.info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
+            logger.warning("event=context_completed_turn_checkpoint_failed", exc_info=True)
+            return None
+
     def close(self):
+        if self._pending_maintenance is not None:
+            self._finalization_blocked = True
         self._pending_maintenance = None
         if self._maintenance_execution is not None and not self.scope.cancelled:
             try:
                 self._maintenance_execution.future.result(timeout=self.context_timeout)
             except Exception:
+                self._finalization_blocked = True
                 logger.warning("event=jiuwen_context_maintenance_close_failed", exc_info=True)
         for execution in self.executions:
             if not execution.future.done():
+                self._finalization_blocked = True
                 self.manager.cancel(execution.execution_id, reason="Jiuwen context cleanup",
                     wait_timeout=self.info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
 

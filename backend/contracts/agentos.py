@@ -583,6 +583,16 @@ class HistoryCheckpointCandidate(RunSpecModel):
     compaction_target_tokens: int | None = Field(default=None, ge=0)
 
 
+class CompletedTurnHistoryCheckpointCandidate(RunSpecModel):
+    """A root Runtime proposal whose final boundary is assigned only by Management."""
+
+    coverage_scope: Literal["current_completed_turn"]
+    summary: dict[str, JsonValue]
+    history_tail_message_id: PositiveInt | None = None
+    previous_summary_unit_id: PositiveInt | None = None
+    trigger: Literal["completed_turn"] = "completed_turn"
+
+
 class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
 

@@ -1077,6 +1077,37 @@ def branch_conversation(
         }
 
 
+def _completed_turn_checkpoint(session, parent, checkpoint):
+    """Resolve a Runtime proposal only inside its authorized completed projection transaction."""
+    from contracts.agentos import CompletedTurnHistoryCheckpointCandidate
+
+    candidate = CompletedTurnHistoryCheckpointCandidate.model_validate(checkpoint)
+    prior = session.scalar(select(ConversationMessage.message_id).where(
+        ConversationMessage.conversation_id == parent.conversation_id,
+        ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index)).limit(1))
+    if prior != candidate.history_tail_message_id:
+        raise HistorySummaryPersistenceError("completed-turn history boundary changed")
+    checkpoints = session.execute(select(ConversationMessageUnit.unit_id, ConversationMessageUnit.unit_content,
+                                         ConversationMessage.message_id)
+        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
+        .where(ConversationMessageUnit.conversation_id == parent.conversation_id,
+            ConversationMessage.conversation_id == parent.conversation_id,
+            ConversationMessageUnit.unit_type == HISTORY_SUMMARY_UNIT_TYPE,
+            ConversationMessageUnit.unit_status == "completed", ConversationMessageUnit.delete_flag == "N",
+            ConversationMessage.status == "completed", ConversationMessage.delete_flag == "N",
+            ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))).all()
+    latest = next((row.unit_id for row in checkpoints
+                   if (parsed := _parse_history_summary_content(row.unit_content))
+                   and parsed["covered_through_message_id"] == row.message_id), None)
+    if latest != candidate.previous_summary_unit_id:
+        raise HistorySummaryPersistenceError("completed-turn previous checkpoint changed")
+    return {"summary": candidate.summary, "covered_through_message_id": parent.message_id,
+            "previous_summary_unit_id": candidate.previous_summary_unit_id, "trigger": candidate.trigger}
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,
@@ -1295,20 +1326,26 @@ def persist_assistant_run_batch(
                 ensure_ascii=False,
             )
 
-        for checkpoint in history_checkpoints or ():
-            try:
-                with session.begin_nested():
-                    save_history_summary(
-                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
-                    )
-            except (HistorySummaryPersistenceError, SQLAlchemyError) as exc:
-                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
-                               conversation_id, type(exc).__name__)
-
         parent.message_content = message_content or ""
         parent.status = terminal_status
         parent.updated_by = user_id
         parent.update_time = func.current_timestamp()
+        if history_checkpoints:
+            session.flush()
+        for checkpoint in history_checkpoints or ():
+            try:
+                with session.begin_nested():
+                    if checkpoint.get("coverage_scope") == "current_completed_turn":
+                        if terminal_status != "completed" or any(
+                                unit.get("unit_type") == "human_interaction" for unit in message_units):
+                            continue
+                        checkpoint = _completed_turn_checkpoint(session, parent, checkpoint)
+                    save_history_summary(
+                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
+                    )
+            except (HistorySummaryPersistenceError, SQLAlchemyError, ValueError) as exc:
+                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
+                               conversation_id, type(exc).__name__)
 
         if message_content or any(
             unit.get("unit_type") not in {HISTORY_SUMMARY_UNIT_TYPE, "history_summary_candidate"}
