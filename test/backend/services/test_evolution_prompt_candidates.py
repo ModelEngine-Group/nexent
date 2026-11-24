@@ -39,7 +39,9 @@ def test_method_specific_single_edit(rewrite, method):
     assert store.call_args.args[4:6] == (source, source.replace(edit["old"], edit["new"]))
     assert result["result_digest"] == service.text_digest(store.call_args.args[5])
     assert service.METHOD_INSTRUCTIONS[method] in model.call_args.kwargs["system_prompt"]
-    assert json.loads(model.call_args.kwargs["user_prompt"])["protection"]["example_id"] == "assigned"
+    evidence = json.loads(model.call_args.kwargs["user_prompt"])
+    assert evidence["protection"]["example_id"] == "assigned"
+    assert evidence.get("published_prompt") == (source if method == "P3" else None)
     assert check.call_count == 2
 
 
@@ -64,3 +66,39 @@ def test_recheck_edit_authority_after_model_response(rewrite):
         service.generate_prompt_candidate(request, "tenant", "editor")
     model.assert_called_once()
     store.assert_not_called()
+
+
+def test_conflict_uses_only_the_selected_clauses_and_accepts_one_json_fence(rewrite):
+    service, request, source, edit, model, store, _ = rewrite
+    request = request.model_copy(update={"method": "P3", "related_passage": "Read both files."})
+    model.return_value = "```json\n" + json.dumps(edit) + "\n```"
+    service.generate_prompt_candidate(request, "tenant", "editor")
+    evidence = json.loads(model.call_args.kwargs["user_prompt"])
+    assert evidence["source_passage"] == request.source_passage
+    assert evidence["related_passage"] == "Read both files."
+    assert "Cite each file" not in model.call_args.kwargs["user_prompt"]
+    assert store.call_args.args[5] == source.replace(edit["old"], edit["new"])
+
+
+@pytest.mark.parametrize("related", ["Unpublished.", "Preserve {owner}", " ", "Read both files. Preserve {owner}."])
+def test_rejects_invalid_conflict_context_before_model_dispatch(rewrite, related):
+    from contracts.errors.exceptions import AppException
+
+    service, request, _, _, model, store, _ = rewrite
+    request = request.model_copy(update={"method": "P3", "related_passage": related})
+    with pytest.raises(AppException, match="non-overlapping"):
+        service.generate_prompt_candidate(request, "tenant", "editor")
+    model.assert_not_called()
+    store.assert_not_called()
+
+
+def test_conflict_fallback_is_bounded_and_requires_other_instructions(rewrite, monkeypatch):
+    from contracts.errors.exceptions import AppException
+
+    service, request, source, _, model, _, _ = rewrite
+    request = request.model_copy(update={"method": "P3"})
+    for text in (request.source_passage, source + "x" * 4000):
+        monkeypatch.setattr(service, "_released_prompt", lambda *_: text)
+        with pytest.raises(AppException, match="distinct related clause"):
+            service.generate_prompt_candidate(request, "tenant", "editor")
+    model.assert_not_called()

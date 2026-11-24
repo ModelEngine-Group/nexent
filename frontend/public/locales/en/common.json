@@ -176,6 +176,7 @@
   "evolution.method.S2": "Skill · revise a step",
   "evolution.editGoal": "Behavior to improve",
   "evolution.sourcePassage": "Current passage to revise",
+  "evolution.relatedPromptPassage": "Other conflicting passage (required for long prompts)",
   "evolution.feedback.failure": "Choose a failed task",
   "evolution.feedback.protection": "Choose a passing task to protect",
   "evolution.viewTaskEvidence": "View input, expectation and actual answer",

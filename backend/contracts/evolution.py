@@ -55,6 +55,13 @@ class PromptCandidateRequest(LocalEditRequest):
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
     method: Literal["P1", "P3", "T1", "T2"]
+    related_passage: str | None = Field(default=None, min_length=1, max_length=2000, exclude_if=lambda v: v is None)
+
+    @model_validator(mode="after")
+    def related_passage_is_for_conflict(self):
+        if self.related_passage is not None and self.method != "P3":
+            raise ValueError("Select a related clause only when resolving a prompt conflict")
+        return self
 
 
 class SkillStepCandidateRequest(LocalEditRequest):
@@ -359,6 +366,7 @@ class FeedbackHandoffRequest(BaseModel):
     skill_id: int | None = Field(default=None, gt=0)
     goal: str = Field(min_length=1, max_length=1500)
     source_passage: str = Field(min_length=1, max_length=2000)
+    related_passage: str | None = Field(default=None, min_length=1, max_length=2000)
     failure: FeedbackExcerpt
     protection: FeedbackExcerpt
     tool_name: str | None = Field(default=None, min_length=1, max_length=180)
@@ -367,6 +375,8 @@ class FeedbackHandoffRequest(BaseModel):
 
     @model_validator(mode="after")
     def valid_resource(self):
+        if self.related_passage is not None and self.method != "P3":
+            raise ValueError("Select a related clause only when resolving a prompt conflict")
         if self.share_file_state and (self.method not in {"T1", "T2"} or not self.tool_name):
             raise ValueError("Choose a measured tool before sharing its file checks")
         if self.tool_name and self.method not in {"T1", "T2"}:

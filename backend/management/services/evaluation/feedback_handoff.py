@@ -19,7 +19,7 @@ from management.services.evaluation.experiments import _io, _snapshot, snapshot_
 from management.services.evaluation.tool_set_candidates import catalog_source, generate_tool_sets
 from management.db.evaluation.candidates import selectable_tool_names
 from management.services.evaluation.example_candidates import generate_example_candidates
-from management.services.evaluation.prompt_candidates import generate_prompt_candidate
+from management.services.evaluation.prompt_candidates import generate_prompt_candidate, prompt_conflict_context
 from management.services.evaluation.replay_cases import get_development_case
 from management.services.evaluation.skill_candidates import bound_catalog_description, feedback_skill_files, generate_skill_discovery_candidate, generate_skill_step_candidate
 
@@ -189,6 +189,10 @@ def _prepare_handoff(tenant, user, eid, request):
         feedback["source_digest"] = text_digest(source)
     if source.count(request.source_passage) != 1:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select a unique passage from the target resource")
+    if request.method == "P3":
+        context = prompt_conflict_context(source, request.source_passage, request.related_passage)
+        if "related_passage" in context:
+            feedback["related_passage"] = context["related_passage"]
     return plan, feedback
 
 
@@ -294,5 +298,6 @@ def generate_from_handoff(tenant, user, feedback_id, model_id):
         request = SkillStepCandidateRequest(model_id=model_id, skill_id=feedback["skill_id"], **common)
         return generate_skill_step_candidate(request, tenant, user, agent_version=(feedback["agent_id"], feedback["version_no"]), **provenance)
     request = PromptCandidateRequest(model_id=model_id, agent_id=feedback["agent_id"],
-        version_no=feedback["version_no"], method=feedback["method"], **common)
+        version_no=feedback["version_no"], method=feedback["method"],
+        related_passage=feedback.get("related_passage"), **common)
     return generate_prompt_candidate(request, tenant, user, **provenance)

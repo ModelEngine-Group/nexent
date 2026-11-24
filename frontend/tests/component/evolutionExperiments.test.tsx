@@ -342,7 +342,11 @@ it("hands off a tool failure when the answer passed, with approved input and arg
       "1": { base: trial(false), comparison: "baseline_only" }, "2": { base: trial(true), comparison: "baseline_only" },
     } }} /></QueryClientProvider>);
   fireEvent.click(screen.getByRole("button", { name: "evolution.shareLocalEdit" }));
+  await choose("evolution.editMethod", "evolution.method.P3");
+  const relation = screen.getByLabelText("evolution.relatedPromptPassage");
+  fireEvent.change(relation, { target: { value: "Do not run on archived tickets." } });
   await choose("evolution.editMethod", "evolution.method.T2");
+  expect(screen.queryByLabelText("evolution.relatedPromptPassage")).not.toBeInTheDocument();
   await choose("evolution.feedback.failure", "incorrect argument");
   await choose("evolution.feedback.protection", "correct argument");
   await choose("evolution.toolName", "read");
@@ -361,7 +365,7 @@ it("hands off a tool failure when the answer passed, with approved input and arg
   }
   fireEvent.click(screen.getByRole("button", { name: "evolution.shareFeedback" }));
   await waitFor(() => expect(evolutionService.shareLocalEdit).toHaveBeenCalledWith(24, expect.objectContaining({
-    method: "T2", tool_name: "read", share_expected_arguments: ["mode"], share_file_state: true,
+    method: "T2", tool_name: "read", related_passage: undefined, share_expected_arguments: ["mode"], share_file_state: true,
     failure: { case_id: 1, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
     protection: { case_id: 2, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
   })));

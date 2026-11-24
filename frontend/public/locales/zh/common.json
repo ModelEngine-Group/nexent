@@ -176,6 +176,7 @@
   "evolution.method.S2": "Skill · 修改步骤",
   "evolution.editGoal": "希望改进的行为",
   "evolution.sourcePassage": "要改的现用指令原文",
+  "evolution.relatedPromptPassage": "发生冲突的另一条现用指令原文（长提示词必填）",
   "evolution.feedback.failure": "选一条失败题",
   "evolution.feedback.protection": "选一条应保持通过的题",
   "evolution.viewTaskEvidence": "查看输入、预期和实际回答",

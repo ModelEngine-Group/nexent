@@ -355,6 +355,7 @@ export interface LocalFeedback {
   method: "P1" | "P3" | "T1" | "T2" | "S2";
   goal: string;
   source_passage: string;
+  related_passage?: string;
   tool_name?: string;
   skill_id?: number;
   share_expected_arguments?: string[];

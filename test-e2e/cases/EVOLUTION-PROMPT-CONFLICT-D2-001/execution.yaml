@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: EVOLUTION-PROMPT-CONFLICT-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_prompt_conflict_reads_only_approved_rules
+acceptance_bindings:
+  AC-01: [test_prompt_conflict_reads_only_approved_rules]
+  AC-02: [test_prompt_conflict_reads_only_approved_rules]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

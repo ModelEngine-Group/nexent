@@ -28,4 +28,6 @@ feature:
     description: 同一 Docker 宿主机上，普通会话与离线评测可配置各自的运行沙箱。配置仅由 Runtime 部署提供，复用和清理只作用于各自的沙箱。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-10
     description: 公开评测报告可选录入并关联候选实验，按智能体编辑权限访问。公开分不进入业务评测、提名或晋升。
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-11
+    description: P3 同时向生成器提供待修改与相关的已发布规则，仅待修改规则可替换。未获准的规则、改变位置的改写或不符合结构的回复不能生成候选。
   required_test_stages: [D1, D2, D3, D5]

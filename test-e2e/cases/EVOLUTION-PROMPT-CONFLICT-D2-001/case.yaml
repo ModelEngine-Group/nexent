@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-PROMPT-CONFLICT-D2-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-11]
+  title: 规则冲突候选读取两条有效规则并只替换指定位置
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证真实管理接口从已发布提示词取冲突规则，校验模型响应并保存候选。
+  preconditions: [可创建临时数据库的 PostgreSQL 实例。]
+  test_data:
+    rules: 账务事项去财务，带 PORTAL 标记的工单均去运维，另有一条无关规则。
+  steps:
+  - order: 1
+    action: 提交唯一且不相交的两条已发布规则，用包含单个 Markdown JSON 代码块的模型响应完成改写。
+    expected: 模型收到两条规则及两道开发证据，仅指定规则变更，其他规则及基线原文保持。
+  - order: 2
+    action: 分别提交未发布规则和与修改目标重叠的规则。另返回修改了另一条规则或含额外输出的模型响应。
+    expected: 伪造和重叠规则在模型前拒绝，越范围或额外输出在落库前拒绝。
+  expected_results:
+  - 仅保存一个局部修改候选，保留另一条规则及无关段落。
+  - 非法证据或模型回复不能增加候选。
+  forbidden_side_effects:
+  - 生成器不得接收显式选择范围以外的已发布段落，线上版本不被替换。
+  contract:
+    protocol: HTTP API
+    request_expectations: [编辑者提交发布版本、两条规则和两条开发证据。]
+    response_expectations: [成功返回不可变候选，越界请求返回客户端错误。]
+  cleanup: [销毁临时数据库。]
+  acceptance:
+  - id: AC-01
+    description: 两条规则可供模型比较，合法单代码块只写候选。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 错误来源及越界输出不生成候选。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]

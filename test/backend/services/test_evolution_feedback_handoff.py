@@ -52,3 +52,23 @@ def test_resource_editor_generation_uses_referenced_target_and_provenance(monkey
     request, tenant, user = generate.call_args.args
     assert request.skill_id == 84 and request.model_id == 3 and user == "skill-editor" and tenant == "tenant"
     assert generate.call_args.kwargs == {"agent_version":(45,2), "feedback_id":19, "source_digest":"d"*64}
+
+
+def test_conflict_handoff_keeps_the_approved_related_clause(monkeypatch):
+    from management.services.evaluation import feedback_handoff as service
+
+    record = {
+        "agent_id": 45, "version_no": 2, "method": "P3", "source_case_ids": [1, 2],
+        "source_passage": "Always assign to OPS.", "related_passage": "Billing goes to FIN.",
+        "source_digest": "a" * 64, "goal": "Resolve policy overlap",
+        "failure": {"example_id": "bad", "observed": "OPS", "expected": "FIN"},
+        "protection": {"example_id": "good", "observed": "OPS", "expected": "OPS"},
+    }
+    monkeypatch.setattr(service.jobs, "read_handoff", lambda *_: record)
+    monkeypatch.setattr(service, "contains_fixed_cases", lambda *_: False)
+    generate = Mock(return_value={"candidate_id": 13})
+    monkeypatch.setattr(service, "generate_prompt_candidate", generate)
+    assert service.generate_from_handoff("tenant", "editor", 19, 3)["candidate_id"] == 13
+    request, _, _ = generate.call_args.args
+    assert request.method == "P3" and request.related_passage == record["related_passage"]
+    assert generate.call_args.kwargs == {"feedback_id": 19, "source_digest": record["source_digest"]}

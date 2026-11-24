@@ -35,6 +35,7 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
     const data = await form.validateFields();
     return api.shareLocalEdit(report.experiment_id, {
       ...data, tool_name: isTool ? data.tool_name : undefined, skill_id: method === "S2" ? data.skill_id : undefined,
+      related_passage: method === "P3" ? data.related_passage?.trim() || undefined : undefined,
       failure: { ...data.failure, observed: data.failure.observed ?? "" },
       protection: { ...data.protection, observed: data.protection.observed ?? "" },
       share_expected_arguments: method === "T2" ? data.share_expected_arguments : undefined,
@@ -59,6 +60,9 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
         <Form.Item name="source_passage" label={t("evolution.sourcePassage")} rules={[{ required: true, whitespace: true }]}>
           <Input.TextArea maxLength={2000} rows={2} />
         </Form.Item>
+        {method === "P3" && <Form.Item name="related_passage" label={t("evolution.relatedPromptPassage")} preserve={false}>
+          <Input.TextArea maxLength={2000} rows={2} />
+        </Form.Item>}
         {(["failure","protection"] as const).map(group => {
           const id = group === "failure" ? failed : good;
           const details = group === "failure" ? failure : protection;
