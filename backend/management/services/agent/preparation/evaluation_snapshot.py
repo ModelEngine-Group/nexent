@@ -608,17 +608,16 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
     metadata = {"agent_id": agent.agent_id, "tenant_id": tenant_id, "version_no": agent.version_no}
     for tool in tools:
         builtin = EvaluationSkillTool(tool.name)
-        expected = {"local_skills_dir": environment.CONTAINER_SKILLS_PATH}
+        expected = {"local_skills_dir": environment.CONTAINER_SKILLS_PATH,
+                    "authorized_skill_names": sorted(configs)}
         actual = dict(tool.params or {})
         if builtin is EvaluationSkillTool.SCRIPT:
             actual.pop("workspace_path", None)
-            expected.update(isolated_skills_root=False, authorized_skill_names=sorted(configs))
+            expected["isolated_skills_root"] = False
         elif builtin is EvaluationSkillTool.GUIDE:
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs
-        if workbench_skills:
-            expected["authorized_skill_names"] = sorted(configs)
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):
             raise ValueError("Unsupported evaluation skill tool configuration")

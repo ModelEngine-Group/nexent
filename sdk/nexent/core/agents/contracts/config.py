@@ -104,22 +104,11 @@ class ModelConfig(BaseModel):
         default=None,
     )
     max_output_tokens: Optional[int] = Field(
-        description=(
-            "Per-call completion output cap forwarded to chat.completions.create. "
-            "Preferred name over the deprecated max_tokens. Defaults to None so "
-            "production keeps the provider's own default (typically the model's "
-            "max output). Benchmarks set this explicitly (e.g. 4096) to bound "
-            "pathological generation loops where a model regurgitates context."
-        ),
+        description="Model maximum output capability; never sent as a completion length limit.",
         default=None,
     )
     max_tokens: Optional[int] = Field(
-        description=(
-            "DEPRECATED W1 alias for max_output_tokens. Retained so existing "
-            "callers and persisted ModelRecord rows keep working during the "
-            "migration window. If only max_tokens is set, the validator copies "
-            "it into max_output_tokens; if both are set, max_output_tokens wins."
-        ),
+        description="Deprecated legacy output limit retained for decoding only; ignored at dispatch.",
         default=None,
     )
     context_window_tokens: Optional[int] = Field(
@@ -127,11 +116,11 @@ class ModelConfig(BaseModel):
         default=None,
     )
     max_input_tokens: Optional[int] = Field(
-        description="Provider hard input-token limit when distinct from the combined window. Resolved by ModelCapacityResolver per W1 ADR.",
+        description="Retired input capability retained for decoding until PR2; runtime ignores it.",
         default=None,
     )
     default_output_reserve_tokens: Optional[int] = Field(
-        description="Default output allowance reserved per request before constructing input context. Resolved by ModelCapacityResolver per W1 ADR.",
+        description="Retired output reserve retained for decoding until PR2; runtime ignores it.",
         default=None,
     )
     tokenizer_family: Optional[str] = Field(
@@ -164,17 +153,8 @@ class ModelConfig(BaseModel):
 
     @model_validator(mode="after")
     def _backfill_max_output_from_legacy_max_tokens(self) -> "ModelConfig":
-        if self.max_output_tokens is None and self.max_tokens is not None:
-            # Heuristic: if max_tokens >= 32768, it's likely the old
-            # "total context window" semantics (pre-W1), not an output limit.
-            # Don't copy it directly; use a conservative default instead.
-            if self.max_tokens >= 32768:
-                self.max_output_tokens = 4096
-            else:
-                fallback = self.max_tokens
-                if self.context_window_tokens is not None and fallback > self.context_window_tokens:
-                    fallback = self.context_window_tokens - 1
-                self.max_output_tokens = max(fallback, 1)
+        # The deprecated request max_tokens field is not an output capability.
+        # Keep it readable until profile cleanup, without inventing a limit.
         return self
 
 

@@ -1,0 +1,66 @@
+schema_version: '1.0'
+change:
+  change_id: CONTEXT-TWO-CAPACITIES-20261112
+  change_type: requirement
+  requirement_id: CONTEXT-TWO-CAPACITIES-20261112
+  title: Use two model capacities with usage-based post-response maintenance
+  description: Ignore retired input/reserve settings and omit output limits; calibrate context usage and maintain only
+    after accepted responses.
+  affected_features:
+    existing: [CMSR-005, F-036, F-171, JIUWEN-CONTEXT]
+    added: []
+    modified: [F-171]
+    retired: []
+  affected_cases:
+    existing: [CONTEXT-POST-RESPONSE-D3-001, JIUWEN-CONTEXT-D3-001, MODEL-LEGACY-TOOLS-D3-001, MODEL-RECOVERY-D3-001,
+      UT-SDK-AUTO-74430BEE8438F486]
+    added: [CONTEXT-POST-RESPONSE-D3-001]
+    modified: [MODEL-RECOVERY-D3-001, UT-SDK-AUTO-74430BEE8438F486]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Retired input/reserve settings cannot affect capacity, fingerprints or output limits; keep trusted snapshot and
+        model identity validation.
+      - Prepare performs no maintenance; accepted responses calibrate input estimates and schedule bounded maintenance
+        at safe step boundaries.
+      - Missing or invalid usage, real zero usage, model changes, compaction, tool results, errors and cancellation preserve
+        truthful state and recoverable history.
+      - Hard rejection preserves policy and emits safe local/calibrated estimates, context_window_tokens and usage provenance;
+        never imply compaction ran or expose prompt/credentials.
+    reason: Reuse capacity, runtime and adapter UT; existing D3 Cases cover transport and usage boundaries without duplicating
+      UT as D1.
+    test_selectors:
+      - test/backend/agents/test_agent_outlet_run_snapshot.py
+      - test/backend/agents/test_context_budget_v2_pipeline.py
+      - test/backend/agents/test_create_agent_info.py
+      - test/backend/agents/test_resolved_model_config.py
+      - test/backend/app/test_runtime_application_lifespan.py
+      - test/backend/database/test_model_connectivity_changes.py
+      - test/backend/management/test_gateway_app_boundary.py
+      - test/backend/services/test_memory_dreaming_summarizer.py
+      - test/backend/services/test_model_outlet_migration_service.py
+      - test/backend/services/test_model_runtime_options.py
+      - test/backend/services/test_model_saved_contracts.py
+      - test/backend/utils/test_config_utils.py
+      - test/sdk/core/agents/test_clarification_runtime.py
+      - test/sdk/core/agents/test_context_directory_boundaries.py
+      - test/sdk/core/agents/test_execution_history_compaction.py
+      - test/sdk/core/agents/test_execution_history_review_regressions.py
+      - test/sdk/core/agents/test_history_context_runtime.py
+      - test/sdk/core/agents/test_jiuwen_context.py
+      - test/sdk/core/agents/test_jiuwen_model_service.py
+      - test/sdk/core/agents/test_post_response_context.py
+      - test/sdk/core/context_runtime/test_runtimes.py
+      - test/sdk/core/model_service/test_gateway_long_text_budget.py
+      - test/sdk/core/model_service/test_gateway_long_text_outlet.py
+      - test/sdk/core/model_service/test_legacy_context_budget.py
+      - test/sdk/core/model_service/test_output_length_omission.py
+      - test/sdk/core/models/test_capacity_budget.py
+      - test/sdk/core/models/test_capacity_resolver.py
+      - test/sdk/core/models/test_implicit_output_cap.py
+      - test/sdk/core/models/test_openai_llm.py
+      - test/sdk/core/models/test_two_capacity_policy.py
+  notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget, approved PR1. Model-profile cleanup
+    is separate; no new API/browser contract, vendor fallback or local-rejection recovery. Real-model/container evidence
+    remains separate from UT.'

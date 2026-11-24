@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Saved outlet output preferences must reach the existing context-budget resolver."""
+"""Saved capacities ignore retired output preferences at runtime."""
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -13,9 +13,9 @@ from management.services.conversation import model_preferences
 from management.services.model import run_budget as model_budget
 
 
-@pytest.mark.parametrize("reserve,requested,expected", [(None, 4096, 4096), (1024, 4096, 4096),
-    (8192, 4096, 4096), (1024, None, 1024), (None, None, None)])
-def test_saved_output_default_does_not_become_provider_hard_limit(monkeypatch, reserve, requested, expected):
+@pytest.mark.parametrize("reserve,requested", [(None, 4096), (1024, 4096),
+    (8192, 4096), (1024, None), (None, None)])
+def test_saved_output_default_does_not_become_provider_hard_limit(monkeypatch, reserve, requested):
     parameters = {} if requested is None else {"max_output_tokens": requested}
     profile = SimpleNamespace(identity=SimpleNamespace(request_model_id="exact", provider_id="provider"),
         connection=SimpleNamespace(base_url="https://models.invalid/v1"),
@@ -32,16 +32,19 @@ def test_saved_output_default_does_not_become_provider_hard_limit(monkeypatch, r
     values = factory.call_args.kwargs
     assert values["api_key"] == ""
     assert values["max_output_tokens"] == 32768
-    assert values["default_output_reserve_tokens"] == expected
+    assert values["context_window_tokens"] == 200000
+    assert values.get("default_output_reserve_tokens") is None
+    assert values.get("max_input_tokens") is None
     assert values["resolved_profile"] is profile
     assert profile.parameter_values == parameters
 
 
-def test_frozen_outlet_request_default_controls_budget_without_replacing_saved_reserve():
+def test_frozen_outlet_request_default_does_not_enter_capacity_overrides():
     record = {"profile_schema_version": 1, "default_output_reserve_tokens": 8192,
               "default_max_output_tokens": 2048, "max_output_tokens": 32768}
     overrides = model_budget._operator_overrides_from_model_info(record)
-    assert overrides["default_output_reserve_tokens"] == 2048
+    assert "default_output_reserve_tokens" not in overrides
+    assert "max_input_tokens" not in overrides
     assert overrides["max_output_tokens"] == 32768
     assert record["default_output_reserve_tokens"] == 8192
 
