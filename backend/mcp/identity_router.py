@@ -1,11 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Tenant MCP dispatch with delegated Gateway authentication and local authorization."""
+"""Dispatch MCP requests to tenant-local applications after identity verification."""
 
 import logging
 import re
 from typing import Any, Callable, Dict
 
-from gateway.security.context import identity_context
+from gateway.identity.context import identity_context
 
 logger = logging.getLogger(__name__)
 

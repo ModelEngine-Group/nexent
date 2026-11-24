@@ -5,7 +5,7 @@ from contextlib import contextmanager
 
 import pytest
 from contracts.errors.trajectory import QueryError
-from management.db.conversation import trajectory_capture as database
+from infrastructure.rdb.trajectory import capture as database
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 

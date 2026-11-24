@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from contracts.errors.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException, VoiceConfigException
 from contracts.voice import VoiceConnectivityRequest, VoiceConnectivityResponse
-from gateway.security.context import trusted_identity
+from gateway.identity.context import trusted_identity
 from runtime.model.voice import get_voice_service
 
 logger = logging.getLogger("voice_app")
