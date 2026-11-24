@@ -74,17 +74,11 @@ def _route_id(method: str, path: str, transport: str) -> str:
 
 
 def _audit_dependency_present(endpoint) -> bool:
-    import inspect
+    # Single source of truth: the declaration module owns the audit-signature
+    # rule; the generator only consumes it.
+    from contracts.northbound_exposure import gate_has_audit_dependency
 
-    try:
-        signature = inspect.signature(endpoint)
-    except (TypeError, ValueError):
-        return False
-    parameter = signature.parameters.get("audit")
-    if parameter is None:
-        return False
-    default = parameter.default
-    return hasattr(default, "dependency") and "audit_hook" in repr(default.dependency)
+    return gate_has_audit_dependency(endpoint)
 
 
 def _collect_gate_rows():

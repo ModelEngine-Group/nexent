@@ -129,7 +129,7 @@ async def nb_delete_automation(
 ):
     target = {"task_id": task_id}
     try:
-        result = agent_automation_facade.delete_task(task_id, ctx.tenant_id, ctx.user_id)
+        result = await agent_automation_facade.delete_task(task_id, ctx.tenant_id, ctx.user_id)
     except Exception as exc:
         audit(audit_outcome(exc), target)
         raise
@@ -161,7 +161,7 @@ async def nb_cancel_automation_run(
 ):
     target = {"run_id": run_id}
     try:
-        result = agent_automation_facade.cancel_run(run_id, ctx.tenant_id, ctx.user_id)
+        result = await agent_automation_facade.cancel_run(run_id, ctx.tenant_id, ctx.user_id)
     except Exception as exc:
         audit(audit_outcome(exc), target)
         raise
