@@ -375,10 +375,18 @@ DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
 
-# Telemetry and Monitoring Configuration (OTLP Protocol)
+# Telemetry and Monitoring Configuration
 MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
-ENABLE_TELEMETRY = (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
+_LOCAL_FILE_TELEMETRY = MONITORING_PROVIDER == 'local_file'
+LOCAL_FILE_MONITORING_ENABLED = (
+    os.getenv('LOCAL_FILE_MONITORING_ENABLED')
+    or (ENABLE_TELEMETRY_RAW if _LOCAL_FILE_TELEMETRY else None)
+    or 'true'
+).strip().lower() == 'true'
+ENABLE_TELEMETRY = (
+    LOCAL_FILE_MONITORING_ENABLED if _LOCAL_FILE_TELEMETRY else (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
+)
 OTEL_SERVICE_NAME_RAW = os.getenv('OTEL_SERVICE_NAME')
 OTEL_SERVICE_NAME = OTEL_SERVICE_NAME_RAW or 'nexent-backend'
 OTEL_EXPORTER_OTLP_ENDPOINT_RAW = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT')
@@ -414,7 +422,9 @@ MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROL
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
-TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
+TRAJECTORY_READ_ENABLED = os.getenv(
+    'TRAJECTORY_READ_ENABLED', 'true' if _LOCAL_FILE_TELEMETRY or LOCAL_FILE_MONITORING_ENABLED else 'false'
+).lower() == 'true'
 TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
 TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
 # ZIP exchange budgets shared by temporary and saved trajectory imports.

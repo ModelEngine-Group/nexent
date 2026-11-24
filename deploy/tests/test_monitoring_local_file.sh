@@ -28,9 +28,34 @@ assert_eq "local_file" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_EN
 assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" TRAJECTORY_READ_ENABLED)" "local reads"
 assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" OTEL_EXPORTER_OTLP_METRICS_ENABLED)" "preserve metrics setting for a later remote deployment"
 assert_eq "" "$(deployment_monitoring_collector_config_file docker local_file)" "no collector config"
-deployment_prepare_config --components application --monitoring-provider local_file
+deployment_prepare_config --components application
 deployment_prepare_monitoring_env docker
+assert_eq "local_file" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" MONITORING_PROVIDER)" "default sink without monitoring component"
+assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" ENABLE_TELEMETRY)" "local capture without monitoring component"
+export LOCAL_FILE_MONITORING_ENABLED=false
+deployment_prepare_monitoring_env k8s
+assert_eq "false" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" ENABLE_TELEMETRY)" "local capture disabled by environment"
+assert_eq "false" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" LOCAL_FILE_MONITORING_ENABLED)" "local disabled reaches the backend env"
 assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" TRAJECTORY_READ_ENABLED)" "historical reads after capture stops"
+assert_eq "false" "$(deployment_render_helm_monitoring_global_values | awk '$1 == "enabled:" { print $2 }')" "Helm respects disabled local capture"
+deployment_prepare_config --components application,monitoring --monitoring-provider phoenix
+deployment_prepare_monitoring_env docker
+assert_eq "phoenix" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" MONITORING_PROVIDER)" "explicit third-party provider"
+assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" ENABLE_TELEMETRY)" "local switch does not disable remote capture"
+assert_eq "false" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" LOCAL_FILE_MONITORING_ENABLED)" "third-party capture only"
+assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" TRAJECTORY_READ_ENABLED)" "remote provider preserves access to past local traces"
+unset LOCAL_FILE_MONITORING_ENABLED
+deployment_prepare_monitoring_env k8s
+assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" LOCAL_FILE_MONITORING_ENABLED)" "local capture defaults on with a third-party provider"
+assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" ENABLE_TELEMETRY)" "third-party export stays on with local capture"
+assert_eq "true" "$(deployment_render_helm_monitoring_global_values | awk '$1 == "localFileEnabled:" { print $2 }')" "Helm retains the local switch in dual mode"
+deployment_prepare_config --components application --monitoring-provider otlp
+deployment_prepare_monitoring_env docker
+assert_eq "local_file" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" MONITORING_PROVIDER)" "ignore remote choice when the monitoring component is off"
+assert_eq "true" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" ENABLE_TELEMETRY)" "capture locally with legacy default options"
+deployment_prepare_config --components application,monitoring
+deployment_prepare_monitoring_env docker
+assert_eq "otlp" "$(deployment_get_env_var_file "$DEPLOYMENT_MONITORING_ENV" MONITORING_PROVIDER)" "monitoring component keeps the default OTLP provider"
 deployment_prepare_config --components application,monitoring --monitoring-provider local_file
 DEPLOYMENT_COMPONENTS=monitoring
 assert_eq "" "$(deployment_compute_docker_ports)" "no monitoring ports"
@@ -49,6 +74,12 @@ case "$(get_third_party_images)" in *opentelemetry-collector-contrib*) ;; *) fai
 
 # Render actual Helm templates without contacting a cluster.
 CHART="$SCRIPT_DIR/../k8s/helm/nexent"
+helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only > "$TEST_DIR/default.yaml"
+helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+  --set global.monitoring.localFileEnabled=false --set global.monitoring.enabled=false > "$TEST_DIR/disabled.yaml"
+helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+  --set global.monitoring.localFileEnabled=false --set global.monitoring.provider=otlp \
+  --set global.monitoring.enabled=true --set nexent-monitoring.enabled=true > "$TEST_DIR/remote_only.yaml"
 for provider in local_file otlp phoenix langfuse langsmith; do
   helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
     --set global.monitoring.enabled=true --set global.monitoring.provider="$provider" \
@@ -70,29 +101,45 @@ from pathlib import Path
 import yaml
 
 root = Path(sys.argv[1])
-for provider in ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith', 'custom'):
+for provider in ('default', 'disabled', 'local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith', 'custom', 'remote_only'):
     docs = [d for d in yaml.safe_load_all((root / f'{provider}.yaml').read_text()) if d]
     deployments = {d['metadata']['name']: d for d in docs if d.get('kind') == 'Deployment'}
     assert not {'nexent-grafana', 'nexent-tempo', 'nexent-zipkin'} & deployments.keys()
     local = provider in ('local_file', 'custom')
-    assert ('nexent-otel-collector' in deployments) == (not local)
+    local_enabled = provider not in ('disabled', 'remote_only')
+    selected_provider = 'local_file' if local else 'otlp' if provider in ('default', 'disabled', 'remote_only') else provider
+    assert ('nexent-otel-collector' in deployments) == (not local and provider not in ('default', 'disabled'))
     assert ('nexent-phoenix' in deployments) == (provider == 'phoenix')
     assert ('nexent-langfuse-web' in deployments) == (provider == 'langfuse')
     config = next(d['data'] for d in docs if d.get('kind') == 'ConfigMap' and d['metadata']['name'] == 'nexent-config')
     expected = '/custom/trajectory' if provider == 'custom' else '/mnt/nexent-data/trajectory'
     assert config['TRAJECTORY_ROOT_DIR'] == expected
+    assert config['ENABLE_TELEMETRY'] == ('false' if provider in ('default', 'disabled') else 'true')
+    assert config['MONITORING_PROVIDER'] == selected_provider
+    assert config['LOCAL_FILE_MONITORING_ENABLED'] == str(local_enabled).lower()
+    assert config['TRAJECTORY_READ_ENABLED'] == str(local or local_enabled).lower()
     if local:
         assert config['OTEL_EXPORTER_OTLP_METRICS_ENABLED'] == 'false'
-        assert config['TRAJECTORY_READ_ENABLED'] == 'true'
-    for name in ('nexent-runtime', 'nexent-config'):
+    volume_names = {'nexent-runtime': 'nexent-trajectory', 'nexent-config': 'nexent-trajectory'}
+    if local or local_enabled:
+        volume_names['nexent-ops'] = 'ops-trajectory'
+    else:
+        ops = deployments['nexent-ops']['spec']['template']['spec']
+        assert 'ops-trajectory' not in {v['name'] for v in ops['volumes']}
+        env = {entry['name']: entry for entry in ops['containers'][0]['env']}
+        for key in ('MONITORING_PROVIDER', 'LOCAL_FILE_MONITORING_ENABLED', 'TRAJECTORY_READ_ENABLED'):
+            assert env[key]['valueFrom']['configMapKeyRef'] == {'name': 'nexent-config', 'key': key}
+    for name, volume_name in volume_names.items():
         pod = deployments[name]['spec']['template']['spec']
-        volume = next(v for v in pod['volumes'] if v['name'] == 'nexent-trajectory')
+        volume = next(v for v in pod['volumes'] if v['name'] == volume_name)
         assert volume['persistentVolumeClaim']['claimName'] == 'nexent-trajectory'
-        mount = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'nexent-trajectory')
+        mount = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == volume_name)
         assert mount['mountPath'] == expected
 for file in ('docker-compose.yml', 'docker-compose.prod.yml'):
     compose = yaml.safe_load((Path(sys.argv[2]) / 'deploy/docker/compose' / file).read_text())
     for name in ('nexent-runtime', 'nexent-config'):
         assert '${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}' in compose['services'][name]['volumes']
+ops = yaml.safe_load((Path(sys.argv[2]) / 'deploy/docker/compose/docker-compose-ops.yml').read_text())
+assert '${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}' in ops['services']['nexent-ops']['volumes']
 PY
 printf 'All local_file deployment option tests passed.\n'

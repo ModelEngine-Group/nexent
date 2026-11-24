@@ -449,10 +449,10 @@ def test_capture_root_switch_keeps_directory_and_native_context(runtime, first_a
         assert len(result['executions']) == 2
 
 
-@pytest.mark.parametrize('sink', ['otlp', 'local_file'])
+@pytest.mark.parametrize('sink, dual', [('otlp', False), ('local_file', False), ('otlp', True)])
 @pytest.mark.parametrize('content_mode', ['summary', 'metrics', 'full'])
-def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_receiver, sink, content_mode):
-    runtime.configure(sink, telemetry_receiver.endpoint, content_mode=content_mode)
+def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_receiver, sink, dual, content_mode):
+    runtime.configure(sink, telemetry_receiver.endpoint, content_mode=content_mode, capture_local_traces=dual)
     large = '完整模型输入' * 16000
 
     def reply(request, number, emit):
@@ -464,8 +464,8 @@ def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_r
         assert info.attempt_outcome == 'completed' and len(requests) == 1
     runtime.flush_remote()
     files = list(runtime.root.rglob('*.otlp.jsonl'))
-    assert bool(files) == (sink != 'otlp')
-    assert bool(telemetry_receiver.requests) == (sink != 'local_file')
+    assert bool(files) == (sink == 'local_file' or dual)
+    assert bool(telemetry_receiver.requests) == (sink == 'otlp')
     assert all(path == '/v1/traces' for path, _ in telemetry_receiver.requests)
     if files:
         assert files[0].stat().st_size > 256 * 1024
@@ -477,18 +477,25 @@ def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_r
         assert meta['capture_state'] == 'ready'
         assert meta['confirmed_bytes'] == files[0].stat().st_size
         assert meta['confirmed_sha256'] == hashlib.sha256(files[0].read_bytes()).hexdigest()
-    for _, message in telemetry_receiver.requests:
-        spans = [s for resource in message.resource_spans for scope in resource.scope_spans for s in scope.spans]
-        assert all(s.name != 'model.attempt' for s in spans)
-        assert all(not item.key.startswith('nexent.local.') for s in spans for item in s.attributes)
-        assert all(large not in item.value.string_value for s in spans for item in s.attributes)
+    remote_spans = [span for _, message in telemetry_receiver.requests for resource in message.resource_spans
+                    for scope in resource.scope_spans for span in scope.spans]
+    assert all(span.name != 'model.attempt' for span in remote_spans)
+    assert all(not item.key.startswith('nexent.local.') for span in remote_spans for item in span.attributes)
+    assert all(large not in item.value.string_value for span in remote_spans for item in span.attributes)
+    if dual:
+        local_root, = [s for s in runtime.spans() if attrs(s).get('nexent.trajectory.root')]
+        remote_root, = [s for s in remote_spans if s.name == 'agent.run']
+        assert (local_root['traceId'], local_root['spanId']) == (remote_root.trace_id.hex(), remote_root.span_id.hex())
 
 
 @pytest.mark.parametrize('failed_sink', ['remote', 'local'])
-def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, monkeypatch):
+@pytest.mark.parametrize('dual', [False, True])
+def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, dual,
+                                                                 monkeypatch):
     from infrastructure.trace.trajectory_store import RunWriter
 
-    runtime.configure('otlp' if failed_sink == 'remote' else 'local_file', telemetry_receiver.endpoint)
+    sink = 'otlp' if dual or failed_sink == 'remote' else 'local_file'
+    runtime.configure(sink, telemetry_receiver.endpoint, capture_local_traces=dual)
     if failed_sink == 'remote':
         telemetry_receiver.status = 503
     else:
@@ -505,13 +512,12 @@ def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemet
         info, _ = runtime.run(base)
         assert info.attempt_outcome == 'completed' and len(requests) == 1
     runtime.flush_remote()
-    if failed_sink == 'remote':
-        assert telemetry_receiver.requests
-        assert not list(runtime.root.rglob('meta.json'))
-    else:
-        assert not telemetry_receiver.requests
-        run = json.loads(next(runtime.root.rglob('meta.json')).read_text())['runs'][0]
-        assert run['capture_state'] == 'incomplete'
+    assert bool(telemetry_receiver.requests) == (sink == 'otlp')
+    manifests = list(runtime.root.rglob('meta.json'))
+    assert bool(manifests) == (dual or failed_sink == 'local')
+    if manifests:
+        run = json.loads(manifests[0].read_text())['runs'][0]
+        assert run['capture_state'] == ('ready' if failed_sink == 'remote' else 'incomplete')
 
 
 def test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_read(runtime, telemetry_receiver):

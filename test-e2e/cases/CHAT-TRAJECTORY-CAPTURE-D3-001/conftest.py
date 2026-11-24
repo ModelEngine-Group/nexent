@@ -41,6 +41,7 @@ from nexent.monitor import (
     agent_monitoring_context,
     get_agent_monitoring_context,
 )
+from nexent.monitor.local_content import local_capture_configured
 from nexent.monitor.monitoring import MonitoringConfig, MonitoringManager
 from opentelemetry import metrics, trace
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
@@ -217,7 +218,7 @@ def runtime(tmp_path, monkeypatch):
     observers = []
     active_provider, extra_providers = [provider], []
 
-    def configure(sink, endpoint, *, enabled=True, content_mode='summary'):
+    def configure(sink, endpoint, *, enabled=True, content_mode='summary', capture_local_traces=False):
         from nexent.monitor import monitoring as module
 
         actual_exporter = module.OTLPSpanExporterHTTP
@@ -243,6 +244,7 @@ def runtime(tmp_path, monkeypatch):
                 enable_telemetry=enabled, provider=sink, local_span_processor=local,
                 export_metrics=False, instrument_requests=False, otlp_endpoint=endpoint,
                 trace_content_mode=content_mode, trace_max_chars=32,
+                capture_local_traces=capture_local_traces,
             ))
         if enabled:
             active_provider[0] = manager._tracer_provider
@@ -255,7 +257,7 @@ def runtime(tmp_path, monkeypatch):
             models=None, preparation=None, observer_factory=None):
         current = active_provider[0]
         delegate = ALWAYS_ON if sampled else ALWAYS_OFF
-        current.sampler = local.wrap_sampler(delegate) if manager._config.provider != 'otlp' else delegate
+        current.sampler = local.wrap_sampler(delegate) if local_capture_configured(manager._config) else delegate
         manager._tracer = current.get_tracer('capture-fixture', str(uuid4()))
         stop = threading.Event()
         observer = observer_factory(stop) if observer_factory is not None else MessageObserver()

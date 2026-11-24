@@ -786,6 +786,7 @@ deployment_prepare_monitoring_env() {
   local example_file
   local legacy_file
   local telemetry_enabled
+  local local_capture_enabled
   local dashboard_url
   local existing_dashboard_url
   local provider
@@ -799,6 +800,7 @@ deployment_prepare_monitoring_env() {
   env_file="$(deployment_monitoring_env_file)"
   example_file="$(deployment_monitoring_env_example_file)"
   legacy_file="$(deployment_legacy_monitoring_env_file)"
+  local_capture_enabled="$(deployment_local_file_monitoring_enabled)"
 
   if [ ! -f "$env_file" ] && [ -f "$legacy_file" ]; then
     mkdir -p "$(dirname "$env_file")"
@@ -809,13 +811,16 @@ deployment_prepare_monitoring_env() {
   deployment_sync_env_defaults "$example_file" "$env_file" || return 1
   deployment_source_env_file "$env_file"
 
-  telemetry_enabled="$(deployment_monitoring_enabled)"
-  provider="$DEPLOYMENT_MONITORING_PROVIDER"
+  provider="$(deployment_effective_monitoring_provider)"
+  telemetry_enabled="$(deployment_telemetry_enabled "$provider" "$local_capture_enabled")"
 
   deployment_update_monitoring_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
   deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
-  if [ "$provider" = "local_file" ]; then
+  deployment_update_monitoring_env_var "LOCAL_FILE_MONITORING_ENABLED" "$local_capture_enabled"
+  if [ "$provider" = "local_file" ] || [ "$local_capture_enabled" = "true" ]; then
     deployment_update_monitoring_env_var "TRAJECTORY_READ_ENABLED" "true"
+  fi
+  if [ "$provider" = "local_file" ]; then
     deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" ""
   fi
 
@@ -857,7 +862,6 @@ deployment_prepare_monitoring_env() {
   fi
 
   deployment_source_env_file "$env_file"
-  DEPLOYMENT_MONITORING_PROVIDER="${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}"
   export DEPLOYMENT_MONITORING_PROVIDER
 }
 
@@ -2289,6 +2293,32 @@ deployment_monitoring_enabled() {
   fi
 }
 
+deployment_effective_monitoring_provider() {
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    printf '%s' "$DEPLOYMENT_MONITORING_PROVIDER"
+  else
+    printf 'local_file'
+  fi
+}
+
+deployment_telemetry_enabled() {
+  if [ "$1" = "local_file" ]; then
+    printf '%s' "$2"
+  else
+    deployment_monitoring_enabled
+  fi
+}
+
+deployment_local_file_monitoring_enabled() {
+  local enabled
+  enabled="$(deployment_trim "${LOCAL_FILE_MONITORING_ENABLED:-true}" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  if [ "$enabled" = "true" ]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 deployment_monitoring_dashboard_url() {
   local target="${1:-docker}"
 
@@ -2539,12 +2569,15 @@ deployment_yaml_quote() {
 }
 
 deployment_render_helm_monitoring_global_values() {
-  local enabled
-  enabled="$(deployment_monitoring_enabled)"
+  local provider
+  local local_capture_enabled
+  provider="$(deployment_monitoring_env_value MONITORING_PROVIDER "$(deployment_effective_monitoring_provider)")"
+  local_capture_enabled="$(deployment_monitoring_env_value LOCAL_FILE_MONITORING_ENABLED "$(deployment_local_file_monitoring_enabled)")"
 
   printf '  monitoring:\n'
-  printf '    enabled: %s\n' "$enabled"
-  printf '    provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '    enabled: %s\n' "$(deployment_monitoring_env_value ENABLE_TELEMETRY "$(deployment_telemetry_enabled "$provider" "$local_capture_enabled")")"
+  printf '    localFileEnabled: %s\n' "$local_capture_enabled"
+  printf '    provider: %s\n' "$(deployment_yaml_quote "$provider")"
   printf '    dashboardUrl: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_URL "$(deployment_monitoring_dashboard_url k8s)")")"
   printf '    dashboardAllowedRoles: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_ALLOWED_ROLES "SU,SPEED")")"
   printf '    projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROJECT_NAME "nexent")")"

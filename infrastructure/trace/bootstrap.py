@@ -36,8 +36,9 @@ local_trajectory_processor = None
 
 def _initialize_monitoring():
     """Configure the shared telemetry defaults before any service adds capture."""
+    remote_enabled = environment.ENABLE_TELEMETRY and environment.MONITORING_PROVIDER != "local_file"
     config = MonitoringConfig(
-        enable_telemetry=environment.ENABLE_TELEMETRY and environment.MONITORING_PROVIDER != "local_file",
+        enable_telemetry=remote_enabled,
         service_name=environment.OTEL_SERVICE_NAME,
         provider=environment.MONITORING_PROVIDER or "otlp",
         otlp_endpoint=environment.OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -45,7 +46,8 @@ def _initialize_monitoring():
         otlp_metrics_endpoint=environment.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT or None,
         otlp_protocol=environment.OTEL_EXPORTER_OTLP_PROTOCOL,
         otlp_headers=environment.OTLP_HEADERS,
-        export_metrics=environment.OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        export_traces=remote_enabled,
+        export_metrics=remote_enabled and environment.OTEL_EXPORTER_OTLP_METRICS_ENABLED,
         instrument_requests=environment.MONITORING_INSTRUMENT_REQUESTS,
         fastapi_included_urls=environment.MONITORING_FASTAPI_INCLUDED_URLS,
         fastapi_excluded_urls=environment.MONITORING_FASTAPI_EXCLUDED_URLS,
@@ -81,10 +83,11 @@ def configure_trajectory(processor, observer):
     """Attach Runtime capture while preserving an existing remote tracer provider."""
     global local_trajectory_processor
     local_trajectory_processor = processor
-    if environment.MONITORING_PROVIDER == "local_file":
-        monitoring_manager.configure(replace(
+    if environment.LOCAL_FILE_MONITORING_ENABLED:
+        monitoring_manager.configure_local_capture(replace(
             _monitoring_config,
-            enable_telemetry=environment.ENABLE_TELEMETRY,
+            enable_telemetry=True,
+            capture_local_traces=True,
             local_span_processor=processor,
             local_execution_observer=observer,
         ))

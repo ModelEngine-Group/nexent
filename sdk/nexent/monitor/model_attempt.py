@@ -135,6 +135,9 @@ class ModelAttemptSession:
         self._provider_response = ProviderResponse(self._reserve_provider)
         # Local projection collapses this wrapper; the remote logical span stays unchanged.
         self.tracker = self.manager.create_token_tracker(self.model, self.span)
+        monitoring_config = self.manager._config
+        if monitoring_config.export_traces and monitoring_config.provider != 'local_file':
+            self.tracker.remote_span = self.logical_span
         safe_body = _safe(body)
         if self._take(safe_body, 'raw.request'):
             self._raw['request'] = safe_body

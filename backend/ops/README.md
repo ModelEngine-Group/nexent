@@ -25,14 +25,12 @@ The listener binds to `0.0.0.0`; `OPS_PORT` defaults to `5016`. Configuration
 reads remain centralized in `contracts/constants/environment.py`. Set
 `PYTHON_DOTENV_DISABLED=1` to disable nearby dotenv loading.
 
-With trajectory reading and model monitoring disabled and a provider other than
-`local_file`, Ops serves health and documentation without initializing their
-storage clients.
-Setting `TRAJECTORY_READ_ENABLED=true` or selecting `MONITORING_PROVIDER=local_file`
-enables trajectory routes and managed maintenance. Query reads still require
-`TRAJECTORY_READ_ENABLED=true`. Enabled operations uses the existing PostgreSQL
-configuration and JWT authentication. It does not initialize telemetry exporters
-or execute Agent calls or SQL migrations.
+Ops enables trajectory routes and managed maintenance when local capture is on,
+historical reads are on, or the deployment selects the legacy `local_file`
+provider. Query reads require `TRAJECTORY_READ_ENABLED=true`. With trajectory
+storage features and model monitoring disabled, Ops serves health and
+documentation without opening their storage clients. Operations use the existing
+PostgreSQL configuration and JWT authentication.
 
 | Endpoint | Contract |
 | --- | --- |

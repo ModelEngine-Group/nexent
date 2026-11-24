@@ -46,6 +46,7 @@ global:
   monitoring:
     enabled: false
     provider: otlp
+    localFileEnabled: true
     trajectoryRootDir: "/mnt/nexent-data/trajectory"
     trajectoryReadEnabled: false
     projectName: "nexent"
