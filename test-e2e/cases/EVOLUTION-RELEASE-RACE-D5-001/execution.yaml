@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVOLUTION-RELEASE-RACE-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_release_race_and_rollback_to_previous_version
+acceptance_bindings:
+  AC-01: [test_release_race_and_rollback_to_previous_version]
+  AC-02: [test_release_race_and_rollback_to_previous_version]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The local database fixture owns and drops its database. Candidate records are seeded with valid digests and passing confirmation; model, external tools and browser are outside this transaction proof.

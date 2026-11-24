@@ -1,0 +1,45 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-RELEASE-RACE-D5-001
+  feature_id: AGENT-EVOLUTION-RELEASE
+  business_rule_ids: [AGENT-EVOLUTION-RELEASE-RULE-01, AGENT-EVOLUTION-RELEASE-RULE-04]
+  title: 并发晋升只生效一次，连续发布后回退到上一稳定版
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 用真实 PostgreSQL 事务验证有竞争的发布、重试、连续发布、回退和会话选版。
+  preconditions: [独占 PostgreSQL 临时数据库，两名指定发布人，同一智能体的 V1 草稿和已确认的提示词候选。]
+  test_data:
+    profile: 同一租户两个智能体，另一租户一个智能体。独立评测结果作为合成输入。
+  steps:
+  - order: 1
+    action: 两个发布事务在同一智能体的锁前排队，并发放行。重试胜出的发布。
+    expected: 仅生成一个 V2；另一候选返回版本冲突，无新版本或发布事件；重试仍返回同一发布记录。
+  - order: 2
+    action: 选择 V2 的已确认候选继续发布 V3，在各阶段绑定会话。两次并发回退 V3 后再开启会话。
+    expected: 新会话恢复 V2，已绑定 V2 和 V3 的会话保持原版。V2 和 V3 分别装入对应提示词，V3 只写一条回退记录。
+  expected_results: [同基线只有一个事务生成版本和上线事件。, 两次发布及一次回退的版本与会话、资源回执一致。]
+  forbidden_side_effects: [其他智能体、其他租户和正在编辑的草稿发生改变。]
+  acceptance:
+  - id: AC-01
+    description: 真实并发事务在锁和当前版本约束下发布，重试不产生第二次上线。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 连续发布后回退到上一稳定版，同时保留草稿、范围和已绑定会话。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: RELIABILITY
+  risk: 竞争发布产生两个有效版本，或回退后新会话加载错误版本。
+  condition: [发布事务在真实 PostgreSQL 的同一个智能体锁前等待。]
+  metrics: [发布和回退事件数，各会话绑定版本，生效和草稿的提示词。]
+  thresholds: [同基线并发胜出一次，重复回退写入一次，试点范围外变更为零。]
+  recovery_expectations: [恢复上一稳定版，旧会话保持原绑定，删除临时数据库。]

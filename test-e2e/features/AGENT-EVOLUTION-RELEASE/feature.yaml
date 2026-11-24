@@ -14,4 +14,6 @@ feature:
     description: 发布负责人按实际版本核对线上运行量、失败、诊断覆盖和操作历史，授权撤回后业务信号随即更新。
   - rule_id: AGENT-EVOLUTION-RELEASE-RULE-03
     description: 业务用户的 Skill 建议可经候选对照、独立确认和指定发布人上线或回退。提交者可查询实际状态。
-  required_test_stages: [D2, D3, D4]
+  - rule_id: AGENT-EVOLUTION-RELEASE-RULE-04
+    description: 同一基线的并发晋升只切换一次。回退到上一稳定版时，同一发布记录只更新一次，其他范围及草稿不受影响。
+  required_test_stages: [D2, D3, D4, D5]
