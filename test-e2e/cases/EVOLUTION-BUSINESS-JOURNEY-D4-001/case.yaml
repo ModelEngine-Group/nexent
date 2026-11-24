@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-BUSINESS-JOURNEY-D4-001
+  feature_id: AGENT-EVOLUTION-RELEASE
+  business_rule_ids: [AGENT-EVOLUTION-RELEASE-RULE-01, AGENT-EVOLUTION-RELEASE-RULE-03]
+  title: 业务建议经开发对照和独立确认后在浏览器上线及回退
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证同一条建议从用户提交、开发试评、独立确认到发布回退和会话版本保持。
+  preconditions:
+  - 启动隔离环境的 Nexent、业务 Runtime 和开发 Runtime，准备可重复对照的试点智能体和三种测试身份。
+  - 将未参与生成的材料交给独立评测进程，使用隔离存储和受控本地模型。
+  test_data:
+    fixture: 由隔离试点输出临时 NEXENT_EVOLUTION_D4_FIXTURE，包含测试作用域、一次性登录和本机确认控制。
+    policy: 无负责人保留并标为待分配，已有负责人保持原样。
+  steps:
+  - order: 1
+    action: 普通用户在目标智能体会话提出长期修改 Skill 的建议。
+    expected: 得到能在原会话查询的建议编号。
+  - order: 2
+    action: 编辑者用开发回执生成候选，在浏览器运行专项与保护题对照并提交独立确认。
+    expected: 目标题改善，保护题和固定回归通过。提名关联原建议。
+  - order: 3
+    action: 在独立工作进程用新材料确认。编辑者检查汇总，并验证无发布授权时无法进入发布详情。
+    expected: 独立评测通过，界面仅显示汇总，普通编辑者无发布权限。
+  - order: 4
+    action: 发布负责人在浏览器上线同一候选，分别执行新会话和已绑定的旧会话。
+    expected: 新会话使用新版、旧会话沿用原版，提交者能查询上线。
+  - order: 5
+    action: 发布负责人在浏览器回退，再执行新会话以及上线期间已绑定新版的会话。
+    expected: 新会话恢复原版，已绑定新版的会话继续使用新版，提交者能查询回退。
+  expected_results:
+  - 同一建议关联开发报告、独立确认与发布动作，提交者在会话能查询。
+  - 独立评测证据留在评测侧，发布页限制指定负责人。
+  - 实际执行版本符合发布和回退前后的绑定约定，默认恢复到原版。
+  forbidden_side_effects:
+  - 不能改动试点以外的智能体或保留启用的测试登录。
+  actor: 普通业务用户、智能体编辑者、独立评测人和发布负责人
+  journey: [会话建议, 工作台对照与提名, 独立确认, 发布与回退]
+  final_business_result: [新会话默认回退，已开始的会话版本保持。]
+  failure_evidence: [仓库 D4 步骤、断言与失败记录。]
+  cleanup: [用例失败时回退已上线版本，关闭测试登录，结束试点服务。]
+  acceptance:
+  - id: AC-01
+    description: 用户建议、开发筛选和独立确认的结果可追溯到同一提出记录。
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: 实际浏览器发布和回退，验证五次在线执行版本并清理测试登录。
+    steps: [4, 5]
+    expected_results: [3]
+    forbidden_side_effects: [1]

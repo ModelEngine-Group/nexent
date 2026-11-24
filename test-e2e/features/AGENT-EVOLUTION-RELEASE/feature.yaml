@@ -12,4 +12,6 @@ feature:
     description: 会话首次提交与服务端选版一致，切换默认版本后续聊和重试沿用已绑定版本。
   - rule_id: AGENT-EVOLUTION-RELEASE-RULE-02
     description: 发布负责人按实际版本核对线上运行量、失败、诊断覆盖和操作历史，授权撤回后业务信号随即更新。
-  required_test_stages: [D2, D3]
+  - rule_id: AGENT-EVOLUTION-RELEASE-RULE-03
+    description: 业务用户的 Skill 建议可经候选对照、独立确认和指定发布人上线或回退。提交者可查询实际状态。
+  required_test_stages: [D2, D3, D4]
