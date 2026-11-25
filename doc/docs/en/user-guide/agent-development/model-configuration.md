@@ -60,21 +60,17 @@ Accounts with view-only access cannot change defaults or manage models.
 
 #### Large Language Models
 
-Nexent supports any **OpenAI-compatible** provider, including:
+When adding a single large language model in the current tenant, the **Provider** dropdown offers profiles for SiliconFlow, Alibaba Cloud Model Studio (China), TokenPony, DeepSeek, Volcengine Ark, and Volcengine Ark Coding Plan. Ark pay-as-you-go and Coding Plan use different base URLs.
 
-- [SiliconFlow](https://siliconflow.cn/)
-- [Ali Bailian](https://bailian.console.aliyun.com/)
-- [TokenPony](https://www.tokenpony.cn/)
-- [DeepSeek](https://platform.deepseek.com/)
-- [OpenAI](https://platform.openai.com/)
-- [Anthropic](https://console.anthropic.com/)
-- [Moonshot](https://platform.moonshot.cn/)
+Batch import uses the built-in model catalog, which also lists OpenAI, Z.AI, Anthropic Claude, Google Gemini, Mistral AI, xAI (Grok), and ModelEngine. Batch import requires an endpoint that can return a model list. Use the connectivity check to confirm that a specific model is callable.
+
+For other providers such as Moonshot, select **Custom provider** and enter an **OpenAI Chat Completions**-compatible Base URL, the model ID, and any required credentials.
 
 Getting started:
 
 1. Sign up at the provider's portal.
 2. Create and copy an API key.
-3. Locate the API endpoint (usually ending with `/v1`).
+3. Find the Base URL for the API protocol in the provider's documentation.
 4. In Nexent, go to **Model Library → Add Model** and enter the connection details from the provider.
 
 #### Multimodal Models

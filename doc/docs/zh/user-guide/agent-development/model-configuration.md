@@ -60,21 +60,17 @@
 
 #### 🤖 大语言模型LLM
 
-Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包括：
+当前租户单个添加大语言模型时，**服务商** 下拉框提供硅基流动、阿里云百炼（中国站）、小马算力、DeepSeek、火山方舟和火山方舟 Coding Plan 的配置档案。火山方舟按量付费和 Coding Plan 使用各自的 Base URL。
 
-- [硅基流动](https://siliconflow.cn/)
-- [阿里云百炼](https://bailian.console.aliyun.com/)
-- [小马算力](https://www.tokenpony.cn/)
-- [Deepseek](https://platform.deepseek.com/)
-- [OpenAI](https://platform.openai.com/)
-- [Anthropic](https://console.anthropic.com/)
-- [月之暗面](https://platform.moonshot.cn/)
+批量添加使用内置模型目录，其中还收录了 OpenAI、智谱 Z.AI、Anthropic Claude、Google Gemini、Mistral AI、xAI（Grok）和 ModelEngine。批量导入取决于所填端点能否返回模型列表，模型能否调用可通过连通性检测确认。
+
+对于月之暗面等其他服务商，选择 **自定义提供商**，填写兼容 **OpenAI Chat Completions** 的 Base URL、模型 ID 和所需凭据。
 
 可参考以下步骤进行模型接入：
 
 1. 访问模型供应商官网，注册账户；
 2. 创建并复制API Key；
-3. 在文档中查看API端点（即模型URL，一般以`/v1`为结尾）；
+3. 在服务商文档中查看当前接入协议对应的 Base URL；
 4. 在Nexent模型配置页面在模型库点击 **添加模型**，填写服务商提供的接入信息。
 
 #### 🎭 多模态模型
