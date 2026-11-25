@@ -8,7 +8,11 @@ from a2a.types import StreamResponse
 from google.protobuf.json_format import ParseDict
 from jsonschema import ValidationError
 from nexent.core.agents.cores.jiuwen.a2a import _RemoteResult
-from nexent.core.agents.cores.jiuwen.collaboration import CollaborationAgent
+from nexent.core.agents.cores.jiuwen.collaboration import (
+    CollaborationAgent,
+    _CollaborationAbilityManager,
+    collaboration_dispatch,
+)
 from openjiuwen.core.single_agent import AgentCard
 
 
@@ -23,12 +27,33 @@ async def test_native_agent_checks_parent_session_and_rejects_hidden_arguments()
 
     with pytest.raises(PermissionError):
         await agent.invoke({"task": "delegate"}, session=stranger)
-    with pytest.raises(ValidationError):
-        await agent.invoke({"task": "delegate", "user_context": {"user_id": "spoof"}}, session=owner)
+    with pytest.raises(PermissionError, match="dispatch identity"):
+        await agent.invoke({"task": "delegate"}, session=owner)
+    with collaboration_dispatch("owned:other", "other"):
+        with pytest.raises(PermissionError, match="dispatch identity"):
+            await agent.invoke({"task": "delegate"}, session=owner)
+
+    with collaboration_dispatch("owned:call", "call"):
+        with pytest.raises(ValidationError):
+            await agent.invoke({"task": "delegate", "provider_call_id": "spoof"}, session=owner)
     execute.assert_not_awaited()
 
-    assert await agent.invoke({"task": "delegate", "conversation_id": "owned:call"}, session=owner) == "result"
-    execute.assert_awaited_once_with(task="delegate")
+    with collaboration_dispatch("owned:call", "call"):
+        assert await agent.invoke({"task": "delegate", "conversation_id": "owned:call"}, session=owner) == "result"
+    execute.assert_awaited_once_with({"task": "delegate"}, provider_call_id="call")
+
+
+@pytest.mark.asyncio
+async def test_native_collaborator_dispatch_rejects_missing_call_id(mocker):
+    manager = _CollaborationAbilityManager("owned")
+    manager.collaborators["delegate"] = object()
+    tool_call = SimpleNamespace(name="delegate", id="")
+    execute = mocker.patch(
+        "openjiuwen.core.single_agent.ability_manager.AbilityManager._execute_single_tool_call",
+    )
+    with pytest.raises(PermissionError, match="call ID is missing"):
+        await manager._execute_single_tool_call(tool_call, None)
+    execute.assert_not_called()
 
 
 def test_native_a2a_artifact_updates_merge_by_id_and_require_completion():

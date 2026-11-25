@@ -50,15 +50,16 @@ case:
   - order: 5
     action: Respond to a native Jiuwen root with three separate child tool calls in the same model step.
       Require all first child requests to arrive before sending any child response. Each child submits two
-      read calls that must both start before either can finish.
+      read calls that must both start before either can finish. Also send two calls to the same child
+      with identical arguments and different provider IDs in one response.
     expected: Each batch overlaps, the provider sees no legacy parallel_executor, and parallel children expose
       only the approved read tool. Live events and restored message units preserve matching call, result, and
       invocation IDs. The controlled-text variant continues to use the compatibility helper.
   - order: 6
     action: Send three native child calls in one step, with the production-shaped helper injected in every child.
       Each child uses Python in a real system sandbox to create a file named same.txt and report its execution interval.
-      Repeat with one Python action held beyond its collaboration deadline, and with cancellation after all three
-      Python programs reach a shared test barrier in the disposable sandbox.
+      Repeat with three identical invocations, with one Python action held beyond its collaboration deadline,
+      and with cancellation after all three Python programs reach a shared test barrier in the disposable sandbox.
     expected: Python intervals overlap in one configured Docker container with distinct Kernel leases. Same-name
       files contain distinct child data and use distinct object keys. The parent receives the authorized references,
       live and historical projections keep invocation ownership, and all owned resources are reclaimed. On timeout,

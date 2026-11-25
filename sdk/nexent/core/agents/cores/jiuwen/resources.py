@@ -46,10 +46,14 @@ class JiuwenResourceBridge:
     def _agent_invocation(self, card_id):
         from openjiuwen.core.runner import Runner
 
+        from nexent.core.agents.cores.jiuwen.collaboration import collaboration_dispatch
+
         async def invoke(arguments):
             child_session = f"{self.session_id}:{uuid4().hex}"
             try:
-                return await Runner.run_agent(card_id, arguments, session=child_session)
+                # This call comes from an authorized Python binding, outside a model tool batch.
+                with collaboration_dispatch(child_session, None):
+                    return await Runner.run_agent(card_id, arguments, session=child_session)
             finally:
                 await Runner.release(child_session)
 

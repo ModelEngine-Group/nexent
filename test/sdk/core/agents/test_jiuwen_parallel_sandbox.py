@@ -6,6 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 from threading import Event, Lock
+from unittest.mock import Mock
 
 import pytest
 
@@ -71,14 +72,14 @@ def test_child_returns_only_published_artifact_references(mocker):
 
 
 @pytest.mark.asyncio
-async def test_one_native_child_timeout_keeps_parent_and_later_sibling_alive(mocker):
+async def test_one_native_child_timeout_keeps_parent_and_later_sibling_alive():
     adapter = JiuwenAdapter(run_info(collaboration_timeout_seconds=0.6))
     adapter.scope = RunCancellationScope(adapter.run_info.stop_event)
     adapter.manager = ThreadManager("child-timeout", {"control-io": LanePolicy(name="control-io", max_workers=2,
                                                                               max_queue_size=2)})
     adapter.manager.start()
     adapter._parallel_child_calls = {"slow": "sandbox", "peer": "sandbox"}
-    mocker.patch.object(adapter.events, "tool_call", side_effect=lambda name, arguments, call, **_: arguments["task"])
+    adapter._native_call_names = dict.fromkeys(adapter._parallel_child_calls, "child")
     slow_started, slow_stopped = Event(), Event()
 
     def forward(task):
@@ -93,15 +94,15 @@ async def test_one_native_child_timeout_keeps_parent_and_later_sibling_alive(moc
             assert not scope.cancelled
         return task
 
-    handler = adapter._business_handler("child", forward, lane="control-io", local_child=True)
+    handler = adapter._business_handler("child", forward, lane="control-io", collaborator=True, local_child=True)
     try:
-        slow = asyncio.create_task(handler(task="slow"))
+        slow = asyncio.create_task(handler({"task": "slow"}, provider_call_id="slow"))
         deadline = asyncio.get_running_loop().time() + 0.4
         while not slow_started.is_set() and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.01)
         assert slow_started.is_set()
         await asyncio.sleep(0.2)
-        results = await asyncio.gather(slow, handler(task="peer"), return_exceptions=True)
+        results = await asyncio.gather(slow, handler({"task": "peer"}, provider_call_id="peer"), return_exceptions=True)
         assert isinstance(results[0], TimeoutError) and results[1] == "peer"
         assert not adapter.scope.cancelled
     finally:
@@ -110,29 +111,35 @@ async def test_one_native_child_timeout_keeps_parent_and_later_sibling_alive(moc
 
 
 @pytest.mark.asyncio
-async def test_native_python_batch_respects_the_parent_slot_limit(mocker):
-    adapter = JiuwenAdapter(run_info(collaboration_timeout_seconds=4))
+async def test_native_python_batch_respects_the_parent_slot_limit(tmp_path):
+    adapter = JiuwenAdapter(run_info(
+        collaboration_timeout_seconds=4, workspace_path=str(tmp_path / "parent"),
+        sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER),
+    ))
     adapter.scope = RunCancellationScope(adapter.run_info.stop_event)
     adapter.manager = ThreadManager("child-capacity", {"control-io": LanePolicy(name="control-io", max_workers=6,
                                                                                max_queue_size=4)})
     adapter.manager.start()
-    tasks = [f"child-{index}" for index in range(5)]
-    adapter._parallel_child_calls = dict.fromkeys(tasks, "sandbox")
-    mocker.patch.object(adapter.events, "tool_call", side_effect=lambda name, arguments, call, **_: arguments["task"])
+    call_ids = [f"child-{index}" for index in range(5)]
+    adapter._parallel_child_calls = dict.fromkeys(call_ids, "sandbox")
+    adapter._native_call_names = dict.fromkeys(call_ids, "child")
     release, full = Event(), Event()
     starts = []
     lock = Lock()
 
     def forward(task):
+        scope, mode = adapter._child_context.get()
+        assert mode == "sandbox"
+        info = child_run_info(adapter.run_info, adapter.run_info.agent_config, scope, parallel_mode=mode)
         with lock:
-            starts.append(task)
+            starts.append(info.workspace_path)
             if len(starts) >= 4:
                 full.set()
         assert release.wait(3)
         return task
 
-    handler = adapter._business_handler("child", forward, lane="control-io", local_child=True)
-    batch = asyncio.gather(*(handler(task=task) for task in tasks))
+    handler = adapter._business_handler("child", forward, lane="control-io", collaborator=True, local_child=True)
+    batch = asyncio.gather(*(handler({"task": "same task"}, provider_call_id=call_id) for call_id in call_ids))
     try:
         async with asyncio.timeout(2):
             while not full.is_set():
@@ -142,5 +149,23 @@ async def test_native_python_batch_respects_the_parent_slot_limit(mocker):
         release.set()
         results = await batch
         drained = await adapter.manager.shutdown(timeout=3)
-    assert results == tasks and set(starts) == set(tasks)
+    assert results == ["same task"] * len(call_ids)
+    assert len(set(starts)) == len(call_ids) and adapter.run_info.workspace_path not in starts
     assert not drained.stuck_execution_ids
+    with pytest.raises(PermissionError, match="accepted model call"):
+        await handler({"task": "same task"}, provider_call_id=call_ids[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("known_name", [None, "other-child"])
+async def test_native_child_rejects_unrecognized_dispatch_before_submitting(known_name):
+    adapter = JiuwenAdapter(run_info())
+    adapter.scope = RunCancellationScope(adapter.run_info.stop_event)
+    adapter.manager = Mock()
+    adapter._native_call_names = {"call": known_name} if known_name else {}
+    forward = Mock()
+    handler = adapter._business_handler("child", forward, lane="control-io", collaborator=True, local_child=True)
+    with pytest.raises(PermissionError, match="accepted model call"):
+        await handler({"task": "same task"}, provider_call_id="call")
+    adapter.manager.submit.assert_not_called()
+    forward.assert_not_called()

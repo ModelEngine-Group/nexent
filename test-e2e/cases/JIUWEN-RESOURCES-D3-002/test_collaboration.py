@@ -137,6 +137,23 @@ def test_native_a2a_stream_has_same_child_result_live_and_in_history(monkeypatch
         assert not {"model_output", "run_terminal", "tool_result"} & {event["type"] for event in stream}
 
 
+def test_identical_child_calls_keep_read_only_contract(monkeypatch):
+    info, state, events, _ = asyncio.run(run_collaboration(monkeypatch, repeat_child=True))
+    assert info.attempt_outcome == "completed"
+    assert len(state["child"]) == 2 and all("CHILD_TASK_ONLY" in str(body) for body in state["child"])
+    assert all(not body.get("tools") for body in state["child"])
+    issued_ids = {"call-child", "call-child-repeat"}
+    assert {session.rsplit(":", 1)[1] for _, session in state["native_invocations"]} == issued_ids
+    root_events = [event for event in events if not event.get("invocation_id")]
+    for kind in ("tool", "tool_result"):
+        calls = [event for event in root_events if event["type"] == kind and event.get("local_call_id")]
+        assert len(calls) == 2 and {call["provider_call_id"] for call in calls} == issued_ids
+    children = [event for event in events if event["type"] == "run_terminal" and event.get("invocation_id")]
+    assert len({event["invocation_id"] for event in children}) == 2
+    assert all(event["status"] == "completed" for event in children)
+    _assert_native_parallel_output(info, events, tool_count=2, child_count=2)
+
+
 def test_native_a2a_polls_known_task_without_resending_message(monkeypatch):
     info, state, events, _ = asyncio.run(run_collaboration(
         monkeypatch, child_core="a2a", fault="remote_poll",
@@ -207,7 +224,7 @@ def test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop(mon
                     assert {message["tool_call_id"] for message in messages if message["role"] == "tool"} == ids
 
 
-def _assert_native_parallel_output(info, events, *, tool_count=9):
+def _assert_native_parallel_output(info, events, *, tool_count=9, child_count=3):
     from management.services.agent.stream import AssistantMessageProjection, finalize_buffered_unit_fragments
     from management.services.conversation.nexent_output import NexentOutputAdapter, normalize_nexent_history
     from management.services.conversation.runtime_output import project_runtime_history
@@ -241,7 +258,7 @@ def _assert_native_parallel_output(info, events, *, tool_count=9):
         assert set(calls) == set(results)
         starts = identities(stream, "subagent_start")
         ends = identities(stream, "subagent_end")
-        assert len(starts) == len(ends) == 3
+        assert len(starts) == len(ends) == child_count
         assert {item[0] for item in starts} == {item[0] for item in ends}
         assert not any(event["type"] in {"error", "model_output", "tool_result", "run_terminal"} for event in stream)
         assert [event["content"] for event in stream
@@ -252,7 +269,7 @@ def _assert_native_parallel_output(info, events, *, tool_count=9):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Run the Docker legacy workspace fixture from a Linux worker")
-@pytest.mark.parametrize("scenario", ["overlap", "isolated-timeout", "parent-cancellation"])
+@pytest.mark.parametrize("scenario", ["overlap", "identical-invocations", "isolated-timeout", "parent-cancellation"])
 def test_native_python_children_overlap_with_distinct_system_kernel_leases(monkeypatch, tmp_path, scenario):
     import docker
 
@@ -286,7 +303,7 @@ def test_native_python_children_overlap_with_distinct_system_kernel_leases(monke
     try:
         infos, outputs, state = asyncio.run(run_parallel_roots(
             monkeypatch, "native", sandbox_workspace=tmp_path, sandbox_timeout=timeout_child,
-            cancel_one=cancel_parent, sandbox_ready=ready,
+            cancel_one=cancel_parent, sandbox_ready=ready, repeat_sandbox_child=scenario == "identical-invocations",
         ))
         info, events = infos[0], outputs[0]
         assert info.attempt_outcome == ("stopped" if cancel_parent else "completed")
@@ -322,6 +339,12 @@ def test_native_python_children_overlap_with_distinct_system_kernel_leases(monke
         returned = [message["content"] for message in state["requests"]["root0"][1]["messages"]
                     if message["role"] == "tool"]
         assert all(any(f"s3://fixture/{key}" in result for result in returned) for key in state["uploads"])
+        if scenario == "identical-invocations":
+            parent_calls = [event for event in events if event["type"] == "tool" and not event.get("invocation_id")]
+            assert len(parent_calls) == 3
+            assert all(call["tool_name"] == "child_0_A" and call["tool_arguments"] == {"task": "Task 0:A"}
+                       for call in parent_calls)
+            assert {call["provider_call_id"] for call in parent_calls} == {f"call-root0-1-{i}" for i in range(3)}
         if timeout_child:
             failed = [event for event in events if event["type"] == "tool_result"
                       and not event.get("invocation_id") and event["is_error"]]

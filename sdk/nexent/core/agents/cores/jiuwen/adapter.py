@@ -111,6 +111,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.text_protocol = False
         self._parallel_children = {}
         self._parallel_tools = set()
+        self._native_call_names = {}
         self._parallel_child_calls = {}
         self._python_child_slots = asyncio.BoundedSemaphore(_PARALLEL_PYTHON_CHILD_LIMIT)
         config = getattr(run_info, "agent_config", None)
@@ -224,12 +225,13 @@ class JiuwenAdapter(AgentCoreAdapter):
         return not self.text_protocol and self.run_info.agent_config.response_mode == "chat"
 
     @contextmanager
-    def _observe_tool(self, name, arguments):
+    def _observe_tool(self, name, arguments, *, provider_call_id=None):
         if getattr(self.run_info.observer, "boundary_reached", False) is True:
             raise asyncio.CancelledError()
         call_id = uuid.uuid4().hex
         parent = self._active_resource.get()
-        provider_id = self.events.tool_call(name, arguments, call_id, parent_call_id=parent[0] if parent else None)
+        provider_id = self.events.tool_call(name, arguments, call_id, parent_call_id=parent[0] if parent else None,
+                                            provider_call_id=provider_call_id)
         source = self._resource_source(name)
         parent_call_id = parent[0] if parent else None
         token = self._active_resource.set((call_id, provider_id, name, source, parent_call_id))
@@ -403,15 +405,18 @@ class JiuwenAdapter(AgentCoreAdapter):
             mode = child_parallel_mode(child, info) if self.native_parallel else None
             if mode is not None:
                 self._parallel_children[tool.name] = mode
-            collaborators.append((tool, mode is not None,
-                                  self._business_handler(tool.name, tool, lane="control-io", local_child=True)))
+            collaborators.append((tool, mode is not None, self._business_handler(
+                tool.name, tool, lane="control-io", collaborator=True, local_child=True,
+            )))
         for external in self.external_agents:
             from nexent.core.agents.resources.subagents import SubAgentDefinition
 
             definition = SubAgentDefinition(external.invocation_name, external.description or external.name)
             tool = self.resources._wrap_subagent(definition, external, agent_id=str(external.agent_id))
             self.business_tools[tool.name] = tool
-            collaborators.append((tool, False, self._business_handler(tool.name, self._remote_handler(tool, external))))
+            collaborators.append((tool, False, self._business_handler(
+                tool.name, self._remote_handler(tool, external), collaborator=True,
+            )))
         # Reuse file/sandbox infrastructure, never construct a smolagents Agent.
         self.resources.agent = SimpleNamespace(tools=self.business_tools, python_executor=None)
         if self.clarification is not None:
@@ -549,20 +554,22 @@ class JiuwenAdapter(AgentCoreAdapter):
         if getattr(self, "execution_history", None) is not None:
             self.execution_history.reset_read_budget(self.owner_id)
 
-    def _active_parallel_child(self):
-        active = self._active_resource.get()
-        return self._parallel_child_calls.get(active[1]) if active is not None else None
-
-    def _business_handler(self, name, forward, *, lane="model-tool-io", local_child=False):
-        async def execute(**arguments):
+    def _business_handler(self, name, forward, *, lane="model-tool-io", collaborator=False, local_child=False):
+        async def invoke(arguments, *, provider_call_id=None):
             if self.scope.cancelled:
                 raise asyncio.CancelledError()
-            with self._observe_tool(name, arguments):
+            parallel_mode = None
+            if provider_call_id is not None:
+                if self._native_call_names.get(provider_call_id) != name:
+                    raise PermissionError("Jiuwen collaborator call does not match an accepted model call")
+                del self._native_call_names[provider_call_id]
+                if local_child:
+                    parallel_mode = self._parallel_child_calls.get(provider_call_id)
+            with self._observe_tool(name, arguments, provider_call_id=provider_call_id):
                 if inspect.iscoroutinefunction(forward):
                     result = await forward(**arguments)
                 else:
                     child_scope = RunCancellationScope(parent_stop_event=self.scope.stop_event) if local_child else None
-                    parallel_mode = self._active_parallel_child() if local_child else None
                     deadline = None
                     if lane == "control-io":
                         deadline = self._collaboration_deadline()
@@ -622,6 +629,12 @@ class JiuwenAdapter(AgentCoreAdapter):
                 self._resource_result(result)
                 self.delegation.record_dispatch(name)
                 return result
+
+        if collaborator:
+            return invoke
+
+        async def execute(**arguments):
+            return await invoke(arguments)
 
         return execute
 
@@ -709,6 +722,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         def on_event(event):
             self.events.model_event(event)
             if event.type == "message_completed":
+                self._native_call_names = {call.provider_call_id: call.name for call in event.message.tool_calls}
                 self._parallel_child_calls = concurrent_children(
                     event.message.tool_calls, self._parallel_tools, self._parallel_children,
                 )

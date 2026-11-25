@@ -20,10 +20,11 @@ from nexent.core.utils.observer import MessageObserver
 
 @asynccontextmanager
 async def collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay=0,
-                                 remote_stream=False):
+                                 remote_stream=False, repeat_child=False):
     state = {"parent": [], "child": [], "remote": [], "closed": False, "errors": [], "handlers": set(),
              "auth_ok": [], "effects": [], "parent_effects": [], "remote_methods": [], "remote_auth": [],
              "native_invocations": []}
+    both_children_started = asyncio.Event()
 
     async def handle(reader, writer):
         state["handlers"].add(asyncio.current_task())
@@ -96,7 +97,12 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
             core = parent_core if key == "parent" else child_core
             first = len(state[key]) == 1
             call = first and key == "parent"
-            if fault == "missing_information" and key == "child":
+            if repeat_child and key == "child":
+                if len(state["child"]) == 2:
+                    both_children_started.set()
+                await asyncio.wait_for(both_children_started.wait(), timeout=3)
+                content, calls = "CHILD_DONE", []
+            elif fault == "missing_information" and key == "child":
                 content, calls = "MISSING_INPUT: birth date", []
                 if core == "smolagents":
                     content = '<final_answer>' + content + '</final_answer>'
@@ -112,6 +118,8 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
                 content = ""
                 calls = [{"id": "call-child", "type": "function", "function": {
                     "name": "delegate", "arguments": json.dumps({"task": "CHILD_TASK_ONLY"})}}]
+                if repeat_child:
+                    calls.append({**calls[0], "id": "call-child-repeat"})
             elif call:
                 content = '<code>\nvalue = delegate(task="CHILD_TASK_ONLY")\nprint(value)\n</code>'
                 calls = []
@@ -172,7 +180,7 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
 
 async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwen", protocol="native",
                             remote_protocol="JSONRPC", fault=None, run_timeouts=None, remote_delay=0,
-                            remote_stream=False):
+                            remote_stream=False, repeat_child=False):
     monitoring = Mock()
     monitoring.trace_llm_request.side_effect = lambda *args, **kwargs: nullcontext(None)
     monkeypatch.setattr("nexent.core.model_service.service.get_monitoring_manager", lambda: monitoring)
@@ -192,7 +200,7 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
         cards.extend(card.id for card in adapter.native_agent.ability_manager.list())
     monkeypatch.setattr(JiuwenAdapter, "prepare", prepare)
     async with collaboration_provider(
-        parent_core, child_core, protocol, remote_protocol, fault, remote_delay, remote_stream,
+        parent_core, child_core, protocol, remote_protocol, fault, remote_delay, remote_stream, repeat_child,
     ) as (url, state):
         from nexent.core.agents.cores.jiuwen.collaboration import CollaborationAgent
         from nexent.core.agents.cores.smolagents import agent as nexent_agent
@@ -259,6 +267,8 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
             name="delegate", description="Delegate task", invocation_name="delegate", model_name="shared", tools=[ToolConfig(name="child_echo", class_name="ChildEchoTool",
                 source="local", params={})],
             max_steps=3, runtime_model_config=child_model, instructions="CHILD_SYSTEM_ONLY")
+        if repeat_child:
+            child.tools = []
         root = AgentConfig(agent_core=parent_core, name="parent", description="Parent", model_name="shared",
                            tools=[ToolConfig(name="parent_only", class_name="ParentOnlyTool", source="local", params={})],
                            instructions="PARENT_SYSTEM_ONLY", max_steps=3,
@@ -271,6 +281,7 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
         manager = ThreadManager("collaboration-runtime", {
             # Reserve service ownership for both monitoring and the shared Jiuwen loop.
             name: LanePolicy(name=name, max_workers=2 if name == "background-service" or
+                             repeat_child and name == "control-io" or
                              name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
             for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
         manager.start()

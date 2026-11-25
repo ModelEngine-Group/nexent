@@ -15,6 +15,7 @@ acceptance_bindings:
   - test_native_python_children_overlap_with_distinct_system_kernel_leases
   AC-04:
   - test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop
+  - test_identical_child_calls_keep_read_only_contract
   AC-03:
   - test_only_root_clarifies_after_child_returns_missing_information
   AC-02:

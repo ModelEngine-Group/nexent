@@ -22,7 +22,7 @@ from nexent.core.utils.observer import MessageObserver
 
 
 async def run_parallel_roots(monkeypatch, protocol, *, cancel_one=False, sandbox_workspace=None, sandbox_timeout=False,
-                             sandbox_ready=None):
+                             sandbox_ready=None, repeat_sandbox_child=False):
     import nexent.core.tools as tools
     from openjiuwen.core.runner import Runner
 
@@ -96,6 +96,15 @@ async def run_parallel_roots(monkeypatch, protocol, *, cancel_one=False, sandbox
             size = int(next(line.split(b":", 1)[1] for line in headers.split(b"\r\n")
                             if line.lower().startswith(b"content-length:")))
             body = json.loads(await reader.readexactly(size))
+            if repeat_sandbox_child and route == "child0A":
+                # All invocations share one endpoint. The stub issues distinct
+                # Python responses, then uses their call IDs to pair follow-ups.
+                result_id = next((message["tool_call_id"] for message in body["messages"]
+                                  if message["role"] == "tool"), None)
+                if result_id:
+                    route = result_id.split("-")[1]
+                else:
+                    route = next(f"child0{label}" for label in "ABC" if not state["requests"][f"child0{label}"])
             state["requests"][route].append(body)
             first = len(state["requests"][route]) % 2 == 1
             if cancel_one and not use_sandbox and route.startswith("child0"):
@@ -116,6 +125,8 @@ async def run_parallel_roots(monkeypatch, protocol, *, cancel_one=False, sandbox
                 args = {"tasks": [{"tool_name": f"child_{root}_{letter}",
                                    "arguments": {"task": f"Task {root}:{letter}"}, "result_key": letter}
                                   for letter in "ABC"], "max_workers": 3, "timeout": 10}
+                if repeat_sandbox_child:
+                    args["tasks"] = [args["tasks"][0]] * 3
                 name = "parallel_executor"
             elif first:
                 root, letter = route[5], route[-1]
