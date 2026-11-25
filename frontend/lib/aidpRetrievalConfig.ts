@@ -56,6 +56,8 @@ export function aidpErrors(
   const c = resolveAidpConfig(raw),
     errors: Record<string, string> = {};
   const methods = aidpMethods(c.search_method);
+  const hybrid = methods.some((m) => m !== "graph_search"),
+    graph = methods.includes("graph_search");
   if (!methods.length || methods.some((m) => !aidpChannels.includes(m)))
     errors.search_method = "method";
   const ranges: Record<string, [number, number]> = {
@@ -97,13 +99,11 @@ export function aidpErrors(
     )
   )
     errors.reranking_mode = "mode";
-  if (c.graph_reranking_enable && !c.reranking_enable)
+  if (c.graph_reranking_enable && graph && !c.reranking_enable)
     errors.graph_reranking_enable = "reranking";
   const h = Number(c.hybrid_top_k),
     g = Number(c.graph_top_k),
     k = Number(c.top_k);
-  const hybrid = methods.some((m) => m !== "graph_search"),
-    graph = methods.includes("graph_search");
   if (hybrid && h > k) errors.hybrid_top_k = "cap";
   if (graph && g > k) errors.graph_top_k = "cap";
   if (hybrid && graph && h + g > k) {
@@ -116,6 +116,21 @@ export function aidpErrors(
   ]) {
     if (methods.includes(method) && h > Number(c[key]))
       errors[key] = "candidates";
+  }
+  // Hidden fields are not part of the request; stale values must not block save.
+  if (!methods.includes("vector_search")) {
+    delete errors.vector_candidates;
+    delete errors.vector_score_threshold;
+  }
+  if (!methods.includes("full_text_search")) {
+    delete errors.full_text_candidates;
+    delete errors.full_text_score_threshold;
+  }
+  if (!hybrid) delete errors.hybrid_top_k;
+  if (!graph) {
+    delete errors.graph_top_k;
+    delete errors.graph_score_threshold;
+    delete errors.graph_reranking_enable;
   }
   return errors;
 }

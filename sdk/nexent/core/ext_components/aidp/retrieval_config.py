@@ -58,6 +58,15 @@ THRESHOLD_KEYS = frozenset({"score_threshold", "vector_score_threshold",
 
 def validate_config(config, inherited=None):
     """Check submitted fields before merging them with trusted persisted values."""
+    merged = merge_config(inherited or {}, config)
+    submitted_method = merged.get("search_method", DEFAULTS["search_method"])
+    channels = active_channels(
+        normalize_method(submitted_method)
+        if isinstance(submitted_method, str)
+        else DEFAULTS["search_method"]
+    )
+    hybrid = bool(channels & {"vector_search", "full_text_search"})
+    graph = "graph_search" in channels
     for key, value in config.items():
         if value is None:
             raise ValueError(f"{key}: fixed value required")
@@ -70,25 +79,38 @@ def validate_config(config, inherited=None):
             if not isinstance(value, str) or value not in RERANK_MODES:
                 raise ValueError("reranking_mode: invalid reranking strategy")
         elif key in BOOLEAN_KEYS:
+            if key == "graph_reranking_enable" and not graph:
+                continue
             if not isinstance(value, bool):
                 raise ValueError(f"{key}: expected boolean")
         elif key in INTEGER_RANGES:
+            if key == "hybrid_top_k" and not hybrid:
+                continue
+            if key == "graph_top_k" and not graph:
+                continue
+            if key == "vector_candidates" and "vector_search" not in channels:
+                continue
+            if key == "full_text_candidates" and "full_text_search" not in channels:
+                continue
             low, high = INTEGER_RANGES[key]
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{key}: expected integer {low}-{high}")
         elif key in THRESHOLD_KEYS:
+            if (
+                (key == "vector_score_threshold" and "vector_search" not in channels)
+                or (key == "full_text_score_threshold" and "full_text_search" not in channels)
+                or (key == "graph_score_threshold" and not graph)
+            ):
+                continue
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
                 raise ValueError(f"{key}: expected finite number 0-1")
-    merged = merge_config(inherited or {}, config)
     if (
-        config.get("graph_reranking_enable") is True
+        graph
+        and config.get("graph_reranking_enable") is True
         and merged.get("reranking_enable", DEFAULTS["reranking_enable"]) is False
     ):
         raise ValueError("graph_reranking_enable: requires reranking_enable")
     result = resolve_config(merged)
-    channels = active_channels(result["search_method"])
-    hybrid = bool(channels & {"vector_search", "full_text_search"})
-    graph = "graph_search" in channels
     h, g, k = result["hybrid_top_k"], result["graph_top_k"], result["top_k"]
     if hybrid and h > k:
         raise ValueError("hybrid_top_k: must not exceed top_k")

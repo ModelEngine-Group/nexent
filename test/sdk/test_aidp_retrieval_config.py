@@ -87,8 +87,10 @@ def test_boundary_default_caps_and_jargon(k):
 def test_method_normalization_and_inactive_quota():
     assert normalize_method("graph_search|vector_search|graph_search") == "vector_search|graph_search"
     assert normalize_method("graph_search|vector_search|full_text_search") == ALL_CHANNELS
-    p = build_payload(validate_config({"search_method":"graph_search","hybrid_top_k":100,"vector_candidates":1}),"q",["kb"])
+    p = build_payload(validate_config({"search_method":"graph_search","hybrid_top_k":0,"graph_top_k":5,"vector_candidates":0}),"q",["kb"])
     assert "hybrid_search_config" not in p
+    vector = build_payload(validate_config({"search_method":"vector_search","hybrid_top_k":5,"graph_top_k":0}),"q",["kb"])
+    assert "graph_search_config" not in vector
 
 
 def test_fixed_candidates_are_not_followed_by_layer_equality():
