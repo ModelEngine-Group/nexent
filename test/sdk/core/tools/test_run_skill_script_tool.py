@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for nexent.core.tools.run_skill_script_tool module.
 
@@ -48,6 +50,7 @@ _mock_sdk_nexent_core_tools = types.ModuleType("sdk.nexent.core.tools")
 _mock_sdk_nexent_core_tools.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")]
 
 _mock_nexent = types.ModuleType("nexent")
+_mock_nexent.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
 _mock_nexent_skills = types.ModuleType("nexent.skills")
 _mock_nexent_skills_skill_manager = types.ModuleType("nexent.skills.skill_manager")
 

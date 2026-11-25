@@ -15,6 +15,7 @@ except ImportError:
 
 from contracts.constants.environment import RUNTIME_CANCEL_TTL_SECONDS, RUNTIME_COMPLETED_TTL_SECONDS, RUNTIME_RUN_TTL_SECONDS, RUNTIME_STATE_REDIS_URL, RUNTIME_STREAM_MAX_LEN, RUNTIME_STREAM_TTL_SECONDS
 from contracts.constants.environment import RUNTIME_CREATOR_LEASE_SECONDS
+from infrastructure.redis.stream_replay import APPEND_COMPACT_REPLAY, compact_replay_args, decode_replay_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,16 @@ class RuntimeStateService:
         self._client: Optional[Any] = None
         self._pod_name = socket.gethostname()
         self._thread_manager: Optional[ThreadManager] = None
+        self._distributed = None
+
+    def configure_distributed(self, state):
+        if self._distributed is not None and self._distributed is not state:
+            raise RuntimeError('Runtime stream protocol is immutable after configuration')
+        self._distributed = state
+
+    @property
+    def distributed_enabled(self):
+        return self._distributed is not None
 
     def set_thread_manager(self, thread_manager: Optional[ThreadManager]) -> None:
         """Inject the process-local manager used for blocking Redis calls."""
@@ -97,8 +108,10 @@ class RuntimeStateService:
         ):
             self.client.expire(key, ttl)
 
-    def reset_stream(self, user_id: str, conversation_id: int, generation: Optional[str] = None) -> None:
+    def reset_stream(self, user_id: str, conversation_id: int, generation: Optional[str] = None, *, run_ref=None) -> None:
         """Initialize an admitted new turn before its cancellation polls start."""
+        if self._distributed is not None:
+            return self._distributed.reset_stream(user_id, conversation_id, generation, run_ref=run_ref)
         if not self.enabled:
             return
         try:
@@ -123,7 +136,10 @@ class RuntimeStateService:
         except Exception as exc:
             logger.warning("Failed to reset runtime stream state: %s", exc)
 
-    async def reset_stream_async(self, user_id: str, conversation_id: int, generation: Optional[str] = None) -> None:
+    async def reset_stream_async(self, user_id: str, conversation_id: int, generation: Optional[str] = None, *, run_ref=None) -> None:
+        if run_ref is not None:
+            return await self._run_managed('runtime-state-reset-stream', self.reset_stream, user_id, conversation_id,
+                                           generation, run_ref=run_ref)
         if generation is None:
             await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
         else:
@@ -166,9 +182,26 @@ class RuntimeStateService:
         return await self._run_managed("creator-lease", self.creator_lease,
                                       user_id, conversation_id, generation, renew)
 
+    def cancel_creator_run(self, user_id, conversation_id, expected_generation=None):
+        if not self.enabled:
+            return False
+        run_key = self._run_key(user_id, conversation_id)
+        return bool(self.client.eval("""
+            local generation = redis.call('HGET', KEYS[1], 'generation')
+            if not generation or redis.call('GET', KEYS[2]) ~= generation
+                or redis.call('HGET', KEYS[1], 'status') ~= 'running'
+                or (ARGV[1] ~= '' and ARGV[1] ~= generation) then return 0 end
+            redis.call('SETEX', KEYS[3], ARGV[2], '1')
+            return 1
+        """, 3, run_key, run_key + ':creator-lease', self._cancel_key(user_id, conversation_id),
+            expected_generation or '', RUNTIME_CANCEL_TTL_SECONDS))
+
     def register_run(
-        self, user_id: str, conversation_id: int | str, message_id: Optional[int] = None, *, tenant_id: str | None = None,
+        self, user_id: str, conversation_id: int | str, message_id: Optional[int] = None,
+        *, tenant_id: str | None = None, run_ref=None,
     ) -> None:
+        if self._distributed is not None:
+            return self._distributed.register_run(user_id, conversation_id, message_id, run_ref=run_ref)
         if not self.enabled:
             return
         try:
@@ -191,7 +224,9 @@ class RuntimeStateService:
         except Exception as exc:
             logger.warning("Failed to register runtime run state: %s", exc)
 
-    def mark_run_finished(self, user_id: str, conversation_id: int, status: str, generation: Optional[str] = None) -> None:
+    def mark_run_finished(self, user_id: str, conversation_id: int, status: str, generation: Optional[str] = None, *, run_ref=None) -> None:
+        if self._distributed is not None:
+            return self._distributed.mark_run_finished(user_id, conversation_id, status, generation, run_ref=run_ref)
         if not self.enabled:
             return
         try:
@@ -215,7 +250,9 @@ class RuntimeStateService:
         except Exception as exc:
             logger.warning("Failed to mark runtime run state as finished: %s", exc)
 
-    def get_run_state(self, user_id: str, conversation_id: int) -> Dict[str, str]:
+    def get_run_state(self, user_id: str, conversation_id: int, *, run_ref=None) -> Dict[str, str]:
+        if self._distributed is not None:
+            return self._distributed.get_run_state(user_id, conversation_id, run_ref=run_ref)
         if not self.enabled:
             return {}
         try:
@@ -224,10 +261,13 @@ class RuntimeStateService:
             logger.warning("Failed to get runtime run state: %s", exc)
             return {}
 
-    async def get_run_state_async(self, user_id: str, conversation_id: int) -> Dict[str, str]:
-        return await self._run_managed("runtime-state-get-run", self.get_run_state, user_id, conversation_id)
+    async def get_run_state_async(self, user_id: str, conversation_id: int, *, run_ref=None) -> Dict[str, str]:
+        return await self._run_managed("runtime-state-get-run", self.get_run_state, user_id, conversation_id,
+                                       **({'run_ref': run_ref} if run_ref is not None else {}))
 
-    def set_cancel_signal(self, user_id: str, conversation_id: int, expected_generation: Optional[str] = None) -> bool:
+    def set_cancel_signal(self, user_id: str, conversation_id: int, expected_generation: Optional[str] = None, *, run_ref=None) -> bool:
+        if self._distributed is not None:
+            return self._distributed.set_cancel_signal(user_id, conversation_id, expected_generation, run_ref=run_ref)
         if not self.enabled:
             return False
         try:
@@ -244,7 +284,9 @@ class RuntimeStateService:
             logger.warning("Failed to set runtime cancel signal: %s", exc)
             return False
 
-    def is_cancelled(self, user_id: str, conversation_id: int) -> bool:
+    def is_cancelled(self, user_id: str, conversation_id: int, *, run_ref=None) -> bool:
+        if self._distributed is not None:
+            return self._distributed.is_cancelled(user_id, conversation_id, run_ref=run_ref)
         if not self.enabled:
             return False
         try:
@@ -253,37 +295,27 @@ class RuntimeStateService:
             logger.warning("Failed to read runtime cancel signal: %s", exc)
             return False
 
-    async def is_cancelled_async(self, user_id: str, conversation_id: int) -> bool:
-        return await self._run_managed("runtime-state-is-cancelled", self.is_cancelled, user_id, conversation_id)
+    async def is_cancelled_async(self, user_id: str, conversation_id: int, *, run_ref=None) -> bool:
+        return await self._run_managed("runtime-state-is-cancelled", self.is_cancelled, user_id, conversation_id,
+                                       **({'run_ref': run_ref} if run_ref is not None else {}))
 
     def append_stream_event(
         self, user_id: str, conversation_id: int, chunk: str, generation: Optional[str] = None,
-        replay_update: Optional[dict] = None,
+        replay_update: Optional[dict] = None, *, run_ref=None,
     ) -> Optional[str]:
+        if self._distributed is not None:
+            return self._distributed.append_stream_event(
+                user_id, conversation_id, chunk, run_ref=run_ref,
+                **({'replay_update': replay_update} if replay_update is not None else {}),
+            )
         if not self.enabled:
             return None
         try:
             if replay_update is not None:
-                return self.client.eval("""
-                    if ARGV[1] ~= '' and redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
-                    local payload = cjson.decode(ARGV[6])
-                    local field = 'part:' .. ARGV[5]
-                    if ARGV[7] == '1' then
-                        local old = redis.call('HGET', KEYS[3], field)
-                        if not old then return redis.error_reply('Replay checkpoint prefix missing') end
-                        old = cjson.decode(old)
-                        payload.content = old.content .. payload.content
-                    end
-                    local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
-                    redis.call('HSET', KEYS[3], field, cjson.encode(payload), 'cursor', id,
-                        'count', tonumber(ARGV[5]) + 1, 'generation', ARGV[1])
-                    redis.call('EXPIRE', KEYS[2], ARGV[4])
-                    redis.call('EXPIRE', KEYS[3], ARGV[4])
-                    return id
-                """, 3, self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
+                return self.client.eval(APPEND_COMPACT_REPLAY, 3,
+                    self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
                     self._replay_key(user_id, conversation_id), generation or "", max(1, RUNTIME_STREAM_MAX_LEN),
-                    chunk, RUNTIME_STREAM_TTL_SECONDS, replay_update["slot"],
-                    json.dumps(replay_update["payload"], ensure_ascii=False), "1" if replay_update["append"] else "0") or None
+                    chunk, RUNTIME_STREAM_TTL_SECONDS, *compact_replay_args(replay_update)) or None
             if generation is not None:
                 return self.client.eval("""
                     if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
@@ -307,7 +339,7 @@ class RuntimeStateService:
 
     async def append_stream_event_async(
         self, user_id: str, conversation_id: int, chunk: str, generation: Optional[str] = None,
-        replay_update: Optional[dict] = None,
+        replay_update: Optional[dict] = None, *, run_ref=None,
     ) -> Optional[str]:
         return await self._run_managed(
             "runtime-state-append-event",
@@ -315,24 +347,24 @@ class RuntimeStateService:
             user_id,
             conversation_id,
             chunk,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
             **({"generation": generation} if generation is not None else {}),
             **({"replay_update": replay_update} if replay_update is not None else {}),
         )
 
-    def read_replay_checkpoint(self, user_id: str, conversation_id: int) -> Optional[dict]:
+    def read_replay_checkpoint(self, user_id: str, conversation_id: int, *, run_ref=None) -> Optional[dict]:
         """Read records and their covered cursor in one atomic Redis operation."""
+        if self._distributed is not None:
+            return self._distributed.read_replay_checkpoint(user_id, conversation_id, run_ref=run_ref)
         if not self.enabled:
             return None
-        data = self.client.hgetall(self._replay_key(user_id, conversation_id))
-        if not data:
-            return None
-        return {
-            "entries": [json.loads(data[f"part:{index}"]) for index in range(int(data["count"]))],
-            "cursor": data["cursor"], "generation": data.get("generation", ""),
-        }
+        return decode_replay_checkpoint(self.client.hgetall(self._replay_key(user_id, conversation_id)))
 
-    async def read_replay_checkpoint_async(self, user_id: str, conversation_id: int) -> Optional[dict]:
-        return await self._run_managed("runtime-state-read-replay", self.read_replay_checkpoint, user_id, conversation_id)
+    async def read_replay_checkpoint_async(self, user_id: str, conversation_id: int, *, run_ref=None) -> Optional[dict]:
+        return await self._run_managed(
+            "runtime-state-read-replay", self.read_replay_checkpoint, user_id, conversation_id,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
+        )
 
     def mark_stream_completed(
         self,
@@ -341,7 +373,10 @@ class RuntimeStateService:
         status: str,
         error: Optional[str] = None,
         generation: Optional[str] = None,
+        *, run_ref=None,
     ) -> None:
+        if self._distributed is not None:
+            return self._distributed.mark_stream_completed(user_id, conversation_id, status, error, run_ref=run_ref)
         if not self.enabled:
             return
         try:
@@ -373,6 +408,7 @@ class RuntimeStateService:
         status: str,
         error: Optional[str] = None,
         generation: Optional[str] = None,
+        *, run_ref=None,
     ) -> None:
         await self._run_managed(
             "runtime-state-mark-stream-completed",
@@ -381,10 +417,13 @@ class RuntimeStateService:
             conversation_id,
             status,
             error,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
             **({"generation": generation} if generation is not None else {}),
         )
 
-    def get_stream_status(self, user_id: str, conversation_id: int) -> Dict[str, str]:
+    def get_stream_status(self, user_id: str, conversation_id: int, *, run_ref=None) -> Dict[str, str]:
+        if self._distributed is not None:
+            return self._distributed.get_stream_status(user_id, conversation_id, run_ref=run_ref)
         if not self.enabled:
             return {}
         try:
@@ -393,12 +432,13 @@ class RuntimeStateService:
             logger.warning("Failed to get runtime stream status: %s", exc)
             return {}
 
-    async def get_stream_status_async(self, user_id: str, conversation_id: int) -> Dict[str, str]:
+    async def get_stream_status_async(self, user_id: str, conversation_id: int, *, run_ref=None) -> Dict[str, str]:
         return await self._run_managed(
             "runtime-state-get-stream-status",
             self.get_stream_status,
             user_id,
             conversation_id,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
         )
 
     def read_stream_events(
@@ -406,7 +446,10 @@ class RuntimeStateService:
         user_id: str,
         conversation_id: int,
         after_id: Optional[str] = None,
+        *, run_ref=None,
     ) -> List[Tuple[str, str]]:
+        if self._distributed is not None:
+            return self._distributed.read_stream_events(user_id, conversation_id, after_id, run_ref=run_ref)
         if not self.enabled:
             return []
         try:
@@ -422,6 +465,7 @@ class RuntimeStateService:
         user_id: str,
         conversation_id: int,
         after_id: Optional[str] = None,
+        *, run_ref=None,
     ) -> List[Tuple[str, str]]:
         return await self._run_managed(
             "runtime-state-read-stream-events",
@@ -429,6 +473,7 @@ class RuntimeStateService:
             user_id,
             conversation_id,
             after_id,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
         )
 
     def wait_for_stream_events(
@@ -438,7 +483,11 @@ class RuntimeStateService:
         last_id: str,
         block_ms: int = 1000,
         count: int = 100,
+        *, run_ref=None,
     ) -> List[Tuple[str, str]]:
+        if self._distributed is not None:
+            return self._distributed.wait_for_stream_events(user_id, conversation_id, last_id, block_ms, count,
+                                                           run_ref=run_ref)
         if not self.enabled:
             return []
         try:
@@ -462,6 +511,7 @@ class RuntimeStateService:
         last_id: str,
         block_ms: int = 1000,
         count: int = 100,
+        *, run_ref=None,
     ) -> List[Tuple[str, str]]:
         return await self._run_managed(
             "runtime-state-wait-stream-events",
@@ -471,6 +521,7 @@ class RuntimeStateService:
             last_id,
             block_ms,
             count,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
         )
 
     def acquire_idempotency(self, key: str, ttl_seconds: int) -> bool:
@@ -518,3 +569,4 @@ class RuntimeStateService:
 
 
 runtime_state_service = RuntimeStateService()
+creator_runtime_state_service = RuntimeStateService()

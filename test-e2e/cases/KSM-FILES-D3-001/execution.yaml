@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: KSM-FILES-D3-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_KSM_FILES_D3_001
+    profiles: [mock]
+timeout_seconds: 900
+notes: Self-contained namespace, two owners, shared PVC and Redis. The binding proves mounted input, output and permissions. MinIO, persisted history, failure and exact application cleanup still need independent acceptance evidence.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_KSM_FILES_D3_001]

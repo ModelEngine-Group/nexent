@@ -28,6 +28,7 @@ from runtime.agentos.prepared_evaluation import discard_prepared_workspace, load
 from runtime.agentos.prepared_agent_creator import prepare_agent_creator_run
 from runtime.agentos.prepared_skill_creator import prepare_skill_creator_run
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
+from runtime.sandbox_runtime import check_agentos_admission, release_agentos_sandbox, reserve_agentos_sandbox
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ def _close_execution(execution, deferred):
 class _EphemeralResponse(StreamingResponse):
     def __init__(
         self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, creator_mode=None,
-        announce_ready=False,
+        announce_ready=False, ownership=None,
     ):
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         self.debug_run_id = f"debug-{info.workspace_run_id}" if debug_owner is not None else None
@@ -113,6 +114,7 @@ class _EphemeralResponse(StreamingResponse):
         self.deferred = deferred
         self.metadata = metadata
         self.debug_owner = debug_owner
+        self.ownership = ownership
 
     async def stream_response(self, send):
         watcher = None
@@ -155,9 +157,12 @@ class _EphemeralResponse(StreamingResponse):
                             )
                     finally:
                         discard_prepared_workspace(self.info)
+                        if self.ownership is not None:
+                            await release_agentos_sandbox(self.ownership, self.execution.future)
 
 
 async def _open_ephemeral(payload, actor):
+    check_agentos_admission()
     deferred = DeferredAgentRun()
     creator_mode = None if isinstance(payload, PreparedEphemeralRun) else payload.mode
     if isinstance(payload, PreparedEphemeralRun):
@@ -169,6 +174,7 @@ async def _open_ephemeral(payload, actor):
     else:
         agent_id, capacity, materialize = None, None, prepare_skill_creator_run
     execution = None
+    ownership = None
     try:
         execution = runtime_thread_manager.submit(
             "agent-run",
@@ -181,12 +187,19 @@ async def _open_ephemeral(payload, actor):
         if capacity is not None:
             execution.future.add_done_callback(lambda _: agent_run_manager.release_agent_capacity(capacity))
         await runtime_thread_manager.wait_until_started(execution)
+        if isinstance(payload, PreparedEphemeralRun):
+            ownership = await reserve_agentos_sandbox(
+                actor.tenant_id, actor.user_id, f"debug:{payload.run_id}", payload.run_id,
+                kind="DEBUG", cancel=deferred.cancel,
+            )
         info = await load_prepared_run(payload, actor, materialize)
     except BaseException:
         if execution is not None:
             _close_execution(execution, deferred)
         elif capacity is not None:
             agent_run_manager.release_agent_capacity(capacity)
+        if ownership is not None:
+            await release_agentos_sandbox(ownership, execution.future)
         raise
     info.thread_future = execution.future
     info.thread_manager = runtime_thread_manager
@@ -208,7 +221,7 @@ async def _open_ephemeral(payload, actor):
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug
     return _EphemeralResponse(
         info, execution, deferred, metadata, debug_owner=debug_owner(actor) if debug else None, creator_mode=creator_mode,
-        announce_ready=bool(debug and payload.native_knowledge),
+        announce_ready=bool(debug and payload.native_knowledge), ownership=ownership,
     )
 
 

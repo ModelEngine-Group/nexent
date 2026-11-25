@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-PARALLEL-DELEGATION-20261120
+  change_type: bugfix
+  bug_id: KSM-PARALLEL-DELEGATION-20261120
+  title: Accept authorized parallel delegation before CodeAgent execution
+  description: Recognize literal child batches for the configured parallel executor. Explicit parallel requests for several named children require their actual results.
+  observed_behavior: The current-request gate rejects parallel_executor, regenerates once, and returns DELEGATION_REQUIRED before either child starts.
+  expected_behavior: One valid batch runs all requested children, records their successful completions independently, and keeps unauthorized calls and premature answers blocked.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: The SYSTEM fixture proves concurrent kernels through direct dispatch and omits model-generated parallel code at the current-request gate.
+  feature_contract_changed: false
+  affected_features:
+    existing: [KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [KSM-EXECUTION-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/sdk/core/agents/test_shared_agent_policy.py
+    - test/sdk/core/agents/test_jiuwen_delegation.py
+    behaviors:
+    - Accept the documented batch form and wait for both children before allowing a final answer.
+    - Reject sequential substitution, unrequested targets, duplicate result keys and unrelated executable expressions.
+    - Preserve successful child results when the model retries only an unfinished child.
+    reason: Reproduce the same gate and logical-step loop seen in the failed daily conversations before exercising Kubernetes.
+  notes: >-
+    The SYSTEM design in runtime-sandbox-kubernetes-migration owns kernel isolation and safe startup recovery.
+    The isolated Web API probe covers model-generated parallel dispatch.
+    The self-contained SYSTEM case provisions its own namespace to prove lost-response reconciliation and read-only readiness retry.

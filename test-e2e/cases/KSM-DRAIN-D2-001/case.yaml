@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "stage": "D2",
+  "module": "RUNTIME-SANDBOX",
+  "case": {
+    "case_id": "KSM-DRAIN-D2-001",
+    "feature_id": "KSM-SYSTEM",
+    "business_rule_ids": [
+      "KSM-SYSTEM-R4"
+    ],
+    "title": "Authenticated drain rejects new business and preserves in-flight control",
+    "type": "API-IT",
+    "priority": "P1",
+    "status": "retired",
+    "automation": "automated",
+    "objective": "Retired on 2026-11-13: user removed graceful Runtime shutdown and its management endpoint from this development scope. Historical contract retained.",
+    "preconditions": [
+      "A disposable Runtime is running with an active cancellable task and a configured internal drain secret."
+    ],
+    "test_data": {
+      "resource_prefix": "ksm-disposable",
+      "profile": "controlled model; real Kubernetes/Redis/storage"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Call the drain endpoint with no credential, a callback token and a wrong credential.",
+        "expected": "Every call is rejected without changing admission or readiness."
+      },
+      {
+        "order": 2,
+        "action": "Call authenticated loopback drain twice with a single absolute deadline while the task invokes a host tool.",
+        "expected": "Admission closes atomically; readiness fails; callback, renewal and cancellation remain available; repeated drain is idempotent."
+      },
+      {
+        "order": 3,
+        "action": "Reach completion or the deadline and inspect task, stream and process shutdown.",
+        "expected": "Existing work completes or receives bounded cancellation; no additive shutdown budgets; unstarted sandboxes are not created."
+      }
+    ],
+    "expected_results": [
+      "Existing public API payloads remain compatible and unauthorized requests never drain.",
+      "New chat/debug/workbench, automation and evaluation work is rejected or compensated before execution."
+    ],
+    "forbidden_side_effects": [
+      "Do not call ThreadManager.drain before the business grace period.",
+      "Do not use a callback credential as a management credential."
+    ],
+    "contract": {
+      "protocol": "HTTP",
+      "method": "POST",
+      "endpoint": "/internal/sandbox/drain",
+      "request_expectations": [
+        "Loopback origin and independent management credential are required.",
+        "Only trusted deployment configuration supplies the absolute timeout budget."
+      ],
+      "response_expectations": [
+        "Unauthorized requests are rejected without effects.",
+        "Repeated authorized requests observe the same draining operation."
+      ]
+    },
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ],
+      "timeout_seconds": 900
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Complete the declared boundary and enforce all forbidden effects.",
+        "steps": [
+          1,
+          2,
+          3
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}

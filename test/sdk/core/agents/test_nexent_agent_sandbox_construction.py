@@ -118,8 +118,10 @@ def test_cleanup_failure_does_not_hide_construction_failure(construction, caplog
     assert 'Failed to release sandbox resources' in caplog.text
 
 
-def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
+@pytest.mark.parametrize("level", [sandbox.SandboxLevel.DOCKER, sandbox.SandboxLevel.KUBERNETES])
+def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker, level):
     c = construction
+    c.factory.sandbox_config.level = level
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool')
@@ -162,6 +164,25 @@ def test_deferred_strict_warmup_failure_releases_executor(construction, mocker, 
     release.assert_called_once_with(c.executor, workspace_resources.logger, timeout=5.0)
     wrapper.cleanup()
     release.assert_called_once()
+
+
+def test_kubernetes_cold_path_and_cleanup_never_initialize_unavailable_backend(construction):
+    c = construction
+    c.factory.sandbox_config.level = sandbox.SandboxLevel.KUBERNETES
+    c.factory.sandbox_config.scope = sandbox.SandboxScope.SYSTEM
+    c.factory.tool_fastpath_enabled = True
+    c.factory.workspace_mapping = None
+    c.build.side_effect = sandbox.SandboxBackendUnavailableError('T02 backend unavailable')
+    c.factory.create_single_agent(c.config)
+    wrapper = c.core.call_args.kwargs['executor']
+    wrapper.send_tools({})
+    wrapper('print("cold")')
+    c.build.assert_not_called()
+    with pytest.raises(sandbox.SandboxBackendUnavailableError, match='T02'):
+        wrapper('import math')
+    assert wrapper.remote is None
+    wrapper.cleanup()
+    c.build.assert_called_once()
 
 
 def test_deferred_strict_mode_rejects_local_executor(construction, mocker):

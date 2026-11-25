@@ -253,12 +253,30 @@ async def test_scoped_stop_cancels_detached_worker(monkeypatch, payload, runtime
 
 
 @pytest.mark.asyncio
-async def test_prepared_execution_retains_occupancy_until_worker_cleanup(monkeypatch, payload, runtime):
+@pytest.mark.parametrize(("owned", "terminal_written"), [(False, True), (True, True), (True, False)])
+async def test_prepared_execution_retains_occupancy_until_worker_cleanup(
+    monkeypatch, payload, runtime, owned, terminal_written,
+):
     running = asyncio.Event()
     detached = asyncio.Event()
     worker = Future()
     assert worker.set_running_or_notify_cancel()
     runtime.info.thread_future = worker
+    ownership = SimpleNamespace(coordinator=Mock()) if owned else None
+    reserve = AsyncMock(return_value=ownership)
+
+    def finish(identity, status):
+        runtime.release.assert_called_once_with(runtime.info, 42, "actor", status)
+        assert worker.done()
+        return terminal_written
+
+    async def release_ownership(_ownership, _worker):
+        runtime.journal.return_value.repair_terminal.assert_called_once_with("stopped")
+
+    runtime.finish.side_effect = finish
+    release = AsyncMock(side_effect=release_ownership)
+    monkeypatch.setattr(prepared_run, "reserve_agentos_sandbox", reserve)
+    monkeypatch.setattr(prepared_run, "release_agentos_sandbox", release)
 
     async def runner(_info, **_kwargs):
         try:
@@ -273,17 +291,29 @@ async def test_prepared_execution_retains_occupancy_until_worker_cleanup(monkeyp
     producer, = runtime.tasks
     try:
         await asyncio.wait_for(running.wait(), timeout=2)
-        runtime.stop.return_value = True
+        if owned:
+            reserve.await_args.kwargs["cancel"]()
+        else:
+            runtime.stop.return_value = True
         await asyncio.wait_for(detached.wait(), timeout=2)
         await asyncio.sleep(0)
         runtime.finish.assert_not_called()
         runtime.release.assert_not_called()
+        release.assert_not_awaited()
     finally:
         worker.set_result(None)
         await asyncio.wait_for(producer, timeout=2)
 
     runtime.release.assert_called_once_with(runtime.info, 42, "actor", "stopped")
     runtime.finish.assert_called_once_with(runtime.begin.call_args.args[0], "stopped")
+    if owned and terminal_written:
+        release.assert_awaited_once_with(ownership, worker)
+        ownership.coordinator.signal_lost.assert_not_called()
+    else:
+        release.assert_not_awaited()
+        if owned:
+            ownership.coordinator.signal_lost.assert_called_once_with()
+            runtime.journal.return_value.repair_terminal.assert_not_called()
 
 
 @pytest.mark.asyncio

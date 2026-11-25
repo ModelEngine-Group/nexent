@@ -33,8 +33,10 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from runtime.trajectory import configure_runtime_trajectory
+from runtime.api.sandbox import router as sandbox_router
+from runtime.identity import uses_distributed_runtime
 from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
+from runtime.trajectory import configure_runtime_trajectory
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
@@ -92,7 +94,15 @@ async def runtime_lifespan(_app):
             ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
             fail_detecting_models_on_startup,
         )
-        await recover_runtime_state()
+        if uses_distributed_runtime():
+            from runtime.sandbox_runtime import configure_runtime_coordination
+
+            await runtime_thread_manager.run(
+                "control-io", ManagedTaskSpec("initialize-runtime-ownership", "runtime"),
+                configure_runtime_coordination, runtime_thread_manager, _app.state,
+            )
+        else:
+            await recover_runtime_state()
         reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
         try:
             yield
@@ -115,7 +125,12 @@ async def runtime_lifespan(_app):
 
                 sandbox_pool = SandboxPoolManager._instance
                 if sandbox_pool is not None:
-                    sandbox_pool.shutdown(logger)
+                    if uses_distributed_runtime():
+                        await runtime_thread_manager.run(
+                            "control-io", ManagedTaskSpec("sandbox-pool-shutdown", "runtime"), sandbox_pool.shutdown, logger,
+                        )
+                    else:
+                        sandbox_pool.shutdown(logger)
             finally:
                 try:
                     if local_trajectory_processor is not None:
@@ -164,3 +179,4 @@ app.include_router(create_run_lifecycle_router())
 app.include_router(create_prepared_run_router())
 app.include_router(create_ephemeral_run_router())
 app.include_router(voice_router)
+app.include_router(sandbox_router)

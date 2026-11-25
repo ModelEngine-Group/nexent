@@ -351,6 +351,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             workspace_path=info.workspace_path, workspace_run_id=info.workspace_run_id, minio_files=info.minio_files,
             cancellation_scope=self.scope, user_context=info.user_context,
             child_invocation_factory=child_invocation_factory(info),
+            runtime_lifecycle=info.__dict__.get("_runtime_run_lifecycle"),
         )
         self.resources.core_run_info = info
         native_tools = []
@@ -481,18 +482,37 @@ class JiuwenAdapter(AgentCoreAdapter):
         if getattr(self, "execution_history", None) is not None:
             self.execution_history.reset_read_budget(self.owner_id)
 
+    @contextmanager
+    def _runtime_tool_lifetime(self):
+        lifecycle = self.run_info.__dict__.get("_runtime_run_lifecycle")
+        holder = lifecycle.begin("callback") if lifecycle is not None else None
+        try:
+            yield
+        finally:
+            if holder is not None:
+                lifecycle.finish(holder)
+
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
             if self.scope.cancelled:
                 raise asyncio.CancelledError()
-            with self._observe_tool(name, arguments):
+            with self._observe_tool(name, arguments), self._runtime_tool_lifetime():
                 if inspect.iscoroutinefunction(forward):
                     result = await forward(**arguments)
                 else:
-                    execution = self.manager.submit(
-                        lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
-                        forward, **arguments,
-                    )
+                    lifecycle = self.run_info.__dict__.get("_runtime_run_lifecycle")
+                    worker_holder = lifecycle.begin("callback") if lifecycle is not None else None
+                    try:
+                        execution = self.manager.submit(
+                            lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
+                            forward, **arguments,
+                        )
+                    except BaseException:
+                        if worker_holder is not None:
+                            lifecycle.finish(worker_holder)
+                        raise
+                    if worker_holder is not None:
+                        execution.future.add_done_callback(lambda _: lifecycle.finish(worker_holder))
                     self._tool_executions.append(execution)
                     try:
                         if lane == "control-io":
@@ -678,12 +698,27 @@ class JiuwenAdapter(AgentCoreAdapter):
         config = self.run_info.sandbox_config
         if config is None or config.level == SandboxLevel.LOCAL:
             return
+        self.resources._sandbox_scope = config.scope.value
         executor = build_python_executor(config, logger, host_tools_exist=True, cancellation_scope=self.scope)
         self.resources._sandbox_executors.append(executor)
         self.resources.agent.python_executor = executor
-        runner = SandboxSkillScriptRunner(
+        if getattr(executor, "_nexent_backend", None) == "local":
+            self.resources.workspace_mapping = None
+            for tool in self.business_tools.values():
+                if getattr(tool, "workspace_mapping", None) is not None:
+                    tool.workspace_mapping = None
+            return
+        runner_type = SandboxSkillScriptRunner
+        runner_options = {}
+        if getattr(executor, "_nexent_backend", None) == "kubernetes":
+            from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
+
+            runner_type = KubernetesSkillScriptRunner
+            runner_options["workspace_access"] = config.workspace_access
+        runner = runner_type(
             executor, timeout_seconds=int(config.timeout_seconds), workspace_path=self.run_info.workspace_path,
             network_enabled=not config.network_disabled, workspace_mapping=self.resources.workspace_mapping,
+            **runner_options,
         )
         self.resources._sandbox_skill_runners.append(runner)
         for tool in self.business_tools.values():

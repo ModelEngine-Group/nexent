@@ -130,9 +130,14 @@ def test_evaluation_skill_snapshot_uses_bound_skill_id_for_regular_agent(skill_s
     assert snapshot is not None
 
 
-def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot):
+@pytest.mark.parametrize(("tool_index", "key", "value"), [
+    (1, "local_skills_dir", "/wrong-source"),
+    (1, "authorized_skill_names", ["other"]),
+    (2, "authorized_skill_names", ["summarize", "other"]),
+])
+def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot, tool_index, key, value):
     agent, binding, *_ = skill_snapshot
-    agent.tools[1].params["local_skills_dir"] = "/wrong-source"
+    agent.tools[tool_index].params[key] = value
     assert evaluation_snapshot.export_snapshot(
         agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
     ) is None

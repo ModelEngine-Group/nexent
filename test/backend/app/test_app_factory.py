@@ -20,6 +20,7 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
+from contracts.constants import environment
 from backend.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
@@ -112,6 +113,24 @@ class TestCreateApp:
         app = create_app(lifespan=lifespan)
 
         assert app.router.lifespan_context is lifespan
+
+    def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+        app.add_api_route("/service", lambda: {"ok": True}, methods=["POST"])
+        app.add_api_route("/ordinary", lambda: {"ok": True}, methods=["POST"])
+        client = TestClient(app)
+        assert client.post("/service").json() == {"ok": True}
+        assert client.post("/ordinary").status_code == 401
 
     def test_create_app_forwards_internal_runtime_request(self):
         """The runtime launcher passes a predicate that must reach the middleware."""

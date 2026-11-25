@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: TPC-HISTORY-ECHO-20261120
+  change_type: bugfix
+  bug_id: TPC-HISTORY-ECHO-20261120
+  title: Reject internal execution records before CodeAgent commits model output
+  description: Apply the reserved-record check before legacy fallback parsing and action execution.
+  observed_behavior: A legacy model reply echoing completed actions is accepted as a public final or parsed as a fresh tool action.
+  expected_behavior: Reject the reply before action execution or stream commit, preserving earlier accepted observations.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: The history-echo regression covered strict repair but omitted the legacy branch and a final envelope containing the echo.
+  feature_contract_changed: false
+  affected_features:
+    existing: [TPC-001, KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [TPC-D3-001, TPC-D4-001, KSM-FILES-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/core/agents/test_nl2agent_history_repair.py
+      - test/sdk/core/agents/test_pr4005_continuation.py
+      - test/sdk/core/agents/test_output_protocol.py
+      - test/sdk/core/utils/test_observer_model_attempts.py
+    behaviors:
+      - Roll back each rejected legacy model attempt without replaying the accepted action.
+      - Retain strict repair and the legacy plain-text answer path.
+      - Reject a record before or after code and inside a final envelope.
+      - Withhold fragmented records from public model and reasoning events before rollback.
+    reason: Extend the existing fixed model replies to catch the unsafe legacy fallback and preserve established parsing.
+  notes: >-
+    Baseline codeagent-explicit-termination and TPC-001 govern the output boundary.
+    Existing Cases cover the surrounding tool and history journey.
+    The isolated browser probe asserts clean SSE and reload, bounded correction for internal markup even with general strict repair off, and controlled failure after repeated echoes.

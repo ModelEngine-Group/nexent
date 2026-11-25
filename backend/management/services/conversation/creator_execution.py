@@ -8,7 +8,7 @@ from contextlib import suppress
 
 from contracts.constants.environment import APP_VERSION, RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
-from infrastructure.redis.run_state import runtime_state_service
+from infrastructure.redis.run_state import creator_runtime_state_service as runtime_state_service
 from management.db.conversation.repository import get_conversation_history
 from contracts.errors.exceptions import AgentRunAlreadyActiveError
 from management.services.agent.system import system_agent_provider

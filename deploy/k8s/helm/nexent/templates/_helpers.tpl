@@ -22,6 +22,10 @@ app: {{ include "nexent.fullname" . }}
 {{- end }}
 
 {{- define "nexent.backendPlatformEnv" -}}
+{{- $provider := default "docker" .Values.global.sandboxProvider -}}
+{{- if not (has $provider (list "docker" "kubernetes")) -}}
+{{- fail "global.sandboxProvider must be docker or kubernetes" -}}
+{{- end -}}
 - name: TZ
   valueFrom:
     configMapKeyRef:
@@ -42,5 +46,17 @@ app: {{ include "nexent.fullname" . }}
       name: nexent-config
       key: NEXENT_SANDBOX_DOCKER_IMAGE
 - name: NEXENT_SANDBOX_DEFAULT_LEVEL
-  value: {{ ternary "local" "docker" (eq (default "lightweight" .Values.global.sandboxMode) "disabled") | quote }}
+  value: {{ ternary "local" $provider (eq (default "lightweight" .Values.global.sandboxMode) "disabled") | quote }}
+- name: NEXENT_SANDBOX_PROVIDER
+  value: {{ $provider | quote }}
+- name: NEXENT_RUNTIME_DEPLOYMENT_ID
+  value: {{ .Release.Name | quote }}
+- name: NEXENT_SANDBOX_ENABLED
+  value: {{ ternary "false" "true" (eq (default "lightweight" .Values.global.sandboxMode) "disabled") | quote }}
+{{- if eq $provider "kubernetes" }}
+- name: NEXENT_SANDBOX_DEFAULT_SCOPE
+  value: "system"
+- name: NEXENT_SANDBOX_FAILURE_POLICY
+  value: "error"
+{{- end }}
 {{- end }}

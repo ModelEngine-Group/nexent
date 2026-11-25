@@ -130,10 +130,13 @@ def responses_for(cfg, nonce, promoted):
     return responses
 
 
-async def setup(case_id):
+async def setup(case_id, *, verify_runtime=None):
     # Preflight must precede every product mutation.
-    managed = os.environ.get("NEXENT_CASE_DEPLOYMENT_PROFILE") == "tfp"
-    if managed:
+    managed = verify_runtime is None and os.environ.get("NEXENT_CASE_DEPLOYMENT_PROFILE") == "tfp"
+    if verify_runtime is not None:
+        cfg = fixture_config()
+        fingerprints = verify_runtime(cfg)
+    elif managed:
         fingerprints, mount_id = inspect_deployment("nexent-runtime")
         cfg = {"runtime_container": "nexent-runtime", "workspace_mount_id": mount_id,
                "config": {"marker": "TFP_RULES", "value": 7},
@@ -143,7 +146,8 @@ async def setup(case_id):
     else:
         cfg = fixture_config()
         fingerprints = verify_deployment(cfg)
-    await verify_trace_access(cfg, startup_wait=45 if managed else 0)
+    if verify_runtime is None:
+        await verify_trace_access(cfg, startup_wait=45 if managed else 0)
     controlled_asset_url()
     if managed:
         try:
