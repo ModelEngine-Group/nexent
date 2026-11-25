@@ -121,7 +121,10 @@ def validate_config(config, inherited=None):
         raise ValueError("hybrid_top_k: must not exceed top_k")
     if graph and g > k:
         raise ValueError("graph_top_k: must not exceed top_k")
-    if hybrid and graph and h + g > k:
+    # Omitted caps are filled by AIDP (H = topk - G, G = 5), so the sum
+    # is only enforced when at least one cap is explicitly customized.
+    both_default = (h == DEFAULTS["hybrid_top_k"] and g == DEFAULTS["graph_top_k"])
+    if not both_default and hybrid and graph and h + g > k:
         raise ValueError("hybrid_top_k + graph_top_k: must not exceed top_k")
     for channel, key in (("vector_search", "vector_candidates"), ("full_text_search", "full_text_candidates")):
         if channel in channels and h > result[key]:
@@ -148,7 +151,10 @@ def build_payload(config, query, kds_list):
     payload.update(query=query, kds_list=kds_list, topk=config["top_k"], multi_modal_enable=config["multi_modal"])
     if config["reranking_enable"]:
         payload["reranking_mode"] = config["reranking_mode"]
-    hybrid = {"hybrid_top_k": config["hybrid_top_k"]}
+    hybrid = {}
+    # Omit caps at their default so AIDP fills in its own values.
+    if config["hybrid_top_k"] != DEFAULTS["hybrid_top_k"]:
+        hybrid["hybrid_top_k"] = config["hybrid_top_k"]
     for channel, prefix in (("vector_search", "vector"), ("full_text_search", "full_text")):
         if channel in channels:
             for suffix in ("candidates", "score_threshold"):
@@ -157,6 +163,9 @@ def build_payload(config, query, kds_list):
     if channels & {"vector_search", "full_text_search"}:
         payload["hybrid_search_config"] = hybrid
     if "graph_search" in channels:
-        payload["graph_search_config"] = {key: config[key] for key in (
-            "graph_top_k", "graph_score_threshold", "graph_reranking_enable")}
+        graph = {"graph_score_threshold": config["graph_score_threshold"],
+                 "graph_reranking_enable": config["graph_reranking_enable"]}
+        if config["graph_top_k"] != DEFAULTS["graph_top_k"]:
+            graph["graph_top_k"] = config["graph_top_k"]
+        payload["graph_search_config"] = graph
     return payload

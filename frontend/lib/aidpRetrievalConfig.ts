@@ -115,7 +115,14 @@ export function aidpErrors(
     k = Number(c.top_k);
   if (hybrid && h > k) errors.hybrid_top_k = "cap";
   if (graph && g > k) errors.graph_top_k = "cap";
-  if (hybrid && graph && h + g > k) {
+  // Omitted caps are filled by AIDP, so the sum check only fires when at
+  // least one cap is explicitly customized away from the default.
+  if (
+    hybrid &&
+    graph &&
+    (h !== aidpDefaults.hybrid_top_k || g !== aidpDefaults.graph_top_k) &&
+    h + g > k
+  ) {
     errors.hybrid_top_k = "sum";
     errors.graph_top_k = "sum";
   }
