@@ -2065,6 +2065,12 @@ class SummaryStatusBody(BaseModel):
     summary_text: Optional[str] = None
 
 
+class FileSummaryBody(BaseModel):
+    """Body of POST .../KnowledgeFiles/Summary (2026-11-25 contract)."""
+
+    file_uuid: uuid.UUID
+
+
 class RemoveChunksBody(BaseModel):
     """Body of DELETE .../Chunks."""
 
@@ -2670,15 +2676,14 @@ def _require_kb(kds_id: str) -> None:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
 
-def _name_conflict(path: str) -> HTTPException:
-    """AIDP 1089: a folder or file already uses this name in the location."""
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": 1089,
-            "message": f"name already exists: {path}",
-        },
+def _name_conflict(path: str, *, code: int = 1089) -> HTTPException:
+    """AIDP 1089 for file/folder duplicates; 1092 for folder-move duplicates."""
+    message = (
+        f"folder already exists at target: {path}"
+        if code == 1092
+        else f"name already exists: {path}"
     )
+    return HTTPException(status_code=409, detail={"code": code, "message": message})
 
 
 @app.get(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{folder_id}}")
@@ -2907,7 +2912,7 @@ def move_folder(
     destination = _join_folder_path(target, name)
     if destination in _all_folder_paths(kds_id):
         if not body.merge_on_conflict:
-            raise _name_conflict(destination)
+            raise _name_conflict(destination, code=1092)
         _merge_folder_into(kds_id, source, destination)
     else:
         _rewrite_folder_prefix(kds_id, source, destination)
@@ -3822,22 +3827,22 @@ def _ensure_summary_state(kb: Dict[str, Any], document: Dict[str, Any]) -> Dict[
     return document
 
 
-@app.get(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/{{file_uuid}}/Summary")
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Summary")
 def get_file_summary(
     kds_id: str,
-    file_uuid: uuid.UUID,
+    body: FileSummaryBody,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """Read one file summary; preview disabled returns an empty result."""
+    """Read one file summary; preview disabled returns an empty object."""
     _check_auth(authorization)
     kb = _KNOWLEDGE_BASES.get(kds_id)
     if kb is None:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    document = _find_document(kds_id, str(file_uuid))
+    document = _find_document(kds_id, str(body.file_uuid))
     if document is None:
-        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+        raise HTTPException(status_code=404, detail=f"File {body.file_uuid} not found")
     if not _summary_preview_enabled(kb):
-        return JSONResponse(content={"result": {}})
+        return JSONResponse(content={})
     document = _ensure_summary_state(kb, document)
     _save_state()
     result = {
@@ -3846,7 +3851,12 @@ def get_file_summary(
     }
     if result["summary_status"] == "success":
         result["summary_text"] = document.get("_summary_text") or ""
-    return JSONResponse(content={"result": result})
+    elif result["summary_status"] == "failed":
+        result["error_reason"] = (
+            document.get("_summary_error_reason")
+            or "llm_failed: mock summary generation failed"
+        )
+    return JSONResponse(content=result)
 
 
 @app.post("/_mock/summary-status")

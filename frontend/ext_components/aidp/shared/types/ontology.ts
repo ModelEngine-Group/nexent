@@ -218,6 +218,12 @@ export interface AidpOntologyImportError {
   index: number | null;
   type: string | null;
   api_name: string | null;
+  field?: string;
+  /** Stable reason code; the browser translates it before showing the issue. */
+  reason?: string;
+  /** Interpolation values for the translated reason. */
+  params?: Record<string, unknown>;
+  /** English fallback for callers that cannot translate the reason. */
   message: string;
 }
 

@@ -247,16 +247,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [relationSearch, setRelationSearch] = useState("");
   const [relationKeyword, setRelationKeyword] = useState("");
-  const [typeSearch, setTypeSearch] = useState("");
-  const [typeKeyword, setTypeKeyword] = useState("");
   const [apiNameTouched, setApiNameTouched] = useState(!!entity);
   const editing = !!entity;
 
   const kind = (Form.useWatch("kind", form) as "entity" | "type") ?? "entity";
   const displayName = Form.useWatch("display_name", form) as string | undefined;
   const assignedTypeId = Form.useWatch("type_id", form) as string | undefined;
-  const propertyRows = Form.useWatch("properties", form) as
-    PropertyFormValue[] | undefined;
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -265,14 +261,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     );
     return () => window.clearTimeout(timer);
   }, [relationSearch]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(
-      () => setTypeKeyword(typeSearch.trim()),
-      300
-    );
-    return () => window.clearTimeout(timer);
-  }, [typeSearch]);
 
   const handleClose = () => {
     setErrorMessage(null);
@@ -297,21 +285,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         relationKeyword || undefined
       ),
     enabled: scope.enabled && open,
-    staleTime: 30_000,
-    retry: false,
-  });
-
-  const typesQuery = useQuery({
-    queryKey: [...scope.key, "ontology-type-options", domainId, typeKeyword],
-    queryFn: () =>
-      aidpOntologyService.listEntities(
-        domainId,
-        1,
-        100,
-        typeKeyword || undefined,
-        "type"
-      ),
-    enabled: scope.enabled && open && !editing && kind === "entity",
     staleTime: 30_000,
     retry: false,
   });
@@ -347,27 +320,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         }))
         .filter((item) => item.value),
     [allEntitiesQuery.data?.value]
-  );
-
-  const typeOptions = useMemo(
-    () =>
-      (typesQuery.data?.value ?? [])
-        // AIDP ignores the kind query parameter, so filter defensively.
-        .filter((item) => item.kind === "type")
-        .map((item) => ({
-          value: relationId(item.entity_id),
-          label: item.display_name || item.api_name,
-        })),
-    [typesQuery.data?.value]
-  );
-
-  const primaryOptions = useMemo(
-    () =>
-      (propertyRows ?? [])
-        .map((property) => (property?.name ?? "").trim())
-        .filter(Boolean)
-        .map((name) => ({ value: name, label: name })),
-    [propertyRows]
   );
 
   const initialParentIds = useMemo(
@@ -415,7 +367,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       api_name: entity?.api_name ?? "",
       description: entity?.description ?? "",
       type_id: entity?.type_id ?? undefined,
-      primary_properties: entity?.primary_properties ?? [],
       properties: initialProperties,
       demo_parents: (entity?.parent_entities ?? [])
         .map(relationId)
@@ -479,15 +430,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     }
     const parentIds = (values.demo_parents ?? []).filter(Boolean);
     const childIds = (values.demo_children ?? []).filter(Boolean);
-    const primary = (values.primary_properties ?? []).filter((name) =>
-      properties.some((property) => property.api_name === name)
-    );
     const detailsLoaded = entity?.detail_loaded !== false;
-    const initialPrimary = (entity?.primary_properties ?? [])
-      .map((name) => String(name))
-      .sort();
-    const primaryChanged =
-      JSON.stringify([...primary].sort()) !== JSON.stringify(initialPrimary);
 
     setSaving(true);
     setErrorMessage(null);
@@ -506,9 +449,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           ...(detailsLoaded ? { properties } : {}),
-          ...(detailsLoaded && primaryChanged
-            ? { primary_properties: primary }
-            : {}),
           // Only send relation fields that actually changed so a plain edit
           // does not trigger an extra Relations read/write round trip.
           ...(parentIdsChanged ? { parent_entities: parentIds } : {}),
@@ -524,7 +464,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           properties,
-          primary_properties: primary,
           ...(typeId ? { type_id: typeId } : {}),
           ...(entityKind === "entity" && parentIdsWithoutType.length
             ? { parent_entities: parentIdsWithoutType }
@@ -594,7 +533,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           display_name: entity?.display_name ?? "",
           api_name: entity?.api_name ?? "",
           description: entity?.description ?? "",
-          primary_properties: entity?.primary_properties ?? [],
           properties: initialProperties,
           demo_parents: (entity?.parent_entities ?? [])
             .map(relationId)
@@ -607,31 +545,33 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             .filter(Boolean),
         }}
       >
-        <Form.Item
-          name="kind"
-          label={
-            <FieldLabel
-              label={t("aidpKnowledge.ontologyEntityObjectKind")}
-              help={t("aidpKnowledge.ontologyEntityKindHint")}
+        {editing && (
+          <Form.Item
+            name="kind"
+            label={
+              <FieldLabel
+                label={t("aidpKnowledge.ontologyEntityObjectKind")}
+                help={t("aidpKnowledge.ontologyEntityKindHint")}
+              />
+            }
+          >
+            <Segmented
+              block
+              className={styles.kindControl}
+              disabled
+              options={[
+                {
+                  value: "entity",
+                  label: t("aidpKnowledge.ontologyEntityKindEntity"),
+                },
+                {
+                  value: "type",
+                  label: t("aidpKnowledge.ontologyEntityKindType"),
+                },
+              ]}
             />
-          }
-        >
-          <Segmented
-            block
-            className={styles.kindControl}
-            disabled={editing}
-            options={[
-              {
-                value: "entity",
-                label: t("aidpKnowledge.ontologyEntityKindEntity"),
-              },
-              {
-                value: "type",
-                label: t("aidpKnowledge.ontologyEntityKindType"),
-              },
-            ]}
-          />
-        </Form.Item>
+          </Form.Item>
+        )}
 
         <Form.Item
           name="display_name"
@@ -730,27 +670,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             }}
           />
         </Form.Item>
-
-        {!editing && kind === "entity" && (
-          <Form.Item
-            name="type_id"
-            label={
-              <FieldLabel
-                label={t("aidpKnowledge.ontologyEntityAssignedType")}
-                help={t("aidpKnowledge.ontologyEntityAssignedTypeHint")}
-              />
-            }
-          >
-            <Select
-              allowClear
-              showSearch
-              filterOption={false}
-              loading={typesQuery.isLoading}
-              options={typeOptions}
-              onSearch={setTypeSearch}
-            />
-          </Form.Item>
-        )}
 
         {kind === "entity" && (
           <section className={styles.relationPanel}>
@@ -956,20 +875,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               </div>
             )}
           </Form.List>
-          {propertiesOpen && (
-            <Form.Item
-              name="primary_properties"
-              label={
-                <FieldLabel
-                  label={t("aidpKnowledge.ontologyEntityPrimaryProperties")}
-                  help={t("aidpKnowledge.ontologyEntityPrimaryPropertiesHint")}
-                />
-              }
-              className={styles.primaryProperties}
-            >
-              <Select mode="multiple" allowClear options={primaryOptions} />
-            </Form.Item>
-          )}
         </section>
         {errorMessage && (
           <div className={drawerStyles.error} role="alert">

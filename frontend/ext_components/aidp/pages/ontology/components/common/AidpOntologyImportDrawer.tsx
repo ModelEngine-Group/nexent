@@ -13,7 +13,9 @@ import {
   previewOntologyImport,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyJson";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import { ApiError } from "@/services/api";
 import type {
+  AidpOntologyImportError,
   AidpOntologyImportPreview,
   AidpOntologyImportResult,
   AidpOntologyJsonDocument,
@@ -31,6 +33,16 @@ interface AidpOntologyImportDrawerProps {
 }
 
 const INITIAL_ERRORS = 10;
+
+interface ImportIssue {
+  index?: number | null;
+  type?: string | null;
+  api_name?: string | null;
+  field?: string;
+  message: string;
+  reason?: string;
+  params?: Record<string, unknown>;
+}
 
 const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
   open,
@@ -54,6 +66,9 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     null
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [serverErrors, setServerErrors] = useState<AidpOntologyImportError[]>(
+    []
+  );
   const [showAllErrors, setShowAllErrors] = useState(false);
 
   const reset = () => {
@@ -62,6 +77,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     setPreview(null);
     setResult(null);
     setErrorMessage(null);
+    setServerErrors([]);
     setShowAllErrors(false);
     setReading(false);
     setImporting(false);
@@ -83,6 +99,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     setReading(true);
     setResult(null);
     setErrorMessage(null);
+    setServerErrors([]);
     setShowAllErrors(false);
     try {
       const text = await file.text();
@@ -122,6 +139,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     if (!document || !preview) return;
     setImporting(true);
     setErrorMessage(null);
+    setServerErrors([]);
     try {
       const response: AidpOntologyImportResult =
         await aidpOntologyService.importDomain(domainId, fileName, document);
@@ -140,6 +158,12 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
       setResult(response);
       onImported();
     } catch (error) {
+      if (error instanceof ApiError) {
+        const serverIssues = (
+          error.details as { errors?: AidpOntologyImportError[] } | undefined
+        )?.errors;
+        if (serverIssues) setServerErrors(serverIssues);
+      }
       setErrorMessage(
         getAidpErrorMessage(error, t, t("aidpKnowledge.ontologyImportFailed"))
       );
@@ -148,6 +172,46 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     }
   };
 
+  const issueMessage = (issue: ImportIssue): string =>
+    issue.reason
+      ? t(
+          `aidpKnowledge.ontologyImportIssue.${issue.reason}`,
+          issue.params ?? {}
+        )
+      : issue.message;
+
+  const renderIssueList = (
+    issues: ImportIssue[],
+    visibleIssues: ImportIssue[],
+    title: string,
+    type: "error" | "warning",
+    getLabel: (issue: ImportIssue) => string
+  ) => (
+    <div className={styles.errorList}>
+      <Alert type={type} showIcon message={title} />
+      <ul>
+        {visibleIssues.map((issue, index) => (
+          <li key={`${issue.index ?? ""}-${issue.field ?? ""}-${index}`}>
+            <span className={styles.errorField}>{getLabel(issue)}</span>
+            <span>{issueMessage(issue)}</span>
+          </li>
+        ))}
+      </ul>
+      {issues.length > INITIAL_ERRORS ? (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setShowAllErrors((value) => !value)}
+        >
+          {showAllErrors
+            ? t("aidpKnowledge.ontologyImportShowLess")
+            : t("aidpKnowledge.ontologyImportShowAll", {
+                count: issues.length,
+              })}
+        </Button>
+      ) : null}
+    </div>
+  );
   const previewErrors = preview?.errors ?? [];
   const resultErrors = result?.errors ?? [];
   const visiblePreviewErrors = showAllErrors
@@ -156,6 +220,9 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
   const visibleResultErrors = showAllErrors
     ? resultErrors
     : resultErrors.slice(0, INITIAL_ERRORS);
+  const visibleServerErrors = showAllErrors
+    ? serverErrors
+    : serverErrors.slice(0, INITIAL_ERRORS);
   const canSubmit =
     !!document && !!preview && preview.errors.length === 0 && !importing;
 
@@ -258,36 +325,14 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
                 name: preview.targetDomainName,
               })}
             </div>
-            {previewErrors.length > 0 && (
-              <div className={styles.errorList}>
-                <Alert
-                  type="error"
-                  showIcon
-                  message={t("aidpKnowledge.ontologyImportValidationFailed")}
-                />
-                <ul>
-                  {visiblePreviewErrors.map((error, index) => (
-                    <li key={`${error.field}-${index}`}>
-                      <span className={styles.errorField}>{error.field}</span>
-                      <span>{error.message}</span>
-                    </li>
-                  ))}
-                </ul>
-                {previewErrors.length > INITIAL_ERRORS && (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => setShowAllErrors((value) => !value)}
-                  >
-                    {showAllErrors
-                      ? t("aidpKnowledge.ontologyImportShowLess")
-                      : t("aidpKnowledge.ontologyImportShowAll", {
-                          count: previewErrors.length,
-                        })}
-                  </Button>
-                )}
-              </div>
-            )}
+            {previewErrors.length > 0 &&
+              renderIssueList(
+                previewErrors,
+                visiblePreviewErrors,
+                t("aidpKnowledge.ontologyImportValidationFailed"),
+                "error",
+                (issue) => issue.field ?? ""
+              )}
           </div>
         )}
 
@@ -315,45 +360,29 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
                 <dd>{result.relation_failed}</dd>
               </div>
             </dl>
-            {resultErrors.length > 0 && (
-              <div className={styles.errorList}>
-                <Alert
-                  type="warning"
-                  showIcon
-                  message={t("aidpKnowledge.ontologyImportPartial", {
-                    count: resultErrors.length,
-                  })}
-                />
-                <ul>
-                  {visibleResultErrors.map((error, index) => (
-                    <li key={`${error.index}-${error.api_name}-${index}`}>
-                      <span className={styles.errorField}>
-                        {[error.type, error.api_name]
-                          .filter(Boolean)
-                          .join(" · ") || "—"}
-                      </span>
-                      <span>{error.message}</span>
-                    </li>
-                  ))}
-                </ul>
-                {resultErrors.length > INITIAL_ERRORS && (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => setShowAllErrors((value) => !value)}
-                  >
-                    {showAllErrors
-                      ? t("aidpKnowledge.ontologyImportShowLess")
-                      : t("aidpKnowledge.ontologyImportShowAll", {
-                          count: resultErrors.length,
-                        })}
-                  </Button>
-                )}
-              </div>
-            )}
+            {resultErrors.length > 0 &&
+              renderIssueList(
+                resultErrors,
+                visibleResultErrors,
+                t("aidpKnowledge.ontologyImportPartial", {
+                  count: resultErrors.length,
+                }),
+                "warning",
+                (issue) =>
+                  [issue.type, issue.api_name].filter(Boolean).join(" · ") ||
+                  "—"
+              )}
           </div>
         )}
 
+        {serverErrors.length > 0 &&
+          renderIssueList(
+            serverErrors,
+            visibleServerErrors,
+            t("aidpKnowledge.ontologyImportValidationFailed"),
+            "error",
+            (issue) => issue.field ?? ""
+          )}
         {errorMessage && (
           <div className={drawerStyles.error} role="alert">
             {errorMessage}

@@ -6,6 +6,8 @@ import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Spin, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import type { AidpFileSummary } from "@/ext_components/aidp/shared/types/summary";
@@ -129,8 +131,14 @@ const AidpFileSummaryPanel: React.FC<AidpFileSummaryPanelProps> = ({
           <span>{t("aidpKnowledge.fileSummaryGenerating")}</span>
         </div>
       ) : isSuccess ? (
-        <div className={styles.text}>
-          {text || t("aidpKnowledge.fileSummaryEmpty")}
+        <div className={styles.markdown}>
+          {text ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+              {text}
+            </ReactMarkdown>
+          ) : (
+            t("aidpKnowledge.fileSummaryEmpty")
+          )}
         </div>
       ) : (
         <div className={styles.state}>

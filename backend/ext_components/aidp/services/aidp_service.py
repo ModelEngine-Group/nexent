@@ -29,6 +29,7 @@ from contracts.errors.exceptions import AppException
 from ext_components.aidp.services.aidp_client import (
     _AIDP_DOWNLOAD_TIMEOUT_SECONDS,
     _AIDP_READ_TIMEOUT_SECONDS,
+    _aidp_headers,
     _build_list_query,
     _extract_upstream_error,
     _get_channels_path,
@@ -358,10 +359,7 @@ def fetch_aidp_knowledge_bases_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     list_path = f"{_get_list_path()}{_build_list_query(page, page_size, keyword)}"
     list_url = urljoin(f"{normalized_url}/", list_path)
@@ -500,10 +498,7 @@ def fetch_all_aidp_knowledge_bases_impl(
             f"AIDP knowledge base pagination exceeded {max_pages} pages",
         )
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     try:
         client = http_client_manager.get_sync_client(
@@ -648,10 +643,7 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     count_path = f"{_get_list_path()}/0/Count"
     count_url = urljoin(f"{normalized_url}/", count_path)
@@ -824,10 +816,7 @@ def create_aidp_kb_impl(
     """Create a new knowledge base via AIDP API."""
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     # Convert the validated request into the upstream representation.
     full_payload = _prepare_create_payload(payload)
@@ -909,10 +898,7 @@ def get_aidp_kb_impl(
     """Get details of a specific knowledge base."""
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     get_path = f"{_get_list_path()}/{kds_id}"
     get_url = urljoin(f"{normalized_url}/", get_path)
@@ -989,10 +975,7 @@ def update_aidp_kb_impl(
     """Update a knowledge base via AIDP API."""
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     update_path = f"{_get_list_path()}/{kds_id}"
     update_url = urljoin(f"{normalized_url}/", update_path)
@@ -1060,10 +1043,7 @@ def delete_aidp_kb_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     delete_path = f"{_get_list_path()}/{kds_id}"
     delete_url = urljoin(f"{normalized_url}/", delete_path)
@@ -1133,9 +1113,7 @@ def upload_aidp_docs_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-    }
+    headers = _aidp_headers(api_key, content_type=False)
 
     upload_path = f"{_get_knowledge_files_path(kds_id)}/Upload"
     upload_url = urljoin(f"{normalized_url}/", upload_path)
@@ -1249,10 +1227,7 @@ def remove_aidp_docs_impl(
     """Remove one or more documents from an AIDP knowledge base."""
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
     remove_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Remove"
     remove_url = urljoin(f"{normalized_url}/", remove_path)
     logger.info("Removing %d AIDP documents from %s", len(file_uuids), remove_url)
@@ -1298,10 +1273,7 @@ def retry_aidp_docs_impl(
 ) -> Dict[str, Any]:
     """Retry one or more failed AIDP knowledge files using the documented array body."""
     normalized_url = _validate_params(server_url, api_key)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
     retry_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Retry"
     retry_url = urljoin(f"{normalized_url}/", retry_path)
     logger.info("Retrying %d AIDP documents for KB %s", len(file_uuids), kds_id)
@@ -1353,10 +1325,7 @@ async def stream_aidp_doc_impl(
     """Open a streaming response for one AIDP document."""
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
     download_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Download"
     download_url = urljoin(f"{normalized_url}/", download_path)
     logger.info("Downloading AIDP document %s from %s", file_uuid, download_url)
@@ -1411,7 +1380,7 @@ async def stream_aidp_preview_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = _aidp_headers(api_key, content_type=False)
     preview_path = _get_ocr_annotate_path(kds_id, file_uuid)
     preview_url = urljoin(f"{normalized_url}/", preview_path)
     logger.info("Previewing AIDP document %s from %s", file_uuid, preview_url)
@@ -1460,10 +1429,7 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     count_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Count"
     count_url = urljoin(f"{normalized_url}/", count_path)
@@ -1540,10 +1506,7 @@ def list_aidp_docs_impl(
     """List documents in a knowledge base via AIDP API."""
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     list_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
     if keyword:
@@ -1761,10 +1724,7 @@ def list_aidp_channels_impl(
             "AIDP channel listing requires a non-empty knowledge base id",
         )
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     channels_path = _get_channels_path(kds_id, tenant_id)
     channels_url = urljoin(f"{normalized_url}/", channels_path)
@@ -1869,10 +1829,7 @@ def list_aidp_doc_history_impl(
             "AIDP file history requires a non-empty fs_id and dir_path",
         )
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     history_path = _get_doc_history_path(kds_id, tenant_id)
     history_url = urljoin(f"{normalized_url}/", history_path)
@@ -2003,10 +1960,7 @@ def list_aidp_models_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
 
     models_path = f"{_get_models_path()}?app={quote(app, safe='')}"
     if service:
@@ -2088,12 +2042,13 @@ def get_aidp_graph_template_impl(
     normalized_url = _validate_params(server_url, api_key)
     url = urljoin(f"{normalized_url}/", f"{_get_list_path()}/GraphConfigTemplate?language={language}")
     logger.info("Fetching AIDP graph template from %s", url)
+    headers = _aidp_headers(api_key, content_type=False)
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url, timeout=_AIDP_READ_TIMEOUT_SECONDS, verify_ssl=False,
         )
         response = _request_with_retry(
-            lambda: client.get(url, headers={"Authorization": f"Bearer {api_key}"}),
+            lambda: client.get(url, headers=headers),
             context="graph-template",
         )
         response.raise_for_status()
@@ -2133,10 +2088,7 @@ def fusion_search_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
     payload = {
         "query": query,
         "kds_list": [str(kds_id) for kds_id in kds_list],

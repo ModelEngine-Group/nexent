@@ -713,15 +713,16 @@ def _summary_client(server, *, enabled=True, preview=True):
     return TestClient(server.app)
 
 
-def test_summary_returns_empty_result_when_preview_disabled(mock_aidp_server):
+def test_summary_returns_empty_object_when_preview_disabled(mock_aidp_server):
     client = _summary_client(mock_aidp_server, enabled=True, preview=False)
-    response = client.get(
+    response = client.post(
         f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
-        f"/KnowledgeFiles/{_SUMMARY_FILE}/Summary",
+        "/KnowledgeFiles/Summary",
         headers={"Authorization": "Bearer mock-aidp-key"},
+        json={"file_uuid": _SUMMARY_FILE},
     )
     assert response.status_code == 200
-    assert response.json() == {"result": {}}
+    assert response.json() == {}
 
 
 def test_summary_state_success_and_failed(mock_aidp_server):
@@ -729,10 +730,12 @@ def test_summary_state_success_and_failed(mock_aidp_server):
     auth = {"Authorization": "Bearer mock-aidp-key"}
     path = (
         f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
-        f"/KnowledgeFiles/{_SUMMARY_FILE}/Summary"
+        "/KnowledgeFiles/Summary"
     )
 
-    success = client.get(path, headers=auth).json()["result"]
+    success = client.post(
+        path, headers=auth, json={"file_uuid": _SUMMARY_FILE}
+    ).json()
     assert success["summary_status"] == "success"
     assert success["summary_model"] == "qwen3"
     assert "年度报告.pdf" in success["summary_text"]
@@ -746,9 +749,12 @@ def test_summary_state_success_and_failed(mock_aidp_server):
         },
     )
     assert failed.status_code == 200
-    failed_result = client.get(path, headers=auth).json()["result"]
+    failed_result = client.post(
+        path, headers=auth, json={"file_uuid": _SUMMARY_FILE}
+    ).json()
     assert failed_result["summary_status"] == "failed"
     assert "summary_text" not in failed_result
+    assert failed_result["error_reason"].startswith("llm_failed:")
 
 
 def test_summary_config_is_echoed_on_create(mock_aidp_server):
@@ -1101,6 +1107,42 @@ def test_folder_crud_and_empty_folder_delete_rule(mock_aidp_server):
     )
     assert moved.status_code == 200
     assert moved.json()["folder_path"] == "/制度/历史"
+
+
+def test_folder_move_conflict_uses_1092_and_merge_succeeds(mock_aidp_server):
+    client = _folder_client(mock_aidp_server)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    folders = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/Folders"
+    mock_aidp_server._FOLDERS_BY_KB["kb-1"].extend(
+        [
+            {"folder_path": "/mv_src", "create_time": 1},
+            {"folder_path": "/mv_dst", "create_time": 1},
+            {"folder_path": "/mv_src/dupe", "create_time": 1},
+            {"folder_path": "/mv_dst/dupe", "create_time": 1},
+        ]
+    )
+    source_id = mock_aidp_server._folder_id_for_path("/mv_src/dupe")
+    target_id = mock_aidp_server._folder_id_for_path("/mv_dst")
+    body = {
+        "src_parent_folder_path": "/mv_src",
+        "folder_name": "dupe",
+        "target_parent_folder_path": "/mv_dst",
+        "target_parent_folder_id": target_id,
+        "merge_on_conflict": False,
+    }
+
+    conflict = client.post(
+        f"{folders}/{source_id}/Move", headers=headers, json=body
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == 1092
+
+    body["merge_on_conflict"] = True
+    merged = client.post(
+        f"{folders}/{source_id}/Move", headers=headers, json=body
+    )
+    assert merged.status_code == 200
+    assert merged.json()["folder_path"] == "/mv_dst/dupe"
 
 
 def test_directory_upload_preserves_relative_path_and_file_move_rename(mock_aidp_server):

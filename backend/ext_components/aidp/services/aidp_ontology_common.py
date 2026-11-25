@@ -18,7 +18,10 @@ from nexent.utils.http_client_manager import http_client_manager
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from ext_components.aidp.services.aidp_client import _extract_upstream_code
+from ext_components.aidp.services.aidp_client import (
+    _aidp_headers,
+    _extract_upstream_code,
+)
 from ext_components.aidp.services.aidp_service import (
     _extract_upstream_error,
     _raise_aidp_http_error,
@@ -84,10 +87,7 @@ def _ontology_request(
     """Execute one authenticated AIDP request and return its JSON body."""
     base_url = _validate_params(server_url, api_key)
     url = urljoin(f"{base_url}/", path)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
     client = http_client_manager.get_sync_client(
         base_url=base_url, timeout=timeout, verify_ssl=False
     )
