@@ -13,7 +13,7 @@ import pytest
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
-from nexent.core.agents.orchestration.children import child_run_info, invoke_child
+from nexent.core.agents.orchestration.children import child_invocation_factory, child_run_info, invoke_child
 from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope, ShellPolicy
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 from nexent.core.utils.observer import MessageObserver
@@ -38,6 +38,8 @@ def test_python_children_use_distinct_workspaces_and_keep_nexent_policy(tmp_path
                    params={"workspace_path": str(root)}, metadata={"validate_url_access": access_check}),
         ToolConfig(name="upload_to_s3", class_name="UploadToS3Tool", source="builtin",
                    params={"workspace_path": str(root)}, metadata={"run_id": "root"}),
+        ToolConfig(name="read_file", class_name="ReadFileTool", source="local",
+                   params={"init_path": str(root / "outputs")}),
     ]
     first, second = [child_run_info(parent, parent.agent_config, RunCancellationScope(), parallel_mode="sandbox")
                      for _ in range(2)]
@@ -51,12 +53,30 @@ def test_python_children_use_distinct_workspaces_and_keep_nexent_policy(tmp_path
         assert info.sandbox_config.network_disabled and info.sandbox_config.shell_policy == ShellPolicy.RESTRICTED
         assert info.sandbox_config.failure_policy == "error"
         assert info.minio_files == parent.minio_files and info.minio_files is not parent.minio_files
-        download, upload = info.agent_config.tools
+        download, upload, read = info.agent_config.tools
         assert download.params["workspace_path"] == upload.params["workspace_path"] == str(directory)
         assert download.metadata["validate_url_access"] is access_check
         assert upload.metadata["run_id"] == info.workspace_run_id
+        assert read.params["init_path"] == str(directory / "outputs")
     assert parent.sandbox_config.failure_policy == "local"
     assert parent.agent_config.tools[1].metadata["run_id"] == "root"
+    assert parent.agent_config.tools[2].params["init_path"] == str(root / "outputs")
+
+
+@pytest.mark.parametrize("mode", [None, "read_only", "sandbox"])
+def test_child_factory_captures_current_dispatch_policy(tmp_path, mocker, mode):
+    parent = run_info(workspace_path=str(tmp_path / "parent"), sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER))
+    scope = RunCancellationScope()
+    active_mode = Mock(return_value=mode)
+    invoke = mocker.patch("nexent.core.agents.orchestration.children.invoke_child", return_value="result")
+    create = child_invocation_factory(parent, parallel_mode=active_mode if mode is not None else None)
+    call = create(parent.agent_config, scope)
+    active_mode.return_value = "different"
+    assert call("Child task") == "result"
+    child, task = invoke.call_args.args
+    assert task == "Child task" and child.parallel_child_mode == mode
+    assert child.cancellation_scope is scope and child.run_role == "subagent"
+    assert (child.workspace_path != parent.workspace_path) is (mode == "sandbox")
 
 
 def test_child_returns_only_published_artifact_references(mocker):
@@ -69,6 +89,25 @@ def test_child_returns_only_published_artifact_references(mocker):
     mocker.patch("nexent.core.agents.orchestration.children.execute_adapter", side_effect=complete)
     tool_result = json.loads(invoke_child(info, "Generate a file"))
     assert tool_result == {"answer": "child answer", "artifacts": info.published_child_files}
+
+
+@pytest.mark.asyncio
+async def test_rejected_sandbox_submission_returns_slot_and_resets_dispatch_context():
+    adapter = JiuwenAdapter(run_info())
+    adapter.scope = RunCancellationScope(adapter.run_info.stop_event)
+    adapter.manager = Mock()
+    adapter.manager.submit.side_effect = RuntimeError("worker rejected")
+    adapter._native_call_names = {"call": "child"}
+    adapter._parallel_child_calls = {"call": "sandbox"}
+    handler = adapter._business_handler("child", Mock(), lane="control-io", collaborator=True, local_child=True)
+    with pytest.raises(RuntimeError, match="worker rejected"):
+        await handler({"task": "Read file"}, provider_call_id="call")
+
+    assert adapter._child_context.get() == (None, None)
+    assert not adapter._tool_executions and not adapter.scope.cancelled
+    for _ in range(4):
+        await asyncio.wait_for(adapter._python_child_slots.acquire(), timeout=1)
+    assert adapter._python_child_slots.locked()
 
 
 @pytest.mark.asyncio
