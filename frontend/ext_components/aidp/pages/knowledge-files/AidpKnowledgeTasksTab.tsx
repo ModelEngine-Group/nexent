@@ -231,7 +231,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
       dataIndex: "file_size",
       key: "file_size",
       width: 80,
-      render: (value?: number) => formatFileSize(value),
+      render: (value?: number | string) => formatFileSize(value),
     },
     {
       title: t("aidpKnowledge.detailUpdateTime"),

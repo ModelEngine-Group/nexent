@@ -13,16 +13,18 @@ from http import HTTPStatus
 from typing import Annotated, List
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ext_components.aidp.apps.aidp_mgmt_common import (
+    FileName,
+    FolderName,
+    FolderPath,
+    NonRootFolderPath,
     _auth,
     _credentials,
-    _normalize_folder_name,
-    _normalize_folder_path,
 )
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_folder_service import (
@@ -44,18 +46,8 @@ class CreateAidpFolderRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    parent_folder: str = Field(..., description="Parent folder path; root is '/'")
-    folder_name: str = Field(..., min_length=1, description="New folder name")
-
-    @field_validator("parent_folder")
-    @classmethod
-    def _validate_parent(cls, value: str) -> str:
-        return _normalize_folder_path(value)
-
-    @field_validator("folder_name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        return _normalize_folder_name(value)
+    parent_folder: FolderPath = Field(..., description="Parent folder path; root is '/'")
+    folder_name: FolderName = Field(..., description="New folder name")
 
 
 class RenameAidpFolderRequest(BaseModel):
@@ -63,19 +55,9 @@ class RenameAidpFolderRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    parent_folder: str = Field(..., description="Parent folder path; root is '/'")
-    old_folder_name: str = Field(..., min_length=1)
-    new_folder_name: str = Field(..., min_length=1)
-
-    @field_validator("parent_folder")
-    @classmethod
-    def _validate_parent(cls, value: str) -> str:
-        return _normalize_folder_path(value)
-
-    @field_validator("old_folder_name", "new_folder_name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        return _normalize_folder_name(value)
+    parent_folder: FolderPath = Field(..., description="Parent folder path; root is '/'")
+    old_folder_name: FolderName
+    new_folder_name: FolderName
 
 
 class MoveAidpFolderRequest(BaseModel):
@@ -83,19 +65,13 @@ class MoveAidpFolderRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    parent_folder: str = Field(..., description="Current parent folder path")
-    folder_name: str = Field(..., min_length=1)
-    target_folder: str = Field(..., description="Destination parent folder path")
-
-    @field_validator("parent_folder", "target_folder")
-    @classmethod
-    def _validate_path(cls, value: str) -> str:
-        return _normalize_folder_path(value)
-
-    @field_validator("folder_name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        return _normalize_folder_name(value)
+    parent_folder: FolderPath = Field(..., description="Current parent folder path")
+    folder_name: FolderName
+    target_folder: FolderPath = Field(..., description="Destination parent folder path")
+    merge_on_conflict: bool = Field(
+        False,
+        description="Merge into an existing same-named folder instead of failing",
+    )
 
     @model_validator(mode="after")
     def _reject_self_move(self) -> "MoveAidpFolderRequest":
@@ -114,12 +90,7 @@ class MoveAidpFilesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     file_uuids: List[UUID] = Field(..., min_length=1)
-    target_folder: str = Field(..., description="Destination folder path")
-
-    @field_validator("target_folder")
-    @classmethod
-    def _validate_target(cls, value: str) -> str:
-        return _normalize_folder_path(value)
+    target_folder: FolderPath = Field(..., description="Destination folder path")
 
 
 class RenameAidpFileRequest(BaseModel):
@@ -128,28 +99,14 @@ class RenameAidpFileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     file_uuid: UUID = Field(..., description="AIDP file UUID")
-    new_file_name: str = Field(..., min_length=1, description="New file name")
-
-    @field_validator("new_file_name")
-    @classmethod
-    def _validate_file_name(cls, value: str) -> str:
-        normalized = (value or "").strip()
-        if not normalized:
-            raise ValueError("new_file_name is required")
-        if "/" in normalized or "\\" in normalized:
-            raise ValueError("new_file_name must not contain a path separator")
-        if len(normalized) > 255:
-            raise ValueError("new_file_name must be at most 255 characters")
-        return normalized
+    new_file_name: FileName = Field(..., description="New file name")
 
 
 @aidp_folder_router.get("/knowledge-bases/{kds_id}/folders/tree")
 async def get_folder_tree(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    folder_path: Annotated[
-        str, Query(description="Folder path; root is '/'")
-    ] = "/",
+    folder_path: Annotated[FolderPath, Query(description="Folder path; root is '/'")] = "/",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 10,
     keyword: Annotated[str | None, Query(max_length=200)] = None,
@@ -162,11 +119,6 @@ async def get_folder_tree(
     """Read one folder level: direct subfolders plus its paginated files."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-    try:
-        normalized_path = _normalize_folder_path(folder_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-folder-tree",
@@ -174,7 +126,7 @@ async def get_folder_tree(
         server_url,
         api_key,
         kds_id,
-        normalized_path,
+        folder_path,
         page,
         page_size,
         keyword,
@@ -240,16 +192,11 @@ async def rename_folder(
 async def delete_folder(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    folder_path: Annotated[str, Query(description="Folder path to delete")],
+    folder_path: Annotated[NonRootFolderPath, Query(description="Folder path to delete")],
 ) -> Response:
     """Delete one empty folder; AIDP rejects non-empty folders."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-    try:
-        normalized_path = _normalize_folder_path(folder_path, allow_root=False)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
     server_url, api_key = _credentials()
     await run_blocking(
         "aidp-delete-folder",
@@ -257,7 +204,7 @@ async def delete_folder(
         server_url,
         api_key,
         kds_id,
-        normalized_path,
+        folder_path,
         lane="control-io",
         owner="config",
     )
@@ -283,6 +230,7 @@ async def move_folder(
         body.parent_folder,
         body.folder_name,
         body.target_folder,
+        body.merge_on_conflict,
         lane="control-io",
         owner="config",
     )

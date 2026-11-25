@@ -157,7 +157,11 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
                 objectName={file.file_uuid}
                 fileName={file.file_name}
                 fileType={file.file_type}
-                fileSize={file.file_size}
+                fileSize={
+                  typeof file.file_size === "string"
+                    ? Number(file.file_size)
+                    : file.file_size
+                }
                 previewUrl={previewUrl}
                 loadOriginal={loadOriginal}
                 pdfRenderer={AidpPdfViewer}
@@ -219,7 +223,11 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
             objectName={file.file_uuid}
             fileName={file.file_name}
             fileType={file.file_type}
-            fileSize={file.file_size}
+            fileSize={
+              typeof file.file_size === "string"
+                ? Number(file.file_size)
+                : file.file_size
+            }
             previewUrl={previewUrl}
             loadOriginal={loadOriginal}
             pdfRenderer={AidpPdfViewer}

@@ -110,10 +110,10 @@ async def create_metadata_field(
     fields = await _load_metadata_fields(domain_id)
     if len(fields) >= METADATA_FIELD_LIMIT:
         raise _bad_request(
-            f"每个本体库最多定义 {METADATA_FIELD_LIMIT} 个 Metadata 字段"
+            f"an ontology can define at most {METADATA_FIELD_LIMIT} metadata fields"
         )
     if any(item.get("field_name") == body.field_name for item in fields):
-        raise _bad_request("字段名在该本体库中已存在")
+        raise _bad_request("field_name already exists in this ontology")
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-ontology-metadata-create",
@@ -153,14 +153,14 @@ async def rename_metadata_field(
     fields = await _load_metadata_fields(domain_id)
     current = _find_metadata_field(fields, field_ref)
     if current is None:
-        raise _bad_request("要重命名的字段不存在")
+        raise _bad_request("the field to rename does not exist")
     if body.new_field_name == current.get("field_name"):
-        raise _bad_request("新字段名与当前字段名相同")
+        raise _bad_request("new field_name matches the current one")
     if any(item.get("field_name") == body.new_field_name for item in fields):
-        raise _bad_request("字段名在该本体库中已存在")
+        raise _bad_request("field_name already exists in this ontology")
     metadata_id = current.get("id")
     if metadata_id is None:
-        raise _bad_request("AIDP 没有返回该字段的 MetadataId，无法按真实契约改名")
+        raise _bad_request("AIDP returned no MetadataId for this field; cannot rename")
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-ontology-metadata-rename",
@@ -203,7 +203,7 @@ async def batch_unbind_metadata_fields(
     for field_ref in body.metadata_ids:
         current = _find_metadata_field(fields, field_ref)
         if current is None or current.get("id") is None:
-            raise _bad_request("部分字段缺少 MetadataId，无法解绑")
+            raise _bad_request("some fields have no MetadataId; cannot unbind")
         resolved.append(int(current["id"]))
     server_url, api_key = _credentials()
     result = await run_blocking(
@@ -237,10 +237,10 @@ async def delete_metadata_field(
     fields = await _load_metadata_fields(domain_id)
     current = _find_metadata_field(fields, field_ref)
     if current is None:
-        raise _bad_request("要删除的字段不存在")
+        raise _bad_request("the field to delete does not exist")
     metadata_id = current.get("id")
     if metadata_id is None:
-        raise _bad_request("AIDP 没有返回该字段的 MetadataId，无法按真实契约删除")
+        raise _bad_request("AIDP returned no MetadataId for this field; cannot delete")
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-ontology-metadata-delete",

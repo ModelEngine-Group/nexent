@@ -8,8 +8,10 @@ import { App, Button, Drawer, Form, Input } from "antd";
 
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
-  ONTOLOGY_DESCRIPTION_MAX_CHARS,
+  ONTOLOGY_DESCRIPTION_MAX_BYTES,
+  ONTOLOGY_NAME_MAX_BYTES,
   ONTOLOGY_NAME_MAX_CHARS,
+  byteCountText,
   validateOntologyDescription,
   validateOntologyName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
@@ -44,8 +46,6 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
   const nameValue = (Form.useWatch("name", form) as string | undefined) ?? "";
   const descriptionValue =
     (Form.useWatch("description", form) as string | undefined) ?? "";
-  const nameLength = nameValue.length;
-  const descriptionLength = descriptionValue.length;
   const editing = !!domain;
 
   useEffect(() => {
@@ -146,11 +146,15 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
               help={t("aidpKnowledge.ontologyDomainNameHint")}
             />
           }
-          extra={`${nameLength}/${ONTOLOGY_NAME_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+          extra={byteCountText(
+            nameValue,
+            ONTOLOGY_NAME_MAX_BYTES,
+            t("aidpKnowledge.ontologyBytesUnit")
+          )}
           rules={[
             {
               validator: async (_rule, value: string) => {
-                const error = validateOntologyName(value ?? "");
+                const error = validateOntologyName(value ?? "", t);
                 if (error) throw new Error(error);
               },
             },
@@ -166,11 +170,15 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
               help={t("aidpKnowledge.ontologyDomainDescriptionHint")}
             />
           }
-          extra={`${descriptionLength}/${ONTOLOGY_DESCRIPTION_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+          extra={byteCountText(
+            descriptionValue,
+            ONTOLOGY_DESCRIPTION_MAX_BYTES,
+            t("aidpKnowledge.ontologyBytesUnit")
+          )}
           rules={[
             {
               validator: async (_rule, value: string) => {
-                const error = validateOntologyDescription(value ?? "");
+                const error = validateOntologyDescription(value ?? "", t);
                 if (error) throw new Error(error);
               },
             },

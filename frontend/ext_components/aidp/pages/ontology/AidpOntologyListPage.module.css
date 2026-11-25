@@ -172,6 +172,13 @@
   line-height: 20px;
 }
 
+/* Keep the clock icon and the update time visually separated. */
+.cardUpdated {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .tableArea {
   min-width: 0;
   min-height: 0;

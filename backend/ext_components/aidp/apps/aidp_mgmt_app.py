@@ -34,9 +34,16 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
@@ -44,14 +51,14 @@ from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.roles import has_any_role
-from ext_components.aidp.apps.aidp_folder_routes import aidp_folder_router
 from ext_components.aidp.apps.aidp_chunk_routes import aidp_chunk_router
+from ext_components.aidp.apps.aidp_folder_routes import aidp_folder_router
 from ext_components.aidp.apps.aidp_mgmt_common import (
     AIDP_FILE_UUID_PATTERN,
     AidpFileUuid,
+    FolderPath,
     _auth,
     _credentials,
-    _normalize_folder_path,
     _relative_path_to_directory,
 )
 from ext_components.aidp.apps.aidp_sensitive_word_routes import (
@@ -187,19 +194,29 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
 # ---------------------------------------------------------------------------
 
 
+KbName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+KbDescription = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+]
+EmbeddingModelName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
+]
+
+
 class CreateKbRequest(BaseModel):
     """Request body for creating a knowledge base."""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(..., description="Knowledge base name (required)")
-    description: str = Field(
-        ...,
-        min_length=1,
-        max_length=255,
-        description="Knowledge base description (required)",
+    name: str = Field(
+        ..., description="Knowledge base name; empty defers to AIDP's name"
     )
-    embedding_model: str = Field(..., min_length=1, description="Embedding model identifier")
+    description: KbDescription = Field(
+        ..., description="Knowledge base description (required)"
+    )
+    embedding_model: EmbeddingModelName = Field(
+        ..., description="Embedding model identifier"
+    )
     chunk_token_num: int = Field(512, ge=256, le=4096, strict=True, description="Chunk size in tokens")
     chunk_overlap_num: int = Field(51, ge=0, strict=True, description="Chunk overlap in tokens")
     vlm_model: str = Field("", description="VLM model identifier for caption generation")
@@ -243,7 +260,7 @@ class CreateKbRequest(BaseModel):
         ),
     )
     # Nexent-side permission payload. Never forwarded to AIDP.
-    ingroup_permission: Optional[str] = Field(
+    ingroup_permission: Literal["EDIT", "READ_ONLY", "PRIVATE"] | None = Field(
         "READ_ONLY",
         description="Permission level for authorised groups: EDIT / READ_ONLY / PRIVATE",
     )
@@ -251,19 +268,6 @@ class CreateKbRequest(BaseModel):
         None,
         description="Group IDs granted the in-group permission. Empty/ignored when PRIVATE.",
     )
-
-
-    @field_validator("description", mode="before")
-    @classmethod
-    def trim_description(cls, value):
-        return value.strip() if isinstance(value, str) else value
-
-    @field_validator("embedding_model")
-    @classmethod
-    def require_embedding_model(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Embedding model is required")
-        return value
 
     @field_validator("summary_model")
     @classmethod
@@ -356,9 +360,11 @@ class UpdateKbRequest(BaseModel):
 class SetPermissionRequest(BaseModel):
     """Save permissions and optionally synchronize explicitly changed metadata."""
 
-    name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
+    name: KbName | None = Field(None, description="Changed KB name; omit when unchanged")
     description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
-    ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
+    ingroup_permission: Literal["EDIT", "READ_ONLY", "PRIVATE"] = Field(
+        ..., description="EDIT / READ_ONLY / PRIVATE"
+    )
     group_ids: Optional[List[int]] = Field(
         None,
         description="Group IDs granted the in-group permission. Ignored when PRIVATE.",
@@ -884,12 +890,6 @@ async def create_knowledge_base(
         # shared AIDP KB by sending EDIT/READ_ONLY and group_ids.
         ingroup = PRIVATE
         valid_group_ids: list[int] = []
-    elif ingroup not in {EDIT, READ_ONLY, PRIVATE}:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Unsupported ingroup_permission: {ingroup!r}",
-        )
-
     elif ingroup != PRIVATE:
         if not body.group_ids:
             raise HTTPException(
@@ -1249,7 +1249,7 @@ async def upload_documents(
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     files: List[UploadFile] = File(..., description="Files to upload"),
     target_folder: Annotated[
-        Optional[str],
+        FolderPath | None,
         Form(description="Destination folder path; root is '/'"),
     ] = None,
     relative_paths: Annotated[
@@ -1260,13 +1260,8 @@ async def upload_documents(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
-    normalized_target: str | None = None
+    normalized_target = target_folder
     normalized_relative_paths: list[str] | None = None
-    if target_folder is not None:
-        try:
-            normalized_target = _normalize_folder_path(target_folder)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if relative_paths is not None:
         if target_folder is None:
@@ -1677,12 +1672,6 @@ async def set_permission(
             detail="USER role can only manage PRIVATE personal knowledge bases",
         )
 
-    if body.ingroup_permission not in {EDIT, READ_ONLY, PRIVATE}:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Unsupported ingroup_permission: {body.ingroup_permission!r}",
-        )
-
     if body.ingroup_permission == PRIVATE:
         final_group_ids: list[int] = []
     else:
@@ -1703,10 +1692,6 @@ async def set_permission(
         include={"name", "description", "summary_enable", "summary_model", "summary_preview"},
         exclude_none=True,
     )
-    if "name" in metadata:
-        metadata["name"] = metadata["name"].strip()
-        if not metadata["name"]:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Name must not be blank")
     result = await asyncio.to_thread(
         save_kb_settings,
         kb_id=kds_id,

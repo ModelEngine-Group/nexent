@@ -41,7 +41,7 @@ const AidpOntologyRuleDetailDrawer: React.FC<
             className={styles.conditionRow}
           >
             <span className={styles.conditionField}>{condition.field}</span>
-            <span>{ruleOperatorLabel(condition.operator)}</span>
+            <span>{ruleOperatorLabel(condition.operator, t)}</span>
             <span className={styles.conditionValue}>
               {condition.value === null ||
               condition.value === undefined ||

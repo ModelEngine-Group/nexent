@@ -30,7 +30,12 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   ENTITY_API_NAME_MAX_CHARS,
+  ENTITY_DESCRIPTION_MAX_BYTES,
   ENTITY_DESCRIPTION_MAX_CHARS,
+  ENTITY_NAME_MAX_BYTES,
+  byteCountText,
+  validateEntityDescription,
+  validateEntityName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
 import type {
   AidpOntologyEntity,
@@ -640,18 +645,23 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             { required: true, whitespace: true },
             {
               validator: async (_rule, value: string) => {
-                if ((value ?? "").trim().length > ENTITY_API_NAME_MAX_CHARS) {
-                  throw new Error(
-                    t("aidpKnowledge.ontologyEntityNameTooLong", {
-                      max: ENTITY_API_NAME_MAX_CHARS,
-                    })
-                  );
-                }
+                const error = validateEntityName(value ?? "", t);
+                if (error) throw new Error(error);
               },
             },
           ]}
         >
-          <Input maxLength={ENTITY_API_NAME_MAX_CHARS} showCount />
+          <Input
+            maxLength={ENTITY_API_NAME_MAX_CHARS}
+            showCount={{
+              formatter: ({ value }) =>
+                byteCountText(
+                  String(value ?? ""),
+                  ENTITY_NAME_MAX_BYTES,
+                  t("aidpKnowledge.ontologyBytesUnit")
+                ),
+            }}
+          />
         </Form.Item>
 
         <Form.Item
@@ -701,15 +711,8 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           rules={[
             {
               validator: async (_rule, value: string) => {
-                if (
-                  (value ?? "").trim().length > ENTITY_DESCRIPTION_MAX_CHARS
-                ) {
-                  throw new Error(
-                    t("aidpKnowledge.ontologyEntityDescriptionTooLong", {
-                      max: ENTITY_DESCRIPTION_MAX_CHARS,
-                    })
-                  );
-                }
+                const error = validateEntityDescription(value ?? "", t);
+                if (error) throw new Error(error);
               },
             },
           ]}
@@ -717,7 +720,14 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           <Input.TextArea
             autoSize={{ minRows: 3, maxRows: 6 }}
             maxLength={ENTITY_DESCRIPTION_MAX_CHARS}
-            showCount
+            showCount={{
+              formatter: ({ value }) =>
+                byteCountText(
+                  String(value ?? ""),
+                  ENTITY_DESCRIPTION_MAX_BYTES,
+                  t("aidpKnowledge.ontologyBytesUnit")
+                ),
+            }}
           />
         </Form.Item>
 

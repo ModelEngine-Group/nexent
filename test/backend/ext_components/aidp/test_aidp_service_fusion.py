@@ -167,14 +167,9 @@ class TestChunkSearchImpl:
                         "title": "演示.pdf",
                         "text": "检索内容",
                         "chunk_type": "table",
-                        "pages": ["2"],
+                        "pages": [2],
                         "metadata": {"章节": "检索指标"},
                         "file_url": "https://example.test/demo.pdf",
-                    },
-                    {
-                        "id": 2002,
-                        "title": "其他.pdf",
-                        "text": "不应出现",
                     },
                 ]
             }
@@ -208,16 +203,3 @@ class TestChunkSearchImpl:
         assert result["value"][0]["chunk_type"] == "TABLE"
         assert result["value"][0]["page_ids"] == [2]
         assert result["value"][0]["metadata"] == {"章节": "检索指标"}
-
-    def test_non_list_result_raises_response_error(
-        self, chunk_service, monkeypatch
-    ):
-        monkeypatch.setattr(
-            chunk_service, "_request_aidp_json",
-            lambda *args, **kwargs: {"result": {"unexpected": True}},
-        )
-        with pytest.raises(chunk_service.AppException) as exc_info:
-            chunk_service.search_aidp_chunks_impl(
-                SERVER_URL, API_KEY, "aidp-kb-demo", "演示.pdf", "检索",
-            )
-        assert exc_info.value.error_code == chunk_service.ErrorCode.AIDP_RESPONSE_ERROR

@@ -8,22 +8,27 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Annotated, Any, Dict, List, Literal
 from urllib.parse import quote, urljoin
 
 import httpx
-from nexent.core.ext_components.aidp.retrieval_config import (
-    build_payload,
-    resolve_config,
-)
 from nexent.utils.http_client_manager import http_client_manager
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.services.aidp_client import (
     _AIDP_DOWNLOAD_TIMEOUT_SECONDS,
     _AIDP_READ_TIMEOUT_SECONDS,
-    _get_retrieval_path,
     _build_list_query,
     _extract_upstream_error,
     _get_channels_path,
@@ -31,6 +36,7 @@ from ext_components.aidp.services.aidp_client import (
     _get_knowledge_files_path,
     _get_list_path,
     _get_ocr_annotate_path,
+    _get_retrieval_path,
     _normalize_upstream_error,
     _raise_aidp_http_error,
     _request_with_retry,
@@ -703,105 +709,66 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         )
 
 
-_GRAPH_PROMPT_LANGUAGES = {"中文", "英文"}
-_GRAPH_CONFIG_FIELDS = frozenset(
-    {
-        "domain",
-        "retrieve_subgraph_hop",
-        "no_think_mode",
-        "prompt_language",
-        "prompt_text",
-        "synonym_merge_enable",
-        "disambiguation_enable",
-        "llm_model_name",
-    }
-)
 _GRAPH_PROMPT_MAX_CHARS = 4096
-_GRAPH_EDITABLE_FIELDS = frozenset(
-    {
-        "llm_model_name",
-        "retrieve_subgraph_hop",
-        "no_think_mode",
-        "synonym_merge_enable",
-        "disambiguation_enable",
-    }
-)
+
+_GraphToggle = Literal["是", "否"]
 
 
+class AidpGraphConfig(BaseModel):
+    """Creation-time graph configuration in AIDP's string wire format."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    domain: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    retrieve_subgraph_hop: Literal["1", "2", "3"]
+    no_think_mode: _GraphToggle
+    prompt_language: Literal["中文", "英文"]
+    prompt_text: str = Field(..., min_length=1, max_length=_GRAPH_PROMPT_MAX_CHARS)
+    synonym_merge_enable: _GraphToggle
+    disambiguation_enable: _GraphToggle
+    llm_model_name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1)
+    ]
+
+
+class AidpGraphConfigUpdate(BaseModel):
+    """Partial graph edit with native JSON types; only edited fields are set."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    llm_model_name: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None
+    ) = None
+    retrieve_subgraph_hop: Annotated[StrictInt, Field(ge=1, le=3)] | None = None
+    no_think_mode: StrictBool | None = None
+    synonym_merge_enable: StrictBool | None = None
+    disambiguation_enable: StrictBool | None = None
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self):
+        nulls = sorted(
+            name for name in self.model_fields_set if getattr(self, name) is None
+        )
+        if nulls:
+            raise ValueError(f"graph parameters must not be null: {', '.join(nulls)}")
+        return self
 
 
 def _serialize_graph_config(config: Dict[str, Any]) -> str:
     """Validate a structured graph configuration and serialize it for AIDP.
 
-    Only documented keys are accepted, and out-of-range values are not
-    clamped. Domain validity is deliberately NOT enforced here: the frontend
-    sources domain choices from the live AIDP graph template, so a fixed
-    backend whitelist would reject newly added AIDP domains. AIDP remains
-    the authority on whether a domain is supported. The result is the JSON
-    string AIDP expects in ``graph_config``; the frontend never builds that
-    string itself.
+    Domain validity is deliberately NOT enforced here: the frontend sources
+    domain choices from the live AIDP graph template, so a fixed backend
+    whitelist would reject newly added AIDP domains. AIDP remains the
+    authority on whether a domain is supported. The result is the JSON string
+    AIDP expects in ``graph_config``; the frontend never builds that string
+    itself.
     """
-    unsupported_fields = set(config).difference(_GRAPH_CONFIG_FIELDS)
-    if unsupported_fields:
-        names = ", ".join(sorted(unsupported_fields))
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            f"Unsupported graph configuration fields: {names}",
-        )
-
-    domain = config.get("domain")
-    if not isinstance(domain, str) or not domain.strip():
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "Graph domain must be a non-empty string",
-        )
-
-    prompt_language = config.get("prompt_language")
-    if not isinstance(prompt_language, str):
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph prompt language must be a string")
-    if prompt_language not in _GRAPH_PROMPT_LANGUAGES:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            f"Unsupported graph prompt language: {prompt_language}",
-        )
-
-    prompt_text = config.get("prompt_text")
-    if not isinstance(prompt_text, str):
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "Graph prompt text must be a string",
-        )
-    if not 1 <= len(prompt_text) <= _GRAPH_PROMPT_MAX_CHARS:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            f"Graph prompt must contain 1 to {_GRAPH_PROMPT_MAX_CHARS} characters",
-        )
-
-    hop = config.get("retrieve_subgraph_hop")
-    if hop not in ("1", "2", "3"):
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph retrieve_subgraph_hop must be 1, 2 or 3")
-
-    def _yes_no(key: str) -> str:
-        value = config.get(key)
-        if value not in ("是", "否"):
-            raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, f"Graph parameter {key} must be 是 or 否")
-        return value
-
-    payload = {
-        "domain": domain,
-        "retrieve_subgraph_hop": hop,
-        "no_think_mode": _yes_no("no_think_mode"),
-        "prompt_language": prompt_language,
-        "prompt_text": prompt_text,
-        "synonym_merge_enable": _yes_no("synonym_merge_enable"),
-        "disambiguation_enable": _yes_no("disambiguation_enable"),
-    }
-    llm_model_name = config.get("llm_model_name")
-    if not isinstance(llm_model_name, str) or not llm_model_name.strip():
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph LLM model name must be a non-empty string")
-    payload["llm_model_name"] = llm_model_name
-    return json.dumps(payload, ensure_ascii=False)
+    try:
+        validated = AidpGraphConfig.model_validate(config)
+    except ValidationError as error:
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, str(error)) from error
+    return validated.model_dump_json()
 
 
 def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) -> str:
@@ -817,46 +784,20 @@ def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) 
     parameter is accepted for signature compatibility but intentionally not
     merged into the result.
     """
-    unsupported_fields = set(updates).difference(_GRAPH_EDITABLE_FIELDS)
-    if unsupported_fields:
-        names = ", ".join(sorted(unsupported_fields))
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            f"Unsupported graph configuration fields: {names}",
-        )
+    try:
+        validated = AidpGraphConfigUpdate.model_validate(updates)
+    except ValidationError as error:
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, str(error)) from error
 
+    edited = validated.model_dump(exclude_unset=True)
     result: Dict[str, str] = {}
-
-    if "llm_model_name" in updates:
-        llm_model_name = updates["llm_model_name"]
-        if not isinstance(llm_model_name, str) or not llm_model_name.strip():
-            raise AppException(
-                ErrorCode.COMMON_PARAMETER_INVALID,
-                "Graph LLM model name must be a non-empty string",
-            )
-        result["llm_model_name"] = llm_model_name.strip()
-
-    if "retrieve_subgraph_hop" in updates:
-        hop = updates["retrieve_subgraph_hop"]
-        # bool is an int subclass; reject it explicitly so True/False never
-        # serialize as "True"/"False" hop strings.
-        if isinstance(hop, bool) or not isinstance(hop, int) or hop not in (1, 2, 3):
-            raise AppException(
-                ErrorCode.COMMON_PARAMETER_INVALID,
-                "Graph retrieve_subgraph_hop must be 1, 2 or 3",
-            )
-        result["retrieve_subgraph_hop"] = str(hop)
-
+    if "llm_model_name" in edited:
+        result["llm_model_name"] = edited["llm_model_name"]
+    if "retrieve_subgraph_hop" in edited:
+        result["retrieve_subgraph_hop"] = str(edited["retrieve_subgraph_hop"])
     for key in ("no_think_mode", "synonym_merge_enable", "disambiguation_enable"):
-        if key in updates:
-            value = updates[key]
-            if not isinstance(value, bool):
-                raise AppException(
-                    ErrorCode.COMMON_PARAMETER_INVALID,
-                    f"Graph parameter {key} must be a boolean",
-                )
-            result[key] = "是" if value else "否"
-
+        if key in edited:
+            result[key] = "是" if edited[key] else "否"
     return json.dumps(result, ensure_ascii=False)
 
 
