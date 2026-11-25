@@ -6449,7 +6449,6 @@
   "chat.agentLanding.unfavorite": "Unfavorite",
   "chat.agentLanding.emptyFavorites": "No favorite agents yet",
   "chat.agentLanding.emptyFavoritesHint": "Click \"···\" on a card to favorite an agent",
-  "chat.agentLanding.defaultTag": "Medical",
   "chat.sidebar.discoverAgents": "Discover Agents",
   "chat.agentLanding.newSession": "Create new conversation",
   "chat.agentLanding.search": "Search",
