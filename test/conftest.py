@@ -18,6 +18,8 @@ import pytest
 
 # Unit tests opt into the infrastructure-backed data plane only when they own its dependencies.
 os.environ.setdefault('OPS_MONITORING_ENABLED', 'false')
+os.environ.setdefault('LOCAL_FILE_MONITORING_ENABLED', 'false')
+os.environ.setdefault('TRAJECTORY_READ_ENABLED', 'false')
 
 # Optional SDK stubs (xlrd, supabase, etc.) live below; see the per-section
 # comments.  The legacy mem0 stub block has been removed because the SDK

@@ -703,6 +703,13 @@ class SkillCreatorDraft(RunSpecModel):
     content: str
 
 
+class CreatorTrajectoryScope(RunSpecModel):
+    """Server-owned history receipt for a request-owned creator execution."""
+
+    conversation_id: Annotated[int, Field(gt=0, le=2147483647)]
+    source_message_id: Annotated[int, Field(gt=0, le=2147483647)] | None = None
+
+
 class PreparedCreatorRun(RunSpecModel):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
     input: RunInput
@@ -713,6 +720,20 @@ class PreparedCreatorRun(RunSpecModel):
     capacity_snapshot: dict[str, JsonValue] | None = None
     context_budget_snapshot: dict[str, JsonValue] | None = None
     system_agent: AgentVersionReference | None = None
+    trajectory: CreatorTrajectoryScope | None = None
+
+    @model_validator(mode="after")
+    def validate_trajectory_scope(self):
+        if self.trajectory is not None and self.system_agent is None:
+            raise ValueError("Creator trajectory requires a system Agent reference")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_trajectory_scope(self, handler):
+        data = handler(self)
+        if self.trajectory is None:
+            data.pop("trajectory", None)
+        return data
 
 
 class PreparedSkillCreatorRun(PreparedCreatorRun):

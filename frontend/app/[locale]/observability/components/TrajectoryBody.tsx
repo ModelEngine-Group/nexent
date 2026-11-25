@@ -1,6 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { App, Button, Segmented, Spin } from "antd";
 import {
   ChevronDown,
@@ -15,10 +22,18 @@ import { trajectoryService } from "@/services/trajectoryService";
 import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
 import type { ContentReference } from "@/types/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
+import { modelInputRows, TrajectoryModelInput } from "./TrajectoryModelInput";
+import {
+  modelResultRows,
+  TrajectoryModelResult,
+} from "./TrajectoryModelResult";
+
+type BodyMode = "text" | "json" | "table";
 
 interface TrajectoryBodyProps {
   reference: ContentReference;
   slot: string;
+  model?: boolean;
   conversationId: string;
   nodeId: string;
   cache: BodyCache;
@@ -33,6 +48,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
         props.conversationId,
         props.nodeId,
         props.slot,
+        props.model,
         props.reference.content_id,
         props.reference.availability,
         props.reference.complete,
@@ -45,6 +61,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
 function TrajectoryBodyContent({
   reference,
   slot,
+  model,
   conversationId,
   nodeId,
   cache,
@@ -55,8 +72,10 @@ function TrajectoryBodyContent({
   const { message } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [mode, setMode] = useState("json");
+  const [preferredMode, setMode] = useState<BodyMode>(model ? "table" : "json");
   const [wordWrap, setWordWrap] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const modeScroll = useRef<{ detail: HTMLElement; top: number } | null>(null);
   const [chunk, setChunk] = useState<{
     offset: number;
     next: number;
@@ -82,6 +101,59 @@ function TrajectoryBodyContent({
   const text = chunk?.text ?? reference.text ?? reference.preview ?? "";
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
+  const table = useMemo(() => {
+    if (!model || !complete || reference.availability !== "available")
+      return null;
+    if (slot === "input") {
+      const rows = modelInputRows(text);
+      return rows && <TrajectoryModelInput rows={rows} />;
+    }
+    if (slot === "output" || slot === "reasoning") {
+      const rows = modelResultRows(text, slot);
+      return (
+        rows && (
+          <TrajectoryModelResult rows={rows} name={t(`trajectory.${slot}`)} />
+        )
+      );
+    }
+    return null;
+  }, [complete, model, reference.availability, slot, t, text]);
+  const mode = preferredMode === "table" && !table ? "json" : preferredMode;
+  const changeMode = (value: BodyMode) => {
+    if (model && value !== mode) {
+      const detail = section.current?.closest<HTMLElement>(
+        ".trajectory-node-detail"
+      );
+      if (detail) modeScroll.current = { detail, top: detail.scrollTop };
+    }
+    setMode(value);
+  };
+  useLayoutEffect(() => {
+    const saved = modeScroll.current;
+    if (!saved) return;
+    modeScroll.current = null;
+    const { detail, top } = saved;
+    detail.style.removeProperty("--trajectory-mode-scroll-padding");
+    // A shorter representation can make the previous position unreachable.
+    const missing = top - (detail.scrollHeight - detail.clientHeight);
+    if (missing > 0) {
+      const viewportBottom =
+        detail.getBoundingClientRect().top + detail.clientHeight;
+      const contentBottom =
+        detail.lastElementChild?.getBoundingClientRect().bottom ??
+        viewportBottom;
+      const unused = Math.max(
+        0,
+        viewportBottom - contentBottom - detail.scrollTop
+      );
+      detail.style.setProperty(
+        "--trajectory-mode-scroll-padding",
+        `${Math.ceil(missing + unused)}px`
+      );
+    }
+    detail.scrollTop = top;
+  }, [mode]);
+  const tablePreview = mode === "table" ? table : null;
   const formatted = useMemo(() => {
     if (mode !== "json") return text;
     try {
@@ -92,11 +164,13 @@ function TrajectoryBodyContent({
   }, [text, mode]);
   const lineNumbers = useMemo(
     () =>
-      Array.from(
-        { length: Math.min(formatted.split("\n").length, 10000) },
-        (_, index) => index + 1
-      ).join("\n"),
-    [formatted]
+      tablePreview
+        ? ""
+        : Array.from(
+            { length: Math.min(formatted.split("\n").length, 10000) },
+            (_, index) => index + 1
+          ).join("\n"),
+    [formatted, tablePreview]
   );
   const load = useCallback(
     async (offset: number) => {
@@ -181,8 +255,25 @@ function TrajectoryBodyContent({
     )
       void load(current.next);
   };
+  const copyButton = (
+    <button
+      className="trajectory-icon-button"
+      aria-label={t("trajectory.copy")}
+      disabled={
+        awaitingFirstChunk || (!text && reference.availability !== "available")
+      }
+      onClick={() => {
+        void navigator.clipboard.writeText(formatted).then(
+          () => message.success(t("trajectory.copied")),
+          () => message.error(t("trajectory.copyFailed"))
+        );
+      }}
+    >
+      <Copy size={14} />
+    </button>
+  );
   return (
-    <section className="trajectory-body" aria-busy={showLoading}>
+    <section className="trajectory-body" ref={section} aria-busy={showLoading}>
       <header>
         <button
           aria-expanded={!collapsed}
@@ -192,18 +283,23 @@ function TrajectoryBodyContent({
           {t(`trajectory.${slot}`)}
         </button>
         <div className="flex flex-wrap items-center gap-1">
-          <Segmented
+          <Segmented<BodyMode>
             size="small"
             value={mode}
-            onChange={setMode}
+            onChange={changeMode}
             options={[
               { label: t("trajectory.text"), value: "text" },
               { label: "JSON", value: "json" },
+              ...(table
+                ? [{ label: t("trajectory.table"), value: "table" as const }]
+                : []),
             ]}
           />
+          {!collapsed && tablePreview && copyButton}
         </div>
       </header>
-      {!collapsed && (
+      {!collapsed && tablePreview}
+      {!collapsed && !tablePreview && (
         <>
           {reference.availability !== "available" ? (
             <p className="p-3 text-xs text-gray-500">
@@ -216,7 +312,7 @@ function TrajectoryBodyContent({
               {!awaitingFirstChunk && (
                 <div className="trajectory-code-card">
                   <div className="trajectory-code-toolbar">
-                    <span>{mode === "json" ? "JSON" : "TEXT"}</span>
+                    <span>{mode.toUpperCase()}</span>
                     <span
                       className="trajectory-code-meta"
                       title={t(
@@ -254,22 +350,7 @@ function TrajectoryBodyContent({
                           disabled={reference.availability !== "available"}
                           onClick={() => setWordWrap((value) => !value)}
                         />
-                        <button
-                          className="trajectory-icon-button"
-                          aria-label={t("trajectory.copy")}
-                          disabled={
-                            awaitingFirstChunk ||
-                            (!text && reference.availability !== "available")
-                          }
-                          onClick={() => {
-                            void navigator.clipboard.writeText(formatted).then(
-                              () => message.success(t("trajectory.copied")),
-                              () => message.error(t("trajectory.copyFailed"))
-                            );
-                          }}
-                        >
-                          <Copy size={14} />
-                        </button>
+                        {copyButton}
                         <button
                           className="trajectory-icon-button"
                           aria-label={t(

@@ -95,6 +95,31 @@ def test_default_sink_does_not_start_local_attempts(capture, sink):
     assert not local.get_finished_spans()
 
 
+@pytest.mark.parametrize("provider, export_traces", [
+    ("otlp", True),
+    ("otlp", False),
+    ("local_file", True),
+], ids=["dual-capture", "local-only", "legacy-local-only"])
+def test_stream_tokens_emit_events_only_on_the_remote_logical_span(capture, provider, export_traces):
+    manager, local, remote = capture
+    manager._config = SimpleNamespace(
+        provider=provider, export_traces=export_traces, capture_local_traces=provider == "otlp",
+    )
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        tracker = session.begin({"messages": []})
+        tracker.record_token("answer")
+        session.end()
+
+    attempt = next(span for span in local.get_finished_spans() if span.name == "model.attempt")
+    assert attempt.attributes["llm.ttft_basis"] == "content"
+    assert all(event.name != "token_generated" for event in attempt.events)
+    logical_span, = remote.get_finished_spans()
+    assert logical_span.name == "logical"
+    token_events = [dict(event.attributes) for event in logical_span.events if event.name == "token_generated"]
+    assert token_events == ([{"token_count": 1, "token_length": 6}] if export_traces and provider == "otlp" else [])
+
+
 @pytest.mark.parametrize("elapsed", [0, 0.125, -1, float("nan"), float("inf")])
 def test_attempt_duration_distinguishes_zero_from_invalid_clock(
     capture, monkeypatch, elapsed
@@ -158,6 +183,27 @@ def test_raw_error_credentials_are_scrubbed_and_partial_result_survives(capture)
     assert "stream" not in json.loads(attempt.attributes["nexent.raw.value"])
     assert json.loads(attempt.attributes["output.value"])["content_parts"] == [{"type": "text", "text": "partial"}]
     assert attempt.attributes["nexent.output_complete"] is False
+
+
+@pytest.mark.parametrize(("category", "message"), [
+    ("model_timeout", "The model request timed out. Please try again later."),
+    ("MODEL_EMPTY_RESPONSE", "The model returned no answer content or tool calls."),
+    ("unknown_diagnostic", None),
+])
+def test_legacy_attempt_records_safe_reason_without_provider_exception(capture, category, message):
+    manager, local, _ = capture
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        session.begin({"messages": []})
+        session.legacy_failure(RuntimeError("private provider exception"), category=category, will_retry=True)
+
+    attempt = local.get_finished_spans()[0]
+    assert attempt.attributes["nexent.business_status"] == "failed"
+    assert json.loads(attempt.attributes["nexent.error"]) == {
+        "category": category, "http_status": None, "safe_message": message,
+        "retryable": False, "will_retry": True,
+    }
+    assert "private provider exception" not in str(attempt.attributes)
 
 
 def test_capture_budget_preserves_business_success_and_reports_missing_body(capture):

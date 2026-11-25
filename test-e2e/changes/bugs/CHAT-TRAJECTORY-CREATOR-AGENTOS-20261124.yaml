@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CREATOR-AGENTOS-20261124
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-CREATOR-AGENTOS-20261124
+  title: 修复 NL2Agent 和 NL2Skill 跨进程后漏采轨迹
+  description: Management 将已保存会话和用户消息收据作为签名请求的一部分传给 Runtime，恢复已有归档行为。
+  observed_behavior: AgentOS 隔离后 Management 仍绑定本地上下文，但发出的请求未携带会话。Runtime 作为临时执行启动，归档找不到会话。
+  expected_behavior: 两类有历史的创建执行按已保存会话和系统创建助手归档，重试保留原用户消息关联，无历史执行不产生会话归档。
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: 原回归直接执行旧同进程创建服务，未通过签名 AgentOS 路由与 Runtime worker。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-CAPTURE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 签名请求仅使用匹配的服务端身份，缺少消息收据仍保留会话，临时请求不携带归档数据。
+    - Runtime 为两个创建模式使用系统执行者和可信会话 ID，同时保持原有执行方式。
+    reason: UT 覆盖签名与元数据边界。复用 D3 验证真实两端 HTTP、worker 和归档冷读，不新增重复 D1。
+    test_selectors:
+    - test/backend/services/test_agentos_proxy_service.py
+    - test/backend/app/test_agentos_ephemeral_lifecycle.py
+    - test/backend/services/test_creator_trajectory_capture.py
+  notes: 责任域 runtime。复用 D3 的私有模型 HTTP 服务、受管 worker、独占归档目录和回读夹具；签名 Runtime HTTP 使用用例内 ASGI 传输，PG 历史和模型配置读边界受控，无新增共享资源。外部 SPEC 文档库不在本地工作区。

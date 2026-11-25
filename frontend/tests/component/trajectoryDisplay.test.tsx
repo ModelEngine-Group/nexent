@@ -220,6 +220,60 @@ describe("trajectory body default format", () => {
 });
 
 describe("documented execution information", () => {
+  it.each(["tool", "model"])(
+    "shows the %s failure reason as text and keeps its partial output",
+    (kind) => {
+      const reason = "**Timed out**\n<img src=invalid>";
+      render(
+        <TrajectoryNodeDetail
+          node={traceNode({
+            kind,
+            status: "failed",
+            failure_reason: reason,
+            output: body("partial output"),
+          })}
+          conversationId="1"
+          cache={new BodyCache()}
+          onParent={vi.fn()}
+          onLoaded={vi.fn()}
+        />,
+        { wrapper }
+      );
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("trajectory.failureReason");
+      expect(alert).toHaveTextContent("**Timed out** <img src=invalid>");
+      expect(alert.querySelector("img, strong")).toBeNull();
+      expect(screen.getByText("partial output")).toBeVisible();
+    }
+  );
+
+  it.each([
+    ["error", undefined, true],
+    ["completed", "previous failure", false],
+    ["cancelled", "previous failure", false],
+  ] as const)(
+    "handles %s nodes with or without a reason",
+    (status, reason, missing) => {
+      render(
+        <TrajectoryNodeDetail
+          node={traceNode({ kind: "tool", status, failure_reason: reason })}
+          conversationId="1"
+          cache={new BodyCache()}
+          onParent={vi.fn()}
+          onLoaded={vi.fn()}
+        />,
+        { wrapper }
+      );
+      if (missing) {
+        expect(
+          screen.getByText("trajectory.failureReasonMissing")
+        ).toBeVisible();
+      } else {
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      }
+    }
+  );
+
   it.each(["agent", "model", "tool"])(
     "shows only documented fields for a %s node",
     (kind) => {

@@ -1,10 +1,57 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Deployment provider owns mutually exclusive capture and fixed query defaults."""
+"""Deployment settings preserve independent trace destinations and fixed query defaults."""
 
 import runpy
 from unittest.mock import Mock
 
 import pytest
+
+
+@pytest.mark.parametrize(
+    ('variables', 'provider', 'enabled', 'local', 'reads'),
+    [
+        ({}, 'otlp', False, True, True),
+        ({'ENABLE_TELEMETRY': 'true'}, 'otlp', True, True, True),
+        ({'LOCAL_FILE_MONITORING_ENABLED': 'false'}, 'otlp', False, False, False),
+        ({'MONITORING_PROVIDER': 'local_file'}, 'local_file', True, True, True),
+        ({'MONITORING_PROVIDER': 'local_file', 'ENABLE_TELEMETRY': 'false'}, 'local_file', False, False, True),
+        (
+            {
+                'MONITORING_PROVIDER': 'local_file',
+                'ENABLE_TELEMETRY': 'false',
+                'LOCAL_FILE_MONITORING_ENABLED': 'true',
+            },
+            'local_file', True, True, True,
+        ),
+        ({'TRAJECTORY_READ_ENABLED': 'false'}, 'otlp', False, True, False),
+        ({'MONITORING_PROVIDER': 'otlp'}, 'otlp', False, True, True),
+        ({'MONITORING_PROVIDER': 'phoenix', 'ENABLE_TELEMETRY': 'true'}, 'phoenix', True, True, True),
+        ({'MONITORING_PROVIDER': 'otlp', 'LOCAL_FILE_MONITORING_ENABLED': 'false'}, 'otlp', False, False, False),
+        (
+            {
+                'MONITORING_PROVIDER': 'langfuse',
+                'ENABLE_TELEMETRY': 'true',
+                'LOCAL_FILE_MONITORING_ENABLED': 'false',
+                'TRAJECTORY_READ_ENABLED': 'true',
+            },
+            'langfuse', True, False, True,
+        ),
+    ],
+)
+def test_local_capture_defaults_and_provider_overrides(monkeypatch, variables, provider, enabled, local, reads):
+    monkeypatch.setattr('dotenv.load_dotenv', lambda **kwargs: False)
+    for key in ('MONITORING_PROVIDER', 'ENABLE_TELEMETRY', 'LOCAL_FILE_MONITORING_ENABLED', 'TRAJECTORY_READ_ENABLED'):
+        if key in variables:
+            monkeypatch.setenv(key, variables[key])
+        else:
+            monkeypatch.delenv(key, raising=False)
+
+    config = runpy.run_module('contracts.constants.environment', run_name='trajectory_deployment_test')
+
+    assert config['MONITORING_PROVIDER'] == provider
+    assert config['ENABLE_TELEMETRY'] is enabled
+    assert config['LOCAL_FILE_MONITORING_ENABLED'] is local
+    assert config['TRAJECTORY_READ_ENABLED'] is reads
 
 
 def test_trajectory_default_directory_and_removed_configuration(monkeypatch):
