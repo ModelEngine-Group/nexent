@@ -183,10 +183,7 @@ def test_validate_base_url_rejects_bad_inputs():
     )
 
 
-def test_init_reads_official_legacy_method_without_revalidation(monkeypatch):
-    def unexpected(*args, **kwargs):
-        raise AssertionError("Persisted retrieval configuration must not be revalidated")
-    monkeypatch.setattr(ind_aidp_search_tool_module, "validate_config", unexpected, raising=False)
+def test_init_reads_official_legacy_method():
     tool = make_tool(search_method="hybrid_search", top_k=7, reranking_enable=False)
     payload = tool._payload("q")
     assert payload["search_method"] == "vector_search|full_text_search|graph_search"
@@ -333,10 +330,9 @@ def test_old_configuration_and_disabled_flags_omit_enhancement_fields():
     assert "rule_enable" not in body
 
 
-def test_entity_enhancement_with_effective_jargon_fails_before_posting():
-    tool = make_tool(
-        ontology_enhance_enable=True,
-        reranking_mode="jargon_coverage",
-    )
+def test_entity_enhancement_with_effective_jargon_fails_during_construction():
     with pytest.raises(ValueError, match="ontology_enhance_enable"):
-        tool._payload("question")
+        make_tool(
+            ontology_enhance_enable=True,
+            reranking_mode="jargon_coverage",
+        )

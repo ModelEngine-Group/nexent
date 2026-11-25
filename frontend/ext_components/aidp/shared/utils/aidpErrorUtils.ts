@@ -39,6 +39,12 @@ const AIDP_BINDING_REASON_KEYS: Record<string, string> = {
   ontology_binding_other_conflict: "aidpKnowledge.ontologyBindingOtherConflict",
 };
 
+/** AIDP reports a duplicate resource name as business code 1022. The BFF
+ * forwards that code verbatim in the error details.
+ */
+export const isAidpDuplicateError = (error: unknown): boolean =>
+  error instanceof ApiError && error.details?.upstream_code === 1022;
+
 /** Resolve errors for a caller-owned inline state or notification.
  *
  * Only upstream AIDP business codes are translated. Without one, the backend

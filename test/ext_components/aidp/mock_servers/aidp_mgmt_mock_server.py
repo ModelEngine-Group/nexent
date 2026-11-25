@@ -2016,14 +2016,22 @@ class FusionSearchRequest(BaseModel):
             raise ValueError("hybrid_search_config must not be sent for pure graph retrieval")
         if not graph and self.graph_search_config is not None:
             raise ValueError("graph_search_config must not be sent without graph retrieval")
-        h = (self.hybrid_search_config.hybrid_top_k or 0) if self.hybrid_search_config else 0
-        g = (self.graph_search_config.graph_top_k or 0) if self.graph_search_config else 0
-        if hybrid and h > self.topk:
+        # Compute effective caps the way AIDP fills omitted values.
+        h = self.hybrid_search_config.hybrid_top_k if self.hybrid_search_config else None
+        g = self.graph_search_config.graph_top_k if self.graph_search_config else None
+        effective_g = g if g is not None else min(5, self.topk)
+        effective_h = h if h is not None else self.topk - effective_g
+        if hybrid and h is not None and h > self.topk:
             raise ValueError("hybrid_top_k must not exceed topk")
-        if graph and g > self.topk:
+        if graph and g is not None and g > self.topk:
             raise ValueError("graph_top_k must not exceed topk")
-        if hybrid and graph and h > 0 and g > 0 and h + g > self.topk:
+        if hybrid and graph and effective_h + effective_g > self.topk:
             raise ValueError("hybrid_top_k + graph_top_k must not exceed topk")
+        if hybrid and h is not None:
+            if "vector_search" in channels and self.hybrid_search_config.vector_candidates < h:
+                raise ValueError("vector_candidates must be at least hybrid_top_k")
+            if "full_text_search" in channels and self.hybrid_search_config.full_text_candidates < h:
+                raise ValueError("full_text_candidates must be at least hybrid_top_k")
         return self
 
 
@@ -2469,6 +2477,21 @@ def create_knowledge_base(
             status_code=400,
             detail="summary_model is required when summary_enable is true",
         )
+    # The live service rejects a duplicate name with HTTP 500 and business
+    # code 1022 (not a 4xx). Mirror that shape so the proxy's error parsing
+    # and the UI's duplicate-name message are exercised realistically.
+    if any(kb["kds_name"] == body.name for kb in _KNOWLEDGE_BASES.values()):
+        logger.info("CREATE REJECTED duplicate name=%r", body.name)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": 1022,
+                    "message": "Create knowledge base failed",
+                }
+            },
+        )
+
     kds_id = f"aidp-kb-{uuid.uuid4().hex[:8]}"
     now = int(time.time())
     new_kb = {
@@ -4333,7 +4356,7 @@ def fusion_search(
         elif source == "full_text_search" and hybrid:
             limit = hybrid.full_text_candidates
         elif source == "graph_search" and graph:
-            limit = graph.graph_top_k
+            limit = graph.graph_top_k if graph.graph_top_k is not None else min(5, request.topk)
         if limit is None:
             limit = request.topk
         selected = [hit for hit in hits if source in hit["sources"]]
@@ -4350,10 +4373,12 @@ def fusion_search(
     results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
 
     # Hybrid caps the combined vector+full-text part; graph is capped above.
-    if hybrid and (hybrid.hybrid_top_k or 0) > 0:
+    if hybrid:
+        effective_g = graph.graph_top_k if graph and graph.graph_top_k is not None else min(5, request.topk)
+        effective_h = hybrid.hybrid_top_k if hybrid.hybrid_top_k is not None else request.topk - effective_g
         hybrid_hits = [hit for hit in results
                        if {"vector_search", "full_text_search"} & set(hit["sources"])]
-        overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}
+        overflow = {hit["chunk"]["id"] for hit in hybrid_hits[effective_h:]}
         results = [hit for hit in results if hit["chunk"]["id"] not in overflow]
 
     final = results[: request.topk]

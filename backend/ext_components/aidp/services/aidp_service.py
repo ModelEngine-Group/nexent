@@ -861,27 +861,9 @@ def create_aidp_kb_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        # Body is already logged above before raise_for_status, so we
-        # only re-log the status for correlation with existing searches.
-        logger.exception(
-            "AIDP API HTTP error: %s, status_code: %s",
-            e,
-            e.response.status_code,
-        )
-        if e.response.status_code in (401, 403):
-            raise AppException(
-                ErrorCode.AIDP_AUTH_ERROR,
-                f"AIDP authentication failed: {str(e)}",
-            )
-        if e.response.status_code == 429:
-            raise AppException(
-                ErrorCode.AIDP_RATE_LIMIT,
-                f"AIDP rate limit exceeded: {str(e)}",
-            )
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-        )
+        # Preserve AIDP's business code (e.g. 1022 for a duplicate name) so
+        # the UI can distinguish a rejected request from an outage.
+        _raise_aidp_http_error(e, "create KB")
     except ValueError as e:
         logger.exception("Failed to parse AIDP API response: %s", e)
         raise AppException(

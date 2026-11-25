@@ -7,7 +7,7 @@ from enum import Enum
 from typing import ClassVar
 
 import pytest
-from nexent.monitor.local_content import safe_local_content
+from nexent.monitor.local_content import safe_local_content, set_local_span_content
 from smolagents import Tool
 
 
@@ -63,3 +63,56 @@ def test_function_references_do_not_capture_defaults_or_closures():
 def test_unsupported_runtime_objects_still_fail_closed(value):
     with pytest.raises(ValueError):
         safe_local_content(value)
+
+
+@pytest.mark.parametrize('body', [
+    '  多行文本\n第二行\n', '  { "value": [1, 2] }\n', '  "text"\n', '  123  ', '{"a":1,"a":2}',
+])
+def test_execution_body_preserves_safe_text_exactly(body):
+    assert safe_local_content(body, redact_json_strings=True) == body
+
+
+def test_malformed_json_preserves_text_and_redacts_url_credentials():
+    body = '[download](https://example.test/file?token=private&format=pdf)\nFile ready.'
+    assert safe_local_content(body, redact_json_strings=True) == (
+        '[download](https://example.test/file?token=REDACTED_CREDENTIAL&format=pdf)\nFile ready.'
+    )
+
+
+def test_execution_body_redacts_encoded_objects_inside_carriers():
+    inner = json.dumps({'password': 'secret', 'link': 'https://example.test/?token=sensitive&lang=en'})
+    data = {'result': json.dumps([{'text': inner}])}
+    safe = json.loads(safe_local_content(data, redact_json_strings=True))
+    text = json.loads(safe['result'])[0]['text']
+    assert json.loads(text) == {'link': 'https://example.test/?token=REDACTED_CREDENTIAL&lang=en'}
+    assert json.loads(json.loads(data['result'])[0]['text'])['password'] == 'secret'
+
+
+def test_execution_body_omits_credentials_in_shadowed_json_fields():
+    body = '{"a":{"password":"secret"},"a":"answer"}'
+    assert json.loads(safe_local_content(body, redact_json_strings=True)) == {'a': 'answer'}
+    assert 'secret' not in safe_local_content(body, redact_json_strings=True)
+
+
+def test_failed_body_capture_only_marks_local_gap(mocker):
+    span = mocker.Mock()
+    set_local_span_content(span, 'output', object())
+    span.set_attribute.assert_not_called()
+    span.set_attributes.assert_called_once_with({
+        'nexent.local.nexent.trajectory.gap': True,
+        'nexent.local.nexent.availability.output': 'serialization_failed',
+    })
+
+
+def test_span_write_errors_do_not_interrupt_execution(mocker):
+    span = mocker.Mock()
+    span.set_attribute.side_effect = RuntimeError('span is closed')
+    span.set_attributes.side_effect = RuntimeError('span is closed')
+
+    set_local_span_content(span, 'input', 'user request')
+
+    span.set_attribute.assert_called_once_with('nexent.local.input.value', 'user request')
+    span.set_attributes.assert_called_once_with({
+        'nexent.local.nexent.trajectory.gap': True,
+        'nexent.local.nexent.availability.input': 'serialization_failed',
+    })

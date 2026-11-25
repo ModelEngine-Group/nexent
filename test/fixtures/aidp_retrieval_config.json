@@ -12,8 +12,8 @@
       "full_text_candidates": 10,
       "graph_reranking_enable": false,
       "multi_modal": false,
-      "hybrid_top_k": 7,
-      "graph_top_k": 0
+      "hybrid_top_k": 5,
+      "graph_top_k": 5
     }
   },
   {
@@ -44,18 +44,16 @@
     }
   },
   {
-    "name": "zero caps and jargon",
+    "name": "default caps and jargon",
     "config": {
-      "top_k": 1,
-      "hybrid_top_k": 1,
-      "graph_top_k": 0,
+      "top_k": 10,
       "reranking_mode": "jargon_coverage"
     },
     "expected": {
       "vector_candidates": 10,
       "full_text_candidates": 10,
-      "hybrid_top_k": 1,
-      "graph_top_k": 0,
+      "hybrid_top_k": 5,
+      "graph_top_k": 5,
       "reranking_mode": "jargon_coverage"
     }
   },

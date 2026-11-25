@@ -34,7 +34,7 @@ from .retrieval_config import (
     DEFAULTS,
     active_channels,
     build_payload,
-    resolve_config,
+    validate_config,
 )
 from . import metadata_filter as metadata_filter_rules
 
@@ -167,8 +167,8 @@ class AidpSearchTool(Tool):
         },
         "vector_candidates": {"description_zh": "向量初步检索条数；固定整数，1–500"},
         "full_text_candidates": {"description_zh": "全文初步检索条数；固定整数，1–500"},
-        "hybrid_top_k": {"description_zh": "向量／全文部分返回上限；固定整数，最小为 1（0 会被 AIDP 拒绝），最终仍受总返回上限约束"},
-        "graph_top_k": {"description_zh": "图谱返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "hybrid_top_k": {"description_zh": "向量／全文返回上限；固定整数，1–100；与图谱返回上限之和不能超过返回条数上限"},
+        "graph_top_k": {"description_zh": "图谱返回上限；固定整数，1–100；与向量／全文返回上限之和不能超过返回条数上限"},
         "vector_score_threshold": {"description_zh": "向量检索分数阈值，范围 0–1"},
         "full_text_score_threshold": {"description_zh": "全文检索分数阈值，范围 0–1"},
         "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
@@ -209,8 +209,8 @@ class AidpSearchTool(Tool):
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
         vector_candidates: int = Field(default=10, ge=1, le=500, description="Vector candidates"),
         full_text_candidates: int = Field(default=10, ge=1, le=500, description="Full-text candidates"),
-        hybrid_top_k: Optional[int] = Field(default=None, ge=0, le=100, description="Vector/full-text cap; real AIDP rejects 0 (ge=1), so zero is normalized to the total cap"),
-        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero means no separate cap, still bounded by top_k"),
+        hybrid_top_k: int = Field(default=5, ge=1, le=100, description="Vector/full-text cap (1-100); the sum with graph_top_k must not exceed top_k"),
+        graph_top_k: int = Field(default=5, ge=1, le=100, description="Graph cap (1-100); the sum with hybrid_top_k must not exceed top_k"),
         vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
         full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
@@ -224,6 +224,7 @@ class AidpSearchTool(Tool):
             description="Server-installed conversation metadata filter: {enabled, match, conditions}",
         ),
         observer: MessageObserver = Field(default=None, exclude=True),
+        **kwargs,
     ):
         super().__init__()
         self.kds_list: List[str] = _parse_kds_list(kds_list)
@@ -261,7 +262,14 @@ class AidpSearchTool(Tool):
             "rule_enable": rule_enable,
         }
         config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
-        resolved = resolve_config(config)
+        if not config.get("reranking_enable", DEFAULTS["reranking_enable"]):
+            config["graph_reranking_enable"] = False
+        # Legacy zero caps mean "not set"; treat them as the default before
+        # validation so stored 0/0 configurations keep working.
+        for key in ("hybrid_top_k", "graph_top_k"):
+            if config.get(key) == 0:
+                config[key] = DEFAULTS[key]
+        resolved = validate_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
         self.metadata_filter = metadata_filter_rules.normalize_metadata_filter(

@@ -166,11 +166,16 @@ def test_docker_ops_uses_monitoring_configuration_and_same_archive_as_runtime():
         "/opt/nexent/scripts/start-ops.sh", "python", "-m", "backend.http.ops_service",
     ]
     assert ops["env_file"] == ["../../env/.env", "../../env/monitoring.env"]
-    archive_mount = "${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}"
-    assert archive_mount in ops["volumes"]
-    for filename in ("docker-compose.yml", "docker-compose.prod.yml"):
+    archive_source = "${ROOT_DIR}/trajectory"
+    default_target = "/mnt/nexent-data/trajectory"
+    assert f"{archive_source}:{default_target}" in ops["volumes"]
+    for filename, target in (
+        ("docker-compose.yml", default_target),
+        ("docker-compose.prod.yml", "${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}"),
+    ):
         services = yaml.safe_load((directory / filename).read_text())["services"]
-        assert archive_mount in services["nexent-runtime"]["volumes"]
+        for name in ("nexent-config", "nexent-runtime"):
+            assert f"{archive_source}:{target}" in services[name]["volumes"]
         assert (
             services["nexent-gateway"]["environment"]["GATEWAY_OPS_URL"]
             == "http://nexent-ops:${OPS_PORT:-5016}"

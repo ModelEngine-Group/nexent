@@ -255,7 +255,7 @@ def _fusion(server, **payload):
 
 
 def _hybrid(**overrides):
-    config = {"vector_candidates": 10, "full_text_candidates": 10,
+    config = {"vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 5,
               "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0}
     config.update(overrides)
     return config
@@ -266,14 +266,14 @@ def test_fusion_accepts_all_seven_method_shapes(mock_aidp_server):
     shapes = {
         "vector_search": {"hybrid_search_config": _hybrid()},
         "full_text_search": {"hybrid_search_config": _hybrid()},
-        "graph_search": {"graph_search_config": {}},
+        "graph_search": {"graph_search_config": {"graph_top_k": 5}},
         "vector_search|full_text_search": {"hybrid_search_config": _hybrid()},
         "vector_search|graph_search": {"hybrid_search_config": _hybrid(),
-                                       "graph_search_config": {}},
+                                       "graph_search_config": {"graph_top_k": 5}},
         "full_text_search|graph_search": {"hybrid_search_config": _hybrid(),
-                                          "graph_search_config": {}},
+                                          "graph_search_config": {"graph_top_k": 5}},
         "hybrid_search": {"hybrid_search_config": _hybrid(),
-                          "graph_search_config": {}},
+                          "graph_search_config": {"graph_top_k": 5}},
     }
     for method, extra in shapes.items():
         response = _fusion(server, query="AIDP", kds_list=["aidp-kb-faq"],
@@ -286,7 +286,7 @@ def test_fusion_rejects_inactive_channel_objects_and_bad_quota(mock_aidp_server)
     server = mock_aidp_server
     pure_graph_with_hybrid = _fusion(
         server, query="q", kds_list=["aidp-kb-faq"], search_method="graph_search",
-        graph_search_config={}, hybrid_search_config=_hybrid())
+        graph_search_config={"graph_top_k": 5}, hybrid_search_config=_hybrid())
     assert pure_graph_with_hybrid.status_code == 422
 
     overflow = _fusion(
@@ -315,7 +315,7 @@ def test_pure_graph_without_graph_returns_nothing_instead_of_falling_back(mock_a
     server = mock_aidp_server
     # aidp-kb-product carries no graph; a graph-only request must stay empty.
     response = _fusion(server, query="AIDP", kds_list=["aidp-kb-product"],
-                       search_method="graph_search", graph_search_config={})
+                       search_method="graph_search", graph_search_config={"graph_top_k": 5})
     assert response.status_code == 200
     assert response.json()["result"] == []
 
@@ -329,31 +329,54 @@ def test_retrieval_source_reports_actual_channels(mock_aidp_server):
     server = mock_aidp_server
     response = _fusion(server, query="AIDP", kds_list=["aidp-kb-faq"],
                        search_method="vector_search|graph_search",
-                       hybrid_search_config=_hybrid(), graph_search_config={})
+                       hybrid_search_config=_hybrid(), graph_search_config={"graph_top_k": 5})
     methods = {tuple(item["retrieval_source"]["methods"]) for item in response.json()["result"]}
     assert methods
     for source in methods:
         assert set(source) <= {"vector_search", "graph_search"}
 
 
-def test_zero_caps_are_not_zero_quotas_and_candidates_truncate(mock_aidp_server):
+def test_caps_are_required_and_candidates_truncate(mock_aidp_server):
     server = mock_aidp_server
+    default = _fusion(server, query="AIDP", kds_list=["aidp-kb-faq", "aidp-kb-product"],
+                      search_method="vector_search", topk=10,
+                      hybrid_search_config=_hybrid())
+    assert default.status_code == 200
+    assert default.json()["result"]
+
     zero = _fusion(server, query="AIDP", kds_list=["aidp-kb-faq", "aidp-kb-product"],
                    search_method="vector_search", topk=10,
-                   hybrid_search_config=_hybrid(vector_candidates=10))
-    assert zero.status_code == 200
-    assert zero.json()["result"]
+                   hybrid_search_config=_hybrid(hybrid_top_k=0))
+    assert zero.status_code == 422
 
     capped = _fusion(server, query="AIDP", kds_list=["aidp-kb-faq", "aidp-kb-product"],
                      search_method="vector_search", topk=10,
-                     hybrid_search_config=_hybrid(vector_candidates=1))
+                     hybrid_search_config=_hybrid(vector_candidates=1, hybrid_top_k=1))
     assert len(capped.json()["result"]) <= 1
+
+
+@pytest.mark.parametrize("method,topk,hybrid,graph,expected", [
+    ("hybrid_search", 10, {}, {}, 200),
+    ("hybrid_search", 5, {"hybrid_top_k": 10}, {"graph_top_k": 10}, 422),
+    ("vector_search", 10, {"hybrid_top_k": 5}, None, 200),
+    ("vector_search|graph_search", 10, {"hybrid_top_k": 5}, {"graph_top_k": 5}, 200),
+    ("hybrid_search", 10, {"hybrid_top_k": 5}, {"graph_top_k": 5}, 200),
+])
+def test_fusion_quota_matrix(mock_aidp_server, method, topk, hybrid, graph, expected):
+    server = mock_aidp_server
+    payload = {"query": "AIDP", "kds_list": ["aidp-kb-faq"], "search_method": method, "topk": topk}
+    if hybrid is not None:
+        payload["hybrid_search_config"] = hybrid
+    if graph is not None:
+        payload["graph_search_config"] = graph
+    response = _fusion(server, **payload)
+    assert response.status_code == expected, response.text
 
 
 def test_legacy_top_k_alias_is_translated_once(mock_aidp_server):
     server = mock_aidp_server
     response = _fusion(server, query="AIDP", kds_list=["aidp-kb-product"], top_k=1,
-                       search_method="vector_search", hybrid_search_config=_hybrid())
+                       search_method="vector_search", hybrid_search_config=_hybrid(hybrid_top_k=1))
     assert response.status_code == 200
     assert len(response.json()["result"]) <= 1
 
