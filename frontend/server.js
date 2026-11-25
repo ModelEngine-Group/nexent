@@ -612,7 +612,12 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 // ============================================================================
 // Cookie-to-Header injection for regular proxy requests
 // ============================================================================
-proxy.on("proxyReq", (proxyReq, req) => {
+proxy.on("proxyReq", (proxyReq, req, res) => {
+  if (req.method === "POST" && req.parsedPathname === "/api/model/outlet_validations") {
+    res.once("close", () => {
+      if (!res.writableFinished) proxyReq.destroy();
+    });
+  }
   const cookies = parseCookies(req);
   if (
     cookies[COOKIE_NAMES.ACCESS_TOKEN] &&

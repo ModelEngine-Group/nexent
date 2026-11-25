@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Independent edge transport regressions (UT-BE-MGWI-001 through 004)."""
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -59,7 +61,8 @@ def test_header_filter():
 
 
 @pytest.mark.asyncio
-async def test_http_preserves_body_query_status_and_cookies():
+@pytest.mark.parametrize("path", ["/api/agent/run", "/api/model/outlet_validations"])
+async def test_http_preserves_body_query_status_and_cookies(path):
     seen = []
 
     async def upstream(request):
@@ -71,7 +74,7 @@ async def test_http_preserves_body_query_status_and_cookies():
     app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.post("/api/agent/run?q=a%2Fb&q=2", content=b"payload")
+            response = await client.post(f"{path}?q=a%2Fb&q=2", content=b"payload")
             denied = await client.post("/api/agent/internal/northbound/run")
     assert response.status_code == 409
     assert response.content == b"event: token\n\n"
@@ -79,6 +82,47 @@ async def test_http_preserves_body_query_status_and_cookies():
     assert seen[0].url.query == b"q=a%2Fb&q=2"
     assert denied.status_code == 404
     assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_outlet_validation_disconnect_cancels_upstream_before_headers():
+    incoming = asyncio.Queue()
+    seen_body = asyncio.Event()
+    closed = asyncio.Event()
+    sent = []
+    await incoming.put({"type": "http.request", "body": b"first-", "more_body": True})
+    await incoming.put({"type": "http.request", "body": b"last", "more_body": False})
+
+    async def upstream(request):
+        assert await request.aread() == b"first-last"
+        seen_body.set()
+        try:
+            await asyncio.Future()
+        finally:
+            closed.set()
+
+    async def send(message):
+        sent.append(message)
+
+    path = "/api/model/outlet_validations"
+    scope = {
+        "type": "http", "method": "POST", "scheme": "http",
+        "path": path, "raw_path": path.encode(), "query_string": b"",
+        "headers": [], "server": ("edge", 80), "client": ("test", 1234),
+    }
+    app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        task = asyncio.create_task(app(scope, incoming.get, send))
+        try:
+            await asyncio.wait_for(seen_body.wait(), 3)
+            await incoming.put({"type": "http.disconnect"})
+            await asyncio.wait_for(closed.wait(), 3)
+            await asyncio.wait_for(task, 3)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    assert sent[0]["status"] == 499
 
 
 @pytest.mark.asyncio

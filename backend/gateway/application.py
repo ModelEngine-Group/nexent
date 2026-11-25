@@ -134,7 +134,10 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
             return JSONResponse({"message": "Invalid or missing credentials"}, status_code=401)
         except IdentityUnavailable:
             return JSONResponse({"message": "Identity service unavailable"}, status_code=503)
-        return await forward_http(request, url, headers, request.app.state.client)
+        return await forward_http(
+            request, url, headers, request.app.state.client,
+            cancel_before_headers=request.method == "POST" and request.url.path == "/api/model/outlet_validations",
+        )
 
     @app.websocket("/{path:path}")
     async def websocket_proxy(websocket: WebSocket, path: str):
