@@ -1094,8 +1094,8 @@ def test_update_related_agents_delete_existing(monkeypatch, mock_session):
     mock_filter2 = MagicMock()
     mock_filter2.update = mock_update
 
-    # Setup filter chain: first call returns filter1 (for query), subsequent calls return filter2 (for update)
-    query.filter.side_effect = [mock_filter1, mock_filter2]
+    # Query the parent lock first, then existing relations and soft deletion.
+    query.filter.side_effect = [MagicMock(), mock_filter1, mock_filter2]
 
     session.add = MagicMock()
     session.commit = MagicMock()
@@ -1136,8 +1136,8 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
     mock_filter2 = MagicMock()
     mock_filter2.update = mock_update
 
-    # Setup filter chain: first call returns filter1 (for query), subsequent calls return filter2 (for update)
-    query.filter.side_effect = [mock_filter1, mock_filter2]
+    # Query the parent lock first, then existing relations and soft deletion.
+    query.filter.side_effect = [MagicMock(), mock_filter1, mock_filter2]
 
     session.add = MagicMock()
     session.commit = MagicMock()
@@ -1559,7 +1559,7 @@ def test_update_related_agents_with_none_related_agents(monkeypatch, mock_sessio
     mock_filter2 = MagicMock()
     mock_filter2.update = mock_update
 
-    query.filter.side_effect = [mock_filter1, mock_filter2]
+    query.filter.side_effect = [MagicMock(), mock_filter1, mock_filter2]
 
     session.add = MagicMock()
 

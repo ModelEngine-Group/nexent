@@ -114,8 +114,8 @@ async def test_automation_callback_uses_the_confirmation_bound_original_prompt(h
     assert (context.source_message_id, context.user_message) == (23, "original instruction")
 
 
-@pytest.mark.parametrize("owned", [False, True])
-async def test_memory_callback_only_fans_out_the_owned_record(http, mocker, owned):
+@pytest.mark.parametrize("owned,enabled", [(False, True), (True, False), (True, True)])
+async def test_memory_callback_only_fans_out_the_owned_record(http, mocker, owned, enabled):
     async def inline(_task, callback, *args, **options):
         return callback(*args)
 
@@ -126,6 +126,7 @@ async def test_memory_callback_only_fans_out_the_owned_record(http, mocker, owne
         "agent_id": "7", "layer": "agent", "memory_type": "short_term", "status": "active",
     }
     read = mocker.patch.object(memory, "get_memory_record", return_value=record)
+    policy = mocker.patch.object(memory, "can_write_automatic_memory", return_value=enabled)
     fanout = mocker.patch.object(memory, "_fanout_external_ingest")
 
     response = await post_callback(http, ManagementOperation.MEMORY_STORED, NOTICE)
@@ -133,6 +134,10 @@ async def test_memory_callback_only_fans_out_the_owned_record(http, mocker, owne
     scope.assert_called_once_with(42, user_id=ACTOR.user_id, tenant_id=ACTOR.tenant_id)
     read.assert_called_once_with(61, ACTOR.tenant_id)
     if owned:
+        policy.assert_called_once_with(ACTOR.tenant_id, ACTOR.user_id, NOTICE.agent_id, NOTICE.agent_version_no)
+    else:
+        policy.assert_not_called()
+    if owned and enabled:
         assert (response.status_code, response.content) == (204, b"")
         fanout.assert_awaited_once_with({**record, "conversation_id": "42"}, {"memory_id": 61})
     else:

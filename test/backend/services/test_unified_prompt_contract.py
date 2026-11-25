@@ -81,26 +81,30 @@ def test_orm_serialization_and_filtering_use_canonical_column():
 
 
 @pytest.mark.asyncio
-async def test_partial_prompt_save_retains_unrequested_fields_and_uses_canonical_events(mocker):
-    original = "# Role\nResearch\n# Constraints\nUse sources\n# Example\nQuestion -> Answer"
+async def test_partial_prompt_save_proposes_confirmation_without_overwriting_fields(mocker):
+    from services import nl2agent_prompt_service
+
+    original = "# Role\nResearch\n# Constraints\nUse sources"
     merged = original.replace("Use sources", "Use verified sources")
-    draft = {"agent_id": 170, "name": "research_assistant", "prompt": original,
-             "description": "Keep description", "greeting_message": "Keep greeting"}
+    draft = {"prompt": original, "description": "Keep description"}
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
         "Authorization": "Bearer test", tools.NL2AGENT_AGENT_ID_HEADER: "170",
+        tools.NL2AGENT_CONVERSATION_ID_HEADER: "9", tools.NL2AGENT_RUN_ID_HEADER: "run",
     }))
-    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="owner", tenant_id="tenant"))
-    mocker.patch.object(service, "require_agent_draft_edit", return_value=dict(draft))
-    update = mocker.patch.object(service, "update_agent_draft_fields", return_value=1)
-    mocker.patch.object(service, "validate_agent_generation_complete_impl", return_value=None)
+    mocker.patch.object(tools, "_tool_actor", return_value=("owner", "tenant"))
+    update = mocker.patch.object(service, "update_agent_draft_fields")
+    card = {"subtype": "prompt_generation", "agent_id": 170, "proposed_prompt": merged}
+    propose = mocker.patch.object(nl2agent_prompt_service, "propose", return_value=card)
 
-    raw = await tools.save_agent_draft_fields(170, {"prompt": merged})
+    result = await tools.save_agent_draft_fields(170, {"prompt": merged})
 
-    assert update.call_args.kwargs["fields"] == {"prompt": merged}
-    assert draft["prompt"] == original
-    assert draft["description"] == "Keep description"
-    assert "duty_prompt" not in raw
-    assert json.loads(raw.split("\n", 1)[0])["updated_fields"] == ["prompt"]
+    scope, proposed = propose.call_args.args
+    assert (scope.agent_id, scope.tenant_id, scope.user_id, scope.conversation_id, scope.run_id) == (
+        170, "tenant", "owner", "9", "run")
+    assert proposed == merged
+    assert result.meta[tools.NL2AGENT_RECEIPT_KEY]["payload"] == card
+    update.assert_not_called()
+    assert draft == {"prompt": original, "description": "Keep description"}
 
 
 @pytest.mark.asyncio

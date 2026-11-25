@@ -153,14 +153,14 @@ beforeEach(() => {
 });
 afterEach(() => message.destroy());
 
-it("shows the current skill's count, shared toolbar title and pagination", async () => {
+it("shows the current skill's count and shared toolbar without pagination", async () => {
   state.history.hasMore = true;
   render(panel());
   expect(state.query).toHaveBeenCalledWith("skill", 8);
   fireEvent.click(screen.getByRole("button", { name: "历史 2" }));
   expect(await screen.findByText("此技能的生成记录")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
-  expect(state.history.loadMore).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
+  expect(state.history.loadMore).not.toHaveBeenCalled();
 });
 
 it("keeps unsaved skill history clickable with zero records and supports new conversation", async () => {

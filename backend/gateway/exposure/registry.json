@@ -641,6 +641,50 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent/nl2agent/knowledge_recommendations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-2e6097a0a63eb8d3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-0b0c7d19b4ff9733",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installation_attempts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-9bb4d46c7b7f0a77",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_links",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-4d4c5dee4c60bea6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent/nl2agent/run",
       "transport": "http",
       "target": "management",
@@ -2967,6 +3011,28 @@
       "target": "management",
       "source": "backend/management/api/memory/memory_config.py",
       "route_id": "route-5559b3b5f7835069",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/config/tenant-switch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-fed989f4c3dee7e1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/config/tenant-switch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-114554631c1bfc9f",
       "credential_kinds": [
         "session"
       ]
@@ -7033,6 +7099,72 @@
     },
     {
       "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/skills/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/ops/v1/monitoring/agents",
       "transport": "http",
       "target": "ops",
@@ -7076,5 +7208,5 @@
       ]
     }
   ],
-  "revision": "2026-11-23.2"
+  "revision": "2026-11-25.aidp-integration"
 }

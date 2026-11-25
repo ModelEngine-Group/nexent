@@ -35,7 +35,7 @@ def test_independent_images_do_not_package_other_service_implementations():
     for parts in copies:
         assert all(
             source.rstrip("/") != "backend"
-            and not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
+            and not source.startswith(("backend/ops", "backend/data_process"))
             for source in parts[1:-1]
         )
     runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
@@ -43,6 +43,27 @@ def test_independent_images_do_not_package_other_service_implementations():
     sql_sources = [source for line in (runtime + common).splitlines() if line.startswith("COPY deploy/sql/")
                    for source in line.split()[1:-1]]
     assert not sql_sources
+
+
+def test_management_packages_creator_imports_without_sharing_them_with_runtime():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    nl2agent_sources = {"backend/services/__init__.py"} | {
+        path.relative_to(ROOT).as_posix() for path in (ROOT / "backend/services").glob("nl2agent_*.py")
+    }
+    assert "backend/services/nl2agent_state_service.py" in nl2agent_sources
+
+    for target in ("management", "runtime", "backend-common", "management-base"):
+        section = dockerfile.split(f" AS {target}\n", 1)[1].split("\nFROM ", 1)[0]
+        sources = {
+            source
+            for line in section.replace("\\\n", " ").splitlines() if line.startswith("COPY ")
+            for source in line.split()[1:-1]
+        }
+        service_sources = {
+            source for source in sources
+            if source.startswith("backend/services")
+        }
+        assert service_sources == (nl2agent_sources if target == "management" else set())
 
 
 def test_only_ops_image_packages_ops_initializer_and_sql():

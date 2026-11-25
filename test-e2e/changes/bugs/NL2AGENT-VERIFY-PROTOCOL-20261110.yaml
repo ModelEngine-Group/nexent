@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-VERIFY-PROTOCOL-20261110
+  change_type: bugfix
+  bug_id: NL2AGENT-VERIFY-PROTOCOL-20261110
+  title: Simplify the NL2Agent resource verification response
+  description: Accept one selection per requirement using the server's offered references and separate tool evidence from assistant messages.
+  observed_behavior: The model appended simulated tool results or omitted a repository reference from its copied candidate list, exhausting protocol repairs.
+  expected_behavior: NL2Agent can submit accepted references without copying the candidate list. The server rejects foreign references and other invalid submissions.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The runtime case did not exercise an accepted-only batch or inspect the model-facing tool evidence role.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/sdk/core/agents/test_context_manager_assembly.py
+      - test/sdk/core/agents/test_output_protocol.py
+    behaviors:
+      - Validate accepted references against the active batch with or without the legacy checked list.
+      - Recognize the same verification on retry and reject a conflicting selection.
+      - Retain strict rejection of malformed output and existing context behavior for other Agents.
+    reason: Keep server verification and protocol safety checks while simplifying model input and output.
+  notes: See ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md, sections 7.6 and 7.10.

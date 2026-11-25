@@ -22,6 +22,7 @@ export type AgentConfigUpdate = Partial<
     | "allow_chat_metadata"
     | "allow_mcp_header_passthrough"
     | "enable_protocol_repair_retry"
+    | "enable_memory"
     | "description"
     | "prompt"
     | "business_description"
@@ -136,6 +137,7 @@ export interface PublishedAgent {
   /** Agent-owned model inference snapshots used by the chat runtime. */
   model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   enable_protocol_repair_retry?: boolean;
+  enable_memory?: boolean;
   icon_url?: string;
   tags?: string[];
 }
@@ -181,6 +183,7 @@ export interface Agent {
   allow_chat_metadata?: boolean;
   allow_mcp_header_passthrough?: boolean;
   enable_protocol_repair_retry?: boolean;
+  enable_memory?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;

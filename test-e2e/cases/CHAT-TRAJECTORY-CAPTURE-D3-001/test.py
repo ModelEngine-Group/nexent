@@ -75,7 +75,7 @@ def test_capture_generated_code_result_and_logs_survive_cold_read(runtime):
 @pytest.mark.parametrize('creator', [False, True], ids=['clarification', 'creator-card'])
 def test_capture_interactive_card_preserves_stop_status(runtime, creator):
     from ops.services.trajectory.projection import execution_values
-    from services.nl2agent_service import _Nl2AgentBoundaryObserver
+    from management.services.agent.nl2agent import _Nl2AgentBoundaryObserver
 
     payload = {'subtype': 'requirement_clarification', 'questions': [{
         'question_id': 'scope', 'question_type': 'text', 'title': 'Which region?',
@@ -562,7 +562,7 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
     from contracts.agent import NL2AgentRunRequest, SystemAgentRef
     from contracts.authentication import AuthenticatedIdentity
     from management.services.conversation import creation_history, creator_execution
-    from services import nl2agent_service
+    from management.services.agent import nl2agent as nl2agent_service
 
     from nexent.core.agents.contracts.run import AgentRunInfo
     from nexent.core.utils.observer import MessageObserver

@@ -197,12 +197,14 @@ async def test_interleaved_streams_do_not_share_identity(creator):
 async def test_invalid_retry_never_runs_or_claims_saved_message(creator):
     save, _ = creator
     raw = RuntimeStream()
+    factory = AsyncMock(return_value=raw)
     with pytest.raises(ValueError, match="Invalid creation retry"):
         await execution.start_creation_turn(
             NL2AgentRunRequest(query="changed", agent_id=201, conversation_id=9, retry_user_message_id=10),
-            kind="agent", tenant_id="tenant", user_id="owner", stream_factory=AsyncMock(return_value=raw),
+            kind="agent", tenant_id="tenant", user_id="owner", stream_factory=factory,
         )
-    assert raw.contexts == [] and len(raw.closed) == 1
+    factory.assert_not_awaited()
+    assert raw.contexts == [] and raw.closed == []
     save.assert_not_called()
 
 

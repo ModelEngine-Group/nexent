@@ -111,7 +111,12 @@ check_shared_monitoring "$prefix-management"
 docker exec "$prefix-management" sh -ec '
   test ! -d /opt/backend/runtime
   test ! -d /opt/backend/data_process
-  test ! -d /opt/backend/services
+'
+docker exec "$prefix-management" python -c '
+import services.nl2agent_knowledge_recommendations
+import services.nl2agent_resource_flow
+import tool_collection.mcp.nl2agent_configuration_tools
+import tool_collection.mcp.nl2agent_resource_tools
 '
 
 docker run -d --name "$prefix-runtime" --network "$prefix" --network-alias runtime \
@@ -123,6 +128,7 @@ check_shared_monitoring "$prefix-runtime"
 docker exec "$prefix-runtime" sh -ec '
   test ! -d /opt/backend/management
   test ! -d /opt/backend/data_process
+  test ! -d /opt/backend/services
 '
 
 if [ "$#" -eq 3 ]; then

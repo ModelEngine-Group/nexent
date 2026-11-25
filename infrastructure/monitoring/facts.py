@@ -57,4 +57,14 @@ class AgentFact(Fact):
         return self
 
 
-FACT_MODELS = {"model": ModelFact, "agent": AgentFact}
+class SkillFact(Fact):
+    """A formal Skill guide read or script start."""
+
+    fact_kind: Literal["skill"] = "skill"
+    skill_id: str = Field(min_length=1, max_length=128)
+    skill_name: str = Field(min_length=1, max_length=200)
+    triggered_at: AwareDatetime
+    trigger_kind: Literal["guide_read", "script_started"]
+
+
+FACT_MODELS = {"model": ModelFact, "agent": AgentFact, "skill": SkillFact}

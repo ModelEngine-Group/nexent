@@ -650,12 +650,13 @@ class TestTenantEndpointMappings:
         assert "tenant_id=tenant-1" in messages[0]
         assert 'details={"tenant_id":"tenant-1","tenant_name":"Updated"}' in messages[0]
 
-    def test_delete_success_records_audit_entry(self, caplog):
+    @pytest.mark.parametrize("roles", ["SU", ("SU",)])
+    def test_delete_success_records_audit_entry(self, caplog, roles):
         """Test successful tenant deletion records a security audit entry"""
         tenant_service_module.delete_tenant.return_value = True
 
         with caplog.at_level(logging.INFO, logger="audit.security"):
-            auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "SU")
+            auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", roles)
             response = client.delete("/tenants/tenant-1")
 
         assert response.status_code == 200
@@ -668,9 +669,10 @@ class TestTenantEndpointMappings:
         assert 'details={"tenant_id":"tenant-1"}' in messages[0]
 
 
-def test_tenant_delete_requires_super_admin():
+@pytest.mark.parametrize("roles", ["ADMIN", ("ADMIN",), ("USER",), ("ADMIN", "DEV")])
+def test_tenant_delete_requires_super_admin(roles):
     auth_utils_module.get_current_user_context.side_effect = None
-    auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "ADMIN")
+    auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", roles)
     tenant_service_module.delete_tenant.reset_mock()
 
     response = client.delete("/tenants/tenant-2", headers={"Authorization": "Bearer token"})

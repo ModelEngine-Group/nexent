@@ -15,7 +15,7 @@ from permissions import rbac
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("resource", ["models", "agents"])
+@pytest.mark.parametrize("resource", ["models", "agents", "skills"])
 async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monkeypatch, resource):
     secret = "isolated-ops-model-gateway-signature"
     actor = {"kind": "session", "user_id": "operator", "tenant_id": "tenant", "roles": ["OPS"]}
@@ -32,6 +32,9 @@ async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monke
     status = {"data_as_of": None, "coverage_state": "uncovered", "is_stale": False}
     monkeypatch.setattr(monitoring, "read_agents", lambda *args, **kwargs: ({}, status))
     monkeypatch.setattr(monitoring, "read_agent_tokens", lambda *args, **kwargs: SimpleNamespace(tokens={}, status=status))
+    monkeypatch.setattr(monitoring, "read_skills", lambda *args, **kwargs: (
+        [], [], [], {**status, "coverage_state": "uncovered"},
+    ))
     ops = ops_application.create_app()
     ops.state.monitoring = SimpleNamespace()
 
@@ -63,10 +66,12 @@ async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monke
 
 
 @pytest.mark.parametrize("method,resource,suffix", [
-    ("GET", resource, suffix) for resource in ("models", "agents")
+    ("GET", resource, suffix) for resource in ("models", "agents", "skills")
     for suffix in ("", "/summary", "/trends", "/rankings")
 ] + [
-    ("POST", "models", "/refresh"), ("GET", "models", "/refreshes/example"),
+    ("POST", resource, "/refresh") for resource in ("models", "skills")
+] + [
+    ("GET", resource, "/refreshes/example") for resource in ("models", "skills")
 ])
 def test_monitoring_exposure_is_limited_to_declared_ops_session_routes(method, resource, suffix):
     match = default_registry().match(method, f"/api/ops/v1/monitoring/{resource}" + suffix)
