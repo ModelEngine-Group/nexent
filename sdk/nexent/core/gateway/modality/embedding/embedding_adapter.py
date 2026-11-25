@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 from nexent.core.concurrency import run_blocking
 
 from nexent.monitor import record_model_call
@@ -310,14 +311,17 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
                     self._test_inputs(),
                     timeout=timeout,
                 )
-        except requests.exceptions.Timeout:
-            logging.error(f"{type(self).__name__} connection timed out ({timeout}s)")
+        except requests.exceptions.Timeout as error:
+            if not record_connectivity_failure(error):
+                logging.error(f"{type(self).__name__} connection timed out ({timeout}s)")
             return []
-        except requests.exceptions.ConnectionError:
-            logging.error(f"{type(self).__name__} connection error")
+        except requests.exceptions.ConnectionError as error:
+            if not record_connectivity_failure(error):
+                logging.error(f"{type(self).__name__} connection error")
             return []
-        except Exception:
-            logging.exception(f"{type(self).__name__} connection failed")
+        except Exception as error:
+            if not record_connectivity_failure(error):
+                logging.exception(f"{type(self).__name__} connection failed")
             return []
 
     async def invoke(self, request: EmbeddingRequest):

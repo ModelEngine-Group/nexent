@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -41,7 +41,15 @@ vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({ invalidate: vi.fn(async () => {}) }),
 }));
 
-const verifyCustomModel = vi.fn().mockResolvedValue(true);
+const verifyCustomModel = vi.fn();
+let resolveProbe: () => void;
+beforeEach(() => {
+  verifyCustomModel.mockReset();
+  const result = new Promise((resolve) => {
+    resolveProbe = () => resolve({ connectivity: true });
+  });
+  verifyCustomModel.mockReturnValue(result);
+});
 
 vi.mock("@/services/modelService", () => ({
   modelService: {
@@ -69,7 +77,7 @@ vi.mock("@/services/modelService", () => ({
         connect_status: "not_detected",
       },
     ]),
-    verifyCustomModel: (...args: unknown[]) => verifyCustomModel(...args),
+    verifyCustomModelDetail: (...args: unknown[]) => verifyCustomModel(...args),
     deleteCustomModel: vi.fn(),
     updateSingleModel: vi.fn(),
   },
@@ -105,24 +113,23 @@ it("lights up every clicked row and probes them all", async () => {
   });
   expect(actions).toHaveLength(2);
 
-  // Two different rows clicked within the 1s debounce window: each row must
-  // light up immediately (the click is never invisible) and keep its own
-  // probe — a shared timer used to drop all but the last clicked row.
+  // Keep both probes pending while checking the row feedback.
   await user.click(actions[0]);
   expect(within(rowOf("Model A")).getByText("检测中")).toBeInTheDocument();
   await user.click(actions[1]);
   expect(within(rowOf("Model B")).getByText("检测中")).toBeInTheDocument();
 
+  await act(async () => resolveProbe());
   await waitFor(
     () => {
-      expect(within(rowOf("Model A")).getByText("可用")).toBeInTheDocument();
-      expect(within(rowOf("Model B")).getByText("可用")).toBeInTheDocument();
+      expect(within(rowOf("Model A")).getByText("已连通")).toBeInTheDocument();
+      expect(within(rowOf("Model B")).getByText("已连通")).toBeInTheDocument();
     },
     { timeout: 3000 }
   );
   expect(verifyCustomModel).toHaveBeenCalledTimes(2);
-  expect(verifyCustomModel).toHaveBeenCalledWith("Model A", "llm");
-  expect(verifyCustomModel).toHaveBeenCalledWith("Model B", "embedding");
+  expect(verifyCustomModel).toHaveBeenCalledWith("Model A", "llm", undefined);
+  expect(verifyCustomModel).toHaveBeenCalledWith("Model B", "embedding", undefined);
 });
 
 it("collapses rapid re-clicks of the same row into a single probe", async () => {
@@ -133,10 +140,10 @@ it("collapses rapid re-clicks of the same row into a single probe", async () => 
     name: "检测连通性",
   });
   await user.click(actions[0]);
-  // The row shows feedback immediately; the disabled action (or the per-row
-  // debounce) keeps re-clicks from queueing a second probe.
+  // The pending row does not queue a second probe.
   expect(within(rowOf("Model A")).getByText("检测中")).toBeInTheDocument();
   await user.click(actions[0]);
+  await act(async () => resolveProbe());
 
   await waitFor(
     () => {
@@ -146,7 +153,7 @@ it("collapses rapid re-clicks of the same row into a single probe", async () => 
   );
   await waitFor(
     () => {
-      expect(within(rowOf("Model A")).getByText("可用")).toBeInTheDocument();
+      expect(within(rowOf("Model A")).getByText("已连通")).toBeInTheDocument();
     },
     { timeout: 3000 }
   );

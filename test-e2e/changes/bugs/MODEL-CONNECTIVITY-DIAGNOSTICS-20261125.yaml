@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-CONNECTIVITY-DIAGNOSTICS-20261125
+  change_type: bugfix
+  bug_id: MODEL-CONNECTIVITY-DIAGNOSTICS-20261125
+  title: Restore model connectivity diagnostics and correlate Runtime warnings
+  description: Restore actionable model-check diagnostics on the page and write a correlated Runtime warning.
+  observed_behavior: AgentOS replaces structured LLM failures with a string, old model checks lose failure detail, and the profile probe emits no final failure warning.
+  expected_behavior: The page displays classified connectivity failures and request IDs, and Runtime emits correlated sanitized warnings for completed failed probes.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The existing HTTP probe Case covers abandonment, and the browser journey covers successful onboarding. Neither asserts failed probe diagnostics through AgentOS.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: [MODEL-PROBE-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve only the approved diagnostic fields at AgentOS and retain the legacy response shape.
+    - Classify non-LLM transport errors and verify cancel and success produce no failure warning.
+    - Display specific diagnostics and their request IDs, and clear the previous issue on success.
+    reason: Unit coverage proves filtering and UI state; the HTTP Case exercises the live probe path.
+    test_selectors:
+    - test/backend/services/test_agentos_model_administration.py
+    - test/backend/app/test_model_managment_app.py::test_inventory_healthcheck_hides_diagnostic
+    - test/backend/services/test_model_health_service.py
+    - test/backend/services/test_model_health_outlet_routing.py
+    - test/sdk/core/models/test_volc_tts_model.py
+    - frontend/tests/component/modelLibraryChecks.test.tsx
+    - frontend/tests/component/modelConfigVerify.test.tsx
+    - frontend/tests/component/modelEditDialog.test.tsx
+  notes: D3 owns its loopback provider and signed ASGI transport and releases them after each scenario. There are no shared preparation families or external credentials. Existing D4 success coverage is a regression only.

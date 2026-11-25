@@ -11,6 +11,7 @@ import os
 from typing import Any, BinaryIO, Dict, List, Union
 
 from ....models import OpenAIModel
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 from nexent.core.concurrency import run_blocking
 from nexent.monitor.model_fact import suppress_model_attempts
 
@@ -265,8 +266,9 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
                     stream=False,
                 )
             return True
-        except Exception:
-            logger.exception("VLM connectivity check failed")
+        except Exception as error:
+            if not record_connectivity_failure(error):
+                logger.exception("VLM connectivity check failed")
             return False
 
     # Adapter contract

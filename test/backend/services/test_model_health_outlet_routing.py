@@ -58,7 +58,8 @@ async def test_failed_llm_check_keeps_existing_envelope_with_safe_category(healt
     _, _, _, probe, update = health
     probe.return_value = {"ok": False, "error": {"category": "model_authentication_error"}}
     assert await module.check_model_connectivity("chosen", "tenant") == {
-        "connectivity": False, "model_name": "Exact/Model", "error": "model_authentication_error"}
+        "connectivity": False, "model_name": "Exact/Model", "error": "model_authentication_error",
+        "diagnostic": {"category": "model_authentication_error"}}
     update.assert_called_once_with(42, "tenant", 7, "unavailable")
 
 

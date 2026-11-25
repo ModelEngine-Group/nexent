@@ -1,17 +1,18 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { App } from "antd";
 
 import { ModelEditDialog } from "../../app/[locale]/models/components/model/ModelEditDialog";
+import { modelService } from "@/services/modelService";
 import type { ModelOption } from "@/types/modelConfig";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? key,
+    t: (key: string, options?: { defaultValue?: string; id?: string }) =>
+      options?.defaultValue ?? (options?.id ? `${key}:${options.id}` : key),
   }),
 }));
 
@@ -104,4 +105,31 @@ it("ME-04 migration failures use the existing edit dialog with an inline warning
   expect(screen.getByRole("alert")).toHaveTextContent("modelMigration.failedHint");
   expect(screen.getAllByRole("dialog")).toHaveLength(1);
   expect(screen.queryByText("modelMigration.reviewTitle")).not.toBeInTheDocument();
+});
+
+
+it("shows the classified draft failure and clears it when a retry succeeds", async () => {
+  vi.mocked(modelService.verifyModelConfigConnectivity)
+    .mockResolvedValueOnce({
+      model_name: "Qwen",
+      connectivity: false,
+      diagnostic: {
+        category: "MODEL_AUTHENTICATION_ERROR",
+        scope: "connection",
+        request_id: "edit-probe-id",
+        http_status: 401,
+        messages: { en: "Authentication failed (401)" },
+      },
+    })
+    .mockResolvedValueOnce({ model_name: "Qwen", connectivity: true });
+  renderDialog();
+  const check = screen.getByRole("button", { name: "检测连通性" });
+  fireEvent.click(check);
+  const details = await screen.findByRole("button", { name: "modelProfile.checkIssues" });
+  fireEvent.click(details);
+  expect(await screen.findByText(/Authentication failed \(401\).*edit-probe-id/)).toBeVisible();
+  fireEvent.click(details);
+  fireEvent.click(check);
+  expect(await screen.findByText("可用")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "modelProfile.checkIssues" })).toBeNull();
 });

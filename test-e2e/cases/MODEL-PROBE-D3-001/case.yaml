@@ -5,32 +5,41 @@ case:
   case_id: MODEL-PROBE-D3-001
   feature_id: V5-PW-MODEL-01
   business_rule_ids: [V5-PW-MODEL-01-RULE-02]
-  title: Abandoned outlet validation reaps its actual HTTP probe
+  title: Outlet validation forwards HTTP diagnostics and reaps abandoned probes
   type: INTEGRATION
   priority: P1
   status: active
   automation: automated
-  objective: Verify the service owns cancellation across ModelService and a blocked loopback HTTP request, with only persistence and identity-loading boundaries controlled.
+  objective: Verify cancellation and safe failure diagnostics across the signed AgentOS command and a real outbound HTTP probe.
   preconditions: [Product backend and SDK dependencies installed, Loopback TCP available]
   test_data:
-    configuration: Synthetic saved profile and key; owned stalled HTTP server; disconnect, checker error and caller cancellation variants.
+    configuration: Synthetic profile and credential with an owned loopback provider.
   steps:
   - order: 1
-    action: Start validation through the actual probe and shared HTTP transport; wait until the provider has received its request, then disconnect or raise in the disconnect checker or cancel the caller.
+    action: Start validation through the actual probe and HTTP transport. After the outbound request arrives, disconnect or raise in the disconnect checker or cancel the caller.
     expected: The expected cancellation or checker error propagates and the child probe is awaited.
   - order: 2
-    action: Inspect connectivity writes, concurrency ownership and child tasks; release and close the owned provider and join its thread.
-    expected: No status write occurs, no named probe task or concurrency lease remains, and the server thread terminates.
+    action: Inspect connectivity writes, concurrency ownership and child tasks, then close the provider and join its thread.
+    expected: No status write, failure warning, named child probe or lease remains.
+  - order: 3
+    action: Submit a profile validation through the Management-to-Runtime command against a loopback provider returning HTTP 401 with a synthetic credential in the body.
+    expected: The response preserves the diagnostic and request ID. Runtime logs one completed failure with the same ID.
   expected_results:
   - All three abandonment variants propagate their expected failure after the HTTP boundary was reached.
-  - No persisted status, orphan probe, lease or server thread remains.
-  forbidden_side_effects: [No external provider or database write, No synthetic credential in retained evidence]
-  integration_boundary: [Validation service through actual ModelService and HTTP sender to an owned loopback server]
-  observations: [Provider request receipt, Task and lease lifecycle, Persistence spies]
-  cleanup: [Release handler gate, Close server and join thread]
+  - No persisted status, failure warning, orphan probe, lease or server thread remains after cancellation.
+  - An actual HTTP 401 is returned with a localized diagnostic and an ID matching the Runtime warning.
+  forbidden_side_effects: [No external provider or database write, No upstream body or test credential in the Runtime warning]
+  integration_boundary: [Management through signed AgentOS and Runtime ModelService to an owned loopback provider]
+  observations: [Provider request receipt, Task and lease lifecycle, Persistence spies, Response and Runtime warnings]
+  cleanup: [Release handler gate, Close server and join thread, Close in-process Runtime HTTP client]
   acceptance:
   - id: AC-CANCEL
-    description: Abandonment owns and reaps the real outbound operation without persisting success.
+    description: Abandonment owns and reaps the outbound operation without persisting status or logging a completed failure.
     steps: [1, 2]
     expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-DIAGNOSTIC
+    description: Authentication failure keeps the classified error across AgentOS and correlates the sanitized failure with Runtime logs.
+    steps: [3]
+    expected_results: [3]
     forbidden_side_effects: [1, 2]

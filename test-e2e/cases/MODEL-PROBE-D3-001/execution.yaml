@@ -3,10 +3,11 @@ case_id: MODEL-PROBE-D3-001
 implementations:
 - framework: pytest
   file: test.py
-  selector: test_abandoned_probe
+  selector: test_probe_
   profiles: [mock]
 acceptance_bindings:
-  AC-CANCEL: [test_abandoned_probe]
+  AC-CANCEL: [test_probe_abandonment]
+  AC-DIAGNOSTIC: [test_probe_authentication_diagnostic]
 preparation:
   families: []
   anchors: false

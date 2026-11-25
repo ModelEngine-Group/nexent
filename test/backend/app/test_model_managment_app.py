@@ -1675,6 +1675,26 @@ async def test_manage_healthcheck_success(client, auth_header, user_credentials,
     mock_check.assert_called_once_with("test-model", "target_tenant", "llm", user_id=user_credentials[0])
 
 
+def test_inventory_healthcheck_hides_diagnostic(client, auth_header, mocker):
+    route = "management.api.model.model_managment"
+    mocker.patch(f"{route}.has_any_role", return_value=False)
+    mocker.patch(f"{route}.require_inventory_scope")
+    check = mocker.patch(f"{route}.check_model_connectivity", return_value={
+        "connectivity": False,
+        "diagnostic": {"category": "MODEL_TIMEOUT", "request_id": "private-test-id"},
+    })
+
+    response = client.post("/model/manage/healthcheck", headers=auth_header, json={
+        "tenant_id": "target_tenant", "display_name": "test-model", "model_type": "llm",
+    })
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"] == {"connectivity": False, "error": "Model connectivity check failed"}
+    check.assert_called_once_with(
+        "test-model", "target_tenant", "llm", persist_status=False, user_id="test_user",
+    )
+
+
 @pytest.mark.asyncio
 async def test_manage_healthcheck_without_model_type_is_backward_compatible(
     client, auth_header, user_credentials, mocker

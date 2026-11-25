@@ -27,8 +27,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, opts?: { count?: number }) =>
-      opts?.count === undefined ? key : `${key}:${opts.count}`,
+    t: (key: string, opts?: { count?: number; id?: string }) => {
+      const value = opts?.count ?? opts?.id;
+      return value === undefined ? key : `${key}:${value}`;
+    },
   }),
 }));
 vi.mock("@/hooks/useConfig", () => ({
@@ -76,7 +78,7 @@ vi.mock("@/services/modelProfileService", () => ({
   validateModelOutlet: mocks.validate,
 }));
 vi.mock("@/services/modelService", () => ({
-  modelService: { getAllModels: mocks.models, verifyCustomModel: mocks.legacy },
+  modelService: { getAllModels: mocks.models, verifyCustomModelDetail: mocks.legacy },
   ModelError: class extends Error {},
 }));
 vi.mock("../../app/[locale]/models/components/model/ModelAddDialog", () => ({
@@ -148,6 +150,7 @@ const failure = {
     category: "MODEL_REQUEST_INVALID",
     scope: "model",
     http_status: 400,
+    request_id: "llm-check-id",
     message_source: "provider",
       message: "(400) invalid top_p: only 0.95 is allowed",
   },
@@ -167,7 +170,7 @@ it("RC-04 retains row probe details, retries the saved outlet and clears correct
   fireEvent.click(
     screen.getByRole("button", { name: "modelProfile.checkIssues:1" })
   );
-  expect(await screen.findByText(/\(400\) invalid top_p/)).toBeVisible();
+  expect(await screen.findByText(/\(400\) invalid top_p.*llm-check-id/)).toBeVisible();
   expect(mocks.validate).toHaveBeenCalledWith(
     { outlet_id: 37, expected_revision: 2 },
     undefined
@@ -210,7 +213,7 @@ it("RC-04 default-slot checks use the same diagnostics endpoint and retain Abort
 it("RC-04 preserves the legacy check for non-LLM models", async () => {
   mocks.selected = "";
   mocks.type = "embedding";
-  mocks.legacy.mockResolvedValue(true);
+  mocks.legacy.mockResolvedValue({ connectivity: true });
   setup();
   fireEvent.click(await screen.findByRole("button", { name: /check Kimi:/ }));
   await screen.findByRole(
@@ -220,6 +223,30 @@ it("RC-04 preserves the legacy check for non-LLM models", async () => {
   );
   expect(mocks.legacy).toHaveBeenCalledWith("Kimi", "embedding", undefined);
   expect(mocks.validate).not.toHaveBeenCalled();
+});
+
+it("shows a non-LLM failure and request ID, then clears it after a successful retry", async () => {
+  mocks.selected = "";
+  mocks.type = "embedding";
+  mocks.legacy
+    .mockResolvedValueOnce({
+      connectivity: false,
+      diagnostic: {
+        category: "MODEL_TIMEOUT",
+        scope: "connection",
+        request_id: "embedding-check-id",
+      },
+    })
+    .mockResolvedValueOnce({ connectivity: true });
+  setup();
+  const check = await screen.findByRole("button", { name: /check Kimi:/ });
+  fireEvent.click(check);
+  fireEvent.click(await screen.findByRole("button", { name: "modelProfile.checkIssues:1" }));
+  expect(await screen.findByText(/MODEL_TIMEOUT.*embedding-check-id/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "modelProfile.checkIssues:1" }));
+  fireEvent.click(screen.getByRole("button", { name: /check Kimi:/ }));
+  await screen.findByRole("button", { name: "check Kimi: available" });
+  expect(screen.queryByRole("button", { name: "modelProfile.checkIssues:1" })).toBeNull();
 });
 
 it("S-01 page refresh after saving never starts a hidden connectivity check", async () => {

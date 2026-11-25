@@ -78,3 +78,26 @@ def test_tenant_model_cleanup_uses_one_scoped_update(monkeypatch):
     assert "tenant_id" in where and "delete_flag" in where
     assert statement.params["tenant_id_1"] == "tenant"
     assert statement.params["updated_by"] == "actor"
+
+
+def test_probe_serializers_keep_safe_diagnostics_and_legacy_error_contract():
+    error = {
+        "category": "MODEL_AUTHENTICATION_ERROR",
+        "request_id": "generated-request-id",
+        "http_status": 401,
+        "messages": {"en": "Authentication failed", "zh": "认证失败", "raw": "discard"},
+        "api_key": "discard",
+        "provider_response": {"secret": "discard"},
+    }
+    expected = {key: error[key] for key in ("category", "request_id", "http_status")}
+    expected["messages"] = {"en": "Authentication failed", "zh": "认证失败"}
+    assert model_administration._safe_profile_probe_result({"ok": False, "error": error}) == {
+        "ok": False, "error": expected,
+    }
+    assert model_administration._safe_profile_probe_result({"ok": True, "error": None}) == {
+        "ok": True, "error": None,
+    }
+    assert model_administration._safe_legacy_probe_result({
+        "connectivity": False, "error": "raw upstream message", "diagnostic": error, "api_key": "discard",
+    }) == {"connectivity": False, "error": "Model connectivity check failed", "diagnostic": expected}
+    assert model_administration._safe_result({"error": error}) == {"error": "Model connectivity check failed"}

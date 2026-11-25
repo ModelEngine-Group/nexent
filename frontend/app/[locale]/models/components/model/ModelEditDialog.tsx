@@ -2,6 +2,8 @@
 
 "use client";
 
+import { ModelCheckSummary } from "@/components/model/ModelCheckSummary";
+import { useModelConfigProbe } from "@/hooks/model/useModelConfigProbe";
 import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -90,9 +92,12 @@ export const ModelEditDialog = ({
   const [name, setName] = useState("");
   // In-dialog connectivity probe. "available" is only meaningful for the
   // current form values — any name/type/URL/key change resets it to "idle".
-  const [probe, setProbe] = useState<
-    "idle" | "checking" | "available" | "unavailable"
-  >("idle");
+  const {
+    status: probe,
+    issue: probeIssue,
+    check: checkProbe,
+    reset: resetProbe,
+  } = useModelConfigProbe();
   // Catalog-driven reasoning capability; refreshed (debounced) when the
   // name, URL or type changes so the effort/budget controls track the
   // target model.
@@ -109,7 +114,7 @@ export const ModelEditDialog = ({
     setApiKey(model.apiKey || "");
     setBaseUrl(model.apiUrl || "");
     setType(model.type);
-    setProbe("idle");
+    resetProbe();
     setReasoningCapability(model.reasoningCapability);
     const extra = (model.extraParams ?? {}) as Record<string, unknown>;
     const next: ModelAdvancedSettingsValue = {};
@@ -176,7 +181,7 @@ export const ModelEditDialog = ({
       if (model.maxTokens > 0) next.max_tokens = model.maxTokens;
     }
     setAdvanced(next);
-  }, [model]);
+  }, [model, resetProbe]);
 
   // Refresh the reasoning capability from the catalog when the name, URL or
   // type changes so the effort/budget controls track the target model.
@@ -228,27 +233,17 @@ export const ModelEditDialog = ({
 
   async function handleCheck() {
     if (!model || probe === "checking" || !samplingComplete(advanced)) return;
-    setProbe("checking");
-    try {
-      // Empty apiKey falls back to the stored key via probe_model_id. The
-      // inference params (temperature / top_p / extra_params incl.
-      // __custom__) ride along so an invalid custom param fails the probe
-      // here instead of at runtime — same contract as the backend probe.
-      const result = await modelService.verifyModelConfigConnectivity({
-        modelName: name.trim(),
-        modelType: type,
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || undefined,
-        modelId: model.id,
-        modelFactory: model.source || "OpenAI-API-Compatible",
-        ...buildInferenceParamsPayload(advanced, reasoningCapability),
-        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
-        ...buildVoiceCredentialParams(type, advanced),
-      });
-      setProbe(result.connectivity ? "available" : "unavailable");
-    } catch {
-      setProbe("unavailable");
-    }
+    // Empty API keys fall back to the stored key via probe_model_id.
+    await checkProbe({
+      modelName: name.trim(),
+      modelType: type,
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim() || undefined,
+      modelId: model.id,
+      modelFactory: model.source || "OpenAI-API-Compatible",
+      ...buildInferenceParamsPayload(advanced, reasoningCapability),
+      ...buildVoiceCredentialParams(type, advanced),
+    });
   }
 
   async function handleSave() {
@@ -405,7 +400,7 @@ export const ModelEditDialog = ({
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
-                  setProbe("idle");
+                  resetProbe();
                   setReasoningCapability(undefined);
                 }}
                 className="font-mono"
@@ -417,7 +412,7 @@ export const ModelEditDialog = ({
                 value={type}
                 onValueChange={(v) => {
                   setType(v as ModelType);
-                  setProbe("idle");
+                  resetProbe();
                 }}
                 disabled={typeLocked}
               >
@@ -457,7 +452,7 @@ export const ModelEditDialog = ({
                 value={apiKey}
                 onChange={(e) => {
                   setApiKey(e.target.value);
-                  setProbe("idle");
+                  resetProbe();
                 }}
                 placeholder={t("modelConfig.editDialog.apiKeyKeepHint", {
                   defaultValue: "留空保持原有 Key",
@@ -474,7 +469,7 @@ export const ModelEditDialog = ({
                 value={baseUrl}
                 onChange={(e) => {
                   setBaseUrl(e.target.value);
-                  setProbe("idle");
+                  resetProbe();
                 }}
               />
             </div>
@@ -504,7 +499,7 @@ export const ModelEditDialog = ({
                     setAdvanced(next);
                     // Inference params ride along in the probe, so changing
                     // them invalidates a previous probe result.
-                    setProbe("idle");
+                    resetProbe();
                   }}
                   modelType={type}
                   reasoningCapability={reasoningCapability}
@@ -536,6 +531,7 @@ export const ModelEditDialog = ({
                 {t("model.status.available", { defaultValue: "可用" })}
               </span>
             )}
+            {probeIssue && <ModelCheckSummary issues={{ [name]: probeIssue }} />}
             {probe === "unavailable" && (
               <span className="flex items-center gap-1.5 text-xs text-red-500">
                 <span className="size-2 rounded-full bg-red-500" />

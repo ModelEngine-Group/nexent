@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import logging
+from uuid import uuid4
 from nexent.core.concurrency import run_blocking
 from typing import Optional
 
@@ -14,7 +15,12 @@ from runtime.model.probe import (
     _infer_model_factory,
 )
 from nexent.core import MessageObserver
+from nexent.core.model_service.profiles.probe_diagnostics import (
+    capture_connectivity_diagnostics,
+    record_connectivity_failure,
+)
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from runtime.model.profile_probe import log_probe_failure
 from runtime.model.voice import get_voice_service
 
 logger = logging.getLogger("model_health_service")
@@ -86,9 +92,12 @@ async def _image_generation_connectivity_check(
                 json={"model": model_name, "prompt": "connectivity check"},
                 headers={"Authorization": f"Bearer {api_key}"},
             )
-        return response.status_code == 200
-    except Exception:
-        return False
+        if response.status_code == 200:
+            return True
+        record_connectivity_failure(status=response.status_code)
+    except Exception as error:
+        record_connectivity_failure(error)
+    return False
 
 
 async def _perform_connectivity_check(
@@ -348,12 +357,14 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
                 model["model_id"], tenant_id, profile.config_revision,
                 "available" if result["ok"] else "unavailable", lane="control-io", owner="runtime.model")
         return {"connectivity": result["ok"], "model_name": model["model_name"],
-                **({"error": result["error"]["category"]} if result["error"] else {})}
+                **({"error": result["error"]["category"], "diagnostic": result["error"]} if result["error"] else {})}
     if not model:
         raise LookupError("MODEL_CONFIGURATION_NOT_FOUND")
-    if not persist_status:
-        return await _verify_non_llm_config_connectivity(model)
-    return await _check_non_llm_connectivity(display_name, tenant_id, model_type, _model=model)
+    check = (
+        _check_non_llm_connectivity(display_name, tenant_id, model_type, _model=model)
+        if persist_status else _verify_non_llm_config_connectivity(model)
+    )
+    return await _with_legacy_diagnostic(model.get("model_type", ""), check)
 
 
 async def verify_model_config_connectivity(model_config: dict):
@@ -371,8 +382,22 @@ async def verify_model_config_connectivity(model_config: dict):
             migrated_at=datetime.now(timezone.utc).isoformat())
         result = await probe_model_profile(profile, model_config.get("api_key"), http_headers=model_config.get("http_headers") or {})
         return {"connectivity": result["ok"], "model_name": name,
-                **({"error": result["error"]["category"]} if result["error"] else {})}
-    return await _verify_non_llm_config_connectivity(model_config)
+                **({"error": result["error"]["category"], "diagnostic": result["error"]} if result["error"] else {})}
+    return await _with_legacy_diagnostic(
+        model_config.get("model_type", ""), _verify_non_llm_config_connectivity(model_config)
+    )
+
+
+async def _with_legacy_diagnostic(model_type, check):
+    with capture_connectivity_diagnostics() as diagnostics:
+        result = await check
+    if not result["connectivity"]:
+        error = {"category": diagnostics.category, "scope": "connection", "request_id": uuid4().hex}
+        if diagnostics.http_status is not None:
+            error["http_status"] = diagnostics.http_status
+        log_probe_failure(model_type, error)
+        result["diagnostic"] = error
+    return result
 
 
 async def _check_non_llm_connectivity(display_name: str, tenant_id: str, model_type: str = None, *, _model=None) -> dict:
@@ -442,7 +467,7 @@ async def _check_non_llm_connectivity(display_name: str, tenant_id: str, model_t
                 )
         except Exception as e:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
-            logger.error(f"Error checking model connectivity: {str(e)}")
+            record_connectivity_failure(e)
             update_model_record(model["model_id"], update_data, tenant_id=tenant_id)
             if isinstance(e, ValueError):
                 raise e
@@ -453,9 +478,7 @@ async def _check_non_llm_connectivity(display_name: str, tenant_id: str, model_t
             }
 
         if connectivity:
-            logger.info(f"CONNECTED: {model_name}")
-        else:
-            logger.warning(f"UNCONNECTED: {model_name}")
+            logger.info("Model connectivity check succeeded")
         connect_status = (
             ModelConnectStatusEnum.AVAILABLE.value
             if connectivity
@@ -471,7 +494,7 @@ async def _check_non_llm_connectivity(display_name: str, tenant_id: str, model_t
         }
         return result
     except Exception as e:
-        logger.error(f"Error checking model connectivity: {str(e)}")
+        logger.error("Could not complete model connectivity check (%s)", type(e).__name__)
         if "model" in locals() and model:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             update_model_record(model["model_id"], update_data, tenant_id=tenant_id)
@@ -541,7 +564,6 @@ async def _verify_non_llm_config_connectivity(model_config: dict):
                     extra_params=extra_params,
                 )
             if not connectivity:
-                error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
                 return {
                     "connectivity": False,
                     "model_name": model_name,
@@ -554,12 +576,12 @@ async def _verify_non_llm_config_connectivity(model_config: dict):
             }
         except ValueError as e:
             error_msg = str(e)
-            logger.warning(f"UNCONNECTED: {model_name}; Error: {error_msg}")
+            record_connectivity_failure(e)
             return {"connectivity": False, "model_name": model_name, "error": error_msg}
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"Failed to check connectivity of models: {error_msg}")
+        record_connectivity_failure(e)
         return {
             "connectivity": False,
             "model_name": model_config.get("model_name", "UNKNOWN_MODEL"),
