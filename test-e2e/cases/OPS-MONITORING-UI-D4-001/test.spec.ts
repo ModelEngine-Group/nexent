@@ -28,7 +28,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       "ops.configuration:read",
       "resource.inventory:read",
     ],
-    accessibleRoutes: ["/ops/dashboard", "/ops/configuration"],
+    accessiblePages: ["ops-dashboard", "ops-configuration"],
   };
   const reads: string[] = [];
   const unexpected: string[] = [];
