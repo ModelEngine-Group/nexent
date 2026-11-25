@@ -304,7 +304,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         )
         if active is not None:
             rendered = result if isinstance(result, str) else json.dumps(value, ensure_ascii=False, default=str)
-            record_tool_result(is_error, value)
+            record_tool_result(is_error, result, fingerprint_value=value)
             diagnostic = (
                 self._resource_failure(RuntimeError("Resource returned failure"), active[3], active[2])
                 if is_error else None

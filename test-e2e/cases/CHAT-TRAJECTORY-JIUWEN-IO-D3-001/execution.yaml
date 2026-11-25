@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-JIUWEN-IO-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_jiuwen
+acceptance_bindings:
+  AC-01: [test_jiuwen_root_and_local_tool]
+  AC-02: [test_jiuwen_delegated_tool_bodies]
+  AC-03: [test_jiuwen_no_final_answer]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The case owns the loopback HTTP model peer, Jiuwen worker lanes, real local OTLP writer,
+  temporary archive and cold Ops HTTP client. The catalog and authenticated identity are controlled.
+  No deployment, database, shared model, assets or preparation families are required. Fixture teardown
+  closes clients and providers, joins managed execution, checks zero active workers and removes the archive.

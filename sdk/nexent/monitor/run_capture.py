@@ -14,8 +14,10 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel
 
+from nexent.core.agents.contracts.output import RunResult
+
 from .duration import duration_attributes
-from .local_content import local_capture_enabled, local_content_value, safe_local_content
+from .local_content import local_capture_enabled, local_content_value, safe_local_content, set_local_span_content
 
 
 def _gap(span, field):
@@ -91,8 +93,8 @@ def capture_run_input(manager, span, *, query, agent_config, model_configs, hist
         _gap(span, 'input')
 
 
-def capture_run_result(manager, span, *, outcome):
-    """Cancellation caught by the worker still has a cancelled business result."""
+def capture_run_result(manager, span, *, outcome, result=None):
+    """Record the worker outcome and the explicit public answer from the completed run."""
     if not local_capture_enabled(manager) or span is None:
         return
     status = {'stopped': 'cancelled', 'completed': 'completed', 'failed': 'failed'}.get(outcome, 'interrupted')
@@ -100,6 +102,9 @@ def capture_run_result(manager, span, *, outcome):
         span.set_attributes({'nexent.business_status': status, 'nexent.cancelled': status == 'cancelled'})
     except Exception:
         _gap(span, 'business_status')
+    if (status == 'completed' and isinstance(result, RunResult) and result.final_content
+            and result.end_reason != 'awaiting_input'):
+        set_local_span_content(span, 'output', result.final_content)
 
 
 def capture_context_values(manager, span, *, before=None, after=None, evidence=None):
