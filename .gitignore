@@ -75,7 +75,6 @@ deploy/k8s/helm/nexent-infrastructure/Chart.lock
 
 MAC_DEVELOPMENT_GUIDE.md
 data/
-sdk/benchmark/.env
 /docker/.env.bak
 
 .venv

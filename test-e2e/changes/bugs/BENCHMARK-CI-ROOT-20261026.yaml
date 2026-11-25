@@ -23,19 +23,11 @@ change:
     modified: []
     retired: []
   traditional_ut:
-    decision: add
+    decision: exempt
     behaviors:
-      - Locate roots with Git directory or pointer metadata.
-      - Locate a complete exported SDK/backend/VERSION tree and initialize entrypoint paths there.
-      - Reject incomplete layouts without silently choosing arbitrary directories.
-    reason: The decision is a local filesystem-layout contract. Dedicated UT is sufficient; benchmark Feature/Case search found no matching formal owner, and no runtime protocol is changed.
-    test_selectors:
-      - test/sdk/benchmark/test_paths.py
-      - test/sdk/benchmark/test_agent_runner_tracking.py
-      - test/sdk/benchmark/test_single_prompt_entrypoints.py
-      - test/sdk/benchmark/test_run_benchmark_execution.py
-      - test/sdk/benchmark/test_webhook_server_security.py
-      - test/sdk/benchmark/test_task_adapter_rendering.py
+      - Resolve Git checkouts, worktrees and complete source trees for the extracted benchmark entrypoints.
+      - Reject incomplete source layouts.
+    reason: This historical tooling-only regression is maintained and tested in the independent benchmark repository.
   notes: >-
     Existing refactor evidence owner is nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/contracts-business-layout/ci-20261026.md.
     Evaluation doubles, fidelity-copy inventory, manifest payload isolation and source-scan scope are test-only repairs within the same CI follow-up.

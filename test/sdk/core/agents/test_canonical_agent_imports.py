@@ -36,7 +36,7 @@ def test_project_imports_do_not_depend_on_removed_agent_paths():
     removed = ["nexent.core.agents." + name for name in REMOVED]
     removed += ["nexent.core.context_runtime", "nexent.core.agent_runtime_support"]
     failures = []
-    for folder in [ROOT / "sdk/nexent", ROOT / "sdk/benchmark", ROOT / "backend"]:
+    for folder in [ROOT / "sdk/nexent", ROOT / "backend"]:
         for path in folder.rglob("*.py"):
             if ".venv" in path.parts or "__pycache__" in path.parts:
                 continue
