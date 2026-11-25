@@ -18,6 +18,21 @@ DEFAULTS = {
 CONFIG_KEYS = frozenset(DEFAULTS)
 INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
                   "full_text_candidates": (1, 500), "hybrid_top_k": (1, 100), "graph_top_k": (1, 100)}
+FIELD_CHANNELS = {
+    "hybrid_top_k": ("vector_search", "full_text_search"),
+    "graph_top_k": ("graph_search",),
+    "vector_candidates": ("vector_search",),
+    "full_text_candidates": ("full_text_search",),
+    "vector_score_threshold": ("vector_search",),
+    "full_text_score_threshold": ("full_text_search",),
+    "graph_score_threshold": ("graph_search",),
+    "graph_reranking_enable": ("graph_search",),
+}
+
+
+def _field_active(key, channels):
+    owners = FIELD_CHANNELS.get(key)
+    return owners is None or bool(set(owners) & channels)
 
 
 def normalize_method(value):
@@ -79,28 +94,18 @@ def validate_config(config, inherited=None):
             if not isinstance(value, str) or value not in RERANK_MODES:
                 raise ValueError("reranking_mode: invalid reranking strategy")
         elif key in BOOLEAN_KEYS:
-            if key == "graph_reranking_enable" and not graph:
+            if not _field_active(key, channels):
                 continue
             if not isinstance(value, bool):
                 raise ValueError(f"{key}: expected boolean")
         elif key in INTEGER_RANGES:
-            if key == "hybrid_top_k" and not hybrid:
-                continue
-            if key == "graph_top_k" and not graph:
-                continue
-            if key == "vector_candidates" and "vector_search" not in channels:
-                continue
-            if key == "full_text_candidates" and "full_text_search" not in channels:
+            if not _field_active(key, channels):
                 continue
             low, high = INTEGER_RANGES[key]
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{key}: expected integer {low}-{high}")
         elif key in THRESHOLD_KEYS:
-            if (
-                (key == "vector_score_threshold" and "vector_search" not in channels)
-                or (key == "full_text_score_threshold" and "full_text_search" not in channels)
-                or (key == "graph_score_threshold" and not graph)
-            ):
+            if not _field_active(key, channels):
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
                 raise ValueError(f"{key}: expected finite number 0-1")

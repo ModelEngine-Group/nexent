@@ -5,6 +5,15 @@ export const aidpChannels = [
   "graph_search",
 ];
 export const aidpAllChannels = aidpChannels.join("|");
+const CHANNEL_FIELDS: Record<string, string[]> = {
+  vector_search: ["vector_candidates", "vector_score_threshold"],
+  full_text_search: ["full_text_candidates", "full_text_score_threshold"],
+  graph_search: [
+    "graph_top_k",
+    "graph_score_threshold",
+    "graph_reranking_enable",
+  ],
+};
 export const aidpDefaults: Record<string, unknown> = {
   search_method: aidpAllChannels,
   top_k: 10,
@@ -118,19 +127,9 @@ export function aidpErrors(
       errors[key] = "candidates";
   }
   // Hidden fields are not part of the request; stale values must not block save.
-  if (!methods.includes("vector_search")) {
-    delete errors.vector_candidates;
-    delete errors.vector_score_threshold;
-  }
-  if (!methods.includes("full_text_search")) {
-    delete errors.full_text_candidates;
-    delete errors.full_text_score_threshold;
-  }
+  for (const [channel, fields] of Object.entries(CHANNEL_FIELDS))
+    if (!methods.includes(channel))
+      for (const key of fields) delete errors[key];
   if (!hybrid) delete errors.hybrid_top_k;
-  if (!graph) {
-    delete errors.graph_top_k;
-    delete errors.graph_score_threshold;
-    delete errors.graph_reranking_enable;
-  }
   return errors;
 }
