@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from contracts.constants.environment import JWT_SECRET
+from infrastructure.monitoring.contracts import McpServerType
 from management.services.permission.identity.session import authenticate
 from ops.monitoring.agent_tokens import read_agent_tokens
 from ops.monitoring.model import summarize
@@ -464,13 +465,16 @@ class ToolSelection(BaseModel):
     end_date: date
     group_ids: list[int]
     server_id: int | None
-    server_type: str | None
+    # Same normalized values the fact contract carries; an unknown filter value
+    # is a client error instead of a silently empty result.
+    server_type: McpServerType | None
     tool_name: str | None
 
 
 def tool_selection(start_date: date, end_date: date, tenant_id: str | None = None,
                    group_ids: Annotated[list[int] | None, Query(max_length=100)] = None,
-                   server_id: Annotated[int | None, Query(gt=0)] = None, server_type: str | None = None,
+                   server_id: Annotated[int | None, Query(gt=0)] = None,
+                   server_type: McpServerType | None = None,
                    tool_name: Annotated[str | None, Query(max_length=200)] = None):
     if not 0 <= (end_date - start_date).days < 366 or any(group <= 0 for group in group_ids or ()):
         raise HTTPException(422, "Invalid monitoring date range or group ID")

@@ -181,6 +181,7 @@ def test_mcp_server_catalog_lists_registered_servers_with_coarse_types(monkeypat
     ]
     statements = []
     monkeypatch.setattr("ops.monitoring.query.get_db_session", lambda: _fake_db_session(rows, statements))
+    monkeypatch.setattr("ops.monitoring.query.LOCAL_MCP_SERVER", None)
 
     catalog = mcp_server_catalog("tenant-a")
     assert {entry["name"]: entry for entry in catalog} == {
@@ -193,6 +194,24 @@ def test_mcp_server_catalog_lists_registered_servers_with_coarse_types(monkeypat
     # The whole-platform readers pass tenant=None and skip the tenant filter.
     assert mcp_server_catalog(None) == catalog
     assert "tenant_id_1" not in statements[1].compile().params
+
+
+def test_mcp_server_catalog_appends_the_local_endpoint_when_configured(monkeypatch):
+    """The tenant-local endpoint is synthesized without a database record."""
+    from ops.monitoring.query import mcp_server_catalog
+
+    rows = [{"mcp_id": 3, "mcp_name": "docs", "tenant_id": "tenant-a", "container_id": None, "config_json": None}]
+    statements = []
+    monkeypatch.setattr("ops.monitoring.query.get_db_session", lambda: _fake_db_session(rows, statements))
+    monkeypatch.setattr("ops.monitoring.query.LOCAL_MCP_SERVER", "http://mcp.internal:8080")
+
+    catalog = mcp_server_catalog("tenant-a")
+    assert catalog == [
+        {"service_id": 3, "name": "docs", "type": "remote"},
+        {"service_id": None, "name": "outer-apis", "type": "builtin"},
+    ]
+    # One synthesized entry regardless of the tenant scope.
+    assert mcp_server_catalog(None) == catalog
 
 
 def test_mcp_services_by_tenant_counts_registered_servers(monkeypatch):

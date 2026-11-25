@@ -324,6 +324,28 @@ def test_mcp_tool_selection_rejects_invalid_ranges(monitoring_client):
     assert response.status_code == 422
 
 
+def test_mcp_tool_selection_rejects_unknown_server_type(monitoring_client):
+    """server_type accepts only the fact contract's normalized values."""
+    client, _ = monitoring_client
+    response = client.get("/ops/v1/monitoring/mcp-tools",
+                          params={"start_date": "2026-11-17", "end_date": "2026-11-17",
+                                  "server_type": "serverless"})
+    assert response.status_code == 422
+
+
+def test_mcp_tool_selection_accepts_builtin_server_type(monitoring_client, monkeypatch):
+    """The synthesized tenant-local endpoint is selectable through its type."""
+    client, _ = monitoring_client
+    monkeypatch.setattr(monitoring, "read_mcp_tools",
+                        Mock(return_value=([], [], {"coverage_state": "uncovered", "is_stale": False,
+                                                    "data_as_of": None})))
+    response = client.get("/ops/v1/monitoring/mcp-tools",
+                          params={"start_date": "2026-11-17", "end_date": "2026-11-17",
+                                  "server_type": "builtin"})
+    assert response.status_code == 200
+    assert monitoring.read_mcp_tools.call_args.kwargs["server_type"] == "builtin"
+
+
 def test_mcp_tools_require_an_available_monitoring_service(monitoring_client, monkeypatch):
     monkeypatch.setattr(monitoring, "read_mcp_tools", Mock(side_effect=RuntimeError("store down")))
     response = monitoring_client[0].get("/ops/v1/monitoring/mcp-tools",

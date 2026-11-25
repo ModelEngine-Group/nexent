@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import func, select
 
+from contracts.constants.environment import LOCAL_MCP_SERVER
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
@@ -287,12 +288,18 @@ def mcp_server_rows(rows):
 
 
 def mcp_server_catalog(tenant: str | None) -> list[dict]:
-    """List registered MCP servers for filter dropdowns, including never-called ones.
+    """List MCP servers for filter dropdowns, including never-called ones.
 
     The type here is a coarse container/remote split for display only; fact
-    rows carry the authoritative normalized ``mcp_server_type``.
+    rows carry the authoritative normalized ``mcp_server_type``. The
+    tenant-local endpoint hosts built-in and OpenAPI-converted tools but has
+    no database record, so it is synthesized from the configuration; it
+    carries no numeric id and is selected through ``server_type=builtin``.
+    This is a registered-inventory view: the summary endpoint's
+    ``service_count`` (servers with published facts) uses a different scope.
     """
     from infrastructure.monitoring.catalog import is_container_record
+    from infrastructure.monitoring.contracts import LOCAL_MCP_NAME
     from infrastructure.rdb.mcp_execution_records import McpRecord
 
     columns = (McpRecord.tenant_id, McpRecord.mcp_id, McpRecord.mcp_name, McpRecord.container_id,
@@ -302,12 +309,19 @@ def mcp_server_catalog(tenant: str | None) -> list[dict]:
         statement = statement.where(McpRecord.tenant_id == tenant)
     with get_db_session() as session:
         records = [dict(row) for row in session.execute(statement).mappings()]
-    return [{"service_id": record["mcp_id"], "name": record["mcp_name"],
-             "type": "container" if is_container_record(record) else "remote"} for record in records]
+    servers = [{"service_id": record["mcp_id"], "name": record["mcp_name"],
+                "type": "container" if is_container_record(record) else "remote"} for record in records]
+    if LOCAL_MCP_SERVER:
+        servers.append({"service_id": None, "name": LOCAL_MCP_NAME, "type": "builtin"})
+    return servers
 
 
 def mcp_services_by_tenant(tenant: str | None) -> list[dict]:
-    """Count registered MCP servers per tenant for the platform overview card."""
+    """Count registered remote/container MCP servers per tenant for the overview card.
+
+    Registered inventory only: the tenant-local endpoint is intentionally
+    excluded because every tenant carries one.
+    """
     from infrastructure.rdb.mcp_execution_records import McpRecord
 
     statement = (select(McpRecord.tenant_id, func.count().label("service_count"))
