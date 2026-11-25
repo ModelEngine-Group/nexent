@@ -51,7 +51,9 @@ def build_run_monitoring_catalog(tenant_id, used_mcp_urls, mcp_records, local_se
     if not enabled or is_debug or not used_mcp_urls:
         return None
     try:
-        converted = query_converted_tool_names(tenant_id)
+        # Converted tool names only refine the local endpoint's entry, so the
+        # tenant OpenAPI lookup is skipped when the endpoint is not configured.
+        converted = query_converted_tool_names(tenant_id) if local_server_url else set()
         return _build_catalog(used_mcp_urls, mcp_records, local_server_url, converted) or None
     except Exception as error:
         logger.warning("event=monitoring_catalog_build_failed error=%s", type(error).__name__)
@@ -85,7 +87,10 @@ def build_run_monitoring_catalog_from_db(tenant_id, used_mcp_urls, mcp_rows, loc
     if not enabled or is_debug or not used_mcp_urls:
         return None
     mapped = _catalog_records(mcp_rows)
-    return select_run_monitoring_catalog(mapped, used_mcp_urls, local_server_url, query_converted_tool_names(tenant_id))
+    # Converted tool names only refine the local endpoint's entry; skip the
+    # tenant OpenAPI lookup when the endpoint is not configured.
+    converted = query_converted_tool_names(tenant_id) if local_server_url else set()
+    return select_run_monitoring_catalog(mapped, used_mcp_urls, local_server_url, converted)
 
 
 def prepare_tenant_monitoring_catalog(tenant_id, local_server_url, *, enabled=True):
@@ -107,11 +112,14 @@ def prepare_tenant_monitoring_catalog(tenant_id, local_server_url, *, enabled=Tr
             used_urls.append(local_server_url)
         if not used_urls:
             return None
+        # Converted tool names only refine the local endpoint's entry, so the
+        # tenant OpenAPI lookup is skipped when the endpoint is not configured.
+        converted = query_converted_tool_names(tenant_id) if local_server_url else set()
         return select_run_monitoring_catalog(
             records,
             used_urls,
             local_server_url,
-            query_converted_tool_names(tenant_id),
+            converted,
         )
     except Exception as error:
         logger.warning("event=monitoring_catalog_prepare_failed error=%s", type(error).__name__)

@@ -2,6 +2,7 @@
 """The per-run MCP monitoring catalog maps used URLs to normalized server identities."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from infrastructure.monitoring import catalog as pure_catalog
 from management.services.agent import monitoring_catalog as catalog_mod
@@ -103,6 +104,53 @@ def test_catalog_skips_urls_without_records():
     assert build_mcp_server_catalog(["http://missing.invalid/mcp"], [], LOCAL, set()) == []
 
 
+def test_filter_prepared_catalog_projects_used_urls_and_stays_silent_on_full_hits(caplog):
+    payload = [{"url": "https://a.example/mcp", "mcp_server_id": 1},
+               {"url": "https://b.example/mcp", "mcp_server_id": 2}]
+
+    with caplog.at_level("WARNING", logger="infrastructure.monitoring.catalog"):
+        selected = pure_catalog.filter_prepared_catalog(
+            payload, ["https://b.example/mcp"], enabled=True, is_debug=False)
+
+    assert selected == [{"url": "https://b.example/mcp", "mcp_server_id": 2}]
+    assert not [record for record in caplog.records
+                if record.getMessage().startswith("event=monitoring_catalog_url_unresolved")]
+
+
+def test_filter_prepared_catalog_warns_on_unresolved_used_urls(caplog):
+    """A used URL missing from the payload signals configuration drift and is logged."""
+    payload = [{"url": "https://a.example/mcp", "mcp_server_id": 1}]
+
+    with caplog.at_level("WARNING", logger="infrastructure.monitoring.catalog"):
+        # One resolved URL plus one drifted URL: the resolved subset survives.
+        selected = pure_catalog.filter_prepared_catalog(
+            payload, ["https://a.example/mcp", "https://drifted.example/mcp"],
+            enabled=True, is_debug=False)
+
+    assert selected == [{"url": "https://a.example/mcp", "mcp_server_id": 1}]
+    unresolved = [record.getMessage() for record in caplog.records
+                  if record.getMessage().startswith("event=monitoring_catalog_url_unresolved")]
+    assert unresolved == ["event=monitoring_catalog_url_unresolved urls=['https://drifted.example/mcp']"]
+
+    # A payload with no intersection at all keeps degrading to None.
+    with caplog.at_level("WARNING", logger="infrastructure.monitoring.catalog"):
+        assert pure_catalog.filter_prepared_catalog(
+            payload, ["https://other.example/mcp"], enabled=True, is_debug=False) is None
+
+
+def test_filter_prepared_catalog_omits_disabled_debug_and_empty_inputs():
+    payload = [{"url": "https://a.example/mcp", "mcp_server_id": 1}]
+
+    assert pure_catalog.filter_prepared_catalog(
+        payload, ["https://a.example/mcp"], enabled=False, is_debug=False) is None
+    assert pure_catalog.filter_prepared_catalog(
+        payload, ["https://a.example/mcp"], enabled=True, is_debug=True) is None
+    assert pure_catalog.filter_prepared_catalog(
+        payload, [], enabled=True, is_debug=False) is None
+    assert pure_catalog.filter_prepared_catalog(
+        None, ["https://a.example/mcp"], enabled=True, is_debug=False) is None
+
+
 def test_run_catalog_omitted_when_disabled_or_debug_or_empty():
     records = [_record(LOCAL)]
     assert build_run_monitoring_catalog("tenant-1", [LOCAL], records, LOCAL,
@@ -134,6 +182,28 @@ def test_run_catalog_builds_with_converted_names(monkeypatch):
                                            enabled=True, is_debug=False)
     assert seen["tenant_id"] == "tenant-1"
     assert catalog and catalog[0]["tool_types"] == {"list_pets": "api_convert"}
+
+
+def test_run_catalog_skips_openapi_lookup_without_local_server(monkeypatch):
+    """Converted tool names only refine the local entry; the OpenAPI lookup is skipped otherwise."""
+    remote_url = "http://remote.invalid/mcp"
+    records = [_record(remote_url)]
+    rows = [{"mcp_server": remote_url, "mcp_name": "docs", "status": True, "mcp_id": 5,
+             "container_id": None, "config_json": None}]
+    lookup = Mock(return_value=set())
+    monkeypatch.setattr(catalog_mod, "query_converted_tool_names", lookup)
+    monkeypatch.setattr(catalog_mod, "_mcp_records_for_tenant", lambda tenant_id: rows)
+
+    assert build_run_monitoring_catalog("tenant-1", [remote_url], records, None,
+                                        enabled=True, is_debug=False) is not None
+    assert catalog_mod.build_run_monitoring_catalog_from_db(
+        "tenant-1", [remote_url], rows, None, enabled=True, is_debug=False) is not None
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", None) is not None
+    assert lookup.call_count == 0
+
+    # The lookup runs once the local endpoint is configured.
+    assert catalog_mod.prepare_tenant_monitoring_catalog("tenant-1", LOCAL) is not None
+    assert lookup.call_count == 1
 
 
 def _fastmcp_default_name(method, path, operation_id=None, summary=None):

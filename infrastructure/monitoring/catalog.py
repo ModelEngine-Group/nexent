@@ -153,14 +153,22 @@ def filter_prepared_catalog(payload_catalog, used_mcp_urls, *, enabled, is_debug
 
     Management attaches the tenant catalog to the prepared payload; Runtime
     keeps only entries for URLs this run materialized. Never raises: capture
-    must not interrupt run preparation.
+    must not interrupt run preparation. A used URL missing from the payload
+    is exceptional (endpoint configuration drift between services, or a
+    record deleted between preparation and materialization): facts for it
+    degrade to the normalized ``unknown`` type, so the cause is surfaced
+    here instead.
     """
     if not enabled or is_debug or not used_mcp_urls or not payload_catalog:
         return None
     try:
         wanted = set(used_mcp_urls)
+        known = {entry.get("url") for entry in payload_catalog if isinstance(entry, dict)}
         selected = [entry for entry in payload_catalog
                     if isinstance(entry, dict) and entry.get("url") in wanted]
+        unresolved = sorted(wanted - known)
+        if unresolved:
+            logger.warning("event=monitoring_catalog_url_unresolved urls=%s", unresolved)
         return selected or None
     except Exception as error:
         logger.warning("event=monitoring_catalog_filter_failed error=%s", type(error).__name__)
