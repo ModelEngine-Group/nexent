@@ -10,7 +10,7 @@ from management.db.conversation import memory_completion as queue
 from management.services.memory import prepared_completion as completion
 
 JOB = queue.MemoryJob("a" * 32, queue.FINAL_ANSWER, 7, "b" * 32, 1, None)
-SOURCE = queue.MemorySource("tenant-a", "user-a", 42, 81, "final answer", "original query")
+SOURCE = queue.MemorySource("tenant-a", "user-a", 42, 81, "final answer", "original query", 1)
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def worker(monkeypatch):
     monkeypatch.setattr(queue, "read_source", read)
     monkeypatch.setattr(queue, "settle", settle)
     monkeypatch.setattr(queue, "checkpoint", checkpoint)
-    monkeypatch.setattr(completion, "get_memory_switch", enabled)
+    monkeypatch.setattr(completion, "can_write_automatic_memory", enabled)
     monkeypatch.setattr(completion, "build_memory_service_for_fa_extraction", Mock())
     monkeypatch.setattr(completion, "FaMemoryExtractor", Mock(return_value=extractor))
     monkeypatch.setattr(completion.tenant_config_manager, "get_app_config", Mock(return_value="11"))
@@ -44,6 +44,7 @@ async def test_extracts_once_and_writes_only_after_checkpoint(worker):
     await completion.process_memory_job(JOB)
 
     worker.extractor.select_items.assert_awaited_once_with("final answer", "original query")
+    completion.build_memory_service_for_fa_extraction.assert_called_once_with(agent_version_no=1)
     worker.extractor.store_item.assert_awaited_once_with("memo")
     worker.settle.assert_called_once_with(JOB, retry=False)
 
@@ -98,3 +99,77 @@ async def test_turn_ingest_uses_committed_unit_ids_without_final_answer(worker, 
     unit, = args["units"]
     assert (unit.event_id, unit.unit_content) == ("11", "tool content")
     worker.settle.assert_called_once_with(job, retry=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_type", [queue.FINAL_ANSWER, queue.TURN_COMPLETED])
+async def test_configuration_read_failure_retries_instead_of_finishing(worker, monkeypatch, job_type):
+    from management.services.memory import access
+
+    error = RuntimeError("configuration database unavailable")
+    monkeypatch.setattr(access, "get_user_configs", Mock(side_effect=error))
+    monkeypatch.setattr(completion, "can_write_automatic_memory", access.can_write_automatic_memory)
+    ingest = AsyncMock()
+    monkeypatch.setattr(completion, "_ingest_turn", ingest)
+    job = replace(JOB, job_type=job_type)
+    await completion.process_memory_job(job)
+    worker.extractor.select_items.assert_not_awaited()
+    ingest.assert_not_awaited()
+    worker.settle.assert_called_once_with(job, retry=True)
+    # A recovered configuration must make the same persisted work eligible again.
+    access.get_user_configs.side_effect = None
+    access.get_user_configs.return_value = {"MEMORY_SWITCH": "Y"}
+    monkeypatch.setattr(access, "tenant_memory_enabled", Mock(return_value=True))
+    monkeypatch.setattr(access, "source_agent_allows_memory", Mock(return_value=True))
+    worker.settle.reset_mock()
+    retried = replace(job, attempts=2)
+    await completion.process_memory_job(retried)
+    worker.settle.assert_called_once_with(retried, retry=False)
+    assert worker.extractor.store_item.await_count == int(job_type == queue.FINAL_ANSWER)
+    assert ingest.await_count == int(job_type == queue.TURN_COMPLETED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_type", [queue.FINAL_ANSWER, queue.TURN_COMPLETED])
+@pytest.mark.parametrize("executed_version", [0, 1])
+@pytest.mark.parametrize("executed_enabled", [False, True])
+async def test_later_publication_does_not_replace_executed_memory_policy(
+    worker, monkeypatch, executed_version, executed_enabled, job_type,
+):
+    from management.services.memory import access
+
+    source = SimpleNamespace(**{**vars(SOURCE), "agent_version_no": executed_version})
+    worker.read.return_value = source
+    monkeypatch.setattr(access, "get_user_configs", Mock(return_value={"MEMORY_SWITCH": "Y"}))
+    monkeypatch.setattr(access, "tenant_memory_enabled", Mock(return_value=True))
+    published = Mock(return_value=2)
+    monkeypatch.setattr(access, "query_current_version_no", published)
+    lookup = Mock(side_effect=lambda _id, _tenant, version: {
+        "enable_memory": executed_enabled if version == executed_version else not executed_enabled,
+    })
+    monkeypatch.setattr(access, "search_agent_info_by_agent_id", lookup)
+    monkeypatch.setattr(completion, "can_write_automatic_memory", access.can_write_automatic_memory)
+    ingest = AsyncMock()
+    monkeypatch.setattr(completion, "_ingest_turn", ingest)
+    job = replace(JOB, job_type=job_type)
+    await completion.process_memory_job(job)
+    lookup.assert_called_once_with(7, "tenant-a", executed_version)
+    published.assert_not_called()
+    assert worker.extractor.store_item.await_count == int(executed_enabled and job_type == queue.FINAL_ANSWER)
+    assert ingest.await_count == int(executed_enabled and job_type == queue.TURN_COMPLETED)
+    worker.settle.assert_called_once_with(job, retry=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", [0, 1])
+async def test_fa_facade_forwards_executed_version_to_backend(monkeypatch, version):
+    from management.services.memory import provider
+
+    store = AsyncMock(return_value={"memory_id": 19, "event": "ADD"})
+    monkeypatch.setattr(provider, "_backend_store_hook", store)
+    service = provider.build_memory_service_for_fa_extraction(agent_version_no=version)
+    result = await service.store_memory(content="memo", tenant_id="tenant", user_id="user", agent_id="7")
+    assert result.memory_id == "19"
+    store.assert_awaited_once()
+    payload = store.await_args.args[0]
+    assert (payload["agent_id"], payload["agent_version_no"], payload["content"]) == ("7", version, "memo")

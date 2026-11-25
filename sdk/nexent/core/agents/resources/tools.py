@@ -269,6 +269,8 @@ class ToolResources:
                 observer=self.observer,
                 authorized_skill_names=params.get("authorized_skill_names"),
             )
+            if params.get("skill_name_to_id"):
+                kwargs["skill_id_by_name"] = params["skill_name_to_id"]
             if params.get("isolated_skills_root"):
                 kwargs["isolated_skills_root"] = True
             if params.get("workspace_path"):
@@ -287,6 +289,8 @@ class ToolResources:
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
+            if params.get("skill_name_to_id"):
+                kwargs["skill_id_by_name"] = params["skill_name_to_id"]
             if params.get("authorized_skill_names") is not None:
                 kwargs["authorized_skill_names"] = params["authorized_skill_names"]
             if params.get("isolated_skills_root"):

@@ -19,7 +19,7 @@ async def add_remote_mcp_server_list(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
-):
+) -> int:
     """Add a remote MCP server to the list.
 
     Args:
@@ -63,7 +63,7 @@ async def add_remote_mcp_server_list(
         "ingroup_permission": ingroup_permission,
         "shared_fields": shared_fields,
     }
-    create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
+    return create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
 
 def _build_mcp_headers(
@@ -121,7 +121,7 @@ async def add_mcp_service(
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
     skip_health_check: bool = False,
-) -> None:
+) -> int:
     """Add an MCP service record.
 
     Args:
@@ -216,7 +216,7 @@ async def add_mcp_service(
     if enabled:
         status = True
 
-    create_mcp_record(
+    return create_mcp_record(
         mcp_data={
             "mcp_name": name,
             "mcp_server": server_url,

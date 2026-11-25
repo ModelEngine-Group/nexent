@@ -19,6 +19,13 @@ _TOOL_ARGUMENTS = {
     "recommend_resources": ({"candidates", "recommended_refs"}, set()),
     "wrapper": ({"subtype"}, {"resource_result", "questions"}),
     "save_agent_draft_fields": ({"fields"}, set()),
+    "validate_agent_generation_complete": (set(), set()),
+    "discover_requirements": (set(), {"requirements", "purpose", "search_queries"}),
+    "verify_requirements": ({"verification_batch_id", "checks"}, set()),
+    "show_resource_card": (set(), set()),
+    "read_generation_context": (set(), {"goal"}),
+    "read_agent_configuration": ({"section"}, set()),
+    "save_agent_configuration": ({"section", "changes"}, set()),
 }
 
 
@@ -37,8 +44,10 @@ def _key(run_id: str) -> str:
     return f"agentos:nl2agent:grant:{run_id}"
 
 
-def open_nl2agent_tool_grant(run_id: str, agent_id: int, actor: ServicePrincipal, policy_clarification: bool) -> None:
-    scope = tools.NL2AgentToolScope(agent_id, actor.user_id, actor.tenant_id, policy_clarification)
+def open_nl2agent_tool_grant(run_id: str, agent_id: int, actor: ServicePrincipal, policy_clarification: bool,
+                             conversation_id: str = "", resource_pending: bool = False) -> None:
+    scope = tools.NL2AgentToolScope(agent_id, actor.user_id, actor.tenant_id, policy_clarification,
+                                  run_id, conversation_id, resource_pending)
     if not _redis().set(_key(run_id), json.dumps(asdict(scope)), ex=_GRANT_TTL_SECONDS, nx=True):
         raise NL2AgentToolScopeUnavailable("NL2Agent run scope already exists")
 
@@ -69,6 +78,28 @@ async def execute_nl2agent_tool(call: NL2AgentToolCall, actor: ServicePrincipal)
     )
     if scope is None:
         return None
-    handler = tools.nl2a_wrapper if call.tool == "wrapper" else getattr(tools, call.tool)
+    from fastmcp.tools.tool import ToolResult
+    from tool_collection.mcp import nl2agent_resource_tools as resources
+    from tool_collection.mcp import nl2agent_configuration_tools as configuration
+    from management.services.agent.nl2agent_receipts import attach_receipt as _attach_receipt
+
+    no_agent_tools = {
+        "validate_agent_generation_complete": tools.validate_agent_generation_complete,
+        "discover_requirements": resources.discover_requirements,
+        "verify_requirements": resources.verify_requirements,
+        "show_resource_card": resources.show_resource_card,
+        "read_generation_context": resources.read_generation_context,
+        "read_agent_configuration": configuration.read_agent_configuration,
+        "save_agent_configuration": configuration.save_agent_configuration,
+    }
+    handler = no_agent_tools.get(call.tool)
+    arguments = dict(call.arguments)
+    if handler is None:
+        handler = tools.nl2a_wrapper if call.tool == "wrapper" else getattr(tools, call.tool)
+        arguments["agent_id"] = call.agent_id
     with tools.bind_nl2agent_tool_scope(scope):
-        return await handler(agent_id=call.agent_id, **call.arguments)
+        output = await _attach_receipt(handler, card=call.tool == "wrapper")(**arguments)
+        if isinstance(output, ToolResult):
+            return {"agentos_tool_result": True,
+                    "content": [item.model_dump(mode="json") for item in output.content], "meta": output.meta}
+        return output

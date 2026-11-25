@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: NL2A-CONFIG-D3-001
+  feature_id: F-045
+  business_rule_ids: [F-045-RULE-08]
+  title: NL2Agent updates ordinary target draft configuration by section
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify targeted configuration changes and their draft readback through the NL2Agent run.
+  preconditions:
+  - A local PostgreSQL test connection is available.
+  test_data:
+    model: Case-owned deterministic HTTP provider
+    target: Case-owned editable Agent draft and related Agent
+  steps:
+  - order: 1
+    action: Read safe configuration options and submit targeted model, collaboration and usage permission changes.
+    expected: Each change persists on the target and only the requested fields or relationships change.
+  - order: 2
+    action: Update tags, guardrails and advanced execution settings.
+    expected: Tag assignment merges deltas, and guardrails and self-verification preserve the other settings.
+  - order: 3
+    action: Try an invalid or forbidden configuration field.
+    expected: The rejected operation performs no write and emits no save event.
+  expected_results:
+  - Successful responses and save receipts name the actual affected fields.
+  - Authorized draft readback confirms each requested configuration change.
+  - Unrecognized fields and invalid changes are rejected as a unit.
+  forbidden_side_effects:
+  - Configuration updates do not publish a version, bind a resource or regenerate Prompt.
+  integration_boundary:
+  - NL2Agent run endpoint, local MCP, SDK, service-owned configuration and authorized draft.
+  observations:
+  - Tool results, save receipts and database state.
+  cleanup:
+  - Own and release the PostgreSQL schema, model provider, MCP listener, workspace and workers.
+  acceptance:
+  - id: AC-CONFIG-SAVE
+    description: Authorized section changes produce accurate scoped save receipts and persisted values.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-CONFIG-REJECT
+    description: Invalid values or a forbidden field prevent every change in the requested patch.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

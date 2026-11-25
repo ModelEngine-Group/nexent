@@ -224,7 +224,7 @@ async def add_container_mcp_service(
             if readiness_error:
                 raise readiness_error
 
-        await add_mcp_service(
+        mcp_id = await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
             name=service_name,
@@ -256,6 +256,7 @@ async def add_container_mcp_service(
 
     return {
         "service_name": service_name,
+        "mcp_id": mcp_id,
         "mcp_url": container_info.get("mcp_url"),
         "container_id": container_info.get("container_id"),
         "container_name": container_info.get("container_name"),
@@ -367,7 +368,7 @@ async def upload_and_start_mcp_image(
             raise readiness_error
 
     try:
-        await add_remote_mcp_server_list(
+        mcp_id = await add_remote_mcp_server_list(
             tenant_id=tenant_id,
             user_id=user_id,
             remote_mcp_server=container_info["mcp_url"],
@@ -397,6 +398,7 @@ async def upload_and_start_mcp_image(
         "message": "MCP container started successfully from uploaded image",
         "status": "success",
         "service_name": final_service_name,
+        "mcp_id": mcp_id,
         "mcp_url": container_info["mcp_url"],
         "container_id": container_info["container_id"],
         "container_name": container_info.get("container_name"),
