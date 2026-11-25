@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from opentelemetry import trace
 
+from nexent.core.agents.contracts.output import RunResult
 from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
 from nexent.core.utils.observer import MessageObserver
 
@@ -51,6 +52,35 @@ def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, bo
     assert root.attributes['nexent.business_status'] == expected
     assert root.attributes['nexent.cancelled'] == (expected == 'cancelled')
     assert info.attempt_outcome == outcome
+
+
+@pytest.mark.parametrize('outcome,end_reason,enabled,expected', [
+    ('completed', 'runner_answer', True, '{"answer": 5}'),
+    ('completed', 'runner_answer', False, None),
+    ('completed', 'awaiting_input', True, None),
+    ('failed', 'error', True, None),
+    ('stopped', 'cancelled', True, None),
+])
+def test_worker_archives_only_confirmed_answer_locally(spans, monkeypatch, outcome, end_reason, enabled, expected):
+    from nexent.core.agents.orchestration import entry
+
+    monkeypatch.setattr(spans.manager._config, 'capture_local_traces', enabled)
+    final_content = '{"answer": 5, "api_key": "test-secret"}' if end_reason == 'runner_answer' else ''
+    info = SimpleNamespace(agent_config=None, model_config_list=[], history=[], query='question')
+    roots = []
+
+    def finish(run, **kwargs):
+        roots.append(trace.get_current_span())
+        run.run_result = RunResult(turn_id='turn', status=outcome, end_reason=end_reason, final_content=final_content)
+        run.attempt_outcome = outcome
+
+    monkeypatch.setattr(entry, '_agent_run_thread', finish)
+    entry.agent_run_thread(info)
+    assert roots[0].attributes.get('nexent.local.output.value') == expected
+    assert info.run_result.final_content == final_content
+    exported, = spans.exporter.get_finished_spans()
+    assert 'output.value' not in exported.attributes and 'nexent.local.output.value' not in exported.attributes
+    assert 'test-secret' not in str(exported.attributes)
 
 
 @pytest.mark.parametrize("request_query", ["原始用户问题", "", None])

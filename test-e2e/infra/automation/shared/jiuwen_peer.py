@@ -25,7 +25,7 @@ def model_config(base, tenant, role, number):
 
 
 @contextmanager
-def provider(mode):
+def provider(mode, *, child_answer=None):
     requests = []
     child_started, release = Event(), Event()
 
@@ -56,7 +56,8 @@ def provider(mode):
                 calls = [{"id": f"delegate-{i}", "type": "function",
                           "function": {"name": "child", "arguments": json.dumps({"task": f"task-{i}"})}}
                          for i in (1, 2)]
-            content = "" if calls else f"<final_answer>{role}-ready</final_answer>"
+            answer = child_answer(payload) if role == "child" and child_answer else f"{role}-ready"
+            content = "" if calls else f"<final_answer>{answer}</final_answer>"
             reason = "tool_calls" if calls else "stop"
             usage = None
             if role == "root":

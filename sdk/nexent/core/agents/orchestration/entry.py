@@ -244,7 +244,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             _agent_run_thread(agent_run_info, observation=observation)
         finally:
             try:
-                capture_run_result(manager, span, outcome=getattr(agent_run_info, "attempt_outcome", None))
+                capture_run_result(
+                    manager, span, outcome=getattr(agent_run_info, "attempt_outcome", None),
+                    result=getattr(agent_run_info, "run_result", None),
+                )
             finally:
                 result = timing.finish()
                 if observation is not None:
