@@ -224,12 +224,14 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     )
     rows = {}
 
-    def find(tenant, user, agent, conversation, key, content):
+    def find(tenant, user, agent, conversation, key, content, *, agent_version_no):
+        assert agent_version_no == 3
         if (tenant, user, agent, conversation) != ("tenant-a", "user-a", 7, 42):
             raise memory.MemoryStoreScopeError
         return rows.get((tenant, key, content))
 
-    def write(tenant, user, agent, conversation, key, content, index, *, deadline):
+    def write(tenant, user, agent, conversation, key, content, index, *, deadline, agent_version_no):
+        assert agent_version_no == 3
         assert (tenant, user, agent, conversation, index) == ("tenant-a", "user-a", 7, 42, "mem_embed_2")
         rows[tenant, key, content] = 17
         return 17, "ADD"
@@ -253,7 +255,7 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     runtime.include_router(memory.create_memory_store_router(model_service, index_service))
     payload = {
         "tenant_id": actor.tenant_id, "user_id": actor.user_id, "agent_id": "7", "conversation_id": "42",
-        "content": "remember", "idempotency_key": "once",
+        "content": "remember", "idempotency_key": "once", "agent_version_no": 3,
     }
     with serve(runtime) as url:
         monkeypatch.setattr(environment, "RUNTIME_SERVICE_URL", url)
@@ -1725,8 +1727,10 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     runtime.include_router(resume.create_run_lifecycle_router())
 
     ingested = AsyncMock()
+    memory_policy = Mock(return_value=True)
     monkeypatch.setattr(memory_callback, "run_blocking", control_io)
     monkeypatch.setattr(memory_callback, "conversation_belongs_to", owns)
+    monkeypatch.setattr(memory_callback, "can_write_automatic_memory", memory_policy)
     monkeypatch.setattr(memory_callback, "_fanout_external_ingest", ingested)
 
     def read_memory(memory_id, tenant):
@@ -1807,6 +1811,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         submission = await automation.AgentAutomationRunner()._execute_active_run(stored_run.copy(), task)
         assert submission["status"] == "RUNNING" and stored_run["projection_message_index"] == 1
         assert await asyncio.to_thread(finished.wait, 5)
+        memory_policy.assert_called_once_with(actor.tenant_id, actor.user_id, 7, 3)
         ingested.assert_awaited_once()
         stored_record, event = ingested.await_args.args
         assert (stored_record["content"], stored_record["conversation_id"], event) == (

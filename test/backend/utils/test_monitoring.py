@@ -15,6 +15,7 @@ import pytest
 fake_consts = types.ModuleType("contracts.constants.environment")
 for name, value in {
     "ENABLE_TELEMETRY": False,
+    "LOCAL_FILE_MONITORING_ENABLED": False,
     "ENABLE_MODEL_MONITORING": False,
     "MODEL_MONITORING_BATCH_SIZE": 100,
     "MODEL_MONITORING_FLUSH_INTERVAL_SECONDS": 30,

@@ -273,7 +273,8 @@ class AgentPromptComposer:
         if include_tools and tools:
             for name, tool in tools.items():
                 tool_name = getattr(tool, "name", name) if not isinstance(tool, dict) else tool.get("name", name)
-                if name == "create_scheduled_task_proposal" or tool_name == "create_scheduled_task_proposal":
+                is_proposal_tool = "create_scheduled_task_proposal" in (name, tool_name)
+                if is_proposal_tool and not enable_automation_tool_policy:
                     continue
                 payload = {
                     "name": name,

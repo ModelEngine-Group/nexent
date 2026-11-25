@@ -6,6 +6,16 @@ from contracts.constants.constants import LANGUAGE
 from typing import Optional
 from fastapi import Request
 
+# ``get_request_id`` is pure HTTP plumbing and the shared Web layer needs it to
+# write ``requestId`` into error bodies, so its definition lives with that layer
+# (the shared layer must not import business source). Re-exported here so the
+# existing management call sites keep working.
+from backend.http.server.request_context import (  # noqa: F401 - re-exported
+    REQUEST_ID_HEADER,
+    get_request_id,
+)
+
+
 def get_client_ip(request: Optional[Request]) -> str:
     """Resolve the client IP: first hop of X-Forwarded-For, then X-Real-IP, then peer.
 

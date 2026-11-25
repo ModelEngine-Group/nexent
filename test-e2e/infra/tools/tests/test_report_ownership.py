@@ -18,11 +18,16 @@ REPO = Path(__file__).resolve().parents[4]
 class OwnershipTests(unittest.TestCase):
     def test_repository_rules_and_all_user_supplied_domains(self):
         rules = load_rules(REPO)
-        self.assertEqual({domain['label'] for domain in rules['domains'].values()}, {
-            'Skill仓库', 'MCP仓库', 'Agent仓库', 'Nexent知识库 & AIDP知识库', '模型管理', '智能体评估',
-            '系统管理整体', '记忆系统', '智能体运行', '上下文工程', '定时任务', '智能体开发配置', '沙箱', '安装部署/升级'})
-        self.assertEqual(rules['domains']['sandbox']['owner'], '@杜宇骁')
-        self.assertEqual(rules['domains']['task']['owner'], '@董济宝')
+        self.assertEqual({domain['label']: domain['owner'] for domain in rules['domains'].values()}, {
+            'Skill仓库': '@李佳阳', 'MCP仓库': '@李佳阳', 'Agent仓库': '@李佳阳',
+            '知识库配置': '@曹杰', '模型管理': '@李佳阳', '配置管理': '@武兆福', '安全护栏': '@武兆福',
+            'AIDP对接': '@曹杰', '北向生态能力': '@夏一辰', 'A2A & ACP': '@徐雅琦',
+            '记忆管理': '@王靖泷', 'Agent Loop': '@潘业宏', '上下文工程': '@夏一辰',
+            '定时任务': '@董济宝', 'NL2Agent': '@徐雅琦', '容器沙箱': '@杜宇骁',
+            '多智能体协作': '@潘业宏', '人在回路&A2UI': '@潘业宏', '智能体评估': '@丁驰',
+            '安装部署/升级': '@贺思聪', '智能体可观测': '@贺思聪', '资源管理': '@丁驰',
+            '用户与权限管理': '@夏一辰', '运维看板': '@苏明明', '系统配置与告警': '@马群',
+        })
 
     def test_category_is_not_overridden_by_incidental_agent_or_mcp_words(self):
         rules = load_rules(REPO)
@@ -44,7 +49,7 @@ class OwnershipTests(unittest.TestCase):
                   'feature_id': 'V5-REL-AUTO-AF6CA560E762D682'}
         result = route(record, {'description': '系统管理 / 配置服务生命周期'}, rules)
         self.assertEqual(result['status'], 'ASSIGNED')
-        self.assertEqual(result['domain'], '系统管理整体')
+        self.assertEqual(result['domain'], '配置管理')
         self.assertEqual(result['owner'], '@武兆福')
 
     def test_unknown_and_ambiguous_are_not_guessed(self):
@@ -57,14 +62,14 @@ class OwnershipTests(unittest.TestCase):
 
     def test_d4_a2a_and_mcp_have_separate_routing(self):
         rules = load_rules(REPO)
-        for identifier, expected in [('V5-PW-A2A-DISCOVERY-01', '@潘业宏'), ('V5-PW-MCP-API-01', '@马群')]:
+        for identifier, expected in [('V5-PW-A2A-DISCOVERY-01', '@徐雅琦'), ('V5-PW-MCP-API-01', '@李佳阳')]:
             result = route({'case_id': identifier[3:], 'feature_id': identifier}, {}, rules)
             self.assertEqual(result['owner'], expected)
 
     def test_core_agent_specific_cases_do_not_all_inherit_runtime_owner(self):
         rules = load_rules(REPO)
         for identifier, expected in [('UT-SDK-018', '@杜宇骁'), ('UT-SDK-AUTO-74430BEE8438F486', '@夏一辰'),
-                                     ('UT-SDK-AUTO-E6DDFB4661E0D8B4', '@马群'), ('UT-SDK-016', '@潘业宏')]:
+                                     ('UT-SDK-AUTO-E6DDFB4661E0D8B4', '@李佳阳'), ('UT-SDK-016', '@潘业宏')]:
             result = route({'case_id': identifier, 'feature_id': 'F-171'}, {}, rules)
             self.assertEqual(result['owner'], expected)
 
@@ -77,7 +82,7 @@ class OwnershipTests(unittest.TestCase):
         rules = load_rules(REPO)
         for cid, fid, expected in [('CHAT-MODEL-CONTROLS-D3-001', 'CHAT-MODEL-CONTROLS', '@潘业宏'),
                                    ('CHAT-MODEL-CONTROLS-D4-001', 'CHAT-MODEL-CONTROLS', '@徐雅琦'),
-                                   ('USER-MODEL-READ-D5-001', 'CHAT-MODEL-CONTROLS', '@武兆福'),
+                                   ('USER-MODEL-READ-D5-001', 'CHAT-MODEL-CONTROLS', '@李佳阳'),
                                    ('WB-CONTROLS-D4-004', 'WB-CONTROLS', '@曹杰'),
                                    ('SAI-D3-001', 'SAI-001', '@杜宇骁'), ('SAI-D1-001', 'SAI-001', '@潘业宏')]:
             with self.subTest(cid=cid):

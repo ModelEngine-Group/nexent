@@ -2,12 +2,28 @@
 
 "use client";
 
+import { useEffect, useId } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Checkbox, Form, InputNumber, Switch, Row, Col } from "antd";
+import {
+  Checkbox,
+  Form,
+  InputNumber,
+  Switch,
+  Row,
+  Col,
+  Typography,
+} from "antd";
 
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import { useTenantMemorySettings } from "@/hooks/memory/useTenantMemorySettings";
+import {
+  loadMemoryConfig,
+  subscribeMemorySwitch,
+} from "@/services/memoryService";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 import { AgentDeploymentOptions } from "./agent-deployment";
 import ContextManagerSetting from "./context-manager-setting";
@@ -52,6 +68,52 @@ export default function AgentRunPolicy({
   const isReadOnly = useAgentReadOnly();
   const { agentCore } = useDeployment();
   const coreUnsupported = agentCore === "jiuwen";
+
+  const { data: tenantMemory, isError: tenantMemoryError } =
+    useTenantMemorySettings();
+  const memoryDisabled =
+    isReadOnly || tenantMemory?.enabled !== true || tenantMemoryError;
+  const { user } = useAuthorizationContext();
+  const canReadPersonalMemory = Boolean(
+    user?.tenantId &&
+    user?.id &&
+    tenantMemory?.enabled === true &&
+    !tenantMemoryError
+  );
+  const {
+    data: personalMemoryEnabled,
+    isSuccess: personalMemoryKnown,
+    refetch: refreshPersonalMemory,
+  } = useQuery({
+    queryKey: ["personal-memory-enabled", user?.tenantId, user?.id],
+    queryFn: async () =>
+      (await loadMemoryConfig({ throwOnError: true })).memoryEnabled,
+    enabled: canReadPersonalMemory,
+  });
+
+  useEffect(() => {
+    if (!canReadPersonalMemory) return;
+    return subscribeMemorySwitch(() => {
+      void refreshPersonalMemory();
+    });
+  }, [canReadPersonalMemory, refreshPersonalMemory]);
+
+  const memoryStatusId = useId();
+  const memoryStatus =
+    tenantMemory?.enabled === false
+      ? t("memory.manager.tenantMemoryDisabledHint")
+      : tenantMemoryError
+        ? t("memory.manager.tenantMemoryLoadError")
+        : canReadPersonalMemory &&
+            personalMemoryKnown &&
+            personalMemoryEnabled === false
+          ? t("memory.manager.personalMemoryDisabledHint")
+          : undefined;
+  const memoryDescription = memoryStatus && (
+    <Typography.Text id={memoryStatusId} type="secondary">
+      {memoryStatus}
+    </Typography.Text>
+  );
 
   if (highFidelity) {
     return (
@@ -117,6 +179,24 @@ export default function AgentRunPolicy({
           </Checkbox>
         </AgentSettingHint>
         <AgentProtocolRepairOption />
+        <div className="flex flex-col gap-1">
+          <AgentSettingHint
+            label={t("memory.manager.agentAutomaticMemory")}
+            hint={t("memory.manager.agentAutomaticMemoryHint")}
+          >
+            <Checkbox
+              aria-describedby={memoryStatus ? memoryStatusId : undefined}
+              checked={editedAgent.enable_memory ?? true}
+              disabled={memoryDisabled}
+              onChange={(event) =>
+                updateAgent({ enable_memory: event.target.checked })
+              }
+            >
+              {t("memory.manager.agentAutomaticMemory")}
+            </Checkbox>
+          </AgentSettingHint>
+          {memoryDescription}
+        </div>
         <AgentDeploymentOptions highFidelity />
       </div>
     );
@@ -147,6 +227,19 @@ export default function AgentRunPolicy({
         </Col>
       </Row>
 
+      <Form.Item
+        label={t("memory.manager.agentAutomaticMemory")}
+        tooltip={t("memory.manager.agentAutomaticMemoryHint")}
+        extra={memoryDescription}
+      >
+        <Switch
+          aria-label={t("memory.manager.agentAutomaticMemory")}
+          aria-describedby={memoryStatus ? memoryStatusId : undefined}
+          checked={editedAgent.enable_memory ?? true}
+          disabled={memoryDisabled}
+          onChange={(checked) => updateAgent({ enable_memory: checked })}
+        />
+      </Form.Item>
       {/* Self Validation */}
       <Row gutter={[16, 0]}>
         {/* Provide Run Summary */}

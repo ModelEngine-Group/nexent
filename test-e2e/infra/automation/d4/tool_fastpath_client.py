@@ -18,7 +18,6 @@ from shared.tool_fastpath_deployed import (
     cleanup_conversation,
     cleanup_fixture,
     control,
-    fixture_config,
     history_units,
     responses_for,
     setup,
@@ -92,8 +91,7 @@ async def operate(operation, *, promoted=False, conversation=None, case_id=CASE_
     if operation == "setup":
         if receipt_path().exists():
             raise ValueError("Do not overwrite an existing owned TFP receipt")
-        cfg = fixture_config()
-        fixture = await setup(case_id, verify_runtime=deployment) if ksm else await setup(case_id)
+        cfg, fixture, _ = await setup(case_id, verify_runtime=deployment if ksm else None)
         receipt = {"case_id": case_id, "fixture": fixture, "config": cfg, "runs": []}
         try:
             save_receipt(receipt)

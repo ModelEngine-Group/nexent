@@ -1247,7 +1247,7 @@ export const conversationService = {
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
-      entrypoint?: "workbench";
+      entrypoint?: "workbench" | "automation";
       workbench?: import("@/features/workbench").WorkbenchSessionConfig;
       expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";

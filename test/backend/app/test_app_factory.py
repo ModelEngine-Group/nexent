@@ -132,6 +132,38 @@ class TestCreateApp:
         assert client.post("/service").json() == {"ok": True}
         assert client.post("/ordinary").status_code == 401
 
+    def test_create_app_forwards_internal_runtime_request(self):
+        """The runtime launcher passes a predicate that must reach the middleware."""
+
+        def is_internal(method, path):
+            return method == "POST" and path == "/internal/run"
+
+        app = create_app(
+            gateway_identity_audience="runtime",
+            internal_runtime_request=is_internal,
+        )
+
+        identity_middleware = [
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "GatewayIdentityMiddleware"
+        ]
+        assert len(identity_middleware) == 1
+        assert identity_middleware[0].kwargs["audience"] == "runtime"
+        assert identity_middleware[0].kwargs["internal_runtime_request"] is is_internal
+
+    def test_create_app_identity_middleware_without_internal_predicate(self):
+        """Non-runtime services keep the predicate unset instead of guessing."""
+        app = create_app(gateway_identity_audience="management")
+
+        identity_middleware = [
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "GatewayIdentityMiddleware"
+        ]
+        assert len(identity_middleware) == 1
+        assert identity_middleware[0].kwargs["internal_runtime_request"] is None
+
 
 class TestRegisterExceptionHandlers:
     """Test class for register_exception_handlers function."""

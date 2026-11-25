@@ -178,6 +178,27 @@ def test_completed_history_keeps_only_persisted_execution_evidence(history_db):
     assert "s3://files/old.txt" in projected["attachments"]
 
 
+def test_presave_boundary_does_not_read_the_persisted_only_row(history_db):
+    """Regression: the pre-save boundary must not dereference the persisted row.
+
+    A follow-up turn whose user message is not stored yet passes
+    ``before_message_index`` instead of ``current_user_message_id``. The
+    projection previously ended by dereferencing the row resolved only on the
+    persisted path, raising UnboundLocalError and turning every second chat
+    message into a 500. The resolved boundary is reported for both paths.
+    """
+    module, message, _ = history_db
+    message(1, "user", "Original task")
+    message(2, "assistant", "First answer")
+    message(3, "user", "Pending follow-up", status="streaming")
+    history = module.get_historical_context(1, None, "owner", "tenant", before_message_index=4)
+
+    assert history is not None
+    assert history["current_user_message_index"] == 4
+    assert [turn["user_message"] for turn in history["conversation_turns"]] == ["Original task"]
+    assert history["conversation_turns"][0]["assistant_final_answer"] == "First answer"
+
+
 @pytest.mark.parametrize("boundary", ["message_id", "message_index"])
 def test_history_returns_resolved_boundary_and_excludes_current_and_future_rows(history_db, boundary):
     module, message, _ = history_db

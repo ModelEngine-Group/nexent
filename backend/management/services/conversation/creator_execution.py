@@ -289,7 +289,7 @@ async def start_creation_turn(
             status="streaming",
             streaming_owner="management",
         )
-        extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents"}
+        extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents", "creator_mode": f"nl2{kind}"}
         source_id = message_receipt.get("message_id")
         if type(source_id) is int and 0 < source_id <= 2147483647:
             extra_metadata["trajectory_source_message_id"] = str(source_id)

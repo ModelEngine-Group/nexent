@@ -70,6 +70,12 @@ _SAFE_ERROR_MESSAGES = {
 }
 
 
+def model_error_summary(error_code: ModelErrorCode, lang: str = "en") -> str:
+    """Return the safe, predefined description for a legacy model error code."""
+    messages = _SAFE_ERROR_MESSAGES[error_code]
+    return messages.get(lang, messages["en"])
+
+
 class ModelInvocationTerminalError(RuntimeError):
     """Terminal model failure that must not be repaired by another Agent step."""
 
@@ -97,6 +103,5 @@ class ModelInvocationTerminalError(RuntimeError):
         if self.public_messages:
             locale = lang.lower().split("-")[0].split("_")[0]
             return self.public_messages.get(locale, self.public_messages["en"])
-        messages = _SAFE_ERROR_MESSAGES[self.error_code]
-        message = messages.get(lang, messages["en"])
+        message = model_error_summary(self.error_code, lang)
         return f"{message} {self.public_detail}" if self.public_detail else message

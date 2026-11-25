@@ -11,9 +11,12 @@ from fastapi import APIRouter, Request
 from pydantic import Field, TypeAdapter, ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedAgentCreatorRun, PreparedEphemeralRun, PreparedSkillCreatorRun
+from contracts.agentos import (
+    BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedAgentCreatorRun, PreparedCreatorRun,
+    PreparedEphemeralRun, PreparedSkillCreatorRun,
+)
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from contracts.constants.environment import APP_VERSION, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from contracts.errors.exceptions import RuntimeQueueTimeoutError, sampling_configuration_error_payload
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
@@ -201,11 +204,19 @@ async def _open_ephemeral(payload, actor):
     info.thread_future = execution.future
     info.thread_manager = runtime_thread_manager
     info.thread_execution_id = execution.execution_id
+    trajectory = payload.trajectory if isinstance(payload, PreparedCreatorRun) else None
+    extra_metadata = {"agentos_run_id": payload.run_id}
+    if trajectory is not None:
+        agent_id = payload.system_agent.agent_id
+        extra_metadata.update(app_version=APP_VERSION, core_type=info.agent_config.agent_core)
+        if trajectory.source_message_id is not None:
+            extra_metadata["trajectory_source_message_id"] = str(trajectory.source_message_id)
     metadata = AgentRunMetadata(
         user_id=actor.user_id, tenant_id=actor.tenant_id, agent_id=agent_id,
-        query=payload.input.trace_query, language=payload.language, is_debug=True, memory_enabled=False,
+        conversation_id=trajectory.conversation_id if trajectory is not None else None,
+        query=payload.input.trace_query, language=payload.language, is_debug=trajectory is None, memory_enabled=False,
         history_count=len(payload.input.history), minio_files_count=len(payload.input.attachment_refs),
-        extra_metadata={"agentos_run_id": payload.run_id},
+        extra_metadata=extra_metadata,
     )
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug
     return _EphemeralResponse(

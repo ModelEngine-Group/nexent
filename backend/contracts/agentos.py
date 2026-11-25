@@ -513,7 +513,9 @@ class ExternalA2AExecutionBinding(RunSpecModel):
 
 
 class PreparedMemorySearch(RunSpecModel):
-    query: str = Field(max_length=65536)
+    # Preserve the complete, already-validated user request so signed snapshots
+    # can replay memory presearch without a second, narrower character limit.
+    query: str
     result: str = Field(max_length=131072)
 
     def observer_events(self) -> list[dict[str, JsonValue]]:
@@ -643,6 +645,7 @@ class PreparedConversationHistory(RunSpecModel):
 
 class PreparedConversationScope(AgentRunReference):
     memory_enabled: Literal[True] | None = None
+    automation_proposal_only: Literal[True] | None = None
     workbench_config_version: PositiveInt | None = None
     native_knowledge: Literal[True] | None = None
     historical_context: PreparedConversationHistory | None = None
@@ -668,7 +671,7 @@ class PreparedConversationScope(AgentRunReference):
     @model_serializer(mode="wrap")
     def serialize_optional_scope(self, handler):
         data = handler(self)
-        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata"):
+        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata", "automation_proposal_only"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data
@@ -713,6 +716,13 @@ class SkillCreatorDraft(RunSpecModel):
     content: str
 
 
+class CreatorTrajectoryScope(RunSpecModel):
+    """Server-owned history receipt for a request-owned creator execution."""
+
+    conversation_id: Annotated[int, Field(gt=0, le=2147483647)]
+    source_message_id: Annotated[int, Field(gt=0, le=2147483647)] | None = None
+
+
 class PreparedCreatorRun(RunSpecModel):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
     input: RunInput
@@ -723,6 +733,20 @@ class PreparedCreatorRun(RunSpecModel):
     capacity_snapshot: dict[str, JsonValue] | None = None
     context_budget_snapshot: dict[str, JsonValue] | None = None
     system_agent: AgentVersionReference | None = None
+    trajectory: CreatorTrajectoryScope | None = None
+
+    @model_validator(mode="after")
+    def validate_trajectory_scope(self):
+        if self.trajectory is not None and self.system_agent is None:
+            raise ValueError("Creator trajectory requires a system Agent reference")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_trajectory_scope(self, handler):
+        data = handler(self)
+        if self.trajectory is None:
+            data.pop("trajectory", None)
+        return data
 
 
 class PreparedSkillCreatorRun(PreparedCreatorRun):
@@ -780,6 +804,7 @@ class MemoryOperation(str, Enum):
 
 class AgentMemoryStore(RunSpecModel):
     agent_id: PositiveInt
+    agent_version_no: int | None = Field(default=None, ge=0)
     conversation_id: PositiveInt | None = None
     content: str = Field(min_length=1, max_length=65536)
     idempotency_key: str = Field(min_length=1, max_length=128)
@@ -795,6 +820,7 @@ class AgentMemoryReceipt(RunSpecModel):
 
 
 class AgentMemoryStored(RunSpecModel):
+    agent_version_no: int | None = Field(default=None, ge=0)
     memory_id: PositiveInt
     agent_id: PositiveInt
     conversation_id: PositiveInt

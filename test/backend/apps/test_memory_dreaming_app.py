@@ -10,6 +10,11 @@ from management.api.memory import memory_dreaming as memory_dreaming_app
 from contracts import memory as memory_dreaming_app_management_memory_memory_dreaming
 
 
+@pytest.fixture(autouse=True)
+def allow_test_dreaming(monkeypatch):
+    monkeypatch.setattr(memory_dreaming_app, "dreaming_allowed", lambda *_: True)
+
+
 def test_ac009_user_scope_does_not_require_agent_id():
     assert memory_dreaming_app_management_memory_memory_dreaming.DreamingRunRequest().target_user_id is None
 
@@ -252,3 +257,14 @@ def test_ac034_invalid_schedule_is_rejected(values):
         memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(
             agent_id="agent-1", enabled=True, **values
         )
+
+
+def test_disabled_automatic_memory_rejects_manual_dreaming_before_queue(monkeypatch):
+    monkeypatch.setattr(memory_dreaming_app, "get_current_user_id", lambda *_: ("u", "t"))
+    monkeypatch.setattr(memory_dreaming_app, "dreaming_allowed", lambda *_: False)
+    create = MagicMock()
+    monkeypatch.setattr(memory_dreaming_app.memory_dreaming_db, "create_audit", create)
+    with pytest.raises(HTTPException) as error:
+        memory_dreaming_app.run_dreaming(memory_dreaming_app.DreamingRunRequest(), "Bearer test")
+    assert error.value.status_code == 409
+    create.assert_not_called()

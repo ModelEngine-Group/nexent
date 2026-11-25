@@ -243,6 +243,7 @@ export default function AgentConfigActions({
         provide_run_summary: detail.provide_run_summary,
         enable_protocol_repair_retry:
           detail.enable_protocol_repair_retry ?? false,
+        enable_memory: detail.enable_memory ?? true,
         enabled: detail.enabled,
         business_description: detail.business_description,
         prompt: detail.prompt,

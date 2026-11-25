@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { expect, Page } from "playwright/test";
+import { errors, expect, Page } from "playwright/test";
 import type { TestUser } from "../runner/runtime-config";
 import { appPath } from "../runner/runtime-config";
 
@@ -16,7 +16,20 @@ export class AuthPage {
   }
 
   async login(user: TestUser): Promise<number> {
-    await this.page.getByRole("button", { name: "登录账户" }).click();
+    const signIn = this.page.getByRole("button", { name: "登录账户" });
+    const reauthenticate = this.page.getByRole("dialog", { name: "登录已过期" })
+      .getByRole("button", { name: "立即登录" });
+    if (!(await reauthenticate.isVisible())) {
+      try {
+        await signIn.click({ timeout: 2_000 });
+      } catch (error) {
+        if (!(error instanceof errors.TimeoutError)) throw error;
+        // The initial deployment-info request may display this dialog while
+        // Playwright is waiting for the ordinary login button to be clickable.
+        if (!(await reauthenticate.isVisible())) await signIn.click();
+      }
+    }
+    if (await reauthenticate.isVisible()) await reauthenticate.click();
     await this.page.getByPlaceholder("your@email.com").first().fill(user.username);
     await this.page.getByPlaceholder("请输入密码").first().fill(user.password);
     const [response] = await Promise.all([

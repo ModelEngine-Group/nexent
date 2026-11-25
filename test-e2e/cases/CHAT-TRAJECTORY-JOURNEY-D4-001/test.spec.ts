@@ -2,7 +2,7 @@
 
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
-import { installTrajectoryFixture } from "./fixture";
+import { installTrajectoryFixture, modelInput, modelOutput } from "./fixture";
 
 journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   const state = await installTrajectoryFixture(page);
@@ -166,7 +166,92 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         .getByText("吞吐量", { exact: true }),
     ).toBeVisible();
     await expect(page.getByText(/结束时间/)).toBeVisible();
+    const input = page
+      .locator(".trajectory-node-detail .trajectory-body")
+      .filter({ has: page.getByRole("button", { name: "输入", exact: true }) });
+    const modelRequest = input.getByRole("table", {
+      name: "模型输入",
+      exact: true,
+    });
+    await expect(input.locator(":scope > .ant-table-wrapper")).toHaveCount(1);
+    await expect(
+      input.locator(".trajectory-code-card, .trajectory-body-preview"),
+    ).toHaveCount(0);
+    await expect(modelRequest.locator(":scope > thead")).toHaveCount(0);
+    const requestRows = modelRequest.locator(":scope > tbody > tr");
+    const messagesRow = requestRows.filter({
+      has: page.getByRole("rowheader", { name: "messages", exact: true }),
+    });
+    const modelMessages = messagesRow.getByRole("table", {
+      name: "模型输入消息",
+      exact: true,
+    });
+    await expect(modelMessages.locator(":scope > thead")).toHaveCount(0);
+    const systemRow = modelMessages.getByRole("row").filter({
+      has: page.getByRole("rowheader", { name: "system", exact: true }),
+    });
+    await expect(systemRow.locator(":scope > :is(th, td)")).toHaveCount(2);
+    for (const [name, value] of [
+      ["enable_thinking", "false"],
+      ["temperature", "0"],
+    ]) {
+      const parameterRow = requestRows.filter({
+        has: page.getByRole("rowheader", { name, exact: true }),
+      });
+      await expect(
+        parameterRow.getByRole("cell", { name: value, exact: true }),
+      ).toBeVisible();
+    }
+    await expect(
+      modelMessages.getByRole("heading", { name: "Storage instructions" }),
+    ).toBeVisible();
+    await expect(
+      modelMessages.getByRole("table").getByRole("cell", { name: "Retention" }),
+    ).toBeVisible();
+    const modes = input.getByRole("radiogroup");
+    await modes.getByText("文本", { exact: true }).click();
+    await expect(input.locator("pre code")).toHaveText(modelInput);
+    await modes.getByText("表格", { exact: true }).click();
+    await expect(modelMessages).toBeVisible();
+    const nodeDetail = page.locator(".trajectory-node-detail");
+    const reasoning = nodeDetail.getByRole("table", {
+      name: "模型思考",
+      exact: true,
+    });
+    await expect(reasoning.locator("strong")).toHaveText(
+      "Compare retention policies",
+    );
+    const output = nodeDetail.locator(".trajectory-body").filter({
+      has: page.getByRole("button", { name: "输出", exact: true }),
+    });
+    const response = output.getByRole("table", { name: "输出", exact: true });
+    await expect(
+      response
+        .getByRole("table", { name: "choices", exact: true })
+        .getByRole("heading", { name: "Storage recommendation" }),
+    ).toBeVisible();
+    const outputModes = output.getByRole("radiogroup");
+    await nodeDetail.evaluate((detail) => {
+      detail.scrollTop = detail.scrollHeight;
+    });
+    await outputModes.scrollIntoViewIfNeeded();
+    const scrollTop = () => nodeDetail.evaluate((detail) => detail.scrollTop);
+    const before = await scrollTop();
+    expect(before).toBeGreaterThan(0);
+    await outputModes.getByText("文本", { exact: true }).click();
+    await expect(output.locator("pre code")).toHaveText(modelOutput);
+    await expect.poll(scrollTop).toBe(before);
+    await outputModes.getByText("JSON", { exact: true }).click();
+    await expect(
+      outputModes.getByRole("radio", { name: "JSON" }),
+    ).toBeChecked();
+    await expect.poll(scrollTop).toBe(before);
+    await outputModes.getByText("表格", { exact: true }).click();
+    await expect(response).toBeVisible();
+    await expect.poll(scrollTop).toBe(before);
     await page.getByRole("treeitem", { name: /policy.check/ }).click();
+    await expect(output.getByRole("radio")).toHaveCount(2);
+    await expect(output.getByRole("table")).toHaveCount(0);
     await expect(
       page.locator(".trajectory-node-detail").getByText(/智能体版本/),
     ).toHaveCount(0);
@@ -266,6 +351,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(body.locator("code")).toContainText("aaaa");
     const inputSection = page.locator(".trajectory-body").first();
     const outputSection = page.locator(".trajectory-body").nth(1);
+    await outputSection.getByText("JSON", { exact: true }).click();
     const originalBody = await body.locator("code").textContent();
     await inputSection
       .getByRole("button", { name: "自动换行", exact: true })

@@ -229,3 +229,59 @@ async def exercise_external_memory(identity, mock, api):
             write_case_evidence(CASE_ID + '-summary', {'profile': 'mock', 'real_llm': True,
                 'initial_hit': marker in answer, 'updated_org_has_no_hit': marker not in missing,
                 'recovered_hit': recovery_marker in recovered, 'wire_counts': await mock.counts()}, secrets=(api_key,))
+
+
+            await verify_automatic_memory_switches(
+                identity, mock, api, agent_id, configured_payload={
+                    **payload,
+                    "prompt": "Return only a matching memory answer, or NOT_FOUND.",
+                },
+                lookup=recovery_lookup, answer=recovery_marker, local_marker=local_marker,
+            )
+
+
+async def verify_automatic_memory_switches(
+    identity, mock, api, agent_id, *, configured_payload, lookup, answer, local_marker,
+):
+    async def assert_search_skipped(label):
+        before = await mock.counts()
+        response = await run_memory_agent(identity, agent_id, lookup, label)
+        assert (await mock.counts()).get("search", 0) == before.get("search", 0)
+        assert answer not in response
+        existing = await api.get("/memory/long-term/user")
+        assert_status(existing, 200)
+        assert local_marker in existing.json()["version"]["content"]
+
+    tenant_route = "/memory/config/tenant-switch"
+    settings = await api.get(tenant_route)
+    assert_status(settings, 200)
+    assert settings.json() == {"enabled": True, "can_edit": True}
+    assert_status(await api.put(tenant_route, json={"enabled": False}), 200)
+    assert (await api.get(tenant_route)).json()["enabled"] is False
+    await assert_search_skipped("tenant-memory-off")
+    assert_status(await api.put(tenant_route, json={"enabled": True}), 200)
+
+    user_route = "/memory/config/set"
+    assert_status(await api.post(user_route, json={"key": "MEMORY_SWITCH", "value": False}), 200)
+    await assert_search_skipped("user-memory-off")
+    assert_status(await api.post(user_route, json={"key": "MEMORY_SWITCH", "value": True}), 200)
+
+    deny_route = "/memory/config/disable_agent"
+    assert_status(await api.post(deny_route, json={"agent_id": str(agent_id)}), 200)
+    await assert_search_skipped("personal-agent-memory-off")
+    assert_status(await api.delete(f"{deny_route}/{agent_id}"), 200)
+
+    assert_status(await api.post("/agent/update", json={**configured_payload, "enable_memory": False}), 200)
+    published = await api.post(
+        f"/agent/{agent_id}/publish",
+        json={"version_name": "case-memory-off", "release_note": "Disable automatic Agent memory"},
+    )
+    assert_status(published, 200)
+    await assert_search_skipped("agent-version-memory-off")
+    write_case_evidence(CASE_ID + "-automatic-memory-switches", {
+        "tenant": "no_external_search",
+        "user": "no_external_search",
+        "personal_agent": "no_external_search",
+        "agent_version": "no_external_search",
+        "manual_version_remains_readable": True,
+    })

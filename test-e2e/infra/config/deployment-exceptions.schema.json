@@ -14,7 +14,14 @@
               "MODEL_ENGINE_ENABLED": {"enum": ["true", "false"]},
               "AIDP_SERVER_URL": {"const": "{mock_product_url}"},
               "AIDP_API_KEY": {"const": "{mock_aidp_key}"},
-              "AIDP_TENANT_ID": {"const": "aidp"}
+              "AIDP_TENANT_ID": {"const": "aidp"},
+              "NEXENT_AGENT_CORE": {"const": "smolagents"},
+              "NEXENT_SANDBOX_DEFAULT_SCOPE": {"const": "session"},
+              "NEXENT_SANDBOX_WORKSPACE_MODE": {"const": "bind"},
+              "NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT": {"const": "/mnt/nexent/workdir"},
+              "NEXENT_SANDBOX_FAILURE_POLICY": {"const": "error"},
+              "NEXENT_TOOL_FASTPATH_ENABLED": {"const": "true"},
+              "NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS": {"const": "ReadSkillConfigTool"}
             }
           }
         }

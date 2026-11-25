@@ -4,7 +4,7 @@ global:
   namespace: nexent
 
 # Matches deployment monitoring provider names:
-# local_file, otlp, phoenix, langfuse, langsmith.
+# otlp, phoenix, langfuse, langsmith.
 provider: otlp
 
 images:
