@@ -5,7 +5,9 @@ import asyncio
 import hashlib
 import json
 import subprocess
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -75,31 +77,48 @@ def inspect_deployment(runtime_container, *, workspace_mount_id=None):
     return expected, mount_id
 
 
-def sandbox_events(cfg, started):
-    ended = time.time()
-    raw = docker_command(
-        "events",
+@contextmanager
+def capture_sandbox_events(cfg, records):
+    """Capture scoped lifecycle events in real time before Docker's history rotates."""
+    command = [
+        "docker", "events",
         "--since",
-        str(started),
-        "--until",
-        str(ended),
+        str(time.time()),
         "--filter",
         "type=container",
         "--filter",
         "label=com.nexent.sandbox=session",
         "--filter",
         "label=com.nexent.workspace=" + cfg["workspace_mount_id"],
+        "--filter", "event=create",
+        "--filter", "event=destroy",
         "--format",
         "{{json .}}",
-    )
-    records = [json.loads(line) for line in raw.splitlines() if line.strip()]
-    for record in records:
-        assert record["Actor"]["Attributes"].get("com.nexent.workspace") == cfg["workspace_mount_id"]
-    return [
-        {"action": record.get("Action", record.get("status")), "id": record["Actor"]["ID"]}
-        for record in records
-        if record.get("Action", record.get("status")) in {"create", "destroy"}
     ]
+    with tempfile.TemporaryFile() as output:
+        try:
+            process = subprocess.Popen(command, stdout=output, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            raise AssetDependencyError("deployment", "tfp_docker", detail="Docker event capture could not start") from error
+        try:
+            yield
+        finally:
+            if process.poll() is not None:
+                raise AssertionError("Docker event capture exited before the scenario ended")
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            output.seek(0)
+            for line in output:
+                event = json.loads(line)
+                actor = event["Actor"]
+                assert actor["Attributes"].get("com.nexent.workspace") == cfg["workspace_mount_id"]
+                action = event.get("Action", event.get("status"))
+                assert action in {"create", "destroy"}
+                records.append({"action": action, "id": actor["ID"]})
 
 
 def verify_sandbox_events(records, promoted):
@@ -116,29 +135,78 @@ async def trace_observations(cfg, conversation_id, final_marker, *, expected_war
         return await trace_observations_v2(settings, credentials, conversation_id, final_marker,
                                          expected_warmups=expected_warmups)
     deadline = time.monotonic() + 60
+    session = str(conversation_id)
+    previous_ids = None
     async with httpx.AsyncClient(
         base_url=settings["url"].rstrip("/"), auth=credentials, timeout=15, trust_env=False
     ) as api:
         while time.monotonic() < deadline:
-            response = await api.get("/api/public/traces", params={"sessionId": str(conversation_id), "limit": 100})
-            assert response.status_code == 200, "Langfuse trace query failed"
-            body = response.json()
-            rows = complete_page(body)
-            assert all(str(row.get("sessionId")) == str(conversation_id) for row in rows)
-            completed = [row for row in rows if output_contains(row.get("output"), final_marker)]
-            if completed:
-                observations = []
-                for row in rows:
-                    response = await api.get("/api/public/observations", params={"traceId": row["id"], "limit": 100})
-                    assert response.status_code == 200, "Langfuse observation query failed"
-                    body = response.json()
-                    page = complete_page(body)
-                    assert all(item.get("traceId") == row["id"] for item in page)
-                    observations.extend(page)
-                assert observations, "Empty telemetry cannot prove absence of warm-up"
-                return observations
-            await asyncio.sleep(0.5)
-    raise AssertionError("Completed Agent trace was not exported before the deadline")
+            traces = await numbered_pages(api, "/api/public/traces", {"sessionId": session}, deadline, sparse=True)
+            observations = []
+            if traces is not None:
+                assert all(str(row.get("sessionId")) == session for row in traces), "Unrelated Agent trace"
+                for row in traces:
+                    trace_id = row["id"]
+                    items = await numbered_pages(api, "/api/public/observations", {"traceId": trace_id}, deadline)
+                    if items is None:
+                        observations = []
+                        break
+                    assert all(item.get("traceId") == trace_id for item in items), "Unrelated Agent observation"
+                    # The trace summary can be an HTTP span without the Agent's answer.
+                    if any(completed_agent(item, final_marker) for item in items):
+                        roots = [item for item in items if not item.get("parentObservationId")]
+                        if not roots or any(not root.get("endTime") for root in roots):
+                            observations = []
+                            break
+                        observations.extend(items)
+            ids = {item["id"] for item in observations} or None
+            warmups = [item for item in observations if item.get("name") == "agent.sandbox.warmup"]
+            if ids and (expected_warmups is None or len(warmups) >= expected_warmups):
+                # Negative proof needs a settled observation tree as child spans may arrive late.
+                if expected_warmups != 0 or ids == previous_ids:
+                    return observations
+            previous_ids = ids
+            await asyncio.sleep(1)
+    raise AssertionError("Complete Agent observations were not available before the deadline")
+
+
+async def numbered_pages(api, path, params, deadline, *, sparse=False):
+    """Read a consistent v1 snapshot, or retry when indexing moved page boundaries."""
+    rows, ids = [], set()
+    total = None
+    limit = 100
+    for page in range(1, 101):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        response = await api.get(path, params=dict(params, page=page, limit=limit), timeout=min(15, remaining))
+        assert response.status_code == 200, "Langfuse trace or observation query failed"
+        body = response.json()
+        items = body.get("data")
+        meta = body.get("meta", {})
+        count = meta.get("totalItems")
+        assert isinstance(items, list) and type(count) is int and count >= 0, "Invalid Langfuse pagination metadata"
+        page_count = (count + limit - 1) // limit
+        assert meta.get("totalPages", page_count) == page_count and meta.get("page", page) == page, (
+            "Invalid Langfuse pagination bounds"
+        )
+        assert all(isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"] for item in items), (
+            "Langfuse page has an unidentified item"
+        )
+        if total is None:
+            total = count
+        new_ids = {item["id"] for item in items}
+        if count != total or len(items) > limit or len(new_ids) != len(items) or ids & new_ids:
+            return None
+        # The v1 Trace index can count multiple stored versions of one trace while returning one ID.
+        # Traverse all advertised pages. Observation lists still require an exact, complete count.
+        if len(rows) + len(items) > total or (not sparse and len(items) != min(limit, total - len(rows))):
+            return None
+        rows.extend(items)
+        ids.update(new_ids)
+        if page >= page_count:
+            return rows
+    raise AssertionError("Langfuse numbered pagination exceeded the bounded fixture limit")
 
 
 async def observation_pages(api, params):
@@ -175,6 +243,10 @@ def output_contains(output, marker):
     return False
 
 
+def completed_agent(row, final_marker):
+    return row.get("name") == "agent.run" and row.get("endTime") and output_contains(row.get("output"), final_marker)
+
+
 async def trace_observations_v2(settings, credentials, conversation_id, final_marker, *, expected_warmups=None):
     since = datetime.now(timezone.utc) - timedelta(minutes=15)
     deadline = time.monotonic() + 60
@@ -185,8 +257,7 @@ async def trace_observations_v2(settings, credentials, conversation_id, final_ma
             window = {"fromStartTime": since.isoformat(), "toStartTime": datetime.now(timezone.utc).isoformat()}
             rows = await observation_pages(api, dict(window, sessionId=str(conversation_id)))
             assert all(str(row.get("sessionId")) == str(conversation_id) for row in rows)
-            completed = [row for row in rows if row.get("name") == "agent.run" and row.get("endTime")
-                         and output_contains(row.get("output"), final_marker)]
+            completed = [row for row in rows if completed_agent(row, final_marker)]
             if completed:
                 observations = []
                 for trace_id in sorted({row["traceId"] for row in completed}):
@@ -208,15 +279,6 @@ async def trace_observations_v2(settings, credentials, conversation_id, final_ma
                         return observations
             await asyncio.sleep(1)
     raise AssertionError("Completed Agent observations were not exported before the deadline")
-
-
-def complete_page(body):
-    rows = body.get("data")
-    total = body.get("meta", {}).get("totalItems")
-    assert isinstance(rows, list) and type(total) is int and total == len(rows) and total <= 100, (
-        "Trace pagination is incomplete"
-    )
-    return rows
 
 
 def trace_credentials(cfg):

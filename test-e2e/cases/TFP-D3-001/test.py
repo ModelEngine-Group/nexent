@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real API/provider/official-tool/Docker/persistence/storage TFP acceptance."""
 
-import time
+from contextlib import ExitStack
 
 import pytest
 from shared.case_evidence import write_case_evidence
@@ -19,7 +19,7 @@ from shared.tool_fastpath_deployed import (
     wait_history,
 )
 from shared.tool_fastpath_observation import (
-    sandbox_events,
+    capture_sandbox_events,
     trace_observations,
     verify_sandbox_events,
     verify_warmups,
@@ -34,8 +34,10 @@ async def exercise(promoted, *, fail_after_verification=False):
     conversation = None
     primary = None
     scenario = "failed-assertion" if fail_after_verification else "promoted" if promoted else "cold"
-    started = time.time()
+    event_capture = ExitStack()
+    records = []
     try:
+        event_capture.enter_context(capture_sandbox_events(cfg, records))
         responses = responses_for(cfg, fixture["nonce"], promoted)
         await control(fixture["nonce"], "reset", responses=responses)
         conversation = await _create_conversation(identity, "Owned TFP acceptance " + fixture["nonce"])
@@ -80,7 +82,7 @@ async def exercise(promoted, *, fail_after_verification=False):
             except Exception as error:
                 failures.append(type(error).__name__)
         try:
-            records = sandbox_events(cfg, started)
+            event_capture.close()
             write_case_evidence("tfp-sandbox-events-" + scenario, records)
             verify_sandbox_events(records, promoted)
         except Exception as error:

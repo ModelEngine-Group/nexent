@@ -67,6 +67,22 @@ async def create_owned_skill(api, identity, name, case_id, fixture):
     return int(body["skill_id"])
 
 
+async def disable_owned_agent_memory(api, identity, case_id, fixture):
+    agent_id = str(fixture["agent_id"])
+    path = f"/memory/config/disable_agent/{agent_id}"
+    # Journal the idempotent undo before sending the request, including ambiguous failures.
+    register_asset("owned_agent_memory_exclusions", agent_id, agent_id, owner_case_id=case_id, cleanup={
+        "service": "config", "identity": identity.id, "method": "DELETE", "path": path,
+        "allowed_statuses": [200],
+    })
+    fixture["memory_exclusion"] = True
+    changed = await api.post("/memory/config/disable_agent", json={"agent_id": agent_id})
+    assert_status(changed, 200)
+    state = await api.get("/memory/config/load")
+    assert_status(state, 200)
+    assert agent_id in state.json().get("DISABLE_AGENT_ID", []), "Owned Agent memory exclusion was not applied"
+
+
 async def control(nonce, operation, *, responses=None):
     local = os.environ.get("NEXENT_TEST_ASSETS_LOCAL_URL", "").rstrip("/")
     if not local:
@@ -239,6 +255,7 @@ async def setup(case_id):
                     "allowed_statuses": [200, 404],
                 },
             )
+            await disable_owned_agent_memory(api, identity, case_id, fixture)
             assert_status(await api.put(f"/agent/clear_new/{fixture['agent_id']}"), 200)
             assert_status(
                 await api.post(
@@ -261,6 +278,17 @@ async def cleanup_fixture(fixture, *, identity=None):
     try:
         identity = identity or await sign_in("tenant_a_admin")
         async with client("config", token=identity.access_token) as api:
+            if fixture.get("memory_exclusion"):
+                agent_id = str(fixture["agent_id"])
+                try:
+                    response = await api.delete(f"/memory/config/disable_agent/{agent_id}")
+                    assert_status(response, 200)
+                    state = await api.get("/memory/config/load")
+                    assert_status(state, 200)
+                    assert agent_id not in state.json().get("DISABLE_AGENT_ID", [])
+                    mark_asset_state("owned_agent_memory_exclusions", agent_id, "DELETED")
+                except Exception as error:
+                    errors.append(type(error).__name__)
             if fixture.get("agent_id"):
                 try:
                     response = await api.request("DELETE", "/agent", json={"agent_id": fixture["agent_id"]})
