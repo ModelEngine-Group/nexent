@@ -7445,6 +7445,7 @@
   "ops.monitoring.skill.details": "Skill 明细",
   "ops.monitoring.skill.search": "搜索 Skill 名称",
   "ops.monitoring.skill.usageColumn": "使用次数",
+  "ops.monitoring.skill.view": "查看统计",
   "ops.monitoring.agent.current": "当前智能体总数",
   "ops.monitoring.agent.currentHint": "不受统计日期和用户组影响",
   "ops.monitoring.agent.inventoryFailed": "智能体目录加载失败",

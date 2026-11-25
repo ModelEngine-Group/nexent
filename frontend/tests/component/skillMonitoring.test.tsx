@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSkillUsageCount } from "@/app/ops/dashboard/components/skill/skillMonitoringValues";
 import { fetchWithAuth } from "@/lib/auth";
 import {
+  getSkillMonitoringList,
+  getSkillMonitoringRankings,
   getSkillMonitoringSummary,
   getSkillMonitoringTrends,
 } from "@/services/skillMonitoringService";
@@ -67,6 +69,47 @@ describe("Skill monitoring reads", () => {
       "/api/ops/v1/monitoring/skills/summary?start_date=2026-11-24&end_date=2026-11-25",
       { signal }
     );
+  });
+
+  it("reads Skill rankings and sends search, paging and sorting only to the list", async () => {
+    const row = {
+      tenant_id: "tenant/a",
+      skill_id: "uuid+1",
+      skill_name: "Summarize",
+      source: "official",
+      metrics: null,
+    };
+    const listing = { ...summary, data: { items: [row], total: 14 } };
+    const ranking = {
+      ...summary,
+      data: [{ ...row, metrics: { usage_count: 3 } }],
+    };
+    fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(listing)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(ranking)));
+    const options = {
+      page: 2,
+      pageSize: 10,
+      search: "a+b c",
+      descending: false,
+    };
+    const allSkills = { ...scope, skillId: null };
+    await expect(
+      getSkillMonitoringList(allSkills, options, signal)
+    ).resolves.toEqual(listing);
+    await expect(
+      getSkillMonitoringRankings(allSkills, signal)
+    ).resolves.toEqual(ranking);
+    expect(fetch.mock.calls).toEqual([
+      [
+        "/api/ops/v1/monitoring/skills?start_date=2026-11-24&end_date=2026-11-25&page=2&page_size=10&search=a%2Bb+c&descending=false&tenant_id=tenant%2Fa&group_ids=3&group_ids=5",
+        { signal },
+      ],
+      [
+        "/api/ops/v1/monitoring/skills/rankings?start_date=2026-11-24&end_date=2026-11-25&tenant_id=tenant%2Fa&group_ids=3&group_ids=5",
+        { signal },
+      ],
+    ]);
   });
 });
 

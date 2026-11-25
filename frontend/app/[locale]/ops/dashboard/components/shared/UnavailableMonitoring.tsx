@@ -15,6 +15,8 @@ export function UnavailableMonitoring({
   summaryBusy,
   summaryNotice,
   rankingTitle,
+  rankingPanel,
+  detailsPanel,
   details,
 }: {
   summaryLabel: string;
@@ -24,7 +26,9 @@ export function UnavailableMonitoring({
   summaryBusy?: boolean;
   summaryNotice?: ReactNode;
   rankingTitle?: string;
-  details: {
+  rankingPanel?: ReactNode;
+  detailsPanel?: ReactNode;
+  details?: {
     title: string;
     nameLabel: string;
     searchLabel: string;
@@ -35,7 +39,7 @@ export function UnavailableMonitoring({
   const metricsId = useId();
   const detailsId = useId();
   const unavailable = t("ops.monitoring.notConnected");
-  const columns = [
+  const columns = details && [
     {
       title: (
         <span className={styles.displayNameHeader}>
@@ -102,35 +106,39 @@ export function UnavailableMonitoring({
               {chartState}
             </section>
           )}
-          {rankingTitle && (
-            <section className={styles.trend} aria-label={rankingTitle}>
-              <div className={styles.trendHeader}>
-                <h3>{rankingTitle}</h3>
-              </div>
-              {chartState}
-            </section>
-          )}
+          {rankingPanel ??
+            (rankingTitle && (
+              <section className={styles.trend} aria-label={rankingTitle}>
+                <div className={styles.trendHeader}>
+                  <h3>{rankingTitle}</h3>
+                </div>
+                {chartState}
+              </section>
+            ))}
         </div>
       </section>
-      <section className={styles.details} aria-labelledby={detailsId}>
-        <h2 id={detailsId} className={styles.detailsHeading}>
-          {details.title}
-        </h2>
-        <Table
-          columns={columns}
-          dataSource={[]}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={unavailable}
-              />
-            ),
-          }}
-          pagination={false}
-          size="small"
-        />
-      </section>
+      {detailsPanel ??
+        (details && (
+          <section className={styles.details} aria-labelledby={detailsId}>
+            <h2 id={detailsId} className={styles.detailsHeading}>
+              {details.title}
+            </h2>
+            <Table
+              columns={columns || undefined}
+              dataSource={[]}
+              locale={{
+                emptyText: (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={unavailable}
+                  />
+                ),
+              }}
+              pagination={false}
+              size="small"
+            />
+          </section>
+        ))}
     </>
   );
 }

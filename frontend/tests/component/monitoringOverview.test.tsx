@@ -1,5 +1,9 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render, screen, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MonitoringOverview } from "@/app/ops/dashboard/components/overview/MonitoringOverview";
 import { countOverviewResources } from "@/app/ops/dashboard/components/overview/overviewCounts";
 import { fetchWithAuth } from "@/lib/auth";
 import { getModelMonitoringTrends } from "@/services/modelMonitoringService";
@@ -7,6 +11,9 @@ import { listOperationsResources } from "@/services/operationsService";
 import type { OperationsResource } from "@/types/operations";
 
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
+}));
 
 const agent: OperationsResource = {
   kind: "agent",
@@ -34,6 +41,52 @@ describe("Overview current resources", () => {
       ])
     ).toEqual({ agent: 2, model: 1 });
     expect(countOverviewResources([])).toEqual({ agent: 0, model: 0 });
+  });
+
+  it("replaces a cached Skill count with the error state after a failed refresh", async () => {
+    const fetch = vi.mocked(fetchWithAuth);
+    fetch.mockReset();
+    fetch
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { current_skill_count: 0 } }))
+      )
+      .mockRejectedValueOnce(new Error("Skill count unavailable"));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const directories = {
+      tenant: "a",
+      scope: { isError: false },
+      inventory: {
+        data: [agent, model],
+        isError: false,
+        isPending: false,
+        isFetching: false,
+      },
+    } as ComponentProps<typeof MonitoringOverview>["directories"];
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MonitoringOverview
+          userId="operator"
+          userTenant="a"
+          directories={directories}
+          canReadInventory
+          scopeLabel="tenant-a"
+          range={null}
+          dateControls={null}
+          dateLabel={null}
+        />
+      </QueryClientProvider>
+    );
+    const card = within(
+      screen.getByText("ops.monitoring.count.skill").parentElement!
+    );
+    expect(await card.findByText("0")).toBeVisible();
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["monitoringOverview"] });
+    });
+    expect(await card.findByText("ops.loadError")).toBeVisible();
+    expect(card.queryByText("0")).not.toBeInTheDocument();
   });
 });
 

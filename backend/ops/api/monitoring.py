@@ -152,7 +152,7 @@ def _skill_items(rows, catalog, status, search="", descending=True):
     items = skill_rows(rows, catalog, covered=status["coverage_state"] == "covered")
     needle = search.casefold()
     items = [item for item in items if needle in (item.get("skill_name") or "").casefold()]
-    items.sort(key=lambda item: (item["tenant_id"], item["skill_id"]))
+    items.sort(key=lambda item: (item["tenant_id"] or "", item["skill_id"]))
     present = [item for item in items if skill_metric_value(item) is not None]
     missing = [item for item in items if skill_metric_value(item) is None]
     return sorted(present, key=skill_metric_value, reverse=descending) + missing

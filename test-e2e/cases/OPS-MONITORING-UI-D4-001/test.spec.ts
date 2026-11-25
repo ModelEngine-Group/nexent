@@ -40,6 +40,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   const skillReads = {
     summary: [] as Record<string, string>[],
     trends: [] as Record<string, string>[],
+    list: [] as Record<string, string>[],
+    rankings: [] as Record<string, string>[],
   };
   let releaseSkillTrend = () => {};
   const delayedSkillTrend = new Promise<void>((resolve) => {
@@ -254,10 +256,18 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       };
     } else if (
       pathname === "/api/ops/v1/monitoring/skills/summary" ||
-      pathname === "/api/ops/v1/monitoring/skills/trends"
+      pathname === "/api/ops/v1/monitoring/skills/trends" ||
+      pathname === "/api/ops/v1/monitoring/skills" ||
+      pathname === "/api/ops/v1/monitoring/skills/rankings"
     ) {
       if (request.method() !== "GET") unexpected.push(request.method());
-      const view = pathname.endsWith("/summary") ? "summary" : "trends";
+      const view = pathname.endsWith("/summary")
+        ? "summary"
+        : pathname.endsWith("/trends")
+          ? "trends"
+          : pathname.endsWith("/rankings")
+            ? "rankings"
+            : "list";
       skillReads[view].push(Object.fromEntries(searchParams));
       const single = searchParams.has("skill_id");
       const start = searchParams.get("start_date")!;
@@ -272,6 +282,38 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         await delayedSkillTrend;
       const uncovered = tenantId === "b";
       const usage = uncovered || single ? 0 : 7;
+      const catalog =
+        tenantId === "b"
+          ? [
+              {
+                tenant_id: "b",
+                skill_id: "9",
+                skill_name: "设计审阅",
+                source: "custom",
+                metrics: null,
+              },
+            ]
+          : [
+              {
+                tenant_id: "a",
+                skill_id: "8",
+                skill_name: "数据核对",
+                source: "custom",
+                metrics: { usage_count: 7 },
+              },
+              {
+                tenant_id: "a",
+                skill_id: "7",
+                skill_name: "文档摘要",
+                source: "official",
+                metrics: { usage_count: 0 },
+              },
+            ];
+      const items = catalog.filter(
+        (row) =>
+          (!single || row.skill_id === searchParams.get("skill_id")) &&
+          row.skill_name.includes(searchParams.get("search") ?? ""),
+      );
       const points = Array.from({ length: 3 }, (_, index) => ({
         statistic_date: new Date(Date.parse(start) + index * 86400000)
           .toISOString()
@@ -289,7 +331,17 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
                 usage_count: usage,
                 skill_count: uncovered ? 0 : 1,
               }
-            : points,
+            : view === "trends"
+              ? points
+              : view === "rankings"
+                ? items.filter((row) => row.metrics !== null)
+                : {
+                    items:
+                      searchParams.get("descending") === "false"
+                        ? items.reverse()
+                        : items,
+                    total: items.length,
+                  },
       };
     } else if (
       pathname === "/api/ops/v1/monitoring/models" &&
@@ -726,22 +778,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const cards = page.locator('dl[aria-label="信息概览"]');
     const agentTrend = page.getByRole("region", { name: "智能体执行次数" });
     const modelTrend = page.getByRole("region", { name: "模型请求数" });
+    const skillTrend = page.getByRole("region", { name: "Skill 使用次数" });
     const inventoryReads = () =>
       reads.filter((entry) => entry.startsWith("resources:"));
     const chart = (panel: typeof agentTrend) =>
       panel.locator(".recharts-area-curve");
-    await expect(cards.locator("dd")).toHaveText([
-      "2",
-      "1",
-      "暂未接入",
-      "暂未接入",
-    ]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "暂未接入", "2"]);
     await expect(
       page.getByRole("region", { name: "MCP 工具调用量" }),
     ).toHaveText(/暂未接入/);
-    await expect(
-      page.getByRole("region", { name: "Skill 使用次数" }),
-    ).toHaveText(/暂未接入/);
+    await expect(chart(skillTrend)).toBeVisible();
     await expect(page.getByText("2026-11-17 – 2026-11-23")).toBeVisible();
     await expect(modelTrend).toHaveAttribute("aria-busy", "true");
     await expect(chart(agentTrend)).toBeVisible();
@@ -760,6 +806,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await page.setViewportSize({ width: 1600, height: 960 });
 
     const beforeDate = inventoryReads().length;
+    const skillCountReads = skillReads.summary.length;
     await page.getByText("近一个月", { exact: true }).click();
     await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
     await expect
@@ -778,13 +825,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         group: null,
         agent: null,
       });
-    await expect(cards.locator("dd")).toHaveText([
-      "2",
-      "1",
-      "暂未接入",
-      "暂未接入",
-    ]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "暂未接入", "2"]);
     expect(inventoryReads()).toHaveLength(beforeDate);
+    expect(skillReads.summary).toHaveLength(skillCountReads);
+    await expect
+      .poll(() => skillReads.trends.at(-1))
+      .toEqual({
+        start_date: "2026-10-25",
+        end_date: "2026-11-23",
+      });
 
     holdOverviewScope = true;
     await choose("租户", "研发中心");
@@ -792,18 +841,13 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       "加载中",
       "加载中",
       "暂未接入",
-      "暂未接入",
+      "加载中",
     ]);
     await expect(chart(agentTrend)).toHaveCount(0);
     await expect(chart(modelTrend)).toHaveCount(0);
     releaseOverviewScope();
     holdOverviewScope = false;
-    await expect(cards.locator("dd")).toHaveText([
-      "1",
-      "0",
-      "暂未接入",
-      "暂未接入",
-    ]);
+    await expect(cards.locator("dd")).toHaveText(["1", "0", "暂未接入", "1"]);
     await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
     await expect
       .poll(() => modelTrendReads.at(-1))
@@ -839,21 +883,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(page.getByText("2026-11-07 – 2026-11-12")).toBeVisible();
     await expect(modelTrend.getByRole("alert")).toHaveText("加载失败，请重试");
     await expect(chart(agentTrend)).toBeVisible();
-    await expect(cards.locator("dd")).toHaveText([
-      "1",
-      "0",
-      "暂未接入",
-      "暂未接入",
-    ]);
+    await expect(cards.locator("dd")).toHaveText(["1", "0", "暂未接入", "1"]);
     expect(inventoryReads()).toHaveLength(beforeCustomInventory);
     await choose("租户", "全部租户");
     await expect(chart(modelTrend)).toBeVisible();
-    await expect(cards.locator("dd")).toHaveText([
-      "2",
-      "1",
-      "暂未接入",
-      "暂未接入",
-    ]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "暂未接入", "2"]);
     overviewModelReads = modelTrendReads.length;
   });
   await contract.step(scope, async () => {
@@ -1674,8 +1708,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const trend = skill.getByRole("region", { name: "Skill 使用趋势" });
     const ranking = skill.getByRole("region", { name: "Skill 使用次数 Top 5" });
     const details = skill.getByRole("region", { name: "Skill 明细" });
-    const unavailable = (region: typeof skill) =>
-      region.getByText("暂未接入", { exact: true });
+    const scopedReads = [skillReads.summary, skillReads.trends];
     const filtersBeforeRefresh = () => [
       stats.length,
       modelSummaryReads.length,
@@ -1683,15 +1716,6 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       modelListReads.length,
     ];
     const columns = ["名称", "来源", "使用次数"];
-    const expectUnavailableDetails = async () => {
-      await expect(unavailable(details)).toBeVisible();
-      await expect(details.locator("tbody tr[data-row-key]")).toHaveCount(0);
-      await expect(
-        details
-          .getByRole("columnheader", { name: /名称/ })
-          .getByRole("button", { name: "搜索 Skill 名称" }),
-      ).toBeDisabled();
-    };
     await expect(
       skill.getByRole("heading", { name: "全部 Skill · 运营中心" }),
     ).toBeVisible();
@@ -1705,8 +1729,17 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     };
     const curve = trend.locator(".recharts-area-curve");
     const points = trend.locator("circle.recharts-area-dot");
-    for (const requests of Object.values(skillReads))
+    for (const requests of scopedReads)
       await expect.poll(() => requests.at(-1)).toEqual(datesAndGroup);
+    await expect.poll(() => skillReads.rankings.at(-1)).toEqual(datesAndGroup);
+    await expect
+      .poll(() => skillReads.list.at(-1))
+      .toMatchObject({
+        ...datesAndGroup,
+        page: "1",
+        page_size: "10",
+        descending: "true",
+      });
     await expect(cards.locator("dt")).toHaveText([
       "当前 Skill 总数",
       "Skill 使用次数",
@@ -1717,29 +1750,47 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(
       trend.getByText("Skill 使用趋势 · 0", { exact: true }),
     ).toBeVisible();
-    await expect(unavailable(ranking)).toBeVisible();
+    await expect(
+      ranking.getByRole("button", { name: "数据核对" }),
+    ).toBeVisible();
     await expect(details.getByRole("columnheader")).toHaveText([
       ...columns,
       "操作",
     ]);
-    await expectUnavailableDetails();
+    const listRows = details.locator("tbody tr[data-row-key]");
+    await expect(listRows).toHaveCount(2);
+    await expect(listRows.first().getByRole("cell").nth(2)).toHaveText("7");
+    await details.getByRole("button", { name: "搜索 Skill 名称" }).click();
+    const search = page.getByPlaceholder("搜索 Skill 名称");
+    await search.fill("文档");
+    await search.press("Enter");
+    await expect
+      .poll(() => skillReads.list.at(-1))
+      .toMatchObject({
+        ...datesAndGroup,
+        search: "文档",
+      });
+    await expect(listRows).toHaveCount(1);
+    await expect(listRows.first().getByRole("cell").nth(1)).toHaveText("官方");
+    await search.press("Escape");
     await screenshot("skill-all");
 
-    await choose("Skill", "文档摘要");
+    await listRows.first().getByRole("button", { name: "查看统计" }).click();
     await expect(
       skill.getByRole("heading", { name: "文档摘要 · 运营中心" }),
     ).toBeVisible();
     await expect(skill.getByText("一线运营组", { exact: true })).toBeVisible();
     await expect(cards.locator("dt")).toHaveText(["Skill 使用次数"]);
     const singleScope = { ...datesAndGroup, skill_id: "7" };
-    for (const requests of Object.values(skillReads))
+    for (const requests of scopedReads)
       await expect.poll(() => requests.at(-1)).toEqual(singleScope);
+    await expect.poll(() => skillReads.list.at(-1)).toMatchObject(singleScope);
     await expect(cards.locator("strong")).toHaveText(["0"]);
     await expect(points.first()).toBeVisible();
     await expect(points).toHaveCount(2);
     await expect(ranking).toHaveCount(0);
     await expect(details.getByRole("columnheader")).toHaveText(columns);
-    await expectUnavailableDetails();
+    await expect(listRows).toHaveCount(1);
     await screenshot("skill-single");
     await choose("Skill", "全部 Skill");
     await expect(ranking).toBeVisible();
@@ -1747,7 +1798,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await choose("Skill", "文档摘要");
     await skill.getByText("近一个月", { exact: true }).click();
     await expect(skill.getByPlaceholder("请选择开始日期")).toBeDisabled();
-    for (const requests of Object.values(skillReads))
+    for (const requests of scopedReads)
       await expect
         .poll(() => requests.at(-1))
         .toMatchObject({
@@ -1792,7 +1843,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(cards.locator("strong")).toHaveText(["1", "—"]);
     await expect(trend.getByText("—", { exact: true })).toBeVisible();
     await expect(curve).toHaveCount(0);
-    for (const requests of Object.values(skillReads))
+    for (const requests of scopedReads)
       await expect
         .poll(() => requests.at(-1))
         .toEqual({
@@ -1800,6 +1851,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           start_date: datesAndGroup.start_date,
           end_date: datesAndGroup.end_date,
         });
+    await expect(listRows.first().getByRole("cell").nth(2)).toHaveText("—");
+    await expect(ranking.locator(".ant-empty-description")).toHaveText(
+      "暂无数据",
+    );
     await expect(skill.getByPlaceholder("请选择开始日期")).toHaveValue(
       "2026-11-07",
     );
@@ -1813,11 +1868,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(cards.locator("strong")).toHaveText(["—"]);
     await expect(
       skill.getByRole("alert").filter({ hasText: "加载失败" }),
-    ).toHaveCount(2);
+    ).toHaveCount(3);
     await choose("租户", "全部租户");
     await expect(select("Skill")).toBeDisabled();
     await expect(ranking).toBeVisible();
-    for (const requests of Object.values(skillReads))
+    for (const requests of scopedReads)
       await expect
         .poll(() => requests.at(-1))
         .toEqual({

@@ -18,6 +18,22 @@ export interface SkillMonitoringTrend extends MonitoringPublication {
   data: { statistic_date: string; usage_count: number | null }[];
 }
 
+export interface SkillMonitoringRow {
+  tenant_id: string | null;
+  skill_id: string;
+  skill_name: string | null;
+  source?: string | null;
+  metrics: { usage_count: number } | null;
+}
+
+export interface SkillMonitoringPage extends MonitoringPublication {
+  data: { items: SkillMonitoringRow[]; total: number };
+}
+
+export interface SkillMonitoringRankings extends MonitoringPublication {
+  data: SkillMonitoringRow[];
+}
+
 export type SkillMonitoringQueryKey = readonly [
   "skillMonitoring",
   string,

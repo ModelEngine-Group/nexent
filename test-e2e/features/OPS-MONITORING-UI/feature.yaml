@@ -19,7 +19,7 @@ feature:
   - rule_id: OPS-MONITORING-UI-RULE-05
     description: All Agents show the server's Top 5 for the active metric and authorized scope. A single Agent shows success and failure shares from the summary and the call total separately.
   - rule_id: OPS-MONITORING-UI-RULE-06
-    description: The overview counts current Agents and Models for the authorized tenant scope. Dates affect only daily Agent and Model trends. MCP and Skill stay visibly unconnected.
+    description: The overview counts current Agents, Models and Skills for the authorized tenant scope. Dates affect only their daily trends. MCP stays visibly unconnected.
   - rule_id: OPS-MONITORING-UI-RULE-07
     description: The Agent and Model detail tables share the name-column search control. Each submits to its own tenant-scoped endpoint and returns to page one on search or clear.
   - rule_id: OPS-MONITORING-UI-RULE-08
@@ -27,7 +27,7 @@ feature:
   - rule_id: OPS-MONITORING-UI-RULE-09
     description: Model details sort six metrics on the server. A sort change resets the page and keeps list search and monitoring filters. Each row opens statistics scoped to its tenant and model ID while keeping the date range.
   - rule_id: OPS-MONITORING-UI-RULE-10
-    description: Skill monitoring uses the tenant's directory for selection and reads the scoped published summary and daily trend. All skills show current total and usage, and one Skill shows usage and a full-width trend. Missing statistics and true zero are distinct. Top 5 and details remain unavailable until connected.
+    description: Skill monitoring reads the scoped summary, daily trend, Top 5 and searchable paginated details. All skills show current total and usage, and one Skill shows usage and a full-width trend. The current catalog and its sources remain visible with missing statistics. Missing usage and true zero are distinct.
   - rule_id: OPS-MONITORING-UI-RULE-11
     description: MCP monitoring switches between all services, one service and one tool. Services come from authorized inventory and tools come from the session tenant's service directory. MCP statistics stay unavailable until their data is connected.
   required_test_stages: [D4]

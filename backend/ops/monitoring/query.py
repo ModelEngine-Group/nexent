@@ -206,8 +206,8 @@ def metric_value(row, metric):
 
 
 def skill_catalog(tenant: str | None) -> list[dict]:
-    columns = (SkillInfo.tenant_id, SkillInfo.skill_id, SkillInfo.skill_name)
-    statement = select(*columns).where(SkillInfo.delete_flag != "Y")
+    columns = (SkillInfo.tenant_id, SkillInfo.skill_id, SkillInfo.skill_name, SkillInfo.source)
+    statement = select(*columns).where(SkillInfo.delete_flag != "Y", SkillInfo.tenant_id.is_not(None))
     if tenant is not None:
         statement = statement.where(SkillInfo.tenant_id == tenant)
     with get_db_session() as session:

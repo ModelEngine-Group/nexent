@@ -22,6 +22,7 @@ import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
 import type { OperationsResource } from "@/types/operations";
 import type {
   SkillMonitoringQueryKey,
+  SkillMonitoringRow,
   SkillMonitoringSelection,
 } from "@/types/skillMonitoring";
 import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
@@ -115,6 +116,7 @@ function MonitoringScope({
   );
   const [modelDrilldown, setModelDrilldown] =
     useState<Pick<OperationsResource, "tenant_id" | "id" | "name">>();
+  const [skillDrilldown, setSkillDrilldown] = useState<SkillMonitoringRow>();
   const directories = useMonitoringDirectories({
     userId,
     userTenant,
@@ -191,10 +193,33 @@ function MonitoringScope({
       ? item.name || String(item.id)
       : `${item.name || item.id} · ${tenantLabel(item.tenant_id)}`,
   });
+  const directorySkill = directories.skills.data?.find(
+    (item) =>
+      resourceKey(directories.tenant ?? "", String(item.skill_id)) ===
+      resourceSelection
+  );
+  const selectedSkill =
+    tab === "skill" && !scopePending
+      ? directorySkill
+        ? {
+            skill_id: String(directorySkill.skill_id),
+            tenant_id: directories.tenant,
+            skill_name: directorySkill.name,
+          }
+        : skillDrilldown &&
+            (!directories.tenant ||
+              skillDrilldown.tenant_id === directories.tenant) &&
+            resourceKey(
+              skillDrilldown.tenant_id ?? "",
+              skillDrilldown.skill_id
+            ) === resourceSelection
+          ? skillDrilldown
+          : undefined
+      : undefined;
   const directoryChoices =
     tab === "skill"
       ? directories.skills.data?.map((skill) => ({
-          value: resourceKey(directories.tenant ?? "", skill.skill_id),
+          value: resourceKey(directories.tenant ?? "", String(skill.skill_id)),
           label: skill.name || skill.skill_id,
         }))
       : canReadInventory
@@ -205,7 +230,15 @@ function MonitoringScope({
   const resourceChoices =
     selectedModel && !directoryModel
       ? [...(directoryChoices ?? []), inventoryChoice(selectedModel)]
-      : directoryChoices;
+      : selectedSkill && !directorySkill
+        ? [
+            ...(directoryChoices ?? []),
+            {
+              value: resourceSelection,
+              label: selectedSkill.skill_name || `#${selectedSkill.skill_id}`,
+            },
+          ]
+        : directoryChoices;
   const resource = resourceChoices?.find(
     (choice) => choice.value === resourceSelection
   );
@@ -253,19 +286,11 @@ function MonitoringScope({
     userTenant,
     modelSelection,
   ] as const;
-  const selectedSkill =
-    tab === "skill"
-      ? directories.skills.data?.find(
-          (item) =>
-            resourceKey(directories.tenant ?? "", item.skill_id) ===
-            resourceSelection
-        )
-      : undefined;
   const skillSelection: SkillMonitoringSelection | null =
     tab === "skill" && directories.tenant !== undefined && range
       ? {
-          tenantId: directories.tenant || null,
-          skillId: selectedSkill ? String(selectedSkill.skill_id) : null,
+          tenantId: selectedSkill?.tenant_id ?? directories.tenant,
+          skillId: selectedSkill?.skill_id ?? null,
           groupIds: group ? [Number(group)] : [],
           startDate: range[0],
           endDate: range[1],
@@ -409,8 +434,8 @@ function MonitoringScope({
                 disabledText={
                   scopePending
                     ? scopeDisabledText
-                    : tab === "skill" && !directories.tenant
-                      ? t("ops.monitoring.notConnected")
+                    : tab === "skill" && !directories.tenant && !selectedSkill
+                      ? t("ops.monitoring.groupTenantRequired")
                       : tab !== "skill" && !canReadInventory && !selectedModel
                         ? t("ops.noPermission")
                         : undefined
@@ -470,7 +495,9 @@ function MonitoringScope({
             {selectedMcpTool && ` / ${selectedMcpTool.name}`} ·{" "}
             {selectedMonitoringResource
               ? tenantLabel(selectedMonitoringResource.tenant_id)
-              : scopeLabel}
+              : selectedSkill?.tenant_id
+                ? tenantLabel(selectedSkill.tenant_id)
+                : scopeLabel}
           </h2>
           {dateLabel}
           {tab === "agent" ? (
@@ -564,10 +591,20 @@ function MonitoringScope({
             </>
           ) : tab === "skill" ? (
             <SkillMonitoring
+              key={JSON.stringify(skillSelection)}
               queryKey={skillQueryKey}
               singleSkill={Boolean(selectedSkill)}
               scopeLoading={scopeLoading}
               hasRange={Boolean(range)}
+              onView={(row) => {
+                setSkillDrilldown(row);
+                dispatch({
+                  type: "resource",
+                  tab: "skill",
+                  value: resourceKey(row.tenant_id ?? "", row.skill_id),
+                });
+                requestAnimationFrame(() => resourceHeading.current?.focus());
+              }}
             />
           ) : (
             <McpMonitoring

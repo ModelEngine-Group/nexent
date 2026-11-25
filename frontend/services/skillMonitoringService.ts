@@ -2,6 +2,8 @@
 import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import type {
+  SkillMonitoringPage,
+  SkillMonitoringRankings,
   SkillMonitoringSelection,
   SkillMonitoringSummary,
   SkillMonitoringTrend,
@@ -10,11 +12,13 @@ import type {
 async function readSkillMonitoring<T>(
   endpoint: string,
   scope: SkillMonitoringSelection,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: Record<string, string>
 ): Promise<T> {
   const params = new URLSearchParams({
     start_date: scope.startDate,
     end_date: scope.endDate,
+    ...options,
   });
   if (scope.tenantId !== null) params.set("tenant_id", scope.tenantId);
   if (scope.skillId !== null) params.set("skill_id", scope.skillId);
@@ -40,6 +44,40 @@ export function getSkillMonitoringTrends(
 ) {
   return readSkillMonitoring<SkillMonitoringTrend>(
     API_ENDPOINTS.operations.skillMonitoringTrends,
+    scope,
+    signal
+  );
+}
+
+export function getSkillMonitoringList(
+  scope: SkillMonitoringSelection,
+  options: {
+    page: number;
+    pageSize: number;
+    search: string;
+    descending: boolean;
+  },
+  signal: AbortSignal
+) {
+  return readSkillMonitoring<SkillMonitoringPage>(
+    API_ENDPOINTS.operations.skillMonitoringList,
+    scope,
+    signal,
+    {
+      page: String(options.page),
+      page_size: String(options.pageSize),
+      search: options.search,
+      descending: String(options.descending),
+    }
+  );
+}
+
+export function getSkillMonitoringRankings(
+  scope: SkillMonitoringSelection,
+  signal: AbortSignal
+) {
+  return readSkillMonitoring<SkillMonitoringRankings>(
+    API_ENDPOINTS.operations.skillMonitoringRankings,
     scope,
     signal
   );

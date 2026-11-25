@@ -5,8 +5,15 @@ import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getAgentMonitoringTrends } from "@/services/agentMonitoringService";
 import { getModelMonitoringTrends } from "@/services/modelMonitoringService";
+import {
+  getSkillMonitoringSummary,
+  getSkillMonitoringTrends,
+} from "@/services/skillMonitoringService";
 import { agentMonitoringSelection } from "../../agentMonitoringValues";
-import type { MonitoringRange } from "../../monitoringFilters";
+import {
+  getMonitoringRange,
+  type MonitoringRange,
+} from "../../monitoringFilters";
 import type { useMonitoringDirectories } from "../../useMonitoringDirectories";
 import { OverviewTrend } from "./OverviewTrend";
 import { countOverviewResources } from "./overviewCounts";
@@ -55,6 +62,35 @@ export function MonitoringOverview({
     queryFn: ({ signal }) => getModelMonitoringTrends(selection!, signal),
     enabled: selection !== null,
   });
+  const skillSelection = selection && { ...selection, skillId: null };
+  const skill = useQuery({
+    queryKey: [...queryKey, "skill"],
+    queryFn: ({ signal }) => getSkillMonitoringTrends(skillSelection!, signal),
+    enabled: skillSelection !== null,
+  });
+  const today = getMonitoringRange("week", null)![1];
+  const skillCountScope =
+    tenant === undefined
+      ? null
+      : {
+          tenantId: tenant,
+          skillId: null,
+          groupIds: [],
+          startDate: today,
+          endDate: today,
+        };
+  const skillSummary = useQuery({
+    queryKey: [
+      "monitoringOverview",
+      userId,
+      userTenant,
+      "skillCount",
+      skillCountScope,
+    ],
+    queryFn: ({ signal }) =>
+      getSkillMonitoringSummary(skillCountScope!, signal),
+    enabled: skillCountScope !== null,
+  });
   const counts = useMemo(
     () =>
       tenant !== undefined && inventory.data
@@ -64,6 +100,10 @@ export function MonitoringOverview({
   );
   const number = new Intl.NumberFormat(i18n.language);
   const inventoryFailed = scope.isError || inventory.isError;
+  const skillCountFailed = scope.isError || skillSummary.isError;
+  const skillCount = skillCountFailed
+    ? undefined
+    : skillSummary.data?.data.current_skill_count;
   const inventoryLoading =
     canReadInventory &&
     !inventoryFailed &&
@@ -81,14 +121,24 @@ export function MonitoringOverview({
       <dl
         className={styles.cards}
         aria-label={t("ops.monitoring.inventory")}
-        aria-busy={inventoryLoading || inventory.isFetching}
+        aria-busy={
+          inventoryLoading || inventory.isFetching || skillSummary.isFetching
+        }
       >
         {resources.map(({ kind, Icon }) => {
           const connected = kind === "agent" || kind === "model";
           const total =
-            connected && canReadInventory && !inventoryFailed
-              ? counts?.[kind]
-              : undefined;
+            kind === "skill"
+              ? skillCount
+              : connected && canReadInventory && !inventoryFailed
+                ? counts?.[kind]
+                : undefined;
+          const status =
+            kind === "skill"
+              ? t(skillCountFailed ? "ops.loadError" : "common.loading")
+              : connected
+                ? inventoryState
+                : t("ops.monitoring.notConnected");
           return (
             <div className={styles.card} key={kind}>
               <Icon size={25} className={styles.icon} aria-hidden />
@@ -99,11 +149,7 @@ export function MonitoringOverview({
                     total === undefined ? styles.cardStatus : styles.total
                   }
                 >
-                  {total !== undefined
-                    ? number.format(total)
-                    : connected
-                      ? inventoryState
-                      : t("ops.monitoring.notConnected")}
+                  {total !== undefined ? number.format(total) : status}
                 </dd>
               </div>
             </div>
@@ -147,7 +193,21 @@ export function MonitoringOverview({
           }}
         />
         <OverviewTrend title={t("ops.monitoring.overview.mcpTrend")} />
-        <OverviewTrend title={t("ops.monitoring.overview.skillTrend")} />
+        <OverviewTrend
+          title={t("ops.monitoring.overview.skillTrend")}
+          trend={{
+            points: skill.data?.data.map((day) => ({
+              date: day.statistic_date,
+              value: day.usage_count,
+            })),
+            loading:
+              scopeLoading ||
+              (skillSelection !== null &&
+                (skill.isPending || skill.isFetching)),
+            failed: scope.isError || skill.isError,
+            hasRange: Boolean(range),
+          }}
+        />
       </div>
     </>
   );

@@ -50,6 +50,8 @@ export const API_ENDPOINTS = {
     modelMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/models/summary`,
     skillMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/skills/summary`,
     skillMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/skills/trends`,
+    skillMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/skills`,
+    skillMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/skills/rankings`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,

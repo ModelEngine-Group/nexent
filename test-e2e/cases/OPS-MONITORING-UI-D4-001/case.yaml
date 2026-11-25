@@ -42,8 +42,8 @@ case:
     action: Open Model statistics for a historical model in the second tenant when two tenants have the same numeric model ID.
     expected: The chart and table read the second tenant and model ID for the original dates. The selected model is visible and the operator can return to all models.
   - order: 9
-    action: Open Skill monitoring for a tenant, apply a user group, switch between all and one Skill, change dates, refresh, then exercise a tenant without published statistics and failed reads.
-    expected: Cards and daily trend read the selected scope and distinguish loading, a true zero, missing statistics and failures. Top 5 and details remain unavailable. Refresh rereads both active statistics and the directories. Changing the tenant clears the group and Skill and keeps the dates.
+    action: Open Skill monitoring for a tenant, apply a user group, search by name, open a Skill from details, change dates, refresh, then exercise a tenant without published statistics and failed reads.
+    expected: Cards, daily trend, Top 5 and details read the selected scope. The catalog and its source remain visible without published statistics, and missing usage stays distinct from a true zero or failure. Refresh rereads the active statistics and directories. Changing the tenant clears the group and Skill and keeps the dates.
   expected_results:
   - The dashboard exposes the intended filters with deterministic calendar dates and explicit unavailable statistics for unconnected resources.
   - Tenant and MCP service transitions clear their dependent selections. MCP refresh only re-reads applicable directories.
@@ -51,14 +51,14 @@ case:
   - Statistics requests refresh within the active range and stale responses never overwrite it.
   - The Agent table supports server search, metric sorting, paging and tenant-qualified drilldown while preserving the list's own publication and request states.
   - All-Agent ranking and single-Agent outcomes follow the active filters. Date and group changes reset only list pagination.
-  - The overview shows current Agent and Model inventory and daily calls while preserving coverage. MCP and Skill placeholders issue no monitoring reads.
+  - The overview shows current Agent, Model and Skill inventory and daily use. MCP placeholders issue no monitoring reads.
   - Both detail tables use column search, keep separate search state and submit to their own list endpoints.
   - Model cards use inventory and the scoped summary. Both charts share a single scoped trends read. Switching the left metric does not request data. Refresh rereads summary, trends and the current list.
   - Model metric sorting retains the search, page size, tenant, group and dates. The sorted list follows server order across pages. The primary-name hint matches server search and a row can open its tenant-qualified Model statistics.
   - The Skill view uses tenant-scoped choices and reads published summary and daily trend data. The all-Skill view shows a catalog total and usage. The single-Skill view shows its usage and daily trend. Missing points remain missing and failed reads stay distinct from uncovered data.
   - All MCP services show the current service count, call count, daily trend, service Top 5 and service details. A selected service shows tool count, call count, daily trend, tool Top 5 and tool details. A selected tool shows call count, a full-width daily trend and tool details without row actions. Each statistics region shows unavailable.
   forbidden_side_effects:
-  - Statistics use the connected Agent and Model GET routes and the Skill summary and trends GET routes in the Skill tab. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking, cross-tenant MCP tool directory request or MCP statistics request is sent.
+  - Statistics use the connected Agent, Model and Skill GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking, cross-tenant MCP tool directory request or MCP statistics request is sent.
   actor: Authorized super administrator
   journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
   final_business_result:
