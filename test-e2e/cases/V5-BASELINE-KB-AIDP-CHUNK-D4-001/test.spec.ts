@@ -11,9 +11,10 @@ import { AidpKnowledgePage } from "../../infra/automation/d4/pages/aidp-knowledg
  * the create page shows the AIDP defaults (512 tokens, 10 percent overlap,
  * Top K 10, similarity 0) instead of the retired 1024 / 12.5 percent pair, the
  * Information tab lists chunk tokens and overlap in create order with stored
- * values, the chunk edit modal reuses the create page mode cards, an edited
- * chunk token survives a full page reload, and an out-of-range overlap is
- * rejected without a partial write.
+ * values, the chunk-mode edit modal reuses the create page mode cards, an
+ * edited chunk token survives a full page reload, and an out-of-range overlap
+ * is constrained by the UI without an invalid write (the backend half-of-chunk
+ * rejection is proven by the D2 contract case).
  *
  * Contract IDs come from case.yaml through contract.expectedIds, so the step
  * and assertion counts stay coupled to the authored contract.
@@ -137,10 +138,10 @@ journey("V5-BASELINE-KB-AIDP-CHUNK-D4-001", async (context) => {
     return `chunk row=${JSON.stringify(rows.chunkToken)}, overlap row=${JSON.stringify(rows.chunkOverlap)}`;
   });
 
-  // Step 5 — edit modal reuses the create page mode cards.
+  // Step 5 — the chunk-mode edit modal reuses the create page mode cards.
   await contract.step(contract.expectedIds("steps")[4], async () => {
-    await aidp.openChunkTokenEditor();
-    return "the chunk token edit modal offers the same chunk mode cards";
+    await aidp.openChunkModeEditor();
+    return "the chunk-mode edit modal offers the same chunk mode cards";
   });
 
   // Step 6 — edit the chunk token.
@@ -167,17 +168,22 @@ journey("V5-BASELINE-KB-AIDP-CHUNK-D4-001", async (context) => {
     return `chunk row after reload=${JSON.stringify(infoRowsAfterEdit.chunkToken)}`;
   });
 
-  // Step 8 — an out-of-range overlap is rejected without a partial write.
+  // Step 8 — an out-of-range overlap is constrained by the UI, no invalid write.
   await contract.step(contract.expectedIds("steps")[7], async () => {
-    await aidp.openChunkTokenEditorAndRejectOutOfRangeOverlap();
+    await aidp.openOverlapEditorAndExpectOutOfRangeConstrained();
     await aidp.openInformationTab();
     const rows = await aidp.readInformationChunkRows();
     if (!rows.chunkToken.includes(String(EDIT_TO_CHUNK_TOKENS))) {
       throw new Error(
-        `a rejected overlap must leave chunk tokens at ${EDIT_TO_CHUNK_TOKENS}, got ${JSON.stringify(rows.chunkToken)}`
+        `a constrained overlap must leave chunk tokens at ${EDIT_TO_CHUNK_TOKENS}, got ${JSON.stringify(rows.chunkToken)}`
       );
     }
-    return "out-of-range overlap rejected and the previous chunk token preserved";
+    if (!rows.chunkOverlap.includes(EXPECTED_OVERLAP_PERCENT)) {
+      throw new Error(
+        `a constrained overlap must leave the stored overlap at ${EXPECTED_OVERLAP_PERCENT} percent, got ${JSON.stringify(rows.chunkOverlap)}`
+      );
+    }
+    return "out-of-range overlap constrained to the UI ceiling and the previous configuration preserved";
   });
 
   // Step 9 — cleanup.

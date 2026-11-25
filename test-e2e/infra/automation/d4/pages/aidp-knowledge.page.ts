@@ -263,19 +263,25 @@ export class AidpKnowledgePage {
   }
 
   /**
-   * Open the chunk-token editor from the information tab and prove it reuses
-   * the create page chunk mode cards (smart splitting / legal clauses).
+   * Open the chunk-mode (切片方式) editor from the information tab and prove
+   * it reuses the create page chunk mode cards (smart splitting / legal
+   * clauses). This is the modal that actually renders AidpChunkModeChoices;
+   * the chunk-token modal only carries the token slider. Close without
+   * writing: this step proves card reuse, not a configuration change.
    */
-  async openChunkTokenEditor(): Promise<void> {
-    await this.page.getByRole("button", { name: "编辑文本切片最长token", exact: true }).click();
-    const dialog = this.settingDialog("编辑文本切片最长token");
+  async openChunkModeEditor(): Promise<void> {
+    await this.page.getByRole("button", { name: "编辑切片方式", exact: true }).click();
+    const dialog = this.settingDialog("编辑切片方式");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("智能分片", { exact: true })).toBeVisible();
     await expect(dialog.getByText("法律条文", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(dialog).toBeHidden();
   }
 
-  /** Set the chunk token in the open editor and save, waiting for the success toast. */
+  /** Open the chunk-token editor, set the token value and save, waiting for the success toast. */
   async saveChunkToken(value: number): Promise<void> {
+    await this.page.getByRole("button", { name: "编辑文本切片最长token", exact: true }).click();
     const dialog = this.settingDialog("编辑文本切片最长token");
     await expect(dialog).toBeVisible();
     await this.setSlider("文本切片最长token", value);
@@ -285,38 +291,26 @@ export class AidpKnowledgePage {
   }
 
   /**
-   * Submit an out-of-range overlap from the overlap editor and prove the save
-   * is rejected with a readable error while the dialog stays open (no partial
-   * write). 60% of a 1024-token chunk is 614 tokens, beyond both the UI cap
-   * (40%) and half the chunk (512 tokens).
+   * Type an out-of-range overlap (60%) into the overlap editor and prove the
+   * UI constrains it to the valid ceiling (AIDP_OVERLAP_PERCENT_MAX = 40,
+   * always below half the chunk) on blur, so an invalid value can never reach
+   * the configuration. Cancel without writing; the stored configuration keeps
+   * its last good values. The explicit half-of-chunk rejection at the backend
+   * boundary is proven by the D2 contract case.
    */
-  async openChunkTokenEditorAndRejectOutOfRangeOverlap(): Promise<void> {
+  async openOverlapEditorAndExpectOutOfRangeConstrained(): Promise<void> {
     await this.page.getByRole("button", { name: "编辑相邻切片重叠字符百分比", exact: true }).click();
     const dialog = this.settingDialog("编辑相邻切片重叠字符百分比");
     await expect(dialog).toBeVisible();
     await this.setSlider("相邻切片重叠字符百分比", 60);
-    await dialog.getByRole("button", { name: "确定", exact: true }).click();
-
-    const errorNode = this.page.locator(".ant-form-item-explain-error, .ant-message-error");
-    const successNode = this.page.getByText("配置已更新", { exact: true });
-    // Let the save attempt settle before judging: a rejection keeps the dialog
-    // open with an error; a (wrongly) accepted save closes it or toasts success.
-    await expect
-      .poll(
-        async () => {
-          if (await errorNode.first().isVisible().catch(() => false)) return "rejected";
-          if (await successNode.isVisible().catch(() => false)) return "saved";
-          if (!(await dialog.isVisible().catch(() => false))) return "closed";
-          return "pending";
-        },
-        { timeout: 15000 }
-      )
-      .not.toBe("pending");
-
-    await expect(dialog).toBeVisible();
-    await expect(errorNode.first()).toBeVisible();
-
-    // Restore the previous state so the following read sees the last good save.
+    const input = this.page.getByRole("spinbutton", { name: "相邻切片重叠字符百分比", exact: true });
+    // The field renders with one decimal (precision 1); compare numerically.
+    const constrained = Number(await input.inputValue());
+    if (constrained !== 40) {
+      throw new Error(
+        `out-of-range overlap must be constrained to the 40% UI ceiling, got ${constrained}`
+      );
+    }
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     await expect(dialog).toBeHidden();
   }

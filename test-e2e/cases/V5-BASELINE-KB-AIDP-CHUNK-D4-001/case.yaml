@@ -47,26 +47,26 @@ case:
     action: 打开该知识库的信息页，按从上到下顺序读取配置字段序列。
     expected: 信息页展示分块 token 与分块重叠两项，顺序与创建页一致；两项均显示已存数值而非破折号。
   - order: 6
-    action: 在信息页点击分块 token 配置项打开编辑弹窗，核对弹窗内分块模式卡与创建页一致。
-    expected: 编辑弹窗复用创建页的分块模式卡（智能切分/法律条款），而不是另一套无关控件。
+    action: 在信息页点击切片方式配置项打开编辑弹窗，核对弹窗内分块模式卡与创建页一致，然后取消关闭（本步只验证复用，不写入）。
+    expected: 切片方式编辑弹窗复用创建页的分块模式卡（智能切分/法律条款），而不是另一套无关控件。
   - order: 7
-    action: 在编辑弹窗把分块 token 改为 1024 并保存，等待保存成功提示。
+    action: 打开分块 token 编辑弹窗，把分块 token 改为 1024 并保存，等待保存成功提示。
     expected: 保存成功提示出现；弹窗关闭；重叠按百分比换算后随分块规模一起提交。
   - order: 8
     action: 整页刷新后重新打开该知识库信息页，复核分块 token 与重叠。
     expected: 分块 token 读回 1024，重叠仍显示 10%（换算为 102 个 token），未回退为默认 512。
   - order: 9
-    action: 在编辑弹窗提交越界重叠（重叠百分比使 token 数超过分块一半），确认前端拦截或后端 4xx 以错误提示呈现。
-    expected: 保存被拒并显示可读错误提示；信息页分块 token 仍为 1024，配置未被部分写入。
+    action: 在重叠编辑弹窗输入越界值 60%（超过 UI 上限 40%，换算后也超过分块一半），确认输入被界面约束到有效上限；取消关闭，不产生写入。后端 50% 红线的显式拒绝由 D2 契约用例证明。
+    expected: 越界输入被约束为 40%（有效上限），无法以越界值保存；取消后信息页分块 token 仍为 1024、重叠仍为 10%，配置保持上一次成功保存状态。
   - order: 10
     action: 清理 run-owned 知识库并通过列表确认删除结果。
     expected: 删除成功，列表中不再出现该 run_id 的知识库。
   expected_results:
   - 创建页 AIDP 分块默认值为 512 token 与 10% 重叠，Top K 10、相似度 0。
   - 信息页按创建顺序展示分块 token 与重叠，取值来自详情接口而非占位破折号。
-  - 编辑弹窗复用创建页分块模式卡。
+  - 切片方式编辑弹窗复用创建页分块模式卡。
   - 编辑分块 token 后刷新页面仍读回新值，重叠百分比保持一致。
-  - 越界重叠被拒且不产生部分写入。
+  - 越界重叠输入被界面约束在有效上限（40%），取消后不产生任何写入；后端 50% 拒绝由 D2 证明。
   - run-owned 知识库清理成功。
   forbidden_side_effects:
   - 创建页仍显示旧默认值 1024 token 或 12.5% 重叠。
@@ -96,14 +96,14 @@ case:
     - 4
     forbidden_side_effects: []
   - id: AC-03
-    description: The detail chunk edit modal reuses the create page chunk mode cards.
+    description: The detail chunk-mode (切片方式) edit modal reuses the create page chunk mode cards; it is the modal that renders the shared mode-card component.
     steps:
     - 6
     expected_results:
     - 3
     forbidden_side_effects: []
   - id: AC-04
-    description: Editing the chunk token to 1024 survives a full page reload with the overlap percentage unchanged, and an out-of-range overlap is rejected without partial writes.
+    description: Editing the chunk token to 1024 survives a full page reload with the overlap percentage unchanged, and an out-of-range overlap input is constrained to the valid UI ceiling without any invalid write (the backend half-of-chunk rejection is proven by the D2 contract case).
     steps:
     - 7
     - 8
@@ -127,16 +127,21 @@ case:
       Derived from commits 01400d399 and a7048be7d. Frontend defaults come from
       frontend/ext_components/aidp/shared/utils/aidpChunking.ts; the detail order and modal reuse come
       from AidpKnowledgeDetailInformation.tsx and AidpKnowledgeInformationTab.tsx.
+      Mode-card reuse is proven on the chunk-mode (切片方式) edit modal, the modal
+      that actually renders AidpChunkModeChoices; the chunk-token modal carries
+      only the token slider. The overlap input is constrained to 1-40% by the UI
+      (AIDP_OVERLAP_PERCENT_MAX), so the half-of-chunk rejection is proven at the
+      backend boundary by V5-BASELINE-AIDP-CHUNK-D2-001.
   actor: 租户管理员（具备 AIDP 知识库创建与编辑权限）
   journey:
   - 进入 /knowledges 并切到 AIDP 分支
   - 打开创建页并读取分块默认值
   - 提交创建进入新知识库文件管理
   - 打开信息页读取配置字段顺序
-  - 打开分块编辑弹窗并核对模式卡
+  - 打开切片方式编辑弹窗并核对模式卡
   - 改分块 token 为 1024 并保存
   - 整页刷新复核持久化
-  - 提交越界重叠并确认被拒
+  - 输入越界重叠并确认被界面约束
   - 删除 run-owned 知识库
   final_business_result:
   - 用户在不改默认值的情况下创建出的 AIDP 知识库分块为 512 token / 10% 重叠，与其预期一致。
@@ -146,4 +151,4 @@ case:
   - 创建页分块输入框显示 1024 或重叠显示 12.5%。
   - 信息页分块字段显示破折号或顺序与创建页不一致。
   - 刷新后分块 token 回退为 512。
-  - 越界提交后信息页显示被截断的中间值。
+  - 越界输入未被约束到有效上限，或取消后信息页配置发生变化。
