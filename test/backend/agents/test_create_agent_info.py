@@ -7662,3 +7662,38 @@ async def test_parent_memory_starts_before_child_and_is_cleaned_up(recursive_mem
     else:
         await create(1, 't', 'u', 'en', 'query')
         assert contexts.call_args.kwargs['long_term_memory_items'][0]['memory'] == 'healthy parent fact'
+
+
+@pytest.fixture(autouse=True)
+def default_tenant_memory_policy(monkeypatch):
+    monkeypatch.setattr(preparation_compiler, "tenant_memory_enabled", lambda _tenant_id: True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tenant,personal,parent,child', [
+    (True, True, True, True), (False, True, True, True),
+    (True, False, True, True), (True, True, False, True),
+    (True, True, True, False), (True, True, False, False),
+])
+async def test_saved_agent_memory_switch_is_independent_for_children(
+    recursive_memory_compiler, monkeypatch, tenant, personal, parent, child,
+):
+    compiler, create = recursive_memory_compiler
+    monkeypatch.setattr(compiler, 'search_agent_info_by_agent_id', lambda **kw: {
+        'name': str(kw['agent_id']), 'description': '', 'prompt': '', 'model_ids': [],
+        'enable_memory': parent if kw['agent_id'] == 1 else child,
+    })
+    monkeypatch.setattr(compiler, 'tenant_memory_enabled', lambda _: tenant)
+    context = Mock(user_config=Mock(memory_switch=personal, external_provider_top_k=5,
+                                   disable_agent_ids=[], disable_user_agent_ids=[]))
+    monkeypatch.setattr(compiler, 'build_memory_context', lambda *_: context)
+    prepare = AsyncMock(return_value=([], 'No relevant memories found.'))
+    monkeypatch.setattr(compiler, '_prepare_runtime_memory', prepare)
+    root = await create(1, 't', 'u', 'en', 'query')
+    for agent, setting in zip([root, *root.worker_agents], [parent, child]):
+        enabled = tenant and personal and setting
+        assert agent.automatic_memory_enabled is enabled
+        assert any(tool.name == 'store_memory' for tool in agent.tools) is enabled
+    assert {int(call.kwargs['agent_id']) for call in prepare.await_args_list} == {
+        agent_id for agent_id, setting in [(1, parent), (2, child)] if tenant and personal and setting
+    }

@@ -48,3 +48,15 @@ def test_object_path_cannot_replace_configured_authority():
     target = build_storage_proxy_url("https://storage//evil.example/bucket/object", "https://storage")
     assert target.host == "storage"
     assert target.raw_path == b"//evil.example/bucket/object"
+
+
+def test_external_authority_url_is_rejected_for_internal_proxy():
+    """P1 regression: a partner-facing external presigned URL must never be
+    fed to the internal proxy — the same-origin guard rejects it with 400.
+    Internal flows therefore must keep signing against MINIO_ENDPOINT."""
+    with pytest.raises(HTTPException) as raised:
+        build_storage_proxy_url(
+            "https://files.example.com/bucket/object?X-Amz-Signature=abc",
+            "http://minio:9000",
+        )
+    assert raised.value.status_code == 400

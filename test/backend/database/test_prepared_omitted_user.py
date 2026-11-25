@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import delete, select
 
 from contracts.agentos import AgentRunReference
+from infrastructure.rdb.agent_execution import AgentExecution
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from management.db.conversation import prepared_turn as store
 from test.backend.database.test_prepared_saved_user import database
@@ -92,6 +93,11 @@ def test_memory_source_survives_projection_close_without_a_user_message(database
         session.add(queue.MemoryCompletion(
             job_id="a" * 32 + ":final_answer", run_id="a" * 32, job_type="final_answer", agent_id=7,
             lease_token="b" * 32, next_attempt_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            created_by="actor", updated_by="actor", delete_flag="N",
+        ))
+        session.add(AgentExecution(
+            run_id="a" * 32, conversation_id=42, tenant_id="tenant", status="completed",
+            resource_versions={"agent_id": 7, "agent_version_no": 1},
             created_by="actor", updated_by="actor", delete_flag="N",
         ))
         admission = session.get(ConversationRunAdmission, "scope")

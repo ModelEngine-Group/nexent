@@ -19,6 +19,7 @@ BODY_FIELDS = {
     "reasoning": "nexent.reasoning.value",
     "raw": "nexent.raw.value",
 }
+FAILURE_REASON_LIMIT = 1024
 
 
 def any_value(value):
@@ -108,6 +109,38 @@ def times(span):
 def _agent_display_name(attrs):
     value = attrs.get("agent.display_name")
     return value.strip() if isinstance(value, str) else ""
+
+
+def _failure_reason(kind, attrs, span_status):
+    """Expose a bounded diagnostic independently of input and output bodies."""
+    candidates = []
+    if kind == "model":
+        encoded = attrs.get("nexent.error")
+        if isinstance(encoded, str) and (
+            not isinstance(encoded, Text) or len(encoded) == encoded.char_count
+        ):
+            try:
+                error = json.loads(encoded)
+            except (ValueError, RecursionError):
+                error = None
+            if isinstance(error, dict):
+                candidates.extend(
+                    error.get(key)
+                    for key in ("safe_message", "diagnostic_code", "category")
+                )
+    else:
+        candidates.append(attrs.get("error.message"))
+    candidates.extend((span_status.get("message"), attrs.get("error.type")))
+    for value in candidates:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        reason = value.strip()
+        if len(reason) > FAILURE_REASON_LIMIT or (
+            isinstance(value, Text) and len(value) < value.char_count
+        ):
+            return reason[: FAILURE_REASON_LIMIT - 1].rstrip() + "…"
+        return reason
+    return None
 
 
 def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: None):
@@ -255,11 +288,13 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
             ttft = finite_number(attrs["llm.time_to_first_token"]) * 1000
         if kind != "model" or duration is None or ttft is None or ttft > duration:
             ttft = None
+        span_status = span.get("status", {})
         status = attrs.get("nexent.business_status")
         if not status:
             status = (
                 "failed"
-                if span.get("status", {}).get("code") in (2, "STATUS_CODE_ERROR")
+                if span_status.get("code") in (2, "STATUS_CODE_ERROR")
+                or (kind == "tool" and attrs.get("agent.tool.success") is False)
                 else "completed"
             )
         if finished is None:
@@ -333,6 +368,10 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 if f"nexent.availability.{slot}" in attrs
             },
         }
+        if kind in ("model", "tool") and status in ("failed", "error"):
+            failure_reason = _failure_reason(kind, attrs, span_status)
+            if failure_reason is not None:
+                node["failure_reason"] = failure_reason
         if kind == "phase" and span.get("name") == "memory.prepare":
             if attrs.get("agent.name"):
                 node["attributes"]["agent.name"] = str(attrs["agent.name"])

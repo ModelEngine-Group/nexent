@@ -1173,7 +1173,7 @@ class TestGetFileUrlImpl:
             assert result["success"] is True
             assert result["url"] == "https://example.com/file.txt"
             mock_get_url.assert_called_once_with(
-                object_name="test/file.txt", expires=3600)
+                object_name="test/file.txt", expires=3600, external=False)
 
     @pytest.mark.asyncio
     async def test_get_file_url_impl_failure(self):
@@ -1193,7 +1193,17 @@ class TestGetFileUrlImpl:
             assert "File does not exist or cannot be accessed: File not found" in str(
                 exc_info.value)
             mock_get_url.assert_called_once_with(
-                object_name="nonexistent/file.txt", expires=3600)
+                object_name="nonexistent/file.txt", expires=3600, external=False)
+
+    @pytest.mark.asyncio
+    async def test_get_file_url_impl_forwards_external_opt_in(self):
+        """Partner direct-link callers opt into the external signing authority."""
+        mock_result = {"success": True, "url": "https://files.example.com/file.txt"}
+        with patch_import_context('management.services.file.service.get_file_url', MagicMock(return_value=mock_result)) as mock_get_url:
+            result = await get_file_url_impl(object_name="test/file.txt", expires=3600, external=True)
+            assert result == mock_result
+            mock_get_url.assert_called_once_with(
+                object_name="test/file.txt", expires=3600, external=True)
 
 
 class TestGetFileStreamImpl:
@@ -1253,6 +1263,64 @@ class TestGetFileStreamImpl:
                 exc_info.value)
             mock_get_stream.assert_called_once_with(
                 object_name="nonexistent/file.txt")
+
+
+class TestGetFileStreamRawImpl:
+    """True-streaming open: managed lane, unbuffered body, typed absence."""
+
+    @staticmethod
+    def _recording_run_blocking(mocker, calls):
+        async def fake_run_blocking(task_name, fn, *args, lane=None, owner=None, **kwargs):
+            calls.append({"task_name": task_name, "lane": lane, "owner": owner, "kwargs": kwargs})
+            return fn(*args, **kwargs)
+
+        return mocker.patch.object(file_management_service, "run_blocking", side_effect=fake_run_blocking)
+
+    @pytest.mark.asyncio
+    async def test_raw_stream_opens_through_managed_control_io_lane(self, mocker):
+        calls = []
+        self._recording_run_blocking(mocker, calls)
+        body = object()
+        mocker.patch.object(file_management_service, "get_file_stream_raw", return_value=body)
+        mocker.patch.object(file_management_service, "get_content_type", return_value="text/plain")
+
+        stream, content_type = await file_management_service.get_file_stream_raw_impl("test/file.txt")
+
+        assert stream is body  # unbuffered: the raw body itself, not a BytesIO copy
+        assert content_type == "text/plain"
+        assert calls == [{
+            "task_name": "open-storage-file-stream",
+            "lane": "control-io",
+            "owner": "config",
+            "kwargs": {"object_name": "test/file.txt"},
+        }]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [None, 0, 7])
+    async def test_raw_stream_absence_probe_distinguishes_missing_from_existing(self, mocker, size):
+        calls = []
+        self._recording_run_blocking(mocker, calls)
+        mocker.patch.object(file_management_service, "get_file_stream_raw", return_value=None)
+        mocker.patch.object(file_management_service, "get_file_size_from_minio_strict", return_value=size)
+
+        with pytest.raises(Exception) as caught:
+            await file_management_service.get_file_stream_raw_impl("workspace/owner/report.txt")
+
+        assert isinstance(caught.value, file_management_service.NotFoundException) == (size is None)
+        assert calls[-1]["task_name"] == "probe-storage-file-size"
+        assert calls[-1]["lane"] == "control-io"
+
+    @pytest.mark.asyncio
+    async def test_raw_stream_preserves_storage_probe_errors(self, mocker):
+        calls = []
+        self._recording_run_blocking(mocker, calls)
+        mocker.patch.object(file_management_service, "get_file_stream_raw", return_value=None)
+        error = PermissionError("storage permission denied")
+        mocker.patch.object(file_management_service, "get_file_size_from_minio_strict", side_effect=error)
+
+        with pytest.raises(PermissionError) as caught:
+            await file_management_service.get_file_stream_raw_impl("workspace/owner/report.txt")
+        assert caught.value is error
 
 
 class TestDeleteFileImpl:

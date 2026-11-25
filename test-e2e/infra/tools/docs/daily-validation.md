@@ -175,6 +175,19 @@ overall status is FAILED and coverage integrity is INCOMPLETE. BLOCKED Cases sta
 in the denominator and have acceptance_status=INCOMPLETE. No historical result is
 rewritten. D6 and the sanitized publication bundle retain the validation receipt.
 
+## D4 time limits
+
+D4 uses up to 600 seconds per Case by default. A lower pipeline
+`case_timeout_seconds` applies automatically. Use the Case's
+`execution.yaml` `timeout_seconds` for an explicit budget for a longer
+journey. Preparation counts against this budget. The outer worker allows
+60 more seconds for Playwright to save evidence and for owned cleanup.
+
+The shared chat helper allows 300 seconds by default for one SSE response
+to close and its UI to settle, using a single deadline for both. A Case can
+supply a different per-turn deadline for a documented scenario. Build and
+deployment hooks use the independent pipeline `command_timeout_seconds`.
+
 ## Terminal reports and notifications
 
 Daily sends a terminal report when a run succeeds, fails or is interrupted. A
@@ -234,3 +247,9 @@ machine-local business credentials. It remains enabled for actual formal Cases.
 
 The legacy catalog `recovery_cases` list is retained for format compatibility; it no
 longer schedules extra startup/finalization business tests or makes them a gate.
+
+The `tfp` profile switches the Runtime sandbox and monitoring configuration for
+`TFP-D3-001` and `TFP-D4-001` only. See the [TFP fixture setup](../../automation/shared/tool_fastpath_fixture.md)
+for machine-local inputs. After a TFP switch, `PW-KB-LOCAL-01` verifies restored
+Local knowledge access in a separate evidence directory. This verification
+completes TFP restoration and does not add a duplicate row to the batch.

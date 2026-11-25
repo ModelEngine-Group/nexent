@@ -85,6 +85,7 @@ def create_nl2agent_agent_config(language: str, tools: list[ToolConfig], snapsho
         max_steps=int(snapshot["max_steps"]) if snapshot is not None else 8,
         model_name="main_model",
         provide_run_summary=False,
+        automatic_memory_enabled=False,
         enable_protocol_repair_retry=snapshot.get("enable_protocol_repair_retry", True) if snapshot is not None else True,
         context_items=[
             ContextItemInput(

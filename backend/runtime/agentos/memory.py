@@ -88,7 +88,7 @@ class AgentMemoryStoreService:
             )
 
         scope = (actor.tenant_id, actor.user_id, payload.agent_id, payload.conversation_id, payload.idempotency_key)
-        existing = await control("memory-find-existing", find_existing_memory, *scope, payload.content)
+        existing = await control("memory-find-existing", partial(find_existing_memory, agent_version_no=payload.agent_version_no), *scope, payload.content)
         if existing is not None:
             return AgentMemoryReceipt(memory_id=existing, event="UNCHANGED")
 
@@ -100,7 +100,7 @@ class AgentMemoryStoreService:
 
         embedding = payload.embedding if payload.embedding is not None else await self._embed(payload, model, actor, deadline)
         index_name = model.get_index_name()
-        memory_id, event = await control("memory-write-record", write_agent_memory, *scope, payload.content, index_name, store_deadline=deadline)
+        memory_id, event = await control("memory-write-record", partial(write_agent_memory, agent_version_no=payload.agent_version_no), *scope, payload.content, index_name, store_deadline=deadline)
         indexed = False
         # Leave time to return the committed SQL receipt before the outer deadline.
         index_deadline = deadline - 0.05

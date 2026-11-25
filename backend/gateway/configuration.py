@@ -12,6 +12,9 @@ class GatewaySettings:
     port: int = 5013
     management_url: str = "http://localhost:5010"
     runtime_url: str = "http://localhost:5014"
+    # Retired logical alias kept for deployment compatibility: the snapshot
+    # records real owning services now, and northbound traffic enters the
+    # management process, so this URL is not read by the routing path anymore.
     northbound_url: str = "http://localhost:5010"
     ops_url: str = "http://localhost:5016"
     auth_enabled: bool = True
@@ -28,6 +31,7 @@ class GatewaySettings:
     db_password: str = field(default="", repr=False)
     db_pool_size: int = 8
     db_timeout: float = 5.0
+    nb_excluded_capabilities: tuple = ()
 
     def __post_init__(self):
         if type(self.port) is not int or not 1 <= self.port <= 65535:
@@ -88,4 +92,9 @@ def load_settings(environ=None):
         db_name=(values.get("POSTGRES_DB") or "nexent"),
         db_user=(values.get("POSTGRES_USER") or "root"),
         db_password=values.get("NEXENT_POSTGRES_PASSWORD", ""),
+        nb_excluded_capabilities=tuple(
+            item.strip()
+            for item in values.get("GATEWAY_NB_EXCLUDED_CAPABILITIES", "").split(",")
+            if item.strip()
+        ),
     )

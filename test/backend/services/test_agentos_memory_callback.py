@@ -12,11 +12,12 @@ from management.services.memory import agentos_callback
 from runtime.agentos import prepared_memory
 
 ACTOR = ServicePrincipal("user-a", "tenant-a")
-NOTICE = AgentMemoryStored(memory_id=17, agent_id=7, conversation_id=42)
+NOTICE = AgentMemoryStored(memory_id=17, agent_id=7, agent_version_no=1, conversation_id=42)
 
 
 @pytest.fixture
 def callback(monkeypatch):
+    monkeypatch.setattr(agentos_callback, "can_write_automatic_memory", Mock(return_value=True))
     record = {
         "tenant_id": "tenant-a", "user_id": "user-a", "agent_id": "7", "conversation_id": "41",
         "layer": "agent", "memory_type": "short_term", "status": "active", "content": "committed",
@@ -84,3 +85,12 @@ async def test_callback_transport_failure_preserves_committed_tool_receipt(monke
     assert result["event"] == "ADD" and result["memory_id"] == 17
     post.assert_awaited_once()
     assert AgentMemoryStored.model_validate_json(post.await_args.kwargs["content"]) == NOTICE
+
+
+@pytest.mark.asyncio
+async def test_revoked_memory_policy_suppresses_external_ingest(callback, monkeypatch):
+    policy = Mock(return_value=False)
+    monkeypatch.setattr(agentos_callback, "can_write_automatic_memory", policy)
+    assert not await agentos_callback.ingest_stored_agent_memory(NOTICE, ACTOR)
+    policy.assert_called_once_with("tenant-a", "user-a", 7, 1)
+    callback.ingest.assert_not_awaited()

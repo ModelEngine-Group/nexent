@@ -753,6 +753,7 @@ async def update_agent_info_impl(
                     "allow_mcp_header_passthrough": request.allow_mcp_header_passthrough
                     if request.allow_mcp_header_passthrough is not None
                     else False,
+                    **({"enable_memory": request.enable_memory} if request.enable_memory is not None else {}),
                     "enable_protocol_repair_retry": request.enable_protocol_repair_retry
                     if request.enable_protocol_repair_retry is not None
                     else False,

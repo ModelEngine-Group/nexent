@@ -27,6 +27,7 @@ from ops.services.trajectory.lifecycle import create_maintenance_processor
 def configuration(root="", **overrides):
     values = {
         "ENABLE_TELEMETRY": False,
+        "LOCAL_FILE_MONITORING_ENABLED": False,
         "MONITORING_PROVIDER": "otlp",
         "TRAJECTORY_ROOT_DIR": str(root),
         "TRAJECTORY_READ_ENABLED": bool(root),

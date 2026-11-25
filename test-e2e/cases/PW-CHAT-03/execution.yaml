@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: PW-CHAT-03
+timeout_seconds: 900
 implementations:
 - framework: playwright
   file: test.spec.ts

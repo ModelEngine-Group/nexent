@@ -46,6 +46,7 @@ global:
   monitoring:
     enabled: false
     provider: otlp
+    localFileEnabled: true
     trajectoryRootDir: "/mnt/nexent-data/trajectory"
     trajectoryReadEnabled: false
     projectName: "nexent"
@@ -73,7 +74,7 @@ global:
     traceMaxItems: "20"
 
 # Optional monitoring stack. Set provider to one of:
-# local_file, otlp, phoenix, langfuse, langsmith.
+# otlp, phoenix, langfuse, langsmith.
 nexent-common:
   # Shared ConfigMap values rendered into the Kubernetes nexent-config ConfigMap.
   config:

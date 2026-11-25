@@ -6,6 +6,12 @@ import logging
 from functools import partial
 
 from anyio import CancelScope
+from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentLegacyResume,
@@ -15,9 +21,11 @@ from contracts.agentos import (
     AgentStop,
     BackgroundRun,
     CompatibilityConversationRun,
+    CreatorTrajectoryScope,
     EvaluationAgentResult,
     EvaluationAgentRun,
     PreparedAgentCreatorRun,
+    PreparedCreatorRun,
     PreparedSkillCreatorRun,
     TrackedBackgroundResult,
     WorkbenchDebugSkillLookup,
@@ -38,8 +46,8 @@ from contracts.errors.exceptions import (
     ValidationError,
     WorkbenchError,
 )
-from fastapi import HTTPException
-from fastapi.responses import StreamingResponse
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.rdb.agent_admission import AdmissionScopeError
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
     active_run_error_response,
@@ -53,12 +61,7 @@ from management.services.agent.workbench_debug_grant import (
     open_workbench_debug_grant,
 )
 from nexent.core.concurrency import run_blocking
-from redis.exceptions import RedisError
-from sqlalchemy.exc import SQLAlchemyError
-
-from backend.http.client import create_httpx_client
-from infrastructure.agentos_identity import ServicePrincipal
-from infrastructure.rdb.agent_admission import AdmissionScopeError
+from nexent.monitor import get_agent_monitoring_context
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,26 @@ async def _run_prepared_debug(client, prepared, user_id, tenant_id):
 async def forward_creator_run(
     payload: PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
 ) -> StreamingResponse:
+    """Forward the history receipt bound around the persisted creator stream."""
+    if isinstance(payload, PreparedCreatorRun):
+        scope = None
+        metadata = get_agent_monitoring_context()
+        if (
+            metadata is not None
+            and payload.system_agent is not None
+            and metadata.conversation_id is not None
+            and metadata.is_debug is False
+            and metadata.user_id == user_id
+            and metadata.tenant_id == tenant_id
+            and metadata.agent_id == payload.system_agent.agent_id
+            and metadata.extra_metadata.get("creator_mode") == payload.mode
+        ):
+            source_id = metadata.extra_metadata.get("trajectory_source_message_id")
+            scope = CreatorTrajectoryScope(
+                conversation_id=metadata.conversation_id,
+                source_message_id=int(source_id) if source_id is not None else None,
+            )
+        payload = payload.model_copy(update={"trajectory": scope})
     return await _agentos_client().run_ephemeral(payload, user_id, tenant_id)
 
 

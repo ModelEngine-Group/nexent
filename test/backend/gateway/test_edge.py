@@ -40,8 +40,8 @@ async def test_partial_upstream_failure_closes_stream_without_retry():
     ("POST", "/api/agent/runner", None),
     ("POST", "/api/file/storage", "management"),
     ("GET", "/api/file/storage", "management"),
-    ("POST", "/nb/v1/chat/run", "northbound"),
-    ("GET", "/api/nb/a2a/test/.well-known/agent-card.json", "northbound"),
+    ("POST", "/nb/v1/chat/run", "management"),  # real owning service, alias retired
+    ("GET", "/api/nb/a2a/test/.well-known/agent-card.json", "management"),
     ("GET", "/api/voice/stt/ws", None),
     ("GET", "/api/internal/thread-capacity", None),
     ("POST", "/api/agent/internal/northbound/run", None),

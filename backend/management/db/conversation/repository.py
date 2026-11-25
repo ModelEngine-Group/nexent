@@ -2193,7 +2193,14 @@ def rename_conversation(
 
 def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> bool:
     """
-    Delete a conversation (soft delete)
+    Delete a conversation owned by the user (soft delete, cascading)
+
+    Only a conversation whose created_by matches user_id is affected. Child
+    rows cascade by conversation_id, and only when the owned conversation
+    row itself matched, so a caller passing an id it does not own cannot
+    touch another user's data (aligned with delete_conversations_batch).
+    A None user_id matches no row (created_by = NULL never compares equal),
+    so the call is a safe no-op; callers must pass the authenticated owner.
 
     Args:
         conversation_id: Conversation ID (integer)
@@ -2211,14 +2218,17 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
-        # 1. Mark conversation as deleted
+        # 1. Mark conversation as deleted (ownership filter: created_by == user_id).
+        # Not owned (or already deleted): rowcount 0 refuses before any child row.
         conversation_stmt = (
             update(ConversationRecord)
-            .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                ConversationRecord.created_by == user_id,
+            )
             .values(update_data)
         )
-        if user_id:
-            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
         if conversation_result.rowcount == 0:
             return False
@@ -2265,8 +2275,9 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         )
         session.execute(image_stmt)
 
-        # Check if the conversation record was affected
-        return conversation_result.rowcount > 0
+        # Ownership was already verified in step 1; the cascade only runs
+        # after a successful owned-conversation update.
+        return True
 
 
 def delete_conversations_batch(

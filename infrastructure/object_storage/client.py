@@ -1,15 +1,20 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import logging
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from contracts.constants.environment import (
     MINIO_ACCESS_KEY,
     MINIO_DEFAULT_BUCKET,
     MINIO_ENDPOINT,
+    MINIO_EXTERNAL_ENDPOINT,
     MINIO_REGION,
     MINIO_SECRET_KEY,
+    MINIO_SECURE,
 )
 from nexent.storage.storage_client_factory import MinIOStorageConfig, create_storage_client_from_config
+
+logger = logging.getLogger(__name__)
 
 
 class MinioClient:
@@ -116,19 +121,85 @@ class MinioClient:
         self._ensure_initialized()
         return self._storage_client.download_file(object_name, file_path, bucket)
 
-    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Tuple[bool, str]:
+    def _get_external_url_client(self):
+        """Lazily create a boto3 client bound to the external endpoint.
+
+        A presigned URL's signature covers the Host header, so signing for an
+        external authority requires a client configured with that authority.
+        Returns None when no external endpoint is configured or when it equals
+        the internal one.
+        """
+        # Only an explicitly configured string counts; anything else (None,
+        # unset, or a non-string value from a misconfigured environment) means
+        # "no external endpoint" and keeps the internal signing behavior.
+        raw_external = MINIO_EXTERNAL_ENDPOINT
+        if not isinstance(raw_external, str):
+            return None
+        external_endpoint = raw_external.strip()
+        if not external_endpoint or external_endpoint == (MINIO_ENDPOINT or "").strip():
+            return None
+        if getattr(self, "_external_url_client", None) is None:
+            import boto3
+            from botocore.client import Config
+
+            endpoint = external_endpoint
+            if "://" not in endpoint:
+                # A bare host:port follows the deployment's MINIO_SECURE flag so
+                # http-only setups do not silently receive https URLs.
+                scheme = "https" if MINIO_SECURE else "http"
+                endpoint = f"{scheme}://{endpoint}"
+            self._external_url_client = boto3.client(
+                "s3",
+                endpoint_url=endpoint,
+                aws_access_key_id=MINIO_ACCESS_KEY,
+                aws_secret_access_key=MINIO_SECRET_KEY,
+                region_name=MINIO_REGION or "us-east-1",
+                config=Config(signature_version="s3v4", proxies={"http": None, "https": None}),
+            )
+        return self._external_url_client
+
+    def get_file_url(
+        self,
+        object_name: str,
+        bucket: Optional[str] = None,
+        expires: int = 86400,
+        *,
+        external: bool = False,
+    ) -> Tuple[bool, str]:
         """
         Get presigned URL for file
+
+        The signing authority is caller-selected. ``external=True`` opts into
+        the ``MINIO_EXTERNAL_ENDPOINT`` authority for partner direct links;
+        the default keeps the internal authority so internal proxy flows stay
+        same-origin with ``MINIO_ENDPOINT`` (a presigned signature covers the
+        Host, so the two authorities are not interchangeable). When no external
+        endpoint is configured, ``external=True`` falls back to internal signing.
 
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
             expires: URL expiration time in seconds (default 86400 = 24 hours)
+            external: Sign against the configured external endpoint instead of
+                the internal one (partner direct-link callers only)
 
         Returns:
             Tuple[bool, str]: (Success status, Presigned URL or error message)
         """
         self._ensure_initialized()
+        external_client = self._get_external_url_client() if external else None
+        if external_client is not None:
+            try:
+                url = external_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket or self.default_bucket, "Key": object_name},
+                    ExpiresIn=expires,
+                )
+                return True, url
+            except Exception as e:
+                # Fall through to the internal signing path; the caller keeps
+                # a working (if internal-only) URL instead of a hard failure.
+                logger.error(f"Failed to presign for external endpoint, falling back to internal: {e}")
         return self._storage_client.get_file_url(object_name, bucket, expires)
 
     def get_file_size(self, object_name: str, bucket: Optional[str] = None) -> int:

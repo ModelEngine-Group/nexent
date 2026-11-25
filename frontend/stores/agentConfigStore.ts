@@ -43,6 +43,7 @@ export type EditableAgent = Pick<
   | "provide_run_summary"
   | "allow_chat_metadata"
   | "enable_protocol_repair_retry"
+  | "enable_memory"
   | "tools"
   | "prompt"
   | "business_description"
@@ -210,6 +211,7 @@ function createEmptyEditableAgent(llmConfig?: {
     provide_run_summary: false,
     allow_chat_metadata: false,
     enable_protocol_repair_retry: false,
+    enable_memory: true,
     tools: [],
     skills: [],
     prompt: "",
@@ -249,6 +251,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         allow_chat_metadata: agent.allow_chat_metadata ?? false,
         enable_protocol_repair_retry:
           agent.enable_protocol_repair_retry ?? false,
+        enable_memory: agent.enable_memory ?? true,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
         prompt: agent.prompt || "",
@@ -386,6 +389,7 @@ const isDirty = (
       editedAgent.provide_run_summary !== false ||
       editedAgent.allow_chat_metadata !== false ||
       editedAgent.enable_protocol_repair_retry !== false ||
+      editedAgent.enable_memory === false ||
       editedAgent.prompt !== "" ||
       editedAgent.business_description !== "" ||
       editedAgent.business_logic_model_name !== "" ||
@@ -424,6 +428,8 @@ const isDirty = (
       (editedAgent.allow_chat_metadata ?? false) ||
     (baselineAgent.enable_protocol_repair_retry ?? false) !==
       (editedAgent.enable_protocol_repair_retry ?? false) ||
+    (baselineAgent.enable_memory ?? true) !==
+      (editedAgent.enable_memory ?? true) ||
     baselineAgent.prompt !== editedAgent.prompt ||
     baselineAgent.business_description !== editedAgent.business_description ||
     baselineAgent.business_logic_model_name !==
@@ -482,7 +488,6 @@ export const useAgentConfigStore = create<AgentConfigStoreState>(
       const editedAgent = baselineAgent
         ? { ...baselineAgent }
         : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
-
 
       set({
         currentAgentId: agentId,
