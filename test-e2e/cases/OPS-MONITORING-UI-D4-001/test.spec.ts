@@ -41,7 +41,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     catalog: [] as Record<string, string>[],
     summary: [] as Record<string, string>[],
     trends: [] as Record<string, string>[],
+    overview: [] as Record<string, string>[],
+    list: [] as Record<string, string>[],
+    rankings: [] as Record<string, string>[],
   };
+  let failMcpService = false;
   const skillReads = {
     summary: [] as Record<string, string>[],
     trends: [] as Record<string, string>[],
@@ -251,8 +255,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         ],
       };
     } else if (pathname.startsWith("/api/ops/v1/monitoring/mcp-tools")) {
-      const view = pathname.split("/").at(-1);
-      if (request.method() !== "GET" || (view !== "catalog" && view !== "summary" && view !== "trends")) {
+      const segment = pathname.split("/").at(-1);
+      const view = segment === "mcp-tools" ? "list" : segment;
+      if (request.method() !== "GET" ||
+          (view !== "catalog" && view !== "summary" && view !== "trends" &&
+           view !== "overview" && view !== "list" && view !== "rankings")) {
         unexpected.push(`${request.method()} ${pathname}`);
         await route.fulfill({ status: 404, json: { detail: "Unexpected MCP read" } });
         return;
@@ -271,11 +278,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           ],
         };
       } else {
-        if (tenantId === "b" && serviceId === "5") {
+        if (failMcpService && tenantId === "b" && serviceId === "5") {
           await route.fulfill({ status: 422, json: { detail: "Controlled MCP failure" } });
           return;
         }
-        const uncovered = tenantId === "b";
+        const uncovered = tenantId === "b" && !serviceId;
         const calls = uncovered
           ? null
           : toolName === "查阅文件"
@@ -293,17 +300,71 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           if (dayCount >= 2) published.push(Math.floor(calls / 6));
           published.push(calls - published.reduce((sum, value) => sum + value, 0));
         }
-        json = {
+        const daily = Array.from({ length: dayCount }, (_, index) => ({
+          statistic_date: new Date(start + index * dayMs).toISOString().slice(0, 10),
+          request_count: published[index - dayCount + published.length] ?? null,
+        }));
+        const publication = {
           coverage_state: uncovered ? "uncovered" : "partial",
           data_as_of: uncovered ? null : "2026-11-12T12:00:00Z",
           is_stale: false,
-          data: view === "summary"
-            ? { tool_count: uncovered ? 0 : 2, request_count: calls }
-            : Array.from({ length: dayCount }, (_, index) => ({
-                statistic_date: new Date(start + index * dayMs).toISOString().slice(0, 10),
-                request_count: published[index - dayCount + published.length] ?? null,
-              })),
         };
+        if (view === "summary") {
+          json = { ...publication, data: { tool_count: uncovered ? 0 : 2, request_count: calls } };
+        } else if (view === "trends") {
+          json = { ...publication, data: daily };
+        } else if (view === "overview") {
+          json = { ...publication, data: { services_by_tenant: [], calls_trend: daily } };
+        } else {
+          const dimension = searchParams.get("dimension");
+          const serviceRows = resources
+            .filter((row) => row.kind === "mcp" && (!tenantId || row.tenant_id === tenantId))
+            .map((row) => ({
+              tenant_id: row.tenant_id,
+              mcp_server_id: row.id,
+              mcp_server_name: row.name,
+              mcp_server_type: "remote",
+              active_tools: row.id === 3 ? 2 : 1,
+              tool_name: undefined as string | undefined,
+              metrics: { request_count: 13, avg_duration_ms: row.id * 2 },
+            }));
+          const historical = (tenantId === "a" || !tenantId) && view === "list"
+            ? Array.from({ length: 11 }, (_, index) => ({
+                ...serviceRows[0]!,
+                mcp_server_id: 51 + index,
+                mcp_server_name: `历史服务 ${index + 1}`,
+                metrics: { request_count: index, avg_duration_ms: index },
+              }))
+            : [];
+          const toolNames = serviceId === "3"
+            ? ["语义检索", "读索引"]
+            : serviceId === "4"
+              ? ["查阅文件"]
+              : serviceId === "5" ? ["研发工具"] : [];
+          const service = serviceRows.find((row) => String(row.mcp_server_id) === serviceId);
+          const rows = uncovered
+            ? []
+            : dimension === "services"
+              ? [...serviceRows].reverse().concat(historical)
+              : toolNames.filter((name) => !toolName || name === toolName).map((name, index) => ({
+                  ...service!,
+                  tool_name: name,
+                  metrics: { request_count: name === "查阅文件" ? 0 : 9 - index, avg_duration_ms: 3 },
+                }));
+          if (view === "rankings") {
+            json = { ...publication, data: rows.slice(0, 5) };
+          } else {
+            const search = searchParams.get("search") ?? "";
+            const metric = searchParams.get("sort_by") === "avg_duration_ms" ? "avg_duration_ms" : "request_count";
+            const descending = searchParams.get("descending") === "true" ? -1 : 1;
+            const items = rows
+              .filter((row) => (row.tool_name ?? row.mcp_server_name).includes(search))
+              .sort((left, right) => descending * (left.metrics[metric] - right.metrics[metric]));
+            const pageSize = Number(searchParams.get("page_size"));
+            const offset = (Number(searchParams.get("page")) - 1) * pageSize;
+            json = { ...publication, data: { items: items.slice(offset, offset + pageSize), total: items.length } };
+          }
+        }
       }
     } else if (pathname === "/api/mcp/tools") {
       const service = searchParams.get("mcp_id");
@@ -839,14 +900,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const agentTrend = page.getByRole("region", { name: "智能体执行次数" });
     const modelTrend = page.getByRole("region", { name: "模型请求数" });
     const skillTrend = page.getByRole("region", { name: "Skill 使用次数" });
+    const mcpTrend = page.getByRole("region", { name: "MCP 工具调用量" });
     const inventoryReads = () =>
       reads.filter((entry) => entry.startsWith("resources:"));
     const chart = (panel: typeof agentTrend) =>
       panel.locator(".recharts-area-curve");
-    await expect(cards.locator("dd")).toHaveText(["2", "1", "暂未接入", "2"]);
-    await expect(
-      page.getByRole("region", { name: "MCP 工具调用量" }),
-    ).toHaveText(/暂未接入/);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "3", "2"]);
+    await expect(chart(mcpTrend)).toBeVisible();
+    await expect.poll(() => mcpReads.overview.at(-1)).toEqual({
+      start_date: "2026-11-17", end_date: "2026-11-23",
+    });
     await expect(chart(skillTrend)).toBeVisible();
     await expect(page.getByText("2026-11-17 – 2026-11-23")).toBeVisible();
     await expect(modelTrend).toHaveAttribute("aria-busy", "true");
@@ -867,6 +930,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
 
     const beforeDate = inventoryReads().length;
     const skillCountReads = skillReads.summary.length;
+    const countReads = mcpReads.catalog.length;
     await page.getByText("近一个月", { exact: true }).click();
     await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
     await expect
@@ -885,9 +949,13 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         group: null,
         agent: null,
       });
-    await expect(cards.locator("dd")).toHaveText(["2", "1", "暂未接入", "2"]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "3", "2"]);
     expect(inventoryReads()).toHaveLength(beforeDate);
     expect(skillReads.summary).toHaveLength(skillCountReads);
+    expect(mcpReads.catalog).toHaveLength(countReads);
+    await expect.poll(() => mcpReads.overview.at(-1)).toEqual({
+      start_date: "2026-10-25", end_date: "2026-11-23",
+    });
     await expect
       .poll(() => skillReads.trends.at(-1))
       .toEqual({
@@ -900,14 +968,14 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(cards.locator("dd")).toHaveText([
       "加载中",
       "加载中",
-      "暂未接入",
+      "加载中",
       "加载中",
     ]);
     await expect(chart(agentTrend)).toHaveCount(0);
     await expect(chart(modelTrend)).toHaveCount(0);
     releaseOverviewScope();
     holdOverviewScope = false;
-    await expect(cards.locator("dd")).toHaveText(["1", "0", "暂未接入", "1"]);
+    await expect(cards.locator("dd")).toHaveText(["1", "0", "1", "1"]);
     await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
     await expect
       .poll(() => modelTrendReads.at(-1))
@@ -929,6 +997,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     );
     await expect(chart(modelTrend)).toHaveCount(0);
     expect(inventoryReads().at(-1)).toBe("resources:b");
+    await expect(mcpTrend.locator(".ant-empty-description")).toHaveText("—");
+    expect(mcpReads.catalog.at(-1)).toEqual({ tenant_id: "b" });
+    expect(mcpReads.overview.at(-1)).toEqual({
+      tenant_id: "b", start_date: "2026-10-25", end_date: "2026-11-23",
+    });
 
     const beforeCustom = modelTrendReads.length;
     const beforeCustomInventory = inventoryReads().length;
@@ -943,11 +1016,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(page.getByText("2026-11-07 – 2026-11-12")).toBeVisible();
     await expect(modelTrend.getByRole("alert")).toHaveText("加载失败，请重试");
     await expect(chart(agentTrend)).toBeVisible();
-    await expect(cards.locator("dd")).toHaveText(["1", "0", "暂未接入", "1"]);
+    await expect(cards.locator("dd")).toHaveText(["1", "0", "1", "1"]);
     expect(inventoryReads()).toHaveLength(beforeCustomInventory);
     await choose("租户", "全部租户");
     await expect(chart(modelTrend)).toBeVisible();
-    await expect(cards.locator("dd")).toHaveText(["2", "1", "暂未接入", "2"]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "3", "2"]);
     overviewModelReads = modelTrendReads.length;
   });
   await contract.step(scope, async () => {
@@ -1208,18 +1281,23 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       search: string,
     ) => {
       await expect(details.getByRole("columnheader")).toHaveText(headers);
-      await expect(unavailable(details)).toBeVisible();
-      await expect(details.locator("tbody tr[data-row-key]")).toHaveCount(0);
-      await expect(
-        details.getByRole("button", { name: search }),
-      ).toBeDisabled();
+      await expect(details.locator("tbody tr[data-row-key]").first()).toBeVisible();
+      await expect(details.getByRole("button", { name: search })).toBeEnabled();
+      await expect(unavailable(details)).toHaveCount(0);
     };
     const toolColumns = ["工具名称", "工具调用量", "平均时延（ms）"];
 
     await choose("租户", "全部租户");
     await choose("MCP", "研发服务 · 研发中心");
     await expect(select("MCP 工具")).toBeDisabled();
-    await expect(unavailable(toolTop)).toBeVisible();
+    await toolTop.getByRole("button", { name: "研发工具" }).click();
+    await expect(mcp.getByRole("heading", { name: "研发服务 / 研发工具 · 研发中心" })).toBeVisible();
+    await expect.poll(() => mcpReads.trends.at(-1)).toMatchObject({
+      tenant_id: "b", server_id: "5", tool_name: "研发工具",
+      start_date: "2026-11-07", end_date: "2026-11-12",
+    });
+    await expect(select("MCP 工具")).toBeEnabled();
+    expect(reads).not.toContain("tools:5");
     await choose("租户", "运营中心");
     await expect(
       mcp.getByRole("heading", { name: "全部服务 · 运营中心" }),
@@ -1227,7 +1305,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(select("MCP 工具")).toHaveCount(0);
     await expectCards(["当前 MCP 总数", "工具调用量"], ["2", "27"]);
     await expectTrend();
-    await expect(unavailable(serviceTop)).toBeVisible();
+    await expect(serviceTop.getByRole("button")).toHaveText(["文件服务", "知识库服务"]);
+    await expect.poll(() => mcpReads.rankings.at(-1)).toMatchObject({
+      dimension: "services", tenant_id: "a", metric: "request_count",
+    });
     await expect(toolTop).toHaveCount(0);
     await expectDetails(
       services,
@@ -1242,6 +1323,30 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       "搜索服务名称",
     );
     await screenshot("mcp-all");
+    const serviceSearchButton = services.getByRole("button", { name: "搜索服务名称" });
+    const serviceSearch = page.getByRole("searchbox", { name: "搜索服务名称" });
+    const otherReads = {
+      summary: mcpReads.summary.length, trends: mcpReads.trends.length, rankings: mcpReads.rankings.length,
+    };
+    await services.locator(".ant-pagination-item-2").click();
+    await expect.poll(() => mcpReads.list.at(-1)).toMatchObject({ page: "2", dimension: "services" });
+    await serviceSearchButton.click();
+    await serviceSearch.fill("服务");
+    await serviceSearch.press("Enter");
+    await expect.poll(() => mcpReads.list.at(-1)).toMatchObject({ page: "1", search: "服务" });
+    await services.locator(".ant-pagination-item-2").click();
+    const latency = services.getByRole("columnheader", { name: "平均时延（ms）" });
+    await latency.click();
+    await expect.poll(() => mcpReads.list.at(-1)).toMatchObject({
+      page: "1", search: "服务", sort_by: "avg_duration_ms", descending: "true",
+    });
+    await latency.click();
+    await expect.poll(() => mcpReads.list.at(-1)).toMatchObject({
+      page: "1", search: "服务", sort_by: "avg_duration_ms", descending: "false",
+    });
+    expect(mcpReads.summary).toHaveLength(otherReads.summary);
+    expect(mcpReads.trends).toHaveLength(otherReads.trends);
+    expect(mcpReads.rankings).toHaveLength(otherReads.rankings);
     await choose("MCP", "内置服务");
     await expect(select("MCP 工具")).toBeDisabled();
     await expect.poll(() => mcpReads.summary.at(-1)).toMatchObject({
@@ -1250,7 +1355,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     });
     expect(mcpReads.summary.at(-1)).not.toHaveProperty("server_id");
 
-    await choose("MCP", "知识库服务");
+    await choose("MCP", "全部服务");
+    await serviceTop.getByRole("button", { name: "知识库服务" }).click();
     await expect(
       mcp.getByRole("heading", { name: "知识库服务 · 运营中心" }),
     ).toBeVisible();
@@ -1258,11 +1364,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expectCards(["工具数", "工具调用量"], ["2", "13"]);
     await expectTrend();
     await expect(serviceTop).toHaveCount(0);
-    await expect(unavailable(toolTop)).toBeVisible();
+    await expect(toolTop.getByRole("button")).toHaveText(["语义检索", "读索引"]);
+    await expect.poll(() => mcpReads.rankings.at(-1)).toMatchObject({
+      dimension: "tools", tenant_id: "a", server_id: "3",
+    });
     await expectDetails(toolDetails, [...toolColumns, "操作"], "搜索工具名称");
     await screenshot("mcp-service");
 
-    await choose("MCP 工具", "语义检索");
+    const rankingCount = mcpReads.rankings.length;
+    await toolDetails.getByRole("row", { name: /语义检索/ })
+      .getByRole("button", { name: "查看统计" }).click();
     await expect(
       mcp.getByRole("heading", { name: "知识库服务 / 语义检索 · 运营中心" }),
     ).toBeVisible();
@@ -1271,6 +1382,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(serviceTop).toHaveCount(0);
     await expect(toolTop).toHaveCount(0);
     await expectDetails(toolDetails, toolColumns, "搜索工具名称");
+    await expect(toolDetails.getByRole("button", { name: "查看统计" })).toHaveCount(0);
+    expect(mcpReads.rankings).toHaveLength(rankingCount);
+    await expect.poll(() => mcpReads.list.at(-1)).toMatchObject({
+      dimension: "tools", server_id: "3", tool_name: "语义检索",
+    });
     await expect.poll(() => mcpReads.trends.at(-1)).toEqual({
       tenant_id: "a", server_id: "3", tool_name: "语义检索",
       start_date: "2026-11-07", end_date: "2026-11-12",
@@ -1291,7 +1407,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await page.getByRole("button", { name: "刷新", exact: true }).click();
     await expect
       .poll(() => reads.slice(start).sort())
-      .toEqual(["groups:a", "mcp:catalog:a", "mcp:summary:a", "mcp:trends:a", "scope:a", "tenants", "tools:4"]);
+      .toEqual([
+        "groups:a", "mcp:catalog:a", "mcp:list:a", "mcp:rankings:a",
+        "mcp:summary:a", "mcp:trends:a", "scope:a", "tenants", "tools:4",
+      ]);
     expect(mcpReads.summary.at(-1)).toEqual({
       tenant_id: "a", server_id: "4",
       start_date: "2026-11-07", end_date: "2026-11-12",
@@ -1328,8 +1447,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     );
     await expectCards(["当前 MCP 总数", "工具调用量"], ["1", "—"]);
     await expect(trend.getByText("—", { exact: true })).toBeVisible();
+    failMcpService = true;
     await choose("MCP", "研发服务");
-    await expect(mcp.getByRole("alert").filter({ hasText: "加载失败" })).toHaveCount(2);
+    await expect(mcp.getByRole("alert").filter({ hasText: "加载失败" })).toHaveCount(4);
+    failMcpService = false;
     expect(unexpected).toEqual([]);
     await choose("租户", "运营中心");
     await choose("MCP", "文件服务");
@@ -1999,7 +2120,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(
       page
         .getByRole("region", { name: "工具明细", exact: true })
-        .getByText("暂未接入", { exact: true }),
+        .getByText("查阅文件", { exact: true }),
     ).toBeVisible();
     await expect(page.getByPlaceholder("请选择开始日期")).toHaveValue(
       "2026-11-07",
@@ -2138,6 +2259,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     expect(reads.filter((read) => read.startsWith("tools:")).sort()).toEqual(
       expect.arrayContaining(["tools:3", "tools:4"]),
     );
+    expect(mcpReads.list).toEqual(expect.arrayContaining([
+      expect.objectContaining({ dimension: "services", page: "2" }),
+      expect.objectContaining({ dimension: "tools", tenant_id: "b", server_id: "5", tool_name: "研发工具" }),
+    ]));
     expect(unexpected).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import { Bot, Box, Layers3, Puzzle } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getAgentMonitoringTrends } from "@/services/agentMonitoringService";
+import { getMcpMonitoringOverview } from "@/services/mcpMonitoringService";
 import { getModelMonitoringTrends } from "@/services/modelMonitoringService";
 import {
   getSkillMonitoringSummary,
@@ -40,7 +41,7 @@ export function MonitoringOverview({
   userTenant: string;
   directories: Pick<
     ReturnType<typeof useMonitoringDirectories>,
-    "tenant" | "scope" | "inventory"
+    "tenant" | "scope" | "inventory" | "mcpCatalog" | "mcpServiceCount"
   >;
   canReadInventory: boolean;
   scopeLabel: string;
@@ -49,7 +50,7 @@ export function MonitoringOverview({
   dateLabel: ReactNode;
 }) {
   const { t, i18n } = useTranslation("common");
-  const { tenant, scope, inventory } = directories;
+  const { tenant, scope, inventory, mcpCatalog, mcpServiceCount } = directories;
   const selection = agentMonitoringSelection(tenant, range, "");
   const queryKey = ["monitoringOverview", userId, userTenant, selection];
   const agent = useQuery({
@@ -60,6 +61,11 @@ export function MonitoringOverview({
   const model = useQuery({
     queryKey: [...queryKey, "model"],
     queryFn: ({ signal }) => getModelMonitoringTrends(selection!, signal),
+    enabled: selection !== null,
+  });
+  const mcp = useQuery({
+    queryKey: [...queryKey, "mcp"],
+    queryFn: ({ signal }) => getMcpMonitoringOverview(selection!, signal),
     enabled: selection !== null,
   });
   const skillSelection = selection && { ...selection, skillId: null };
@@ -100,6 +106,7 @@ export function MonitoringOverview({
   );
   const number = new Intl.NumberFormat(i18n.language);
   const inventoryFailed = scope.isError || inventory.isError;
+  const mcpCountFailed = scope.isError || mcpCatalog.isError;
   const skillCountFailed = scope.isError || skillSummary.isError;
   const skillCount = skillCountFailed
     ? undefined
@@ -122,23 +129,27 @@ export function MonitoringOverview({
         className={styles.cards}
         aria-label={t("ops.monitoring.inventory")}
         aria-busy={
-          inventoryLoading || inventory.isFetching || skillSummary.isFetching
+          inventoryLoading ||
+          inventory.isFetching ||
+          skillSummary.isFetching ||
+          mcpCatalog.isFetching
         }
       >
         {resources.map(({ kind, Icon }) => {
-          const connected = kind === "agent" || kind === "model";
           const total =
             kind === "skill"
               ? skillCount
-              : connected && canReadInventory && !inventoryFailed
-                ? counts?.[kind]
-                : undefined;
+              : kind === "mcp"
+                ? mcpServiceCount
+                : canReadInventory && !inventoryFailed
+                  ? counts?.[kind]
+                  : undefined;
           const status =
             kind === "skill"
               ? t(skillCountFailed ? "ops.loadError" : "common.loading")
-              : connected
-                ? inventoryState
-                : t("ops.monitoring.notConnected");
+              : kind === "mcp"
+                ? t(mcpCountFailed ? "ops.loadError" : "common.loading")
+                : inventoryState;
           return (
             <div className={styles.card} key={kind}>
               <Icon size={25} className={styles.icon} aria-hidden />
@@ -192,7 +203,24 @@ export function MonitoringOverview({
             hasRange: Boolean(range),
           }}
         />
-        <OverviewTrend title={t("ops.monitoring.overview.mcpTrend")} />
+        <OverviewTrend
+          title={t("ops.monitoring.overview.mcpTrend")}
+          emptyDescription={
+            mcp.data?.coverage_state === "uncovered" ? "—" : undefined
+          }
+          trend={{
+            points: mcp.data?.data.calls_trend.map((day) => ({
+              date: day.statistic_date,
+              value: day.request_count,
+            })),
+            publication: mcp.data,
+            loading:
+              scopeLoading ||
+              (selection !== null && (mcp.isPending || mcp.isFetching)),
+            failed: scope.isError || mcp.isError,
+            hasRange: Boolean(range),
+          }}
+        />
         <OverviewTrend
           title={t("ops.monitoring.overview.skillTrend")}
           trend={{

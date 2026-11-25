@@ -3,10 +3,16 @@ import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import type {
   McpCatalogService,
+  McpMonitoringDimension,
+  McpMonitoringListOptions,
+  McpMonitoringOverview,
+  McpMonitoringPage,
+  McpMonitoringRankings,
   McpMonitoringSelection,
   McpMonitoringSummary,
   McpMonitoringTrend,
 } from "@/types/mcpMonitoring";
+import type { MonitoringDateScope } from "@/types/operations";
 
 export async function getMcpMonitoringCatalog(
   tenantId: string | null,
@@ -20,23 +26,39 @@ export async function getMcpMonitoringCatalog(
   return (await response.json()).data;
 }
 
-async function readMcpMonitoring<T>(
-  endpoint: string,
-  scope: McpMonitoringSelection,
-  signal: AbortSignal
-): Promise<T> {
+function dateParams(scope: MonitoringDateScope): URLSearchParams {
   const params = new URLSearchParams({
     start_date: scope.startDate,
     end_date: scope.endDate,
   });
   if (scope.tenantId) params.set("tenant_id", scope.tenantId);
+  return params;
+}
+
+async function readMonitoring<T>(
+  endpoint: string,
+  params: URLSearchParams,
+  signal: AbortSignal
+): Promise<T> {
+  const response = await fetchWithAuth(`${endpoint}?${params}`, { signal });
+  return response.json();
+}
+
+function readMcpMonitoring<T>(
+  endpoint: string,
+  scope: McpMonitoringSelection,
+  signal: AbortSignal,
+  options?: Record<string, string>
+): Promise<T> {
+  const params = dateParams(scope);
   for (const id of scope.groupIds) params.append("group_ids", String(id));
   if (scope.serviceId !== null)
     params.set("server_id", String(scope.serviceId));
-  if (scope.builtin) params.set("server_type", "builtin");
+  if (scope.serverType) params.set("server_type", scope.serverType);
   if (scope.toolName) params.set("tool_name", scope.toolName);
-  const response = await fetchWithAuth(`${endpoint}?${params}`, { signal });
-  return response.json();
+  for (const [key, value] of Object.entries(options ?? {}))
+    params.set(key, value);
+  return readMonitoring<T>(endpoint, params, signal);
 }
 
 export function getMcpMonitoringSummary(
@@ -57,6 +79,51 @@ export function getMcpMonitoringTrends(
   return readMcpMonitoring<McpMonitoringTrend>(
     API_ENDPOINTS.operations.mcpMonitoringTrends,
     scope,
+    signal
+  );
+}
+
+export function getMcpMonitoringRankings(
+  scope: McpMonitoringSelection,
+  dimension: McpMonitoringDimension,
+  signal: AbortSignal
+) {
+  return readMcpMonitoring<McpMonitoringRankings>(
+    API_ENDPOINTS.operations.mcpMonitoringRankings,
+    scope,
+    signal,
+    { dimension, metric: "request_count" }
+  );
+}
+
+export function getMcpMonitoringList(
+  scope: McpMonitoringSelection,
+  dimension: McpMonitoringDimension,
+  options: McpMonitoringListOptions,
+  signal: AbortSignal
+) {
+  return readMcpMonitoring<McpMonitoringPage>(
+    API_ENDPOINTS.operations.mcpMonitoringList,
+    scope,
+    signal,
+    {
+      dimension,
+      page: String(options.page),
+      page_size: String(options.pageSize),
+      search: options.search,
+      sort_by: options.sortBy,
+      descending: String(options.descending),
+    }
+  );
+}
+
+export function getMcpMonitoringOverview(
+  scope: MonitoringDateScope,
+  signal: AbortSignal
+) {
+  return readMonitoring<McpMonitoringOverview>(
+    API_ENDPOINTS.operations.mcpMonitoringOverview,
+    dateParams(scope),
     signal
   );
 }

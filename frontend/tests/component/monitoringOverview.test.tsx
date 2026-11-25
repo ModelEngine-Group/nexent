@@ -56,6 +56,8 @@ describe("Overview current resources", () => {
     });
     const directories = {
       tenant: "a",
+      mcpCatalog: { isError: false, isFetching: false },
+      mcpServiceCount: 0,
       scope: { isError: false },
       inventory: {
         data: [agent, model],
@@ -82,6 +84,10 @@ describe("Overview current resources", () => {
       screen.getByText("ops.monitoring.count.skill").parentElement!
     );
     expect(await card.findByText("0")).toBeVisible();
+    const mcpCard = within(
+      screen.getByText("ops.monitoring.count.mcp").parentElement!
+    );
+    expect(mcpCard.getByText("0")).toBeVisible();
     await act(async () => {
       await queryClient.refetchQueries({ queryKey: ["monitoringOverview"] });
     });

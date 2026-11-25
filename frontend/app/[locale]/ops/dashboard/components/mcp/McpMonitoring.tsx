@@ -7,20 +7,29 @@ import {
   getMcpMonitoringSummary,
   getMcpMonitoringTrends,
 } from "@/services/mcpMonitoringService";
-import type { McpMonitoringQueryKey } from "@/types/mcpMonitoring";
+import type {
+  McpMonitoringQueryKey,
+  McpMonitoringRow,
+} from "@/types/mcpMonitoring";
 import { OverviewTrend } from "../overview/OverviewTrend";
 import { UnavailableMonitoring } from "../shared/UnavailableMonitoring";
+import { McpMonitoringDetails } from "./McpMonitoringDetails";
+import { McpMonitoringRankings } from "./McpMonitoringRankings";
 
 export function McpMonitoring({
   scope,
   queryKey,
   registeredServices,
+  viewKey,
+  onViewStatistics,
   scopeLoading,
   hasRange,
 }: {
   scope: "all" | "service" | "tool";
   queryKey: McpMonitoringQueryKey;
   registeredServices: { count: number | null; loading: boolean };
+  viewKey: string;
+  onViewStatistics: (row: McpMonitoringRow) => void;
   scopeLoading: boolean;
   hasRange: boolean;
 }) {
@@ -29,6 +38,10 @@ export function McpMonitoring({
   const singleTool = scope === "tool";
   const calls = t("ops.monitoring.mcp.calls");
   const trendTitle = t("ops.monitoring.mcp.trend");
+  const dimension = allServices ? "services" : "tools";
+  const rankingTitle = t(
+    allServices ? "ops.monitoring.mcp.serviceTop" : "ops.monitoring.mcp.toolTop"
+  );
   const selection = queryKey[3];
   const summary = useQuery({
     queryKey: [...queryKey, "summary"],
@@ -112,48 +125,30 @@ export function McpMonitoring({
           }}
         />
       }
-      rankingTitle={
-        singleTool
-          ? undefined
-          : t(
-              allServices
-                ? "ops.monitoring.mcp.serviceTop"
-                : "ops.monitoring.mcp.toolTop"
-            )
+      rankingTitle={singleTool ? undefined : rankingTitle}
+      rankingPanel={
+        !singleTool && (
+          <McpMonitoringRankings
+            title={rankingTitle}
+            queryKey={queryKey}
+            dimension={dimension}
+            scopeLoading={scopeLoading}
+            hasRange={hasRange}
+            onViewStatistics={onViewStatistics}
+          />
+        )
       }
-      details={{
-        title: t(
-          allServices
-            ? "ops.monitoring.mcp.serviceDetails"
-            : "ops.monitoring.mcp.toolDetails"
-        ),
-        nameLabel: t(
-          allServices
-            ? "ops.monitoring.mcp.serviceName"
-            : "ops.monitoring.mcp.toolName"
-        ),
-        searchLabel: t(
-          allServices
-            ? "ops.monitoring.mcp.searchServices"
-            : "ops.monitoring.mcp.searchTools"
-        ),
-        columns: [
-          ...(allServices
-            ? [
-                { title: t("common.source"), key: "source" },
-                {
-                  title: t("ops.monitoring.mcp.activeTools"),
-                  key: "active_tools",
-                },
-              ]
-            : []),
-          { title: calls, key: "calls" },
-          { title: t("ops.monitoring.mcp.latency"), key: "latency" },
-          ...(!singleTool
-            ? [{ title: t("common.actions"), key: "actions" }]
-            : []),
-        ],
-      }}
+      detailsPanel={
+        <McpMonitoringDetails
+          key={viewKey}
+          queryKey={queryKey}
+          dimension={dimension}
+          singleTool={singleTool}
+          scopeLoading={scopeLoading}
+          hasRange={hasRange}
+          onViewStatistics={onViewStatistics}
+        />
+      }
     />
   );
 }

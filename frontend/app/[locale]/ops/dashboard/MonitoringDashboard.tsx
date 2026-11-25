@@ -20,7 +20,9 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { hasRole } from "@/lib/roles";
 import type {
   McpMonitoringQueryKey,
+  McpMonitoringRow,
   McpMonitoringSelection,
+  McpServiceFilter,
 } from "@/types/mcpMonitoring";
 import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
 import type { OperationsResource } from "@/types/operations";
@@ -33,6 +35,7 @@ import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
 import { McpMonitoring } from "./components/mcp/McpMonitoring";
+import { getMcpDrilldownService } from "./components/mcp/mcpMonitoringValues";
 import { ModelMonitoringDetails } from "./components/model/ModelMonitoringDetails";
 import { ModelMonitoringPanels } from "./components/model/ModelMonitoringPanels";
 import { MonitoringOverview } from "./components/overview/MonitoringOverview";
@@ -122,6 +125,11 @@ function MonitoringScope({
   const [modelDrilldown, setModelDrilldown] =
     useState<Pick<OperationsResource, "tenant_id" | "id" | "name">>();
   const [skillDrilldown, setSkillDrilldown] = useState<SkillMonitoringRow>();
+  const [mcpDrilldown, setMcpDrilldown] = useState<{
+    tenantId: string;
+    service: McpServiceFilter;
+    toolName?: string;
+  }>();
   const directories = useMonitoringDirectories({
     userId,
     userTenant,
@@ -130,6 +138,7 @@ function MonitoringScope({
     selectedTenant: filters.tenant,
     tab,
     selectedService: filters.resources.mcp,
+    drilledMcpService: mcpDrilldown,
   });
 
   const tenantChoices =
@@ -156,7 +165,10 @@ function MonitoringScope({
       choices={tenantChoices}
       loading={directories.tenants.isFetching}
       failed={directories.tenants.isError}
-      onChange={(value) => dispatch({ type: "tenant", value })}
+      onChange={(value) => {
+        setMcpDrilldown(undefined);
+        dispatch({ type: "tenant", value });
+      }}
     />
   ) : (
     <Select
@@ -225,6 +237,16 @@ function MonitoringScope({
           ? skillDrilldown
           : undefined
       : undefined;
+  const mcpService = directories.mcpService;
+  const mcpServices: McpServiceFilter[] = [
+    ...(directories.mcpCatalog.data ?? []),
+  ];
+  if (
+    mcpService &&
+    !mcpServices.some((service) => mcpServiceKey(service) === resourceSelection)
+  ) {
+    mcpServices.push(mcpService);
+  }
   const directoryChoices =
     tab === "skill"
       ? directories.skills.data?.map((skill) => ({
@@ -232,7 +254,7 @@ function MonitoringScope({
           label: skill.name || skill.skill_id,
         }))
       : tab === "mcp"
-        ? directories.mcpCatalog.data?.map((service) => {
+        ? mcpServices.map((service) => {
             const tenant = directories.mcpServiceTenant(service);
             return {
               value: mcpServiceKey(service),
@@ -323,15 +345,35 @@ function MonitoringScope({
     skillSelection,
   ];
   const selectedMonitoringResource = selectedAgent ?? selectedModel;
-  const mcpService = directories.mcpService;
   const mcpTenant = mcpService && directories.mcpServiceTenant(mcpService);
   const resourceTenant =
     selectedMonitoringResource?.tenant_id ??
     selectedSkill?.tenant_id ??
     mcpTenant;
-  const selectedMcpTool = directories.canReadTools
-    ? directories.tools.data?.find((tool) => tool.name === filters.tool)
-    : undefined;
+  const availableMcpTools = directories.canReadTools
+    ? (directories.tools.data ?? [])
+    : [];
+  const drilledToolName =
+    mcpDrilldown &&
+    mcpService &&
+    mcpDrilldown.tenantId === mcpTenant &&
+    mcpServiceKey(mcpDrilldown.service) === resourceSelection &&
+    mcpDrilldown.toolName === filters.tool
+      ? mcpDrilldown.toolName
+      : undefined;
+  const selectedMcpTool =
+    availableMcpTools.find((tool) => tool.name === filters.tool)?.name ??
+    drilledToolName;
+  const toolChoices = availableMcpTools.map(({ name }) => ({
+    value: name,
+    label: name,
+  }));
+  if (
+    drilledToolName &&
+    !toolChoices.some(({ value }) => value === drilledToolName)
+  ) {
+    toolChoices.push({ value: drilledToolName, label: drilledToolName });
+  }
   const mcpSelection: McpMonitoringSelection | null =
     tab === "mcp" &&
     directories.tenant !== undefined &&
@@ -341,8 +383,8 @@ function MonitoringScope({
           tenantId: directories.tenant,
           groupIds: group ? [Number(group)] : [],
           serviceId: mcpService?.service_id ?? null,
-          builtin: mcpService?.type === "builtin",
-          toolName: selectedMcpTool?.name ?? null,
+          serverType: mcpService?.service_id === null ? mcpService.type : null,
+          toolName: selectedMcpTool ?? null,
           startDate: range[0],
           endDate: range[1],
         }
@@ -361,6 +403,22 @@ function MonitoringScope({
     range && scopePending && !directories.scope.isError
   );
   const resourceHeading = useRef<HTMLHeadingElement>(null);
+  const viewMcpStatistics = (row: McpMonitoringRow) => {
+    const service = getMcpDrilldownService(row);
+    if (!service || (!canChooseTenant && row.tenant_id !== directories.tenant))
+      return;
+    setMcpDrilldown({
+      tenantId: row.tenant_id,
+      service,
+      toolName: row.tool_name,
+    });
+    if (directories.tenant !== row.tenant_id) {
+      dispatch({ type: "tenant", value: row.tenant_id });
+    }
+    dispatch({ type: "resource", tab: "mcp", value: mcpServiceKey(service) });
+    dispatch({ type: "tool", value: row.tool_name ?? "" });
+    requestAnimationFrame(() => resourceHeading.current?.focus());
+  };
   const dateControls = (
     <div className={styles.dateControls}>
       <Segmented<DatePreset>
@@ -504,13 +562,10 @@ function MonitoringScope({
                 <DirectorySelect
                   label={t("ops.monitoring.tool")}
                   allLabel={t("ops.monitoring.allTools")}
-                  value={selectedMcpTool?.name ?? ""}
-                  choices={directories.tools.data?.map((tool) => ({
-                    value: tool.name,
-                    label: tool.name,
-                  }))}
+                  value={selectedMcpTool ?? ""}
+                  choices={toolChoices}
                   disabledText={
-                    directories.canReadTools
+                    directories.canReadTools || drilledToolName
                       ? undefined
                       : t("ops.monitoring.notConnected")
                   }
@@ -548,7 +603,7 @@ function MonitoringScope({
             {selectedMonitoringResource
               ? selectedMonitoringResource.name || selectedMonitoringResource.id
               : (mcpService?.name ?? resource?.label ?? allResources)}
-            {selectedMcpTool && ` / ${selectedMcpTool.name}`} ·{" "}
+            {selectedMcpTool && ` / ${selectedMcpTool}`} ·{" "}
             {resourceTenant ? tenantLabel(resourceTenant) : scopeLabel}
           </h2>
           {dateLabel}
@@ -668,13 +723,17 @@ function MonitoringScope({
                     : "all"
               }
               queryKey={mcpQueryKey}
+              viewKey={JSON.stringify([
+                directories.tenant,
+                resourceSelection,
+                selectedMcpTool,
+              ])}
+              onViewStatistics={viewMcpStatistics}
               registeredServices={{
-                count: directories.mcpCatalog.isError
-                  ? null
-                  : (directories.mcpCatalog.data?.filter(
-                      ({ type }) => type !== "builtin"
-                    ).length ?? null),
-                loading: scopeLoading || directories.mcpCatalog.isLoading,
+                count: directories.mcpServiceCount ?? null,
+                loading:
+                  (scopePending && !directories.scope.isError) ||
+                  directories.mcpCatalog.isLoading,
               }}
               scopeLoading={scopeLoading}
               hasRange={Boolean(range)}
