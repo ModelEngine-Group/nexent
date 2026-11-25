@@ -127,23 +127,34 @@ def test_orphan_user_is_preserved_and_can_enter_context(history_db):
 
 
 @pytest.mark.parametrize("owner,tenant", [("different-owner", "tenant"), ("owner", "other-tenant")])
-def test_history_keeps_owner_and_tenant_boundaries(history_db, owner, tenant):
+@pytest.mark.parametrize("by_index", [False, True], ids=["message-id", "index"])
+def test_history_keeps_owner_and_tenant_boundaries(history_db, owner, tenant, by_index):
     module, message, _ = history_db
     message(1, "user", "Private task")
     message(2, "assistant", "Private output", "stopped")
     message(3, "user", "Next")
-    assert module.get_historical_context(1, 3, owner, tenant) is None
+    if by_index:
+        assert module.get_historical_context(1, None, owner, tenant, before_message_index=3) is None
+    else:
+        assert module.get_historical_context(1, 3, owner, tenant) is None
 
 
-def test_projection_is_bounded_and_excludes_deleted_or_future_rows(history_db):
+@pytest.mark.parametrize("by_index", [False, True], ids=["message-id", "index"])
+def test_projection_is_bounded_and_excludes_deleted_or_future_rows(history_db, by_index):
     module, message, unit = history_db
     message(1, "user", "Task")
     message(2, "assistant", "", "stopped")
-    message(3, "user", "Next")
+    if not by_index:
+        message(30, "user", "Next", index=3)
     message(4, "assistant", "Future answer")
     message(5, "user", "Deleted", deleted="Y")
     unit(1, 2, "execution_logs", "x" * 20000)
-    turns = module.get_historical_context(1, 3, "owner", "tenant")["conversation_turns"]
+    if by_index:
+        result = module.get_historical_context(1, None, "owner", "tenant", before_message_index=3)
+    else:
+        result = module.get_historical_context(1, 30, "owner", "tenant")
+    assert result["current_user_message_index"] == 3
+    turns = result["conversation_turns"]
     assert len(turns) == 1
     assert len(turns[0]["assistant_final_answer"]) < 16100
 
@@ -165,6 +176,27 @@ def test_completed_history_keeps_only_persisted_execution_evidence(history_db):
     assert "Saved result" in str(records) and "Saved failure" in str(records)
     assert all(text not in str(records) for text in ["Never replay", "Not committed", "Deleted error"])
     assert "s3://files/old.txt" in projected["attachments"]
+
+
+def test_presave_boundary_does_not_read_the_persisted_only_row(history_db):
+    """Regression: the pre-save boundary must not dereference the persisted row.
+
+    A follow-up turn whose user message is not stored yet passes
+    ``before_message_index`` instead of ``current_user_message_id``. The
+    projection previously ended by dereferencing the row resolved only on the
+    persisted path, raising UnboundLocalError and turning every second chat
+    message into a 500. The resolved boundary is reported for both paths.
+    """
+    module, message, _ = history_db
+    message(1, "user", "Original task")
+    message(2, "assistant", "First answer")
+    message(3, "user", "Pending follow-up", status="streaming")
+    history = module.get_historical_context(1, None, "owner", "tenant", before_message_index=4)
+
+    assert history is not None
+    assert history["current_user_message_index"] == 4
+    assert [turn["user_message"] for turn in history["conversation_turns"]] == ["Original task"]
+    assert history["conversation_turns"][0]["assistant_final_answer"] == "First answer"
 
 
 @pytest.mark.parametrize("boundary", ["message_id", "message_index"])

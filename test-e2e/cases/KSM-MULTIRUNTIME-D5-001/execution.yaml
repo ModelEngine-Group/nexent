@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: KSM-MULTIRUNTIME-D5-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_KSM_MULTIRUNTIME_D5_001
+    profiles: [mock]
+timeout_seconds: 900
+notes: Owned namespace with two Runtime Pods, shared PVC and Redis. The binding proves coordinated admission, renewal and isolation of AgentOS journal events, terminal state and stop flags by run. Real business DB recovery, the public stop route, faults and replica lifecycle acceptance remain pending.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_KSM_MULTIRUNTIME_D5_001]

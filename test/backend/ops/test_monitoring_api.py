@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+﻿# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regression tests for reporting model monitoring coverage and refresh status."""
 
 from datetime import date, datetime, timedelta, timezone

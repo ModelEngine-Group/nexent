@@ -356,9 +356,7 @@ get_third_party_images() {
     echo_image_ref "nginx:alpine"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    if [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ]; then
-      echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
-    fi
+    echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
       phoenix) echo_image_ref "arizephoenix/phoenix:15" ;;
       langfuse)

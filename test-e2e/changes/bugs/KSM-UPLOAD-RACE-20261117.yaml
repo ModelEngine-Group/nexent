@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-UPLOAD-RACE-20261117
+  change_type: bugfix
+  bug_id: KSM-UPLOAD-RACE-20261117
+  title: Bind workspace upload validation and storage reads to one file handle
+  description: Close the path replacement gap without changing upload parameters, object keys or artifact responses.
+  observed_behavior: Replacing a validated output with an outside symlink before storage opens it uploads outside bytes.
+  expected_behavior: Reject pre-open path replacement and retain the original file handle during storage transfer.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing path rejection and normal upload UT did not replace the file or parent between validation and transfer. Group-two isolation reproduced the leak with real MinIO.
+  feature_contract_changed: false
+  affected_features:
+    existing: [KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [KSM-FILES-D3-001, KSM-SECURITY-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/core/tools/test_upload_to_s3_race.py
+      - test/sdk/core/tools/test_s3_tools.py
+      - test/sdk/core/tools/test_file_tools_bind_boundary.py
+      - test/sdk/core/agents/test_nexent_agent_bind_workspace.py
+      - test/sdk/core/agents/test_sandbox_workspace.py
+      - test/sdk/storage/test_minio.py
+    behaviors:
+      - Reject leaf and ancestor replacement before safe open; upload original bytes after safe open.
+      - Close upload handles on success and failure; emit artifacts and registry entries only on success.
+      - Preserve normal path forms, existing in-workspace symlinks, materialization, size limits and automatic finalization.
+    reason: Extend owning upload UT and reuse storage, mapping and finalization tests; real POSIX/MinIO evidence uses the existing owned group-two fixture.
+  notes: >-
+    Baseline runtime-sandbox-kubernetes-migration/design.md and system-group2-manual-acceptance.md in the document workspace.
+    No Case or V5 registration is added. Existing Case IDs identify impacted proof boundaries, not a claim of complete formal Case execution.
+    Run the group2 isolated probe with the exact SDK source overlay, disposable MinIO/PVC and UID-matched namespace cleanup.
+    Network control, autoscaling, developer stack images and existing business data remain outside this change.
+    Verification on working tree a2f137126: Windows UT 185 passed and 8 skipped; Linux race UT 8 passed and 2 Windows-only skips
+    (old implementation 7 failed and 1 passed). Final group2 probe passed all 10 checks and invalid configuration rejection;
+    all owned namespaces removed and 25 developer Pod/PVC records unchanged. Exact source hashes and receipts are linked in the acceptance document.

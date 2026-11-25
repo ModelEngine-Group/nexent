@@ -100,10 +100,15 @@ def test_smoke_retains_monitoring_and_prepares_its_dependencies(smoke, full):
     mcp, = [call for call in runs if "backend.http.mcp_service" in call]
     assert "management-image" in mcp and "OPS_MONITORING_ENABLED=false" in mcp
     assert all("OPS_MONITORING_ENABLED=false" not in call for call in runs if call != mcp)
-    runtime_runs = [call for call in runs if "backend.http.runtime_service" in call]
-    assert len(runtime_runs) == 2
-    assert any({"MONITORING_PROVIDER=local_file", "ENABLE_TELEMETRY=true"} <= set(call) for call in runtime_runs)
-    assert any({"TRAJECTORY_READ_ENABLED=true", "ENABLE_TELEMETRY=false"} <= set(call) for call in runtime_runs)
+    capture, read_only = [call for call in runs if "backend.http.runtime_service" in call]
+    assert {
+        "MONITORING_PROVIDER=otlp", "ENABLE_TELEMETRY=false",
+        "LOCAL_FILE_MONITORING_ENABLED=true", "TRAJECTORY_READ_ENABLED=false",
+    } <= set(capture)
+    assert {
+        "MONITORING_PROVIDER=otlp", "ENABLE_TELEMETRY=false",
+        "LOCAL_FILE_MONITORING_ENABLED=false", "TRAJECTORY_READ_ENABLED=true",
+    } <= set(read_only)
     schema_checks = [call for call in calls if any("store.verify_schema()" in part for part in call)]
     assert len(schema_checks) == (1 if full else 0)
     if full:

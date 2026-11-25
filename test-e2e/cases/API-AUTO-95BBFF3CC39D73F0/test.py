@@ -1,13 +1,22 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
+from secrets import token_hex
+
+import httpx
 import pytest
 
+from contracts.constants import environment
+from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+from nexent.core.concurrency import ThreadManager
 from shared.http import assert_status, client
 
 RUNTIME_LANES = {
     "agent-run",
     "control-io",
     "model-tool-io",
+    "model-embedding",
     "mcp-session",
     "sandbox",
     "background-service",
@@ -45,30 +54,51 @@ def _normalized_state(snapshot: dict) -> str:
     return value.lower()
 
 
-async def _fetch_snapshot(service: str) -> dict:
-    async with client(service) as api:
-        response = await api.get("/internal/thread-capacity")
-    assert_status(response, 200)
-    body = response.json()
-    assert isinstance(body, dict), f"snapshot must be a JSON object, got {type(body).__name__}"
-    return body
+async def _probe(app, manager: ThreadManager, audience: str):
+    identity = {"user_id": "capacity-probe", "tenant_id": "capacity-fixture", "kind": "session"}
+    path = "/internal/thread-capacity"
 
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
+        assert_status(await api.get(path), 401)
 
-async def _openapi_paths(service: str) -> set[str]:
-    async with client(service) as api:
-        response = await api.get("/openapi.json")
-    assert_status(response, 200)
-    schema = response.json()
-    paths = schema.get("paths") if isinstance(schema, dict) else {}
-    return {str(path) for path in (paths or {}).keys()}
+        async def read_internal(route: str):
+            token = sign_identity(identity, audience, "GET", route, b"")
+            response = await api.get(route, headers={IDENTITY_HEADER: token})
+            assert_status(response, 200)
+            return response.json()
+
+        manager.start()
+        try:
+            snapshot = await read_internal(path)
+            assert path not in (await read_internal("/openapi.json"))["paths"]
+            return snapshot
+        finally:
+            await manager.shutdown(timeout=5)
 
 
 @pytest.mark.stage("D2")
 @pytest.mark.case_id("API-AUTO-95BBFF3CC39D73F0")
 @pytest.mark.asyncio
-async def test_thread_capacity_returns_process_local_snapshot_and_stays_out_of_openapi():
-    runtime_snapshot = await _fetch_snapshot("runtime")
-    config_snapshot = await _fetch_snapshot("config")
+async def test_thread_capacity_returns_process_local_snapshot_and_stays_out_of_openapi(monkeypatch):
+    from management.api import application as config
+    from runtime.api import application as runtime
+
+    # Use synthetic signing keys in isolated ASGI apps. The deployed Gateway is
+    # probed separately and its signing configuration is never read.
+    monkeypatch.setattr(environment, "JWT_SECRET", token_hex(32))
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", token_hex(32))
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+    runtime_manager = ThreadManager("runtime", runtime.runtime_thread_manager._policies)
+    config_manager = ThreadManager("config", config.config_thread_manager._policies)
+    monkeypatch.setattr(runtime, "runtime_thread_manager", runtime_manager)
+    monkeypatch.setattr(config, "config_thread_manager", config_manager)
+    for app in (runtime.app, config.app):
+        monkeypatch.setattr(app, "middleware_stack", None)
+
+    runtime_snapshot = await _probe(runtime.app, runtime_manager, "runtime")
+    config_snapshot = await _probe(config.app, config_manager, "management")
+    async with client("config") as gateway:
+        assert_status(await gateway.get("/internal/thread-capacity"), 404)
 
     for service, snapshot, expected_lanes in (
         ("runtime", runtime_snapshot, RUNTIME_LANES),
@@ -94,10 +124,4 @@ async def test_thread_capacity_returns_process_local_snapshot_and_stays_out_of_o
         service_name = snapshot.get("service_name")
         assert service_name == service, (
             f"{service} snapshot service_name={service_name!r}, expected {service!r}"
-        )
-
-    for service in ("runtime", "config"):
-        paths = await _openapi_paths(service)
-        assert "/internal/thread-capacity" not in paths, (
-            f"{service} openapi paths must not expose /internal/thread-capacity"
         )

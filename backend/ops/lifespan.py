@@ -8,11 +8,12 @@ from fastapi import FastAPI
 
 from contracts.constants import environment as config
 from infrastructure.system_configuration.database import configuration_database
+from infrastructure.trace.trajectory_runtime import trajectory_storage_enabled
 from ops.concurrency import create_thread_manager
 
 
 def trajectory_enabled():
-    return config.TRAJECTORY_READ_ENABLED or config.MONITORING_PROVIDER == "local_file"
+    return trajectory_storage_enabled(config)
 
 
 def create_trajectory_workers():

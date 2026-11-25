@@ -64,15 +64,11 @@ export class AgentPage {
     await this.open();
     const search = this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true });
     await search.fill(displayName);
-    // Scope the menu to the exact owned Agent card before opening its editor.
-    const card = this.page
-      .getByRole("button", { name: displayName, exact: true })
-      .locator("xpath=ancestor::article[1]");
+    const card = this.page.getByTestId("agent-card-body").and(
+      this.page.getByRole("button", { name: displayName, exact: true }),
+    );
     await expect(card).toHaveCount(1);
-    await card.hover();
-    await card.getByRole("button", { name: "更多操作", exact: true }).click();
-    await this.page.getByRole("menuitem", { name: "配置", exact: true }).click();
-    // The configure action routes to the agent's own editor page.
+    await card.click();
     await expect(this.page).toHaveURL(/\/agents\/\d+/);
     await expect(this.page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
     await expect(this.page.getByText("模型与提示词", { exact: true }).first()).toBeVisible();

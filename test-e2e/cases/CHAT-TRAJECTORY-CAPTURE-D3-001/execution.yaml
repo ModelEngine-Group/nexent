@@ -9,6 +9,7 @@ acceptance_bindings:
   - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
   AC-02:
   - test_capture_interactive_card_preserves_stop_status
+  - test_capture_tool_failure_reason_survives_cold_read
   - test_capture_versions_are_frozen_per_execution_and_cold_read
   - test_capture_parallel_tools_nested_output_and_full_local_body
   - test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry
@@ -55,9 +56,10 @@ notes: 'Current assertions own private loopback Provider/OTLP HTTP servers, real
   schema/sequence/committed-chat reconciliation, backend environment bootstrap across
   processes remain unverified; integration acceptance is deferred by the user. A direct
   script pass is not complete acceptance of AC-01/03/05 or this full Case. The creator
-  regression uses the real shared orchestration and NL2Agent stream, with the AgentRunInfo
-  builder and PG history boundary controlled, then real SDK/HTTP/file capture and
-  cold reads. It owns no additional shared resources; existing teardown applies. AC-07
+  regression uses the public NL2Agent and NL2Skill routes, real signed AgentOS requests
+  over isolated ASGI transport, real Runtime workers and HTTP model capture, and cold file
+  reads. PG history and model catalog reads are controlled. It owns no additional shared
+  resources; existing teardown applies. AC-07
   uses the same private resources and asserted teardown; cold snapshot and content
   chunks must reconstruct the exact original Agent query while physical model requests
   remain complete. AC-08 reuses private provider and cold reader resources; all model

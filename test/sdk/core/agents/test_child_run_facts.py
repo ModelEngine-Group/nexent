@@ -9,12 +9,15 @@ from unittest.mock import Mock
 
 import pytest
 
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.contracts.output import RunResult
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.factory import AgentCoreFactory
 from nexent.core.agents.orchestration.children import invoke_child
 from nexent.core.agents.resources.subagents import SubAgentDefinition, SubAgentToolWrapper
 from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
 from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.core.utils.observer import MessageObserver
 from nexent.monitor import (
     AgentRunMetadata, MonitoringConfig, agent_monitoring_context, get_agent_monitoring_context, get_monitoring_manager,
 )
@@ -22,6 +25,13 @@ from nexent.monitor.agent_fact import AgentRunObservation
 from nexent.monitor.facts import get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
 from nexent.monitor.run_timing import RunTiming
+
+
+def make_child_run_info():
+    return AgentRunInfo(
+        query="", model_config_list=[], observer=MessageObserver(), stop_event=Event(),
+        agent_config=AgentConfig(name="child", description="Controlled child", model_name="fixture", tools=[]),
+    )
 
 
 @pytest.fixture
@@ -55,7 +65,7 @@ def child_capture(monkeypatch):
         @contextmanager
         def invocation():
             advance("allocate", 20)
-            info = SimpleNamespace(stop_event=Event(), run_result=None, attempt_outcome=None)
+            info = make_child_run_info()
             if pre_cancel:
                 info.stop_event.set()
 

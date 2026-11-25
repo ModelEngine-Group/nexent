@@ -41,7 +41,8 @@ def test_saved_core_context_continuation(monkeypatch,original,protocol,cm,existi
         source=str(result["summaries"][0])
         assert "s3://files/old.txt" in source and "TOOL_RESULT_ALPHA" in source
         assert all(not body.get("tools") for body in result["summaries"])
-        assert all(body.get("max_tokens",0)>0 for body in result["summaries"])
+        assert all(not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(body)
+                   for body in result["summaries"])
     else:
         assert not result["summaries"]
         assert len(result["checkpoints"]) == int(existing_checkpoint)

@@ -61,10 +61,8 @@ import {
 } from "@assistant-ui/react";
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
-import {
-  ConversationArtifactsToolbarEntry,
-  ConversationArtifactsPanel,
-} from "../ui/artifacts-panel";
+import { ConversationArtifactsPanel } from "../ui/artifacts-panel";
+import { ConversationToolbar } from "./conversation-toolbar";
 import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryRail } from "../ui/question-directory-rail";
 import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
@@ -988,7 +986,16 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
-        <ConversationArtifactsToolbarEntry />
+        <ConversationToolbar
+          conversationId={
+            !configurationLayout &&
+            !debugLayout &&
+            variant !== "embedded" &&
+            !isShareMode
+              ? conversationId
+              : undefined
+          }
+        />
         <QuestionDirectoryRail
           questions={questionDirectory}
           onJump={handleJumpToQuestion}

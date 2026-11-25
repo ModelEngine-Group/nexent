@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +31,7 @@ from sdk.nexent.core.concurrency.models import (
 _EXPECTED_LANES = {
     'agent-run': (4, 16),
     'model-tool-io': (4, 16),
+    'model-embedding': (4, 16),
     'control-io': (16, 8),
     'evaluation': (2, 8),
     'background-service': (12, 4),
@@ -87,7 +90,6 @@ async def test_fallback_thread_manager_journey(caplog):
         assert snap.state == ManagerState.RUNNING
 
         policy_map = dict(m1._policies)
-        assert len(policy_map) == 7
         assert set(policy_map) == set(_EXPECTED_LANES)
         for name, (workers, queue_size) in _EXPECTED_LANES.items():
             policy = policy_map[name]

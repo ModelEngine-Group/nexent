@@ -53,6 +53,14 @@ async function run(scope: string, custom: Record<string, unknown> = {}) {
     }
   else await result;
 }
+it.each([
+  { config: { agentId: 7 }, entrypoint: undefined },
+  { config: { agentId: 7, automationEntry: true }, entrypoint: "automation" },
+])("forwards only explicit automation entry $entrypoint", async ({ config, entrypoint }) => {
+  await run("automation-thread", config);
+  expect(service.runAgent.mock.calls[0][0].entrypoint).toBe(entrypoint);
+});
+
 it.each([false, true])(
   "SU-AC-02 sends and acknowledges identical first-turn preferences with Workbench=%s",
   async (workbench) => {

@@ -675,7 +675,6 @@ disable_dashboard() {
 }
 
 docker_monitoring_active_services() {
-  [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ] || return 0
   printf '%s\n' otel-collector
 
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
@@ -1378,7 +1377,7 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || [ "$DEPLOYMENT_MONITORING_PROVIDER" = "local_file" ]; then
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     stop_monitoring_services || return 1
     return 0
   fi

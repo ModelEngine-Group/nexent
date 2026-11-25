@@ -35,6 +35,8 @@ async def test_registered_name_maps_to_original_wire_and_saved_public_alias(monk
     await owner._run_async_session()
     assert owner.tools[0].card.name == "public_date"
     assert len(proxies) == 1 and proxies[0].remote_name == raw
+    # Monitoring identity resolves against the server URL captured at proxy construction.
+    assert proxies[0].server_url == "http://fixture/mcp"
     client.disconnect.assert_awaited_once()
 
 

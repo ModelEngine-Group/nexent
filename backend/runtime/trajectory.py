@@ -16,7 +16,7 @@ def configure_runtime_trajectory():
     from infrastructure.trace.trajectory_execution import execution_observer
 
     observer = execution_observer(
-        capturing=environment.ENABLE_TELEMETRY and environment.MONITORING_PROVIDER == "local_file",
+        capturing=environment.LOCAL_FILE_MONITORING_ENABLED,
         store=processor.store,
         repository=repository,
     )

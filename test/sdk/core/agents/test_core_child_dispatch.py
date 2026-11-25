@@ -21,6 +21,13 @@ def configuration(core="jiuwen"):
     return AgentConfig(name="child", description="Child", model_name="shared", tools=[], agent_core=core)
 
 
+@pytest.fixture
+def child_info():
+    return AgentRunInfo(
+        query="", agent_config=configuration(), observer=MessageObserver(), stop_event=Event(), model_config_list=[],
+    )
+
+
 @pytest.mark.parametrize("core", ["jiuwen", "smolagents"])
 def test_child_keeps_own_binding_and_has_no_parent_history_or_workspace_ownership(core):
     child = configuration(core)
@@ -45,8 +52,7 @@ def test_child_keeps_own_binding_and_has_no_parent_history_or_workspace_ownershi
 
 
 @pytest.mark.parametrize("failure", [None, "validate", "prepare", "run"])
-def test_child_factory_selects_core_and_always_closes(mocker, failure):
-    info = Mock()
+def test_child_factory_selects_core_and_always_closes(mocker, failure, child_info):
     adapter = Mock()
     adapter.run.return_value = "child-result"
     if failure:
@@ -54,12 +60,12 @@ def test_child_factory_selects_core_and_always_closes(mocker, failure):
     factory = mocker.patch("nexent.core.agents.factory.AgentCoreFactory.create", return_value=adapter)
     if failure:
         with pytest.raises(RuntimeError, match="controlled failure"):
-            invoke_child(info, "child-task")
+            invoke_child(child_info, "child-task")
     else:
-        assert invoke_child(info, "child-task") == "child-result"
-    factory.assert_called_once_with(info)
+        assert invoke_child(child_info, "child-task") == "child-result"
+    factory.assert_called_once_with(child_info)
     adapter.close.assert_called_once()
-    assert info.query == "child-task"
+    assert child_info.query == "child-task"
 
 
 @pytest.mark.parametrize("task", ["", " ", None, 1])
@@ -85,14 +91,13 @@ def test_child_binding_alias_mismatch_is_rejected():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("lane", ["control-io", "model-tool-io"])
-async def test_only_collaboration_deadline_cancels_owner(lane, caplog):
+async def test_only_collaboration_deadline_cancels_owner(lane, caplog, child_info):
     future = Future()
     if lane == "model-tool-io":
         future.set_exception(TimeoutError("tool-local timeout"))
-    info = SimpleNamespace(collaboration_timeout_seconds=0.01, model_deadline=None, observer=Mock(),
-                           agent_config=SimpleNamespace(worker_agents=[], external_a2a_agents=[]))
-    adapter = JiuwenAdapter(info)
-    adapter.scope = RunCancellationScope()
+    child_info.collaboration_timeout_seconds = 0.01
+    adapter = JiuwenAdapter(child_info)
+    adapter.scope = RunCancellationScope(child_info.stop_event)
     adapter.manager = Mock()
     adapter.manager.submit.return_value = SimpleNamespace(future=future, execution_id="owned")
     adapter._observe_tool = Mock(return_value=nullcontext())

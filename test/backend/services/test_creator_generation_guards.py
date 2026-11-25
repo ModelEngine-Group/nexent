@@ -4,7 +4,7 @@
 import json
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import fakeredis
 import pytest
@@ -39,6 +39,9 @@ def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
     state.mark_stream_completed("user", 91, "failed", generation="old")
     state.mark_run_finished("user", 91, "stopped", generation="old")
     assert not state.set_cancel_signal("user", 91, expected_generation="old")
+    assert not state.cancel_creator_run("user", 91, expected_generation="old")
+    assert state.cancel_creator_run("user", 91, expected_generation="new")
+    assert state.is_cancelled("user", 91)
     assert state.get_run_state("user", 91)["generation"] == "new"
     assert state.get_run_state("user", 91)["status"] == "running"
     assert state.get_stream_status("user", 91) == {}
@@ -48,6 +51,20 @@ def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
     state.mark_run_finished("user", 91, "completed", generation="new")
     assert state.get_stream_status("user", 91)["status"] == "completed"
     assert state.get_run_state("user", 91)["status"] == "completed"
+    assert not state.cancel_creator_run("user", 91, expected_generation="new")
+
+
+@pytest.mark.asyncio
+async def test_local_creator_stop_keeps_the_current_generation(monkeypatch):
+    manager = Mock()
+    monkeypatch.setattr(creator_runtime, "agent_run_manager", manager)
+    current = CreatorControl().registered_info()
+    manager.get_agent_run_info.return_value = current
+    generation = current._automation_runtime_generation
+    assert await creator_runtime.stop_creator(21, "user", "obsolete") is False
+    manager.stop_local_run.assert_not_called()
+    assert await creator_runtime.stop_creator(21, "user", generation) is manager.stop_local_run.return_value
+    manager.stop_local_run.assert_called_once_with(21, "user", expected_run=current)
 
 
 @pytest.mark.asyncio

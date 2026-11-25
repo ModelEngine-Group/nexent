@@ -3,6 +3,7 @@ import asyncio
 import importlib
 import sys
 import types
+from unittest.mock import AsyncMock, Mock
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -80,6 +81,21 @@ def _base_task():
         "consecutive_failures": 0,
         "status": "ACTIVE",
     }
+
+
+@pytest.mark.asyncio
+async def test_automation_cancel_sends_only_the_owned_run_to_signed_runtime(monkeypatch):
+    module = _load_runner_with_stubs(monkeypatch)
+    run_id = "a" * 32
+    list_runs = Mock(return_value=[run_id])
+    monkeypatch.setattr(module.agent_automation_db, "list_active_runtime_run_ids", list_runs)
+    stop = AsyncMock()
+    monkeypatch.setattr(module, "forward_scoped_stop", stop)
+
+    await module.AgentAutomationRunner().cancel_for_conversation(7, "user", "tenant")
+
+    list_runs.assert_called_once_with(7, "user", "tenant")
+    stop.assert_awaited_once_with(module.AgentStop(run_id=run_id, conversation_id=7, prevent_start=True), "user", "tenant")
 
 
 def test_scheduled_task_state_update_is_fenced_by_lease_owner(monkeypatch):

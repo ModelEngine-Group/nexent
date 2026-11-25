@@ -1,7 +1,7 @@
 {{- define "nexent-monitoring.provider" -}}
 {{- $globalMonitoring := default dict .Values.global.monitoring -}}
 {{- $provider := default .Values.provider $globalMonitoring.provider | default "otlp" | lower -}}
-{{- if not (has $provider (list "local_file" "otlp" "phoenix" "langfuse" "langsmith")) -}}
+{{- if not (has $provider (list "otlp" "phoenix" "langfuse" "langsmith")) -}}
 {{- fail "Unsupported monitoring provider" -}}
 {{- end -}}
 {{ $provider }}
