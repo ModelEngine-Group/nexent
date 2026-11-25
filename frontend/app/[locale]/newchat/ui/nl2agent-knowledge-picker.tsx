@@ -5,6 +5,8 @@
 import { useState } from "react";
 import { BookOpen, Check, Sparkles } from "lucide-react";
 import type { Nl2aKnowledgeRecommendation } from "../adapter/remote-chat-model-adapter";
+import type { Nl2AgentKnowledgePreparation } from "@/types/nl2AgentKnowledge";
+import { useConfig } from "@/hooks/useConfig";
 import { useTranslation } from "react-i18next";
 import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
 import { Button } from "antd";
@@ -28,6 +30,11 @@ export function Nl2AgentKnowledgePicker({
   onChange,
   hideTrigger = false,
   compact = false,
+  preparation,
+  userEdited = false,
+  recommendationLoading = false,
+  recommendationError = false,
+  onRetryRecommendation,
 }: {
   toolName: ManagedKnowledgeToolName;
   suggestions?: Nl2aKnowledgeRecommendation[];
@@ -40,9 +47,20 @@ export function Nl2AgentKnowledgePicker({
   onChange: (params: Nl2AgentResourceParam[]) => void;
   hideTrigger?: boolean;
   compact?: boolean;
+  preparation?: Nl2AgentKnowledgePreparation;
+  userEdited?: boolean;
+  recommendationLoading?: boolean;
+  recommendationError?: boolean;
+  onRetryRecommendation?: () => void;
 }) {
   const { t } = useTranslation("common");
   const [userConfirmedSelection, setUserConfirmedSelection] = useState(false);
+  const { data: appConfig } = useConfig();
+  const recommended =
+    !compact &&
+    !userEdited &&
+    !userConfirmedSelection &&
+    preparation?.selection_source === "recommended";
   const {
     data: knowledgeBases = [],
     isLoading,
@@ -55,7 +73,7 @@ export function Nl2AgentKnowledgePicker({
     ids.includes(aidp ? String(kb.id) : String(kb.index_name || kb.id))
   );
   const displayIds =
-    compact || userConfirmedSelection
+    preparation || compact || userConfirmedSelection
       ? ids
       : ids.filter((id) => !associatedValues.includes(id));
   const selectedNames = displayIds.map((id) => {
@@ -66,6 +84,9 @@ export function Nl2AgentKnowledgePicker({
     return (
       kb?.display_name ||
       kb?.name ||
+      preparation?.recommendations.find(
+        (suggestion) => suggestion.binding_value === id
+      )?.name ||
       suggestions.find((suggestion) => suggestion.binding_value === id)?.name ||
       t(
         "nl2agent.resourceBinding.knowledgeUnavailable",
@@ -87,7 +108,8 @@ export function Nl2AgentKnowledgePicker({
                 "nl2agent.resourceBinding.associatedKnowledge",
                 "Associated knowledge bases:"
               )
-            : userConfirmedSelection
+            : !recommended &&
+                (preparation || userEdited || userConfirmedSelection)
               ? t(
                   "nl2agent.resourceBinding.selectedKnowledge",
                   "Selected knowledge bases:"
@@ -103,7 +125,7 @@ export function Nl2AgentKnowledgePicker({
               key={displayIds[index]}
               className="inline-flex max-w-full items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] leading-4 text-foreground"
             >
-              {userConfirmedSelection && !compact ? (
+              {!recommended && !compact ? (
                 <Check
                   className="size-3 shrink-0 text-amber-600"
                   aria-hidden="true"
@@ -119,15 +141,30 @@ export function Nl2AgentKnowledgePicker({
           ))
         ) : (
           <span>
-            {isLoading
-              ? t(
-                  "nl2agent.resourceBinding.knowledgeLoading",
-                  "Loading knowledge bases..."
-                )
-              : t("nl2agent.resourceBinding.knowledgeNone", "None")}
+            {recommendationLoading && !userEdited
+              ? t("nl2agent.knowledgeAuto.loading")
+              : isLoading
+                ? t(
+                    "nl2agent.resourceBinding.knowledgeLoading",
+                    "Loading knowledge bases..."
+                  )
+                : t("nl2agent.resourceBinding.knowledgeNone", "None")}
           </span>
         )}
       </div>
+      {recommendationError ? (
+        <p role="alert" className="text-xs text-muted-foreground">
+          {t("nl2agent.knowledgeAuto.failed")}{" "}
+          <Button
+            type="link"
+            size="small"
+            disabled={disabled}
+            onClick={onRetryRecommendation}
+          >
+            {t("common.retry", "Retry")}
+          </Button>
+        </p>
+      ) : null}
       {isError ? (
         <div role="alert" className="text-xs text-destructive">
           {t(
@@ -161,6 +198,26 @@ export function Nl2AgentKnowledgePicker({
           isLoading={isLoading || isError}
           isAidpSearch={aidp}
           maxSelect={aidp ? 10 : undefined}
+          currentEmbeddingModelId={
+            appConfig?.models?.embedding?.id ||
+            preparation?.models.embedding_model_id ||
+            null
+          }
+          currentEmbeddingModel={
+            appConfig?.models?.embedding?.displayName ||
+            preparation?.models.embedding_model_name ||
+            null
+          }
+          currentMultiEmbeddingModelId={
+            appConfig?.models?.multiEmbedding?.id ||
+            preparation?.models.multi_embedding_model_id ||
+            null
+          }
+          currentMultiEmbeddingModel={
+            appConfig?.models?.multiEmbedding?.displayName ||
+            preparation?.models.multi_embedding_model_name ||
+            null
+          }
           toolMultimodal={
             params.find((param) => param.name === "multimodal")?.value ?? null
           }

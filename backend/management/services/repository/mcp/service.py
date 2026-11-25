@@ -245,6 +245,7 @@ async def list_community_mcp_services(
     cursor: str | None = None,
     page: int | None = None,
     limit: int = 30,
+    strict_permissions: bool = False,
 ) -> Dict[str, Any]:
     """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
     user_role = _get_user_role(user_id)
@@ -253,6 +254,8 @@ async def list_community_mcp_services(
         try:
             user_group_ids = list(query_group_ids_by_user(user_id) or [])
         except Exception as e:
+            if strict_permissions:
+                raise
             logger.warning(f"Failed to query user group ids: user_id={user_id}, err={e}")
 
     list_kwargs = dict(

@@ -13,7 +13,7 @@ import httpx
 
 from management.services.permission.identity.session import generate_session_jwt
 from management.db.skill.models import SkillInfo, SkillInstance
-from services.nl2agent_service import _load_installed_resource_catalog
+from management.services.agent.nl2agent import _load_installed_resource_catalog
 from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, ConversationMessage, ConversationMessageUnit, ConversationRecord
 

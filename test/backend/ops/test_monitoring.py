@@ -14,10 +14,10 @@ from nexent.monitor.facts import emit_fact, set_fact_sink
 from nexent.monitor.model_fact import AttemptObservation
 from nexent.monitor.monitoring import _MonitoredChatCompletions
 from ops.monitoring.contracts import Fact, MonitoringKind, day_id
-from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, summarize
+from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, accumulate_skill, summarize
 from infrastructure.monitoring.runtime import Producer
 from ops.monitoring.search import delete_documents, install_templates
-from ops.monitoring.service import CLEANUP_INTERVAL_SECONDS, Monitoring, _apply_revision
+from ops.monitoring.service import CLEANUP_INTERVAL_SECONDS, Monitoring, _apply_revision, _merge_skill_usage
 
 
 def fact(**overrides):
@@ -173,6 +173,43 @@ def test_shared_sink_accepts_a_non_model_fact():
         set_fact_sink(None)
     emit_fact(payload)
     assert events == [payload]
+
+
+def test_skill_usage_server_merge_keeps_earliest_trigger():
+    later = {
+        "tenant_id": "tenant", "fact_kind": "skill", "fact_id": "skill-use",
+        "call_context_id": "run", "started_at": "2026-11-23T01:00:00Z",
+        "triggered_at": "2026-11-23T01:05:00Z", "trigger_kind": "script_started",
+        "record_revision": 1,
+    }
+    earlier = {**later, "triggered_at": "2026-11-23T01:04:00Z", "trigger_kind": "guide_read"}
+    merged = _merge_skill_usage(later, earlier)
+    assert merged["triggered_at"] == earlier["triggered_at"]
+    assert merged["trigger_kind"] == "guide_read"
+    assert merged["record_revision"] == 2
+    assert _merge_skill_usage(merged, later) is None
+
+
+def test_skill_rollup_groups_dimensions_and_counts_usage():
+    rows = [
+        {"tenant_id": "tenant", "fact_kind": "skill", "statistic_date": "2026-11-23",
+         "skill_id": "7", "skill_name": "summarize", "agent_id": 1},
+        {"tenant_id": "tenant", "fact_kind": "skill", "statistic_date": "2026-11-23",
+         "skill_id": "7", "skill_name": "summarize", "agent_id": 1},
+        {"tenant_id": "tenant", "fact_kind": "skill", "statistic_date": "2026-11-23",
+         "skill_id": "8", "skill_name": "other", "agent_id": 1},
+    ]
+    groups = dict(accumulate_skill(rows))
+    assert len(groups) == 2
+    assert groups[next(key for key, row in groups.items() if row["skill_id"] == "7")]["usage_count"] == 2
+    assert groups[next(key for key, row in groups.items() if row["skill_id"] == "8")]["usage_count"] == 1
+
+
+def test_skill_usage_merge_handles_non_skill_and_later_duplicate():
+    model = {"fact_kind": "model", "fact_id": "same"}
+    skill = {"fact_kind": "skill", "fact_id": "same", "triggered_at": "2026-11-23T01:00:00Z"}
+    assert _merge_skill_usage(model, skill) is skill
+    assert _merge_skill_usage(skill, {**skill, "triggered_at": "2026-11-23T02:00:00Z"}) is None
 
 
 @pytest.mark.parametrize("stream", [False, True])

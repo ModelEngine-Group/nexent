@@ -37,6 +37,23 @@ def _apply_revision(previous, document):
     return True
 
 
+def _merge_skill_usage(previous, document):
+    """Keep the earliest trigger when duplicate Skill facts race or replay."""
+    if previous is None or previous.get("fact_kind") != "skill" or document.get("fact_kind") != "skill":
+        return document
+    if previous.get("fact_id") != document.get("fact_id"):
+        return document
+    previous_triggered = previous.get("triggered_at")
+    current_triggered = document.get("triggered_at")
+    if not previous_triggered or not current_triggered or current_triggered >= previous_triggered:
+        return None
+    merged = dict(previous)
+    merged["triggered_at"] = current_triggered
+    merged["trigger_kind"] = document.get("trigger_kind")
+    merged["record_revision"] = max(previous.get("record_revision", 1), document.get("record_revision", 1)) + 1
+    return merged
+
+
 class Monitoring:
     def __init__(self, store: ControlStore, es, zone: ZoneInfo, kinds: Mapping[str, MonitoringKind]):
         self.store = store
@@ -58,6 +75,11 @@ class Monitoring:
             document = fact.document(self.zone)
             pending = writes.get((index, doc_id))
             previous = pending["document"] if pending else existing_fact(self.es, index, doc_id)
+            if kind == "skill" and previous is not None:
+                merged = _merge_skill_usage(previous, document)
+                if merged is None:
+                    continue
+                document = merged
             if not _apply_revision(previous, document):
                 continue
             document["write_version"] = batch["write_version"]

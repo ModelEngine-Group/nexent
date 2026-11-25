@@ -71,6 +71,7 @@ class RunSkillScriptTool(Tool):
         isolated_skills_root: bool = False,
         artifact_path_resolver: Optional[Callable[[str], str]] = None,
         artifact_uploader: Optional[Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]]] = None,
+        skill_id_by_name: Optional[Dict[str, str | int]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -98,6 +99,7 @@ class RunSkillScriptTool(Tool):
         self.isolated_skills_root = isolated_skills_root
         self.artifact_path_resolver = artifact_path_resolver
         self.artifact_uploader = artifact_uploader
+        self.skill_id_by_name = dict(skill_id_by_name or {})
         self.authorized_skill_names = (
             frozenset(name for name in (authorized_skill_names or []) if name)
             if authorized_skill_names is not None
@@ -322,6 +324,13 @@ class RunSkillScriptTool(Tool):
                     params,
                     **run_kwargs,
                 )
+            skill_id = self.skill_id_by_name.get(skill_name)
+            if skill_id is not None:
+                try:
+                    from nexent.monitor.skill_usage import observe_skill_usage
+                    observe_skill_usage(skill_id, skill_name, "script_started")
+                except Exception as error:
+                    logger.warning("Skill monitoring failed after script start error=%s", type(error).__name__)
             if self.on_complete is not None:
                 self.on_complete(result)
             artifacts = (

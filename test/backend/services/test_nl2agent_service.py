@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contracts.authentication import AuthenticatedIdentity
+import asyncio
 import json
 import sys
 import types
@@ -15,6 +17,9 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
+from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
 from management.services.agent.nl2agent import (
     Nl2AgentCompletionError,
     Nl2AgentDraftSaveError,
@@ -35,43 +40,25 @@ from management.services.agent.nl2agent import (
     search_installed_mcp_tools_by_query,
     validate_agent_generation_complete_impl,
 )
-from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
+    NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_CONVERSATION_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
+    NL2AGENT_RECEIPT_KEY,
+    NL2AGENT_RUN_ID_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
+    NL2A_WRAPPER_NAME,
     ResourceCandidate,
     ResourceRequirement,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
 )
+from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
 
 
 
-def _context_budget_snapshot() -> ContextBudgetSnapshot:
-    values = {
-        "resolver_version": "2.0.0",
-        "w1_fingerprint": "capacity-fingerprint",
-        "provider": "openai",
-        "model_name": "gpt-4o",
-        "requested_output_tokens": 2768,
-        "output_reserve_source": "model_default",
-        "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none",
-        "approved_profile_reserve_tokens": None,
-        "effective_input_limit_tokens": 30000,
-        "compaction_trigger_ratio": 0.8,
-        "compaction_trigger_ratio_source": "code_default",
-        "compaction_trigger_threshold_tokens": 24000,
-        "compaction_target_ratio": 0.6,
-        "compaction_target_ratio_source": "code_default",
-        "compaction_target_tokens": 18000,
-        "field_sources": {},
-        "warnings": [],
-    }
-    return ContextBudgetSnapshot(
-        **values,
-        fingerprint=compute_context_budget_fingerprint(**values),
-    )
 
 
 @pytest.fixture
@@ -97,18 +84,15 @@ def _basic_draft_fields(**overrides):
 def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     """UT-BE-NCR-013: the first valid interactive card stops generation."""
     stop_event = Event()
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop_event)
-
-    observer.add_message(
-        "nl2agent",
-        ProcessType.EXECUTION_LOGS,
-        '<nl2a>{"subtype":"requirement_clarification","questions":['
-        '{"question_id":"expected_output","question_type":"text",'
-        '"title":"What should the agent produce?","required":true,'
-        '"options":[],"allow_other":false,"other_input_expanded":false}'
-        "]}</nl2a>"
-        "\nNL2A payload generated.",
+    observer = _Nl2AgentBoundaryObserver(
+        lang="en", stop_event=stop_event, agent_id=42, run_id="run", conversation_id="7",
     )
+    card = {"agent_id": 42, "subtype": "requirement_clarification", "questions": []}
+    observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {
+        NL2AGENT_RECEIPT_KEY: {
+            "event_id": "card", "run_id": "run", "conversation_id": "7", "payload": card,
+        },
+    })
 
     messages = [json.loads(item) for item in observer.get_cached_message()]
     assert not stop_event.is_set()
@@ -116,9 +100,8 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     assert observer.boundary_reached is True
     assert [item["type"] for item in messages] == [
         ProcessType.NL2A.value,
-        ProcessType.EXECUTION_LOGS.value,
     ]
-    assert messages[1]["content"] == "NL2A payload generated."
+    assert json.loads(messages[0]["content"]) == card
 
     observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, "<user_break>")
     observer.add_message(
@@ -135,18 +118,40 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     ]
 
 
-def test_boundary_observer_does_not_stop_for_invalid_wrapper():
+def test_boundary_observer_rejects_untrusted_and_stale_receipts():
     stop_event = Event()
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop_event)
-
-    observer.add_message(
-        "nl2agent",
-        ProcessType.EXECUTION_LOGS,
-        "<nl2a>{invalid json}</nl2a>\nWrapper failed.",
+    observer = _Nl2AgentBoundaryObserver(
+        lang="en", stop_event=stop_event, agent_id=42, run_id="run", conversation_id="7",
     )
+    card = {"agent_id": 42, "subtype": "requirement_clarification"}
+    receipt = {"event_id": "card", "run_id": "run", "conversation_id": "7", "payload": card}
+    stdout = f"<nl2a>{json.dumps(card)}</nl2a>"
+    observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, stdout)
+    observer.on_mcp_tool_result("external_tool", {NL2AGENT_RECEIPT_KEY: receipt})
+    for invalid in (
+        {"run_id": "old"}, {"conversation_id": "8"}, {"payload": {**card, "agent_id": 43}},
+    ):
+        observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {NL2AGENT_RECEIPT_KEY: {**receipt, **invalid}})
 
     assert stop_event.is_set() is False
     assert observer.boundary_reached is False
+    assert [(item["type"], item["content"]) for item in map(json.loads, observer.get_cached_message())] == [
+        ("execution_logs", stdout),
+    ]
+
+
+def test_boundary_observer_deduplicates_same_save_receipt():
+    observer = _Nl2AgentBoundaryObserver(
+        lang="en", stop_event=Event(), agent_id=42, run_id="run", conversation_id="7",
+    )
+    state = {"agent_id": 42, "event": "agent_draft_fields_saved", "updated_fields": ["description"]}
+    receipt = {"event_id": "save", "run_id": "run", "conversation_id": "7", "payload": state}
+    observer.on_mcp_tool_result(SAVE_AGENT_DRAFT_FIELDS_NAME, {NL2AGENT_RECEIPT_KEY: receipt})
+    observer.on_mcp_tool_result(SAVE_AGENT_DRAFT_FIELDS_NAME, {NL2AGENT_RECEIPT_KEY: receipt})
+    messages = [json.loads(item) for item in observer.get_cached_message()]
+    assert len(messages) == 1
+    assert messages[0]["type"] == ProcessType.NL2A_STATE.value
+    assert json.loads(messages[0]["content"]) == state
 
 
 def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
@@ -1499,7 +1504,8 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
     assert "Current authoritative description" in context.content["text"]
     assert "Legacy workflow description" not in context.content["text"]
     assert "weather_forecast" in context.content["text"]
-    assert "api_key" in context.content["text"]
+    assert "api_key" not in context.content["text"]
+    assert '"runtime_inputs":[{"name":"city"' in context.content["text"]
     assert "private-secret" not in context.content["text"]
     assert "catalog-secret" not in context.content["text"]
     assert "daily_report" in context.content["text"]
@@ -1518,18 +1524,13 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
         "greeting_message": "Hello, I can verify information.",
         "example_questions": ["What is the weather?"],
     }
-    facts = [
-        {
-            "resource_type": "tool",
-            "resource_id": 7,
-            "name": "weather_forecast",
-            "description": "Weather lookup",
-        }
-    ]
-    load_state = mocker.patch(
+    load_draft = mocker.patch(
+        "management.services.agent.nl2agent.require_agent_draft_edit",
+        return_value=draft,
+    )
+    resource_context = mocker.patch(
         "management.services.agent.nl2agent._load_verified_nl2agent_state",
-        new_callable=AsyncMock,
-        return_value=(draft, facts),
+        side_effect=RuntimeError("Resource catalog unavailable"),
     )
 
     await validate_agent_generation_complete_impl(
@@ -1538,39 +1539,12 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
         user_id="user-a",
     )
 
-    load_state.assert_awaited_once_with(
+    load_draft.assert_called_once_with(
         agent_id=42,
         tenant_id="tenant-a",
         user_id="user-a",
     )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("facts", [[], [{"resource_type": "tool", "resource_id": 7, "name": "search"}]])
-async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
-    mocker, facts,
-):
-    mocker.patch(
-        "management.services.agent.nl2agent._load_verified_nl2agent_state",
-        new_callable=AsyncMock,
-        return_value=(
-            {
-                "name": "writing_assistant",
-                "display_name": "Writing Assistant",
-                "description": "Improve writing",
-                "prompt": "Help users improve their writing.",
-                "greeting_message": "Hello, what should we write?",
-                "example_questions": ["Improve this paragraph"],
-            },
-            facts,
-        ),
-    )
-
-    await validate_agent_generation_complete_impl(
-        agent_id=42,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    )
+    resource_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1579,28 +1553,17 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
     mocker, prompt,
 ):
     mocker.patch(
-        "management.services.agent.nl2agent._load_verified_nl2agent_state",
-        new_callable=AsyncMock,
-        return_value=(
-            {
-                "name": "research_assistant",
-                "display_name": "Research Assistant",
-                "description": "Research help",
-                "prompt": prompt,
-                "constraint_prompt": "Use search.",
-                "few_shots_prompt": "A valid legacy example",
-                "greeting_message": "Hello",
-                "example_questions": ["Research this topic"],
-            },
-            [
-                {
-                    "resource_type": "tool",
-                    "resource_id": 7,
-                    "name": "search",
-                    "description": "Search sources",
-                }
-            ],
-        ),
+        "management.services.agent.nl2agent.require_agent_draft_edit",
+        return_value={
+            "name": "research_assistant",
+            "display_name": "Research Assistant",
+            "description": "Research help",
+            "prompt": prompt,
+            "constraint_prompt": "Use search.",
+            "few_shots_prompt": "A valid legacy example",
+            "greeting_message": "Hello",
+            "example_questions": ["Research this topic"],
+        },
     )
 
     with pytest.raises(Nl2AgentCompletionError) as exc_info:
@@ -1617,9 +1580,8 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
 @pytest.mark.asyncio
 async def test_validate_agent_generation_complete_requires_description(mocker):
     mocker.patch(
-        "management.services.agent.nl2agent._load_verified_nl2agent_state",
-        new_callable=AsyncMock,
-        return_value=({"name": "draft_assistant", "description": " "}, []),
+        "management.services.agent.nl2agent.require_agent_draft_edit",
+        return_value={"name": "draft_assistant", "description": " "},
     )
 
     with pytest.raises(Nl2AgentCompletionError) as exc_info:
@@ -1636,9 +1598,8 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
 @pytest.mark.asyncio
 async def test_validate_agent_generation_complete_requires_generated_name(mocker):
     mocker.patch(
-        "management.services.agent.nl2agent._load_verified_nl2agent_state",
-        new_callable=AsyncMock,
-        return_value=({"display_name": "Draft", "description": "Ready"}, []),
+        "management.services.agent.nl2agent.require_agent_draft_edit",
+        return_value={"display_name": "Draft", "description": "Ready"},
     )
 
     with pytest.raises(Nl2AgentCompletionError) as exc_info:

@@ -601,6 +601,11 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
     else:
         rows = read_bound_skills(agent.agent_id, agent.version_no, tenant_id)
     configs = {row["name"]: row["config"] for row in rows}
+    skill_name_to_id = {
+        row["name"]: row["skill_id"]
+        for row in rows
+        if row.get("name") and row.get("skill_id") is not None
+    }
     if not rows or len(configs) != len(rows):
         raise ValueError("Ambiguous evaluation skill bindings")
     validate_skill_context(context_items, rows)
@@ -619,6 +624,8 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs
+        if builtin in {EvaluationSkillTool.SCRIPT, EvaluationSkillTool.GUIDE} and "skill_name_to_id" in actual:
+            expected["skill_name_to_id"] = skill_name_to_id if actual["skill_name_to_id"] else {}
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):
             raise ValueError("Unsupported evaluation skill tool configuration")
