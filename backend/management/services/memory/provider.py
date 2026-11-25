@@ -22,7 +22,9 @@ Usage from the agent build path::
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -58,6 +60,7 @@ async def _store_agent_memory(payload: Dict[str, Any], agent_id: int) -> Dict[st
     conversation = payload.get("conversation_id")
     request = AgentMemoryStore(
         agent_id=agent_id,
+        agent_version_no=payload.get("agent_version_no"),
         conversation_id=int(conversation) if conversation not in (None, "") else None,
         content=payload["content"],
         idempotency_key=payload.get("idempotency_key") or str(uuid4()),
@@ -72,6 +75,17 @@ async def _backend_store_hook(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Store bound Agent memory and relay the existing external-ingest notification."""
+    from contracts.constants.environment import MEMORY_WRITE_TIMEOUT_SECONDS
+
+    layer = payload.get("layer", MemoryLayer.AGENT.value)
+    if layer not in (MemoryLayer.AGENT, MemoryLayer.AGENT.value):
+        return await _bounded_backend_store_hook(payload)
+    deadline = time.monotonic() + MEMORY_WRITE_TIMEOUT_SECONDS
+    async with asyncio.timeout(MEMORY_WRITE_TIMEOUT_SECONDS):
+        return await _bounded_backend_store_hook(payload, deadline=deadline)
+
+
+async def _bounded_backend_store_hook(payload, *, deadline=None):
     layer_value = payload.get("layer", MemoryLayer.AGENT.value)
     if isinstance(layer_value, MemoryLayer):
         layer_value = layer_value.value
@@ -89,7 +103,12 @@ async def _backend_store_hook(
         result = await _store_legacy_memory(payload, layer_value, memory_type_value)
 
     try:
-        await _fanout_external_ingest(payload, result)
+        if deadline is None:
+            await _fanout_external_ingest(payload, result)
+        else:
+            from infrastructure.memory_io import remaining_time
+            async with asyncio.timeout(max(0.001, remaining_time(deadline) - 0.01)):
+                await _fanout_external_ingest(payload, result)
     except Exception as exc:
         logger.warning(
             "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
@@ -273,15 +292,19 @@ def build_memory_service_for_dreaming() -> MemoryService:
         backend_search=None,
     )
 
-def build_memory_service_for_fa_extraction() -> MemoryService:
+def build_memory_service_for_fa_extraction(*, agent_version_no: int | None = None) -> MemoryService:
     """Return a facade for final-answer memory extraction.
 
     Reuses the same backend store hook as StoreMemoryTool. The extraction
     pipeline writes agent short-term memory with the same policy constraints.
+    Bind queued writes to the Agent version that produced the answer.
     """
+    async def store_extracted_memory(payload):
+        return await _backend_store_hook({**payload, "agent_version_no": agent_version_no})
+
     return MemoryService(
         embedding_model=None,
         embedding_model_info=None,
-        backend_store=_backend_store_hook,
+        backend_store=store_extracted_memory,
         backend_search=None,
     )

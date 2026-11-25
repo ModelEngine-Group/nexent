@@ -1,0 +1,46 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ID-D4-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids: [CHAT-TRAJECTORY-COPY-ID-20261124]
+  business_rule_ids: [TRJ-RULE-013]
+  title: 从智能体对话和工作台复制会话 ID
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证两个入口均可取得当前会话的准确 ID，供轨迹检索使用。
+  preconditions:
+  - 使用实际前端、受控的已登录身份和会话接口，在独占浏览器上下文中允许剪贴板操作。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 打开未保存的工作台会话，再打开两条工作台历史会话并分别复制 ID。
+    expected: 未保存时不显示 ID，历史会话显示当前 ID，剪贴板内容仅含该数字。
+  - order: 2
+    action: 打开已保存的智能体对话并复制 ID。
+    expected: 对话顶部显示该会话 ID，复制内容与工作台同样只含数字。
+  expected_results:
+  - 新开未保存的工作台会话不显示会话 ID，切换历史后显示和复制的 ID 随当前会话更新。
+  - 智能体对话中的会话 ID 可见，复制得到用于轨迹搜索的纯数字。
+  forbidden_side_effects:
+  - 查看和复制 ID 不触发聊天生成或持久化写入。
+  actor: 已登录用户
+  journey: [打开工作台, 查看历史并复制, 打开智能体历史并复制]
+  final_business_result:
+  - 用户可从两种对话入口取得准确的会话 ID。
+  failure_evidence: [浏览器截图、实际及预期剪贴板内容、受控接口写入记录]
+  acceptance:
+  - id: AC-01
+    description: 工作台只为已保存会话显示正确 ID，复制内容随会话切换更新。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 智能体对话复制的数字与当前已保存会话 ID 一致。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]

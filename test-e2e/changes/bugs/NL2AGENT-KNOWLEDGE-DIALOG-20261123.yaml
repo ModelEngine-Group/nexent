@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-KNOWLEDGE-DIALOG-20261123
+  change_type: bugfix
+  bug_id: NL2AGENT-KNOWLEDGE-DIALOG-20261123
+  title: Allow the active knowledge editor while locking other resource actions
+  description: Separate the active configuration editor from the card operation lock and render one editor for a shared tool.
+  observed_behavior: Opening knowledge configuration sets the global interaction lock, which also suppresses its drawer.
+  expected_behavior: Local and AIDP knowledge configuration opens, cancellation releases locks, confirmation stays local until binding, and shared tools open one drawer.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing binding tests replace the binding item and the browser case did not click knowledge configuration.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-WORKFLOW-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Real card, binding item and knowledge picker open local and AIDP editors while other operations remain locked.
+    - Shared tools open one drawer from either requirement; confirmation updates the shared local draft without a binding write.
+    - Cancellation releases locks and configuration read failure leaves an actionable error without a stuck editor.
+    reason: Component UT mocks only external catalogs, configuration reads and drawer UI; D4 clicks the actual browser drawer. No backend or protocol changes require D2/D3/D5 or duplicate D1.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentKnowledgeDialog.test.tsx
+    - frontend/tests/workbench/Nl2AgentBindingConfig.test.tsx
+  notes: 'Baseline: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/. F-045 owns agent_config. Browser fixtures and context are case-owned and cleaned; no persistent tenant resources or business writes.'

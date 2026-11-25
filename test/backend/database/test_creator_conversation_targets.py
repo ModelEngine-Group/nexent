@@ -30,7 +30,7 @@ def test_bind_target_is_owner_scoped_compare_and_set(session, previous, affected
     target = {"type": "agent", "id": 201}
     session.execute.return_value.rowcount = affected
     assert db.bind_creation_conversation_target(9, 77, previous, target, "owner") is (affected == 1)
-    statement = session.execute.call_args.args[0]
+    statement = next(call.args[0] for call in session.execute.call_args_list if call.args[0].is_update)
     compiled = statement.compile(dialect=postgresql.dialect())
     predicates = str(statement.whereclause.compile(dialect=postgresql.dialect()))
     assert compiled.params["target"] == target and compiled.params["updated_by"] == "owner"

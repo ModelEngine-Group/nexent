@@ -94,8 +94,12 @@ check_shared_monitoring() {
       exit 1
     fi
     test -x /opt/nexent/scripts/run-sql-migrations.sh
-    test -x /opt/nexent/scripts/run-ops-sql-migrations.sh
-    test -f /opt/nexent/ops-sql/ops-init.sql
+    for path in /opt/nexent/scripts/start-ops.sh /opt/nexent/scripts/run-ops-sql-migrations.sh /opt/nexent/ops-sql; do
+      if [ -e "$path" ]; then
+        echo "Unexpected Ops SQL initializer in producer image" >&2
+        exit 1
+      fi
+    done
   '
 }
 
@@ -107,11 +111,17 @@ check_shared_monitoring "$prefix-management"
 docker exec "$prefix-management" sh -ec '
   test ! -d /opt/backend/runtime
   test ! -d /opt/backend/data_process
-  test ! -d /opt/backend/services
+'
+docker exec "$prefix-management" python -c '
+import services.nl2agent_knowledge_recommendations
+import services.nl2agent_resource_flow
+import tool_collection.mcp.nl2agent_configuration_tools
+import tool_collection.mcp.nl2agent_resource_tools
 '
 
 docker run -d --name "$prefix-runtime" --network "$prefix" --network-alias runtime \
-  "${env_args[@]}" -e MONITORING_PROVIDER=local_file -e ENABLE_TELEMETRY=true -e TRAJECTORY_READ_ENABLED=false \
+  "${env_args[@]}" -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false \
+  -e LOCAL_FILE_MONITORING_ENABLED=true -e TRAJECTORY_READ_ENABLED=false \
   --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory \
   --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
 wait_ready "$prefix-runtime" 5014
@@ -119,9 +129,17 @@ check_shared_monitoring "$prefix-runtime"
 docker exec "$prefix-runtime" sh -ec '
   test ! -d /opt/backend/management
   test ! -d /opt/backend/data_process
+  test ! -d /opt/backend/services
 '
 
-docker exec "$prefix-runtime" python -c '
+if [ "$#" -eq 3 ]; then
+  wait_ready "$prefix-management" 9200 '/_cluster/health?wait_for_status=yellow&timeout=2s' elasticsearch
+  docker run -d --name "$prefix-ops" --network "$prefix" "${env_args[@]}" \
+    -e GATEWAY_AUTH_ENABLED=true -e TRAJECTORY_READ_ENABLED=true \
+    -e REDIS_BACKEND_URL=redis://redis:6379/0 \
+    --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory "$3" >/dev/null
+  wait_ready "$prefix-ops" 5016
+  docker exec "$prefix-runtime" python -c '
 from contracts.constants.environment import OPS_MONITORING_ENABLED
 from infrastructure.monitoring.store import BatchStore, monitoring_engine
 assert OPS_MONITORING_ENABLED
@@ -131,9 +149,11 @@ try:
 finally:
     store.engine.dispose()
 '
+fi
 
 docker run -d --name "$prefix-runtime-read" --network "$prefix" "${env_args[@]}" \
-  -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false -e TRAJECTORY_READ_ENABLED=true \
+  -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false \
+  -e LOCAL_FILE_MONITORING_ENABLED=false -e TRAJECTORY_READ_ENABLED=true \
   --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory \
   --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
 wait_ready "$prefix-runtime-read" 5014
@@ -144,7 +164,7 @@ import asyncio
 
 from sqlalchemy import select
 
-from contracts.constants.environment import ENABLE_TELEMETRY
+from contracts.constants.environment import LOCAL_FILE_MONITORING_ENABLED
 from infrastructure.rdb.account_record import UserAccount, UserTenant
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationRecord
@@ -155,7 +175,7 @@ from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from nexent.monitor import AgentRunMetadata
 from runtime.trajectory import configure_runtime_trajectory
 
-owner = "trajectory-capture" if ENABLE_TELEMETRY else "trajectory-read"
+owner = "trajectory-capture" if LOCAL_FILE_MONITORING_ENABLED else "trajectory-read"
 tenant = "trajectory-smoke"
 with get_db_session() as session:
     session.add_all([
@@ -184,9 +204,10 @@ try:
             select(TrajectoryExecution).where(TrajectoryExecution.conversation_id == conversation_id)
         ).one()
         assert execution.turn_no == 1
-        assert execution.status == ("unarchived" if ENABLE_TELEMETRY else "not_captured")
+        expected_status = "unarchived" if LOCAL_FILE_MONITORING_ENABLED else "not_captured"
+        assert execution.status == expected_status, f"{owner}: expected {expected_status}, got {execution.status}"
         execution_id = str(execution.trajectory_id)
-    if ENABLE_TELEMETRY:
+    if LOCAL_FILE_MONITORING_ENABLED:
         manifest = processor.store.manifest(CaptureIdentity(tenant, owner, str(conversation_id), "42"))
         assert any(run["trajectory_id"] == execution_id for run in manifest["runs"])
         assert any(processor.store.root.rglob("*.otlp.jsonl"))
@@ -205,12 +226,6 @@ docker run -d --name "$prefix-mcp" --network "$prefix" "${env_args[@]}" \
 wait_ready "$prefix-mcp" 5015 /tools/outer_api
 
 if [ "$#" -eq 3 ]; then
-  wait_ready "$prefix-management" 9200 '/_cluster/health?wait_for_status=yellow&timeout=2s' elasticsearch
-  docker run -d --name "$prefix-ops" --network "$prefix" "${env_args[@]}" \
-    -e GATEWAY_AUTH_ENABLED=true -e TRAJECTORY_READ_ENABLED=true \
-    -e REDIS_BACKEND_URL=redis://redis:6379/0 \
-    --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory "$3" >/dev/null
-  wait_ready "$prefix-ops" 5016
   docker exec "$prefix-ops" python -c '
 from contracts.constants.environment import ES_HOST, OPS_MONITORING_ENABLED
 from elasticsearch import Elasticsearch

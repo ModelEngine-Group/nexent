@@ -58,7 +58,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     assert len(public) == 30
     for method, path, _ in public:
         route = registry.match(method, path)
-        assert route and route.target == "northbound", (method, path)
+        assert route and route.target == "management", (method, path)  # real owning service, alias retired
 
 
 @pytest.mark.parametrize("method,path,target", [
@@ -81,7 +81,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     ("POST", "/api/agent/automations/runs/42/cancel", "management"),
     ("GET", "/api/conversation/42/automation", "management"),
     ("POST", "/api/file/storage", "management"), ("GET", "/api/file/storage", "management"),
-    ("POST", "/nb/v1/chat/run", "northbound"), ("GET", "/nb/v1/chat/run", None),
+    ("POST", "/nb/v1/chat/run", "management"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])
 def test_regular_backend_and_northbound_have_explicit_targets(method, path, target):
@@ -102,6 +102,42 @@ def test_conversation_share_and_pins_are_mounted_by_management():
         assert mounted & owners == expected
 
 
+def test_conversation_snapshot_target_matches_the_mounting_service():
+    """Every conversation row must point at the service that mounts its router.
+
+    The conversation router is mounted by exactly one service. Rows generated
+    from its source file previously straddled both upstreams: the subset marked
+    ``management`` 404'd while its siblings answered 200, which broke the model
+    preference panel and turned clarification cards read-only. Keep the snapshot
+    target and the real mount point tied together so a router move cannot leave
+    a subset of rows behind.
+    """
+    root = Path(__file__).resolve().parents[3] / "backend"
+    mount_owner = {}
+    for service in ("management", "runtime", "ops"):
+        tree = ast.parse((root / service / "api/application.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "include_router" and node.args):
+                continue
+            argument = node.args[0]
+            names = [argument.id] if isinstance(argument, ast.Name) else []
+            names += [keyword.value.id for keyword in node.keywords
+                      if isinstance(keyword.value, ast.Name) and getattr(keyword, "arg", None) is None]
+            for name in names:
+                if "conversation" in name.lower():
+                    mount_owner[name] = service
+
+    snapshot = json.loads(
+        (Path(__file__).resolve().parents[3] / "backend/gateway/exposure/registry.json").read_text(encoding="utf-8"))
+    conversation_rows = [row for row in snapshot["routes"]
+                         if row.get("source", "").endswith("conversation/conversation_management.py")]
+    assert conversation_rows
+    assert {row["target"] for row in conversation_rows} == {"management"}, sorted(
+        {row["target"] for row in conversation_rows})
+    assert "management" in mount_owner.values()
+
+
 @pytest.mark.parametrize("method,path", [
     ("GET", "/api/model/model_profiles"),
     ("GET", "/api/model/provider_profiles"),
@@ -118,6 +154,17 @@ def test_web_features_are_exposed_only_to_sessions(method, path):
     assert match.target == "management"
     assert match.credential_kinds == ("session",)
 
+
+@pytest.mark.parametrize("operation", [
+    "knowledge_recommendations", "resource_installations", "resource_installation_attempts", "resource_links",
+])
+def test_nl2agent_card_operations_have_explicit_session_routes(operation):
+    path = f"/api/agent/nl2agent/{operation}"
+    match = default_registry().match("POST", path)
+    assert match is not None
+    assert match.target == "management" and match.credential_kinds == ("session",)
+    assert default_registry().match("GET", path) is None
+    assert default_registry().match("GET", path, transport="websocket") is None
 
 WEB_CREATOR_OPERATIONS = [
     ("GET", "/api/users/{user_id}/assignable_roles", "management"),
@@ -237,3 +284,28 @@ def test_registry_cannot_be_changed_by_mutating_its_input():
     data["routes"][0]["credential_kinds"].append("api_key")
     data["routes"].clear()
     assert registry.match("GET", "/api/models/test").credential_kinds == ("session",)
+
+
+@pytest.mark.parametrize("method", ["GET", "PUT"])
+def test_tenant_memory_switch_has_precise_session_exposure(method):
+    route = default_registry().match(method, "/api/memory/config/tenant-switch")
+    assert route is not None and route.target == "management"
+    assert route.credential_kinds == ("session",)
+    assert default_registry().match("POST", "/api/memory/config/tenant-switch") is None
+
+
+@pytest.mark.parametrize("method", ["GET", "PUT"])
+@pytest.mark.asyncio
+async def test_tenant_memory_switch_rejects_anonymous_before_upstream(method):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Anonymous tenant settings request reached identity storage")
+
+    def upstream(request):
+        pytest.fail("Anonymous tenant settings request reached a business handler")
+
+    app = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret="fixture"),
+                             identity_lookup=forbidden, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.request(method, "/api/memory/config/tenant-switch")
+    assert response.status_code == 401

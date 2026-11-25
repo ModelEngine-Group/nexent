@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-SERVICE-EPOCH-20261119
+  change_type: bugfix
+  bug_id: KSM-SERVICE-EPOCH-20261119
+  title: Reconcile terminated sandbox epochs when a Runtime Pod reuses its Service name
+  description: Verify the protected identity of a different epoch before retiring an old generation with a reused Service name.
+  observed_behavior: Background recovery repeatedly reports a conflict for a terminated generation after the next process in the same Runtime Pod creates its same-name Service.
+  expected_behavior: Preserve the verified Service of the other generation and finish recovery of the terminated generation. Unverified ownership remains a conflict.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Existing recovery tests cover exact ownership and conflicts but do not distinguish a verified same-Pod successor Service from an unknown owner.
+  feature_contract_changed: false
+  affected_features:
+    existing: [KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [KSM-MULTIRUNTIME-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/agents/test_sandbox_recovery.py::test_same_pod_restart_reconciles_old_epoch_with_reused_service_name
+    behaviors:
+      - Reconcile stopped and terminated epochs while preserving the verified same-name Service and current run.
+      - Keep unrecorded or conflicting Service identities unresolved and never delete those resources.
+    reason: Exercise the existing recovery entry point and protected journal with mocked Kubernetes calls. Reuse the existing exact-Service UID precondition test.
+  notes: >-
+    The runtime-sandbox-kubernetes-migration design sections 4.4 and 5.3 and KSM-SYSTEM-R3 define the retained ownership contract.
+    The focused recovery regression is covered by UT. KSM-MULTIRUNTIME-D5-001 is the related runtime reliability boundary and requires deployment in an owned namespace.

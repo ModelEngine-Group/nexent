@@ -36,7 +36,7 @@ COPY backend/ext_components/aidp/__init__.py /opt/backend/ext_components/aidp/
 COPY backend/ext_components/aidp/consts/aidp_exceptions.py /opt/backend/ext_components/aidp/consts/
 COPY backend/gateway/__init__.py /opt/backend/gateway/
 COPY backend/http/logging.py backend/http/ops_service.py /opt/backend/http/
-COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py /opt/backend/http/server/
+COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py backend/http/server/request_context.py /opt/backend/http/server/
 COPY backend/management/__init__.py /opt/backend/management/
 COPY backend/management/api/__init__.py /opt/backend/management/api/
 COPY backend/management/api/permission /opt/backend/management/api/permission
@@ -120,8 +120,10 @@ COPY infrastructure/rdb/trajectory /opt/infrastructure/rdb/trajectory
 COPY infrastructure/trace /opt/infrastructure/trace
 COPY sdk/nexent /opt/nexent
 COPY VERSION /opt/nexent/VERSION
-COPY --chmod=0755 deploy/common/start-backend.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+COPY --chmod=0755 deploy/common/start-ops.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+# Preserve older deployed command paths with the same Ops-only initialization.
+RUN ln -s start-ops.sh /opt/nexent/scripts/start-backend.sh
 COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
 COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 
-ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service"]
+ENTRYPOINT ["/opt/nexent/scripts/start-ops.sh", "python", "-m", "backend.http.ops_service"]

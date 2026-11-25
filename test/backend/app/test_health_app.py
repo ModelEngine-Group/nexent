@@ -16,6 +16,28 @@ from backend.http.server.health import install_health_contract
 from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
 
+def test_lost_coordination_changes_readiness_without_polling_redis_or_kubernetes():
+    app = FastAPI()
+    install_health_contract(app)
+    lost = threading.Event()
+    app.state.sandbox_coordinator = SimpleNamespace(lost_coordination=lost)
+    configuration = SimpleNamespace(is_ready=True)
+    app.state.configuration_runtime = configuration
+    with TestClient(app) as client:
+        assert client.get("/health/ready").status_code == 200
+        lost.set()
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json() == {"status": "not_ready", "reason": "coordination_unknown"}
+
+        configuration.is_ready = False
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json() == {"status": "not_ready", "configuration_ready": False}
+        assert response.json()["configuration_ready"] is False
+        assert client.get("/health/live").status_code == 200
+
+
 def test_live_and_ready_are_dependency_free_process_health():
     app = FastAPI()
     install_health_contract(app)

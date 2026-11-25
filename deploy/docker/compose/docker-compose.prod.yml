@@ -207,6 +207,9 @@ services:
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_OPS_URL: "http://nexent-ops:${OPS_PORT:-5016}"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
+      # Emergency kill switch: comma-separated capability ids/paths removed
+      # from the exposure registry at gateway startup (empty = expose all).
+      GATEWAY_NB_EXCLUDED_CAPABILITIES: "${GATEWAY_NB_EXCLUDED_CAPABILITIES:-}"
     entrypoint: ["python", "-m", "backend.http.gateway_service"]
     healthcheck:
       test: ["CMD", "python", "-m", "gateway.healthcheck"]

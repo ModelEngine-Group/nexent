@@ -1,65 +1,78 @@
-# User Guide
+# Home Page
 
-Nexent is a future-oriented zero-code agent development platform that helps anyone build and deploy custom AI agents without writing code or handling complex workflows.
+Welcome to Nexent. This page introduces the homepage and main navigation, and helps you choose where to start.
 
-This guide walks you through Nexent’s major features and daily workflows so you can get productive in minutes.
+If your administrator has already prepared models and agents, you can start chatting right away. To build your own agent, begin with agent configuration or browse reusable resources.
 
-By the end, you’ll know how to turn your ideas into production-ready agents that deliver real value at work and in life.
+## Explore the homepage
 
-## 🏠 Homepage Overview
+The homepage provides shortcuts to common tasks. Use the left sidebar to switch between pages. Expand it to see entry names, or pin it to keep it open.
 
-The Nexent homepage highlights the core entry points of the platform:
+![Homepage and main entry points](./assets/home-page/homepage.png)
 
-![Homepage Overview](./assets/home-page/homepage.png)
+### Homepage shortcuts
 
-### Primary actions
+| Entry | What it opens | Use it to |
+| --- | --- | --- |
+| **Start Chatting** | The agent chat page, where you can select an available agent and send a message | Complete tasks with an existing agent |
+| **Quick Setup** | The agent configuration page, where you can create or configure an agent | Build your own agent |
+| **Agent Space** | Shared agents and agents you are authorized to manage | Find, reuse, or manage agents |
 
-1. **Start Chatting** – Jump straight into the chat interface and talk to an agent.
-2. **Quick Setup** – Follow the guided flow to finish model, knowledge base, and agent setup in sequence.
-3. **Agent Space** – Browse and manage every agent you have built.
+Shortcuts are displayed according to your permissions. **Quick Setup** currently opens agent configuration. Model connections and knowledge bases can be prepared through the sidebar.
 
-### Left navigation
+### Left sidebar
 
-Taking the administrator account as an example, the left sidebar exposes every major module:
+The following table groups the main entries by purpose. Available entries depend on your account permissions and deployment settings.
 
-- **Home Page** – Return to the homepage.
-- **Start Chat** – Open the chat interface.
-- **Quick Setup** – Complete the recommended setup flow (Models → Knowledge Base → Agent).
-- **Agent Space** – Manage all existing agents.
-- **Agent Market** – Discover and install published agents.
-- **Agent Development** – Create and configure agents.
-- **Agent Evaluation** – Validate agent behavior with evaluation sets and evaluators.
-- **Knowledge Base** – Upload documents and materials to help agents understand your exclusive knowledge.
-- **MCP Tools** – Connect servers, sync tools, and view status at a glance (coming soon).
-- **Monitoring & Operations** – Monitor agent runtime status in real time (coming soon).
-- **Model Management** – Manage app information and model configuration, connect the AI capabilities you need.
-- **Memory Management** – Control agents' long-term memory for more efficient conversations.
-- **User Management** – Provide unified user, role, and permission control for teams (coming soon).
+| Goal | Main entries | Purpose |
+| --- | --- | --- |
+| Daily use | **Workbench**, **Agent Chat**, **Automation Tasks** | Work on tasks, chat with existing agents, or manage scheduled tasks |
+| Agent development | **Model Configuration**, **Knowledge Base Configuration**, **Agent Configuration**, **Memory Configuration**, **Agent Evaluation** | Prepare resources, then create, debug, and evaluate agents |
+| Resource reuse | **Agent Space**, **MCP Space**, **Skill Space** under **Resource Space** | Find and reuse agents, external tools, and skills |
+| Resource and permission management | **Resource Management**, **Asset Administrator Resource Management** | Manage resources and access within your authorized scope |
+| Observability and operations | **Observability center**, **Operations dashboard**, **System configuration** | Inspect runtime information or perform authorized operations and configuration tasks |
 
-Use the language switcher in the top-right corner to toggle between Simplified Chinese and English. The lower-left corner shows the running Nexent version to simplify troubleshooting when asking for help.
+The **Agent Space** homepage shortcut and the sidebar entry under **Resource Space** open the same page. See the relevant guides for detailed instructions.
 
-## � Account Setup (First Use)
+## Choose where to start
 
-When using Nexent for the first time, you need to create a tenant administrator account before you can integrate models, create agents, and interact via Q&A:
+### Use an existing agent
 
-1. Log in with the super administrator account `suadmin@nexent.com` (see the [Installation Guide](../quick-start/installation.md) for the default password);
-2. Go to **Tenant Resources**, create a tenant and a tenant administrator account;
-3. Log out of the super administrator account;
-4. Log in with the newly created tenant administrator account.
+1. Click **Start Chatting** on the homepage, or select **Agent Chat** in the sidebar.
+2. Select an agent you can use, enter your question, and send it.
+3. Add files or ask follow-up questions as needed.
 
-Once these steps are complete, you can proceed with configuration and usage. For role and permission details, see [Resource Management](./resource-management.md).
+If no agents are available, ask your administrator or agent developer to check publishing status and access permissions. See [Agent Chat](./start-chat) for details.
 
-## �🚀 Quick Start
+### Build your own agent
 
-We recommend configuring the platform in this order:
+1. Confirm that a suitable model is available. To connect another model, see [Model Configuration](./agent-development/model-configuration).
+2. Click **Quick Setup**, or open **Agent Development → Agent Configuration**, to create and configure an agent. You can also browse [Agent Space](./resource-repository/agent-repository) for reusable resources.
+3. Configure tools, skills, knowledge bases, and memory as needed. **A knowledge base is optional**: prepare one when your agent needs to retrieve information from your own materials.
+4. Debug the agent and check its results before publishing. Then verify the experience on the chat page.
 
-1. Set up **[Model Management](./agent-development/model-configuration.md)** to define app details and connect AI models.
-2. Create your **[Knowledge Base](./agent-development/knowledge-configuration.md)** and upload documents.
-3. Conduct **[Agent Development](./agent-development)** on top of the models and knowledge base.
-4. When everything is ready, chat with your agents via **[Start Chat](./start-chat)**.
+See [Agent Configuration](./agent-development) for detailed instructions, or [Knowledge Base Configuration](./agent-development/knowledge-configuration) to prepare your own reference materials.
 
-Alternatively, you can click the "Quick Setup" button on the homepage or in the navigation bar and follow the guided flow to complete the setup.
+### Initialize or administer the platform
 
-## 💡 Get Help
+Follow the [Installation Guide](../quick-start/installation) to initialize accounts and tenants after the first deployment. Users with an existing account can sign in directly without creating another tenant administrator.
 
-Need help? Check the **[FAQ](../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Administrators can prepare models and configure users and resource permissions before developers create and publish agents. See [Resource Management](./resource-management) for roles and access control.
+
+## Why an entry or resource may be missing
+
+- **Account permissions**: Your roles and grants determine which navigation entries, shortcuts, and actions are available. Contact your administrator if you need additional access.
+- **Deployment settings**: Some deployments hide the homepage and open the workbench, agent chat, or another authorized page after sign-in. The workbench may also be disabled.
+- **Resource permissions**: Access to a page does not grant access to every resource on it. Models, agents, and knowledge bases have their own visibility and usage permissions.
+
+Use the entries available in your environment. You do not need to switch to an administrator account to match the examples in this guide.
+
+## Next steps and help
+
+- [Agent Chat](./start-chat): Select an agent, send questions, and view results.
+- [Auto Tasks](./auto-tasks): Manage scheduled tasks.
+- [Agent Configuration](./agent-development): Create, configure, debug, and publish agents.
+- [Agent Space](./resource-repository/agent-repository): Find and reuse existing agents.
+- [FAQ](../quick-start/faq): Troubleshoot usage and deployment issues.
+
+You can also ask questions in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions). Include your version, reproduction steps, and error messages, and hide account details, keys, and business data.

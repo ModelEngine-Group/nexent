@@ -61,10 +61,8 @@ import {
 } from "@assistant-ui/react";
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
-import {
-  ConversationArtifactsToolbarEntry,
-  ConversationArtifactsPanel,
-} from "../ui/artifacts-panel";
+import { ConversationArtifactsPanel } from "../ui/artifacts-panel";
+import { ConversationToolbar } from "./conversation-toolbar";
 import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryRail } from "../ui/question-directory-rail";
 import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
@@ -146,6 +144,7 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { PromptGenerationCard } from "../ui/prompt-generation-card";
 import { findRequirementSubmission } from "../ui/requirement-clarification-history";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -987,7 +986,16 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
-        <ConversationArtifactsToolbarEntry />
+        <ConversationToolbar
+          conversationId={
+            !configurationLayout &&
+            !debugLayout &&
+            variant !== "embedded" &&
+            !isShareMode
+              ? conversationId
+              : undefined
+          }
+        />
         <QuestionDirectoryRail
           questions={questionDirectory}
           onJump={handleJumpToQuestion}
@@ -1399,7 +1407,9 @@ const ThreadScrollToBottom: FC = () => {
 
 const MessageError: FC = () => {
   const { t } = useTranslation();
-  const hasInlineError = useAuiState((s) => s.message.content.some(part => (part as { isError?: boolean }).isError));
+  const hasInlineError = useAuiState((s) =>
+    s.message.content.some((part) => (part as { isError?: boolean }).isError)
+  );
   const rawError = useAuiState((state) => {
     const status = state.message.status;
     return status?.type === "incomplete" && status.reason === "error"
@@ -1450,18 +1460,34 @@ const AssistantCompletionIndicator: FC = () => {
   const status = useAuiState((s) => s.message.status);
   const isComplete = status?.type === "complete";
   const failed = status?.type === "incomplete" && status.reason === "error";
-  const stopped = status?.type === "incomplete" && status.reason === "cancelled";
+  const stopped =
+    status?.type === "incomplete" && status.reason === "cancelled";
 
   if (!isComplete && !failed && !stopped) return null;
 
   return (
     <span
       data-slot="aui_assistant-message-completion-indicator"
-      className={cn("inline-flex items-center gap-1 text-xs", failed ? "text-destructive" : stopped ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400")}
+      className={cn(
+        "inline-flex items-center gap-1 text-xs",
+        failed
+          ? "text-destructive"
+          : stopped
+            ? "text-muted-foreground"
+            : "text-emerald-600 dark:text-emerald-400"
+      )}
       role="status"
     >
       {isComplete && <DotMatrix state="success" aria-hidden />}
-      <span>{t(failed ? "chat.thread.failed" : stopped ? "chat.thread.stopped" : "chat.thread.complete")}</span>
+      <span>
+        {t(
+          failed
+            ? "chat.thread.failed"
+            : stopped
+              ? "chat.thread.stopped"
+              : "chat.thread.complete"
+        )}
+      </span>
     </span>
   );
 };
@@ -1553,7 +1579,40 @@ const AssistantMessage: FC<{
   const isLatestMessage = useAuiState(
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
+  const isLatestResourceCard = useAuiState(
+    (s) =>
+      s.thread.messages.findLast((message) => {
+        const card = (
+          message.metadata.custom as { nl2a?: Nl2aMessage } | undefined
+        )?.nl2a?.content;
+        return (
+          card && "protocol_version" in card && card.protocol_version === 2
+        );
+      })?.id === s.message.id
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const isLatestPromptCard = useAuiState(
+    (s) =>
+      s.thread.messages.findLast((message) => {
+        const metadata = message.metadata.custom as
+          | {
+              nl2a?: Nl2aMessage;
+              nl2agentStates?: Array<{
+                event: string;
+                updated_fields?: string[];
+              }>;
+            }
+          | undefined;
+        return (
+          metadata?.nl2a?.content.subtype === "prompt_generation" ||
+          metadata?.nl2agentStates?.some(
+            (event) =>
+              event.event === "agent_draft_fields_saved" &&
+              event.updated_fields?.includes("prompt")
+          )
+        );
+      })?.id === s.message.id
+  );
   const requirementMessages = useAuiState((s) =>
     nl2a?.content.subtype === "requirement_clarification"
       ? s.thread.messages
@@ -1898,7 +1957,20 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a?.content.subtype === "requirement_clarification" ? (
+        {nl2a?.content.subtype === "requirement_resources" ? (
+          <InstalledResourceBindingCard
+            key={nl2a.content.card_id}
+            payload={nl2a.content}
+            unifiedPayload={nl2a.content}
+            disabled={readOnly || !isLatestResourceCard}
+          />
+        ) : nl2a?.content.subtype === "prompt_generation" ? (
+          <PromptGenerationCard
+            key={nl2a.content.card_id}
+            payload={nl2a.content}
+            disabled={readOnly || !isLatestPromptCard}
+          />
+        ) : nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
             sourceMessageId={messageId}
@@ -1910,15 +1982,9 @@ const AssistantMessage: FC<{
         ) : nl2a?.content.subtype === "agent_draft" ? (
           <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
-          <SuggestedResourceInstallationCard
-            payload={nl2a.content}
-            disabled={readOnly || !isLatestMessage}
-          />
+          <SuggestedResourceInstallationCard payload={nl2a.content} disabled />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
-          <InstalledResourceBindingCard
-            payload={nl2a.content}
-            disabled={readOnly || !isLatestMessage}
-          />
+          <InstalledResourceBindingCard payload={nl2a.content} disabled />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />

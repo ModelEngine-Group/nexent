@@ -88,7 +88,9 @@ function buildCronExpr(
   return `${minute} ${hour} * * *`;
 }
 
-export function DreamingConfigCards() {
+export function DreamingConfigCards({
+  memoryAllowed = true,
+}: { memoryAllowed?: boolean } = {}) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
 
@@ -329,9 +331,11 @@ export function DreamingConfigCards() {
   })();
   const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
   const runReason =
-    latestRun?.status === "completed" &&
+    latestRun &&
+    ["completed", "skipped"].includes(latestRun.status) &&
     latestRun.reason &&
-    NO_PUBLICATION_REASONS.has(latestRun.reason)
+    (latestRun.reason === "memory_disabled" ||
+      NO_PUBLICATION_REASONS.has(latestRun.reason))
       ? t(`dreaming.reason.${latestRun.reason}`)
       : null;
 
@@ -535,7 +539,12 @@ export function DreamingConfigCards() {
               <Button onClick={() => setAdvancedOpen(true)}>
                 {t("dreaming.advanced.open")}
               </Button>
-              <Button type="primary" loading={running} onClick={handleRunNow}>
+              <Button
+                type="primary"
+                loading={running}
+                disabled={!memoryAllowed}
+                onClick={handleRunNow}
+              >
                 {t("dreaming.run.executeNow")}
               </Button>
             </Flex>

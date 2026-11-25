@@ -44,7 +44,6 @@ from .monitoring import (
     OPENINFERENCE_USER_ID,
     OPENINFERENCE_TAG_TAGS,
 )
-
 __version__ = "0.2.0"
 __all__ = [
     'MonitoringConfig',

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -80,3 +82,18 @@ for (const response of [{ success: false }, new Error("save failed")]) {
     assert.deepEqual(changes, []);
   });
 }
+
+test("saved personal Dreaming preference is returned independently from memory", async () => {
+  const { service } = serviceWithResponse({
+    MEMORY_SWITCH: "Y",
+    DREAMING_SWITCH: "N",
+  });
+  const config = await service.loadMemoryConfig({ throwOnError: true });
+  assert.equal(config.memoryEnabled, true);
+  assert.equal(config.dreamingEnabled, false);
+});
+
+test("missing Dreaming preference preserves the existing enabled default", async () => {
+  const { service } = serviceWithResponse({ MEMORY_SWITCH: "Y" });
+  assert.equal((await service.loadMemoryConfig()).dreamingEnabled, true);
+});

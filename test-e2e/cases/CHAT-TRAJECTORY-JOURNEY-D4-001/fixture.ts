@@ -2,6 +2,30 @@
 
 import type { Page } from "playwright/test";
 
+export const modelInput = JSON.stringify({
+  model: "DeepSeek",
+  enable_thinking: false,
+  temperature: 0,
+  messages: [
+    { role: "system", content: "### Storage instructions" },
+    { role: "user", content: "| Policy |\n| --- |\n| Retention |" },
+  ],
+});
+
+export const modelOutput = JSON.stringify({
+  model: "DeepSeek",
+  choices: [
+    {
+      index: 0,
+      message: {
+        role: "assistant",
+        content: "### Storage recommendation\n\nKeep the records for **30 days**.",
+      },
+      finish_reason: "stop",
+    },
+  ],
+});
+
 /** Owned HTTP boundary; the product page and its state/rendering remain real. */
 export async function installTrajectoryFixture(
   page: Page,
@@ -86,7 +110,16 @@ export async function installTrajectoryFixture(
   const nodes = [
     makeNode("root", null, "agent", "Friday"),
     makeNode("storage", "root", "agent", "存储设计", 500),
-    makeNode("model", "storage", "model", "DeepSeek", 700),
+    {
+      ...makeNode("model", "storage", "model", "DeepSeek", 700),
+      input: body(modelInput),
+      output: body(modelOutput),
+      reasoning: body(
+        JSON.stringify([
+          { type: "text", text: "**Compare retention policies**" },
+        ]),
+      ),
+    },
     makeNode("tool", "storage", "tool", "policy.check", 900),
     makeNode("security", "root", "agent", "安全审查", 500),
     makeNode("capacity", "root", "agent", "容量规划", 500),

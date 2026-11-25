@@ -37,7 +37,7 @@ def test_ops_deployed_start_and_restart(tmp_path, deployment):
         pod = next(doc['spec']['template']['spec'] for doc in yaml.safe_load_all(result.stdout)
                    if isinstance(doc, dict) and doc.get('kind') == 'Deployment')
         command = pod['containers'][0]['command']
-    assert command[:2] == ['/opt/nexent/scripts/start-backend.sh', 'python']
+    assert command[:2] == ['/opt/nexent/scripts/start-ops.sh', 'python']
     bash = shutil.which('bash')
     assert bash, 'Bash is required for the actual backend startup wrapper'
     with socket.socket() as listener:
@@ -50,7 +50,7 @@ def test_ops_deployed_start_and_restart(tmp_path, deployment):
         PYTHON_DOTENV_DISABLED='1', GATEWAY_AUTH_ENABLED='false', OPS_PORT=str(port),
         NEXENT_SQL_STARTUP_MODE='off', OPS_MONITORING_ENABLED='false', LOG_DIR=str(tmp_path / 'logs'),
     )
-    actual = [bash, str(repo / 'deploy/common/start-backend.sh'), sys.executable, *command[2:]]
+    actual = [bash, str(repo / 'deploy/common/start-ops.sh'), sys.executable, *command[2:]]
     opener = build_opener(ProxyHandler({}))
     for attempt in range(2):
         output_path = tmp_path / f'{deployment}-{attempt}.log'

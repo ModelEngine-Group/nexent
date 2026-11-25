@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: TPC-PROVIDER-MARKUP-20261120
+  change_type: bugfix
+  bug_id: TPC-PROVIDER-MARKUP-20261120
+  title: Reject unparsed provider tool markup and recover CodeAgent execution
+  description: Treat provider tool-call markup in visible model text as a format error and retain prior tool evidence.
+  observed_behavior: A real DeepSeek run emitted DSML text instead of a script action and was marked completed without executing it.
+  expected_behavior: Withhold DSML before SSE, request a bounded correction before executing any action, and report failure if correction fails.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Prior fixed model responses covered internal action history echoes but did not include provider-specific tool serialization in content.
+  feature_contract_changed: false
+  affected_features:
+    existing: [TPC-001, KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [TPC-D3-001, TPC-D4-001, KSM-FILES-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/core/agents/test_dsml_codeagent.py
+      - test/sdk/core/utils/test_observer_model_attempts.py
+      - test/sdk/core/agents/test_nl2agent_history_repair.py
+    behaviors:
+      - Treat top-level DSML, mixed code and DSML, and a final envelope containing DSML as invalid proposals.
+      - Preserve the previous execution result and resume with a real code action after one legacy correction.
+      - Fail on repeated malformed proposals and hide provider markup split across stream fragments.
+    reason: Reproduce the daily model response in the real parser and MessageObserver with a deterministic model sequence.
+  notes: >-
+    Reuse codeagent-explicit-termination and TPC-001 output boundaries.
+    Controlled Kubernetes retest exercises the live SSE surface with a malformed frame and real Python before and after it.
+    Daily verification uses the original attachment and configured model.

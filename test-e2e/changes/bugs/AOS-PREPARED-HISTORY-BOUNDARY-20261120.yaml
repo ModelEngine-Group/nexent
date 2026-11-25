@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-PREPARED-HISTORY-BOUNDARY-20261120
+  change_type: bugfix
+  bug_id: AOS-PREPARED-HISTORY-BOUNDARY-20261120
+  title: Return the resolved prepared conversation history boundary
+  description: Preserve the historical context for prepared turns that provide a message index before a user row has been persisted.
+  observed_behavior: The index-boundary branch raises UnboundLocalError after querying authorized history, so the public conversation run returns HTTP 500 before dispatch.
+  expected_behavior: Both message-ID and explicit-index callers receive the same boundary shape and only authorized history preceding the boundary.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The history repository tests exercise existing message IDs, and the signed transport fixtures replace the history reader for the prepared boundary.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AOS-TRANSPORT-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both boundary forms return the resolved index and exclude events at or after the boundary.
+    - Both boundary forms reject access from another owner or tenant.
+    reason: Extend the existing repository fixture and verify real Management-to-Runtime execution in the isolated stack.
+    test_selectors:
+    - test/backend/database/test_conversation_history_stopped.py
+  notes: Reuse the Management AgentOS service-boundary SPEC and its signed transport Case for adjacent regression. The local smoke exercises the real history repository through the public run API and checks subsequent SSE and durable terminal state.

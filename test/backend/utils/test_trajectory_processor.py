@@ -217,7 +217,7 @@ def test_invocation_ownership_survives_technical_spans_and_remote_projection(cap
                     pass
             with capture.tracer.start_as_current_span("agent.subagent.sibling", attributes={"openinference.span.kind": "AGENT"}):
                 pass
-        root_record = root.attributes["nexent.record_id"]
+        root_record = root.attributes["nexent.local.nexent.record_id"]
     assert capture.processor.force_flush(2000)
     spans = {span["name"]: attrs(span) for span in bodies(capture) if span["name"] != "nexent.trajectory.fragment"}
     assert spans["agent.run"]["nexent.invocation_id"] == root_record
@@ -236,6 +236,8 @@ def test_invocation_ownership_survives_technical_spans_and_remote_projection(cap
     assert sibling["nexent.invocation_id"] not in {root_record, child_id}
     assert all("nexent.invocation_id" not in body.attributes for body in remote.get_finished_spans())
     assert all("nexent.parent_invocation_id" not in body.attributes for body in remote.get_finished_spans())
+    assert all("nexent.trajectory_id" not in body.attributes for body in remote.get_finished_spans())
+    assert all("nexent.owner_user_id" not in body.attributes for body in remote.get_finished_spans())
     remote_child = next(body for body in remote.get_finished_spans() if body.name == "agent.subagent.child")
     assert remote_child.attributes["subagent.invocation_id"] == child_id
     assert all(not any(key.startswith("nexent.local.") for key in body.attributes) for body in remote.get_finished_spans())
@@ -342,8 +344,9 @@ def test_otlp_json_decodes_against_official_schema(capture):
 
 def test_sampler_keeps_unsampled_local_records_without_setting_sampled_bit():
     sampler = LocalTrajectoryProcessor.wrap_sampler(ALWAYS_OFF)
-    result = sampler.should_sample(None, 123, "agent.run")
+    result = sampler.should_sample(None, 123, "agent.run", attributes={"nexent.local_only": True})
     assert result.decision == Decision.RECORD_ONLY
+    assert result.attributes["nexent.local_only"] is True
     provider = TracerProvider(sampler=sampler, shutdown_on_exit=False)
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))

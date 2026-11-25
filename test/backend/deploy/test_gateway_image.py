@@ -128,7 +128,10 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     assert env["JWT_SECRET"]["valueFrom"]["secretKeyRef"]["key"] == "JWT_SECRET"
     assert env["GATEWAY_SIGNING_SECRET"]["valueFrom"]["secretKeyRef"]["optional"] is True
     assert set(env) == {"TZ", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
-                        "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "GATEWAY_OPS_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT"}
+                        "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "GATEWAY_OPS_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT",
+                        "GATEWAY_NB_EXCLUDED_CAPABILITIES"}
+    # The emergency kill switch defaults to empty (expose all declared rows).
+    assert env["GATEWAY_NB_EXCLUDED_CAPABILITIES"]["value"] == ""
 
 
 def test_offline_application_includes_gateway():

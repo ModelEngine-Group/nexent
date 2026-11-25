@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-KNOWLEDGE-SCORE-20261117
+  change_type: requirement
+  requirement_id: NL2AGENT-KNOWLEDGE-SCORE-20261117
+  title: Replace keyword-driven knowledge priority with score-based recommendations
+  description: Keep the existing small native lexical score bonus and rank verified available resources by score and stable reference. Remove query intent and source-name priority tiers; use the authorized resource catalog directly and leave knowledge scope checks at configuration boundaries.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001, NL2A-WORKFLOW-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_knowledge_boundary.py
+      - test/backend/services/test_nl2agent_knowledge_priority.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/backend/services/test_nl2agent_knowledge_service.py
+      - test/backend/services/test_nl2agent_search_alternatives.py
+    behaviors:
+      - Query paraphrases and negative expressions cannot assign priority; recommendations never query knowledge providers.
+      - Higher-scoring alternatives precede native tools even with ready bindings or legacy preference state; ties are stable.
+      - Native lexical scoring retains the existing 0.02 bonus without bypassing recall or capability rejection.
+      - Empty and failing knowledge providers do not affect resource recommendations; authorized resource visibility is rechecked.
+      - Saved required configuration and knowledge selections determine readiness; configuration and binding APIs retain scope validation.
+    reason: Reuse existing UT and D3/D4 proof boundaries with score-based assertions; no duplicate D1 is needed.
+  notes: >-
+    User explicitly supersedes keyword and ready-binding priority in TASK-022.
+    SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/ sections 7.5.4 and 11.7.
+    F-045 retains agent_config ownership. D3 owns PostgreSQL schemas, Redis state,
+    ES indices and model/MCP listeners with cleanup. D4 owns isolated browser
+    fixtures and verifies no binding writes. HTTP contracts, provider APIs and
+    deployment selection remain unchanged; no new D2 or D5 surface is introduced.

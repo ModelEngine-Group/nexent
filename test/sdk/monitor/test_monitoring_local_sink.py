@@ -2,21 +2,24 @@
 """Exporter selection must retain the default remote monitoring contract."""
 
 import json
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sdk.nexent.monitor.monitoring import MonitoringConfig, MonitoringManager
+from sdk.nexent.monitor import monitoring
+from sdk.nexent.monitor.monitoring import AgentRunMetadata, MonitoringConfig, MonitoringManager
 
 
 def test_default_trace_sink_remains_otlp():
     assert MonitoringConfig().provider == "otlp"
 
 
-@pytest.mark.parametrize("sink", ["local_file"])
-def test_enabled_local_sink_requires_injected_processor(sink):
+@pytest.mark.parametrize("sink, capture_local_traces", [("local_file", False), ("otlp", True)])
+def test_enabled_local_sink_requires_injected_processor(sink, capture_local_traces):
     with pytest.raises(ValueError, match="processor"):
-        MonitoringConfig(enable_telemetry=True, provider=sink)
+        MonitoringConfig(enable_telemetry=True, provider=sink, capture_local_traces=capture_local_traces)
 
 
 @pytest.mark.parametrize("provider", ["invalid", "both", "grafana", "zipkin"])
@@ -47,6 +50,49 @@ def test_local_trace_selection_and_independent_metrics(sink, remote_calls):
     assert metric.call_count == remote_calls
     if sink == "local_file":
         manager._tracer_provider.add_span_processor.assert_any_call(processor)
+
+
+@pytest.mark.parametrize("remote_enabled", [False, True], ids=["local-only", "dual-capture"])
+def test_local_capture_reuses_an_enabled_provider_and_registers_processor_once(monkeypatch, mocker, remote_enabled):
+    monkeypatch.setattr(MonitoringManager, "_instance", None)
+    manager = MonitoringManager()
+    original_sampler = mocker.Mock()
+    provider = SimpleNamespace(sampler=original_sampler, add_span_processor=mocker.Mock())
+    provider_factory = mocker.patch.object(monitoring, "TracerProvider", return_value=provider)
+    remote_exporter = mocker.patch.object(monitoring, "OTLPSpanExporterHTTP")
+    local_sampler = mocker.Mock(get_description=mocker.Mock(return_value="local capture sampler"))
+    processor = mocker.Mock(wrap_sampler=mocker.Mock(return_value=local_sampler))
+    config = MonitoringConfig(enable_telemetry=remote_enabled, export_traces=remote_enabled, export_metrics=False)
+    manager.configure(config)
+    sampler = provider.sampler
+    local_config = replace(config, enable_telemetry=True, capture_local_traces=True, local_span_processor=processor)
+
+    manager.configure_local_capture(local_config)
+    manager.configure_local_capture(replace(local_config))
+    with pytest.raises(ValueError, match="different span processor"):
+        manager.configure_local_capture(replace(local_config, local_span_processor=mocker.Mock()))
+
+    assert manager.is_enabled
+    provider_factory.assert_called_once()
+    assert remote_exporter.call_count == int(remote_enabled)
+    assert len(provider.add_span_processor.call_args_list) == 1 + int(remote_enabled)
+    provider.add_span_processor.assert_called_with(processor)
+    processor.wrap_sampler.assert_called_once_with(original_sampler)
+    if remote_enabled:
+        assert provider.sampler is sampler
+    assert provider.sampler.get_description() == "local capture sampler"
+    assert "nexent.local.input.value" in manager._trace_payload_attributes("input", "answer")
+
+
+def test_remote_agent_metadata_omits_local_trajectory_identifiers():
+    metadata = AgentRunMetadata(conversation_id=9, extra_metadata={
+        "trajectory_id": "private-id",
+        "trajectory_turn_no": 2,
+        "trajectory_source_message_id": "10",
+        "core_type": "jiuwen",
+    })
+
+    assert metadata.metadata() == {"conversation_id": 9, "core_type": "jiuwen"}
 
 
 def test_local_payload_copy_retains_full_body_with_original_remote_preview():

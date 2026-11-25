@@ -15,6 +15,7 @@ async def test_saved_import_workers_exist_without_capture_or_read_service(monkey
     monkeypatch.setattr(lifespan, "create_thread_manager", lambda: manager)
     monkeypatch.setattr(lifespan, "create_trajectory_workers", workers)
     monkeypatch.setattr(lifespan.config, "TRAJECTORY_READ_ENABLED", False)
+    monkeypatch.setattr(lifespan.config, "LOCAL_FILE_MONITORING_ENABLED", False)
     monkeypatch.setattr(lifespan.config, "MONITORING_PROVIDER", "otlp")
     app = FastAPI()
     async with lifespan.ops_lifespan(app):

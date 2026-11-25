@@ -65,7 +65,7 @@ test = [
     "redis<8.2",
     "httpx>=0.28.1",
     "selenium",
-    "botocore"
+    "botocore",
 ]
 
 [dependency-groups]

@@ -119,7 +119,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
-| `--monitoring-provider` | Provider when `monitoring` is selected | `local_file`, `otlp`, `phoenix`, `langfuse`, `langsmith` |
+| `--monitoring-provider` | Remote provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith` |
 | `--use-local-config` | Reuse saved local deployment config | Flag |
 | `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
 | `--config` | Open the interactive deployment configuration | Flag |
@@ -312,29 +312,34 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 
 ### Monitoring
 
-The Helm chart includes an optional monitoring stack that mirrors the Docker
-monitoring deployment. The collector is always installed when
-`nexent-monitoring.enabled=true`; the backend stack is selected by
-`global.monitoring.provider`.
+Docker and Kubernetes application deployments capture traces to the persistent
+`/mnt/nexent-data/trajectory` directory by default. Set
+`LOCAL_FILE_MONITORING_ENABLED=false` in `deploy/env/.env` and rerun the deployment
+script to stop new local capture. Existing local traces remain available in
+the observability center. For direct Helm deployments, use
+`--set global.monitoring.localFileEnabled=false` to turn off local capture and
+`--set global.monitoring.trajectoryReadEnabled=true` to keep historical reads.
 
-Supported providers:
+To export new traces to a third-party provider, include the `monitoring`
+component and select a provider in the deployment script. Local capture keeps its
+own setting. With both enabled, Runtime records full traces locally and applies
+the existing remote sampling and content settings to the third-party export.
+Omit the `monitoring` component to turn off remote export.
 
-- `otlp` / `collector` - Collector only, debug exporter
-- `phoenix` - Collector + local Phoenix
-- `langfuse` - Collector + self-hosted Langfuse stack
-- `langsmith` - Collector forwarding to hosted LangSmith
-
-Example:
+If a saved deployment profile used the former `local_file` option, the script
+loads it with remote export off and uses `LOCAL_FILE_MONITORING_ENABLED` for
+local capture. For direct Helm upgrades from `global.monitoring.provider=local_file`,
+set `global.monitoring.provider=otlp`, `global.monitoring.enabled=false`,
+`nexent-monitoring.enabled=false`, and `global.monitoring.localFileEnabled=true`.
 
 ```bash
-helm upgrade --install nexent nexent \
-  --set nexent-monitoring.enabled=true \
-  --set global.monitoring.enabled=true \
-  --set global.monitoring.provider=local_file \
-  --set 'global.monitoring.dashboardUrl=http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+bash deploy.sh docker --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix
+bash deploy.sh k8s --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix
 ```
 
-For LangSmith, also provide an API key:
+The optional monitoring chart supports `otlp` for the Collector with its debug
+exporter, `phoenix`, `langfuse`, and `langsmith`. For direct Helm deployments,
+enable `nexent-monitoring` and select a provider. LangSmith also requires an API key.
 
 ```bash
 helm upgrade --install nexent nexent \

@@ -14,26 +14,54 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentLegacyResume, AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
-    EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
-    WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
+    AgentLegacyResume,
+    AgentResume,
+    AgentRunLookup,
+    AgentRunReference,
+    AgentStop,
+    BackgroundRun,
+    CompatibilityConversationRun,
+    CreatorTrajectoryScope,
+    EvaluationAgentResult,
+    EvaluationAgentRun,
+    PreparedAgentCreatorRun,
+    PreparedCreatorRun,
+    PreparedSkillCreatorRun,
+    TrackedBackgroundResult,
+    WorkbenchDebugSkillLookup,
+    WorkbenchSkillMounts,
 )
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, NEXENT_AGENT_CORE, RUNTIME_SERVICE_URL
+from contracts.constants.environment import (
+    ENABLE_AGENT_WORKBENCH,
+    NEXENT_AGENT_CORE,
+    RUNTIME_SERVICE_URL,
+)
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
-    NorthboundStopInProgressError, RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError,
-    RuntimeUpstreamError, ValidationError, WorkbenchError,
+    NorthboundStopInProgressError,
+    RunModelControlsError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    ValidationError,
+    WorkbenchError,
 )
-from infrastructure.rdb.agent_admission import AdmissionScopeError
 from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.rdb.agent_admission import AdmissionScopeError
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
-    active_run_error_response, debug_preparation_events, present_ephemeral_stream, present_public_resume,
+    active_run_error_response,
+    debug_preparation_events,
+    present_ephemeral_stream,
+    present_public_resume,
 )
 from management.services.agent.workbench_debug_grant import (
-    WorkbenchDebugGrantUnavailable, close_workbench_debug_grant, open_workbench_debug_grant,
+    WorkbenchDebugGrantUnavailable,
+    close_workbench_debug_grant,
+    open_workbench_debug_grant,
 )
 from nexent.core.concurrency import run_blocking
+from nexent.monitor import get_agent_monitoring_context
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +115,33 @@ async def _run_prepared_debug(client, prepared, user_id, tenant_id):
 async def forward_creator_run(
     payload: PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
 ) -> StreamingResponse:
+    """Forward the history receipt bound around the persisted creator stream."""
+    if isinstance(payload, PreparedCreatorRun):
+        scope = None
+        metadata = get_agent_monitoring_context()
+        if (
+            metadata is not None
+            and payload.system_agent is not None
+            and metadata.conversation_id is not None
+            and metadata.is_debug is False
+            and metadata.user_id == user_id
+            and metadata.tenant_id == tenant_id
+            and metadata.agent_id == payload.system_agent.agent_id
+            and metadata.extra_metadata.get("creator_mode") == payload.mode
+        ):
+            source_id = metadata.extra_metadata.get("trajectory_source_message_id")
+            scope = CreatorTrajectoryScope(
+                conversation_id=metadata.conversation_id,
+                source_message_id=int(source_id) if source_id is not None else None,
+            )
+        payload = payload.model_copy(update={"trajectory": scope})
     return await _agentos_client().run_ephemeral(payload, user_id, tenant_id)
 
 
 async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: str) -> StreamingResponse:
-    from management.services.agent.preparation.evaluation_snapshot import prepare_a2a_snapshot
+    from management.services.agent.preparation.evaluation_snapshot import (
+        prepare_a2a_snapshot,
+    )
 
     snapshot = await prepare_a2a_snapshot(agent_request, user_id, tenant_id)
     if snapshot is None:
@@ -156,7 +206,9 @@ async def forward_conversation_run(
         if payload.idempotency_key is None:
             payload = payload.model_copy(update={"idempotency_key": f"saved-message-{saved_user.message_id}"})
     if request.is_debug and not payload.resume and not northbound:
-        from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
+        from management.services.agent.preparation.evaluation_snapshot import (
+            prepare_debug_snapshot,
+        )
 
         try:
             prepared = await prepare_debug_snapshot(
@@ -253,6 +305,52 @@ async def forward_agent_stop(
     return {"status": "success", "message": message, "already_stopped": True}
 
 
+# Bounded retry for the runtime's transient internal-token rejection windows.
+# Field evidence (v2.8.4 support incident): the long-lived runtime process can
+# enter a ~16-17s window (worst observed ~59s) where every internal JWT verify
+# fails while fresh processes stay healthy; retrying inside that budget rides
+# the window out. Tokens are re-signed on every attempt (AgentOSClient signs
+# per request), so no stale-credential risk is introduced.
+_EVALUATION_AUTH_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0, 16.0)
+# The 401 body rendered by the TokenExpiredError handler marks internal-token
+# rejections; other 401s (e.g. misconfigured secrets) fail fast instead.
+_AUTH_WINDOW_MARKER = "TOKEN_EXPIRED"
+
+
+def _is_runtime_auth_window(exc: Exception) -> bool:
+    return (
+        isinstance(exc, RuntimeUpstreamError)
+        and exc.status_code == 401
+        and _AUTH_WINDOW_MARKER in _upstream_body_text(exc)
+    )
+
+
+def _upstream_body_text(exc: RuntimeUpstreamError) -> str:
+    content = getattr(exc, "content", b"")
+    if isinstance(content, (bytes, bytearray)):
+        return content.decode("utf-8", "replace")
+    return str(content or "")
+
+
+async def _run_prepared_evaluation_with_auth_retry(client, prepared, user_id: str, tenant_id) -> EvaluationAgentResult:
+    attempts = (0.0,) + _EVALUATION_AUTH_RETRY_DELAYS
+    last_exc: Exception | None = None
+    for delay in attempts:
+        if delay:
+            logger.warning(
+                "Evaluation runtime call hit auth window; retrying in %.1fs (user=%s tenant=%s)",
+                delay, user_id, tenant_id,
+            )
+            await asyncio.sleep(delay)
+        try:
+            return await client.run_prepared_evaluation(prepared, user_id, tenant_id)
+        except RuntimeUpstreamError as exc:
+            if not _is_runtime_auth_window(exc):
+                raise
+            last_exc = exc
+    raise last_exc  # exhausted retries inside the window
+
+
 async def _wait_for_northbound_stop(client, reference: AgentRunReference, user_id: str, tenant_id: str) -> None:
     from management.services.agent.prepared_turn import find_pending_turn, reconcile_turn
 
@@ -277,12 +375,15 @@ async def _wait_for_northbound_stop(client, reference: AgentRunReference, user_i
 
 
 async def forward_evaluation_case(payload: EvaluationAgentRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
-    from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
+    from management.services.agent.preparation.evaluation_snapshot import (
+        prepare_evaluation_snapshot,
+    )
 
     prepared = await prepare_evaluation_snapshot(payload, user_id, tenant_id)
     if prepared is None:
         raise ValidationError("Evaluation resources could not be prepared for AgentOS")
-    return await _agentos_client().run_prepared_evaluation(prepared, user_id, tenant_id)
+    client = _agentos_client()
+    return await _run_prepared_evaluation_with_auth_retry(client, prepared, user_id, tenant_id)
 
 
 async def forward_active_run(conversation_id: int, user_id: str, tenant_id: str) -> str | None:
@@ -310,7 +411,9 @@ async def forward_tracked_background(
             raise
         if agent_request.conversation_id is not None and agent_request.conversation_id > 0:
             from management.db.automation import repository as runs
-            from management.db.conversation.repository import get_prepared_projection_receipt
+            from management.db.conversation.repository import (
+                get_prepared_projection_receipt,
+            )
 
             try:
                 record = await run_blocking(

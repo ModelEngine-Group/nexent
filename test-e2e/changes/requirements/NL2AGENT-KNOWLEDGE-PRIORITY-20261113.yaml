@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-KNOWLEDGE-PRIORITY-20261113
+  change_type: requirement
+  requirement_id: NL2AGENT-KNOWLEDGE-PRIORITY-20261113
+  title: Prefer authorized platform knowledge tools after capability verification
+  description: Implement TASK-022 candidate guarantees and stable verified recommendation order for the deployment-selected knowledge tool, preserving explicit sources, ready bindings, all qualified alternatives and user configuration.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001, NL2A-WORKFLOW-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/services/test_nl2agent_knowledge_priority.py
+      - test/backend/services/test_nl2agent_knowledge_service.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/backend/services/test_nl2agent_bilingual_recall.py
+      - test/backend/services/test_nl2agent_semantic_retrieval.py
+    behaviors:
+      - Original knowledge intent and explicit source constraints select only the deployment-eligible tool.
+      - Candidate guarantees survive lexical, hybrid and fallback limits without altering retrieval scores.
+      - Verified stable order preserves ready bindings, all qualified alternatives and rejected capabilities.
+      - Authorized empty knowledge differs from provider failure and no private configuration reaches model state.
+    reason: Existing retrieval and knowledge configuration tests do not prove guaranteed candidates and post-verification defaults. Add focused UT and strengthen the owned runtime case; no duplicate D1.
+  notes: >-
+    SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/, TASK-022.
+    F-045 inherits agent_config responsibility. The D3 owns PostgreSQL schema,
+    Redis namespace, HTTP model/MCP listeners and workers with finally cleanup.
+    D4 strengthens the existing controlled browser journey for actual default and
+    manual selection without business writes. Knowledge provider permission and
+    configuration APIs are unchanged; no new D2 protocol surface or separate D5
+    algorithm is introduced. UT plus D3 revalidation/failure checks cover the changed
+    policy, while existing authorization/configuration regression remains separate.

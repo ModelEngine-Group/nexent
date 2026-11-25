@@ -10,6 +10,7 @@ required_mock_services: [memory-provider]
 acceptance_bindings:
   AC-01: [test_external_memory_real_ingest_search_and_hot_update]
   AC-02: [test_external_memory_real_ingest_search_and_hot_update]
+  AC-03: [test_external_memory_real_ingest_search_and_hot_update]
 preparation:
   families: []
   anchors: false

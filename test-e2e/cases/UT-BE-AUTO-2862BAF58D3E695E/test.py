@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from infrastructure.redis.client import run_state as rss
+from infrastructure.redis import run_state as rss
 from infrastructure.redis.run_state import RuntimeStateService
 
 
@@ -118,6 +118,14 @@ class FakeRedisClient:
             self.store[key] = {}
         self.store[key].update(mapping or {})
         return len(mapping or {})
+
+    def hdel(self, key, *fields):
+        self._record('hdel', (key, *fields), {})
+        values = self.store.get(key, {})
+        found = [field for field in fields if field in values]
+        for field in found:
+            del values[field]
+        return len(found)
 
     def hgetall(self, key):
         self._record('hgetall', (key,), {})

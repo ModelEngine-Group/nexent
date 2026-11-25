@@ -265,6 +265,8 @@ def create_conversation(
     """
     with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         _enforce_user_conversation_limit(session, user_id)
+        if user_id and agent_id and target and target.get("type") in ("agent", "skill"):
+            _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{agent_id}:{target['type']}:{target['id']}")
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
@@ -272,6 +274,8 @@ def create_conversation(
             data["conversation_id"] = reserved_conversation_id
         if target is not None:
             data["target"] = deepcopy(target)
+            if target.get("type") in ("agent", "skill"):
+                data["last_activity_time"] = func.timezone("UTC", func.clock_timestamp())
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -313,6 +317,7 @@ def create_conversation(
         record = session.execute(stmt).fetchone()
         from infrastructure.rdb.trajectory.repository import seed_conversation
         seed_conversation(session, record.conversation_id, user_id, agent_id)
+        retain_creator_histories(user_id, agent_id, target, session=session)
 
         # Convert to dictionary and ensure timestamps are integers
         result_dict = {
@@ -2188,7 +2193,14 @@ def rename_conversation(
 
 def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> bool:
     """
-    Delete a conversation (soft delete)
+    Delete a conversation owned by the user (soft delete, cascading)
+
+    Only a conversation whose created_by matches user_id is affected. Child
+    rows cascade by conversation_id, and only when the owned conversation
+    row itself matched, so a caller passing an id it does not own cannot
+    touch another user's data (aligned with delete_conversations_batch).
+    A None user_id matches no row (created_by = NULL never compares equal),
+    so the call is a safe no-op; callers must pass the authenticated owner.
 
     Args:
         conversation_id: Conversation ID (integer)
@@ -2206,14 +2218,17 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
-        # 1. Mark conversation as deleted
+        # 1. Mark conversation as deleted (ownership filter: created_by == user_id).
+        # Not owned (or already deleted): rowcount 0 refuses before any child row.
         conversation_stmt = (
             update(ConversationRecord)
-            .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                ConversationRecord.created_by == user_id,
+            )
             .values(update_data)
         )
-        if user_id:
-            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
         if conversation_result.rowcount == 0:
             return False
@@ -2260,11 +2275,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         )
         session.execute(image_stmt)
 
-        # Check if the conversation record was affected
-        return conversation_result.rowcount > 0
+        # Ownership was already verified in step 1; the cascade only runs
+        # after a successful owned-conversation update.
+        return True
 
 
-def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
+def delete_conversations_batch(
+    conversation_ids: List[int], user_id: Optional[str] = None, *, session: Optional[Session] = None,
+) -> List[int]:
     """
     Soft-delete multiple conversations owned by the user (cascading).
 
@@ -2279,7 +2297,7 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
     Returns:
         List of conversation IDs that were actually deleted
     """
-    with get_db_session() as session:
+    with (nullcontext(session) if session is not None else get_db_session()) as session:
         ids = [int(i) for i in conversation_ids]
         if not ids:
             return []
@@ -3662,14 +3680,41 @@ def remove_conversation_knowledge_bindings(
         record.update_time = func.current_timestamp()
 
 
+def retain_creator_histories(user_id, executor_id, target, *, session=None):
+    """Keep the latest three owned Agent or Skill creator conversations and cascade soft deletion."""
+    if not user_id or not executor_id or not target or target.get("type") not in ("agent", "skill"):
+        return
+    with (nullcontext(session) if session is not None else get_db_session()) as session:
+        _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{executor_id}:{target['type']}:{target['id']}")
+        excess = session.scalars(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.agent_id == executor_id,
+                ConversationRecord.target == target,
+                ConversationRecord.delete_flag == "N",
+            ).order_by(_activity_time_expression().desc(), ConversationRecord.conversation_id.desc()).offset(3)
+        ).all()
+        if excess:
+            delete_conversations_batch(excess, user_id, session=session)
+
+
 def bind_creation_conversation_target(conversation_id, executor_id, expected_target, target, user_id):
     """Compare-and-set a resource target without changing the executor or messages."""
     with get_db_session() as session:
+        if target.get("type") in ("agent", "skill"):
+            _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{executor_id}:{target['type']}:{target['id']}")
         predicate = ConversationRecord.target.is_(None) if expected_target is None else ConversationRecord.target == expected_target
+        update_data = {"target": target, "updated_by": user_id}
+        if target.get("type") in ("agent", "skill"):
+            update_data.update(update_time=func.current_timestamp(),
+                               last_activity_time=func.timezone("UTC", func.clock_timestamp()))
         result = session.execute(update(ConversationRecord).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.created_by == user_id,
             ConversationRecord.agent_id == executor_id,
             ConversationRecord.delete_flag == "N", predicate,
-        ).values(target=target, updated_by=user_id))
-        return result.rowcount == 1
+        ).values(**update_data))
+        bound = result.rowcount == 1
+        if bound:
+            retain_creator_histories(user_id, executor_id, target, session=session)
+        return bound

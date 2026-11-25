@@ -44,14 +44,11 @@ const getWebSocketUrl = (endpoint: string): string => {
 export const conversationService = {
   async getCreatorHistories(
     kind: ConversationTarget["type"],
-    targetId: number,
-    offset = 0
+    targetId: number
   ): Promise<CreatorHistoryPage> {
     const query = new URLSearchParams({
       kind,
       target_id: String(targetId),
-      offset: String(offset),
-      limit: "20",
     });
     const response = await fetchWithErrorHandling(
       `${API_ENDPOINTS.conversation.creatorHistories}?${query}`,
@@ -1250,7 +1247,7 @@ export const conversationService = {
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
-      entrypoint?: "workbench";
+      entrypoint?: "workbench" | "automation";
       workbench?: import("@/features/workbench").WorkbenchSessionConfig;
       expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";

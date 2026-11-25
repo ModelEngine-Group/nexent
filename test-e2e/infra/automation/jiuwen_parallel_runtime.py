@@ -37,8 +37,8 @@ async def run_parallel_roots(monkeypatch, protocol, *, cancel_one=False, sandbox
     class FixtureStorage:
         default_bucket = "fixture"
 
-        def upload_file(self, source, key):
-            uploads[key] = Path(source).read_text(encoding="utf-8")
+        def upload_fileobj(self, stream, key):
+            uploads[key] = stream.read().decode("utf-8")
             return True, key
 
     storage = FixtureStorage()

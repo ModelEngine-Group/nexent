@@ -380,6 +380,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             workspace_path=info.workspace_path, workspace_run_id=info.workspace_run_id, minio_files=info.minio_files,
             cancellation_scope=self.scope, user_context=info.user_context,
             child_invocation_factory=child_invocation_factory(info, parallel_mode=lambda: self._child_context.get()[1]),
+            runtime_lifecycle=info.__dict__.get("_runtime_run_lifecycle"),
         )
         self.resources.core_run_info = info
         native_tools, collaborators = [], []
@@ -554,6 +555,16 @@ class JiuwenAdapter(AgentCoreAdapter):
         if getattr(self, "execution_history", None) is not None:
             self.execution_history.reset_read_budget(self.owner_id)
 
+    @contextmanager
+    def _runtime_tool_lifetime(self):
+        lifecycle = self.run_info.__dict__.get("_runtime_run_lifecycle")
+        holder = lifecycle.begin("callback") if lifecycle is not None else None
+        try:
+            yield
+        finally:
+            if holder is not None:
+                lifecycle.finish(holder)
+
     def _business_handler(self, name, forward, *, lane="model-tool-io", collaborator=False, local_child=False):
         async def invoke(arguments, *, provider_call_id=None):
             if self.scope.cancelled:
@@ -565,7 +576,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 del self._native_call_names[provider_call_id]
                 if local_child:
                     parallel_mode = self._parallel_child_calls.get(provider_call_id)
-            with self._observe_tool(name, arguments, provider_call_id=provider_call_id):
+            with self._observe_tool(name, arguments, provider_call_id=provider_call_id), self._runtime_tool_lifetime():
                 if inspect.iscoroutinefunction(forward):
                     result = await forward(**arguments)
                 else:
@@ -580,8 +591,12 @@ class JiuwenAdapter(AgentCoreAdapter):
                     close_hook = child_scope.cancel if child_scope is not None else None
                     if lane == "sandbox" and self.run_info.parallel_child_mode == "sandbox":
                         close_hook = self.scope.cancel
+                    lifecycle = self.run_info.__dict__.get("_runtime_run_lifecycle")
+                    worker_holder = None
                     token = self._child_context.set((child_scope, parallel_mode))
                     try:
+                        if lifecycle is not None:
+                            worker_holder = lifecycle.begin("callback")
                         execution = self.manager.submit(
                             lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__, close_hook=close_hook,
                                                   deadline_monotonic=deadline),
@@ -590,6 +605,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                     except BaseException:
                         if sandbox_slot:
                             self._python_child_slots.release()
+                        if worker_holder is not None:
+                            lifecycle.finish(worker_holder)
                         raise
                     finally:
                         self._child_context.reset(token)
@@ -600,6 +617,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                                 loop.call_soon_threadsafe(self._python_child_slots.release)
 
                         execution.future.add_done_callback(release_slot)
+                    if worker_holder is not None:
+                        execution.future.add_done_callback(lambda _: lifecycle.finish(worker_holder))
                     self._tool_executions.append(execution)
                     try:
                         if deadline is not None:
@@ -772,7 +791,7 @@ class JiuwenAdapter(AgentCoreAdapter):
     def _skill_rails(self):
         from nexent.core.agents.cores.jiuwen.skills import NexentSkillRail
 
-        directories, names, authorized_by_root = set(), set(), {}
+        directories, names, authorized_by_root, skill_name_to_id = set(), set(), {}, {}
         for config in self.tool_configs:
             if config.class_name not in {"ReadSkillMdTool", "RunSkillScriptTool", "ReadSkillConfigTool"}:
                 continue
@@ -784,7 +803,11 @@ class JiuwenAdapter(AgentCoreAdapter):
                 directories.add(parameters["local_skills_dir"])
                 names.update(authorized)
                 authorized_by_root.setdefault(parameters["local_skills_dir"], set()).update(authorized)
-        return [NexentSkillRail(sorted(directories), sorted(names), authorized_by_root=authorized_by_root)] \
+            for name, skill_id in (parameters.get("skill_name_to_id") or {}).items():
+                if name in names and skill_id is not None:
+                    skill_name_to_id[name] = skill_id
+        return [NexentSkillRail(sorted(directories), sorted(names), authorized_by_root=authorized_by_root,
+                                skill_name_to_id=skill_name_to_id)] \
             if directories and names else []
 
     def _bind_skill_sandbox(self):
@@ -795,9 +818,23 @@ class JiuwenAdapter(AgentCoreAdapter):
         if config is None or config.level == SandboxLevel.LOCAL:
             return
         executor = self._allocate_python_executor(config)
-        runner = SandboxSkillScriptRunner(
+        if getattr(executor, "_nexent_backend", None) == "local":
+            self.resources.workspace_mapping = None
+            for tool in self.business_tools.values():
+                if getattr(tool, "workspace_mapping", None) is not None:
+                    tool.workspace_mapping = None
+            return
+        runner_type = SandboxSkillScriptRunner
+        runner_options = {}
+        if getattr(executor, "_nexent_backend", None) == "kubernetes":
+            from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
+
+            runner_type = KubernetesSkillScriptRunner
+            runner_options["workspace_access"] = config.workspace_access
+        runner = runner_type(
             executor, timeout_seconds=int(config.timeout_seconds), workspace_path=self.run_info.workspace_path,
             network_enabled=not config.network_disabled, workspace_mapping=self.resources.workspace_mapping,
+            **runner_options,
         )
         self.resources._sandbox_skill_runners.append(runner)
         for tool in self.business_tools.values():
