@@ -170,15 +170,15 @@ export default defineConfig({
                 "collapsed": false,
                 "items": [
                   {
-                    "text": "Agent Repository",
+                    "text": "Agent Space",
                     "link": "/en/user-guide/resource-repository/agent-repository"
                   },
                   {
-                    "text": "MCP Repository",
+                    "text": "MCP Space",
                     "link": "/en/user-guide/resource-repository/mcp-repository"
                   },
                   {
-                    "text": "Skill Repository",
+                    "text": "Skill Space",
                     "link": "/en/user-guide/resource-repository/skill-repository",
                     "collapsed": false,
                     "items": [
@@ -613,7 +613,7 @@ export default defineConfig({
                 "collapsed": false,
                 "items": [
                   {
-                    "text": "智能体仓库",
+                    "text": "Agent 仓库",
                     "link": "/zh/user-guide/resource-repository/agent-repository"
                   },
                   {

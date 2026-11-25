@@ -1,6 +1,6 @@
-# MCP Repository
+# MCP Space
 
-The MCP Repository is the hub for sharing, managing, and reviewing MCP (Model Context Protocol) services within a tenant. You can browse MCP services published to the community and install them with one click, manage the MCP services you have permission to edit, and (as an administrator) review publication applications.
+The MCP Space is the hub for sharing, managing, and reviewing MCP (Model Context Protocol) services within a tenant. You can browse MCP services published to the community and install them with one click, manage the MCP services you have permission to edit, and (as an administrator) review publication applications.
 
 ## 👥 Interface Differences for Administrators and Developers
 
@@ -11,7 +11,7 @@ After entering **MCP Repository**, the tabs shown at the top of the page vary by
 | **Developer** | Repository, My MCP | Browse the shared repository, install MCP services, add MCP services, manage your own services and apply to publish them |
 | **Administrator** | Repository, My MCP, Review Center | In addition to developer capabilities, review publication applications and delist services directly from the repository |
 
-> Tip: The Review Center tab is only visible to administrators. Developers can track the result of their applications via **View Review Progress** in the upper-right corner of the MCP card in **My MCP**.
+> Tip: The Review Center tab is only visible to administrators and super administrators (including multi-role users who hold the corresponding roles). Developers can track the result of their applications via **View Review Progress** in the upper-right corner of the MCP card in **My MCP**.
 
 **Developer view** (Repository / My MCP):
 
@@ -34,7 +34,8 @@ The **Repository** tab displays the MCP services that have been published (share
 ### Browsing and Searching
 
 - Published MCP services are displayed as cards
-- Search by **name or tags**
+- Search by **name or tags**, with structured filtering against the tag library
+- Toggle the list sorting between **default order / recently updated**
 - Each card shows: name, description, tags, and install count
 
 <div style="display: flex; justify-content: left;">
@@ -128,6 +129,7 @@ In the service card or detail dialog, you can:
 
 - **Edit**: Modify the name, description, URL, Authorization Token, tags, and other content
 - **Enable / Disable**: Control the service state with a toggle
+- **Connectivity Check**: Select the inline button on the card to run a connection test (only for services you own) and verify the MCP service connection status
 - **View Tool List**: View all tools provided by the service
 - **Container Management**: View container logs and the configuration JSON used at creation time (containerized services)
 
@@ -137,7 +139,6 @@ In the service card or detail dialog, you can:
 
 - **More Actions**:
   - **Apply to Publish**: Submit the service to the repository for review
-  - **Connectivity Check**: Run a connection test to check the MCP service connection status
   - **View Review Progress**: View the application status, and cancel the application or delist the service
   - **Delete**: Delete the service; containerized services also have their container resources cleaned up
 
@@ -170,6 +171,8 @@ Depending on the status, you can also:
 
 - **Cancel Publication Application**: Withdraw a pending or rejected application
 - **Delist**: Withdraw a published service from the repository
+
+Review results (approved / rejected) are pushed to the applicant via **in-app notifications**; selecting the notification opens the review status dialog of the corresponding service directly.
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/mcp-space/mymcp-mcp-review.png" style="width: 40%; height: auto;" alt="Review progress" />
@@ -208,8 +211,8 @@ A badge on the tab shows the number of pending items, so administrators can hand
 
 After managing your MCP services in the MCP Repository, you can:
 
-1. Configure MCP tools for your agents in **[Agent Development](../agent-development)**
-2. Experience agents calling MCP tools in **[Start Chat](../start-chat)**
-3. Continue browsing **[Skill Repository](./skill-repository)** to learn how skills and MCP work together
+1. Configure MCP tools for your agents in **[Agent Configuration](../agent-development/agent-configuration)**
+2. Experience agents calling MCP tools in **[Agent Chat](../start-chat)**
+3. Continue browsing **[Skill Space](./skill-repository)** to learn how skills and MCP work together
 
 If you encounter any issues while using Nexent, please refer to our **[FAQ](../../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

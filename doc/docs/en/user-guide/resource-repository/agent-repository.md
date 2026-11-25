@@ -1,6 +1,6 @@
-# Agent Repository
+# Agent Space
 
-The Agent Repository is the hub for sharing, managing, and reviewing agents within the same tenant. Browse listed agents and copy them into your workspace, manage agents you can edit, and—if you are an admin—review listing applications.
+The Agent Space is the hub for sharing, managing, and reviewing agents within the same tenant. Browse listed agents and copy them into your workspace, manage agents you can edit, and—if you are an admin—review listing applications.
 
 ## 👥 UI Differences Between Admins and Developers
 
@@ -11,7 +11,7 @@ After you open **Agent Repository**, the top tabs differ by role:
 | **Developer** | Repository, My Agents | Browse the shared repository, copy agents, manage your agents, and apply for listing |
 | **Admin** | Repository, My Agents, Review Center | Everything developers can do, plus review listing applications and take agents down directly from the repository |
 
-> Note: The Review Center tab is visible to admins only. Developers track their own applications via **View review progress** in **My Agents**.
+> Note: The Review Center tab is visible to admins only (including multi-role users who hold the Admin role). Developers track their own applications via **View review progress** in **My Agents**.
 
 **Developer view** (Repository / My Agents):
 
@@ -36,8 +36,9 @@ The **Repository** tab shows agents that are listed (shared) in the current tena
 ### Browse and Search
 
 - Browse listed agents as cards
-- Search by **agent name, description, or tags**
-- Each card shows: icon, name, author, description, tags, tool count, version, and install count
+- Search by **agent name, description, or tags**, with structured filtering against the tag library
+- Toggle the list sorting between **default order / recently updated**
+- Each card shows: icon, name, author, description, tags, tool count, version, and install count; platform-provided official agents carry an "Official" badge
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/resource-repository/repository-list.png" style="width: 80%; height: auto;" alt="Repository list" />
@@ -73,9 +74,13 @@ Dependency types usually include: **Model**, **Knowledge Base**, **MCP Service**
 
 ### Admin Take-Down
 
-Admins can choose **Take down** from the more menu at the top-right of a repository card. After take-down, the agent is no longer visible to tenant members and can no longer be copied.
+Admins can choose **Take down** from the more menu at the top-right of a repository card. After take-down, the agent is no longer visible to tenant members and can no longer be copied. Official agents provided by the platform cannot be taken down.
 
 If a developer needs to take down an agent they listed, use the **View review progress** dialog in **My Agents**.
+
+### Official Agents
+
+The repository also shows built-in official agents with an "Official" badge, covering industry scenarios such as education, finance, government, human resources, legal, marketing, and healthcare (e.g., Intelligent Teaching Assistant, Financial Report Generation Assistant, Lung CT Diagnosis Assistant). Official agents are maintained by the platform, require no application, and are ready to use after copying; admins cannot take them down.
 
 ---
 
@@ -86,15 +91,15 @@ The **My Agents** tab manages agents you can edit, including agents you created 
 ### Filter and Search
 
 - **All / Created by me / Others**: filter by ownership
-- Search by agent name or description
+- Search by agent name or description, with structured filtering against the tag library
+- Toggle the list sorting between **default order / recently updated**
 - Agents are shown as cards with pagination
 
-### Create and Import
+### Create an Agent
 
-When the filter is **All** and there is no search query, the page provides:
+When the filter is **All** and there is no search query, the page provides a **Create agent** entry that jumps to the Agent Configuration page.
 
-- **Create agent**: jump to the agent development page to create a new agent
-- **Import agent**: upload and import agent configuration via the import wizard
+> 💡 To import an existing agent configuration (JSON/ZIP), use the import wizard on the Agent Configuration page or the Agent Market; the My Agents page no longer provides an import entry.
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/resource-repository/mine-list.png" style="width: 80%; height: auto;" alt="My Agents list" />
@@ -131,8 +136,8 @@ You can apply only when the agent has a published version and the current versio
 
 1. Click **Apply for listing** in the more menu
 2. Fill in the listing information:
-   - **Agent icon** (required): choose a preset emoji or enter a single custom emoji
-   - **Agent tags** (required): up to 5 tags; choose presets or enter custom tags
+   - **Agent icon** (required): upload an image as the icon
+   - **Agent tags** (optional): up to 5 tags; choose presets or enter custom tags
    - **Listing note** (optional): extra context for reviewers
 3. Click **Submit application** and wait for admin review
 
@@ -151,6 +156,8 @@ Depending on the status, you can also:
 
 - **Cancel listing application**: withdraw a pending or rejected application
 - **Take down**: remove a listed agent from the repository
+
+Review results (approved / rejected) are pushed to the applicant via **in-app notifications**; selecting the notification opens the review status dialog of the corresponding agent directly.
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/resource-repository/review-status.png" style="width: 80%; height: auto;" alt="Review progress" />
