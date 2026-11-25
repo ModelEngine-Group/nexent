@@ -6747,17 +6747,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/aidp-mgmt/ontology/knowledge-bases/{kds_id}/binding",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-459598b61ed5768f",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/relations",
       "transport": "http",
       "target": "management",

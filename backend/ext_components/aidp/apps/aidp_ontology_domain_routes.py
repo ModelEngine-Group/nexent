@@ -283,10 +283,7 @@ async def list_ontology_entities(
         lane="control-io",
         owner="config",
     )
-    rows = await _enrich_entity_rows(
-        server_url, api_key, domain_id, envelope["value"], kind or "entity"
-    )
-    envelope["value"] = [_entity_summary(item) for item in rows]
+    envelope["value"] = [_entity_summary(item) for item in envelope["value"]]
     return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
 
 
@@ -335,7 +332,7 @@ async def create_ontology_entity(
         }
         type_names = {str(item.get("api_name")) for item in types["value"]}
         if body.type_id not in type_ids and body.type_id not in type_names:
-            raise _bad_request("所属 Type 不存在于当前本体库")
+            raise _bad_request("the selected type does not exist in this ontology")
         payload["type_id"] = int(body.type_id)
     parent_ids: list[int] = []
     if body.kind == "entity" and body.parent_entities:

@@ -86,7 +86,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     setShowAllErrors(false);
     try {
       const text = await file.text();
-      const parsed = parseOntologyJson(text);
+      const parsed = parseOntologyJson(text, t);
       if (!parsed.document) {
         setFileName(file.name);
         setDocument(null);
@@ -99,7 +99,8 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
       const nextPreview = previewOntologyImport(
         parsed.document,
         file.name,
-        domainName
+        domainName,
+        t
       );
       setFileName(file.name);
       setDocument(parsed.document);

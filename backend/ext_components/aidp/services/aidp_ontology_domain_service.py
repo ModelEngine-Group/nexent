@@ -183,48 +183,21 @@ def list_ontology_entities_impl(
     kind: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
-    if not kind:
-        return _request_entity_page(
-            server_url,
-            api_key,
-            domain_id,
-            page=page,
-            page_size=page_size,
-            keyword=keyword,
-            kind=None,
-            tenant_id=tenant_id,
-        )
+    """Request one entity page.
 
-    # AIDP ignores kind, so aggregate every page and filter locally; otherwise
-    # the type picker receives entities mixed into its options.
-    rows: list[dict[str, Any]] = []
-    fetch_page = 1
-    while fetch_page <= 100:
-        envelope = _request_entity_page(
-            server_url,
-            api_key,
-            domain_id,
-            page=fetch_page,
-            page_size=100,
-            keyword=keyword,
-            kind=kind,
-            tenant_id=tenant_id,
-        )
-        rows.extend(envelope["value"])
-        if not envelope["has_more"]:
-            break
-        fetch_page += 1
-    wanted = kind.lower()
-    filtered = [item for item in rows if str(item.get("kind") or "").lower() == wanted]
-    total = len(filtered)
-    start = max(page - 1, 0) * page_size
-    end = start + page_size
-    return {
-        "value": filtered[start:end],
-        "total_count": total,
-        "has_more": end < total,
-        "total_reliable": True,
-    }
+    AIDP filters by ``kind`` server-side and returns the filtered total, so the
+    page is passed through as-is instead of aggregating every page locally.
+    """
+    return _request_entity_page(
+        server_url,
+        api_key,
+        domain_id,
+        page=page,
+        page_size=page_size,
+        keyword=keyword,
+        kind=kind,
+        tenant_id=tenant_id,
+    )
 
 
 def get_ontology_entity_impl(

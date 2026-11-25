@@ -22,7 +22,6 @@ from ext_components.aidp.apps.aidp_ontology_models import (
 from ext_components.aidp.apps.aidp_ontology_validation import (
     _bad_request,
     _domain_id_path,
-    _numeric_domain_id,
     _require_ontology_manager,
 )
 from ext_components.aidp.services.aidp_ontology_common import (
@@ -100,7 +99,6 @@ async def export_ontology(
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
-    _numeric_domain_id(domain_id)
     server_url, api_key = _credentials()
     payload = await run_blocking(
         "aidp-ontology-export",
@@ -119,7 +117,7 @@ async def export_ontology(
     except ValueError as error:
         raise AppException(
             ErrorCode.AIDP_RESPONSE_ERROR,
-            "AIDP 导出响应缺少本体库数据",
+            "AIDP export response is missing ontology data",
             details={"operation": "export-ontology"},
         ) from error
     if normalized.get("accepted"):
@@ -154,7 +152,6 @@ async def import_ontology(
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
-    _numeric_domain_id(domain_id)
     server_url, api_key = _credentials()
     try:
         domain = await run_blocking(
@@ -173,7 +170,7 @@ async def import_ontology(
         domain.get("name") or domain.get("display_name") or domain.get("od_name")
     )
     if not isinstance(domain_name, str) or not domain_name.strip():
-        raise _bad_request("无法读取目标本体库名称，导入已取消")
+        raise _bad_request("cannot read the target ontology name; import cancelled")
     try:
         import_body, counts = build_import_request(body.document, domain_name.strip())
     except OntologyImportValidationError as error:
@@ -182,7 +179,7 @@ async def import_ontology(
             body.file_name,
             len(error.errors),
         )
-        raise _bad_request("导入文件校验失败", error.errors) from error
+        raise _bad_request("import file validation failed", error.errors) from error
 
     payload = await run_blocking(
         "aidp-ontology-import",

@@ -51,16 +51,6 @@
   cursor: help;
 }
 
-.popoverList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 280px;
-  color: #595959;
-  font-size: 13px;
-  line-height: 20px;
-}
-
 .popoverTags {
   display: flex;
   flex-wrap: wrap;

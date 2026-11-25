@@ -29,7 +29,6 @@ import {
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
   AidpOntologyEntity,
@@ -42,6 +41,14 @@ import styles from "./AidpKnowledgeOntologyTab.module.css";
 
 interface AidpKnowledgeOntologyTabProps {
   kdsId: string;
+  /** AIDP KDS detail bind_lib_id; the domain ID when bind_lib_type=ontology. */
+  bindingId?: number | string | null;
+  /** AIDP KDS detail bind_lib_type: ontology / jargon / none. */
+  bindingType?: string | null;
+  /** AIDP KDS detail bind_lib_name. */
+  bindingName?: string | null;
+  bindingLoading: boolean;
+  onBindingChanged?: () => void;
 }
 
 type ReadonlyView = "metadata" | "entities" | "rules";
@@ -64,6 +71,11 @@ const relationName = (value: unknown): string => {
 
 const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   kdsId,
+  bindingId,
+  bindingType,
+  bindingName,
+  bindingLoading,
+  onBindingChanged,
 }) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
@@ -76,15 +88,9 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   const [showChunkCount, setShowChunkCount] = useState(true);
   const pageSize = 10;
 
-  const bindingQuery = useQuery({
-    queryKey: [...scope.key, "kb-ontology-binding", kdsId],
-    queryFn: () => aidpOntologyService.getKnowledgeBaseBinding(kdsId),
-    enabled: scope.enabled && !!kdsId,
-    staleTime: 0,
-    retry: false,
-  });
-  const binding = bindingQuery.data?.binding ?? null;
-  const domainId = binding?.od_id ?? null;
+  const domainId =
+    bindingType === "ontology" && bindingId ? String(bindingId) : null;
+  const isJargonBound = bindingType === "jargon";
 
   const domainQuery = useQuery({
     queryKey: [...scope.key, "ontology-domain", domainId],
@@ -118,24 +124,18 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
 
   const refresh = () => {
     void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "kb-ontology-binding", kdsId],
+      queryKey: [...scope.key, "ontology-domain"],
     });
-    void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "ontology-domain", domainId],
-    });
+    onBindingChanged?.();
   };
 
   const handleUnbind = (change: boolean) => {
-    if (!binding) return;
-    if (!binding.binding_id) {
-      message.warning(t("aidpKnowledge.ontologyBindingMissingIdAction"));
-      return;
-    }
+    if (!domainId) return;
     modal.confirm({
       title: change
         ? t("aidpKnowledge.ontologyKbChangeTitle")
         : t("aidpKnowledge.ontologyKbUnbindTitle", {
-            name: domainQuery.data?.name || binding.od_name || binding.od_id,
+            name: domainQuery.data?.name || bindingName || domainId,
           }),
       content: (
         <div className={styles.confirmBody}>
@@ -151,10 +151,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
       centered: true,
       onOk: async () => {
         try {
-          await aidpOntologyService.deleteBinding(
-            binding.od_id,
-            binding.kds_id
-          );
+          await aidpOntologyService.deleteBinding(domainId, kdsId);
           message.success(t("aidpKnowledge.ontologyUnbindSuccess"));
           refresh();
         } catch (error) {
@@ -210,21 +207,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
       key: "description",
       ellipsis: true,
       render: (value: string) => value || "—",
-    },
-    {
-      title: t("aidpKnowledge.ontologyEntityExtended"),
-      key: "extended",
-      width: 160,
-      render: (_value, record) =>
-        (record.properties ?? []).length === 0
-          ? "—"
-          : (record.properties ?? [])
-              .slice(0, 2)
-              .map(
-                (property) =>
-                  `${property.display_name || property.api_name}=${property.value ?? ""}`
-              )
-              .join("、"),
     },
     {
       title: t("aidpKnowledge.ontologyEntityParent"),
@@ -355,7 +337,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           )}
           dataSource={entityRows.slice((page - 1) * pageSize, page * pageSize)}
           pagination={false}
-          scroll={{ x: 1010 }}
+          scroll={{ x: 760 }}
         />
       );
     }
@@ -374,28 +356,31 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
     );
   };
 
-  if (bindingQuery.isLoading) {
+  if (bindingLoading) {
     return <Skeleton active paragraph={{ rows: 4 }} />;
   }
 
-  if (bindingQuery.isError) {
+  if (isJargonBound) {
     return (
-      <div className={styles.errorBlock} role="alert">
-        {getAidpErrorMessage(
-          bindingQuery.error,
-          t,
-          t("aidpKnowledge.ontologyBindingLoadFailed")
-        )}
+      <div className={styles.emptyBlock}>
+        <Empty
+          image={
+            <ApartmentOutlined
+              className={styles.emptyIcon}
+              aria-hidden="true"
+            />
+          }
+          description={t("aidpKnowledge.ontologyKbJargonBound", {
+            name: bindingName || "—",
+          })}
+        />
       </div>
     );
   }
 
-  if (!binding) {
+  if (!domainId) {
     return (
       <div className={styles.emptyBlock}>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyKbBindingLookupGap")}
-        </AidpOntologyGapNote>
         <Empty
           image={
             <ApartmentOutlined
@@ -412,7 +397,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
         <AidpKnowledgeOntologyPicker
           open={pickerOpen}
           kdsId={kdsId}
-          mode={binding ? "change" : "add"}
+          mode="add"
           onClose={() => setPickerOpen(false)}
           onBound={() => {
             setPickerOpen(false);
@@ -425,15 +410,12 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
 
   return (
     <div className={styles.tab}>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyKbBindingLookupGap")}
-      </AidpOntologyGapNote>
       <section className={styles.overview}>
         <div className={styles.overviewText}>
           <div className={styles.titleRow}>
             <h2 className={styles.title}>
               {t("aidpKnowledge.ontologyKbHeaderPrefix")}
-              {domainQuery.data?.name || binding.od_name || binding.od_id}
+              {bindingName || domainQuery.data?.name || domainId}
             </h2>
           </div>
           <p className={styles.description}>
@@ -441,18 +423,10 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           </p>
         </div>
         <div className={styles.actions}>
-          <Button
-            danger
-            disabled={!binding.binding_id}
-            onClick={() => handleUnbind(false)}
-          >
+          <Button danger onClick={() => handleUnbind(false)}>
             {t("aidpKnowledge.ontologyKbRemoveBinding")}
           </Button>
-          <Button
-            type="primary"
-            disabled={!binding.binding_id}
-            onClick={() => handleUnbind(true)}
-          >
+          <Button type="primary" onClick={() => handleUnbind(true)}>
             {t("aidpKnowledge.ontologyKbChangeShort")}
           </Button>
         </div>

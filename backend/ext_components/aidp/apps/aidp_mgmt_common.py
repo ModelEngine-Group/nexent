@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from typing import Annotated
 
 from fastapi import HTTPException, Request
+from pydantic import AfterValidator, StringConstraints
 
 import management.services.permission.identity.session as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
@@ -103,3 +105,21 @@ def _normalize_folder_name(value: str) -> str:
             f"folder_name must be at most {_FOLDER_NAME_MAX_LENGTH} characters"
         )
     return normalized
+
+
+def _normalize_non_root_folder_path(value: str) -> str:
+    return _normalize_folder_path(value, allow_root=False)
+
+
+FolderPath = Annotated[str, AfterValidator(_normalize_folder_path)]
+NonRootFolderPath = Annotated[str, AfterValidator(_normalize_non_root_folder_path)]
+FolderName = Annotated[str, AfterValidator(_normalize_folder_name)]
+FileName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=_FOLDER_NAME_MAX_LENGTH,
+        pattern=r"^[^/\\]+$",
+    ),
+]

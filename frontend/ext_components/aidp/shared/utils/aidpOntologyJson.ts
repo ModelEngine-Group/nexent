@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import type { TFunction } from "i18next";
+
 import type {
   AidpOntologyImportPreview,
   AidpOntologyJsonDocument,
@@ -39,7 +41,8 @@ function locateGroups(
 export function previewOntologyImport(
   document: AidpOntologyJsonDocument,
   fileName: string,
-  targetDomainName: string
+  targetDomainName: string,
+  t: TFunction
 ): AidpOntologyImportPreview {
   const errors: PreviewError[] = [];
   const preview: AidpOntologyImportPreview = {
@@ -53,7 +56,10 @@ export function previewOntologyImport(
   };
 
   if (!document || typeof document !== "object" || Array.isArray(document)) {
-    errors.push({ field: "$", message: "JSON 顶层必须是对象" });
+    errors.push({
+      field: "$",
+      message: t("aidpKnowledge.ontologyImportJsonTopLevelObject"),
+    });
     return preview;
   }
 
@@ -73,8 +79,7 @@ export function previewOntologyImport(
     if (!firstGroup) {
       errors.push({
         field: "$",
-        message:
-          "未找到本体库分组，需要以本体库名称为键并包含 types/entities/relations",
+        message: t("aidpKnowledge.ontologyImportJsonGroupMissing"),
       });
       return preview;
     }
@@ -93,14 +98,19 @@ export function previewOntologyImport(
       const raw = group[field];
       if (raw === undefined) continue;
       if (!Array.isArray(raw)) {
-        errors.push({ field, message: `${field} 必须是数组` });
+        errors.push({
+          field,
+          message: t("aidpKnowledge.ontologyImportFieldMustBeArray", {
+            field,
+          }),
+        });
         continue;
       }
       raw.forEach((item, index) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) {
           errors.push({
             field: `${field}[${index}]`,
-            message: "条目必须是对象",
+            message: t("aidpKnowledge.ontologyImportItemMustBeObject"),
           });
           return;
         }
@@ -108,14 +118,14 @@ export function previewOntologyImport(
         if (!apiName) {
           errors.push({
             field: `${field}[${index}].api_name`,
-            message: "api_name 不能为空",
+            message: t("aidpKnowledge.ontologyImportApiNameRequired"),
           });
           return;
         }
         if (seen.has(`${apiName}:${kind}`)) {
           errors.push({
             field: `${field}[${index}].api_name`,
-            message: "同一文件内 (api_name, kind) 重复",
+            message: t("aidpKnowledge.ontologyImportDuplicateApiName"),
           });
           return;
         }
@@ -133,14 +143,19 @@ export function previewOntologyImport(
     const raw = group.relations;
     if (raw === undefined) continue;
     if (!Array.isArray(raw)) {
-      errors.push({ field: "relations", message: "relations 必须是数组" });
+      errors.push({
+        field: "relations",
+        message: t("aidpKnowledge.ontologyImportFieldMustBeArray", {
+          field: "relations",
+        }),
+      });
       continue;
     }
     raw.forEach((item, index) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) {
         errors.push({
           field: `relations[${index}]`,
-          message: "条目必须是对象",
+          message: t("aidpKnowledge.ontologyImportItemMustBeObject"),
         });
         return;
       }
@@ -149,7 +164,7 @@ export function previewOntologyImport(
       if (!apiName) {
         errors.push({
           field: `relations[${index}].api_name`,
-          message: "api_name 不能为空",
+          message: t("aidpKnowledge.ontologyImportApiNameRequired"),
         });
         return;
       }
@@ -161,7 +176,9 @@ export function previewOntologyImport(
         if (!endpoint) {
           errors.push({
             field: `relations[${index}].${endpointField}`,
-            message: `${endpointField} 不能为空`,
+            message: t("aidpKnowledge.ontologyImportRelationEndpointRequired", {
+              field: endpointField,
+            }),
           });
           continue;
         }
@@ -169,7 +186,9 @@ export function previewOntologyImport(
         if (!kinds) {
           errors.push({
             field: `relations[${index}].${endpointField}`,
-            message: `关系端点 ${endpoint} 不在本次导入的实体中`,
+            message: t("aidpKnowledge.ontologyImportRelationEndpointMissing", {
+              endpoint,
+            }),
           });
           continue;
         }
@@ -177,12 +196,18 @@ export function previewOntologyImport(
         if (declared && !kinds.has(declared)) {
           errors.push({
             field: `relations[${index}].${kindField}`,
-            message: `关系端点 ${endpoint} 的 kind 与 ${declared} 不一致`,
+            message: t("aidpKnowledge.ontologyImportRelationKindMismatch", {
+              endpoint,
+              declared,
+            }),
           });
         } else if (!declared && kinds.size > 1) {
           errors.push({
             field: `relations[${index}].${kindField}`,
-            message: `关系端点 ${endpoint} 同时以 type 和 entity 出现，需显式提供 ${kindField}`,
+            message: t("aidpKnowledge.ontologyImportRelationKindAmbiguous", {
+              endpoint,
+              field: kindField,
+            }),
           });
         }
       }
@@ -197,17 +222,20 @@ export function previewOntologyImport(
 }
 
 /** Parse a selected file and return either the document or a readable error. */
-export function parseOntologyJson(text: string): {
+export function parseOntologyJson(
+  text: string,
+  t: TFunction
+): {
   document?: AidpOntologyJsonDocument;
   error?: string;
 } {
   try {
     const parsed: unknown = JSON.parse(text);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { error: "JSON 顶层必须是对象" };
+      return { error: t("aidpKnowledge.ontologyImportJsonTopLevelObject") };
     }
     return { document: parsed as AidpOntologyJsonDocument };
   } catch {
-    return { error: "文件不是合法的 JSON" };
+    return { error: t("aidpKnowledge.ontologyImportInvalidJson") };
   }
 }

@@ -1471,6 +1471,36 @@ def _ensure_folder_records(kds_id: str, path: str) -> None:
             known.add(folder_path)
 
 
+def _merge_folder_into(kds_id: str, source: str, destination: str) -> None:
+    """Merge one folder subtree into an existing same-named folder.
+
+    Files move into the destination; child folders with a matching name are
+    merged recursively, other children keep their names.
+    """
+    source_prefix = f"{source}/"
+    child_folders = sorted(
+        path
+        for path in _all_folder_paths(kds_id)
+        if _folder_parent(path) == source
+    )
+    for child in child_folders:
+        child_name = child.rsplit("/", 1)[-1]
+        target_child = f"{destination}/{child_name}"
+        if _folder_exists(kds_id, target_child):
+            _merge_folder_into(kds_id, child, target_child)
+        else:
+            _rewrite_folder_prefix(kds_id, child, target_child)
+    for document in _DOCUMENTS_BY_KB.get(kds_id, []):
+        if not isinstance(document, dict):
+            continue
+        if (document.get("folder_path") or "/") == source:
+            document["folder_path"] = destination
+    records = _folder_records(kds_id)
+    records[:] = [
+        record for record in records if record.get("folder_path") != source
+    ]
+
+
 def _rewrite_folder_prefix(kds_id: str, old_path: str, new_path: str) -> None:
     """Move a folder subtree by rewriting folder and document path prefixes."""
     old_prefix = f"{old_path}/"
@@ -2344,6 +2374,19 @@ def get_knowledge_base(
     # Match AIDP's detail response: file counts come from the Count endpoint
     # and configuration fields stay inside kms_config_str / graph_config.
     result = _public_kb_detail(kb)
+    binding = next(
+        (row for row in _ONTOLOGY_BINDINGS if row.get("kds_id") == kds_id),
+        None,
+    )
+    if binding:
+        domain = _ONTOLOGY_DOMAINS.get(str(binding["od_id"])) or {}
+        result["bind_lib_id"] = binding["od_id"]
+        result["bind_lib_type"] = "ontology"
+        result["bind_lib_name"] = domain.get("name") or ""
+    else:
+        result["bind_lib_id"] = 0
+        result["bind_lib_type"] = "none"
+        result["bind_lib_name"] = ""
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)
@@ -2711,9 +2754,12 @@ def move_folder(
             detail="cannot move a folder into itself (code 1091)",
         )
     destination = _join_folder_path(target, name)
-    if destination in _all_folder_paths(kds_id) and not body.merge_on_conflict:
-        raise _name_conflict(destination)
-    _rewrite_folder_prefix(kds_id, source, destination)
+    if destination in _all_folder_paths(kds_id):
+        if not body.merge_on_conflict:
+            raise _name_conflict(destination)
+        _merge_folder_into(kds_id, source, destination)
+    else:
+        _rewrite_folder_prefix(kds_id, source, destination)
     _save_state()
     return JSONResponse(
         content={"folder_path": destination, "conflict_paths": []}

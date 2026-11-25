@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Ontology binding routes (domain list/unbind plus KB-side lookup)."""
+"""Ontology binding routes (domain list, bind and unbind)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ import logging
 from http import HTTPStatus
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.apps.aidp_mgmt_common import _auth, _credentials
 from ext_components.aidp.apps.aidp_ontology_common import (
     _domain_names,
@@ -28,11 +30,11 @@ from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_ontology_binding_service import (
     create_ontology_binding_impl,
     delete_ontology_binding_impl,
-    list_ontology_bindings_impl,
 )
 from ext_components.aidp.services.aidp_ontology_domain_service import (
     get_ontology_domain_impl,
 )
+from ext_components.aidp.services.aidp_service import get_aidp_kb_impl
 
 
 logger = logging.getLogger("aidp_ontology_binding_routes")
@@ -107,11 +109,9 @@ async def create_domain_binding(
     target_kb_id = body.target_kb_id
     perms.require_permission(target_kb_id, user_id, tenant_id, required="EDIT")
 
-    # AIDP's design also requires mutual exclusion with jargon-library
-    # bindings. Nexent currently has no jargon-binding API or local
-    # representation, so this backend cannot query that relationship without
-    # inventing an external contract. Keep the one-KB-one-ontology check and
-    # track the jargon exclusion as a real-AIDP integration item.
+    # One knowledge base can bind either one ontology domain or one jargon
+    # library. The KDS detail exposes both through bind_lib_type/bind_lib_id,
+    # so the pre-check is one request instead of scanning every domain.
     server_url, api_key = _credentials()
     await run_blocking(
         "aidp-ontology-domain-exists",
@@ -122,32 +122,40 @@ async def create_domain_binding(
         lane="control-io",
         owner="config",
     )
-    existing = await run_blocking(
-        "aidp-ontology-binding-check",
-        list_ontology_bindings_impl,
+    kb_detail = await run_blocking(
+        "aidp-ontology-kb-bind-state",
+        get_aidp_kb_impl,
         server_url,
         api_key,
-        kds_id=target_kb_id,
+        target_kb_id,
         lane="control-io",
         owner="config",
     )
-    for binding in existing:
-        if binding["od_id"] != domain_id:
-            raise HTTPException(
-                status_code=HTTPStatus.CONFLICT,
-                detail="该知识库已绑定其他本体库，一个知识库最多绑定一个本体库",
+    bound_type = kb_detail.get("bind_lib_type")
+    bound_id = kb_detail.get("bind_lib_id")
+    if bound_type == "jargon":
+        raise AppException(
+            ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+            "The knowledge base is already bound to a jargon library; unbind it before binding an ontology.",
+            details={"reason": "ontology_binding_jargon_conflict"},
+        )
+    if bound_type == "ontology":
+        if str(bound_id) != str(domain_id):
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+                "The knowledge base is already bound to another ontology domain.",
+                details={"reason": "ontology_binding_other_conflict"},
             )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                "binding_id": binding.get("binding_id"),
-                "od_id": binding["od_id"],
-                "kds_id": binding["kds_id"],
+                "od_id": domain_id,
+                "kds_id": target_kb_id,
                 "unchanged": True,
             },
         )
 
-    result = await run_blocking(
+    await run_blocking(
         "aidp-ontology-binding-create",
         create_ontology_binding_impl,
         server_url,
@@ -157,14 +165,12 @@ async def create_domain_binding(
         lane="control-io",
         owner="config",
     )
-    binding_id = result.get("id") or result.get("binding_id")
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={
-            "binding_id": str(binding_id) if binding_id is not None else None,
             "od_id": domain_id,
             "kds_id": target_kb_id,
-            "result": result,
+            "unchanged": False,
         },
     )
 
@@ -204,39 +210,4 @@ async def delete_domain_binding(
             if isinstance(task, dict)
             else None,
         },
-    )
-
-
-@aidp_ontology_binding_router.get("/knowledge-bases/{kds_id}/binding")
-async def get_knowledge_base_binding(
-    request: Request,
-    kds_id: Annotated[str, Path(..., min_length=1, max_length=128)],
-) -> JSONResponse:
-    """Resolve a knowledge base's current ontology binding.
-
-    AIDP exposes no by-KB query, so this scans every domain's binding list and
-    filters locally (bounded by the service); a failed scan degrades to "no
-    binding" rather than inventing one.
-    """
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-    rows = await _load_bindings(user_id, tenant_id)
-    match = next((row for row in rows if row["kds_id"] == kds_id), None)
-    if match is None:
-        return JSONResponse(status_code=HTTPStatus.OK, content={"binding": None})
-    names = await _domain_names(tenant_id)
-    enriched = await run_blocking(
-        "aidp-ontology-binding-enrich-kb",
-        _enrich_bindings_sync,
-        [match],
-        tenant_id,
-        names,
-        _credentials()[0],
-        _credentials()[1],
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(
-        status_code=HTTPStatus.OK,
-        content={"binding": enriched[0] if enriched else None},
     )
