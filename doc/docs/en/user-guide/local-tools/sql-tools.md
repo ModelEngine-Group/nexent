@@ -24,7 +24,7 @@ The SQL database toolset enables AI agents to connect to and query relational da
 
 - `sql`: The SQL query to execute (required)
 - `parameters`: Parameter values for parameterized queries (optional)
-- `max_rows`: Maximum number of rows to return (default: 100)
+- `max_rows`: Maximum number of rows to return (default: 0, unlimited)
 - `timeout`: Query timeout in seconds (default: 10)
 
 ### Database Connection Parameters
@@ -37,9 +37,9 @@ The SQL database toolset enables AI agents to connect to and query relational da
 
 ### Security Restrictions
 
-- Forbidden operations: `DROP DATABASE`, `GRANT`, `REVOKE`, `CREATE USER`, `INTO OUTFILE`, `LOAD DATA INFILE`
+- Forbidden operations: `DROP DATABASE`, `GRANT`, `REVOKE`, `CREATE USER`, `INTO OUTFILE`, `LOAD DATA INFILE`, `EXEC xp_`
 - `UPDATE` and `DELETE` statements must include a `WHERE` clause
-- `LIMIT` is automatically added to restrict returned rows
+- Returned rows are truncated on the result side according to `max_rows` (the SQL statement is not modified); SQL Server converts a `LIMIT` in the statement to `TOP`
 
 ### Response Format
 
