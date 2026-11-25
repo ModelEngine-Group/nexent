@@ -4,7 +4,7 @@ An evaluator defines what to measure and how to score it. A task can select up t
 
 ## Built-in evaluators
 
-In **Agent Development > Agent Evaluation**, open **Evaluators > Built-in Evaluators** to view and use these evaluators:
+In **Agent Evaluation**, open the **Evaluators** tab and switch between **Built-in Evaluators** and **Custom Evaluators** using the sub-tabs. Built-in evaluators appear as cards showing the name, judgment type (LLM / Code), and published status:
 
 | Evaluator | Type | Main purpose | Reference answer |
 |-----------|------|--------------|:----------------:|
@@ -13,7 +13,7 @@ In **Agent Development > Agent Evaluation**, open **Evaluators > Built-in Evalua
 | Content Safety | LLM | Check harmful, non-compliant, biased, or leaked content | No |
 | Format Validation | Code | Check output format (the built-in rule validates JSON) | No |
 | Answer Relevance | LLM | Check whether the answer addresses the question | No |
-| Factual Accuracy | LLM | Check fabricated or unverifiable claims | Recommended |
+| Factual Accuracy | LLM | Check fabricated or unverifiable claims | Required |
 | Execution Success Rate | LLM | Judge whether execution completed successfully | No |
 | Tool Call Health | LLM | Judge tool-call errors, retries, and success | No |
 | Token Efficiency | LLM | Judge whether token usage is reasonable | No |
@@ -22,24 +22,27 @@ In **Agent Development > Agent Evaluation**, open **Evaluators > Built-in Evalua
 
 LLM evaluators use the Judge model to return a score and reason. Code evaluators apply deterministic Python rules. LLM scores are probabilistic and should be interpreted together with failed cases and repeated runs.
 
+No-set evaluation has no reference answers, so evaluators that require one cannot be selected in that mode.
+
 ## Create a custom evaluator
 
-In **Evaluators > Custom Evaluators**, select **Create Evaluator**. You can use AI generation or enter the configuration manually.
+On the **Evaluators > Custom Evaluators** sub-tab, select **Create Evaluator** in the top-right corner. A drawer slides out with the **AI Generate** and **Evaluator Configuration** sections.
 
 ### AI Generate
 
-Describe the desired check in natural language, such as “Check that the customer-service answer is polite, complete, and does not fabricate facts.” Select a generation model and optionally a target agent, then select **AI Generate**. Nexent fills in the name, description, type, prompt or code, and score range.
+In the **AI Generate** card, describe the desired check in natural language (up to 500 characters), such as “Check that the customer-service answer is polite, complete, and does not fabricate facts.” Select a generation model and optionally a target agent, then select **AI Generate**. The generated name, description, type, prompt or code, and score range are filled into the form below.
 
 Generated content only fills the editor and is not published automatically. Review the evaluation dimension, inputs, score rules, and prompt before saving.
 
-### Manual creation
+### Evaluator configuration
 
-Enter a name, description, judgment type, and score rules:
+Fill in or adjust the following in the **Evaluator Configuration** card:
 
-- **LLM**: write a prompt for the Judge model;
-- **Code**: write a pure Python function for format, keyword, numeric, or other deterministic checks.
+- **Name** (up to 50 characters) and **description** (up to 200 characters);
+- **Judgment type**: **LLM** writes a prompt (up to 5,000 characters) that the Judge model uses to return a score and reason; **Code** writes a pure Python function (up to 20,000 characters) that defines `evaluate(query, expected, actual)` for format, keyword, numeric, or other deterministic checks;
+- **Score range and pass threshold**: the lower bound must be below the upper bound, the upper bound must not exceed 100, and the pass threshold must be within the range. Built-in evaluators normally use 0–1 scores and a 0.5 threshold.
 
-The lower score bound must be below the upper bound, the upper bound must not exceed 100, and the pass threshold must be within the range. Built-in evaluators normally use 0–1 scores and a 0.5 threshold.
+Select **Save** to store the evaluator as a draft.
 
 ## LLM prompt placeholders
 
@@ -78,6 +81,6 @@ Code is syntax-checked, statically scanned, executed with a restricted built-in 
 - New and edited custom evaluators are **Draft** and cannot be selected for a task.
 - Select **Publish** before using one in an evaluation task.
 - Built-in evaluators are published and cannot be edited or deleted.
-- Editing a published custom evaluator creates a new draft version; the previous published version remains in history.
-- Version history supports viewing, restoring, and deleting historical versions, subject to active-task references.
-- Custom evaluators can be exported to JSON and imported elsewhere. Import skips duplicate name-and-type pairs.
+- When editing a published custom evaluator, the name, description, score range, and threshold can be changed, and the prompt of an LLM evaluator can also be changed; the judgment type and Code evaluator code cannot be changed. Saving creates a new draft version; the previous published version remains in history.
+- **Version History** on an evaluator card shows each version's type, status, score range, and prompt summary, and offers **Restore** and **Delete** for non-current versions, subject to active-task references.
+- Custom evaluators can be exported to JSON (select the entries to export) and imported elsewhere with the import button in the top-right corner of the Evaluators tab. Import skips duplicate name-and-type pairs.

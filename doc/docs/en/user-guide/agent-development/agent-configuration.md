@@ -12,7 +12,7 @@ On the Agent Development page, you can create, configure, and manage agents. The
 
 ## 🔧 Create an Agent
 
-On the **Agent Configuration** tab of Agent Development, click **New** in the upper-right corner to create a blank agent. After creating or selecting an editable agent, describe the requirement in AI Generation or fill in the Configuration panel manually. If you have read-only access, you can view the configuration but cannot generate or modify it.
+On the **Agent Configuration** page, click **New** in the upper-right corner to create a blank agent. After creating or selecting an editable agent, describe the requirement in AI Generation or fill in the Configuration panel manually. If you have read-only access, you can view the configuration but cannot generate or modify it.
 If you already have an agent configuration, click **Import** and create an agent from a JSON or ZIP file. For details about export formats, import steps, duplicate-name handling, and dependency checks, see [Export and Import Agents](../../integration/integration-out/agents-export.md).
 
 ## 👥 Configure Collaborative Agents/Tools

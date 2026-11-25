@@ -11,15 +11,15 @@ Use evaluation to:
 
 ## Open the Evaluation page
 
-After signing in, select **Agent Development > Agent Evaluation** from the left navigation. You can also select **Evaluate** from an agent card in **Agent Space** or **Agent Repository > My Agents**.
+After signing in, select **Agent Evaluation** from the left navigation. You can also open an agent card on the **Agent Configuration** page and select **Evaluate** from its **More** menu. This entry is only available for agents with a published version, and the evaluation task list is filtered by that agent automatically.
 
 The page contains four tabs:
 
 | Tab | Purpose |
 |-----|---------|
-| **Evaluation Tasks** | Create tasks and view run history and status |
+| **Runs** | Create evaluations and view task status and history |
 | **Evaluators** | View built-in evaluators and manage custom evaluators |
-| **Evaluation Sets** | Upload, generate, and maintain test cases |
+| **Sets** | Upload, generate, and maintain test cases |
 | **Annotation Labels** | Define labels for manual review |
 
 If the entry is not visible, ask a tenant administrator to check your page permissions.
@@ -39,7 +39,7 @@ If the entry is not visible, ask a tenant administrator to check your page permi
 | Runs the agent | Yes | Yes |
 | Reference answer | Depends on the set | Not available |
 | Best for | Regression, release validation, and repeatable comparison | Quick exploration and smoke checks |
-| Number of cases | Number of cases in the set | 1–50 questions |
+| Number of cases | Number of cases in the set | 1–50 questions (10 by default) |
 
 ### Evaluation with a set
 
@@ -55,13 +55,20 @@ This mode is useful for quickly checking an agent's basic behavior. For formal r
 
 An evaluation usually follows these steps:
 
-1. Select an agent and a published version.
-2. Select an evaluation mode, evaluation set, and Judge model.
-3. Select published evaluators.
-4. Run the agent and collect its answer and runtime information.
-5. Score each case and generate the evaluation results and report.
+1. On the **Runs** tab, select **Create Evaluation** and choose an evaluation mode.
+2. Select an agent and a published version (the latest published version is used by default).
+3. Configure the evaluation: select a Judge model; choose an evaluation set in with-set mode, or set the AI question count in no-set mode.
+4. Select 1–5 published evaluators.
+5. Select **Start Evaluation**. The agent runs and collects its answers and runtime information; evaluators score each case and generate the results and report.
 
-The pages below describe task creation, evaluation sets, evaluators, and results and annotations.
+The execution kernel is adapted automatically by the platform and requires no manual selection.
+
+The pages below describe each step:
+
+- [Create an Evaluation Task](./evaluation/create-task)
+- [Manage Evaluation Sets](./evaluation/sets)
+- [Configure Evaluators](./evaluation/evaluators)
+- [View Results and Annotations](./evaluation/results)
 
 ## Limits
 
@@ -77,3 +84,5 @@ The pages below describe task creation, evaluation sets, evaluators, and results
 | Historical data | Normally retained for about 30 days and may be cleaned by maintenance jobs |
 | Multi-turn | Up to 10 turns per session during one run |
 | Custom code | Restricted pure Python; no file, network, system-command, or arbitrary-module access |
+| Evaluator content length | LLM prompt up to 5,000 characters; Code evaluator code up to 20,000 characters |
+| Annotation labels | Up to 500 annotation labels in total; up to 5 annotation values per case |
