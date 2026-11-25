@@ -139,6 +139,8 @@ def aidp_tool(aidp_module, mock_observer):
         related_search_enable=True,
         score_threshold=0.7,
         top_k=2,
+        hybrid_top_k=1,
+        graph_top_k=1,
         multi_modal=True,
         observer=mock_observer,
     )
@@ -304,8 +306,8 @@ class TestAidpSearchToolForward:
                 "topk": 2,
                 "multi_modal_enable": True,
                 "query_expansion_enable": False,
-                "hybrid_search_config": {"hybrid_top_k": 0, "vector_candidates": 10, "full_text_candidates": 10, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0},
-                "graph_search_config": {"graph_top_k": 0, "graph_score_threshold": 0.0, "graph_reranking_enable": True},
+                "hybrid_search_config": {"hybrid_top_k": 1, "vector_candidates": 10, "full_text_candidates": 10, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0},
+                "graph_search_config": {"graph_top_k": 1, "graph_score_threshold": 0.0, "graph_reranking_enable": True},
                 "reranking_mode": "high_accuracy",
             },
         )

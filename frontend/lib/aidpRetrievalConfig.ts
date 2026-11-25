@@ -17,8 +17,8 @@ export const aidpDefaults: Record<string, unknown> = {
   multi_modal: true,
   vector_candidates: 10,
   full_text_candidates: 10,
-  hybrid_top_k: 0,
-  graph_top_k: 0,
+  hybrid_top_k: 5,
+  graph_top_k: 5,
   vector_score_threshold: 0,
   full_text_score_threshold: 0,
   graph_score_threshold: 0,
@@ -62,8 +62,8 @@ export function aidpErrors(
     top_k: [1, 100],
     vector_candidates: [1, 500],
     full_text_candidates: [1, 500],
-    hybrid_top_k: [0, 100],
-    graph_top_k: [0, 100],
+    hybrid_top_k: [1, 100],
+    graph_top_k: [1, 100],
   };
   for (const [key, value] of Object.entries(c)) {
     if (key in ranges) {
@@ -106,8 +106,10 @@ export function aidpErrors(
     graph = methods.includes("graph_search");
   if (hybrid && h > k) errors.hybrid_top_k = "cap";
   if (graph && g > k) errors.graph_top_k = "cap";
-  if (hybrid && graph && h > 0 && g > 0 && h + g > k)
+  if (hybrid && graph && h + g > k) {
+    errors.hybrid_top_k = "sum";
     errors.graph_top_k = "sum";
+  }
   for (const [method, key] of [
     ["vector_search", "vector_candidates"],
     ["full_text_search", "full_text_candidates"],

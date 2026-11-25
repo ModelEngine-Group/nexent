@@ -1013,7 +1013,7 @@ class HybridSearchConfig(BaseModel):
 
     vector_candidates: int = Field(default=10, ge=1, le=500)
     full_text_candidates: int = Field(default=10, ge=1, le=500)
-    hybrid_top_k: int = Field(0, ge=0, le=100)
+    hybrid_top_k: int = Field(5, ge=1, le=100)
     vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -1021,7 +1021,7 @@ class HybridSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Per-channel knobs for the graph part of a FusionSearch call."""
 
-    graph_top_k: int = Field(0, ge=0, le=100)
+    graph_top_k: int = Field(5, ge=1, le=100)
     graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     graph_reranking_enable: bool = True
 
@@ -1088,8 +1088,13 @@ class FusionSearchRequest(BaseModel):
             raise ValueError("hybrid_top_k must not exceed topk")
         if graph and g > self.topk:
             raise ValueError("graph_top_k must not exceed topk")
-        if hybrid and graph and h > 0 and g > 0 and h + g > self.topk:
+        if hybrid and graph and h + g > self.topk:
             raise ValueError("hybrid_top_k + graph_top_k must not exceed topk")
+        if hybrid:
+            if "vector_search" in channels and self.hybrid_search_config.vector_candidates < h:
+                raise ValueError("vector_candidates must be at least hybrid_top_k")
+            if "full_text_search" in channels and self.hybrid_search_config.full_text_candidates < h:
+                raise ValueError("full_text_candidates must be at least hybrid_top_k")
         return self
 
 
@@ -2207,7 +2212,7 @@ def fusion_search(
     results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
 
     # Hybrid caps the combined vector+full-text part; graph is capped above.
-    if hybrid and hybrid.hybrid_top_k > 0:
+    if hybrid:
         hybrid_hits = [hit for hit in results
                        if {"vector_search", "full_text_search"} & set(hit["sources"])]
         overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}

@@ -21,14 +21,14 @@ def test_shared_frontend_python_policy_fixtures(fixture):
 
 @pytest.mark.parametrize("method", sorted(SEARCH_METHODS))
 def test_complete_payload_filters_channels(method):
-    payload = build_payload(validate_config({"search_method": method, "top_k": 7, "multi_modal": False}), "query", ["kb"])
+    payload = build_payload(validate_config({"search_method": method, "top_k": 7, "hybrid_top_k": 2, "graph_top_k": 2, "multi_modal": False}), "query", ["kb"])
     assert payload["topk"] == 7
     assert payload["multi_modal_enable"] is False
     assert not {"top_k", "multi_modal", "candidate_topk", "metadata_condition", "file_reorder_enable"} & payload.keys()
     channels = active_channels(method)
     if channels & set(CHANNELS[:2]):
         hybrid = payload["hybrid_search_config"]
-        assert hybrid["hybrid_top_k"] == 0
+        assert hybrid["hybrid_top_k"] == 2
         for channel, prefix in zip(CHANNELS, ("vector", "full_text")):
             assert (f"{prefix}_candidates" in hybrid) == (channel in channels)
             if channel in channels:
@@ -38,13 +38,13 @@ def test_complete_payload_filters_channels(method):
         assert "hybrid_search_config" not in payload
     assert ("graph_search_config" in payload) == ("graph_search" in channels)
     if "graph_search" in channels:
-        assert payload["graph_search_config"] == {"graph_top_k": 0, "graph_score_threshold": 0, "graph_reranking_enable": True}
+        assert payload["graph_search_config"] == {"graph_top_k": 2, "graph_score_threshold": 0, "graph_reranking_enable": True}
 
 
 def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
     base = {"top_k": 10, "vector_candidates": 30, "reranking_enable": False, "multi_modal": False}
     original = deepcopy(base)
-    merged = merge_config(base, {"top_k": 7, "vector_candidates": None, "multi_modal": None})
+    merged = merge_config(base, {"top_k": 10, "vector_candidates": None, "multi_modal": None})
     resolved = resolve_config(merged)
     assert resolved["vector_candidates"] == 30
     assert "vector_candidates" not in {k for k, v in merged.items() if v is None}
@@ -59,12 +59,14 @@ def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
 @pytest.mark.parametrize("config,field", [
     ({"top_k":0},"top_k"), ({"top_k":True},"top_k"), ({"top_k":1.5},"top_k"),
     ({"vector_candidates":0},"vector_candidates"), ({"vector_candidates":501},"vector_candidates"),
+    ({"hybrid_top_k":0},"hybrid_top_k"), ({"graph_top_k":0},"graph_top_k"),
+    ({"hybrid_top_k":101},"hybrid_top_k"), ({"graph_top_k":101},"graph_top_k"),
     ({"full_text_candidates":"7"},"full_text_candidates"), ({"score_threshold":math.nan},"score_threshold"),
     ({"graph_score_threshold":math.inf},"graph_score_threshold"), ({"score_threshold":True},"score_threshold"),
     ({"reranking_enable":False,"graph_reranking_enable":True},"graph_reranking_enable"),
     ({"hybrid_top_k":8,"graph_top_k":5},"hybrid_top_k"),
     ({"hybrid_top_k":8,"graph_top_k":5,"graph_reranking_enable":False},"hybrid_top_k"),
-    ({"hybrid_top_k":6,"full_text_candidates":5},"full_text_candidates"),
+    ({"search_method":"full_text_search","hybrid_top_k":6,"full_text_candidates":5},"full_text_candidates"),
     ({"search_method":"graph_search","graph_top_k":11},"graph_top_k"),
     ({"search_method":"vector_search|"},"search_method"), ({"search_method":""},"search_method"),
     ({"search_method":"unknown"},"search_method"), ({"query_expansion_enable":1},"query_expansion_enable"),
@@ -74,11 +76,11 @@ def test_strict_validation(config, field):
         validate_config(config)
 
 
-@pytest.mark.parametrize("k", [1,100])
-def test_boundary_zero_caps_and_jargon(k):
+@pytest.mark.parametrize("k", [10, 100])
+def test_boundary_default_caps_and_jargon(k):
     c = resolve_config({"top_k": k, "reranking_mode":"jargon_coverage", "vector_candidates":500, "full_text_candidates":1})
     assert c["top_k"] == k
-    assert c["hybrid_top_k"] == c["graph_top_k"] == 0
+    assert c["hybrid_top_k"] == c["graph_top_k"] == 5
     assert resolve_config({"hybrid_top_k":5,"graph_top_k":5})["top_k"] == 10
 
 
@@ -90,7 +92,7 @@ def test_method_normalization_and_inactive_quota():
 
 
 def test_fixed_candidates_are_not_followed_by_layer_equality():
-    saved = {"top_k": 10, "vector_candidates": 10, "full_text_candidates": 30}
+    saved = {"top_k": 10, "vector_candidates": 10, "full_text_candidates": 30, "hybrid_top_k": 2, "graph_top_k": 2}
     effective = validate_config(merge_config(saved, {"top_k": 7}))
     assert effective["vector_candidates"] == 10
     assert effective["full_text_candidates"] == 30
@@ -103,14 +105,14 @@ def test_fixed_candidates_are_not_followed_by_layer_equality():
 
 def test_payload_uses_prepared_config_without_revalidation(monkeypatch):
     from nexent.core.ext_components.aidp import retrieval_config as policy
-    effective = validate_config({"top_k": 7})
+    effective = validate_config({"top_k": 10})
     def unexpected(*args):
         raise AssertionError("Payload must not validate or resolve configuration again")
     monkeypatch.setattr(policy, "validate_config", unexpected)
     monkeypatch.setattr(policy, "resolve_config", unexpected)
     first = policy.build_payload(effective, "first", ["kb"])
     second = policy.build_payload(effective, "second", ["kb"])
-    assert first["topk"] == second["topk"] == 7
+    assert first["topk"] == second["topk"] == 10
     assert first["search_method"] == second["search_method"] == ALL_CHANNELS
 
 

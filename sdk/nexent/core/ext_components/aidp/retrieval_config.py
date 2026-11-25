@@ -11,13 +11,13 @@ DEFAULTS = {
     "search_method": ALL_CHANNELS, "top_k": 10, "score_threshold": 0.0,
     "reranking_enable": True, "reranking_mode": "performance", "rewrite_enable": False,
     "query_expansion_enable": False, "related_search_enable": False, "multi_modal": True,
-    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0,
-    "graph_top_k": 0, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
+    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 5,
+    "graph_top_k": 5, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
     "graph_score_threshold": 0.0, "graph_reranking_enable": True,
 }
 CONFIG_KEYS = frozenset(DEFAULTS)
 INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
-                  "full_text_candidates": (1, 500), "hybrid_top_k": (0, 100), "graph_top_k": (0, 100)}
+                  "full_text_candidates": (1, 500), "hybrid_top_k": (1, 100), "graph_top_k": (1, 100)}
 
 
 def normalize_method(value):

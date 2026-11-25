@@ -202,6 +202,7 @@ function NumberControl({
   step = 1,
   disabled,
   invalid,
+  error,
   onChange,
   note,
 }: {
@@ -213,6 +214,7 @@ function NumberControl({
   step?: number;
   disabled?: boolean;
   invalid?: boolean;
+  error?: string;
   onChange: (value: number) => void;
   note?: ReactNode;
 }) {
@@ -235,6 +237,11 @@ function NumberControl({
           )
         }
       />
+      {error ? (
+        <p role="alert" className={styles.fieldError}>
+          {error}
+        </p>
+      ) : null}
       {note}
     </div>
   );
@@ -246,6 +253,7 @@ function SwitchControl({
   checked,
   disabled,
   stateText,
+  error,
   onChange,
   note,
 }: {
@@ -254,6 +262,7 @@ function SwitchControl({
   checked: boolean;
   disabled?: boolean;
   stateText: string;
+  error?: string;
   onChange: (checked: boolean) => void;
   note?: ReactNode;
 }) {
@@ -273,6 +282,11 @@ function SwitchControl({
         />
         <span className={styles.switchState}>{stateText}</span>
       </div>
+      {error ? (
+        <p role="alert" className={styles.fieldError}>
+          {error}
+        </p>
+      ) : null}
       {note}
     </div>
   );
@@ -333,11 +347,23 @@ export function AidpRetrievalParamsForm({
   const graph = channels.includes("graph_search");
   const errors = aidpErrors(values);
   if (mixed && channels.length < 2) errors.search_method = "combination";
+  const errorText = (key: string) =>
+    errors[key] ? t(`aidpRetrieval.errors.${errors[key]}`) : undefined;
 
   const [combinationOpen, setCombinationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [enhancementOpen, setEnhancementOpen] = useState(false);
   const topKBeforeClear = useRef(c.top_k);
+  const detailsHasError = [
+    "hybrid_top_k",
+    "graph_top_k",
+    "vector_candidates",
+    "full_text_candidates",
+    "vector_score_threshold",
+    "full_text_score_threshold",
+    "graph_score_threshold",
+    "graph_reranking_enable",
+  ].some((key) => Boolean(errors[key]));
 
   const changeTopK = (value: number) => {
     if (Number.isFinite(Number(c.top_k))) topKBeforeClear.current = c.top_k;
@@ -360,11 +386,7 @@ export function AidpRetrievalParamsForm({
       : vector
         ? "vector_top_k"
         : "full_text_top_k";
-  const showHybridTopK =
-    (vector || text) &&
-    ((graph && !c.graph_reranking_enable) ||
-      Number(c.hybrid_top_k) > 0 ||
-      Boolean(errors.hybrid_top_k));
+  const showHybridTopK = vector || text;
   const enhancementCount = ENHANCEMENT_KEYS.filter((key) =>
     Boolean(c[key])
   ).length;
@@ -432,6 +454,7 @@ export function AidpRetrievalParamsForm({
       max={500}
       disabled={disabled}
       invalid={Boolean(errors[key])}
+      error={errorText(key)}
       onChange={(value) => onChange({ [key]: value })}
       note={candidateNote(key)}
     />
@@ -453,6 +476,7 @@ export function AidpRetrievalParamsForm({
       step={0.05}
       disabled={disabled}
       invalid={Boolean(errors[key])}
+      error={errorText(key)}
       onChange={(value) => onChange({ [key]: value })}
     />
   );
@@ -463,20 +487,14 @@ export function AidpRetrievalParamsForm({
       label={t(`aidpRetrieval.fields.${hKey}`)}
       helpKey="hybrid_top_k"
       value={Number(c.hybrid_top_k)}
-      min={0}
+      min={1}
       max={100}
       disabled={disabled}
       invalid={Boolean(errors.hybrid_top_k)}
+      error={errorText("hybrid_top_k")}
       onChange={(value) => onChange({ hybrid_top_k: value })}
       note={
-        <>
-          <p className={styles.inlineNote}>
-            {t("aidpRetrieval.zeroUnlimited")}
-          </p>
-          <p className={styles.inlineNote}>
-            {t("aidpRetrieval.hybridTopKHint")}
-          </p>
-        </>
+        <p className={styles.inlineNote}>{t("aidpRetrieval.hybridTopKHint")}</p>
       }
     />
   );
@@ -537,6 +555,7 @@ export function AidpRetrievalParamsForm({
           max={100}
           disabled={disabled}
           invalid={Boolean(errors.top_k)}
+          error={errorText("top_k")}
           onChange={changeTopK}
         />
         <NumberControl
@@ -548,6 +567,7 @@ export function AidpRetrievalParamsForm({
           step={0.05}
           disabled={disabled}
           invalid={Boolean(errors.score_threshold)}
+          error={errorText("score_threshold")}
           onChange={(value) => onChange({ score_threshold: value })}
         />
         <SwitchControl
@@ -556,6 +576,7 @@ export function AidpRetrievalParamsForm({
           checked={Boolean(c.reranking_enable)}
           disabled={disabled}
           stateText={switchState(Boolean(c.reranking_enable))}
+          error={errorText("reranking_enable")}
           onChange={(checked) =>
             onChange(
               checked
@@ -634,7 +655,7 @@ export function AidpRetrievalParamsForm({
       <Section
         title={t("aidpRetrieval.details")}
         summary={detailsSummary}
-        open={detailsOpen}
+        open={detailsOpen || detailsHasError}
         onToggle={() => setDetailsOpen((current) => !current)}
       >
         {vector ? (
@@ -669,6 +690,9 @@ export function AidpRetrievalParamsForm({
             </div>
           </section>
         ) : null}
+        {showHybridTopK ? (
+          <div className={styles.independentCount}>{hybridTopKField}</div>
+        ) : null}
         {graph ? (
           <section
             className={styles.group}
@@ -684,16 +708,12 @@ export function AidpRetrievalParamsForm({
                 label={t("aidpRetrieval.fields.graph_top_k")}
                 helpKey="graph_top_k"
                 value={Number(c.graph_top_k)}
-                min={0}
+                min={1}
                 max={100}
                 disabled={disabled}
                 invalid={Boolean(errors.graph_top_k)}
+                error={errorText("graph_top_k")}
                 onChange={(value) => onChange({ graph_top_k: value })}
-                note={
-                  <p className={styles.inlineNote}>
-                    {t("aidpRetrieval.zeroUnlimited")}
-                  </p>
-                }
               />
               {thresholdField("graph_score_threshold")}
             </div>
@@ -707,6 +727,7 @@ export function AidpRetrievalParamsForm({
                   Boolean(c.graph_reranking_enable),
                   !c.reranking_enable
                 )}
+                error={errorText("graph_reranking_enable")}
                 onChange={(checked) =>
                   onChange({ graph_reranking_enable: checked })
                 }
@@ -719,13 +740,7 @@ export function AidpRetrievalParamsForm({
                 }
               />
             </div>
-            {showHybridTopK ? (
-              <div className={styles.independentCount}>{hybridTopKField}</div>
-            ) : null}
           </section>
-        ) : null}
-        {showHybridTopK && !graph ? (
-          <div className={styles.independentCount}>{hybridTopKField}</div>
         ) : null}
       </Section>
 

@@ -252,6 +252,13 @@
   line-height: 18px;
 }
 
+.fieldError {
+  margin: 6px 0 0;
+  color: #c83e3e;
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .validation {
   margin: 14px 0 0;
   color: #c83e3e;
