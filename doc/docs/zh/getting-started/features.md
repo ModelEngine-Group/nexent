@@ -1,6 +1,6 @@
 # 核心特性
 
-Nexent v2.5.0 覆盖智能体生成、配置、调试、发布和运行，并提供模型、工具、知识、记忆与权限管理能力。
+Nexent 覆盖智能体生成、配置、调试、发布和运行，并提供模型、工具、知识、记忆与权限管理能力。有关各版本的功能变化与修复内容，请参阅 [GitHub Releases](https://github.com/ModelEngine-Group/nexent/releases)。
 
 ## ⚙️ 多模型集成
 
