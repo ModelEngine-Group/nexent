@@ -20,7 +20,7 @@ export function UnavailableMonitoring({
   details,
 }: {
   summaryLabel: string;
-  cards: { title: string; Icon: LucideIcon; value?: string }[];
+  cards: { title: string; Icon: LucideIcon; value?: string; unit?: string }[];
   trendTitle: string;
   trendPanel?: ReactNode;
   summaryBusy?: boolean;
@@ -71,7 +71,7 @@ export function UnavailableMonitoring({
           aria-label={summaryLabel}
           aria-busy={summaryBusy}
         >
-          {cards.map(({ title, Icon, value }) => (
+          {cards.map(({ title, Icon, value, unit }) => (
             <div
               key={title}
               className={
@@ -85,6 +85,7 @@ export function UnavailableMonitoring({
                 <dt>{title}</dt>
                 <dd>
                   <strong>{value ?? "—"}</strong>
+                  {unit && <span>{unit}</span>}
                   {value === undefined && <small>{unavailable}</small>}
                 </dd>
               </div>

@@ -7442,6 +7442,7 @@
   "ops.monitoring.mcp.currentServices": "Current MCP service count",
   "ops.monitoring.mcp.currentTools": "Tool count",
   "ops.monitoring.mcp.calls": "Tool calls",
+  "ops.monitoring.mcp.callUnit": "calls",
   "ops.monitoring.mcp.trend": "Tool call trend",
   "ops.monitoring.mcp.serviceTop": "Top 5 services by calls",
   "ops.monitoring.mcp.toolTop": "Top 5 tools by calls",

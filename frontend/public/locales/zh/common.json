@@ -7439,6 +7439,7 @@
   "ops.monitoring.mcp.currentServices": "当前 MCP 总数",
   "ops.monitoring.mcp.currentTools": "工具数",
   "ops.monitoring.mcp.calls": "工具调用量",
+  "ops.monitoring.mcp.callUnit": "次",
   "ops.monitoring.mcp.trend": "工具调用趋势",
   "ops.monitoring.mcp.serviceTop": "服务调用量 Top 5",
   "ops.monitoring.mcp.toolTop": "工具调用量 Top 5",

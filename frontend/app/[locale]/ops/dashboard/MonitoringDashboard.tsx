@@ -18,6 +18,10 @@ import { useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { hasRole } from "@/lib/roles";
+import type {
+  McpMonitoringQueryKey,
+  McpMonitoringSelection,
+} from "@/types/mcpMonitoring";
 import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
 import type { OperationsResource } from "@/types/operations";
 import type {
@@ -44,6 +48,7 @@ import {
   type MonitoringTab,
 } from "./monitoringFilters";
 import {
+  mcpServiceKey,
   resourceKey,
   useMonitoringDirectories,
 } from "./useMonitoringDirectories";
@@ -184,7 +189,11 @@ function MonitoringScope({
       ? modelDrilldown
       : undefined);
   const resourceQuery =
-    tab === "skill" ? directories.skills : directories.inventory;
+    tab === "skill"
+      ? directories.skills
+      : tab === "mcp"
+        ? directories.mcpCatalog
+        : directories.inventory;
   const inventoryChoice = (
     item: Pick<OperationsResource, "tenant_id" | "id" | "name">
   ) => ({
@@ -222,11 +231,22 @@ function MonitoringScope({
           value: resourceKey(directories.tenant ?? "", String(skill.skill_id)),
           label: skill.name || skill.skill_id,
         }))
-      : canReadInventory
-        ? directories.inventory.data
-            ?.filter((item) => item.kind === tab)
-            .map(inventoryChoice)
-        : undefined;
+      : tab === "mcp"
+        ? directories.mcpCatalog.data?.map((service) => {
+            const tenant = directories.mcpServiceTenant(service);
+            return {
+              value: mcpServiceKey(service),
+              label:
+                !directories.tenant && tenant
+                  ? `${service.name} · ${tenantLabel(tenant)}`
+                  : service.name,
+            };
+          })
+        : canReadInventory
+          ? directories.inventory.data
+              ?.filter((item) => item.kind === tab)
+              .map(inventoryChoice)
+          : undefined;
   const resourceChoices =
     selectedModel && !directoryModel
       ? [...(directoryChoices ?? []), inventoryChoice(selectedModel)]
@@ -302,11 +322,38 @@ function MonitoringScope({
     userTenant,
     skillSelection,
   ];
-  const selectedMonitoringResource =
-    selectedAgent ?? selectedModel ?? directories.mcpService;
+  const selectedMonitoringResource = selectedAgent ?? selectedModel;
+  const mcpService = directories.mcpService;
+  const mcpTenant = mcpService && directories.mcpServiceTenant(mcpService);
+  const resourceTenant =
+    selectedMonitoringResource?.tenant_id ??
+    selectedSkill?.tenant_id ??
+    mcpTenant;
   const selectedMcpTool = directories.canReadTools
     ? directories.tools.data?.find((tool) => tool.name === filters.tool)
     : undefined;
+  const mcpSelection: McpMonitoringSelection | null =
+    tab === "mcp" &&
+    directories.tenant !== undefined &&
+    range &&
+    (!resourceSelection || mcpService || directories.mcpCatalog.isSuccess)
+      ? {
+          tenantId: directories.tenant,
+          groupIds: group ? [Number(group)] : [],
+          serviceId: mcpService?.service_id ?? null,
+          builtin: mcpService?.type === "builtin",
+          toolName: selectedMcpTool?.name ?? null,
+          startDate: range[0],
+          endDate: range[1],
+        }
+      : null;
+  const mcpQueryKey: McpMonitoringQueryKey = [
+    "mcpMonitoring",
+    userId,
+    userTenant,
+    mcpSelection,
+  ];
+  const mcpFetching = useIsFetching({ queryKey: mcpQueryKey }) > 0;
   const modelFetching = useIsFetching({ queryKey: modelQueryKey }) > 0;
   const skillFetching = useIsFetching({ queryKey: skillQueryKey }) > 0;
   const queryClient = useQueryClient();
@@ -365,7 +412,8 @@ function MonitoringScope({
             directories.fetching ||
             agentMonitoring.fetching ||
             modelFetching ||
-            skillFetching
+            skillFetching ||
+            mcpFetching
           }
           onClick={() => {
             void directories.refresh();
@@ -378,6 +426,11 @@ function MonitoringScope({
             if (skillSelection)
               void queryClient.refetchQueries({
                 queryKey: skillQueryKey,
+                type: "active",
+              });
+            if (mcpSelection)
+              void queryClient.refetchQueries({
+                queryKey: mcpQueryKey,
                 type: "active",
               });
           }}
@@ -436,7 +489,10 @@ function MonitoringScope({
                     ? scopeDisabledText
                     : tab === "skill" && !directories.tenant && !selectedSkill
                       ? t("ops.monitoring.groupTenantRequired")
-                      : tab !== "skill" && !canReadInventory && !selectedModel
+                      : tab !== "skill" &&
+                          tab !== "mcp" &&
+                          !canReadInventory &&
+                          !selectedModel
                         ? t("ops.noPermission")
                         : undefined
                 }
@@ -491,13 +547,9 @@ function MonitoringScope({
           >
             {selectedMonitoringResource
               ? selectedMonitoringResource.name || selectedMonitoringResource.id
-              : (resource?.label ?? allResources)}
+              : (mcpService?.name ?? resource?.label ?? allResources)}
             {selectedMcpTool && ` / ${selectedMcpTool.name}`} ·{" "}
-            {selectedMonitoringResource
-              ? tenantLabel(selectedMonitoringResource.tenant_id)
-              : selectedSkill?.tenant_id
-                ? tenantLabel(selectedSkill.tenant_id)
-                : scopeLabel}
+            {resourceTenant ? tenantLabel(resourceTenant) : scopeLabel}
           </h2>
           {dateLabel}
           {tab === "agent" ? (
@@ -615,6 +667,17 @@ function MonitoringScope({
                     ? "service"
                     : "all"
               }
+              queryKey={mcpQueryKey}
+              registeredServices={{
+                count: directories.mcpCatalog.isError
+                  ? null
+                  : (directories.mcpCatalog.data?.filter(
+                      ({ type }) => type !== "builtin"
+                    ).length ?? null),
+                loading: scopeLoading || directories.mcpCatalog.isLoading,
+              }}
+              scopeLoading={scopeLoading}
+              hasRange={Boolean(range)}
             />
           )}
         </>

@@ -37,6 +37,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   const modelTrendReads: Record<string, string>[] = [];
   const modelSummaryReads: Record<string, string>[] = [];
   const modelListReads: Record<string, string>[] = [];
+  const mcpReads = {
+    catalog: [] as Record<string, string>[],
+    summary: [] as Record<string, string>[],
+    trends: [] as Record<string, string>[],
+  };
   const skillReads = {
     summary: [] as Record<string, string>[],
     trends: [] as Record<string, string>[],
@@ -245,6 +250,61 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           },
         ],
       };
+    } else if (pathname.startsWith("/api/ops/v1/monitoring/mcp-tools")) {
+      const view = pathname.split("/").at(-1);
+      if (request.method() !== "GET" || (view !== "catalog" && view !== "summary" && view !== "trends")) {
+        unexpected.push(`${request.method()} ${pathname}`);
+        await route.fulfill({ status: 404, json: { detail: "Unexpected MCP read" } });
+        return;
+      }
+      mcpReads[view].push(Object.fromEntries(searchParams));
+      reads.push(`mcp:${view}:${tenantId ?? "*"}`);
+      const serviceId = searchParams.get("server_id");
+      const toolName = searchParams.get("tool_name");
+      if (view === "catalog") {
+        json = {
+          data: [
+            ...resources
+              .filter((row) => row.kind === "mcp" && (!tenantId || tenantId === row.tenant_id))
+              .map((row) => ({ service_id: row.id, name: row.name, type: "remote" })),
+            { service_id: null, name: "内置服务", type: "builtin" },
+          ],
+        };
+      } else {
+        if (tenantId === "b" && serviceId === "5") {
+          await route.fulfill({ status: 422, json: { detail: "Controlled MCP failure" } });
+          return;
+        }
+        const uncovered = tenantId === "b";
+        const calls = uncovered
+          ? null
+          : toolName === "查阅文件"
+            ? 0
+            : serviceId
+              ? (toolName ? 9 : 13)
+              : 27;
+        const start = Date.parse(searchParams.get("start_date")!);
+        const end = Date.parse(searchParams.get("end_date")!);
+        const dayMs = 86_400_000;
+        const dayCount = (end - start) / dayMs + 1;
+        const published: number[] = [];
+        if (calls !== null) {
+          if (dayCount >= 3) published.push(Math.floor(calls / 3));
+          if (dayCount >= 2) published.push(Math.floor(calls / 6));
+          published.push(calls - published.reduce((sum, value) => sum + value, 0));
+        }
+        json = {
+          coverage_state: uncovered ? "uncovered" : "partial",
+          data_as_of: uncovered ? null : "2026-11-12T12:00:00Z",
+          is_stale: false,
+          data: view === "summary"
+            ? { tool_count: uncovered ? 0 : 2, request_count: calls }
+            : Array.from({ length: dayCount }, (_, index) => ({
+                statistic_date: new Date(start + index * dayMs).toISOString().slice(0, 10),
+                request_count: published[index - dayCount + published.length] ?? null,
+              })),
+        };
+      }
     } else if (pathname === "/api/mcp/tools") {
       const service = searchParams.get("mcp_id");
       reads.push(`tools:${service}`);
@@ -1132,10 +1192,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const toolDetails = mcp.getByRole("region", { name: "工具明细" });
     const unavailable = (region: typeof mcp) =>
       region.getByText("暂未接入", { exact: true });
-    const expectCards = async (titles: string[]) => {
+    const expectCards = async (titles: string[], values: string[]) => {
       await expect(cards.locator("dt")).toHaveText(titles);
-      await expect(cards.locator("strong")).toHaveText(titles.map(() => "—"));
-      await expect(unavailable(cards)).toHaveCount(titles.length);
+      await expect(cards.locator("strong")).toHaveText(values);
+      await expect(unavailable(cards)).toHaveCount(0);
+    };
+    const expectTrend = async () => {
+      await expect(trend.locator(".recharts-area")).toBeVisible();
+      await expect(trend.locator(".recharts-area-curve")).toHaveAttribute("d", /L/);
+      await expect(trend.getByText(/部分覆盖|统计尚未完整覆盖/)).toBeVisible();
     };
     const expectDetails = async (
       details: typeof mcp,
@@ -1151,7 +1216,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     };
     const toolColumns = ["工具名称", "工具调用量", "平均时延（ms）"];
 
-    await choose("MCP", "研发服务");
+    await choose("租户", "全部租户");
+    await choose("MCP", "研发服务 · 研发中心");
     await expect(select("MCP 工具")).toBeDisabled();
     await expect(unavailable(toolTop)).toBeVisible();
     await choose("租户", "运营中心");
@@ -1159,8 +1225,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       mcp.getByRole("heading", { name: "全部服务 · 运营中心" }),
     ).toBeVisible();
     await expect(select("MCP 工具")).toHaveCount(0);
-    await expectCards(["当前 MCP 总数", "工具调用量"]);
-    await expect(unavailable(trend)).toBeVisible();
+    await expectCards(["当前 MCP 总数", "工具调用量"], ["2", "27"]);
+    await expectTrend();
     await expect(unavailable(serviceTop)).toBeVisible();
     await expect(toolTop).toHaveCount(0);
     await expectDetails(
@@ -1176,14 +1242,21 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       "搜索服务名称",
     );
     await screenshot("mcp-all");
+    await choose("MCP", "内置服务");
+    await expect(select("MCP 工具")).toBeDisabled();
+    await expect.poll(() => mcpReads.summary.at(-1)).toMatchObject({
+      tenant_id: "a",
+      server_type: "builtin",
+    });
+    expect(mcpReads.summary.at(-1)).not.toHaveProperty("server_id");
 
     await choose("MCP", "知识库服务");
     await expect(
       mcp.getByRole("heading", { name: "知识库服务 · 运营中心" }),
     ).toBeVisible();
     await expect(allTools).toBeVisible();
-    await expectCards(["工具数", "工具调用量"]);
-    await expect(unavailable(trend)).toBeVisible();
+    await expectCards(["工具数", "工具调用量"], ["2", "13"]);
+    await expectTrend();
     await expect(serviceTop).toHaveCount(0);
     await expect(unavailable(toolTop)).toBeVisible();
     await expectDetails(toolDetails, [...toolColumns, "操作"], "搜索工具名称");
@@ -1193,11 +1266,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(
       mcp.getByRole("heading", { name: "知识库服务 / 语义检索 · 运营中心" }),
     ).toBeVisible();
-    await expectCards(["工具调用量"]);
-    await expect(unavailable(trend)).toBeVisible();
+    await expectCards(["工具调用量"], ["9"]);
+    await expectTrend();
     await expect(serviceTop).toHaveCount(0);
     await expect(toolTop).toHaveCount(0);
     await expectDetails(toolDetails, toolColumns, "搜索工具名称");
+    await expect.poll(() => mcpReads.trends.at(-1)).toEqual({
+      tenant_id: "a", server_id: "3", tool_name: "语义检索",
+      start_date: "2026-11-07", end_date: "2026-11-12",
+    });
     await screenshot("mcp-tool");
 
     await choose("MCP", "文件服务");
@@ -1214,7 +1291,12 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await page.getByRole("button", { name: "刷新", exact: true }).click();
     await expect
       .poll(() => reads.slice(start).sort())
-      .toEqual(["groups:a", "resources:a", "scope:a", "tenants", "tools:4"]);
+      .toEqual(["groups:a", "mcp:catalog:a", "mcp:summary:a", "mcp:trends:a", "scope:a", "tenants", "tools:4"]);
+    expect(mcpReads.summary.at(-1)).toEqual({
+      tenant_id: "a", server_id: "4",
+      start_date: "2026-11-07", end_date: "2026-11-12",
+    });
+    expect(mcpReads.trends.at(-1)).toEqual(mcpReads.summary.at(-1));
 
     await choose("MCP 工具", "查阅文件");
     await choose("MCP", "全部服务");
@@ -1223,7 +1305,15 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await choose("MCP", "文件服务");
     await expect(allTools).toBeVisible();
     await choose("MCP 工具", "查阅文件");
+    await expectCards(["工具调用量"], ["0"]);
+    await expectTrend();
+    const catalogReads = mcpReads.catalog.length;
     await choose("用户组", "一线运营组");
+    await expect.poll(() => mcpReads.summary.at(-1)).toEqual({
+      tenant_id: "a", group_ids: "10", server_id: "4", tool_name: "查阅文件",
+      start_date: "2026-11-07", end_date: "2026-11-12",
+    });
+    expect(mcpReads.catalog).toHaveLength(catalogReads);
     await choose("租户", "研发中心");
     await expect(mcp.getByText("全部用户组", { exact: true })).toBeVisible();
     await expect(
@@ -1236,6 +1326,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(mcp.getByPlaceholder("请选择结束日期")).toHaveValue(
       "2026-11-12",
     );
+    await expectCards(["当前 MCP 总数", "工具调用量"], ["1", "—"]);
+    await expect(trend.getByText("—", { exact: true })).toBeVisible();
+    await choose("MCP", "研发服务");
+    await expect(mcp.getByRole("alert").filter({ hasText: "加载失败" })).toHaveCount(2);
     expect(unexpected).toEqual([]);
     await choose("租户", "运营中心");
     await choose("MCP", "文件服务");

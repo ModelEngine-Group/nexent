@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getMcpMonitoringCatalog } from "@/services/mcpMonitoringService";
+import type { McpCatalogService } from "@/types/mcpMonitoring";
 import { listGroups } from "@/services/groupService";
 import {
   checkOperationsScope,
@@ -12,6 +14,10 @@ import type { MonitoringTab } from "./monitoringFilters";
 
 export function resourceKey(tenantId: string, id: number | string): string {
   return JSON.stringify([tenantId, id]);
+}
+
+export function mcpServiceKey(service: McpCatalogService): string {
+  return service.service_id === null ? "builtin" : String(service.service_id);
 }
 
 export function useMonitoringDirectories({
@@ -62,7 +68,11 @@ export function useMonitoringDirectories({
   });
   const inventory = useQuery({
     queryKey: [...queryKey, "inventory", tenant],
-    enabled: tenant !== undefined && canReadInventory && tab !== "skill",
+    enabled:
+      tenant !== undefined &&
+      canReadInventory &&
+      tab !== "skill" &&
+      (tab !== "mcp" || (tenant === null && Boolean(userTenant))),
     queryFn: ({ signal }) => listOperationsResources(tenant ?? null, signal),
   });
   const skills = useQuery({
@@ -71,20 +81,32 @@ export function useMonitoringDirectories({
     queryFn: () => fetchSkillsList(tenant, "mount"),
   });
 
+  const mcpCatalog = useQuery({
+    queryKey: [...queryKey, "mcpCatalog", tenant],
+    enabled: tab === "mcp" && tenant !== undefined,
+    queryFn: ({ signal }) => getMcpMonitoringCatalog(tenant ?? null, signal),
+  });
+  // MCP catalog IDs are global; inventory supplies tenant labels for a platform scope.
+  const mcpServiceTenant = (service: McpCatalogService) =>
+    tenant ??
+    inventory.data?.find(
+      (item) => item.kind === "mcp" && item.id === service.service_id
+    )?.tenant_id;
   const service =
-    tab === "mcp" && canReadInventory
-      ? inventory.data?.find(
-          (item) =>
-            item.kind === "mcp" &&
-            resourceKey(item.tenant_id, item.id) === selectedService
-        )
+    tab === "mcp"
+      ? mcpCatalog.data?.find((item) => mcpServiceKey(item) === selectedService)
       : undefined;
-  // The tool directory resolves tenant from the session, regardless of SU scope.
-  const canReadTools = Boolean(service && service.tenant_id === userTenant);
+  const serviceId = service?.service_id;
+  // The tool directory requires a registered service in the session tenant.
+  const canReadTools =
+    service !== undefined &&
+    service.service_id !== null &&
+    Boolean(userTenant) &&
+    mcpServiceTenant(service) === userTenant;
   const tools = useQuery({
-    queryKey: [...queryKey, "tools", service?.tenant_id, service?.id],
+    queryKey: [...queryKey, "tools", serviceId],
     enabled: canReadTools,
-    queryFn: ({ signal }) => listOperationsMcpTools(service!.id, signal),
+    queryFn: ({ signal }) => listOperationsMcpTools(serviceId!, signal),
   });
 
   const fetching =
@@ -92,6 +114,7 @@ export function useMonitoringDirectories({
     (canChooseTenant && tenants.isFetching) ||
     (tab !== "overview" && groups.isFetching) ||
     (tab === "skill" ? skills.isFetching : inventory.isFetching) ||
+    mcpCatalog.isFetching ||
     (canReadTools && tools.isFetching);
 
   return {
@@ -101,7 +124,9 @@ export function useMonitoringDirectories({
     groups,
     inventory,
     skills,
+    mcpCatalog,
     mcpService: service,
+    mcpServiceTenant,
     tools,
     canReadTools,
     fetching,

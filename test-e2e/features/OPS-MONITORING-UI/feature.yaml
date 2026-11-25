@@ -29,8 +29,8 @@ feature:
   - rule_id: OPS-MONITORING-UI-RULE-10
     description: Skill monitoring reads the scoped summary, daily trend, Top 5 and searchable paginated details. All skills show current total and usage, and one Skill shows usage and a full-width trend. The current catalog and its sources remain visible with missing statistics. Missing usage and true zero are distinct.
   - rule_id: OPS-MONITORING-UI-RULE-11
-    description: MCP monitoring switches between all services, one service and one tool. Services come from authorized inventory and tools come from the session tenant's service directory. MCP statistics stay unavailable until their data is connected.
+    description: MCP monitoring switches between all services, one service and one tool. Services and the current registered service count come from the authorized MCP catalog. Tools come from the session tenant's service directory. Summary and daily calls use the selected tenant, group, service, tool and dates, with unpublished values kept distinct from zero. Ranking and details remain visibly unconnected.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124, OPS-MODEL-UI-NAVIGATION-20261124, OPS-SKILL-UI-SHELL-20261124, OPS-MCP-UI-SHELL-20261124, OPS-SKILL-UI-METRICS-20261125]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124, OPS-MODEL-UI-NAVIGATION-20261124, OPS-SKILL-UI-SHELL-20261124, OPS-MCP-UI-SHELL-20261124, OPS-SKILL-UI-METRICS-20261125, OPS-MCP-UI-METRICS-20261125]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md
