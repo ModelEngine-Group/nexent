@@ -1,6 +1,6 @@
 # Database design, access, and migrations
 
-Use for relational schema design, `backend/database/**/*.py`, related service-level integrity checks, and schema work under `deploy/sql/`.
+Use for relational schema design, a service's models and repositories, shared persistence adapters in `infrastructure/rdb/`, and schema work under `deploy/sql/`. Start with the owning service's data path, such as `backend/management/db/<domain>/` or `backend/ops/db/`. Runtime and Gateway use their scoped persistence adapters in `infrastructure/`; Gateway's identity lookup is read-only.
 
 ## Design workflow
 
@@ -56,7 +56,7 @@ The new design standard requires all five audit fields on every new table, inclu
 | `update_time` | `TIMESTAMP` | Last update time |
 | `delete_flag` | `VARCHAR(1)` | Soft-delete marker, default `N` |
 
-- Inherit the five audit fields from `backend/database/db_models.py::TableBase`, which uses the names and types above. Do not redeclare inherited audit columns.
+- Inherit the five audit fields from `infrastructure/rdb/base.py::TableBase`, which uses the names and types above. Do not redeclare inherited audit columns.
 - Define how all write paths maintain timestamps, including raw SQL and SQLAlchemy Core operations; do not assume an ORM `onupdate` setting proves database-wide behavior.
 
 ## Keys, references, and business uniqueness
@@ -76,7 +76,7 @@ The new design standard requires all five audit fields on every new table, inclu
 
 ## Models and CRUD
 
-- Define models in `backend/database/db_models.py`, inheriting `TableBase` and reusing its shared audit fields.
+- Define models with the owning data module. For Management, use `backend/management/db/<domain>/models.py`, follow the domain's base import convention, and register the model through `backend/management/db/models/__init__.py` when needed for shared metadata.
 - Prefer SQLAlchemy Core `insert`/`update`/`select` with `session.execute()` / `session.scalars()`. ORM `session.add()` remains allowed.
 - Creation sets the creating/updating actor and `delete_flag='N'`; populate timestamps through the designed defaults. Updates normally overwrite the row, refresh the updating actor/time, and preserve creation fields.
 - Business tables use soft deletion. Set `delete_flag='Y'`, the updating actor/time, and soft-delete dependent rows in the same transaction when required by the relationship contract.
@@ -85,13 +85,13 @@ The new design standard requires all five audit fields on every new table, inclu
 
 ## Transaction ownership and errors
 
-- Use `with get_db_session() as session:` from `backend/database/client.py`, or its supported shared-session form for a caller-owned transaction.
+- Use `with get_db_session() as session:` from `infrastructure/rdb/client.py`, or its supported shared-session form for a caller-owned transaction.
 - CRUD functions never call `commit()`, `rollback()`, or `close()`. The session owner handles lifecycle; the current context manager leaves explicitly supplied sessions to their caller.
 - Let exceptions propagate from CRUD modules. Central session management rolls back, logs, re-raises, and closes sessions it owns.
-- Define a shared database exception in `backend/consts/exceptions.py` if needed and verify its raising boundary. The current client re-raises original exceptions; it does not automatically create `DatabaseOperationError`.
+- Define a shared database exception in `backend/contracts/errors/` if needed and verify its raising boundary. The current client re-raises original exceptions; it does not automatically create `DatabaseOperationError`.
 
 ## SQL
 
-- Every file named `init.sql` or with `merged_migrations` in its name is already merged into the target branch, which is immutable. Never modify, rename, or delete one.
+- Every SQL file under `deploy/sql/` already merged into the target branch is immutable, including initialization and Supabase SQL. Do not edit, rename, or delete it.
 - Add a versioned migration under `deploy/sql/migrations/`, following current naming/version conventions. Application version is `APP_VERSION` in `backend/contracts/constants/environment.py`.
-- Verify naming/comments, type limits, JSONB validation, audit maintenance, reference/uniqueness behavior, soft deletion/versioning, query indexes, transaction ownership, and migration compatibility as applicable. External database execution requires authorization for that action.
+- Verify naming/comments, type limits, JSONB validation, audit maintenance, reference/uniqueness behavior, soft deletion/versioning, query indexes, transaction ownership, and migration compatibility as applicable. External database execution requires authorization for that action. For moved modules and model registration, consult the [API and database layout tests](../../../../test/backend/management/test_api_db_directory_architecture.py).

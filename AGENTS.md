@@ -2,7 +2,7 @@
 
 ## Repository map
 
-- `backend/` contains the FastAPI HTTP API; `sdk/nexent/` contains the agent framework.
+- `backend/` contains Gateway, Management, Runtime, Ops, and Data Process. Shared backend adapters live in `infrastructure/`; the agent framework lives in `sdk/nexent/`.
 - `frontend/` contains the Next.js UI. Deployment resources live in `deploy/`, `docker/`, and `k8s/`.
 - Python tests live in `test/backend/` and `test/sdk/`.
 
@@ -10,7 +10,7 @@
 
 - Write code comments, docstrings, TODOs, and configuration comments in English. User-facing strings may use supported languages; this does not prescribe conversation language.
 - Every new or modified source file (`.py`, `.sh`, `.sql`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`) must start with the copyright header `Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.` (the end year tracks the current year, e.g. `2025-2027` in 2027) in the file's comment style (`#` for Python/Shell, `--` for SQL, `//` for TypeScript/JavaScript), placed after shebang/encoding lines. The `Copyright Header Check` CI job rejects changed files missing it; verify or fix locally with `python scripts/check_copyright.py [--fix] <files...>`.
-- In backend/SDK Python code, centralize environment reads in `backend/contracts/constants/environment.py`. Backend callers import from `contracts.constants.environment`; SDK code accepts parameters and must not read environment variables or introduce `from_env()` methods.
+- Centralize backend application environment reads in `backend/contracts/constants/environment.py`; callers import from `contracts.constants.environment`. The standalone Gateway reads its injected environment through `backend/gateway/configuration.py`. SDK code accepts parameters and must not read environment variables or introduce `from_env()` methods.
 - Every SQL file under `deploy/sql/` already merged into the target branch is immutable, including initialization and Supabase SQL. Do not edit, rename, or delete it. Add versioned migrations under `deploy/sql/migrations/`; application version is `APP_VERSION` in `backend/contracts/constants/environment.py`.
 - Preserve existing HTTP routes, payloads, and response contracts when applying conventions to new code.
 
@@ -36,7 +36,7 @@ These Markdown files are the maintained rules. `.cursor/rules/` contains compati
 - Before adding new D1, inspect actual existing UT/formal inputs and assertions, record the remaining gap and additional component evidence, and apply nexent-test-assets' admission rules. A Feature needs no D1 quota; sufficient unit proof stays in UT. For code already developed, use its test-backfill mode rather than generating a Case per function or restarting development. Preserve required higher-boundary checks.
 - Keep traditional UT results/coverage separate from formal functional results; frontend and Python coverage percentages are never combined. A collected script passing is not evidence that every written acceptance requirement was implemented. Record acceptance implementation gaps and distinguish execution from completeness.
 - Backend setup uses Python 3.11. From `backend/`, run `uv sync --extra data-process --extra test`; this includes the editable local `nexent[dev]` distribution (Python imports remain `nexent`). Add `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` for CUDA 13.0; select `pytorch-cpu` with the same upgrade flags to switch back. Both variants use the same extra. Use uv 0.13.6.
-- Run targeted tests from the root using the configured backend environment, for example `pytest test/backend/apps/test_agent_app.py -v`. The broader runner is `python test/run_all_test.py`. Confirm the interpreter works before testing.
+- Run targeted tests from the root using the configured backend environment, for example `pytest test/backend/management/test_agent_runtime_boundaries.py -v`. The broader runner is `python test/run_all_test.py`. Confirm the interpreter works before testing.
 - Formal D1-D5 assets live in `test-e2e/`; use `python test-e2e/infra/tools/validate_test_assets.py --phase implementation` to check generated views and `python test-e2e/infra/tools/run_cases.py <Case-ID> --test-home <local-test-data>` for targeted execution. Keep machine-local configuration and results outside Git.
 - For added/changed formal assets, follow nexent-test-assets' preparation/delivery gate: confirm responsibility routing, declare active automated D2-D5 preparation (including justified self-contained empty families), and verify owned cleanup. Reconcile the current target branch and repeat strict validation before delivery/merge; record the tested revision and actual preparation-test-cleanup evidence.
 - From `frontend/`, `npm run dev` starts development. `npm run check-all` runs type-check, lint, format checking, and build; individual checks are in `frontend/package.json`.
