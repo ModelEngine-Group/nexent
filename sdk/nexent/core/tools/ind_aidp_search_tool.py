@@ -208,6 +208,11 @@ class IndependentAidpSearchTool(Tool):
         config = {key: _field_default(value, DEFAULTS[key]) for key, value in config.items()}
         if not config.get("reranking_enable", DEFAULTS["reranking_enable"]):
             config["graph_reranking_enable"] = False
+        # Legacy zero caps mean "not set"; treat them as the default before
+        # validation so stored 0/0 configurations keep working.
+        for key in ("hybrid_top_k", "graph_top_k"):
+            if config.get(key) == 0:
+                config[key] = DEFAULTS[key]
         resolved = validate_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
