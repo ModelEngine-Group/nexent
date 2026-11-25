@@ -181,6 +181,16 @@ def prepare_tool_retrieval_overrides(
         raise ValidationError(str(exc)) from exc
 
 
+def _knowledge_sources(agent_tree: List[Dict[str, Any]]) -> Dict[str, bool]:
+    classes = {tool.get("class_name") for node in agent_tree for tool in node["tools"]}
+    return {"local": LOCAL_TOOL_CLASS in classes, "aidp": AIDP_TOOL_CLASS in classes}
+
+
+def get_agent_knowledge_sources(agent_id: int, tenant_id: str, version_no: int) -> Dict[str, bool]:
+    """Project configured retrieval tools without resolving knowledge catalogs or access."""
+    return _knowledge_sources(_walk_agent_tree(agent_id, tenant_id, version_no))
+
+
 def get_agent_knowledge_capabilities(
     agent_id: int,
     tenant_id: str,
@@ -190,16 +200,7 @@ def get_agent_knowledge_capabilities(
 ) -> Dict[str, Any]:
     resolved_version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
     agent_tree = _walk_agent_tree(agent_id, tenant_id, resolved_version)
-    local_enabled = any(
-        tool.get("class_name") == LOCAL_TOOL_CLASS
-        for node in agent_tree
-        for tool in node["tools"]
-    )
-    aidp_enabled = any(
-        tool.get("class_name") == AIDP_TOOL_CLASS
-        for node in agent_tree
-        for tool in node["tools"]
-    )
+    configured_sources = _knowledge_sources(agent_tree)
     local_default_indices = list(dict.fromkeys(
         index_name
         for node in agent_tree
@@ -248,7 +249,7 @@ def get_agent_knowledge_capabilities(
     ]
     sources = {
         "local": {
-            "enabled": local_enabled,
+            "enabled": configured_sources["local"],
             "max_select": LOCAL_MAX_SELECT,
             "requires_same_embedding_model": True,
             "default_summary": "Follow each agent's default configuration",
@@ -256,7 +257,7 @@ def get_agent_knowledge_capabilities(
             "default_range_values": local_default_indices,
         },
         "aidp": {
-            "enabled": aidp_enabled,
+            "enabled": configured_sources["aidp"],
             "max_select": AIDP_MAX_SELECT,
             "default_summary": "Follow each agent's default configuration",
             "default_knowledge_ids": aidp_default_ids,

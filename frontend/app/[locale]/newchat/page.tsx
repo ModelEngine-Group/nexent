@@ -3,10 +3,6 @@
 "use client";
 
 import {
-  ComposerAttachment,
-  ComposerDictation,
-} from "@/app/newchat/assistant-ui/composer-tools";
-import {
   useCallback,
   useEffect,
   useMemo,
@@ -63,11 +59,9 @@ import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
-import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
-import type { STTModelConfig } from "@/types/modelConfig";
+import { isDictationConfigured } from "@/lib/dictationConfig";
 import { conversationService } from "@/services/conversationService";
 import { useQueryClient } from "@tanstack/react-query";
 import { createConversationDetailLoader } from "@/lib/conversationDetails";
@@ -82,7 +76,6 @@ import { useConversationResume } from "@/hooks/chat/useConversationResume";
 import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
   ConversationKnowledgeScope,
-  KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
   KnowledgeScopeResolution,
   KnowledgeScopeWarning,
@@ -100,14 +93,6 @@ function useLocalChatRuntime(
     },
   });
 }
-
-const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
-  if (!config?.modelName) return false;
-  if (config.modelFactory === "volcengine") {
-    return Boolean(config.modelAppid && config.accessToken);
-  }
-  return Boolean(config.apiConfig?.apiKey);
-};
 
 export default function Home() {
   return <PersistentChatHome />;
@@ -347,27 +332,6 @@ const HomeContent: FC<{
     useState<ConversationKnowledgeScope | null>(null);
   const [knowledgePreview, setKnowledgePreview] =
     useState<KnowledgeScopeEffectivePreview | null>(null);
-  const { enableAidpKnowledge } = useDeployment();
-  // Observe the composer's catalog updates without starting another list request.
-  const { dataUpdatedAt: knowledgeCatalogUpdatedAt } =
-    useComposerKnowledgeBases(false, enableAidpKnowledge);
-  const knowledgeCapabilityKey = JSON.stringify([
-    selectedAgent?.id,
-    selectedAgent?.current_version_no,
-    enableAidpKnowledge,
-    knowledgeCatalogUpdatedAt,
-  ]);
-  const [knowledgeCapabilityState, setKnowledgeCapabilityState] = useState<{
-    key: string;
-    value: KnowledgeCapabilities | null;
-  }>({ key: knowledgeCapabilityKey, value: null });
-  if (knowledgeCapabilityState.key !== knowledgeCapabilityKey) {
-    setKnowledgeCapabilityState({ key: knowledgeCapabilityKey, value: null });
-  }
-  const knowledgeCapabilities =
-    knowledgeCapabilityState?.key === knowledgeCapabilityKey
-      ? knowledgeCapabilityState.value
-      : null;
   const [runtimeMetadata, setRuntimeMetadata] = useState<
     Record<string, unknown>
   >({});
@@ -549,43 +513,6 @@ const HomeContent: FC<{
       !sidebarSelectedAgent &&
       !restoreFallbackReady
     );
-
-  useEffect(() => {
-    if (!selectedAgent?.id) {
-      return;
-    }
-
-    let cancelled = false;
-    const versionNo = selectedAgent.current_version_no;
-    void conversationService
-      .getKnowledgeCapabilities(Number(selectedAgent.id), versionNo)
-      .then((capabilities) => {
-        if (!cancelled) {
-          const matches =
-            capabilities?.agent_id === Number(selectedAgent.id) &&
-            (versionNo === undefined || capabilities.version_no === versionNo);
-          setKnowledgeCapabilityState({
-            key: knowledgeCapabilityKey,
-            value: matches ? capabilities : null,
-          });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled)
-          setKnowledgeCapabilityState({
-            key: knowledgeCapabilityKey,
-            value: null,
-          });
-        log.error(
-          "[HomeContent] Failed to load knowledge capabilities:",
-          error
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedAgent, knowledgeCapabilityKey]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -1132,15 +1059,9 @@ const HomeContent: FC<{
             onBack={handleThreadBack}
             chatMode={chatMode}
             onChatModeChange={handleChatModeChange}
-            composerTools={
-              <>
-                <ComposerAttachment />
-                <ComposerDictation configured={isDictationConfigured} />
-              </>
-            }
+            inputTools={{ attachments: true, dictationConfigured: isDictationConfigured }}
             knowledgeScope={knowledgeScope}
             knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
             onKnowledgeScopeChange={handleKnowledgeScopeChange}
             runtimeMetadata={runtimeMetadata}
             onRuntimeMetadataChange={handleRuntimeMetadataChange}

@@ -2,10 +2,6 @@
 
 "use client";
 
-import {
-  ComposerAttachment,
-  ComposerDictation,
-} from "@/app/newchat/assistant-ui/composer-tools";
 import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 
 import {
@@ -939,41 +935,6 @@ const HomeContent: FC = () => {
     setChatMode(mode);
   }, []);
 
-  const handleRemoveWorkbenchSkill = useCallback(
-    async (skillId: number) => {
-      const mounts = workbenchState.config.skill_mounts.filter(
-        (mount) => mount.skill_id !== skillId
-      );
-      const numericConversationId = Number(activeConversationId);
-      if (
-        Number.isInteger(numericConversationId) &&
-        numericConversationId > 0
-      ) {
-        try {
-          await saveWorkbenchConfig(numericConversationId, {
-            ...workbenchState.config,
-            skill_mounts: mounts,
-          });
-        } catch (error) {
-          message.error(
-            error instanceof Error
-              ? error.message
-              : t("workbench.resources.saveFailed")
-          );
-        }
-        return;
-      }
-      dispatchWorkbench({ type: "replace-skills", mounts });
-    },
-    [
-      activeConversationId,
-      saveWorkbenchConfig,
-      t,
-      workbenchState.config,
-      dispatchWorkbench,
-    ]
-  );
-
   const handleReplaceWorkbenchSkills = useCallback(
     async (
       mounts: import("@/features/workbench").WorkbenchSkillMount[],
@@ -1371,20 +1332,6 @@ const HomeContent: FC = () => {
     workbenchState,
     workbenchBootstrap ?? undefined
   );
-  const removeMountedAgent = async (agentId: number) => {
-    const mounts = workbenchState.config.agent_mounts.filter(
-      (mount) => mount.agent_id !== agentId
-    );
-    try {
-      await changeAgentTopology(runtime, () => applyAgentMounts(mounts));
-    } catch (error) {
-      message.error(
-        error instanceof Error
-          ? error.message
-          : t("ui.localization.agentRemoveFailed")
-      );
-    }
-  };
   const isCreating =
     workbenchState.config.mode === "skill_create" ||
     workbenchState.config.mode === "agent_create";
@@ -1544,12 +1491,7 @@ const HomeContent: FC = () => {
               onAgentSelected={handleAgentSelectedFromLanding}
               chatMode={chatMode}
               onChatModeChange={handleChatModeChange}
-              composerTools={
-                <>
-                  <ComposerAttachment />
-                  <ComposerDictation configured={isDictationConfigured} />
-                </>
-              }
+              inputTools={{ attachments: true, dictationConfigured: isDictationConfigured }}
               knowledgeScope={isCreating ? null : knowledgeScope}
               knowledgePreview={isCreating ? null : knowledgePreview}
               knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
@@ -1594,43 +1536,15 @@ const HomeContent: FC = () => {
                 isCreating
                   ? undefined
                   : {
-                      agentName:
-                        selectedAgent?.display_name || selectedAgent?.name,
-                      agents: workbenchState.config.agent_mounts.map(
-                        (mount) => {
-                          const agent = agents.find(
-                            (item) => Number(item.id) === mount.agent_id
-                          );
-                          return {
-                            id: mount.agent_id,
-                            name:
-                              agent?.display_name ||
-                              agent?.name ||
-                              `#${mount.agent_id}`,
-                            remove: () =>
-                              void removeMountedAgent(mount.agent_id),
-                          };
-                        }
-                      ),
+                      agentCount: workbenchState.config.agent_mounts.length,
+                      skillCount: workbenchState.config.skill_mounts.length,
                       onSelectAgent: () => setAgentPickerOpen(true),
-                      onRemoveAgent: () =>
-                        void changeAgentTopology(runtime, () =>
-                          applyAgentMounts([])
-                        ).catch((error) => message.error(error.message)),
-                      skills: workbenchState.config.skill_mounts.map(
-                        (mount) => ({
-                          id: mount.skill_id,
-                          name:
-                            workbenchState.skillNames[mount.skill_id] ||
-                            `#${mount.skill_id}`,
-                        })
-                      ),
                     }
               }
-              onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
               workbenchPresentation={{
                 mode: workbenchState.config.mode,
+                allowsSessionKnowledge: !isCreating,
                 onKnowledgeOpenChange,
                 onKnowledgeRetry,
                 knowledgePending: knowledgePickerOpen && !knowledgeSettled,

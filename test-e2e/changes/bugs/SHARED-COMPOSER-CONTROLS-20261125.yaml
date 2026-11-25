@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: SHARED-COMPOSER-CONTROLS-20261125
+  change_type: bugfix
+  bug_id: SHARED-COMPOSER-CONTROLS-20261125
+  title: Align chat Composer controls, resource counters, and attachment cards
+  description: Render shared toolbar actions with confirmed resource counts, and show draft attachments as file cards.
+  observed_behavior: Published Agent chat renders selected knowledge above the input while Workbench renders it below.
+  expected_behavior: Eligible chat entry points display confirmed resource counts on their shared toolbar. Drawers manage selections and load knowledge upon opening.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing Workbench layout assertions do not compare the published Agent chat path.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS-D4-001, WB-CONTROLS-D4-005, WB-RESOURCE-LAZY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both knowledge-capable entry points show the same count and open the same picker.
+    - Composer attachment cards show type and known file size, while retaining removal.
+    - Knowledge stays hidden without an eligible operation and reads remain deferred until open.
+    - Model, attachment, dictation, mode and resource controls follow the advertised runtime operations.
+    test_selectors:
+    - frontend/tests/workbench/Composer.test.tsx
+    - frontend/tests/workbench/ComposerAttachments.test.tsx
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    reason: Existing Composer, runtime wiring and lifecycle tests exercise the changed boundary. No Python path changes in this follow-up.
+  notes: 'See chat-shared-resource-selectors/design.md. Existing Workbench journeys assert toolbar counts after confirmation and no count after cancellation. Existing preparation, ownership and bindings apply.'

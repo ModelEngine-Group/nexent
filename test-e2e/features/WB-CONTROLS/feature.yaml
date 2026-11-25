@@ -42,6 +42,9 @@ feature:
       accessible label. Ordinary-chat knowledge actions and editable mounts require the current Agent version's active-source
       retrieval capability; absent, pending, failed or stale capabilities and saved scopes cannot expose the picker. Workbench
       retains its existing independent knowledge entry, and creation modes hide resources.
+      Composer renders actions in a common order from the available runtime operations. Agent, Skill and Knowledge buttons
+      show counts for confirmed selections, and open their drawers to edit or remove selections. Knowledge details and
+      catalogs load when the eligible picker opens. Draft attachment cards show the file type and available file size.
   - rule_id: WB-CONTROLS-RULE-006
     description: Workbench reuses configuration resource controls and knowledge presentation; Agent/Skill tabs remain Mine/Repository,
       AIDP knowledge selectors hide document/chunk counts across configuration, chat and Workbench; local selectors retain

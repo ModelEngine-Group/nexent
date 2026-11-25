@@ -871,6 +871,13 @@ async def list_published_agents_impl(tenant_id: str, user_id: str) -> list[dict]
     )
 
 
+def _published_knowledge_sources(agent_id: int, tenant_id: str, version_no: int) -> Dict[str, bool]:
+    """Load the effective-tool resolver only for published configuration projection."""
+    from management.services.knowledge_base.scope import get_agent_knowledge_sources
+
+    return get_agent_knowledge_sources(agent_id, tenant_id, version_no)
+
+
 def _list_published_agents_sync(
     tenant_id: str,
     user_id: str,
@@ -1081,6 +1088,9 @@ def _list_published_agents_sync(
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),
+                "knowledge_sources": _published_knowledge_sources(
+                    agent["agent_id"], tenant_id, agent["current_version_no"],
+                ),
                 "version_name": agent.get("version_name"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),

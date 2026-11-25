@@ -6,7 +6,7 @@ import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Thread, type WelcomeSuggestion } from "./thread";
-import type { ChatMode } from "./composer";
+import type { ChatMode, ComposerInputTools } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
 import type {
@@ -33,7 +33,7 @@ export interface ChatProps {
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   showConversationTitle?: boolean;
-  composerTools?: ReactNode;
+  inputTools?: ComposerInputTools;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -54,7 +54,6 @@ export interface ChatProps {
   newChatDesign?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
-  onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
 }
 
@@ -90,7 +89,7 @@ export const Chat: FC<ChatProps> = ({
   selectedModelId,
   onModelChange,
   showConversationTitle = true,
-  composerTools,
+  inputTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -107,7 +106,6 @@ export const Chat: FC<ChatProps> = ({
   newChatDesign = false,
   workbenchPresentation,
   workbenchResources,
-  onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
 }) => {
   const handleSelectAgent = useCallback(
@@ -148,7 +146,7 @@ export const Chat: FC<ChatProps> = ({
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
-          composerTools={composerTools}
+          inputTools={inputTools}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
           interactionContent={interactionContent}
@@ -156,7 +154,6 @@ export const Chat: FC<ChatProps> = ({
           workbenchPresentation={workbenchPresentation}
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-          onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
           skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -188,7 +185,7 @@ export const Chat: FC<ChatProps> = ({
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
       showConversationTitle={showConversationTitle}
-      composerTools={composerTools}
+      inputTools={inputTools}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
       knowledgeCapabilities={knowledgeCapabilities}
@@ -203,7 +200,6 @@ export const Chat: FC<ChatProps> = ({
       readOnlyReason={readOnlyReason}
       workbenchPresentation={workbenchPresentation}
       workbenchResources={workbenchResources}
-      onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
       onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
     />
   );

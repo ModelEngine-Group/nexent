@@ -3,13 +3,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { screen } from "@testing-library/dom";
-import { act, render, waitFor } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "../../app/[locale]/newchat/page";
 import { conversationService } from "@/services/conversationService";
-import type { KnowledgeCapabilities } from "@/types/knowledgeScope";
 
 const switchToNewThread = vi.fn().mockResolvedValue(undefined);
 const reloadThreads = vi.fn().mockResolvedValue(undefined);
@@ -48,7 +47,9 @@ const sidebarState = vi.hoisted(() => ({
 }));
 const queryClientMock = vi.hoisted(() => ({
   ensureQueryData: vi.fn().mockResolvedValue(undefined),
-  fetchQuery: vi.fn(({ queryFn }: { queryFn: () => Promise<unknown> }) => queryFn()),
+  fetchQuery: vi.fn(({ queryFn }: { queryFn: () => Promise<unknown> }) =>
+    queryFn()
+  ),
   getQueryState: vi.fn(),
   removeQueries: vi.fn(),
   invalidateQueries: vi.fn().mockResolvedValue(undefined),
@@ -69,12 +70,6 @@ const agent = {
 type PageAgent = typeof agent;
 
 let capturedRuntimeOptions: Record<string, unknown> | undefined;
-let chatProps:
-  | {
-      knowledgeCapabilities?: KnowledgeCapabilities | null;
-      onAgentSelected: (agent: PageAgent) => void;
-    }
-  | undefined;
 
 vi.mock("@assistant-ui/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@assistant-ui/react")>();
@@ -114,14 +109,11 @@ vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
     selectedAgent,
     onAgentSelected,
     onBack,
-    knowledgeCapabilities,
   }: {
     selectedAgent: PageAgent | null;
     onAgentSelected: (agent: PageAgent) => void;
     onBack: () => void;
-    knowledgeCapabilities?: KnowledgeCapabilities | null;
   }) => {
-    chatProps = { knowledgeCapabilities, onAgentSelected };
     return (
       <>
         {selectedAgent ? (
@@ -233,14 +225,11 @@ describe("newchat refresh restore wiring", () => {
     initializeThread.mockClear();
     updateThreadCustom.mockClear();
     capturedRuntimeOptions = undefined;
-    chatProps = undefined;
     sidebarState.isRestoringView = undefined;
     sidebarState.selectedAgentId = undefined;
     queryClientMock.ensureQueryData.mockClear().mockResolvedValue(undefined);
     queryClientMock.invalidateQueries.mockClear().mockResolvedValue(undefined);
-    vi.mocked(conversationService.getKnowledgeCapabilities)
-      .mockReset()
-      .mockResolvedValue(null as unknown as KnowledgeCapabilities);
+    vi.mocked(conversationService.getKnowledgeCapabilities).mockClear();
     window.sessionStorage.clear();
     runtimeState = {
       threads: {
@@ -458,68 +447,10 @@ describe("newchat refresh restore wiring", () => {
     expect(window.sessionStorage.getItem(AGENT_KEY)).toBe("41");
   });
 
-  it("never exposes another Agent's capability while loading, after failure or a late response", async () => {
-    const capability = {
-      agent_id: 41,
-      version_no: 1,
-      sources: { local: { enabled: true }, aidp: { enabled: false } },
-    } as KnowledgeCapabilities;
-    let finishPending!: (value: KnowledgeCapabilities) => void;
-    const getCapabilities = vi.mocked(
-      conversationService.getKnowledgeCapabilities
-    );
-    getCapabilities
-      .mockResolvedValueOnce(capability)
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            finishPending = resolve;
-          })
-      )
-      .mockRejectedValueOnce(new Error("capability unavailable"));
+  it("does not load knowledge capabilities when entering an agent chat", async () => {
     render(<Home />);
     await userEvent.click(screen.getByText("select agent"));
-    await waitFor(() =>
-      expect(chatProps?.knowledgeCapabilities).toEqual(capability)
-    );
-    const second = {
-      ...agent,
-      id: "42",
-      agent_id: 42,
-      display_name: "Second Agent",
-    };
-    await act(async () => {
-      await chatProps!.onAgentSelected(second);
-    });
-    expect(chatProps?.knowledgeCapabilities).toBeNull();
-    await waitFor(() => expect(getCapabilities).toHaveBeenCalledWith(42, 1));
-    await act(async () => {
-      await chatProps!.onAgentSelected({ ...agent, current_version_no: 2 });
-    });
-    await waitFor(() => expect(getCapabilities).toHaveBeenCalledWith(41, 2));
-    await act(async () => {
-      finishPending({ ...capability, agent_id: 42 });
-    });
-    expect(chatProps?.knowledgeCapabilities).toBeNull();
-  });
-
-  it.each([
-    { agent_id: 99, version_no: 1 },
-    { agent_id: 41, version_no: 99 },
-  ])("rejects capability identity mismatch %j", async (identity) => {
-    vi.mocked(conversationService.getKnowledgeCapabilities).mockResolvedValue({
-      ...identity,
-      sources: { local: { enabled: true }, aidp: { enabled: false } },
-    } as KnowledgeCapabilities);
-    render(<Home />);
-    await userEvent.click(screen.getByText("select agent"));
-    await waitFor(() =>
-      expect(conversationService.getKnowledgeCapabilities).toHaveBeenCalledWith(
-        41,
-        1
-      )
-    );
-    await act(async () => {});
-    expect(chatProps?.knowledgeCapabilities).toBeNull();
+    await screen.findByText("Agent chat: Fixed Agent");
+    expect(conversationService.getKnowledgeCapabilities).not.toHaveBeenCalled();
   });
 });

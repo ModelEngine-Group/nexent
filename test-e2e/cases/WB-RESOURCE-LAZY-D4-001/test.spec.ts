@@ -149,8 +149,7 @@ journey("WB-RESOURCE-LAZY-D4-001", async ({ page, contract }) => {
     await contract.assertion(id, async () => {
       await retainDraft();
       expect(state.writes).toEqual([]);
-      await expect(
-        page.getByRole("button", { name: /Agent ·|Skill ·/ }),
-      ).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体");
+      await expect(page.getByRole("button", { name: "技能", exact: true })).toHaveText("技能");
     });
 });
