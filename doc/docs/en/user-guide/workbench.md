@@ -9,9 +9,7 @@ Use the Nexent Workbench to run tasks and create resources. You can describe a t
 
 If **Workbench** is missing from the navigation, ask your administrator to check whether it is enabled for your deployment and accessible to your account.
 
-<!-- Screenshot pending. Capture the Workbench landing page with the navigation entry, New conversation, and the composer.
 ![Workbench entry and landing page](./assets/workbench/overview.png)
--->
 
 ## Describe the task
 
@@ -19,9 +17,7 @@ In the composer, describe your goal, the materials to use, and the result you wa
 
 > Turn the attached meeting notes into a Markdown summary. List the decisions by topic and put the action items, owners, and due dates in a table. Mark missing information as “To confirm.”
 
-<!-- Screenshot pending. Capture the composer before sending, with the example request and an attached file.
 ![Entering a task and adding an attachment](./assets/workbench/task-input.png)
--->
 
 ## Choose conversation resources
 
@@ -35,17 +31,11 @@ Before sending, use the composer controls to add resources as needed. Availabili
 
 To remove a resource, use its label in the composer.
 
-<!-- Screenshot pending. Capture the Agents picker with a selected agent and the Confirm button.
 ![Selecting agents for the conversation](./assets/workbench/agent-picker.png)
--->
 
-<!-- Screenshot pending. Capture the conversation knowledge base panel with the available sources and the current selection.
 ![Setting the knowledge base scope for the conversation](./assets/workbench/knowledge-scope.png)
--->
 
-<!-- Screenshot pending. Capture the Skills picker with a selected skill and the Confirm button.
 ![Selecting skills for the conversation](./assets/workbench/skill-picker.png)
--->
 
 ### Select a model
 
@@ -55,19 +45,16 @@ To remove a resource, use its label in the composer.
 
 The list depends on your tenant's model configuration. If the model you need is missing, ask your administrator to check that it is connected and available. See [Model Configuration](./agent-development/model-configuration).
 
-<!-- Screenshot pending. Capture the open model selector with the selected model and the Advanced settings control visible.
 ![Selecting a model and finding advanced settings in the Workbench](./assets/workbench/model-selector.png)
--->
 
 ## Run the task and review the result
 
 1. Choose **Execution mode** or **Planning mode** in the composer. Execution mode starts the task directly. Planning mode breaks the task into steps and lets you track their status.
+
+   ![Choosing execution or planning mode in the Workbench](./assets/workbench/execution-mode.png)
+
 2. Send the task. During the run, expand any step or tool call cards that appear to check progress. To interrupt the run, click the stop button in the composer.
 3. Review the final response. When the response includes sources or generated files, open sources to verify the information, or preview and download available files. Send a follow-up in the same conversation to refine the result.
-
-<!-- Screenshot pending. Capture the plan and final response for the same task, with one completed step or tool call expanded.
-![Reviewing the execution process and task result](./assets/workbench/task-result.png)
--->
 
 ## Create an agent or skill through conversation
 
@@ -75,19 +62,19 @@ Creation controls appear according to your account permissions. The Workbench op
 
 ### Create an agent
 
-1. Click **Create Agent**. Describe the intended users, the tasks the agent should perform, its inputs and outputs, and any constraints. You can also start from an example in the interface.
+1. Click **Create Agent**. Describe the intended users, the tasks the agent should perform, its inputs and outputs, and any constraints. You can also start from an example in the interface. If the **Clarify requirements** card appears, answer its questions.
+
+   ![Answering follow-up questions about the agent requirements](./assets/workbench/agent-creation-clarification.png)
+
 2. When the **Requirements and resources** card appears, review the extracted requirements. To make changes, edit the requirements and click **Update requirements and search again**. Select any recommended tools, skills, or knowledge bases you need. Configure any unbound selections and click **Bind selected**. When the resources are ready, click **Continue**. If the task needs no resources, use **Continue without resources** when the option is available.
+
+   ![Reviewing agent requirements and binding resources](./assets/workbench/agent-creation-resources.png)
+
 3. When the result card shows **Draft Generated**, click **Edit current draft** above the composer or **Go to Agent Development** in the result card. In the configuration, review or edit the prompts under **Model and prompt**, then follow the [Agent Configuration](./agent-development) guide to debug and publish the agent.
 
+   ![Reviewing the generated agent draft and opening its configuration](./assets/workbench/agent-creation-result.png)
+
 If the draft has no prompt yet, Workbench saves the first generated prompt directly. When a conversation generates a replacement for an existing prompt, review the changes in the **Generated prompt** card and click **Confirm and apply** to save.
-
-<!-- Screenshot pending. Capture the Requirements and resources card with one resource ready and the control for continuing.
-![Reviewing agent requirements and binding resources](./assets/workbench/agent-creation-resources.png)
--->
-
-<!-- Screenshot pending. Capture the result card with its Draft Generated status and Go to Agent Development link, along with Edit current draft above the composer.
-![Reviewing the generated agent draft and opening its configuration](./assets/workbench/agent-creation-result.png)
--->
 
 ### Create a skill
 
@@ -95,8 +82,6 @@ If the draft has no prompt yet, Workbench saves the first generated prompt direc
 2. After the draft is generated, review the skill files shown in the conversation. Send a follow-up in the same conversation to request changes.
 3. Click **Save Skill** in the result card. Once saved, click **View My Skills** to open your list. See [Skill Space](./resource-repository/skill-repository) for managing and reusing skills.
 
-<!-- Screenshot pending. Capture the generated skill files and the result card with its Save Skill button.
-![Reviewing and saving a skill draft](./assets/workbench/skill-creation.png)
--->
+![Reviewing the generated skill files and the Skill Saved card](./assets/workbench/skill-creation.png)
 
 See also [Home Page](./home-page) and [Agent Chat](./start-chat).
