@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_HISTORY_SIZE = 200
 
 
+def reference_options(channel):
+    reference = getattr(channel, "_runtime_run_reference", None)
+    return {"run_ref": reference} if reference is not None else {}
+
+
 class StreamingChannel:
     """
     A channel that maintains a queue of streaming chunks for a conversation.
@@ -211,7 +216,7 @@ class StreamingChannel:
             user_id=self.user_id,
             conversation_id=self.conversation_id,
             chunk=chunk,
-            **({"run_ref": self._runtime_run_reference} if self._runtime_run_reference is not None else {}),
+            **reference_options(self),
             replay_update=replay_update,
             **({"generation": self.generation} if self.generation is not None else {}),
         )

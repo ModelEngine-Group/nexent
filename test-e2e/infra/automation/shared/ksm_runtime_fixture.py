@@ -371,11 +371,37 @@ def probe_core(owned):
         # All twenty real acquisitions use bounded Runtime-owned workers.
         original_factory = backend.api_factory
         lost = threading.Event()
+        pod_create_requests = []
+        readiness_requests = []
+        wait_pinned_jupyter = backend._wait_pinned_jupyter
+
+        def wait_with_publication_lag(connection, deadline, check_cancelled):
+            from requests.exceptions import ConnectionError
+
+            session = connection.tls_client.http
+            actual_get = session.get
+
+            def get_with_publication_lag(url, **kwargs):
+                assert url == connection.base_url + '/api/kernels'
+                readiness_requests.append(url)
+                if len(readiness_requests) == 1:
+                    raise ConnectionError('Controlled Service publication lag')
+                return actual_get(url, **kwargs)
+
+            session.get = get_with_publication_lag
+            try:
+                return wait_pinned_jupyter(connection, deadline, check_cancelled)
+            finally:
+                session.get = actual_get
+
+        backend._wait_pinned_jupyter = wait_with_publication_lag
+
         @contextmanager
         def lost_response_factory():
             with original_factory() as api:
                 original_create = api.create_namespaced_pod
                 def create_then_lose(*args, **kwargs):
+                    pod_create_requests.append(args[1]['metadata']['name'])
                     response = original_create(*args, **kwargs)
                     if not lost.is_set():
                         lost.set()
@@ -404,6 +430,8 @@ def probe_core(owned):
         connections = [future.result(timeout=130) for future in futures]
         backend.api_factory = original_factory
         assert len({id(connection) for connection in connections}) == 1
+        assert pod_create_requests == [backend.resource_name(config.owner)]
+        assert len(readiness_requests) >= 2
         root.run('controlled runtime callback')
         parent = getattr(root.python_executor, 'remote', None) or root.python_executor
         assert parent._nexent_backend == 'kubernetes'
@@ -460,7 +488,9 @@ def probe_core(owned):
         else:
             raise AssertionError('Closed callback capability remained usable')
         return {'owner_uid': coordinator.owner.pod_uid, 'pod_uid': connections[0].pod_uid,
-                'twenty_acquisitions': 1, 'lost_create_response': lost.is_set(), 'kernels': observed_kernels,
+                'twenty_acquisitions': 1, 'lost_create_response': lost.is_set(),
+                'pod_create_requests': len(pod_create_requests), 'readiness_get_requests': len(readiness_requests),
+                'kernels': observed_kernels,
                 'execution_windows': windows, 'foreign_resource_rejected': True,
                 'cancelled_child_preserved_parent': True,
                 'script_matrix': scripts,
@@ -468,16 +498,17 @@ def probe_core(owned):
                 'callback_statuses': callbacks[callback_start:], 'stale_context_rejected': True}
     finally:
         backend.api_factory = original_factory
+        backend._wait_pinned_jupyter = wait_pinned_jupyter
         factory._close_subagent_invocations()
         factory._cleanup_sandbox()
 
 
 def probe_multiruntime(_owned):
-    from infrastructure.redis.run_state import runtime_state_service as state
+    from infrastructure.redis.agent_events import START, RunJournal
     from runtime.sandbox_coordination import SandboxRunBusy
 
     coordinator = get_coordinator()
-    tenant, user, conversation = 'fixture-tenant', 'fixture-user', 'fixture-concurrent-run'
+    tenant, user, conversation = 'fixture-tenant', 'fixture-user', 1
     gate = 'ksm-fixture:admission-ready'
     coordinator.client.incr(gate)
     deadline = time.monotonic() + 15
@@ -498,8 +529,9 @@ def probe_multiruntime(_owned):
     try:
         coordinator.activate(lease)
         previous = coordinator.reference(lease)
-        state.reset_stream(user, conversation, run_ref=previous)
-        state.register_run(user, conversation, run_ref=previous)
+        old_journal = RunJournal(tenant, user, conversation, previous.run_id, retain_for_projection=True)
+        old_journal.start()
+        old_journal.append(1, 'previous')
         time.sleep(3 * coordinator.lease_seconds + 1)
         assert coordinator.client.get('ksm-fixture:admission-rejected')
         assert coordinator.client.hget(coordinator.redis_key(previous.business_key), 'run_id') == previous.run_id
@@ -510,16 +542,23 @@ def probe_multiruntime(_owned):
     try:
         coordinator.activate(replacement)
         current = coordinator.reference(replacement)
-        state.reset_stream(user, conversation, run_ref=current)
-        state.register_run(user, conversation, run_ref=current)
-        state.append_stream_event(user, conversation, 'current', run_ref=current)
-        state.append_stream_event(user, conversation, 'stale', run_ref=previous)
-        state.mark_stream_completed(user, conversation, 'failed', run_ref=previous)
-        assert not state.set_cancel_signal(user, conversation, previous.run_id, run_ref=previous)
-        assert state.get_run_state(user, conversation, run_ref=current)['status'] == 'running'
-        assert not state.is_cancelled(user, conversation, run_ref=current)
-        assert [chunk for _, chunk in state.read_stream_events(user, conversation, run_ref=current)] == ['current']
-        return {'accepted': True, 'renewed': True, 'current_generation': current.run_id}
+        journal = RunJournal(tenant, user, conversation, current.run_id, retain_for_projection=True)
+        journal.start()
+        journal.append(1, 'current')
+
+        # AgentOS delivers delayed events and stops to the exact generation journal.
+        old_journal.append(2, 'stale')
+        assert old_journal.run_state(request_stop=True) == ('2-0', 'running', True)
+        old_journal.finish(3, 'failed')
+        assert old_journal.run_state() == ('3-0', 'failed', False)
+        assert journal.run_state() == ('1-0', 'running', False)
+        assert not journal.is_stop_requested()
+        _, events, _ = journal.replay(START)
+        assert [event['data'] for _, event in events] == ['current']
+        assert coordinator.client.hget(coordinator.redis_key(current.business_key), 'run_id') == current.run_id
+        assert journal.run_state(request_stop=True) == ('1-0', 'running', True)
+        return {'accepted': True, 'renewed': True, 'previous_generation': previous.run_id,
+                'current_generation': current.run_id, 'stale_events_isolated': True, 'current_stop_recorded': True}
     finally:
         coordinator.finish(replacement)
 
@@ -572,14 +611,20 @@ async def controlled_core(request: Request, scenario: str):
 
 
 if __name__ == '__main__':
-    from management.configuration import runtime as configuration_runtime
-    from management.configuration.catalog import DEFAULT_CATALOG
+    from infrastructure.system_configuration import runtime as configuration_runtime
+    from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+    from runtime.api import application as runtime_application
+    from runtime import recovery as execution_recovery
 
     async def load_fixture_configuration():
         return dict(DEFAULT_CATALOG.defaults)
 
-    # The isolated namespace has no configuration database.
+    # These probes use a controlled model and no business database. Keep the
+    # Runtime lifespan and Redis/PVC owner recovery in the real application.
     configuration_runtime._process_runtime = configuration_runtime.SystemConfigurationRuntime(
         loader=load_fixture_configuration,
     )
+    runtime_application.fail_detecting_models_on_startup = lambda: 0
+    execution_recovery.renew_execution_leases = lambda: None
+    execution_recovery.pending_journal_repairs = lambda: []
     uvicorn.run(app, host='0.0.0.0', port=5014, log_level='warning')

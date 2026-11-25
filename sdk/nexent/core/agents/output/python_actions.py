@@ -5,50 +5,26 @@
 import ast
 
 
-_PARALLEL_EXECUTOR = "parallel_executor"
-
-
-def _authorized_parallel_call(call, names):
-    parameters = ("tasks", "timeout", "max_workers")
-    if len(call.args) > len(parameters):
+def is_parent_preparation_action(code, collaborator_names):
+    """Recognize one Python action without delegate or final-answer calls."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, TypeError):
         return False
-    arguments = dict(zip(parameters, call.args))
-    for keyword in call.keywords:
-        if keyword.arg not in parameters or keyword.arg in arguments:
-            return False
-        arguments[keyword.arg] = keyword.value
-    tasks = arguments.pop("tasks", None)
-    if not isinstance(tasks, (ast.List, ast.Tuple)) or not tasks.elts:
-        return False
-    if any(not isinstance(value, ast.Constant) for value in arguments.values()):
-        return False
-    widths = set()
-    for task in tasks.elts:
-        if not isinstance(task, (ast.List, ast.Tuple)) or len(task.elts) not in (2, 3):
-            return False
-        widths.add(len(task.elts))
-        target, kwargs, *label = task.elts
-        if not isinstance(target, ast.Name) or target.id not in names or not isinstance(kwargs, ast.Dict):
-            return False
-        try:
-            literal_kwargs = ast.literal_eval(kwargs)
-        except (ValueError, TypeError, SyntaxError):
-            return False
-        if any(not isinstance(key, str) for key in literal_kwargs):
-            return False
-        if label and (not isinstance(label[0], ast.Constant) or not isinstance(label[0].value, str)):
-            return False
-    return len(widths) == 1
+    reserved_names = collaborator_names | {"parallel_executor", "final_answer"}
+    return bool(tree.body) and not any(
+        isinstance(node, ast.Name) and node.id in reserved_names for node in ast.walk(tree)
+    )
 
 
-def is_delegation_action(code, names, *, allow_parallel=False):
-    """Accept authorized collaborator calls and optional result assignment or printing."""
+def is_delegation_action(code, names):
+    """Accept direct collaborator calls and optional result assignment/printing only."""
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError, KeyError, TypeError):
         return False
-    # Imports, attributes and indirect calls are outside the delegation action.
-    dispatchers = names | {_PARALLEL_EXECUTOR} if allow_parallel else names
+    # Before delegation, a text block is only a direct worker call, optional
+    # assignment and print. Imports, attributes and indirect calls cannot act.
     allowed = (
         ast.Module,
         ast.Expr,
@@ -69,9 +45,9 @@ def is_delegation_action(code, names, *, allow_parallel=False):
         if (
             not isinstance(assignment.value, ast.Call)
             or not isinstance(assignment.value.func, ast.Name)
-            or assignment.value.func.id not in dispatchers
+            or assignment.value.func.id not in names
             or any(
-                not isinstance(target, ast.Name) or target.id in dispatchers | {"print"}
+                not isinstance(target, ast.Name) or target.id in names | {"print"}
                 for target in assignment.targets
             )
         ):
@@ -81,19 +57,97 @@ def is_delegation_action(code, names, *, allow_parallel=False):
     for node in ast.walk(tree):
         if not isinstance(node, allowed):
             return False
-        if isinstance(node, ast.Name) and node.id not in dispatchers | {"print"} | variables:
+        if isinstance(node, ast.Name) and node.id not in names | {"print"} | variables:
             return False
         if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name) or node.func.id not in dispatchers | {"print"}:
+            if not isinstance(node.func, ast.Name) or node.func.id not in names | {"print"}:
                 return False
-            if allow_parallel and node.func.id == _PARALLEL_EXECUTOR:
-                if not _authorized_parallel_call(node, names):
-                    return False
-                worker_calls += 1
-            else:
-                worker_calls += node.func.id in names
+            worker_calls += node.func.id in names
             if any(keyword.arg is None for keyword in node.keywords):
                 return False
         if isinstance(node, ast.Assign) and any(not isinstance(target, ast.Name) for target in node.targets):
             return False
     return worker_calls > 0
+
+
+def parallel_delegation_targets(code, collaborator_names):
+    """Read one literal parallel batch followed only by optional result printing."""
+    try:
+        body = ast.parse(code).body
+    except (SyntaxError, ValueError, TypeError):
+        return ()
+    if not body:
+        return ()
+
+    result = None
+    match body[0]:
+        case ast.Assign(targets=[ast.Name(id=result)], value=ast.Call() as call):
+            if result in collaborator_names | {"parallel_executor", "print", "final_answer"}:
+                return ()
+        case ast.Expr(value=ast.Call() as call):
+            pass
+        case _:
+            return ()
+    if not isinstance(call.func, ast.Name) or call.func.id != "parallel_executor":
+        return ()
+
+    arguments = dict(zip(("tasks", "timeout", "max_workers"), call.args))
+    if len(call.args) > 3:
+        return ()
+    for keyword in call.keywords:
+        if keyword.arg not in {"tasks", "timeout", "max_workers"} or keyword.arg in arguments:
+            return ()
+        arguments[keyword.arg] = keyword.value
+    tasks = arguments.pop("tasks", None)
+    if not isinstance(tasks, (ast.List, ast.Tuple)) or not tasks.elts:
+        return ()
+    for name, option in arguments.items():
+        if not isinstance(option, ast.Constant):
+            return ()
+        value = option.value
+        if name == "max_workers" and (type(value) is not int or value < min(2, len(tasks.elts))):
+            return ()
+        if name == "timeout" and value is not None and (
+            type(value) not in (int, float) or not 0 < value < float("inf")
+        ):
+            return ()
+
+    targets = []
+    keys = set()
+    for task in tasks.elts:
+        match task:
+            case ast.Tuple(elts=[ast.Name(id=name), ast.Dict() as kwargs, *key]):
+                if name not in collaborator_names or len(key) > 1:
+                    return ()
+            case _:
+                return ()
+        try:
+            if any(not isinstance(param, str) for param in ast.literal_eval(kwargs)):
+                return ()
+        except (ValueError, TypeError):
+            return ()
+        if key:
+            if not isinstance(key[0], ast.Constant) or not isinstance(key[0].value, str) or not key[0].value:
+                return ()
+            keys.add(key[0].value)
+        targets.append(name)
+    if keys and len(keys) != len(targets):
+        return ()
+
+    for statement in body[1:]:
+        match statement:
+            case ast.Expr(value=ast.Call(func=ast.Name(id="print"), args=values, keywords=[])):
+                if not all(_is_parallel_result_value(value, result) for value in values):
+                    return ()
+            case _:
+                return ()
+    return tuple(targets)
+
+
+def _is_parallel_result_value(value, result):
+    if isinstance(value, ast.Constant):
+        return True
+    match value:
+        case ast.Name(id=name) | ast.Subscript(value=ast.Name(id=name), slice=ast.Constant()):
+            return name == result
+    return False

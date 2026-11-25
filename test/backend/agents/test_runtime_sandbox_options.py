@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from contracts import constants
+from runtime.adapters.nexent import sandbox
 from runtime.adapters.nexent.sandbox import get_runtime_sandbox_options
 
 
@@ -56,3 +57,20 @@ def test_incomplete_or_invalid_trusted_configuration_fails(settings, field, valu
     setattr(settings, field, value)
     with pytest.raises(ValueError):
         get_runtime_sandbox_options()
+
+
+def test_agentos_sandbox_resolution_uses_trusted_deployment_identity(settings, monkeypatch):
+    monkeypatch.setattr(sandbox, "default_sandbox_policy", lambda: None)
+
+    config = sandbox.resolve_deployed_sandbox({"level": "docker", "scope": "system"})
+
+    assert config.level.value == "kubernetes"
+    assert config.owner.pod_uid == "uid"
+    assert config.system_profile.execution_image == "sandbox:fixed"
+
+
+def test_agentos_sandbox_resolution_honors_disabled_provider(settings, monkeypatch):
+    settings.NEXENT_SANDBOX_ENABLED = False
+    monkeypatch.setattr(sandbox, "default_sandbox_policy", lambda: None)
+
+    assert sandbox.resolve_deployed_sandbox({"level": "docker", "scope": "system"}) is None

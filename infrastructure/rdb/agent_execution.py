@@ -248,6 +248,36 @@ def renew_execution_leases() -> None:
             ).values(lease_until=func.clock_timestamp() + LEASE_INTERVAL))
 
 
+def _recover_row(session, row):
+    status = "stopped" if row.cancellation_requested else "failed"
+    if row.assistant_message_id is not None:
+        message = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.message_id == row.assistant_message_id,
+            ConversationMessage.conversation_id == row.conversation_id,
+            ConversationMessage.created_by == row.created_by,
+            ConversationMessage.message_role == "assistant",
+            ConversationMessage.delete_flag == "N",
+        ).with_for_update())
+        if message is not None:
+            if message.status in TERMINAL:
+                status = message.status
+            elif message.status == "streaming":
+                message.status = status
+    row.status = status
+    row.lease_until = None
+    row.journal_repair_pending = True
+
+
+def recover_stopped_execution(identity: RunIdentity) -> bool:
+    """Finalize only the exact run whose protected Runtime owner has stopped."""
+    with get_db_session() as session:
+        row = session.scalar(select(AgentExecution).where(*_scope(identity), *_active()).with_for_update())
+        if row is None:
+            return False
+        _recover_row(session, row)
+        return True
+
+
 def recover_expired_executions(*, offline_session=None) -> int:
     """Recover expired leases, or all active rows while Runtime is fully stopped."""
     with get_db_session(offline_session) as session:
@@ -260,23 +290,7 @@ def recover_expired_executions(*, offline_session=None) -> int:
             query = query.with_for_update()
         rows = session.scalars(query).all()
         for row in rows:
-            status = "stopped" if row.cancellation_requested else "failed"
-            if row.assistant_message_id is not None:
-                message = session.scalar(select(ConversationMessage).where(
-                    ConversationMessage.message_id == row.assistant_message_id,
-                    ConversationMessage.conversation_id == row.conversation_id,
-                    ConversationMessage.created_by == row.created_by,
-                    ConversationMessage.message_role == "assistant",
-                    ConversationMessage.delete_flag == "N",
-                ).with_for_update())
-                if message is not None:
-                    if message.status in TERMINAL:
-                        status = message.status
-                    elif message.status == "streaming":
-                        message.status = status
-            row.status = status
-            row.lease_until = None
-            row.journal_repair_pending = True
+            _recover_row(session, row)
         return len(rows)
 
 

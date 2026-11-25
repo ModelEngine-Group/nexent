@@ -171,6 +171,7 @@ feature_overrides:
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: deployment
+  OPS-MCP-TOOL-MONITORING: ops_dashboard
   OPS-AGENT-FACTS: ops_dashboard
   OPS-MODEL-MONITORING: ops_dashboard
   SYSTEM-CONFIGURATION: system_configuration_alerts

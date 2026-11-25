@@ -7,8 +7,6 @@ from functools import lru_cache
 from pathlib import Path
 
 from runtime.sandbox_workspace import KubernetesWorkspace
-from runtime.sandbox_coordination import SandboxRunBusy
-from runtime.sandbox_journal import SandboxCoordinationUnknown
 
 from nexent.core.agents.sandbox_callbacks import SandboxCallbackRegistry
 from nexent.core.agents.sandbox_kubernetes import KubernetesSandboxBackend
@@ -70,33 +68,6 @@ def bind_runtime_sandbox(config, *, execution_run_id=None):
         host = '[' + host + ']'
     config.callback_endpoint = f'http://{host}:5014/internal/sandbox/tool-invoke'
     config.extra_kwargs['workspace_root'] = str(workspace.owner_root)
-
-
-def prepare_sandbox_workspace(config, actor, conversation_id, run_id, stop_event):
-    """Bind a prepared run to this Pod's workspace and callback registry."""
-    from runtime.sandbox_runtime import get_coordinator
-
-    coordinator = get_coordinator()
-    if coordinator is None or coordinator.owner_facts is None:
-        raise SandboxCoordinationUnknown("Runtime sandbox ownership is unavailable")
-    # Debug and trial runs have no persisted conversation to share.
-    key = conversation_id if conversation_id and conversation_id > 0 else f"prepared:{run_id}"
-    try:
-        lease = coordinator.reserve(actor.tenant_id, actor.user_id, key, run_id, cancel=stop_event.set)
-    except SandboxRunBusy as exc:
-        raise SandboxCoordinationUnknown("The previous sandbox execution has not been reclaimed") from exc
-    release = lambda: coordinator.finish(lease)
-    try:
-        coordinator.activate(lease)
-        bind_runtime_sandbox(config, execution_run_id=run_id)
-        workspace = config.workspace_access
-        path = workspace.run_path(actor.tenant_id, actor.user_id, run_id)
-        coordinator.record_workspace(run_id, path)
-        workspace.prepare_run(actor.tenant_id, actor.user_id, run_id)
-    except BaseException:
-        release()
-        raise
-    return str(path), str(workspace.owner_root), release
 
 
 def current_callback_registry():

@@ -6,7 +6,7 @@ implementations:
     selector: test_KSM_MULTIRUNTIME_D5_001
     profiles: [mock]
 timeout_seconds: 900
-notes: Owned namespace with two Runtime Pods, shared PVC and Redis. The binding proves coordinated admission, renewal and generation isolation. Real business DB recovery, faults and lifecycle acceptance remain pending.
+notes: Owned namespace with two Runtime Pods, shared PVC and Redis. The binding proves coordinated admission, renewal and isolation of AgentOS journal events, terminal state and stop flags by run. Real business DB recovery, the public stop route, faults and replica lifecycle acceptance remain pending.
 preparation:
   families: []
   anchors: false

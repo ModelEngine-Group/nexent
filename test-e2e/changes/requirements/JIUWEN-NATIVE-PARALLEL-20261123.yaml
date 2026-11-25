@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-NATIVE-PARALLEL-20261123
+  change_type: requirement
+  requirement_id: JIUWEN-NATIVE-PARALLEL-20261123
+  title: Schedule independent reads and eligible local agents through native Jiuwen parallel calls
+  description: Enable native parallel dispatch in Jiuwen chat while preserving authorized resource, timeout, output and cancellation contracts.
+  affected_features:
+    existing: []
+    modified: [JIUWEN-RESOURCES]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-RESOURCES-D3-001, JIUWEN-RESOURCES-D5-003, JIUWEN-OUTPUT-D3-001]
+    modified: [JIUWEN-RESOURCES-D3-002]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Native chat hides the legacy helper, while controlled text and the creator workflow retain it.
+    - Unknown or side-effecting tools are serial, and read-only parallel leaf children get read-only runtime bindings.
+    - Docker children retain their deployment policy with independently scoped workspaces and artifact bindings.
+    - A parallel child timeout cancels only the affected child; the parent can continue collecting results.
+    - Existing tool timeouts, output pairing and root-only clarification remain intact.
+    reason: Strengthen policy and adapter unit coverage. The D3 loopback provider waits for every child before
+      releasing any one, proving actual overlap, original call ID round trips and invocation ownership.
+      It also compares the public projection of live events with the projection of stored message units.
+      Existing D5 verifies cancellation beside unrelated roots. No duplicate D1 is required.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_adapter_preflight.py
+    - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/sdk/core/agents/test_jiuwen_history.py
+    - test/sdk/core/agents/test_jiuwen_clarification.py
+    - test/sdk/core/agents/test_jiuwen_tool_timeouts.py
+    - test/sdk/core/agents/test_jiuwen_parallel_sandbox.py
+    - test/sdk/core/agents/test_sandbox_lease_cleanup.py
+    - test/sdk/core/agents/test_sandbox_channel_readiness.py
+    - test/backend/utils/test_runtime_output.py
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/changes/runtime-jiuwen-native-parallel/.
+    JIUWEN-RESOURCES inherits runtime ownership. Existing Cases own their loopback model endpoints,
+    native sessions and ThreadManager workers. Preparation families remain empty. The SDK smoke
+    uses a real model with disposable local files and ephemeral Agent configs. Sandbox PoC and
+    guardrail design are recorded separately from production parallel dispatch.

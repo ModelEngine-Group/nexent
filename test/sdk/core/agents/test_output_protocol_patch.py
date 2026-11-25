@@ -157,12 +157,13 @@ def test_stray_closers_do_not_hide_a_real_action_or_change_quoted_text():
     assert classify_model_output(output, protocol="code_action") == ExecutableAction('print("</code>")')
 
 
-@pytest.mark.parametrize("output", [
-    "</code> <final_answer>Done.</final_answer>",
-    "<final_answer>Done.</final_answer> </code></CoDe>",
+@pytest.mark.parametrize(("output", "answer"), [
+    ("</code> <final_answer>Done.</final_answer>", "Done."),
+    ("<final_answer>Done.</final_answer> </code></CoDe>", "Done."),
+    ("<final_answer><result>5</result></final_answer></code>", "<result>5</result>"),
 ])
-def test_stray_closers_do_not_require_repair_for_a_complete_answer(output):
-    assert classify_model_output(output, protocol="code_action") == ExplicitFinalAnswer("Done.")
+def test_stray_closers_do_not_require_repair_for_a_complete_answer(output, answer):
+    assert classify_model_output(output, protocol="code_action") == ExplicitFinalAnswer(answer)
 
 
 @pytest.mark.parametrize(("content", "expected"), [

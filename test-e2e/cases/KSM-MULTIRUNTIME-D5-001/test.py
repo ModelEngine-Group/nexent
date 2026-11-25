@@ -18,4 +18,5 @@ def test_KSM_MULTIRUNTIME_D5_001():
     verdicts = list(result['core_agents'].values())
     assert sum(verdict['accepted'] for verdict in verdicts) == 1
     winner, = (verdict for verdict in verdicts if verdict['accepted'])
-    assert winner['renewed'] and winner['current_generation']
+    assert winner['renewed'] and winner['current_generation'] != winner['previous_generation']
+    assert winner['stale_events_isolated'] and winner['current_stop_recorded']

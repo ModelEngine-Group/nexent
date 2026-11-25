@@ -2,6 +2,7 @@
 """RSR-003: actual calls are safely observed without redefining success."""
 
 import asyncio
+import json
 from types import MethodType, SimpleNamespace
 
 import pytest
@@ -46,12 +47,14 @@ def test_normal_return_and_structured_error_keep_call_success(adapter, spans, re
     assert span.attributes['nexent.tool.result.is_error'] is is_error
     assert span.attributes['nexent.tool.local_call_id']
     assert not {'input.value', 'output.value', 'tool.parameters'}.intersection(span.attributes)
+    assert not {'nexent.local.input.value', 'nexent.local.output.value'}.intersection(span.attributes)
     assert 'secret-input' not in str(span.attributes) and 'private-result' not in str(span.attributes)
 
 
 @pytest.mark.parametrize('error', [ValueError('secret-error-message'), asyncio.CancelledError()])
 def test_actual_exception_is_preserved_and_safely_recorded(adapter, spans, error):
-    _, exporter = spans
+    manager, exporter = spans
+    manager._config = SimpleNamespace(capture_local_traces=True)
     with pytest.raises(type(error)) as caught:
         with adapter._observe_tool('local', {}):
             raise error
@@ -61,6 +64,8 @@ def test_actual_exception_is_preserved_and_safely_recorded(adapter, spans, error
     assert tools[0].attributes['agent.tool.success'] is False
     assert tools[0].attributes['error.type'] == type(error).__name__
     assert tools[0].status.status_code.name == 'ERROR'
+    assert json.loads(tools[0].attributes['nexent.local.input.value']) == {}
+    assert 'nexent.local.output.value' not in tools[0].attributes
     assert 'secret-error-message' not in str(tools[0].attributes) + str(tools[0].events) + str(tools[0].status.description)
     assert adapter._active_resource.get() is None
 
@@ -68,17 +73,20 @@ def test_actual_exception_is_preserved_and_safely_recorded(adapter, spans, error
 @pytest.mark.asyncio
 async def test_parallel_async_calls_have_distinct_scope_and_original_parent(adapter, spans):
     manager, exporter = spans
-    async def work():
-        with adapter._observe_tool('local', {}):
+    manager._config = SimpleNamespace(capture_local_traces=True)
+    async def work(query):
+        with adapter._observe_tool('local', {'query': query}):
             await asyncio.sleep(0)
-            adapter._resource_result('ok')
+            adapter._resource_result(query)
     with manager._tracer.start_as_current_span('parent') as parent:
-        await asyncio.gather(work(), work())
+        await asyncio.gather(work('first'), work('second'))
         parent_id = parent.get_span_context().span_id
     tools = [s for s in exporter.get_finished_spans() if s.attributes.get('openinference.span.kind') == 'TOOL']
     assert len(tools) == 2
     assert len({s.attributes['nexent.tool.local_call_id'] for s in tools}) == 2
     assert all(s.parent.span_id == parent_id and not s.attributes.get('nexent.tool.parent_call_id') for s in tools)
+    assert {json.loads(s.attributes['nexent.local.input.value'])['query']: s.attributes['nexent.local.output.value']
+            for s in tools} == {'first': 'first', 'second': 'second'}
     assert adapter._active_resource.get() is None
 
 
@@ -116,7 +124,8 @@ async def test_managed_worker_inherits_actual_tool_span_and_cleanup(adapter, spa
 
 
 def test_nested_actual_calls_have_unique_ids_and_scoped_results(adapter, spans):
-    _, exporter = spans
+    manager, exporter = spans
+    manager._config = SimpleNamespace(capture_local_traces=True)
     with adapter._observe_tool('local', {}):
         outer_id = adapter._active_resource.get()[0]
         with adapter._observe_tool('local', {}):
@@ -129,6 +138,8 @@ def test_nested_actual_calls_have_unique_ids_and_scoped_results(adapter, spans):
     assert inner.parent.span_id == outer.context.span_id
     assert inner.attributes['nexent.tool.result.is_error'] is True
     assert outer.attributes['nexent.tool.result.is_error'] is False
+    assert json.loads(inner.attributes['nexent.local.output.value']) == {'success': False}
+    assert outer.attributes['nexent.local.output.value'] == 'normal outer result'
     assert all(s.attributes['agent.tool.success'] is True for s in tools)
 
 
@@ -210,6 +221,7 @@ def test_opaque_non_json_payload_has_no_repr_capture(adapter, spans):
     from nexent.core.agents.cores.jiuwen.tool_tracing import tool_execution_trace
 
     manager, exporter = spans
+    manager._config = SimpleNamespace(capture_local_traces=True)
     class Private:
         def __repr__(self):
             raise AssertionError('Do not inspect arbitrary objects')
@@ -217,6 +229,9 @@ def test_opaque_non_json_payload_has_no_repr_capture(adapter, spans):
         pass
     span = exporter.get_finished_spans()[0]
     assert span.attributes['nexent.tool.input.available'] is False
+    assert span.attributes['nexent.local.nexent.availability.input'] == 'serialization_failed'
+    assert span.attributes['nexent.local.nexent.trajectory.gap'] is True
+    assert 'nexent.local.input.value' not in span.attributes
     assert span.attributes['agent.tool.success'] is True
 
 
@@ -233,3 +248,41 @@ def test_existing_local_capture_identity_and_definition_are_preserved(adapter, s
     assert span.attributes['nexent.local.nexent.call_id'] == local_id
     assert 'Lookup' in span.attributes['nexent.local.tool.definition']
     assert span.attributes['nexent.local.tool.implementation']
+
+
+@pytest.mark.parametrize('result,expected', [
+    (None, 'null'), (False, 'false'), ('', ''), (' 42 ', ' 42 '), ('"text"', '"text"'),
+    (' { "v": 5 } ', ' { "v": 5 } '),
+])
+def test_local_tool_output_preserves_actual_return(adapter, spans, result, expected):
+    manager, exporter = spans
+    manager._config = SimpleNamespace(capture_local_traces=True)
+    with adapter._observe_tool('local', {}):
+        adapter._resource_result(result)
+    assert exporter.get_finished_spans()[0].attributes['nexent.local.output.value'] == expected
+
+
+def test_local_tool_bodies_are_redacted_and_excluded_from_remote_export(adapter, spans):
+    from nexent.monitor.span_processor import MonitoringSpanProcessor
+
+    manager, exporter = spans
+    manager._config = SimpleNamespace(capture_local_traces=True, provider='otlp')
+    arguments = {'count': 0, 'empty': [], 'nested': {'api_key': 'input-secret', 'value': None}}
+    result = {'result': '{"success":false,"api_key":"output-secret","message":"business error"}'}
+    with adapter._observe_tool('remote', arguments):
+        adapter._resource_result(result)
+    span = exporter.get_finished_spans()[0]
+    assert json.loads(span.attributes['nexent.local.input.value']) == {
+        'count': 0, 'empty': [], 'nested': {'value': None},
+    }
+    captured = json.loads(span.attributes['nexent.local.output.value'])
+    assert json.loads(captured['result']) == {'success': False, 'message': 'business error'}
+    assert span.attributes['agent.tool.success'] is True
+    assert span.attributes['nexent.tool.result.is_error'] is True
+    remote = InMemorySpanExporter()
+    MonitoringSpanProcessor(SimpleSpanProcessor(remote)).on_end(span)
+    public = remote.get_finished_spans()[0]
+    assert not any(key.startswith('nexent.local.') for key in public.attributes)
+    assert 'nexent.tool.output.sha256' in public.attributes
+    assert 'business error' not in str(public.attributes)
+    assert all(secret not in str(span.attributes) for secret in ('input-secret', 'output-secret'))

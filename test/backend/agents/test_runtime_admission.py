@@ -5,19 +5,20 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
-from runtime import identity, sandbox_runtime
+from runtime import sandbox_runtime
 
 
-@pytest.mark.parametrize('distributed,lost', [(False, True), (True, False), (True, True)])
-def test_admission_still_rejects_lost_coordination_without_an_exit_controller(monkeypatch, distributed, lost):
-    monkeypatch.setattr(identity, 'uses_distributed_runtime', lambda: distributed)
-    lookup = Mock(return_value=SimpleNamespace(lost_coordination=SimpleNamespace(is_set=lambda: lost)))
-    monkeypatch.setattr(sandbox_runtime, 'get_coordinator', lookup)
+@pytest.mark.parametrize("distributed,lost", [(False, True), (True, False), (True, True)])
+def test_admission_rejects_lost_agentos_coordination(monkeypatch, distributed, lost):
+    state = Mock()
+    state.is_set.return_value = lost
+    coordinator = SimpleNamespace(lost_coordination=state) if distributed else None
+    monkeypatch.setattr(sandbox_runtime, "get_coordinator", lambda: coordinator)
     if distributed and lost:
         with pytest.raises(HTTPException) as error:
-            sandbox_runtime.require_business_admission()
+            sandbox_runtime.check_agentos_admission()
         assert error.value.status_code == 503
-        assert error.value.headers == {'Retry-After': '1'}
+        assert error.value.detail == {"code": "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN"}
     else:
-        sandbox_runtime.require_business_admission()
-    assert lookup.call_count == int(distributed)
+        sandbox_runtime.check_agentos_admission()
+    assert state.is_set.call_count == int(distributed)

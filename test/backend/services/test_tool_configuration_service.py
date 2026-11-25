@@ -5357,7 +5357,7 @@ class TestUpdateToolInfoImplAidpPermission:
         request.name = "aidp_search"
         request.tool_id = 9
         request.agent_id = 3
-        request.params = {"kds_list": kds_list, "top_k": 5}
+        request.params = {"kds_list": kds_list, "top_k": 5, "hybrid_top_k": 1, "graph_top_k": 1}
         request.version_no = 0
         return request
 
@@ -5567,7 +5567,7 @@ class TestValidateLocalToolAidpSearch:
         mock_snapshot.return_value = types.SimpleNamespace(accessible_id_set=set())
 
         from management.services.tool.configuration import _validate_local_tool
-        result = _validate_local_tool("aidp_search", {"q": "test"}, {"top_k": 5}, "tid", "uid")
+        result = _validate_local_tool("aidp_search", {"q": "test"}, {"top_k": 5, "hybrid_top_k": 1, "graph_top_k": 1}, "tid", "uid")
 
         assert result == "search result"
         call_kwargs = mock_tool_class.call_args[1]

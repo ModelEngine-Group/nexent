@@ -6,9 +6,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.sandbox_contracts import SandboxOwner
+from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
+from nexent.core.agents.sandbox_kubernetes import KubernetesSandboxBackend
 from runtime.sandbox_journal import SandboxCoordinationUnknown, SandboxRunJournal, SandboxRunRecord
-from runtime.sandbox_owner import SandboxOwnerFacts
+from runtime.sandbox_owner import SandboxOwnerFacts, SandboxOwnerObserver
 from runtime.sandbox_recovery import SandboxRuntimeRecovery
 
 
@@ -17,7 +18,7 @@ def recovery(tmp_path):
     owner = SandboxOwner('release', 'namespace', 'runtime-a', 'uid-a', '10.0.0.1', 'old')
     journal = SandboxRunJournal(tmp_path / 'control')
     facts = SandboxOwnerFacts(journal, owner)
-    facts.initialize({'pid': 123, 'start_ticks': '100', 'boot_id': 'boot', 'container_id': 'runtime-cid',
+    facts.initialize({'pid': 1, 'start_ticks': '100', 'boot_id': 'boot', 'container_id': 'runtime-cid',
                       'container_name': 'nexent-runtime'})
     key = journal.business_key('release', 'namespace', 'tenant', 'user', 7)
     record = SandboxRunRecord('a' * 32, key, asdict(owner), 'tenant', 'user', 7, 'b' * 64, phase='ACTIVE')
@@ -88,18 +89,134 @@ def test_new_epoch_same_pod_is_blocked_by_another_live_process(recovery):
     fail.assert_not_called()
 
 
-def test_missing_ready_sandbox_never_proves_execution_stopped(recovery):
+@pytest.mark.parametrize('sandbox_created', [False, True])
+def test_startup_recovers_replaced_runtime_older_than_last_state(recovery, sandbox_created):
     from kubernetes.client.exceptions import ApiException
-    from nexent.core.agents.sandbox_contracts import SystemSandboxProfile
+
+    engine, record, facts, _, api, fail = recovery
+    owner = facts.owner
+    current_owner = replace(owner, epoch='new')
+    engine.coordinator.owner = current_owner
+    process = facts.read(owner.epoch)['process']
+    current_process = {**process, 'container_id': 'runtime-cid-new', 'start_ticks': '200'}
+    engine.observer = SandboxOwnerObserver(engine.api_factory, current_owner, current_process)
+    pod = {
+        'metadata': {'name': owner.pod_name, 'namespace': owner.namespace, 'uid': owner.pod_uid},
+        'spec': {'containers': [{'name': process['container_name']}]},
+        'status': {'containerStatuses': [{
+            'name': process['container_name'], 'containerID': current_process['container_id'],
+            'state': {'running': {'startedAt': '2026-11-23T01:00:00Z'}},
+            'lastState': {'terminated': {'containerID': 'runtime-cid-intermediate', 'finishedAt': 'time'}},
+        }]},
+    }
+    if sandbox_created:
+        declared_resource(facts)
+        api.read_namespaced_pod.side_effect = [pod, ApiException(status=404)]
+        with pytest.raises(SandboxCoordinationUnknown, match='SYSTEM execution termination is unproved'):
+            engine.recover(startup=True)
+        assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
+        fail.assert_not_called()
+        engine.coordinator.client.eval.assert_not_called()
+    else:
+        api.read_namespaced_pod.return_value = pod
+        assert engine.recover(startup=True)['recovered_runs'] == 1
+        api.read_namespaced_pod.side_effect = ApiException(status=503)
+        assert engine.recover(startup=True)['recovered_runs'] == 0
+        assert engine.journal.read_run(record.run_id).phase == 'TERMINAL'
+        api.read_namespaced_pod.assert_called_once_with(owner.pod_name, owner.namespace, _request_timeout=5)
+        fail.assert_called_once()
+    assert facts.read(owner.epoch)['process_stopped_at'] is not None
+    api.delete_namespaced_pod.assert_not_called()
+
+
+def test_missing_ready_sandbox_never_proves_execution_stopped(recovery, caplog, mocker):
+    from kubernetes.client.exceptions import ApiException
 
     engine, record, facts, observer, api, fail = recovery
     facts.creation_intent(facts.owner, SystemSandboxProfile('image:tag', 'claim'), 'sandbox-name')
     facts.observe_pod(facts.owner, 'sandbox-uid', 'sandbox-cid', ready=True)
     observer.process_stopped.return_value = True
     api.read_namespaced_pod.side_effect = ApiException(status=404)
-    assert engine.recover()['recovered_runs'] == 0
+    clock = mocker.patch('runtime.sandbox_recovery.time.monotonic', return_value=100)
+    engine.retention_seconds = 0
+
+    for now in (100, 105, 399):
+        clock.return_value = now
+        assert engine.recover() == {'recovered_runs': 0, 'unknown_owners': 1, 'restart_confirmed': False}
+
+    warnings = [entry for entry in caplog.records if entry.name == 'runtime.sandbox_recovery']
+    assert len(warnings) == 1
+    assert warnings[0].exc_info is None
+    assert 'sandbox-name' in warnings[0].message and '404' in warnings[0].message
+    clock.return_value = 400
+    assert engine.recover()['unknown_owners'] == 1
+    assert sum(entry.name == 'runtime.sandbox_recovery' for entry in caplog.records) == 2
+    assert api.read_namespaced_pod.call_count == 4
+    api.read_namespaced_service.assert_not_called()
+    api.delete_namespaced_pod.assert_not_called()
+    api.delete_namespaced_service.assert_not_called()
     fail.assert_not_called()
+    engine.coordinator.client.eval.assert_not_called()
     assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
+    assert facts.read(facts.owner.epoch)['resource_state'] == 'READY'
+
+
+def test_missing_previous_sandbox_in_same_pod_still_blocks_startup(recovery):
+    from kubernetes.client.exceptions import ApiException
+
+    engine, record, facts, observer, api, fail = recovery
+    engine.coordinator.owner = replace(facts.owner, epoch='new')
+    declared_resource(facts)
+    observer.process_stopped.return_value = True
+    api.read_namespaced_pod.side_effect = ApiException(status=404)
+
+    with pytest.raises(SandboxCoordinationUnknown, match='termination is unproved'):
+        engine.recover(startup=True)
+
+    assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
+    api.delete_namespaced_pod.assert_not_called()
+    api.delete_namespaced_service.assert_not_called()
+    fail.assert_not_called()
+
+
+def test_missing_sandbox_warning_does_not_delay_recovery_with_later_proof(recovery, mocker):
+    from kubernetes.client.exceptions import ApiException
+
+    engine, record, facts, observer, api, fail = recovery
+    pod = declared_resource(facts)
+    observer.process_stopped.return_value = True
+    api.read_namespaced_pod.side_effect = [ApiException(status=404), pod]
+    api.read_namespaced_service.side_effect = ApiException(status=404)
+    prove_termination = mocker.patch('runtime.sandbox_recovery.wait_for_sandbox_termination', return_value=True)
+
+    assert engine.recover()['unknown_owners'] == 1
+    fail.assert_not_called()
+    assert engine.recover() == {'recovered_runs': 1, 'unknown_owners': 0, 'restart_confirmed': True}
+
+    assert prove_termination.call_args.kwargs['container_id'] == 'sandbox-cid'
+    assert api.delete_namespaced_pod.call_args.kwargs['body']['preconditions'] == {'uid': 'sandbox-uid'}
+    assert facts.read(facts.owner.epoch)['resource_state'] == 'TERMINATED'
+    assert engine.journal.read_run(record.run_id).phase == 'TERMINAL'
+
+
+@pytest.mark.parametrize('status', [403, 503])
+def test_other_pod_lookup_errors_keep_their_diagnostics(recovery, caplog, status):
+    from kubernetes.client.exceptions import ApiException
+
+    engine, _, facts, observer, api, fail = recovery
+    declared_resource(facts)
+    observer.process_stopped.return_value = True
+    api.read_namespaced_pod.side_effect = ApiException(status=status)
+
+    assert engine.recover()['unknown_owners'] == 1
+    assert engine.recover()['unknown_owners'] == 1
+
+    warnings = [entry for entry in caplog.records if entry.name == 'runtime.sandbox_recovery']
+    assert len(warnings) == 2
+    assert all(entry.exc_info[1].status == status for entry in warnings)
+    api.delete_namespaced_pod.assert_not_called()
+    api.delete_namespaced_service.assert_not_called()
+    fail.assert_not_called()
 
 
 def test_database_failure_keeps_protected_active_marker(recovery):
@@ -144,6 +261,74 @@ def test_retired_resource_still_retries_exact_service_cleanup(recovery):
     assert engine.recover()['recovered_runs'] == 1
     api.read_namespaced_pod.assert_not_called()
     assert api.delete_namespaced_service.call_args.kwargs['body'] == {'preconditions': {'uid': 'service-uid'}}
+
+
+@pytest.mark.parametrize('conflict', [None, 'unrecorded-epoch', 'owner', 'profile'])
+def test_same_pod_restart_reconciles_old_epoch_with_reused_service_name(recovery, caplog, conflict):
+    engine, record, old_facts, observer, api, fail = recovery
+    old_owner = old_facts.owner
+    new_owner = replace(old_owner, epoch='new')
+    engine.coordinator.owner = new_owner
+    name = KubernetesSandboxBackend.resource_name(old_owner)
+    assert name == KubernetesSandboxBackend.resource_name(new_owner)
+
+    old_facts.creation_intent(old_owner, SystemSandboxProfile('image:old', 'claim'), name)
+    old_facts.observe_pod(old_owner, 'old-sandbox-uid', 'old-sandbox-cid', ready=True)
+    old_facts.terminated(old_owner, 'old-sandbox-uid')
+    old_facts.record_process_stopped()
+
+    new_facts = SandboxOwnerFacts(engine.journal, new_owner)
+    process = old_facts.read(old_owner.epoch)['process']
+    new_facts.initialize(dict(process, container_id='new-runtime-cid'))
+    new_profile = SystemSandboxProfile('image:new', 'claim')
+    new_facts.creation_intent(new_owner, new_profile, name)
+    new_facts.observe_pod(new_owner, 'new-sandbox-uid', 'new-sandbox-cid', ready=True)
+    new_record = replace(record, run_id='c' * 32, owner=asdict(new_owner),
+                         associations={**record.associations, 'assistant_message_id': 20})
+    engine.journal.publish(new_record)
+    owner_before = new_facts.read(new_owner.epoch)
+    observer.process_stopped.return_value = True
+    metadata = {
+        'name': name,
+        'uid': 'new-service-uid',
+        'annotations': {'nexent.ai/epoch': new_owner.epoch, 'nexent.ai/profile': new_profile.fingerprint},
+        'ownerReferences': [{'kind': 'Pod', 'name': new_owner.pod_name, 'uid': new_owner.pod_uid}],
+    }
+    if conflict == 'unrecorded-epoch':
+        metadata['annotations']['nexent.ai/epoch'] = 'unrecorded'
+    elif conflict == 'owner':
+        metadata['ownerReferences'][0]['uid'] = 'foreign-pod-uid'
+    elif conflict == 'profile':
+        metadata['annotations']['nexent.ai/profile'] = 'conflicting-profile'
+    api.read_namespaced_service.return_value = {'metadata': metadata}
+
+    result = engine.recover()
+
+    api.delete_namespaced_pod.assert_not_called()
+    api.delete_namespaced_service.assert_not_called()
+    assert new_facts.read(new_owner.epoch) == owner_before
+    assert engine.journal.read_current(record.business_key).run_id == new_record.run_id
+    assert engine.journal.read_run(new_record.run_id).phase == 'ACTIVE'
+    if conflict:
+        assert result['unknown_owners'] == 1
+        assert result['recovered_runs'] == 0
+        assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
+        fail.assert_not_called()
+        return
+
+    assert result['unknown_owners'] == 0
+    assert result['recovered_runs'] == 1
+    assert engine.journal.read_run(record.run_id).phase == 'TERMINAL'
+    fail.assert_called_once()
+    assert fail.call_args.kwargs['assistant_message_id'] == 19
+    engine.retention_seconds = 0
+    assert engine.recover()['unknown_owners'] == 0
+    assert old_facts.read(old_owner.epoch) is None
+    api.read_namespaced_service.reset_mock()
+    assert engine.recover()['unknown_owners'] == 0
+    api.read_namespaced_service.assert_not_called()
+    api.delete_namespaced_service.assert_not_called()
+    assert 'Sandbox owner recovery preserved unknown state' not in caplog.text
 
 
 def declared_resource(facts, *, observed=True):

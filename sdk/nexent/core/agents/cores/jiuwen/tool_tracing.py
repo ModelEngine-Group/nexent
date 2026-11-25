@@ -8,16 +8,17 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 from nexent.monitor import get_agent_monitoring_context
-from nexent.monitor.local_content import local_content_value
+from nexent.monitor.local_content import local_capture_enabled, local_content_value, set_local_span_content
 from nexent.monitor.run_capture import tool_capture_attributes
 
 
-_active_span = ContextVar("jiuwen_active_tool_span", default=None)
+_active_trace = ContextVar("jiuwen_active_tool_trace", default=(None, False))
 
 
 @contextmanager
 def tool_execution_trace(manager_factory, name, agent_name, attributes, *, tool_input=None, tool=None, observer=None):
     manager_context, span = None, None
+    capture_body = False
     try:
         metadata = get_agent_monitoring_context()
         extra = getattr(metadata, "extra_metadata", None)
@@ -27,15 +28,18 @@ def tool_execution_trace(manager_factory, name, agent_name, attributes, *, tool_
         manager = manager_factory()
         if tool is not None:
             attributes = {**tool_capture_attributes(manager, tool, observer), **attributes}
+        capture_body = local_capture_enabled(manager)
         manager_context = manager.trace_tool_call(
             name, agent_name, safe_diagnostics=True,
             **{key: value for key, value in attributes.items() if value is not None},
         )
         span = manager_context.__enter__()
         _fingerprint(span, "input", tool_input)
+        if span is not None and capture_body:
+            set_local_span_content(span, "input", tool_input)
     except Exception:
         manager_context = None
-    token = _active_span.set(span)
+    token = _active_trace.set((span, capture_body))
     try:
         yield span
     except BaseException:
@@ -53,17 +57,19 @@ def tool_execution_trace(manager_factory, name, agent_name, attributes, *, tool_
             except Exception:
                 pass
     finally:
-        _active_span.reset(token)
+        _active_trace.reset(token)
 
 
-def record_tool_result(is_error, result):
+def record_tool_result(is_error, result, *, fingerprint_value):
     """Structured result state is separate from normal call-return success."""
-    span = _active_span.get()
+    span, capture_body = _active_trace.get()
     if span is not None:
         try:
             span.set_attributes({"nexent.tool.result.is_error": bool(is_error),
                                  "nexent.tool.execution_state": "returned"})
-            _fingerprint(span, "output", result)
+            _fingerprint(span, "output", fingerprint_value)
+            if capture_body:
+                set_local_span_content(span, "output", result)
         except Exception:
             pass
 

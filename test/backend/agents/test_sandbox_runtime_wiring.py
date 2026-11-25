@@ -2,16 +2,22 @@
 
 """Startup and admission preserve trusted ownership before any business work."""
 
+import asyncio
 import importlib
+import sys
+from concurrent.futures import Future
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
+from fastapi import HTTPException
+
 from contracts.constants import environment
 from runtime import sandbox_runtime as wiring
 from runtime import sandbox_services as services
-from runtime.sandbox_journal import SandboxRunJournal
+from runtime.sandbox_coordination import SandboxRunBusy
+from runtime.sandbox_journal import SandboxCoordinationUnknown, SandboxRunJournal
 
 from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
 
@@ -28,38 +34,77 @@ def configured(monkeypatch, owner, tmp_path):
     return coordinator
 
 
-def test_non_kubernetes_requests_keep_existing_local_contract(monkeypatch):
-    monkeypatch.setattr(wiring, 'get_coordinator', lambda: None)
-    assert wiring.initialize_sandbox_coordination(Mock()) is None
+@pytest.mark.asyncio
+async def test_non_kubernetes_requests_keep_existing_local_contract(monkeypatch):
+    monkeypatch.setattr(wiring, "get_coordinator", lambda: None)
+    assert await wiring.reserve_agentos_sandbox("t", "u", 7, "a" * 32, kind="CHAT", cancel=Mock()) is None
+    assert wiring.configure_runtime_coordination(Mock(), Mock()) is None
 
 
-@pytest.mark.parametrize('provider,in_cluster', [('docker', True), ('kubernetes', False)])
-def test_coordinator_is_disabled_outside_trusted_kubernetes(monkeypatch, provider, in_cluster):
+@pytest.mark.parametrize('provider,in_cluster,enabled', [('docker', True, True), ('kubernetes', False, True),
+                                                        ('kubernetes', True, False)])
+def test_coordinator_requires_enabled_sandbox_in_trusted_kubernetes(monkeypatch, provider, in_cluster, enabled):
+    monkeypatch.setattr(environment, 'NEXENT_SANDBOX_ENABLED', enabled)
     monkeypatch.setattr(environment, 'NEXENT_SANDBOX_PROVIDER', provider)
     monkeypatch.setattr(environment, 'IS_DEPLOYED_BY_KUBERNETES', in_cluster)
     assert wiring.get_coordinator() is None
 
 
-def test_prepared_workspace_binds_exact_owner_and_releases_lease(monkeypatch, configured, tmp_path):
-    config = SimpleNamespace()
-    actor = SimpleNamespace(tenant_id="tenant", user_id="owner")
-    workspace = Mock(owner_root=tmp_path)
-    run_dir = tmp_path / ("a" * 32)
-    workspace.run_path.return_value = run_dir
-    bind = Mock(side_effect=lambda config, **kwargs: setattr(config, "workspace_access", workspace))
-    monkeypatch.setattr(services, "bind_runtime_sandbox", bind)
-    event = Mock()
+@pytest.fixture
+def managed_io(monkeypatch):
+    async def run(_name, func, *args, lane, owner):
+        assert (lane, owner) == ("control-io", "runtime")
+        return func(*args)
 
-    path, root, release = services.prepare_sandbox_workspace(config, actor, 7, "a" * 32, event)
-    lease = configured.reserve.return_value
-    assert (path, root) == (str(run_dir), str(tmp_path))
-    configured.reserve.assert_called_once_with("tenant", "owner", 7, "a" * 32, cancel=event.set)
-    configured.activate.assert_called_once_with(lease)
-    configured.record_workspace.assert_called_once_with("a" * 32, run_dir)
-    workspace.prepare_run.assert_called_once_with("tenant", "owner", "a" * 32)
+    monkeypatch.setattr(wiring, "run_blocking", run)
+
+
+@pytest.mark.asyncio
+async def test_agentos_sandbox_activation_and_worker_exit_control_lease(configured, managed_io):
+    cancel = Mock()
+    owned = await wiring.reserve_agentos_sandbox("t", "u", 7, "a" * 32, kind="CHAT", cancel=cancel)
+    configured.reserve.assert_called_once_with("t", "u", 7, "a" * 32, kind="CHAT", cancel=cancel)
+    configured.activate.assert_called_once_with(owned.lease)
+    worker = Future()
+    await wiring.release_agentos_sandbox(owned, worker)
     configured.finish.assert_not_called()
-    release()
-    configured.finish.assert_called_once_with(lease)
+    worker.set_result(None)
+    configured.finish.assert_called_once_with(owned.lease)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase, code", [("busy", 409), ("lost", 503)])
+async def test_agentos_admission_failure_only_releases_acquired_lease(configured, managed_io, phase, code):
+    if phase == "busy":
+        configured.reserve.side_effect = SandboxRunBusy()
+    else:
+        configured.activate.side_effect = SandboxCoordinationUnknown()
+    with pytest.raises(HTTPException) as raised:
+        await wiring.reserve_agentos_sandbox("t", "u", 7, "a" * 32, kind="CHAT", cancel=Mock())
+    assert raised.value.status_code == code
+    assert configured.finish.call_count == int(phase == "lost")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_agentos_admission_releases_late_exact_lease(monkeypatch, configured):
+    started, unblock = asyncio.Event(), asyncio.Event()
+
+    async def run(name, func, *, lane, owner):
+        if name == "agentos-sandbox-reserve":
+            started.set()
+            await unblock.wait()
+        return func()
+
+    monkeypatch.setattr(wiring, "run_blocking", run)
+    task = asyncio.create_task(wiring.reserve_agentos_sandbox("t", "u", 7, "a" * 32, kind="CHAT", cancel=Mock()))
+    await started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    configured.finish.assert_not_called()
+    unblock.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    configured.finish.assert_called_once_with(configured.reserve.return_value)
 
 
 @pytest.fixture
@@ -72,28 +117,45 @@ def startup(monkeypatch, configured):
     monkeypatch.setattr(environment, 'NEXENT_RUNTIME_CONTAINER_NAME', 'nexent-runtime')
     monkeypatch.setattr(wiring, 'process_identity', lambda *args: {
         'pid': 123, 'start_ticks': '100', 'boot_id': 'boot', 'container_id': 'trusted', 'container_name': 'nexent-runtime'})
+    monkeypatch.setattr(environment, 'NEXENT_SANDBOX_ENABLED', True)
+    monkeypatch.setattr(environment, 'NEXENT_RECOVERY_MODE', 'startup')
     recovery = Mock()
+    recovery.recover.return_value = {'restart_confirmed': True}
     recovery_module = importlib.import_module('runtime.sandbox_recovery')
     monkeypatch.setattr(recovery_module, 'SandboxRuntimeRecovery', Mock(return_value=recovery))
-    monkeypatch.setattr(environment, 'NEXENT_SANDBOX_ENABLED', True)
+    app = SimpleNamespace(state=SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'runtime.api.application', SimpleNamespace(app=app))
     manager = Mock()
     manager.register_service.side_effect = [SimpleNamespace(execution_id='renew'), SimpleNamespace(execution_id='recover')]
-    return configured, api, pod, recovery, manager
+    return configured, api, pod, recovery, app, manager
 
 
 def test_startup_reconciles_owner_before_publishing_services(startup):
-    coordinator, _api, _pod, recovery, manager = startup
-    assert wiring.initialize_sandbox_coordination(manager) is coordinator
+    coordinator, api, pod, recovery, app, manager = startup
+    wiring.configure_runtime_coordination(manager, app.state)
     coordinator.client.ping.assert_called_once()
-    recovery.recover.assert_called_once_with(startup=True)
+    assert recovery.recover.call_args_list == [call(startup=True), call()]
     recovery.verify_current_owner_resources_absent.assert_called_once()
     assert coordinator.owner_facts.read('epoch')['process']['container_id'] == 'trusted'
+    assert app.state.sandbox_coordinator is coordinator
+    assert app.state.sandbox_restart_cutoff is not None
     assert [call.args[0] for call in manager.start_service.call_args_list] == ['renew', 'recover']
+
+
+def test_maintenance_startup_only_reconciles_sandbox_resources(startup, monkeypatch):
+    _coordinator, _api, _pod, recovery, app, manager = startup
+    monkeypatch.setattr(environment, 'NEXENT_RECOVERY_MODE', 'maintenance')
+    wiring.configure_runtime_coordination(manager, app.state)
+    recovery.recover.assert_called_once_with(startup=True)
+    constructor = importlib.import_module('runtime.sandbox_recovery').SandboxRuntimeRecovery
+    assert constructor.call_args.args[3] is None
+    assert constructor.call_args.kwargs['fail_execution'] is None
+    assert app.state.sandbox_restart_cutoff is None
 
 
 @pytest.mark.parametrize('failure', ['redis', 'uid', 'container_timeout'])
 def test_startup_identity_failure_never_enables_admission(startup, monkeypatch, failure):
-    coordinator, api, pod, recovery, manager = startup
+    coordinator, api, pod, recovery, app, manager = startup
     if failure == 'redis':
         coordinator.client.ping.side_effect = OSError('offline')
     elif failure == 'uid':
@@ -103,9 +165,21 @@ def test_startup_identity_failure_never_enables_admission(startup, monkeypatch, 
         monkeypatch.setattr(wiring.time, 'monotonic', Mock(side_effect=[0, 1, 16]))
         monkeypatch.setattr(wiring.time, 'sleep', Mock())
     with pytest.raises((OSError, RuntimeError, TimeoutError)):
-        wiring.initialize_sandbox_coordination(manager)
+        wiring.configure_runtime_coordination(manager, app.state)
+    assert not hasattr(app.state, "sandbox_coordinator")
     manager.start_service.assert_not_called()
     recovery.recover.assert_not_called()
+
+
+def test_failed_coordination_rejects_business_but_local_mode_keeps_running(monkeypatch, configured):
+    configured.lost_coordination.is_set.return_value = True
+    with pytest.raises(HTTPException) as raised:
+        wiring.check_agentos_admission()
+    assert raised.value.status_code == 503
+    configured.lost_coordination.is_set.return_value = False
+    wiring.check_agentos_admission()
+    monkeypatch.setattr(wiring, "get_coordinator", lambda: None)
+    wiring.check_agentos_admission()
 
 
 def test_service_binding_checks_mount_and_keeps_ipv6_callback_address(monkeypatch, configured, owner):

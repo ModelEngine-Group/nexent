@@ -45,9 +45,9 @@ def execution_conversation_id(request):
 
 
 def uses_distributed_runtime():
-    from contracts.constants.environment import IS_DEPLOYED_BY_KUBERNETES, NEXENT_SANDBOX_PROVIDER
+    from contracts.constants.environment import IS_DEPLOYED_BY_KUBERNETES, NEXENT_SANDBOX_ENABLED, NEXENT_SANDBOX_PROVIDER
 
-    return NEXENT_SANDBOX_PROVIDER == 'kubernetes' and bool(IS_DEPLOYED_BY_KUBERNETES)
+    return NEXENT_SANDBOX_ENABLED and NEXENT_SANDBOX_PROVIDER == 'kubernetes' and bool(IS_DEPLOYED_BY_KUBERNETES)
 
 
 def current_reference_options(tenant_id, user_id, conversation_id):

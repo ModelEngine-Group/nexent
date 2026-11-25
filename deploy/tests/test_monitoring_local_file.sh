@@ -155,11 +155,14 @@ for provider in ('default', 'disabled', 'otlp', 'phoenix', 'langfuse', 'langsmit
         assert volume['persistentVolumeClaim']['claimName'] == 'nexent-trajectory'
         mount = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == volume_name)
         assert mount['mountPath'] == expected
-for file in ('docker-compose.yml', 'docker-compose.prod.yml'):
+for file, target in (
+    ('docker-compose.yml', '/mnt/nexent-data/trajectory'),
+    ('docker-compose.prod.yml', '${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}'),
+):
     compose = yaml.safe_load((Path(sys.argv[2]) / 'deploy/docker/compose' / file).read_text())
     for name in ('nexent-runtime', 'nexent-config'):
-        assert '${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}' in compose['services'][name]['volumes']
+        assert '${ROOT_DIR}/trajectory:' + target in compose['services'][name]['volumes']
 ops = yaml.safe_load((Path(sys.argv[2]) / 'deploy/docker/compose/docker-compose-ops.yml').read_text())
-assert '${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}' in ops['services']['nexent-ops']['volumes']
+assert '${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory' in ops['services']['nexent-ops']['volumes']
 PY
 printf 'All monitoring deployment option tests passed.\n'

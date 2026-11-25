@@ -14,6 +14,7 @@ except ImportError:
     redis = None
 
 from contracts.constants.environment import RUNTIME_CANCEL_TTL_SECONDS, RUNTIME_COMPLETED_TTL_SECONDS, RUNTIME_RUN_TTL_SECONDS, RUNTIME_STATE_REDIS_URL, RUNTIME_STREAM_MAX_LEN, RUNTIME_STREAM_TTL_SECONDS
+from infrastructure.redis.stream_replay import APPEND_COMPACT_REPLAY, compact_replay_args, decode_replay_checkpoint
 from contracts.constants.environment import RUNTIME_CREATOR_LEASE_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -404,35 +405,12 @@ class RuntimeStateService:
             return None
         try:
             if replay_update is not None:
-                return self.client.eval("""
-                    if ARGV[1] ~= '' and redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
-                    if ARGV[8] ~= '' then
-                        local previous = tonumber(redis.call('HGET', KEYS[3], 'sequence') or '0')
-                        if previous + 1 ~= tonumber(ARGV[8]) then
-                            redis.call('HSET', KEYS[1], 'replay_incomplete', '1')
-                            return false
-                        end
-                    end
-                    local payload = cjson.decode(ARGV[6])
-                    local field = 'part:' .. ARGV[5]
-                    if ARGV[7] == '1' then
-                        local old = redis.call('HGET', KEYS[3], field)
-                        if not old then return redis.error_reply('Replay checkpoint prefix missing') end
-                        old = cjson.decode(old)
-                        payload.content = old.content .. payload.content
-                    end
-                    local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
-                    redis.call('HSET', KEYS[3], field, cjson.encode(payload), 'cursor', id,
-                        'count', tonumber(ARGV[5]) + 1, 'generation', ARGV[1])
-                    if ARGV[8] ~= '' then redis.call('HSET', KEYS[3], 'sequence', ARGV[8]) end
-                    redis.call('EXPIRE', KEYS[2], ARGV[4])
-                    redis.call('EXPIRE', KEYS[3], ARGV[4])
-                    return id
-                """, 3, self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
-                    self._replay_key(user_id, conversation_id), generation or "", max(1, RUNTIME_STREAM_MAX_LEN),
-                    chunk, RUNTIME_STREAM_TTL_SECONDS, replay_update["slot"],
-                    json.dumps(replay_update["payload"], ensure_ascii=False), "1" if replay_update["append"] else "0",
-                    str(replay_update.get("sequence", ""))) or None
+                return self.client.eval(
+                    APPEND_COMPACT_REPLAY, 3, self._run_key(user_id, conversation_id),
+                    self._stream_key(user_id, conversation_id), self._replay_key(user_id, conversation_id),
+                    generation or "", max(1, RUNTIME_STREAM_MAX_LEN), chunk, RUNTIME_STREAM_TTL_SECONDS,
+                    *compact_replay_args(replay_update),
+                ) or None
             if generation is not None:
                 return self.client.eval("""
                     if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
@@ -475,17 +453,7 @@ class RuntimeStateService:
             return self._distributed.read_replay_checkpoint(user_id, conversation_id, run_ref=run_ref)
         if not self.enabled:
             return None
-        data = self.client.hgetall(self._replay_key(user_id, conversation_id))
-        return self._decode_checkpoint(data)
-
-    @staticmethod
-    def _decode_checkpoint(data):
-        if not data:
-            return None
-        return {
-            "entries": [json.loads(data[f"part:{index}"]) for index in range(int(data["count"]))],
-            "cursor": data["cursor"], "generation": data.get("generation", ""),
-        }
+        return decode_replay_checkpoint(self.client.hgetall(self._replay_key(user_id, conversation_id)))
 
     async def read_replay_checkpoint_async(self, user_id: str, conversation_id: int, *, run_ref=None) -> Optional[dict]:
         return await self._run_managed(
@@ -523,7 +491,7 @@ class RuntimeStateService:
         generation, status, message_id, entries, raw_exists, event_count, invalid = snapshot
         data = dict(zip(entries[::2], entries[1::2]))
         try:
-            checkpoint = self._decode_checkpoint(data) if data.get("generation") == generation else None
+            checkpoint = decode_replay_checkpoint(data) if data.get("generation") == generation else None
         except (KeyError, TypeError, ValueError):
             checkpoint = None
         return {"generation": generation, "terminal_status": status or None, "checkpoint": checkpoint,

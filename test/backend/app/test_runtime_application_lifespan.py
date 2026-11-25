@@ -62,8 +62,11 @@ class RuntimeThreadManager:
         return {"service_name": "runtime", "active_count": 0}
 
 
+@pytest.mark.parametrize("distributed", [False, True])
 @pytest.mark.parametrize("recovery_mode", ["startup", "maintenance"])
-def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, recovery_mode):
+def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, recovery_mode, distributed):
+    monkeypatch.setitem(sys.modules, "runtime.identity",
+                        _module("runtime.identity", uses_distributed_runtime=lambda: distributed))
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
@@ -118,7 +121,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     )
     monkeypatch.setitem(
         sys.modules, "runtime.sandbox_runtime",
-        _module("runtime.sandbox_runtime", initialize_sandbox_coordination=initialize_sandbox),
+        _module("runtime.sandbox_runtime", configure_runtime_coordination=initialize_sandbox),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -209,7 +212,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     shutdown_order.attach_mock(manager.shutdown, "thread_manager")
 
     async def exercise():
-        async with application.runtime_lifespan(None):
+        async with application.runtime_lifespan(application.app):
             pass
 
     asyncio.run(exercise())
@@ -227,7 +230,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     )
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
-    initialize_sandbox.assert_called_once_with(manager)
+    initialize_sandbox.assert_called_once_with(manager, application.app.state)
     if recovery_mode == "maintenance":
         verify_maintenance.assert_called_once_with("maintenance-batch")
         recover_models.assert_not_called()
@@ -236,8 +239,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     else:
         verify_maintenance.assert_not_called()
         recover_models.assert_called_once_with()
-        recover.assert_called_once_with()
-        cleanup.assert_called_once_with()
+        assert recover.call_count == cleanup.call_count == int(not distributed)
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()

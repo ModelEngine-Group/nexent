@@ -7,7 +7,7 @@ import socket
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 
 import httpx
@@ -157,7 +157,9 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
             metadata_patches, northbound=True, metadata={"project": "replacement"},
         )
     with monkeypatch.context() as workbench_patches:
-        await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True, use_root_skill=True)
+        await _assert_public_prepared_turn_over_signed_http(
+            workbench_patches, use_workbench=True, use_root_skill=True, requested_model_id=23,
+        )
     with monkeypatch.context() as native_metadata_patches:
         await _assert_public_prepared_turn_over_signed_http(
             native_metadata_patches, metadata={}, check_cursorless_resume=True,
@@ -183,7 +185,29 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
     with monkeypatch.context() as memory_patches:
-        await _assert_memory_store_over_signed_http(memory_patches)
+        async with memory_worker(memory_patches, "memory-write"):
+            await _assert_memory_store_over_signed_http(memory_patches)
+
+
+@asynccontextmanager
+async def memory_worker(monkeypatch, lane):
+    from infrastructure import memory_io
+    from nexent.core.concurrency import LanePolicy, ThreadManager
+
+    manager = ThreadManager("agentos-transport", {
+        lane: LanePolicy(
+            name=lane, max_workers=1, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=0, shutdown_grace_seconds=1,
+        ),
+    })
+    manager.start()
+    try:
+        with monkeypatch.context() as memory_patches:
+            memory_patches.setattr(memory_io, "get_default_thread_manager", lambda: manager)
+            yield
+    finally:
+        shutdown = await manager.shutdown(timeout=1)
+        assert not shutdown.stuck_execution_ids
 
 
 async def _assert_memory_store_over_signed_http(monkeypatch):
@@ -200,18 +224,17 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     )
     rows = {}
 
-    def find(tenant, user, agent, conversation, key, content):
+    def find(tenant, user, agent, conversation, key, content, *, agent_version_no):
+        assert agent_version_no == 3
         if (tenant, user, agent, conversation) != ("tenant-a", "user-a", 7, 42):
             raise memory.MemoryStoreScopeError
         return rows.get((tenant, key, content))
 
-    def write(tenant, user, agent, conversation, key, content, index):
+    def write(tenant, user, agent, conversation, key, content, index, *, deadline, agent_version_no):
+        assert agent_version_no == 3
         assert (tenant, user, agent, conversation, index) == ("tenant-a", "user-a", 7, 42, "mem_embed_2")
         rows[tenant, key, content] = 17
         return 17, "ADD"
-
-    async def controlled_io(_label, fn, *args, **_options):
-        return fn(*args)
 
     model_service = AsyncMock()
     model_service.invoke.return_value = SimpleNamespace(output=[[0.1, 0.2]])
@@ -219,11 +242,10 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     index_service.index_record.return_value = True
     write_record = Mock(side_effect=write)
     fanout = AsyncMock()
-    monkeypatch.setattr(memory, "run_blocking", controlled_io)
     monkeypatch.setattr(memory, "_load_embedding", lambda tenant: model if tenant == actor.tenant_id else None)
     monkeypatch.setattr(memory, "find_existing_memory", find)
     monkeypatch.setattr(memory, "write_agent_memory", write_record)
-    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args: args[-1]({"memory_id": 17}))
+    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args, deadline: args[-1]({"memory_id": 17}))
     monkeypatch.setattr(provider, "_fanout_external_ingest", fanout)
     monkeypatch.setattr(provider, "get_memory_record_service", Mock(side_effect=AssertionError("legacy store loaded")))
 
@@ -233,7 +255,7 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
     runtime.include_router(memory.create_memory_store_router(model_service, index_service))
     payload = {
         "tenant_id": actor.tenant_id, "user_id": actor.user_id, "agent_id": "7", "conversation_id": "42",
-        "content": "remember", "idempotency_key": "once",
+        "content": "remember", "idempotency_key": "once", "agent_version_no": 3,
     }
     with serve(runtime) as url:
         monkeypatch.setattr(environment, "RUNTIME_SERVICE_URL", url)
@@ -1449,16 +1471,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from contracts.agentos import AgentMemoryReceipt, AgentMemoryStored, ManagementOperation, PreparedMemorySearch
     from contracts.conversation import MessageSource
     from contracts.errors.exceptions import RuntimeServiceUnavailableError
-    from management.services.automation import runner as automation
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_store_memory_tool
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
     from management.api.memory import agentos_callback as memory_api
-    from management.services.memory import agentos_callback as memory_callback
     from management.services.agent import agentos_events, prepared_projection, runtime_client
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
+    from management.services.automation import runner as automation
+    from management.services.memory import agentos_callback as memory_callback
     from nexent.core.agents.contracts.config import AgentConfig
     from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
@@ -1563,12 +1585,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         }],
     }])
 
+    execution_records = [{"record_type": "tool_result", "content": "previous tool output",
+                          "tool_call_id": "completed-call", "invocation_id": None}]
+
     def read_history(conversation_id, boundary_id, user_id, tenant_id):
         assert (conversation_id, boundary_id, user_id, tenant_id) == (42, 23, actor.user_id, actor.tenant_id)
         return {
             "history_summary": {"unit_id": 51, "summary": {"markdown": "earlier"}, "covered_through_message_id": 20},
             "conversation_turns": [{"user_message": "previous query", "assistant_final_answer": "previous answer",
-                                    "user_message_id": 21, "assistant_message_id": 22, "attachments": None}],
+                                    "user_message_id": 21, "assistant_message_id": 22, "attachments": None,
+                                    "execution_records": execution_records}],
         }
 
     monkeypatch.setattr(evaluation_snapshot, "get_historical_context", read_history)
@@ -1591,12 +1617,13 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         lambda model_id, tenant_id, **_: create_model_config_from_record(model_record).resolved_profile
         if (model_id, tenant_id) == (11, actor.tenant_id) else None,
     )
-    request = await evaluation_snapshot.prepare_conversation_snapshot(
-        AgentRequest(
-            query="question", conversation_id=42, agent_id=7, version_no=3, enable_automation_tool=False,
-        ),
-        reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
-    )
+    async with memory_worker(monkeypatch, "memory-read"):
+        request = await evaluation_snapshot.prepare_conversation_snapshot(
+            AgentRequest(
+                query="question", conversation_id=42, agent_id=7, version_no=3, enable_automation_tool=False,
+            ),
+            reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
+        )
     assert isinstance(request, PreparedAgentRun)
     assert request.resource.version_no == 3
     assert request.native_knowledge is True and "kb-excluded" not in request.model_dump_json()
@@ -1616,6 +1643,9 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         assert profile.parameter_values["enable_thinking"] is True
         assert all(entry["path"] != "/temperature" for entry in profile.extra_api_parameters)
         assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
+        assert info.context_input.items[-1].content["execution_records"] == [
+            {"unit_index": None, "execution_event": None} | record for record in execution_records
+        ]
         memory_item = next(item for item in info.context_input.items if item.id == "memory:0")
         assert memory_item.content["memory"] == "authorized preference"
         store, = info.agent_config.tools
@@ -1635,8 +1665,8 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         output.write_bytes(b"report")
         published = []
 
-        def save_file(path, key):
-            uploaded.append((Path(path).read_bytes(), key))
+        def save_fileobj(file_obj, key):
+            uploaded.append((file_obj.read(), key))
             return True, "stored"
 
         agent = NexentAgent.__new__(NexentAgent)
@@ -1644,7 +1674,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         agent.workspace_mapping = None
         uploader = UploadToS3Tool(
             workspace_path=str(workspace), user_id=actor.user_id, run_id=info.workspace_run_id,
-            minio_client=SimpleNamespace(upload_file=save_file, default_bucket="bucket"),
+            minio_client=SimpleNamespace(upload_fileobj=save_fileobj, default_bucket="bucket"),
         )
         agent.agent = SimpleNamespace(tools={"upload_to_s3": uploader})
         script = RunSkillScriptTool(
@@ -1697,8 +1727,10 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     runtime.include_router(resume.create_run_lifecycle_router())
 
     ingested = AsyncMock()
+    memory_policy = Mock(return_value=True)
     monkeypatch.setattr(memory_callback, "run_blocking", control_io)
     monkeypatch.setattr(memory_callback, "conversation_belongs_to", owns)
+    monkeypatch.setattr(memory_callback, "can_write_automatic_memory", memory_policy)
     monkeypatch.setattr(memory_callback, "_fanout_external_ingest", ingested)
 
     def read_memory(memory_id, tenant):
@@ -1779,6 +1811,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         submission = await automation.AgentAutomationRunner()._execute_active_run(stored_run.copy(), task)
         assert submission["status"] == "RUNNING" and stored_run["projection_message_index"] == 1
         assert await asyncio.to_thread(finished.wait, 5)
+        memory_policy.assert_called_once_with(actor.tenant_id, actor.user_id, 7, 3)
         ingested.assert_awaited_once()
         stored_record, event = ingested.await_args.args
         assert (stored_record["content"], stored_record["conversation_id"], event) == (
@@ -2223,7 +2256,7 @@ async def test_raw_new_conversation_over_signed_agentos(monkeypatch, prior_users
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
     use_knowledge_scope=False, clarification=False, use_memory=False, use_root_skill=False,
-    check_cursorless_resume=False, raw_prior_users=None,
+    check_cursorless_resume=False, raw_prior_users=None, requested_model_id=None,
 ):
     from contracts.agentos import CompatibilityConversationRun
     from contracts.agent import WorkbenchSessionConfig
@@ -2321,8 +2354,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                     "index_names": ["kb-one"], "document_paths": ["report.txt"],
                 }
             assert turn["automation"] == {
-                # Automation retains the requested model. This request leaves model selection to the Agent.
-                "agent_id": 7, "agent_version_no": 2, "model_id": None,
+                # Automation retains an explicit request; otherwise the Agent selects its model.
+                "agent_id": 7, "agent_version_no": 2, "model_id": requested_model_id,
                 "tool_params": automation_params,
                 "has_attachments": False,
             }
@@ -2397,6 +2430,12 @@ async def _assert_public_prepared_turn_over_signed_http(
                 root_skills=(SimpleNamespace(tool_ids=()),) if use_root_skill else (), root=SimpleNamespace(identity=identity),
             ),
         ))
+    if requested_model_id is not None:
+        def lookup_model(model_id, tenant_id):
+            assert (model_id, tenant_id) == (requested_model_id, actor.tenant_id)
+            return {"model_type": "llm"}
+
+        monkeypatch.setattr("management.services.model.run_controls.get_model_by_model_id", lookup_model)
     if use_knowledge_scope:
         from management.services.knowledge_base import mount, scope
 
@@ -2414,6 +2453,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        assert request.model_id == requested_model_id
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         if raw_new:
@@ -2505,6 +2545,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                 "query": "test", "entrypoint": "workbench", "workbench": config.model_dump(mode="json"),
                 "expected_workbench_config_version": 3,
             }
+        if requested_model_id is not None:
+            request["model_id"] = requested_model_id
         if metadata is not None:
             request.update(metadata=metadata, expected_metadata_version=metadata_version - 1)
         if use_knowledge_scope:

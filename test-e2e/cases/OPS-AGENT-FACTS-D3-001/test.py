@@ -1589,17 +1589,12 @@ async def test_actual_jiuwen_agent_monitoring_pipeline(
 ):
     """Keep Jiuwen Runner, model service and the monitoring pipeline real."""
     import importlib.metadata
-    import importlib.util
-    from pathlib import Path
+    from shared.jiuwen_peer import model_config, provider
     from management.services.permission.identity import session as auth
     from nexent.core.agents.factory import AgentCoreFactory
     from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
     from permissions import rbac
 
-    specification = importlib.util.spec_from_file_location("ops_jiuwen_peer", Path(__file__).with_name("jiuwen_peer.py"))
-    peer = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(peer)
-    model_config, provider = peer.model_config, peer.provider
     assert importlib.metadata.version("openjiuwen") == "0.1.19"
     service, tenant = isolated_monitoring
     selected, native = [], []

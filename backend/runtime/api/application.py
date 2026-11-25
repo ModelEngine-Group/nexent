@@ -39,7 +39,8 @@ from nexent.core.concurrency import (
 )
 from runtime.trajectory import configure_runtime_trajectory
 from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
-from runtime.sandbox_runtime import initialize_sandbox_coordination
+from runtime.identity import uses_distributed_runtime
+from runtime.sandbox_runtime import configure_runtime_coordination
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
@@ -106,15 +107,15 @@ async def runtime_lifespan(_app):
                 ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
                 fail_detecting_models_on_startup,
             )
-            await recover_runtime_state()
-        coordinator = await runtime_thread_manager.run(
+            if not uses_distributed_runtime():
+                await recover_runtime_state()
+        await runtime_thread_manager.run(
             "control-io",
             ManagedTaskSpec(task_name="sandbox-owner-startup", owner="runtime"),
-            initialize_sandbox_coordination,
+            configure_runtime_coordination,
             runtime_thread_manager,
+            getattr(_app, "state", None),
         )
-        if coordinator is not None and _app is not None:
-            _app.state.sandbox_coordinator = coordinator
         reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
         try:
             yield

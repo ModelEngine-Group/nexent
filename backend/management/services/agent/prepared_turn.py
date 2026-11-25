@@ -94,7 +94,10 @@ def _definitive_rejection(error):
     if error.status_code == 503:
         try:
             payload = json.loads(error.content)
-            return payload["detail"]["code"] == "AGENTOS_EVENT_STORE_UNAVAILABLE"
+            return payload["detail"]["code"] in {
+                "AGENTOS_EVENT_STORE_UNAVAILABLE",
+                "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN",
+            }
         except (TypeError, ValueError, KeyError):
             pass
     return False

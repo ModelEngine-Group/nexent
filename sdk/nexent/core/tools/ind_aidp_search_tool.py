@@ -24,7 +24,7 @@ from ..ext_components.aidp.retrieval_config import (
     CONFIG_KEYS,
     DEFAULTS,
     build_payload,
-    resolve_config,
+    validate_config,
 )
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
@@ -136,8 +136,8 @@ class IndependentAidpSearchTool(Tool):
         "multi_modal": {"description": "Return image/table chunks", "description_zh": "是否返回图片和表格块"},
         "vector_candidates": {"description_zh": "向量初步检索条数；固定整数，1–500"},
         "full_text_candidates": {"description_zh": "全文初步检索条数；固定整数，1–500"},
-        "hybrid_top_k": {"description_zh": "向量／全文部分返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
-        "graph_top_k": {"description_zh": "图谱返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "hybrid_top_k": {"description_zh": "向量／全文返回上限；固定整数，1–100；与图谱返回上限之和不能超过返回条数上限"},
+        "graph_top_k": {"description_zh": "图谱返回上限；固定整数，1–100；与向量／全文返回上限之和不能超过返回条数上限"},
         "vector_score_threshold": {"description_zh": "向量检索分数阈值，范围 0–1"},
         "full_text_score_threshold": {"description_zh": "全文检索分数阈值，范围 0–1"},
         "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
@@ -164,8 +164,8 @@ class IndependentAidpSearchTool(Tool):
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
         vector_candidates: int = Field(default=10, ge=1, le=500, description="Vector candidates"),
         full_text_candidates: int = Field(default=10, ge=1, le=500, description="Full-text candidates"),
-        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero means no separate cap, still bounded by top_k"),
-        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero means no separate cap, still bounded by top_k"),
+        hybrid_top_k: int = Field(default=5, ge=1, le=100, description="Vector/full-text cap (1-100); the sum with graph_top_k must not exceed top_k"),
+        graph_top_k: int = Field(default=5, ge=1, le=100, description="Graph cap (1-100); the sum with hybrid_top_k must not exceed top_k"),
         vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
         full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
@@ -173,6 +173,7 @@ class IndependentAidpSearchTool(Tool):
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
         observer: MessageObserver = Field(default=None, exclude=True),
         image_url_builder: Optional[Callable[[str], str]] = Field(default=None, exclude=True),
+        **kwargs,
     ):
         super().__init__()
         self.base_url = _validate_base_url(server_url)
@@ -205,7 +206,14 @@ class IndependentAidpSearchTool(Tool):
             "query_expansion_enable": query_expansion_enable,
         }
         config = {key: _field_default(value, DEFAULTS[key]) for key, value in config.items()}
-        resolved = resolve_config(config)
+        if not config.get("reranking_enable", DEFAULTS["reranking_enable"]):
+            config["graph_reranking_enable"] = False
+        # Legacy zero caps mean "not set"; treat them as the default before
+        # validation so stored 0/0 configurations keep working.
+        for key in ("hybrid_top_k", "graph_top_k"):
+            if config.get(key) == 0:
+                config[key] = DEFAULTS[key]
+        resolved = validate_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
         self.observer = _field_default(observer, None)

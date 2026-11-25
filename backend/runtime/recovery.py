@@ -18,6 +18,7 @@ from nexent.core.concurrency import ManagedTaskSpec
 
 from infrastructure.rdb.conversation_state import fail_streaming_assistant_messages
 from infrastructure.redis.run_state import runtime_state_service
+from runtime.identity import uses_distributed_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def recover_streaming_runs() -> int:
 
 def reconcile_executions() -> None:
     renew_execution_leases()
-    if NEXENT_RECOVERY_MODE != "maintenance":
+    if NEXENT_RECOVERY_MODE == "startup" and not uses_distributed_runtime():
         recover_expired_executions()
     repair_deadline = monotonic() + 10
     for identity, status in pending_journal_repairs():

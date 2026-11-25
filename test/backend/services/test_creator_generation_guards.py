@@ -14,7 +14,6 @@ from contracts.errors.exceptions import (
     RuntimeQueueTimeoutError,
 )
 from infrastructure.redis.run_state import RuntimeStateService
-from management.services.agent import channels, lifecycle, run
 from management.services.conversation import creator_runtime
 from management.services.conversation.creator_runtime import CreatorControl
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
@@ -55,63 +54,6 @@ def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
     assert not state.cancel_creator_run("user", 91, expected_generation="new")
 
 
-@pytest.mark.asyncio
-async def test_creator_claim_and_replay_keep_working_with_sandbox_coordination(monkeypatch):
-    monkeypatch.setattr("infrastructure.redis.run_state.RUNTIME_STATE_REDIS_URL", "redis://controlled-fixture")
-    state = RuntimeStateService()
-    state._client = fakeredis.FakeRedis(decode_responses=True)
-    manager = lifecycle.agent_run_manager
-    coordinator = Mock()
-    monkeypatch.setattr(manager, "_coordinator", coordinator)
-    monkeypatch.setattr(lifecycle, "creator_runtime_state_service", state)
-    monkeypatch.setattr(creator_runtime, "runtime_state_service", state)
-    monkeypatch.setattr(channels, "creator_runtime_state_service", state)
-    control = CreatorControl()
-    with pytest.raises(RuntimeError, match="trusted tenant"):
-        manager.reserve_agent_run(19, "user")
-    token = await creator_runtime.claim_creator(19, "user", control.generation)
-
-    async def frames():
-        yield 'data: {"type":"final_answer","content":"creator output"}\n\n'
-
-    stream = await creator_runtime.launch_creator(
-        frames(), control=control, conversation_id=19, user_id="user", reservation=token,
-    )
-    assert [json.loads(frame[6:]) async for frame in stream] == [
-        {"type": "final_answer", "content": "creator output"},
-    ]
-    assert state.read_replay_checkpoint("user", 19)["generation"] == control.generation
-    assert state.get_run_state("user", 19)["status"] == "completed"
-    assert manager.get_agent_run_info(19, "user") is None
-    assert coordinator.mock_calls == []
-
-
-@pytest.mark.parametrize("redis_outage", [False, True])
-def test_runtime_stop_preserves_creator_generation_with_local_owner(monkeypatch, redis_outage):
-    monkeypatch.setattr("infrastructure.redis.run_state.RUNTIME_STATE_REDIS_URL", "redis://controlled-fixture")
-    state = RuntimeStateService()
-    state._client = fakeredis.FakeRedis(decode_responses=True)
-    manager = lifecycle.agent_run_manager
-    monkeypatch.setattr(manager, "_coordinator", Mock())
-    monkeypatch.setattr(lifecycle, "creator_runtime_state_service", state)
-    monkeypatch.setattr(run, "current_reference_options", lambda *_: {"run_ref": None})
-    control = CreatorControl()
-    assert state.claim_creator_run("user", 21, control.generation)
-    token = manager.reserve_agent_run(21, "user", creator=True)
-    info = control.registered_info()
-    manager.register_agent_run(21, info, "user", token, creator=True)
-    if redis_outage:
-        monkeypatch.setattr(state, "cancel_creator_run", Mock(side_effect=OSError("Redis unavailable")))
-    try:
-        stopped = run.stop_agent_tasks(21, "user", expected_generation="obsolete", tenant_id="tenant")
-        assert stopped["already_stopped"] and not control.stop_event.is_set()
-        stopped = run.stop_agent_tasks(21, "user", expected_generation=control.generation, tenant_id="tenant")
-        assert not stopped.get("already_stopped") and control.stop_event.is_set()
-        assert state.is_cancelled("user", 21) != redis_outage
-    finally:
-        manager.unregister_agent_run(21, "user", "stopped", agent_run_info=info)
-
-
 def test_durable_creator_owner_replaces_obsolete_lease_without_waiting_for_redis_expiry(monkeypatch):
     monkeypatch.setattr("infrastructure.redis.run_state.RUNTIME_STATE_REDIS_URL", "redis://controlled-fixture")
     state = RuntimeStateService()
@@ -126,6 +68,19 @@ def test_durable_creator_owner_replaces_obsolete_lease_without_waiting_for_redis
     assert state.get_run_state("user", 91)["generation"] == "execution:42"
     assert state.get_run_state("user", 91)["execution_id"] == "42"
     assert state.read_stream_events("user", 91) == []
+
+
+@pytest.mark.asyncio
+async def test_local_creator_stop_keeps_the_current_generation(monkeypatch):
+    manager = Mock()
+    monkeypatch.setattr(creator_runtime, "agent_run_manager", manager)
+    current = CreatorControl().registered_info()
+    manager.get_agent_run_info.return_value = current
+    generation = current._automation_runtime_generation
+    assert await creator_runtime.stop_creator(21, "user", "obsolete") is False
+    manager.stop_local_run.assert_not_called()
+    assert await creator_runtime.stop_creator(21, "user", generation) is manager.stop_local_run.return_value
+    manager.stop_local_run.assert_called_once_with(21, "user", expected_run=current)
 
 
 @pytest.mark.asyncio

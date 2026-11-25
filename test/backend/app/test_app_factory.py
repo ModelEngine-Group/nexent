@@ -116,6 +116,24 @@ class TestCreateApp:
 
         assert app.router.lifespan_context is lifespan
 
+    def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+        app.add_api_route("/service", lambda: {"ok": True}, methods=["POST"])
+        app.add_api_route("/ordinary", lambda: {"ok": True}, methods=["POST"])
+        client = TestClient(app)
+        assert client.post("/service").json() == {"ok": True}
+        assert client.post("/ordinary").status_code == 401
+
     def test_create_app_forwards_internal_runtime_request(self):
         """The runtime launcher passes a predicate that must reach the middleware."""
 
@@ -984,3 +1002,57 @@ class TestGenericHandlerAppExceptionDelegation:
             "message": "Session expired, please log in again",
             "code": "TOKEN_EXPIRED",
         }
+
+
+
+
+class TestOpsMonitoringLifespanWiring:
+    """The shared producer from infrastructure.monitoring wraps app lifespans."""
+
+    @staticmethod
+    def _stub_lifespan(state):
+        @asynccontextmanager
+        async def lifespan(_app):
+            state["lifespan"] = True
+            yield
+
+        return lifespan
+
+    @staticmethod
+    def _stub_producer(state):
+        @asynccontextmanager
+        async def producer_lifespan():
+            state["producer"] = True
+            yield
+
+        return producer_lifespan
+
+    def test_enabled_combines_producer_and_lifespan(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["producer"] is True
+        assert state["lifespan"] is True
+
+    def test_disabled_keeps_lifespan_unwrapped(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", False)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["lifespan"] is True
+        assert "producer" not in state

@@ -130,6 +130,21 @@ async def test_admission_identity_reaches_worker_without_changing_response_ids(l
 
 
 @pytest.mark.asyncio
+async def test_admission_identity_reaches_worker_without_changing_conversation_id(payload, runtime, mocker):
+    async def source(info, **_kwargs):
+        assert info is runtime.info
+        yield '{"type":"final_answer","content":"done"}'
+
+    mocker.patch.object(prepared_run, "agent_run", side_effect=source)
+    reference = await prepared_run.start_prepared_run(payload, ACTOR)
+    await settle(runtime)
+    assert reference.run_id == payload.run_id
+    assert reference.conversation_id == payload.conversation_id
+    assert reference.run_id != str(reference.conversation_id)
+    runtime.prepare.assert_awaited_once_with(payload, ACTOR, prepared_run.prepare_run_snapshot)
+
+
+@pytest.mark.asyncio
 async def test_preparation_failure_records_safe_terminal_and_releases_capacity(payload, runtime, mocker):
     runtime.prepare.side_effect = RuntimeError("private provider details")
     worker = mocker.patch.object(prepared_run, "agent_run")
