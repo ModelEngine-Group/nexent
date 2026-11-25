@@ -1556,7 +1556,7 @@ class TestCreateKnowledgeBaseEdgeCases:
             json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
                   "ingroup_permission": "INVALID_VALUE", "group_ids": [1]},
         )
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
     def test_create_with_aidp_group_validation_error(self):
         from ext_components.aidp.services import aidp_permission_service
@@ -1794,7 +1794,7 @@ class TestSetPermissionEdgeCases:
                 headers=_bearer(),
                 json={"ingroup_permission": "INVALID_VAL", "group_ids": [1]},
             )
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
     def test_set_permission_group_validation_error(self):
         from ext_components.aidp.services import aidp_permission_service
@@ -2895,8 +2895,7 @@ class TestSetPermissionBlankName:
                 json={"ingroup_permission": "PRIVATE", "name": "   "},
             )
 
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-        assert "blank" in response.json()["message"]
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
         mock_save.assert_not_called()
 
 

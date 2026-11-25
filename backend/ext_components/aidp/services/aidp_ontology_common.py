@@ -64,21 +64,10 @@ def _domain_id_value(domain_id: Any) -> int:
 
     The browser keeps a string identifier for routing stability, but every
     upstream path segment, query parameter and request body uses the numeric
-    form confirmed by the AIDP contact.
+    form confirmed by the AIDP contact. Route path validation already enforces
+    ``^\\d+$`` before service calls.
     """
-    try:
-        value = int(domain_id)
-    except (TypeError, ValueError):
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "AIDP ontology domain ID must be numeric",
-        ) from None
-    if value < 0:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "AIDP ontology domain ID must not be negative",
-        )
-    return value
+    return int(domain_id)
 
 
 def _ontology_request(
