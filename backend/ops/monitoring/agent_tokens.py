@@ -28,7 +28,7 @@ def read_agent_tokens(service, *, tenant, start, end, groups, agent_id, identiti
     """Count each attributed model request under its actual Agent and start date."""
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="model", start=start, end=end,
-        initiator_group_ids=groups, agent_id=agent_id, has_agent_run=True,
+        initiator_group_ids=groups, agent_id=agent_id, has_agent_run=True, exclude_system_agents=True,
     )
     rows = [row for row in rows if row.get("agent_id") is not None and row.get("has_agent_run")]
     identities = None if identities is None else set(identities)
