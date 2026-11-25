@@ -180,6 +180,7 @@ class ManagedThreadSpec:
 
 
 stub_concurrency.ManagedThreadSpec = ManagedThreadSpec
+stub_concurrency.ManagedTaskSpec = ManagedThreadSpec
 stub_concurrency.set_default_thread_manager = MagicMock()
 stub_concurrency.clear_default_thread_manager = MagicMock()
 sys.modules["nexent"] = stub_nexent
@@ -1617,6 +1618,7 @@ def test_run_mcp_server_with_management_starts_and_cleans_up_services():
     mcp_service.mcp_thread_manager.shutdown.assert_awaited_once_with(timeout=15)
     clear_default.assert_called_once_with(mcp_service.mcp_thread_manager)
 
+
     @patch.object(Thread, 'start')
     @patch('backend.http.mcp_service.uvicorn')
     def test_run_mcp_server_with_management_creates_new_event_loop(self, mock_uvicorn, mock_thread_start):
@@ -1633,6 +1635,27 @@ def test_run_mcp_server_with_management_starts_and_cleans_up_services():
         # Verify asyncio operations are present
         assert 'asyncio.new_event_loop()' in source
         assert 'asyncio.set_event_loop(loop)' in source
+
+
+@pytest.mark.asyncio
+async def test_mcp_configuration_snapshot_lifecycle():
+    async def start(run_io):
+        assert await run_io(lambda: "snapshot") == "snapshot"
+
+    async def run(lane, task, fn):
+        assert lane == "control-io"
+        assert task.task_name == "system-configuration-refresh"
+        return fn()
+
+    with (
+        patch.object(mcp_service, "start_system_configuration", AsyncMock(side_effect=start)) as startup,
+        patch.object(mcp_service, "stop_system_configuration", AsyncMock()) as shutdown,
+        patch.object(mcp_service.mcp_thread_manager, "run", side_effect=run),
+    ):
+        async with mcp_service._mcp_management_lifespan():
+            startup.assert_awaited_once()
+            shutdown.assert_not_awaited()
+        shutdown.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

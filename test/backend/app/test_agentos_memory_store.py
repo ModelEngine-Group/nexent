@@ -49,11 +49,11 @@ async def test_signed_scope_selects_model_and_persists_index(store):
     result = await store.service.store(store.request, store.actor)
 
     assert (result.memory_id, result.event, result.indexed) == (17, "ADD", True)
-    store.lookup.assert_called_once_with("tenant-a", "user-a", 7, 42, "one", "remember")
+    store.lookup.assert_called_once_with("tenant-a", "user-a", 7, 42, "one", "remember", agent_version_no=None)
     invocation, actor = store.model.invoke.await_args.args
     assert (invocation.model_id, invocation.expected_revision, invocation.input) == (11, "r1", ["remember"])
     assert actor == store.actor
-    store.write.assert_called_once_with("tenant-a", "user-a", 7, 42, "one", "remember", "mem_provider_embed_2", deadline=ANY)
+    store.write.assert_called_once_with("tenant-a", "user-a", 7, 42, "one", "remember", "mem_provider_embed_2", deadline=ANY, agent_version_no=None)
     assert store.index.index_record.call_args.kwargs["embedding"] == [0.1, 0.2]
     assert store.index.index_record.call_args.kwargs["refresh"] is False
 
@@ -170,10 +170,10 @@ async def test_prepared_store_ignores_identity_in_sdk_payload(monkeypatch):
     assert events == search.observer_events()
     assert result["memory_id"] == 17
     assert local.await_args.args == (
-        AgentMemoryStore(agent_id=8, conversation_id=42, content="remember", idempotency_key="one"), actor,
+        AgentMemoryStore(agent_id=8, agent_version_no=1, conversation_id=42, content="remember", idempotency_key="one"), actor,
     )
     assert local.await_args.kwargs == {"deadline": ANY}
-    notify.assert_awaited_once_with(AgentMemoryStored(memory_id=17, agent_id=8, conversation_id=42), actor)
+    notify.assert_awaited_once_with(AgentMemoryStored(memory_id=17, agent_id=8, agent_version_no=1, conversation_id=42), actor)
 
 
 @pytest.mark.parametrize("conversation_id, credentials, params, error", [
@@ -257,7 +257,7 @@ def test_runtime_storage_honors_existing_personal_memory_policy(config):
     session = Mock()
     session.execute.return_value.all.return_value = config
     with pytest.raises(memory_store.MemoryStoreScopeError):
-        memory_store._require_automatic_memory(session, "user", 7)
+        memory_store._require_automatic_memory(session, "tenant", "user", 7)
 
 
 @pytest.mark.parametrize("lookup_consumes_budget", [False, True])
@@ -356,3 +356,43 @@ async def test_cancelling_index_wait_does_not_swallow_caller_cancellation(store,
     with pytest.raises(asyncio.CancelledError):
         await task
     store.write.assert_called_once()
+
+
+@pytest.mark.parametrize("tenant,personal,agent,allowed", [
+    (None, [], True, True),
+    ("Y", [("MEMORY_SWITCH", "Y")], True, True),
+    ("N", [("MEMORY_SWITCH", "Y")], True, False),
+    ("Y", [("MEMORY_SWITCH", "N")], True, False),
+    ("Y", [("DISABLE_AGENT_ID", "7")], True, False),
+    ("Y", [("DISABLE_USERAGENT_ID", "7")], True, False),
+    ("Y", [], False, False),
+    ("Y", [], None, False),
+])
+def test_runtime_automatic_memory_scope_priority(tenant, personal, agent, allowed):
+    from infrastructure.rdb import memory_store
+
+    session = Mock()
+    user_rows = Mock()
+    user_rows.all.return_value = personal
+    agent_row = Mock()
+    agent_row.first.return_value = None if agent is None else (agent,)
+    session.execute.side_effect = [user_rows, agent_row]
+    session.scalar.return_value = tenant
+    if allowed:
+        memory_store._require_automatic_memory(session, "tenant", "user", 7, 3)
+        parameters = session.execute.call_args.args[1]
+        assert parameters["version_no"] == 3
+        assert parameters["tenant_id"] == "tenant"
+    else:
+        with pytest.raises(memory_store.MemoryStoreScopeError):
+            memory_store._require_automatic_memory(session, "tenant", "user", 7, 3)
+
+
+@pytest.mark.asyncio
+async def test_revoked_policy_stops_before_embedding_and_mutation(store):
+    store.lookup.side_effect = memory.MemoryStoreScopeError("Automatic memory is disabled")
+    with pytest.raises(memory.MemoryStoreScopeError):
+        await store.service.store(store.request, store.actor)
+    store.model.invoke.assert_not_awaited()
+    store.write.assert_not_called()
+    store.mirror.assert_not_called()

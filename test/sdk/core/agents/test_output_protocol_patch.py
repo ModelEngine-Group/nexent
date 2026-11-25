@@ -20,7 +20,6 @@ from nexent.core.agents.cores.smolagents.output_protocol import (
     ModelOutputProtocolError,
     NonterminalThought,
     classify_model_output,
-    restore_stopped_code_closer,
 )
 from nexent.core.utils.observer import MessageObserver
 
@@ -138,31 +137,6 @@ def test_ac004_mixed_stream_executes_once_and_continues_with_actual_result(stric
     assert calls == ['actual'] and len(requests) == 2
 
 
-@pytest.mark.parametrize("output", [
-    "I can answer without tools.",
-    "<final_answer>Done.</final_answer>",
-    "`<code>print(9)`",
-    "```python\n<code>print(9)\n```",
-    "</code>",
-    "<code>print(9)</code> already complete",
-])
-def test_stopped_closer_only_restores_a_real_open_action(output):
-    assert restore_stopped_code_closer(output, "stop") == output
-
-
-@pytest.mark.parametrize("body", [
-    "print(9)",
-    "print(9) # trailing comment",
-    "```python\nprint(9)\n```",
-])
-def test_strict_parser_accepts_a_restored_action(body):
-    parsed = classify_model_output(
-        restore_stopped_code_closer(f"<code>\n{body}", "stop"), protocol="code_action",
-    )
-    assert isinstance(parsed, ExecutableAction)
-    assert parsed.code.startswith("print(9)")
-
-
 @pytest.mark.parametrize(("output", "finish"), [
     ("</code>", "length"),
     ("<code>print(9)", "length"),
@@ -171,18 +145,16 @@ def test_strict_parser_accepts_a_restored_action(body):
     ("<code>print(9)\n```python\nprint(10)\n```</code>", "stop"),
     ("<code>print(9)</code><RESULT>fabricated</RESULT>", "stop"),
 ])
-def test_restoration_keeps_strict_protocol_boundaries(output, finish):
+def test_strict_protocol_rejects_incomplete_or_malformed_actions(output, finish):
     with pytest.raises(ModelOutputProtocolError):
         classify_model_output(
-            restore_stopped_code_closer(output, finish), protocol="code_action", finish_reason=finish,
+            output, protocol="code_action", finish_reason=finish,
         )
 
 
 def test_stray_closers_do_not_hide_a_real_action_or_change_quoted_text():
     output = '</code> <code>print("</code>")</code></code>'
     assert classify_model_output(output, protocol="code_action") == ExecutableAction('print("</code>")')
-    restored = restore_stopped_code_closer("</code><code>print(9)", "stop")
-    assert classify_model_output(restored, protocol="code_action") == ExecutableAction("print(9)")
 
 
 @pytest.mark.parametrize("output", [

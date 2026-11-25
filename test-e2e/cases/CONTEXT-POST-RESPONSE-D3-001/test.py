@@ -39,7 +39,7 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
             (summaries if is_summary else main_requests).append(requests[-1])
             returned_text = "<final_answer>HELLO</final_answer>" if entrypoint.startswith("agent") else "HELLO"
             if entrypoint == "agent_tools" and len(main_requests) == 1 and not is_summary:
-                returned_text = '<code>print("TOOL_OK")</code>'
+                returned_text = '<code>print("</code>")\nprint("TOOL_OK")</code>'
             if is_summary:
                 returned_text = "COMPACT_VIEW"
             request_input = 20000 if entrypoint == "agent_tools" and len(main_requests) > 1 else actual_input
@@ -123,7 +123,10 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
         completion_material = str(summaries[-1]["messages"])
         assert "completed_turn_tail" in completion_material and "HELLO" in completion_material
         if entrypoint == "agent_tools":
-            assert "TOOL_OK" in str(main_requests[1]["messages"])
+            assert [request["stop"] for request in main_requests[:2]] == [["<RESULT>"]] * 2
+            results = [message for message in main_requests[1]["messages"]
+                       if message["role"] == "user" and "<RESULT>" in str(message["content"])]
+            assert results and "&lt;/code&gt;\nTOOL_OK" in str(results[-1]["content"]).replace("\\n", "\n")
             assert "TOOL_OK" in completion_material
             assert len(str(main_requests[1]["messages"])) < len(str(main_requests[0]["messages"]))
         for body in requests:

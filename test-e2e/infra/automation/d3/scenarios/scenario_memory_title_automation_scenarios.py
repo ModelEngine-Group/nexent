@@ -17,6 +17,7 @@ from shared.cases import case_params
 from shared.asset_registry import register_asset
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.factories.tenant import isolated_accounts
+from shared.final_answers import final_answer_text
 from shared.sse import assert_terminal_event, read_sse
 from shared.case_evidence import write_case_evidence
 from shared.asset_registry import AssetDependencyError
@@ -322,9 +323,7 @@ async def _memory_agent_context(identity, mode: str) -> None:
                     assert_status(response, 200)
                     events = await read_sse(response, limit=2000)
             assert_terminal_event(events)
-            answers = [item['data'].get('content', '') for item in events
-                       if isinstance(item.get('data'), dict) and item['data'].get('type') == 'final_answer']
-            assert marker.lower() in ''.join(part for part in answers if isinstance(part, str)).lower(), 'Final answer did not use retrieved memory'
+            assert marker.lower() in final_answer_text(events).lower(), 'Final answer did not use retrieved memory'
     finally:
         await cleanup_owned_memory(identity, memory_id_value)
 

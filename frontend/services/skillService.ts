@@ -321,12 +321,15 @@ export const submitSkillFromFile = async (
   allSkills: SkillListItem[],
   onSuccess: () => void,
   onCancel: () => void,
-  t: (key: string, options?: Record<string, unknown>) => string
+  t: (key: string, options?: Record<string, unknown>) => string,
+  onSaved?: (id: number) => void,
 ): Promise<boolean> => {
   try {
     const result = await createSkillFromFile(skillName.trim(), file, false);
 
     if (result.success) {
+      const savedId = Number(result.data?.skill_id ?? result.data?.data?.skill_id);
+      if (Number.isSafeInteger(savedId) && savedId > 0) onSaved?.(savedId);
       message.success(t("skillManagement.message.createSuccess"));
       onSuccess();
       onCancel();

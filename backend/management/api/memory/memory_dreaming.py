@@ -27,12 +27,12 @@ from management.services.automation.scheduler import (
     compute_next_fire_at,
     is_valid_cron_expression,
 )
+from management.services.memory.access import dreaming_allowed
 from management.services.memory.dreaming.service import (
     DreamingConflictError,
     DreamingRunError,
     get_memory_dreaming_service,
 )
-from management.services.permission.identity.session import get_current_user_id
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
@@ -174,6 +174,8 @@ def run_dreaming(
         payload.target_user_id,
         tenant_capability="EDIT_TENANT",
     )
+    if not dreaming_allowed(tenant_id, user_id):
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Automatic memory or Dreaming is disabled")
     try:
         run_id = memory_dreaming_db.create_audit(
             tenant_id,

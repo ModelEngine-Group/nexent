@@ -1,5 +1,9 @@
 # Agent Market
 
+::: warning Review Pending: 3.0 Entry and Resource Scope
+This page retains the existing market guide. Confirm its 3.0 entry point, resource sources, and relationship to the tenant repository. For tenant resource reuse, see [Agent Repository](./resource-repository/agent-repository).
+:::
+
 🎁 Here you'll find high-quality agents created by **Nexent Official** and **community creators**
 
 You can use them directly to complete specific tasks, or incorporate them as sub-agents into your own agents

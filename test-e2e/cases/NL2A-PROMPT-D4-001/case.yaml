@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: NL2A-PROMPT-D4-001
+  feature_id: F-045
+  business_rule_ids: [F-045-RULE-03, F-045-RULE-04]
+  title: Preview and confirm or cancel generated prompt replacements
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  actor: Developer editing an Agent in the creation assistant
+  journey:
+  - Preview the pending prompt and confirm application.
+  - Restore the saved result, then cancel another generated proposal.
+  final_business_result:
+  - Only explicitly accepted prompt text is applied; cancelled and replayed cards do not write.
+  failure_evidence:
+  - Browser trace, screenshot and audited journey step results.
+  objective: Verify the browser prompt confirmation card, exact action and history outcome.
+  preconditions:
+  - Local frontend is reachable; case-owned HTTP routes supply draft and SSE facts.
+  test_data:
+    target: Case-owned editable draft with existing prompt
+  steps:
+  - order: 1
+    action: Open creation history containing a pending prompt card and expand the complete text.
+    expected: Full multiline text is readable; input remains enabled and no write is requested.
+  - order: 2
+    action: Edit the complete multiline text locally, preview it, confirm application and restore the resulting history.
+    expected: Editing sends no write; HTTP acceptance followed by an SSE save error retains the exact edited draft and retry controls; retry carries card identity, revision and the same edited prompt. Only a matching server terminal card confirms application. Restored history shows the applied edit read-only.
+  - order: 3
+    action: Open another pending result, edit it and cancel it.
+    expected: One identity-only cancel action is sent; the result shows cancelled without saving the edited draft.
+  expected_results:
+  - Prompt previews retain line breaks and fit narrow containers.
+  - Apply sends the exact user-edited prompt through the existing NL2Agent run endpoint; cancel sends no replacement text.
+  - Applied, cancelled and superseded cards cannot submit again.
+  forbidden_side_effects:
+  - Preview does not write Agent configuration or block ordinary dialogue.
+  - History replay does not resubmit actions.
+  acceptance:
+  - id: AC-PREVIEW
+    description: Preview is complete, responsive and keeps dialogue available.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-ACTIONS
+    description: Local edits do not write; apply submits exact edited text and cancel is identity-only. History restores read-only outcomes.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [2]

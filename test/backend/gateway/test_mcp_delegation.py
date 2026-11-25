@@ -119,12 +119,12 @@ async def test_delegated_identity_adapter_reads_gateway_origin_and_key_from_sett
         seen.update(gateway_url=gateway_url, key=key, authorization=authorization, scope=scope)
         return PRINCIPAL
 
-    monkeypatch.setattr(environment, "GATEWAY_SERVICE_URL", "http://gateway:5013")
+    monkeypatch.setattr(mcp_service, "GATEWAY_SERVICE_URL", "http://gateway:5013")
     monkeypatch.setattr(environment, "JWT_SECRET", KEY)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "")
     monkeypatch.setattr(mcp_service, "_resolve_gateway_mcp_identity", fake_resolve)
 
-    result = await mcp_service._resolve_delegated_identity(SCOPE, "Bearer test")
+    result = await mcp_service._gateway_mcp_identity(SCOPE, "Bearer test")
 
     assert result == PRINCIPAL
     assert seen["gateway_url"] == "http://gateway:5013"

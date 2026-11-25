@@ -108,6 +108,13 @@ def materialize_skill_tools(
 
     metadata = {"agent_id": resource.agent_id, "version_no": resource.version_no, "tenant_id": tenant}
     params = {"local_skills_dir": str(stage), "isolated_skills_root": True, "authorized_skill_names": sorted(configs)}
+    skill_name_to_id = {
+        row["name"]: row["skill_id"]
+        for row in rows.values()
+        if row.get("name") and row.get("skill_id") is not None
+    }
+    if skill_name_to_id:
+        params["skill_name_to_id"] = skill_name_to_id
     tools = {}
     for binding in bindings:
         if binding.version != "1" or binding.credential_ref is not None:

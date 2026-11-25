@@ -1,18 +1,18 @@
-# Start Chat
+# Agent Chat
 
-The Start Chat page is the primary entry point for interacting with agents. On this page, you can chat with agents, upload files and attachments, use voice input, manage conversation history, and complete tasks such as file processing, knowledge retrieval, and document generation.
+The Agent Chat page is the primary entry point for interacting with agents. On this page, you can chat with agents, upload files and attachments, use voice input, manage conversation history, and complete tasks such as file processing, knowledge retrieval, and document generation.
 
 ## 1. Select an Agent
 
-### 1. Open the Start Chat Home Page
+### 1. Open the Agent Chat Home Page
 
-When you open the Start Chat page, the agent list is displayed by default. You must select an agent before starting a conversation.
+When you open the Agent Chat page, the agent list is displayed by default. You must select an agent before starting a conversation.
 
 ![Agent list](./assets/start-chat/agent-list.png)
 
 ### 2. Select an Available Agent
 
-Only agents that meet all of the following conditions appear on the Start Chat page:
+Only agents that meet all of the following conditions appear on the Agent Chat page:
 
 - **Published**: The agent has been published.
 - **Set as a primary agent**: The agent is configured as a primary agent.

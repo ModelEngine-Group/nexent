@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from contracts.agentos import AgentRunReference
+from infrastructure.rdb.agent_execution import AgentExecution
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from management.db.conversation import prepared_turn as store
@@ -21,7 +22,7 @@ def database(mocker):
     schema = ConversationMessage.__table__.schema
     engine = create_engine("sqlite://", execution_options={"schema_translate_map": {schema: None}})
     metadata = MetaData()
-    for model in (ConversationRecord, ConversationMessage, ConversationRunAdmission):
+    for model in (ConversationRecord, ConversationMessage, ConversationRunAdmission, AgentExecution):
         copied = model.__table__.to_metadata(metadata, schema=None)
         for column in copied.c:
             if isinstance(column.type, JSONB):

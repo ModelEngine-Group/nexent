@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-PROMPT-EDITING-20261117
+  change_type: requirement
+  requirement_id: NL2AGENT-PROMPT-EDITING-20261117
+  title: Edit generated prompt cards and recover interrupted confirmations
+  description: Extend AC-011 and AC-015 with local multiline editing, exact approved text persistence, read-only history and serialized apply/cancel recovery.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-PROMPT-D4-001, NL2A-COMPLETION-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_prompt_confirmation.py
+      - frontend/tests/workbench/Nl2AgentPromptConfirmation.test.tsx
+    behaviors:
+      - Local edits do not write; apply preserves exact text and cancel never submits edited content.
+      - Empty and malformed edits, stale identities and conflicting replays cannot write.
+      - Active writers reject competing actions; abandoned apply/cancel states recover from actual database facts.
+      - Lost database acknowledgement and failed readback remain recoverable without duplicate writes.
+    reason: Existing tests cover identity-only confirmation but not editing or uncommitted abandoned claims. Strengthen UT and existing D3/D4 contracts; no duplicate D1 is needed.
+  notes: F-045 inherits agent_config routing. D3 owns PostgreSQL schema, Redis keys and controlled HTTP/MCP runtime. D4 owns browser routes and context; both retain explicit self-contained preparation and cleanup. See owning SPEC design 6.5 and tasks prompt-card editing section.

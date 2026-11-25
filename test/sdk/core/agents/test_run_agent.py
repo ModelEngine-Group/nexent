@@ -1626,6 +1626,7 @@ def test_agent_run_thread_grouped_mcp_failure_friendly_message(
     """End to end: grouped MCP failure → friendly FINAL_ANSWER + error-level log."""
     basic_agent_run_info.observer.lang = "en"
     basic_agent_run_info.mcp_host = _mcp_host_single()
+    _mock_managed_mcp(monkeypatch)
     failing = MagicMock(name="NexentAgentInstance")
     failing.create_single_agent.side_effect = BaseExceptionGroup(
         "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]

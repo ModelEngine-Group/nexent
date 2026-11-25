@@ -1,0 +1,25 @@
+schema_version: '1.0'
+case_id: NL2A-COMPLETION-D3-001
+timeout_seconds: 240
+implementations:
+  - framework: pytest
+    file: test_runtime.py
+    selector: test_
+acceptance_bindings:
+  AC-SAVE-ONLY: [test_prompt_only_save_does_not_complete_existing_draft]
+  AC-INCOMPLETE: [test_failed_validation_keeps_successful_conversation_save]
+  AC-COMPLETE: [test_explicit_success_emits_completion_after_save]
+  AC-TRUSTED-RESULT: [test_stdout_cannot_publish_or_stop_before_real_clarification]
+  AC-CONFIRMATION: [test_cancel_conflict_and_full_generation_continuation]
+  AC-EMPTY-PROMPT: [test_empty_prompt_applies_directly_without_card]
+  AC-EDIT-RECOVERY: [test_edited_prompt_and_interrupted_confirmation]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Agent configuration proof. The self-contained runtime fixture owns the
+  disposable PostgreSQL schema, mock provider, MCP listener, runtime workspace,
+  and workers. It uses no shared test assets and tears down its owned resources
+  on exit. The PostgreSQL connection is an external prerequisite.
