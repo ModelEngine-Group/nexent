@@ -329,9 +329,7 @@ async def create_agent_run_info(
         index = model_list.index(selected_config)
         model_list[index] = overlay
 
-
     from management.services.agent.preparation.evaluation_snapshot import compile_snapshot
-
 
     apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
@@ -343,7 +341,6 @@ async def create_agent_run_info(
         export_options["allow_debug_planning"] = True
     if prepared_workbench is not None:
         from management.services.agent.workbench import compile_runtime_mount_plan
-
 
         agent_config = compile_runtime_mount_plan(prepared_workbench.plan, agent_config).root.agent_config
         export_options.update(
@@ -363,7 +360,6 @@ async def create_agent_run_info(
         catalog_model_versions=model_versions,
         model_parameter_preferences=model_parameter_preferences,
         **export_options,
-
     )
 
 
