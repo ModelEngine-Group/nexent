@@ -632,6 +632,7 @@ class PreparedConversationHistory(RunSpecModel):
 
 class PreparedConversationScope(AgentRunReference):
     memory_enabled: Literal[True] | None = None
+    automation_proposal_only: Literal[True] | None = None
     workbench_config_version: PositiveInt | None = None
     native_knowledge: Literal[True] | None = None
     historical_context: PreparedConversationHistory | None = None
@@ -657,7 +658,7 @@ class PreparedConversationScope(AgentRunReference):
     @model_serializer(mode="wrap")
     def serialize_optional_scope(self, handler):
         data = handler(self)
-        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata"):
+        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata", "automation_proposal_only"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data

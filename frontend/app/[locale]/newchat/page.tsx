@@ -161,6 +161,7 @@ const PersistentChatHome: FC = () => {
       ),
     [pinScope, queryClient, conversationDetails]
   );
+  const [automationEntry, setAutomationEntry] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
@@ -186,6 +187,7 @@ const PersistentChatHome: FC = () => {
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
+    setAutomationEntry(searchParams.get("entry") === "automation");
     const threadId =
       searchParams.get("thread_id") ?? searchParams.get("conversation_id");
     conversationDetails.activate(threadId || lastChatView?.conversationId);
@@ -292,6 +294,7 @@ const PersistentChatHome: FC = () => {
         >
           <HomeContent
             conversationDetails={conversationDetails}
+            automationEntry={automationEntry}
             runtime={runtime}
             selectedAgent={selectedAgent}
             restoreViewTarget={restoreViewTarget}
@@ -314,6 +317,7 @@ const PersistentChatHome: FC = () => {
  */
 const HomeContent: FC<{
   conversationDetails: ConversationDetailLoader;
+  automationEntry: boolean;
   runtime: AssistantRuntime;
   selectedAgent: Agent | null;
   restoreViewTarget: LastChatViewState | null | undefined;
@@ -325,6 +329,7 @@ const HomeContent: FC<{
   isDictationConfigured: boolean;
 }> = ({
   conversationDetails,
+  automationEntry,
   runtime,
   selectedAgent,
   restoreViewTarget,
@@ -414,6 +419,7 @@ const HomeContent: FC<{
   //   2. Switching back and forth between threads keeps each thread bound to
   //      its own server-side conversation.
   const serverConversationIdsRef = useRef<Map<string, string>>(new Map());
+  const automationConversations = useRef(new Set<string>());
   const titleGuard = useRef(new ConversationTitleGuard());
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
@@ -432,6 +438,7 @@ const HomeContent: FC<{
         // Historical runs already use a server key and must not be rebound.
         if (initialQuestion !== undefined) {
           bindModelThread?.(threadId, numericId);
+          if (automationEntry) automationConversations.current.add(numericId);
         }
         map.set(threadId, numericId);
         cacheHistoricalChatMode(numericId, chatMode);
@@ -460,7 +467,7 @@ const HomeContent: FC<{
           });
       }
     },
-    [chatMode, bindModelThread]
+    [chatMode, bindModelThread, automationEntry]
   );
 
   const handleConversationRenamed = useCallback(
@@ -915,6 +922,10 @@ const HomeContent: FC<{
       onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
       onGenerationStopped: handleGenerationStopped,
 
+      automationEntry:
+        automationEntry &&
+        (!activeConversationId ||
+          automationConversations.current.has(String(activeConversationId))),
       enablePlan: chatMode === "planning",
       ...(activeThreadId
         ? {
@@ -935,6 +946,7 @@ const HomeContent: FC<{
     selectedAgent,
     activeConversationId,
     activeThreadId,
+    automationEntry,
     chatMode,
     knowledgeScope,
     runtimeMetadata,

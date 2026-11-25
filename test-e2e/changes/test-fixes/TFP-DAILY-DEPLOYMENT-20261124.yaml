@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: TFP-DAILY-DEPLOYMENT-20261124
+  change_type: test-fix
+  title: Run deployed fast-path acceptance in a Daily exception group
+  description: >-
+    Route the existing D3 and D4 Cases to one serial deployment group, generate
+    owned fixtures from the repository, and verify Local recovery after a switch.
+    Preserve the existing product behavior and Case acceptance requirements.
+  affected_features:
+    existing: [TFP-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [TFP-D3-001, TFP-D4-001]
+    retired: []
+  notes: >-
+    The runner owns temporary Skills, Agents, models, and workspace mounts.
+    Missing machine-local configuration is reported for the TFP Cases only.
+    Framework regressions exercise selection, scoped deployment and cleanup after
+    failure. The Local knowledge smoke runs once after restoring the saved
+    configuration, with a separate receipt outside the plan's Case counts.
