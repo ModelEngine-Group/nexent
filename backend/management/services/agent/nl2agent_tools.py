@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
+from uuid import uuid4
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agent_names import validate_agent_name
@@ -18,40 +19,180 @@ from pydantic import (
     ValidationError, field_validator, model_validator,
 )
 
-from contracts.errors.exceptions import UnauthorizedError
-from infrastructure.nl2agent_tool_config import (
-    MAX_BINDING_CANDIDATES as MAX_BINDING_CANDIDATES,
-    NL2A_MCP_SERVICE_NAME as NL2A_MCP_SERVICE_NAME,
-    SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME as SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
-    SEARCH_INSTALLED_RESOURCES_LOCAL_NAME as SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
-    SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME as SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
-    RECOMMEND_RESOURCES_LOCAL_NAME as RECOMMEND_RESOURCES_LOCAL_NAME,
-    SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME as SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
-    NL2A_WRAPPER_LOCAL_NAME as NL2A_WRAPPER_LOCAL_NAME,
-    NL2A_MCP_LOCAL_TOOL_NAMES as NL2A_MCP_LOCAL_TOOL_NAMES,
-    SEARCH_INSTALLED_MCP_TOOLS_NAME as SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    SEARCH_INSTALLED_RESOURCES_NAME as SEARCH_INSTALLED_RESOURCES_NAME,
-    SEARCH_UNINSTALLED_RESOURCES_NAME as SEARCH_UNINSTALLED_RESOURCES_NAME,
-    RECOMMEND_RESOURCES_NAME as RECOMMEND_RESOURCES_NAME,
-    SAVE_AGENT_DRAFT_FIELDS_NAME as SAVE_AGENT_DRAFT_FIELDS_NAME,
-    NL2A_WRAPPER_NAME as NL2A_WRAPPER_NAME,
-    NL2A_MCP_TOOL_NAMES as NL2A_MCP_TOOL_NAMES,
-    NL2A_MCP_LEGACY_TOOL_NAMES as NL2A_MCP_LEGACY_TOOL_NAMES,
-    SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION as SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
-    SEARCH_INSTALLED_RESOURCES_DESCRIPTION as SEARCH_INSTALLED_RESOURCES_DESCRIPTION,
-    SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION as SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION,
-    RECOMMEND_RESOURCES_DESCRIPTION as RECOMMEND_RESOURCES_DESCRIPTION,
-    NL2A_WRAPPER_DESCRIPTION as NL2A_WRAPPER_DESCRIPTION,
-    SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION as SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
-    create_nl2agent_mcp_tool_configs as create_nl2agent_mcp_tool_configs,
-)
-from management.services.permission.identity.session import authenticate_identity
+from contracts.errors.exceptions import AgentDraftEditError, UnauthorizedError
+from contracts.nl2agent_resources import MAX_REQUIREMENTS
+from management.services.permission.identity.session import authenticate_identity, get_current_user_id
 
 logger = logging.getLogger(__name__)
 
+NL2A_MCP_SERVICE_NAME = "nl2a"
+SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME = "search_installed_mcp_tools"
+SEARCH_INSTALLED_RESOURCES_LOCAL_NAME = "search_installed_resources"
+SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME = "search_uninstalled_resources"
+RECOMMEND_RESOURCES_LOCAL_NAME = "recommend_resources"
+SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME = "save_agent_draft_fields"
+VALIDATE_AGENT_GENERATION_COMPLETE_LOCAL_NAME = "validate_agent_generation_complete"
+NL2A_WRAPPER_LOCAL_NAME = "wrapper"
+NL2A_MCP_LOCAL_TOOL_NAMES = (
+    SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
+    SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
+    RECOMMEND_RESOURCES_LOCAL_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_LOCAL_NAME,
+    NL2A_WRAPPER_LOCAL_NAME,
+)
+(
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
+    RECOMMEND_RESOURCES_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
+    NL2A_WRAPPER_NAME,
+) = tuple(
+    f"{NL2A_MCP_SERVICE_NAME}_{name}"
+    for name in NL2A_MCP_LOCAL_TOOL_NAMES
+)
+NL2A_MCP_TOOL_NAMES = (
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
+    RECOMMEND_RESOURCES_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
+    NL2A_WRAPPER_NAME,
+)
+NL2A_MCP_LEGACY_TOOL_NAMES = (
+    SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
+    SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
+    RECOMMEND_RESOURCES_LOCAL_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_LOCAL_NAME,
+    NL2A_WRAPPER_NAME,
+)
+DISCOVER_REQUIREMENTS_LOCAL_NAME = "discover_requirements"
+VERIFY_REQUIREMENTS_LOCAL_NAME = "verify_requirements"
+SHOW_RESOURCE_CARD_LOCAL_NAME = "show_resource_card"
+READ_CONFIGURATION_LOCAL_NAME = "read_agent_configuration"
+SAVE_CONFIGURATION_LOCAL_NAME = "save_agent_configuration"
+READ_GENERATION_CONTEXT_LOCAL_NAME = "read_generation_context"
+RESOURCE_TOOL_LOCAL_NAMES = (DISCOVER_REQUIREMENTS_LOCAL_NAME, VERIFY_REQUIREMENTS_LOCAL_NAME,
+                             SHOW_RESOURCE_CARD_LOCAL_NAME)
+DISCOVER_REQUIREMENTS_NAME, VERIFY_REQUIREMENTS_NAME, SHOW_RESOURCE_CARD_NAME = (
+    f"{NL2A_MCP_SERVICE_NAME}_{name}" for name in RESOURCE_TOOL_LOCAL_NAMES
+)
+READ_CONFIGURATION_NAME = f"{NL2A_MCP_SERVICE_NAME}_{READ_CONFIGURATION_LOCAL_NAME}"
+SAVE_CONFIGURATION_NAME = f"{NL2A_MCP_SERVICE_NAME}_{SAVE_CONFIGURATION_LOCAL_NAME}"
+READ_GENERATION_CONTEXT_NAME = f"{NL2A_MCP_SERVICE_NAME}_{READ_GENERATION_CONTEXT_LOCAL_NAME}"
+NL2A_MCP_TOOL_NAMES += (DISCOVER_REQUIREMENTS_NAME, VERIFY_REQUIREMENTS_NAME, SHOW_RESOURCE_CARD_NAME,
+                       READ_CONFIGURATION_NAME, SAVE_CONFIGURATION_NAME, READ_GENERATION_CONTEXT_NAME)
+NL2A_MCP_LEGACY_TOOL_NAMES += (*RESOURCE_TOOL_LOCAL_NAMES, READ_CONFIGURATION_LOCAL_NAME,
+                             SAVE_CONFIGURATION_LOCAL_NAME, READ_GENERATION_CONTEXT_LOCAL_NAME)
+NL2A_MCP_LOCAL_TOOL_NAMES += (*RESOURCE_TOOL_LOCAL_NAMES, READ_CONFIGURATION_LOCAL_NAME,
+                             SAVE_CONFIGURATION_LOCAL_NAME, READ_GENERATION_CONTEXT_LOCAL_NAME)
+DISCOVER_REQUIREMENTS_DESCRIPTION = (
+    "Find safe candidates using each requirement's prepared capability queries. "
+    "Prepare bilingual search_queries from reusable resource capabilities, not runtime search content or business topics. "
+    "Keep requested content in query and preserve explicitly required tools, platforms and data sources. "
+    "Omit requirements to resume accepted requirements."
+)
+VERIFY_REQUIREMENTS_DESCRIPTION = (
+    "Submit one entry per requirement with its requirement_id and accepted candidate references. "
+    "Omit checked; the runtime already knows which candidates were offered. "
+    "The final batch publishes the current resource card."
+)
+SHOW_RESOURCE_CARD_DESCRIPTION = "Show the current recommendation, coverage, or binding card from the verified requirements."
+READ_CONFIGURATION_DESCRIPTION = "Read safe current values and choices for model, collaborators, permissions, tags, guardrails or advanced settings."
+SAVE_CONFIGURATION_DESCRIPTION = (
+    "Save explicit changes to one supported configuration section on the target draft. "
+    "For guardrails, changes accepts enabled (boolean master switch), upsert_rules (list of rules), "
+    "and remove_rules (list of rule names). Each rule accepts only name (non-empty string), "
+    "pattern (non-empty valid Python regex), severity (block, mask, or pass; defaults to block), "
+    "and optional description (string). severity is the matching action, not a risk level: "
+    "use block to reject, mask to redact, or pass to allow. Do not use error/high or an action field. "
+    "enabled belongs to changes, never to an individual rule. Example: "
+    'section="guardrails", changes={"enabled":True,"upsert_rules":'
+    '[{"name":"sensitive_info","pattern":"password","severity":"block"}]}. '
+    "Only include requested changes; unrelated rules and verification settings are preserved."
+)
+READ_GENERATION_CONTEXT_DESCRIPTION = (
+    "Read current safe draft and bound resource contracts before generating or synchronizing Prompt. "
+    "Use goal=complete for full Agent creation, including creation without resources; "
+    "use the default goal=prompt for independent prompt generation or optimization."
+)
 NL2AGENT_AGENT_ID_HEADER = "X-Nexent-NL2Agent-Agent-ID"
 NL2AGENT_POLICY_CLARIFICATION_HEADER = "X-Nexent-NL2Agent-Policy-Clarification-Required"
-
+NL2AGENT_RESOURCE_PENDING_HEADER = "X-Nexent-NL2Agent-Resource-Confirmation-Pending"
+NL2AGENT_RUN_ID_HEADER = "X-Nexent-NL2Agent-Run-ID"
+NL2AGENT_CONVERSATION_ID_HEADER = "X-Nexent-NL2Agent-Conversation-ID"
+NL2AGENT_RECEIPT_KEY = "nexent.nl2agent.receipt"
+MAX_RESOURCE_REQUIREMENTS_PER_SEARCH = MAX_REQUIREMENTS
+RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION = (
+    f"Use at most {MAX_RESOURCE_REQUIREMENTS_PER_SEARCH} requirements per search. "
+    "If the batch exceeds the limit, ask the user to split the request or narrow its scope."
+)
+SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
+    "Search the current tenant's installed and available MCP tools using keywords. "
+    "Returns JSON text ordered by relevance. Decode the result with json.loads "
+    f"before passing it to {NL2A_WRAPPER_NAME}, preserve the decoded content unchanged, "
+    "and use print(result) to expose the decoded observation."
+)
+SEARCH_INSTALLED_RESOURCES_DESCRIPTION = (
+    "Search all current-user-visible installed Local Tools, MCP Tools, and Skills "
+    "for a structured set of capability requirements. Return no more than 12 "
+    "ranked candidates as JSON text. Decode the result with json.loads before "
+    "indexing it, and preserve the decoded candidates unchanged when calling "
+    f"{RECOMMEND_RESOURCES_NAME}. {RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION}"
+)
+SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION = (
+    "Search installable Nexent Skills and tenant Skill/MCP repositories for "
+    "structured capability requirements. Pass skipped candidate_ref values "
+    "unchanged in exclude_refs, and preserve returned candidates unchanged when "
+    f"calling {RECOMMEND_RESOURCES_NAME}. {RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION}"
+)
+RECOMMEND_RESOURCES_DESCRIPTION = (
+    "Resolve installed or installable resource candidates into verified card "
+    "details. Pass unchanged candidates returned by resource searches and a "
+    "unique recommended_refs subset. Decode the JSON result, then pass it "
+    f"unchanged to {NL2A_WRAPPER_NAME} with the matching installation or binding subtype."
+)
+NL2A_WRAPPER_DESCRIPTION = (
+    "Build one NL2Agent output for the existing draft. Always pass the current "
+    "`agent_id` and `subtype`. For `requirement_clarification`, pass structured "
+    "`questions`. For resource installation or binding, pass `agent_id` and the "
+    "verified `resource_result`. JSON parameters must be decoded dictionaries, "
+    "never raw JSON strings. An empty installed-resource result returns a "
+    "non-interactive success result so Prompt generation can continue immediately. "
+    f"Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, then use `print(result)`."
+)
+SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
+    "Partially update the current tenant's existing ordinary agent draft. "
+    "Always pass the current agent_id and only whitelisted fields, never null. "
+    "Allowed fields: name, display_name, description, prompt, greeting_message, example_questions, "
+    "enable_protocol_repair_retry. "
+    "enable_protocol_repair_retry must be a boolean: explicit true enables strict output validation and silent "
+    "protocol repair for the target Agent, false disables it; omit it unless requested. "
+    "It does not control model-service retries or the NL2Agent creator itself. "
+    "prompt contains complete responsibilities, constraints, tool-use rules, output requirements and necessary few-shot. "
+    "For partial edits, read draft_fields.prompt, preserve unrelated instructions, and save the full merged prompt. "
+    "Before any prompt save, call nl2a_read_generation_context (goal=complete for full creation). "
+    "Save prompt separately. Existing prompts return pending_confirmation and a preview card; stop immediately "
+    "without saving dependent settings or reporting success until the user confirms. Empty prompts save directly. "
+    "greeting_message and example_questions are separate conversation settings; "
+    "example_questions must be a list of strings, never a newline-delimited string. "
+    "Only submit the fields determined by the current action. A save does not validate full generation. "
+    "The name field may be set only when the existing draft name is empty; "
+    "display_name may be set only alongside the first name on an empty Workbench Draft; "
+    "all other display names are immutable. Call the tool as "
+    f"`result = {SAVE_AGENT_DRAFT_FIELDS_NAME}(...)`, then use `print(result)` exactly once."
+)
+VALIDATE_AGENT_GENERATION_COMPLETE_DESCRIPTION = (
+    "Read the authorized target draft and validate full generation after all requested fields "
+    "have been saved. This tool does not write fields. Call only for full generation; "
+    f"use `result = {VALIDATE_AGENT_GENERATION_COMPLETE_NAME}()` and then `print(result)`."
+)
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
 MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5
 _NL2AGENT_PROMPT_FIELDS = frozenset(
@@ -61,7 +202,6 @@ _NL2AGENT_PROMPT_FIELDS = frozenset(
         "example_questions",
     }
 )
-_NL2AGENT_FINAL_PROMPT_BATCH = frozenset({"greeting_message", "example_questions"})
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {"name", "display_name", "description", "enable_protocol_repair_retry", *_NL2AGENT_PROMPT_FIELDS}
 )
@@ -136,7 +276,9 @@ class SearchInstalledResourcesInput(BaseModel):
     """Frozen input for installed Tool/Skill discovery (implemented in PR2)."""
 
     model_config = ConfigDict(extra="forbid")
-    requirements: list[ResourceRequirement] = Field(min_length=1, max_length=8)
+    requirements: list[ResourceRequirement] = Field(
+        min_length=1, max_length=MAX_RESOURCE_REQUIREMENTS_PER_SEARCH
+    )
 
     @model_validator(mode="after")
     def validate_requirement_ids(self) -> "SearchInstalledResourcesInput":
@@ -150,7 +292,9 @@ class SearchUninstalledResourcesInput(BaseModel):
     """Frozen input for tenant-visible installable resource discovery."""
 
     model_config = ConfigDict(extra="forbid")
-    requirements: list[ResourceRequirement] = Field(min_length=1, max_length=8)
+    requirements: list[ResourceRequirement] = Field(
+        min_length=1, max_length=MAX_RESOURCE_REQUIREMENTS_PER_SEARCH
+    )
     exclude_refs: list[str] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
@@ -267,6 +411,7 @@ class ResourceToolError(BaseModel):
     status: Literal["error"] = "error"
     code: Literal[
         "invalid_requirements",
+        "requirements_limit_exceeded",
         "resource_search_failed",
         "invalid_candidates",
         "resource_not_found",
@@ -414,6 +559,7 @@ class SaveAgentDraftFieldsError(BaseModel):
     code: Literal[
         "invalid_agent_fields",
         "policy_clarification_required",
+        "resource_confirmation_required",
         "agent_not_found",
         "agent_not_draft",
         "agent_deleted",
@@ -582,6 +728,9 @@ def _serialize_nl2a_payload(output: BaseModel | dict[str, Any]) -> str:
     return f"<nl2a>\n{serialized}\n</nl2a>\nNL2A payload generated."
 
 
+from infrastructure.nl2agent_tool_config import create_nl2agent_mcp_tool_configs
+
+
 class AgentContextMismatchError(Exception):
     """The model supplied an Agent ID that conflicts with trusted run context."""
 
@@ -592,9 +741,26 @@ class NL2AgentToolScope:
     user_id: str
     tenant_id: str
     policy_clarification: bool
+    run_id: str = ""
+    conversation_id: str = ""
+    resource_pending: bool = False
 
 
 _tool_scope: ContextVar[NL2AgentToolScope | None] = ContextVar("nl2agent_tool_scope", default=None)
+
+
+def tool_headers():
+    """Read only server-authorized scope when invoked through AgentOS."""
+    scope = _tool_scope.get()
+    if scope is None:
+        return get_http_request().headers
+    return {
+        NL2AGENT_AGENT_ID_HEADER: str(scope.agent_id),
+        NL2AGENT_RUN_ID_HEADER: scope.run_id,
+        NL2AGENT_CONVERSATION_ID_HEADER: scope.conversation_id,
+        NL2AGENT_POLICY_CLARIFICATION_HEADER: "true" if scope.policy_clarification else "false",
+        NL2AGENT_RESOURCE_PENDING_HEADER: "true" if scope.resource_pending else "false",
+    }
 
 
 @contextmanager
@@ -741,6 +907,19 @@ def _dump_resource_tool_error(
     ).model_dump(mode="json")
 
 
+def _dump_resource_search_input_error(error: ValidationError) -> dict[str, Any]:
+    """Report an oversized batch without echoing any submitted requirement text."""
+    if any(
+        issue["type"] == "too_long" and issue["loc"] == ("requirements",)
+        for issue in error.errors(include_input=False)
+    ):
+        return {
+            **_dump_resource_tool_error("requirements_limit_exceeded", retryable=False),
+            "max_requirements": MAX_RESOURCE_REQUIREMENTS_PER_SEARCH,
+        }
+    return _dump_resource_tool_error("invalid_requirements", retryable=False)
+
+
 async def search_installed_resources(
     agent_id: int,
     requirements: list[dict[str, Any]],
@@ -749,11 +928,8 @@ async def search_installed_resources(
 
     try:
         payload = SearchInstalledResourcesInput(requirements=requirements)
-    except ValidationError:
-        return _dump_resource_tool_error(
-            "invalid_requirements",
-            retryable=False,
-        )
+    except ValidationError as error:
+        return _dump_resource_search_input_error(error)
 
     try:
         resolved_agent_id = _resolve_agent_context_id(agent_id)
@@ -804,8 +980,8 @@ async def search_uninstalled_resources(
             requirements=requirements,
             exclude_refs=exclude_refs or [],
         )
-    except ValidationError:
-        return _dump_resource_tool_error("invalid_requirements", retryable=False)
+    except ValidationError as error:
+        return _dump_resource_search_input_error(error)
 
     try:
         resolved_agent_id = _resolve_agent_context_id(agent_id)
@@ -990,24 +1166,15 @@ async def nl2a_wrapper(
 def _serialize_agent_draft_save_result(
     result: SaveAgentDraftFieldsSuccess | SaveAgentDraftFieldsError,
     attempted_fields: list[str] | None = None,
-    failed_fields: list[str] | None = None,
-    generation_completed: bool = False,
 ) -> str:
     payload = result.model_dump(mode="json")
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if isinstance(result, SaveAgentDraftFieldsSuccess):
-        state_payload = (
-            {
-                "event": "agent_generation_completed",
-                "agent_id": result.agent_id,
-            }
-            if generation_completed
-            else {
-                "event": "agent_draft_fields_saved",
-                "agent_id": result.agent_id,
-                "updated_fields": payload["updated_fields"],
-            }
-        )
+        state_payload = {
+            "event": "agent_draft_fields_saved",
+            "agent_id": result.agent_id,
+            "updated_fields": payload["updated_fields"],
+        }
         state = json.dumps(
             state_payload,
             ensure_ascii=False,
@@ -1016,7 +1183,7 @@ def _serialize_agent_draft_save_result(
         return f"{serialized}\n<nl2a_state>{state}</nl2a_state>"
 
     prompt_fields = sorted(
-        set(failed_fields or attempted_fields or [])
+        set(attempted_fields or [])
         & _NL2AGENT_PROMPT_FIELDS
     )
     if (
@@ -1075,13 +1242,18 @@ async def save_agent_draft_fields(
             Nl2AgentCompletionError,
             Nl2AgentDraftSaveError,
             save_agent_draft_fields_impl,
-            validate_agent_generation_complete_impl,
         )
 
+        headers = tool_headers()
         user_id, tenant_id = _tool_actor()
+        if (headers.get(NL2AGENT_RESOURCE_PENDING_HEADER) == "true"
+                and {"prompt", "greeting_message", "example_questions"} & payload.fields.model_fields_set):
+            return _serialize_agent_draft_save_result(SaveAgentDraftFieldsError(
+                agent_id=resolved_agent_id, code="resource_confirmation_required", retryable=False,
+            ))
         if (
             payload.fields.enable_protocol_repair_retry is not None
-            and _policy_clarification_required()
+            and headers.get(NL2AGENT_POLICY_CLARIFICATION_HEADER) == "true"
         ):
             return _serialize_agent_draft_save_result(
                 SaveAgentDraftFieldsError(
@@ -1090,6 +1262,36 @@ async def save_agent_draft_fields(
                     retryable=False,
                 )
             )
+        if "prompt" in payload.fields.model_fields_set:
+            from fastmcp.tools.tool import ToolResult
+            from services.nl2agent_prompt_service import propose
+            from services.nl2agent_state_service import ResourceScope, ResourceStateError
+
+            if payload.fields.model_fields_set != {"prompt"}:
+                return json.dumps({"status": "error", "code": "save_prompt_separately", "retryable": False})
+            scope = ResourceScope(
+                tenant_id, user_id, resolved_agent_id,
+                headers.get(NL2AGENT_CONVERSATION_ID_HEADER, ""), headers.get(NL2AGENT_RUN_ID_HEADER, ""),
+            )
+            if not scope.run_id or not scope.conversation_id:
+                return json.dumps({"status": "error", "code": "invalid_prompt_context", "retryable": False})
+            try:
+                proposed = await propose(scope, payload.fields.prompt)
+            except ResourceStateError as exc:
+                return json.dumps({"status": "error", "code": exc.code, "retryable": exc.retryable})
+            if proposed.get("subtype") == "prompt_generation":
+                return ToolResult(
+                    content=json.dumps({"status": "pending_confirmation", "agent_id": resolved_agent_id}),
+                    meta={NL2AGENT_RECEIPT_KEY: {
+                        "event_id": uuid4().hex, "run_id": scope.run_id,
+                        "conversation_id": scope.conversation_id, "payload": proposed,
+                    }},
+                )
+            return _serialize_agent_draft_save_result(SaveAgentDraftFieldsSuccess.model_validate(proposed))
+        if {"greeting_message", "example_questions"} & payload.fields.model_fields_set:
+            blocked = await _pending_prompt_error(headers, resolved_agent_id, user_id, tenant_id)
+            if blocked:
+                return blocked
         result = save_agent_draft_fields_impl(
             agent_id=resolved_agent_id,
             fields=payload.fields,
@@ -1097,29 +1299,6 @@ async def save_agent_draft_fields(
             user_id=user_id,
         )
         success = SaveAgentDraftFieldsSuccess.model_validate(result)
-        updated_fields = set(success.updated_fields)
-        if updated_fields & _NL2AGENT_PROMPT_FIELDS:
-            try:
-                await validate_agent_generation_complete_impl(
-                    agent_id=resolved_agent_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                )
-            except Nl2AgentCompletionError as exc:
-                if not _NL2AGENT_FINAL_PROMPT_BATCH.issubset(updated_fields):
-                    return _serialize_agent_draft_save_result(success)
-                return _serialize_agent_draft_save_result(
-                    SaveAgentDraftFieldsError(
-                        agent_id=resolved_agent_id,
-                        code=exc.code,
-                        retryable=exc.code == "prompt_fields_incomplete",
-                    ),
-                    failed_fields=exc.failed_fields,
-                )
-            return _serialize_agent_draft_save_result(
-                success,
-                generation_completed=True,
-            )
         return _serialize_agent_draft_save_result(success)
     except Nl2AgentDraftSaveError as exc:
         return _serialize_agent_draft_save_result(
@@ -1149,3 +1328,62 @@ async def save_agent_draft_fields(
             ),
             list(payload.fields.model_fields_set),
         )
+
+
+async def _pending_prompt_error(headers, agent_id, user_id, tenant_id):
+    if not headers.get(NL2AGENT_RUN_ID_HEADER) or not headers.get(NL2AGENT_CONVERSATION_ID_HEADER):
+        return None
+    from services.nl2agent_prompt_service import require_no_pending
+    from services.nl2agent_state_service import ResourceScope, ResourceStateError
+    try:
+        await require_no_pending(ResourceScope(
+            tenant_id, user_id, agent_id, headers[NL2AGENT_CONVERSATION_ID_HEADER], headers[NL2AGENT_RUN_ID_HEADER],
+        ))
+    except ResourceStateError as exc:
+        return json.dumps({"status": "error", "code": exc.code, "retryable": exc.retryable})
+    return None
+
+
+async def validate_agent_generation_complete() -> str:
+    """Validate the trusted run target without saving or marking a failed save."""
+    from management.services.agent.nl2agent import (
+        Nl2AgentCompletionError,
+        validate_agent_generation_complete_impl,
+    )
+
+    try:
+        headers = tool_headers()
+        agent_id = int(headers.get(NL2AGENT_AGENT_ID_HEADER, ""))
+        if agent_id <= 0:
+            raise ValueError("Invalid target Agent ID")
+    except (RuntimeError, TypeError, ValueError):
+        return _agent_context_error()
+
+    try:
+        user_id, tenant_id = _tool_actor()
+        if headers.get(NL2AGENT_RESOURCE_PENDING_HEADER) == "true":
+            return _agent_context_error("resource_confirmation_required")
+        blocked = await _pending_prompt_error(headers, agent_id, user_id, tenant_id)
+        if blocked:
+            return blocked
+        await validate_agent_generation_complete_impl(
+            agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+        )
+    except Nl2AgentCompletionError as exc:
+        return json.dumps({
+            "status": "error", "code": exc.code, "retryable": False,
+            "failed_fields": exc.failed_fields,
+        }, separators=(",", ":"))
+    except AgentDraftEditError as exc:
+        return _agent_context_error(exc.code)
+    except (PermissionError, UnauthorizedError):
+        return _agent_context_error("unauthorized")
+    except Exception:
+        logger.exception("Failed to validate NL2Agent generation")
+        return json.dumps({
+            "status": "error", "code": "generation_validation_failed", "retryable": True,
+        }, separators=(",", ":"))
+
+    result = json.dumps({"status": "success", "agent_id": agent_id}, separators=(",", ":"))
+    state = json.dumps({"event": "agent_generation_completed", "agent_id": agent_id}, separators=(",", ":"))
+    return f"{result}\n<nl2a_state>{state}</nl2a_state>"

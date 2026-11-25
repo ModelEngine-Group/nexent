@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-ES-RESOURCES-20261116
+  change_type: requirement
+  requirement_id: NL2AGENT-ES-RESOURCES-20261116
+  title: Store resource vectors in a dedicated ES index with backend authorization before search
+  description: Replace Redis resource vector caching and Python similarity calculation with stable ES documents and exact filtered ES scoring. Resolve user-visible resources before search; preserve lexical merging, current source facts and fail-closed authorization.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_semantic_retrieval.py
+      - test/backend/services/test_nl2agent_resource_index.py
+      - test/backend/services/test_nl2agent_resource_authorization.py
+    behaviors:
+      - Stable resource identity, safe projection, model snapshot, version changes and no Redis vector TTL.
+      - Tenant and visible-resource filters precede ES scoring, empty scope makes no search, chunked top-k merging preserves references and scores.
+      - User-visible MCP tools, revalidation before disclosure, permission failures fail closed and ES failures use authorized lexical fallback.
+      - Partial ES failures, refresh, optimistic concurrency, cancellation and finite phase deadline.
+    reason: Existing unit and runtime tests prove Redis reuse and hybrid retrieval but do not prove actual ES mapping, scoring, refresh or pre-search permission filters. Strengthen those boundaries without adding duplicate D1.
+  notes: >-
+    SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/, TASK-023.
+    F-045 inherits agent_config responsibility. Extend the existing runtime D3
+    with real ES and controlled embedding HTTP; isolated unit assertions remain
+    under test/backend. The case owns its ES container/index, PostgreSQL schema,
+    Redis state, HTTP listeners and workers and cleans them on failure.
+    No frontend protocol change or deployment-mode change is required.

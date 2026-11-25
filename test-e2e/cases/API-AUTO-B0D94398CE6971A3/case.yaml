@@ -38,7 +38,7 @@ case:
     action: 用 local 用户登录，携带其 Authorization Header 通过实际 HTTP 请求 GET /user/current_user_info，记录状态码与响应 body。
     expected: 字段类型契约：auth_provider 恒为 "local" 或 "cas" 字符串；username 仅在 CAS 分支出现（字符串或 null），local 分支不返回该字段。
   - order: 4
-    action: 检查响应 data.user 中 auth_provider 字段值以及是否包含 username 字段，并核对 data.user 其余字段（user_id/group_ids/tenant_id/user_email/user_role/permissions/accessibleRoutes）仍完整返回。
+    action: 检查响应 data.user 中 auth_provider 字段值以及是否包含 username 字段，并核对 data.user 其余字段（user_id/group_ids/tenant_id/user_email/user_role/permissions/accessiblePages）仍完整返回。
     expected: 前端映射契约：authService.getCurrentUserInfo 将 data.user.username 映射为 user.username（缺失时为 undefined）、data.user.auth_provider
       映射为 user.authProvider；local 用户 username 为 undefined 时不影响 username→email 回退展示。
   - order: 5
@@ -71,7 +71,7 @@ case:
     - 从 config/users.yaml 读取隔离测试账号与租户关系；密码/Token 仅从 secrets.env 注入，测试代码不得读取生产凭据。
     - 启动本地完整认证依赖并通过 health check；准备一个 local 认证用户，以及（可选）一个已链接 provider='cas' 且 provider_username 非空的 CAS 账号用户。
     - 用 local 用户登录，携带其 Authorization Header 通过实际 HTTP 请求 GET /user/current_user_info，记录状态码与响应 body。
-    - 检查响应 data.user 中 auth_provider 字段值以及是否包含 username 字段，并核对 data.user 其余字段（user_id/group_ids/tenant_id/user_email/user_role/permissions/accessibleRoutes）仍完整返回。
+    - 检查响应 data.user 中 auth_provider 字段值以及是否包含 username 字段，并核对 data.user 其余字段（user_id/group_ids/tenant_id/user_email/user_role/permissions/accessiblePages）仍完整返回。
     - 用 CAS 用户获取会话后，携带该会话的 Authorization Header 再次请求 GET /user/current_user_info。
     - 记录 CAS 分支响应 data.user.auth_provider 与 username 字段值，并与 oauth_accounts 表中该用户 provider='cas' 的 provider_username 比对。
     - 检查前端 authService.getCurrentUserInfo 对 data.user.username 与 data.user.auth_provider 的映射结果；确认响应与日志不出现明文 password/token/API

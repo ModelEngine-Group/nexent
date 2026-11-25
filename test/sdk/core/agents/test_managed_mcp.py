@@ -46,14 +46,15 @@ class _PassthroughAdapter:
 
 
 class _AsyncMCPContext:
-    def __init__(self, session, exited: threading.Event):
+    def __init__(self, session, exited: threading.Event, name: str = "blocking_tool"):
         self.session = session
         self.exited = exited
+        self.name = name
         self.exit_count = 0
 
     async def __aenter__(self):
         tool = mcp.types.Tool(
-            name="blocking_tool",
+            name=self.name,
             description="Blocks until the session is closed",
             inputSchema={"type": "object", "properties": {}},
         )
@@ -87,6 +88,41 @@ def _manager():
     )
     manager.start()
     return manager
+
+
+def test_tool_result_callback_is_bound_to_its_server():
+    class Session:
+        async def call_tool(self, name, arguments):
+            return mcp.types.CallToolResult(
+                content=[mcp.types.TextContent(type="text", text="public output")],
+                _meta={"receipt": name},
+            )
+
+    manager = _manager()
+    receipt = MagicMock()
+    local = _AsyncMCPContext(Session(), threading.Event(), "local_tool")
+    remote = _AsyncMCPContext(Session(), threading.Event(), "remote_tool")
+
+    def factory(parameters, **kwargs):
+        assert "on_tool_result" not in parameters
+        return local if parameters["url"] == "local" else remote
+
+    try:
+        with ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[{"url": "local", "on_tool_result": receipt}, {"url": "remote"}],
+            cancellation_scope=RunCancellationScope(),
+            tool_timeout_seconds=1,
+            close_timeout_seconds=0.5,
+            session_context_factory=factory,
+        ) as collection:
+            tools = {tool.name: tool for tool in collection.tools}
+            assert tools["remote_tool"].forward() == "public output"
+            receipt.assert_not_called()
+            assert tools["local_tool"].forward() == "public output"
+            receipt.assert_called_once_with("local_tool", {"receipt": "local_tool"})
+    finally:
+        asyncio.run(manager.shutdown(timeout=1))
 
 
 def test_ut_sdk_tlm_029_tool_deadline_closes_session_owner(caplog):

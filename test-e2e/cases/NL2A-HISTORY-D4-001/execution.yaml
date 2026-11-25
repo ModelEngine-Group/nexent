@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: NL2A-HISTORY-D4-001
+preparation:
+  families: []
+notes: Self-contained browser-local editor/history/runtime fixtures. Cleanup closes the page and rejects any unexpected persistent write; no shared resources or model calls.
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: NL2A-HISTORY-D4-001
+acceptance_bindings:
+  AC-ENTRY: [NL2A-HISTORY-D4-001]
+  AC-CONTINUE: [NL2A-HISTORY-D4-001]

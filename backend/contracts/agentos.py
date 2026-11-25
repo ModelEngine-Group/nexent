@@ -729,6 +729,8 @@ class PreparedAgentCreatorRun(PreparedCreatorRun):
     mode: Literal["nl2agent"]
     agent_id: PositiveInt
     bound_resources: str = Field(min_length=1)
+    conversation_id: PositiveInt | None = None
+    resource_pending: bool = False
 
 
 class PreparedEvaluationRun(AgentRunSpec):
@@ -793,7 +795,9 @@ class NL2AgentToolCall(RunSpecModel):
     agent_id: PositiveInt
     tool: Literal[
         "search_installed_resources", "search_uninstalled_resources", "recommend_resources", "wrapper",
-        "save_agent_draft_fields",
+        "save_agent_draft_fields", "validate_agent_generation_complete", "discover_requirements",
+        "verify_requirements", "show_resource_card", "read_generation_context",
+        "read_agent_configuration", "save_agent_configuration",
     ]
     arguments: dict[str, JsonValue]
 
@@ -879,6 +883,8 @@ class ChatInvocation(ModelInvokeBase):
 class EmbeddingInvocation(ModelInvokeBase):
     operation: Literal["embedding"] = "embedding"
     input: Annotated[list[str], Field(min_length=1)]
+    # Automatic Memory only; other model callers retain their existing policy.
+    memory_timeout_seconds: Annotated[float, Field(gt=0, le=10)] | None = None
 
 
 class RerankInput(BaseModel):

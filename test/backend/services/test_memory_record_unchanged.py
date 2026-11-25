@@ -1,7 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from unittest.mock import MagicMock
+import asyncio
+from time import monotonic
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, Mock
 
-from management.services.memory import records as memory_record_service
+import pytest
+
+from management.services.memory import records
+from nexent.memory.embedding_model import EmbeddingModelInfo
 
 
 def test_create_memory_exact_idempotency_match_is_unchanged(monkeypatch):
@@ -10,14 +16,14 @@ def test_create_memory_exact_idempotency_match_is_unchanged(monkeypatch):
         "memory_id": 7,
         "content": "existing preference",
     }
-    monkeypatch.setattr(memory_record_service, "memory_record_db", fake_db)
+    monkeypatch.setattr(records, "memory_record_db", fake_db)
     monkeypatch.setattr(
-        memory_record_service,
+        records,
         "_resolve_tenant_embedding_model_info",
         lambda _tenant_id: None,
     )
 
-    service = memory_record_service.MemoryRecordService()
+    service = records.MemoryRecordService()
     service.index_service = MagicMock()
 
     fake_embedding_model_info = MagicMock()

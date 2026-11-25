@@ -92,7 +92,8 @@ def create_app(
         from gateway.identity.middleware import GatewayIdentityMiddleware
 
         app.add_middleware(
-            GatewayIdentityMiddleware, audience=gateway_identity_audience,
+            GatewayIdentityMiddleware,
+            audience=gateway_identity_audience,
             internal_runtime_request=internal_runtime_request,
         )
 

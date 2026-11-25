@@ -68,4 +68,19 @@ class McpToolFact(Fact):
     span_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
 
 
-FACT_MODELS = {"model": ModelFact, "mcp_tool": McpToolFact, "agent": AgentFact}
+class SkillFact(Fact):
+    """A formal Skill guide read or script start."""
+
+    fact_kind: Literal["skill"] = "skill"
+    skill_id: str = Field(min_length=1, max_length=128)
+    skill_name: str = Field(min_length=1, max_length=200)
+    triggered_at: AwareDatetime
+    trigger_kind: Literal["guide_read", "script_started"]
+
+
+FACT_MODELS = {
+    "model": ModelFact,
+    "mcp_tool": McpToolFact,
+    "agent": AgentFact,
+    "skill": SkillFact,
+}

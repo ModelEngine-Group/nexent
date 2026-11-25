@@ -641,6 +641,50 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent/nl2agent/knowledge_recommendations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-2e6097a0a63eb8d3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-0b0c7d19b4ff9733",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installation_attempts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-9bb4d46c7b7f0a77",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_links",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-4d4c5dee4c60bea6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent/nl2agent/run",
       "transport": "http",
       "target": "management",
@@ -6494,6 +6538,116 @@
     },
     {
       "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/skills/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/ops/v1/monitoring/mcp-tools",
       "transport": "http",
       "target": "ops",
@@ -6579,51 +6733,7 @@
       "credential_kinds": [
         "session"
       ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-list",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents/summary",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-summary",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents/trends",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-trends",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents/rankings",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-rankings",
-      "credential_kinds": [
-        "session"
-      ]
     }
   ],
-  "revision": "2026-11-23.ops-agent-and-mcp-tool-monitoring-routes"
+  "revision": "2026-11-25.ops-agent-mcp-tool-and-skill-monitoring-routes"
 }

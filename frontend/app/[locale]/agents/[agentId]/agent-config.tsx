@@ -200,7 +200,7 @@ interface AgentConfigProps {
   onPublished?: () => void;
   debugVisible?: boolean;
   onConfigure?: () => void;
-  onOptimizePrompt?: () => void;
+  onOptimizePrompt?: () => boolean;
   debugPanel?: ReactNode;
   debugExpanded?: boolean;
 }

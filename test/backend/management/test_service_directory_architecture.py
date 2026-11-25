@@ -12,6 +12,8 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'agent/nl2agent_receipts.py',
+    'conversation/nl2agent_resource_index.py',
     'agent/a2a/adapter.py',
     'agent/a2a/catalog.py',
     'agent/a2a/http_client.py',
@@ -28,6 +30,7 @@ MIGRATED_MODULES = {
     'agent/conversation_submission.py',
     'agent/core_policy.py',
     'agent/creator_run.py',
+    'agent/runtime_inputs.py',
     'agent/icon.py',
     'agent/management.py',
     'agent/mcp_passthrough.py',
@@ -181,6 +184,7 @@ MIGRATED_MODULES = {
     'memory/providers/service.py',
     'memory/records.py',
     'memory/retrieval.py',
+    'memory/runtime_embedding.py',
     'model/adapter.py',
     'model/capacity.py',
     'model/catalog.py',

@@ -139,6 +139,7 @@ class ManagedMCPToolCollection:
             connections = []
             for parameters in self.server_parameters:
                 parameters = parameters.copy()
+                on_tool_result = parameters.pop("on_tool_result", None)
                 allowed_tools = parameters.pop("allowed_tools", None)
                 try:
                     connection = await asyncio.wait_for(
@@ -163,11 +164,12 @@ class ManagedMCPToolCollection:
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
                     ) from exc
-                connections.append((*connection, allowed_tools))
+                connections.append((*connection, on_tool_result, allowed_tools))
 
             tools = []
             # Connections mirror server_parameters order: exactly one per entry.
-            for parameters, (session, mcp_tools, allowed_tools) in zip(self.server_parameters, connections):
+            for parameters, (session, mcp_tools, on_tool_result, allowed_tools) in zip(
+                    self.server_parameters, connections):
                 matched = set()
                 for mcp_tool in mcp_tools:
                     if allowed_tools is not None and mcp_tool.name not in allowed_tools:
@@ -177,6 +179,7 @@ class ManagedMCPToolCollection:
                         arguments=None,
                         __session=session,
                         __name=mcp_tool.name,
+                        __on_tool_result=on_tool_result,
                     ):
                         result = self._call_tool(__session, __name, arguments)
                         # Read the protocol result before the adapter renders it:
@@ -186,6 +189,12 @@ class ManagedMCPToolCollection:
                             if token is not None:
                                 with self._result_errors_lock:
                                     self._result_errors[token] = True
+                        elif (
+                            __on_tool_result is not None
+                            and not self._close_requested.is_set()
+                            and not self.cancellation_scope.cancelled
+                        ):
+                            __on_tool_result(__name, result.meta)
                         return result
 
                     tool = adapter.adapt(call_tool, mcp_tool)
@@ -488,6 +497,8 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
 
+        if callable(mcp_host_item.get("on_tool_result")):
+            result["on_tool_result"] = mcp_host_item["on_tool_result"]
         if "allowed_tools" in mcp_host_item:
             result["allowed_tools"] = mcp_host_item["allowed_tools"]
 

@@ -26,7 +26,7 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
         "selected_model_id": 42, "model_parameter_preferences": preferences,
     })
     monkeypatch.setattr(model_preferences, "read_model_preferences", read_preferences)
-    monkeypatch.setattr("nexent.core.concurrency.run_blocking", inline)
+    monkeypatch.setattr(creator_execution, "run_blocking", inline)
     monkeypatch.setattr(creator, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(creator, "get_current_user_info", Mock(return_value=("owner", "tenant", "en")))
     monkeypatch.setattr(creator_execution.system_agent_provider, "get_creator_ref",
@@ -59,7 +59,8 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
     assert effective.__dict__["_runtime_model_parameter_preferences"] == preferences
     assert actor == ServicePrincipal("owner", "tenant")
     assert language == "en"
-    dispatch.assert_called_once_with(payload.model_copy.return_value, actor)
+    dispatch.assert_called_once_with(payload.model_copy.return_value, actor, request=effective)
+    assert payload.model_copy.return_value.conversation_id == 11
     assert prepare_history.call_args.kwargs["selected_model_id"] == effective.model_id
     assert prepare_history.call_args.kwargs.get("model_parameter_preferences", {}) == {}
     assert response.headers["conversation_id"] == "11"

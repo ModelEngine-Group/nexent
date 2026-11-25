@@ -35,17 +35,38 @@ def test_independent_images_do_not_package_other_service_implementations():
     for parts in copies:
         assert all(
             source.rstrip("/") != "backend"
-            and not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
+            and not source.startswith(("backend/ops", "backend/data_process"))
             for source in parts[1:-1]
         )
     runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
     common = dockerfile.split("FROM base AS backend-common\n", 1)[1].split("\nFROM ", 1)[0]
     sql_sources = [source for line in (runtime + common).splitlines() if line.startswith("COPY deploy/sql/")
                    for source in line.split()[1:-1]]
-    assert set(sql_sources) <= {"deploy/sql/ops-init.sql", "deploy/sql/migrations/ops/"}
+    assert not sql_sources
 
 
-def test_independent_services_package_the_shared_monitoring_producer_and_ops_migrations():
+def test_management_packages_creator_imports_without_sharing_them_with_runtime():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    nl2agent_sources = {"backend/services/__init__.py"} | {
+        path.relative_to(ROOT).as_posix() for path in (ROOT / "backend/services").glob("nl2agent_*.py")
+    }
+    assert "backend/services/nl2agent_state_service.py" in nl2agent_sources
+
+    for target in ("management", "runtime", "backend-common", "management-base"):
+        section = dockerfile.split(f" AS {target}\n", 1)[1].split("\nFROM ", 1)[0]
+        sources = {
+            source
+            for line in section.replace("\\\n", " ").splitlines() if line.startswith("COPY ")
+            for source in line.split()[1:-1]
+        }
+        service_sources = {
+            source for source in sources
+            if source.startswith("backend/services")
+        }
+        assert service_sources == (nl2agent_sources if target == "management" else set())
+
+
+def test_only_ops_image_packages_ops_initializer_and_sql():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
     common = dockerfile.split("FROM base AS backend-common\n", 1)[1].split("\nFROM ", 1)[0]
     sources = {source for line in common.replace("\\\n", " ").splitlines() if line.startswith("COPY ")
@@ -54,11 +75,27 @@ def test_independent_services_package_the_shared_monitoring_producer_and_ops_mig
     assert not any(source.startswith("backend/ops") for source in sources)
     ops = (ROOT / "deploy/images/dockerfiles/ops/Dockerfile").read_text(encoding="utf-8")
     assert "COPY infrastructure/monitoring /opt/infrastructure/monitoring" in ops
-    for target in (common, ops):
-        assert "postgresql-client" in target
-        assert "deploy/common/run-ops-sql-migrations.sh" in target
-        assert "deploy/common/run-sql-migrations.sh" in target
-        assert "deploy/sql/ops-init.sql" in target and "deploy/sql/migrations/ops/" in target
+    for source in ("deploy/common/start-ops.sh", "deploy/common/run-ops-sql-migrations.sh",
+                   "deploy/sql/ops-init.sql", "deploy/sql/migrations/ops/"):
+        assert source not in common
+        assert source in ops
+    assert "deploy/common/run-sql-migrations.sh" in common
+    assert 'ENTRYPOINT ["/opt/nexent/scripts/start-ops.sh"' in ops
+    assert "ln -s start-ops.sh /opt/nexent/scripts/start-backend.sh" in ops
+
+
+def test_data_process_image_excludes_ops_sql_initialization():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/data-process/Dockerfile").read_text(encoding="utf-8")
+    assert "COPY deploy/common/start-backend.sh" in dockerfile
+    assert "run-ops-sql-migrations.sh" not in dockerfile
+    assert "deploy/sql/ops-init.sql" not in dockerfile
+
+
+@pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_data_process_compose_keeps_generic_startup(filename):
+    services = yaml.safe_load((ROOT / "deploy/docker/compose" / filename).read_text(encoding="utf-8"))["services"]
+    assert services["nexent-data-process"]["environment"]["NEXENT_SQL_STARTUP_MODE"] == "off"
+    assert "OPS_MONITORING_ENABLED" not in services["nexent-data-process"]["environment"]
 
 
 def test_runtime_packages_aidp_search_without_management_extensions():

@@ -103,7 +103,7 @@ async def test_generation_completion_uses_the_same_identifier_contract(mocker, n
         "name": name, "description": "Ready", "prompt": "Ready", "greeting_message": "Hello",
         "example_questions": ["Help"],
     }
-    mocker.patch.object(service, "_load_verified_nl2agent_state", return_value=(draft, {}))
+    mocker.patch.object(service, "require_agent_draft_edit", return_value=draft)
     if valid:
         assert await service.validate_agent_generation_complete_impl(
             agent_id=1, tenant_id="tenant", user_id="owner",

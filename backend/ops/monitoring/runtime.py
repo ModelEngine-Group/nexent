@@ -14,14 +14,19 @@ from infrastructure.monitoring.runtime import start_worker
 from infrastructure.monitoring.store import monitoring_engine
 from ops.monitoring.agent import AGENT_MONITORING
 from ops.monitoring.mcp_tool import MCP_TOOL_MONITORING
-from ops.monitoring.model import MODEL_MONITORING
+from ops.monitoring.model import MODEL_MONITORING, SKILL_MONITORING
 from ops.monitoring.search import install_templates
 from ops.monitoring.service import Monitoring
 from ops.monitoring.store import ControlStore
 
 
 logger = logging.getLogger(__name__)
-MONITORING_KINDS = {"model": MODEL_MONITORING, "mcp_tool": MCP_TOOL_MONITORING, "agent": AGENT_MONITORING}
+MONITORING_KINDS = {
+    "model": MODEL_MONITORING,
+    "mcp_tool": MCP_TOOL_MONITORING,
+    "agent": AGENT_MONITORING,
+    "skill": SKILL_MONITORING,
+}
 
 
 def control_store():

@@ -3,7 +3,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { conversationService } from "@/services/conversationService";
 import type { ConversationTarget } from "@/types/conversation";
@@ -22,26 +22,23 @@ export function useCreatorHistories(
     () => client.invalidateQueries({ queryKey, exact: true }),
     [client, queryKey]
   );
-  const query = useInfiniteQuery({
+  const query = useQuery({
     queryKey,
     enabled: Boolean(user?.id && user?.tenantId && targetId && targetId > 0),
-    initialPageParam: 0,
     staleTime: 30_000,
-    queryFn: ({ pageParam }) =>
-      conversationService.getCreatorHistories(kind, targetId!, pageParam),
-    getNextPageParam: (last, pages) => {
-      const count = pages.reduce((sum, page) => sum + page.items.length, 0);
-      return last.items.length && count < last.total ? count : undefined;
-    },
+    queryFn: () => conversationService.getCreatorHistories(kind, targetId!),
   });
   return {
-    items: query.data?.pages.flatMap((page) => page.items) ?? [],
-    total: targetId && targetId > 0 ? query.data?.pages[0]?.total : 0,
+    items: query.data?.items.slice(0, 3) ?? [],
+    total:
+      targetId && targetId > 0
+        ? query.data
+          ? Math.min(query.data.total, 3)
+          : undefined
+        : 0,
     pending: query.isLoading,
+    ready: query.isSuccess,
     failed: query.isError,
-    fetchingMore: query.isFetchingNextPage,
-    hasMore: query.hasNextPage,
-    loadMore: () => query.fetchNextPage(),
     refetch: () =>
       targetId && targetId > 0 ? query.refetch() : Promise.resolve(undefined),
     refresh,
