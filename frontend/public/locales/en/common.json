@@ -4838,6 +4838,7 @@
   "aidpKnowledge.deleteKbFailed": "Failed to delete knowledge base",
   "aidpKnowledge.createKbSuccess": "Knowledge base created",
   "aidpKnowledge.createKbFailed": "Failed to create knowledge base",
+  "aidpKnowledge.createKbDuplicateName": "A knowledge base with this name already exists. Use a different name.",
   "aidpKnowledge.updateKb": "Update Knowledge Base",
   "aidpKnowledge.updateKbSuccess": "Knowledge base updated",
   "aidpKnowledge.updateKbFailed": "Failed to update knowledge base",
