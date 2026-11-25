@@ -7388,7 +7388,6 @@
   "nl2agent.promptGeneration.applied": "Applied",
   "nl2agent.promptGeneration.cancelled": "Cancelled",
   "nl2agent.promptGeneration.failed": "Could not confirm the result. Your edits are retained. Retry to check and complete the operation.",
-
   "dreaming.reason.no_candidates": "No recent Agent memories were available.",
   "dreaming.reason.no_eligible_candidates": "No memories reached the promotion thresholds.",
   "dreaming.reason.no_new_evidence": "The current version already contains the available evidence.",
@@ -7437,5 +7436,14 @@
   "nl2agent.unified.otherResources": "Need a different resource?",
   "nl2agent.unified.createMcp": "Create MCP",
   "nl2agent.unified.unmatchedTitle": "No candidate has passed verification for this requirement",
-  "nl2agent.unified.unmatchedDescription": "Create a Skill or connect an MCP service. It will be added to this requirement automatically."
+  "nl2agent.unified.unmatchedDescription": "Create a Skill or connect an MCP service. It will be added to this requirement automatically.",
+  "memory.manager.agentAutomaticMemory": "Automatic memory for this Agent",
+  "memory.manager.personalMemoryDisabledHint": "The current user has turned off personal memory. Their conversations will not use automatic memory.",
+  "memory.manager.tenantAutomaticMemory": "Tenant automatic memory",
+  "memory.manager.agentAutomaticMemoryHint": "This setting applies to the saved Agent version. Tenant and personal settings also apply.",
+  "memory.manager.tenantAutomaticMemoryHint": "Controls automatic memory for all conversations in this tenant.",
+  "memory.manager.tenantMemoryDisabledHint": "Automatic memory is disabled for this tenant. Contact your tenant administrator to enable it.",
+  "dreaming.reason.memory_disabled": "Automatic memory is off.",
+  "memory.manager.tenantMemoryLoadError": "Could not load the tenant memory setting.",
+  "tenantResources.tabs.memory": "Memory Settings"
 }

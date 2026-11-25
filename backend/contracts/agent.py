@@ -429,6 +429,7 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    enable_memory: Optional[bool] = Field(default=None, strict=True)
     enable_protocol_repair_retry: Optional[bool] = None
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
@@ -482,6 +483,7 @@ class ExportAndImportAgentInfo(BaseModel):
     provide_run_summary: bool
     allow_chat_metadata: bool = False
     allow_mcp_header_passthrough: bool = False
+    enable_memory: bool = Field(default=True, strict=True)
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None

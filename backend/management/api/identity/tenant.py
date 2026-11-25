@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
+from contracts.roles import has_any_role
 from contracts.constants.constants import SU_ROLES
 from contracts.identity import PaginationRequest, TenantCreateRequest, TenantUpdateRequest
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
@@ -241,7 +242,7 @@ async def delete_tenant_endpoint(
     """
     try:
         user_id, operator_tenant_id, role = get_current_user_context(authorization)
-        if (role or "").upper() not in SU_ROLES:
+        if not has_any_role(role, SU_ROLES):
             raise ForbiddenError("Only super administrators can delete tenants")
 
         # Perform tenant deletion with all associated resources

@@ -166,6 +166,7 @@ MIGRATED_MODULES = {
     'mcp/registration.py',
     'mcp/service.py',
     'mcp/tools.py',
+    'memory/access.py',
     'memory/agentos_callback.py',
     'memory/context.py',
     'memory/dreaming/scheduler.py',

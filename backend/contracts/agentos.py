@@ -767,6 +767,7 @@ class MemoryOperation(str, Enum):
 
 class AgentMemoryStore(RunSpecModel):
     agent_id: PositiveInt
+    agent_version_no: int | None = Field(default=None, ge=0)
     conversation_id: PositiveInt | None = None
     content: str = Field(min_length=1, max_length=65536)
     idempotency_key: str = Field(min_length=1, max_length=128)
@@ -782,6 +783,7 @@ class AgentMemoryReceipt(RunSpecModel):
 
 
 class AgentMemoryStored(RunSpecModel):
+    agent_version_no: int | None = Field(default=None, ge=0)
     memory_id: PositiveInt
     agent_id: PositiveInt
     conversation_id: PositiveInt

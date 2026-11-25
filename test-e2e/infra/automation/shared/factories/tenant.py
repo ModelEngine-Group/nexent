@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Owned, API-provisioned tenants/accounts for mutating identity/quota tests.
 
 Credentials are memory-only. Shared users.yaml and anchor tenants are untouched.
@@ -32,12 +33,12 @@ async def delete_isolated_user(api, tenant_id, user_id):
 
 
 async def delete_isolated_tenant(api, tenant_id):
+    deleted = await api.delete(f'/tenants/{tenant_id}')
+    assert_status(deleted, (200, 404))
     listing = await api.post('/users/list', json={'tenant_id': tenant_id, 'page': 1, 'page_size': 100})
     assert_status(listing, 200)
     if listing.json().get('data') != []:
         raise RuntimeError('Owned tenant still contains users; cleanup incomplete')
-    deleted = await api.delete(f'/tenants/{tenant_id}')
-    assert_status(deleted, (200, 404))
 
 
 @asynccontextmanager
@@ -110,13 +111,8 @@ async def isolated_accounts(aliases):
             raise
         finally:
             failures = []
-            for tid, uid in reversed(users):
-                try:
-                    await delete_isolated_user(api, tid, uid)
-                    mark_asset_state('isolated_users', uid, 'DELETED')
-                except Exception as exc:
-                    failures.append(type(exc).__name__)
-                    mark_asset_state('isolated_users', uid, 'ORPHANED', detail=type(exc).__name__)
+            # Tenant deletion removes the identity scope before account cleanup,
+            # as required by the product's last-administrator protection.
             for tenant in reversed(list(tenants.values())):
                 tid = str(tenant['tenant_id'])
                 try:
@@ -126,6 +122,13 @@ async def isolated_accounts(aliases):
                 except Exception as exc:
                     failures.append(type(exc).__name__)
                     mark_asset_state('isolated_tenants', tid, 'ORPHANED', detail=type(exc).__name__)
+            for tid, uid in reversed(users):
+                try:
+                    await delete_isolated_user(api, tid, uid)
+                    mark_asset_state('isolated_users', uid, 'DELETED')
+                except Exception as exc:
+                    failures.append(type(exc).__name__)
+                    mark_asset_state('isolated_users', uid, 'ORPHANED', detail=type(exc).__name__)
             if failures:
                 message = 'Isolated account cleanup incomplete; see asset journal'
                 if primary is None:
