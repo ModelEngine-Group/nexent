@@ -24,7 +24,7 @@ from ..ext_components.aidp.retrieval_config import (
     CONFIG_KEYS,
     DEFAULTS,
     build_payload,
-    resolve_config,
+    validate_config,
 )
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
@@ -173,6 +173,7 @@ class IndependentAidpSearchTool(Tool):
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
         observer: MessageObserver = Field(default=None, exclude=True),
         image_url_builder: Optional[Callable[[str], str]] = Field(default=None, exclude=True),
+        **kwargs,
     ):
         super().__init__()
         self.base_url = _validate_base_url(server_url)
@@ -205,7 +206,9 @@ class IndependentAidpSearchTool(Tool):
             "query_expansion_enable": query_expansion_enable,
         }
         config = {key: _field_default(value, DEFAULTS[key]) for key, value in config.items()}
-        resolved = resolve_config(config)
+        if not config.get("reranking_enable", DEFAULTS["reranking_enable"]):
+            config["graph_reranking_enable"] = False
+        resolved = validate_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
         self.observer = _field_default(observer, None)

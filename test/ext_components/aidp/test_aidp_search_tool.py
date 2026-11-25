@@ -248,13 +248,9 @@ class TestAidpSearchToolInit:
 
         assert "kds_list must be a valid JSON array" in str(exc_info.value)
 
-    def test_init_reads_official_legacy_method_without_revalidation(self, aidp_module, mock_observer, monkeypatch):
+    def test_init_reads_official_legacy_method(self, aidp_module, mock_observer):
         mock_client = MagicMock()
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
-
-        def unexpected(*args, **kwargs):
-            raise AssertionError("Persisted retrieval configuration must not be revalidated")
-        monkeypatch.setattr(aidp_module, "validate_config", unexpected, raising=False)
         tool = aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com",
                 api_key="jwt-token",

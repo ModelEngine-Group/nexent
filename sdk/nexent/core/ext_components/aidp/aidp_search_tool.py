@@ -33,7 +33,7 @@ from .retrieval_config import (
     CONFIG_KEYS,
     DEFAULTS,
     build_payload,
-    resolve_config,
+    validate_config,
 )
 
 
@@ -184,6 +184,7 @@ class AidpSearchTool(Tool):
         graph_reranking_enable: bool = Field(default=True, description="Include graph results in unified reranking"),
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
         observer: MessageObserver = Field(default=None, exclude=True),
+        **kwargs,
     ):
         super().__init__()
         self.kds_list: List[str] = _parse_kds_list(kds_list)
@@ -219,7 +220,9 @@ class AidpSearchTool(Tool):
             "query_expansion_enable": query_expansion_enable,
         }
         config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
-        resolved = resolve_config(config)
+        if not config.get("reranking_enable", DEFAULTS["reranking_enable"]):
+            config["graph_reranking_enable"] = False
+        resolved = validate_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
         self.observer = _resolve_field_default(observer, None)
