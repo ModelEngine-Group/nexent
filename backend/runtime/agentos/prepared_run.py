@@ -7,6 +7,8 @@ import logging
 from concurrent.futures import Future
 from contextlib import aclosing
 from dataclasses import dataclass
+from functools import partial
+from typing import Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
@@ -22,15 +24,19 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import (
     ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
 )
+from infrastructure.rdb.conversation_state import load_execution_result_record
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
 from nexent.core.agents.context.execution_history import ExecutionHistory
+from nexent.core.agents.context.native_history import decode_history_event
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from runtime.adapters.nexent.runner import DeferredAgentRun, agent_run
+from runtime.agentos.prepared_automation import request_automation_proposal
 from runtime.agentos.prepared_evaluation import (
     discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
 )
+from runtime.agentos.history_sources import discover_summary_sources
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
 from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
 
@@ -45,6 +51,7 @@ class _AdmissionSlot:
     worker: Future | None = None
     execution: object = None
     deferred: DeferredAgentRun | None = None
+    cleanup: Callable[[], None] | None = None
 
     async def start_worker(self, run_id):
         self.deferred = DeferredAgentRun()
@@ -90,6 +97,47 @@ async def _snapshot_chunks(info, slot=None):
             yield chunk
 
 
+def _read_execution_result(user_id, tenant_id, conversation_id, message_id, unit_index):
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] == "tool_result":
+        event = decode_history_event(record)
+        if event is None or not event.get("call_id"):
+            raise ValueError("Invalid persisted native execution result")
+        return event["result"]
+    payload = json.loads(record["content"])
+    if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+        raise ValueError("Invalid persisted execution content")
+    return payload["content"]
+
+
+async def _automation_proposal_chunks(info, payload, actor):
+    reference = AgentRunReference(conversation_id=payload.conversation_id, run_id=payload.run_id)
+    try:
+        result = await request_automation_proposal(reference, actor)
+        message = result.get("user_message")
+        if not isinstance(message, str) or not message:
+            raise RuntimeError("Scheduled-task proposal response is missing its message")
+        if result["status"] == "proposal_ready":
+            proposal = result.get("proposal")
+            if not isinstance(proposal, dict) or not proposal.get("proposal_id"):
+                raise RuntimeError("Scheduled-task proposal response is missing its proposal")
+            yield json.dumps({
+                "type": "automation_proposal",
+                "content": json.dumps(proposal, ensure_ascii=False),
+            }, ensure_ascii=False)
+        elif result["status"] == "error":
+            info.attempt_outcome = "failed"
+    except RuntimeError:
+        logger.warning("Scheduled-task proposal request failed for run %s", reference.run_id)
+        info.attempt_outcome = "failed"
+        message = (
+            "暂时无法生成定时任务提案，请稍后重试。"
+            if payload.language == "zh"
+            else "The scheduled-task proposal could not be generated. Try again shortly."
+        )
+    yield json.dumps({"type": "final_answer", "content": message}, ensure_ascii=False)
+
+
 def _execution_record(history, event):
     value = event.get("content")
     try:
@@ -116,6 +164,8 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
         raise
 
     status = "failed"
+    facts = {}
+    index = 0
     try:
         versions = {
             "agent_id": payload.resource.agent_id,
@@ -142,12 +192,20 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
             minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
         )
-        history = ExecutionHistory()
+        checkpoint = payload.historical_context.history_summary if payload.historical_context is not None else None
+        history = ExecutionHistory(read_conversation_result=partial(
+            _read_execution_result, actor.user_id, actor.tenant_id, identity.conversation_id,
+        ), discover_summary_sources=(partial(
+            discover_summary_sources, actor.user_id, actor.tenant_id, identity.conversation_id,
+            checkpoint.unit_id, checkpoint.covered_through_message_id,
+        ) if checkpoint is not None else None))
         info.observer.execution_history = history
-        facts = {}
-        index = 0
         with agent_monitoring_context(metadata):
-            async with aclosing(_snapshot_chunks(info, slot)) as chunks:
+            stream = (
+                _automation_proposal_chunks(info, payload, actor)
+                if payload.automation_proposal_only else _snapshot_chunks(info, slot)
+            )
+            async with aclosing(stream) as chunks:
                 async for chunk in chunks:
                     # Re-encode JSON to keep each payload within one SSE data line.
                     observer_event = json.loads(chunk)
@@ -159,35 +217,40 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
                             continue
                         index += 1
                         fact = record.payload()
-                        for field in ("invocation_id", "tool_call_id"):
+                        for field in ("invocation_id", "tool_call_id", "step_id"):
                             if isinstance(observer_event.get(field), str):
                                 fact[field] = observer_event[field]
                         await _append_event(journal, index, "agentos_execution_fact", fact)
                         history.bind_run(key, identity.run_id, index)
-                        facts[index] = (record, fact.get("summary"))
+                        facts[index] = (record, fact.get("summary"), fact.get("model_view"))
                         continue
                     index += 1
                     await _append_event(journal, index, "agentos_observer", observer_event)
-        for fact_index, (record, original_summary) in facts.items():
-            if record.summary and record.summary != original_summary:
-                index += 1
-                await _append_event(journal, index, "agentos_execution_summary", {
-                    "fact_sequence": fact_index, "summary": record.summary,
-                })
         status = info.attempt_outcome or "completed"
         return status
     except asyncio.CancelledError:
         status = "stopped"
         raise
     finally:
-        if slot is not None:
-            if slot.execution is None:
-                slot.worker = info.thread_future
+        try:
+            for fact_index, (record, original_summary, original_view) in facts.items():
+                update = {}
+                if record.summary and record.summary != original_summary:
+                    update["summary"] = record.summary
+                if record.model_view is not None and record.model_view != original_view:
+                    update["model_view"] = record.model_view
+                if update:
+                    index += 1
+                    await _append_event(journal, index, "agentos_execution_summary", {
+                        "fact_sequence": fact_index, **update,
+                    })
+        finally:
+            if slot is None:
+                release_prepared_run(info, identity.conversation_id, identity.user_id, status)
             else:
-                slot.cancel_worker()
-            if slot.worker is not None and not slot.worker.done():
-                await asyncio.gather(asyncio.wrap_future(slot.worker), return_exceptions=True)
-        release_prepared_run(info, identity.conversation_id, identity.user_id, status)
+                if slot.execution is None:
+                    slot.worker = info.thread_future
+                slot.cleanup = partial(release_prepared_run, info, identity.conversation_id, identity.user_id, status)
 
 
 async def _finish_producer(runner, monitor, identity, journal, status, slot=None):
@@ -199,6 +262,8 @@ async def _finish_producer(runner, monitor, identity, journal, status, slot=None
         slot.cancel_worker()
         if slot.worker is not None and not slot.worker.done():
             await asyncio.gather(asyncio.wrap_future(slot.worker), return_exceptions=True)
+        if slot.cleanup is not None:
+            slot.cleanup()
     try:
         finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
         if finished:

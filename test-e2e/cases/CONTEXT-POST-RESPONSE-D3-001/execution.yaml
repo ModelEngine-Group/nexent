@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: CONTEXT-POST-RESPONSE-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_usage_calibrates_post_response_maintenance
+  profiles: [mock]
+acceptance_bindings:
+  AC-POST-RESPONSE: [test_usage_calibrates_post_response_maintenance]
+  AC-WHOLE-TURN: [test_usage_calibrates_post_response_maintenance]
+  AC-CODE-END-STOP: [test_usage_calibrates_post_response_maintenance]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained owned HTTP/SSE protocol provider, synthetic key, no shared assets. Actual context runtime, model service, sender and usage decoder execute; provider and thread are closed in finally. Real cloud/Phoenix acceptance is separate.

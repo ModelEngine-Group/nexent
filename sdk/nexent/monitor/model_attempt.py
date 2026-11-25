@@ -14,9 +14,24 @@ from uuid import uuid4
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from nexent.core.model_errors import ModelErrorCode, model_error_summary
+
 from .duration import duration_attributes
 from .local_content import local_capture_enabled, safe_local_content
 from .provider_response import ProviderResponse
+
+
+_LEGACY_ATTEMPT_MESSAGES = {
+    'MODEL_EMPTY_RESPONSE': 'The model returned no answer content or tool calls.',
+    'MODEL_CONTEXT_EXCEEDED': 'The model service context limit was exceeded.',
+    'MODEL_SAMPLING_FALLBACK': 'The model service rejected the sampling parameters.',
+}
+
+_TOKEN_ATTRIBUTES = {
+    "input_tokens": "llm.token_count.prompt",
+    "output_tokens": "llm.token_count.completion",
+    "total_tokens": "llm.token_count.total",
+}
 
 
 def _isolated(method):
@@ -72,6 +87,7 @@ class ModelAttemptSession:
         self.manager, self.model, self.logical_span = manager, model, logical_span
         self.request_id, self.max_attempts = str(request_id), max_attempts
         self.span = self.tracker = None
+        self.observation = None
         self.attempt_id = self.previous_attempt_id = self.retry_reason = None
         self.attempt_no = 0
         self._raw = self._output = None
@@ -119,6 +135,9 @@ class ModelAttemptSession:
         self._provider_response = ProviderResponse(self._reserve_provider)
         # Local projection collapses this wrapper; the remote logical span stays unchanged.
         self.tracker = self.manager.create_token_tracker(self.model, self.span)
+        monitoring_config = self.manager._config
+        if monitoring_config.export_traces and monitoring_config.provider != 'local_file':
+            self.tracker.remote_span = self.logical_span
         safe_body = _safe(body)
         if self._take(safe_body, 'raw.request'):
             self._raw['request'] = safe_body
@@ -133,6 +152,15 @@ class ModelAttemptSession:
                 _encoded(safe_config).encode()).hexdigest())
         self.span.add_event('model.requested', {'nexent.event_id': str(uuid4())})
         return self.tracker
+
+    @_isolated
+    def bind_observation(self, observation):
+        if self.span is None or not self.span.is_recording():
+            return
+        observation.bind_trace(self.span.get_span_context())
+        self.observation = observation
+        self.tracker.attempt_observation = observation
+        self.span.set_attribute("nexent.model_attempt.fact_id", observation.payload["fact_id"])
 
     def _put(self, key, value):
         self.span.set_attribute(key, _encoded(value))
@@ -320,8 +348,12 @@ class ModelAttemptSession:
                 if key.lower() in {'authorization', 'x-api-key', 'api-key', 'cookie'}:
                     secrets.extend([value, value.removeprefix('Bearer ')])
             self.raw_response(RawHttpResponse(response.status_code, {}, response.content, tuple(secrets)))
+        try:
+            message = model_error_summary(ModelErrorCode(category))
+        except ValueError:
+            message = _LEGACY_ATTEMPT_MESSAGES.get(category)
         self.fail({'category': category, 'http_status': status if type(status) is int else None,
-                   'retryable': retryable, 'will_retry': will_retry})
+                   'safe_message': message, 'retryable': retryable, 'will_retry': will_retry})
 
     @_isolated
     def complete(self, message):
@@ -347,11 +379,14 @@ class ModelAttemptSession:
             ('cached_input_tokens', 'cached_input_tokens', 'llm.prompt_cache.cached_input_tokens'),
             ('reasoning_tokens', 'reasoning_tokens', 'llm.usage.reasoning_tokens'),
         ):
+            if self.observation is not None and field in _TOKEN_ATTRIBUTES:
+                continue
             value = usage.get(field, usage.get(alias))
             if type(value) is int and value >= 0:
                 values[attribute] = value
         known = bool(values)
-        values['nexent.usage_origin'] = usage.get('origin', 'provider' if known else 'unknown')
+        if self.observation is None:
+            values['nexent.usage_origin'] = usage.get('origin', 'provider' if known else 'unknown')
         if usage.get('semantics_id'):
             values['nexent.usage_semantics_id'] = usage['semantics_id']
         self.span.set_attributes(values)
@@ -368,6 +403,28 @@ class ModelAttemptSession:
         self._terminal = True
         self.end()
 
+    def _write_measurements(self, span, observation, cancelled):
+        if observation is None or observation.started is None:
+            span.set_attributes(duration_attributes(self._started, time.perf_counter()))
+            return
+        if cancelled:
+            observation.finish(GeneratorExit())
+        values = observation.terminal
+        if values is None:
+            return
+        attributes = {
+            "nexent.model_attempt.outcome": values["outcome"],
+            "nexent.duration_ms": values["duration_ms"],
+            "nexent.usage_origin": "provider" if _TOKEN_ATTRIBUTES.keys() & values.keys() else "unknown",
+        }
+        attributes.update({attribute: values[field] for field, attribute in _TOKEN_ATTRIBUTES.items()
+                           if field in values})
+        if "ttft_ms" in values:
+            attributes.update({"llm.ttft_ms": values["ttft_ms"], "llm.time_to_first_token": values["ttft_ms"] / 1000})
+        if "generation_rate" in values:
+            attributes["llm.generation_rate"] = values["generation_rate"]
+        span.set_attributes(attributes)
+
     @_isolated
     def end(self, *, cancelled=False):
         if self.span is None:
@@ -375,10 +432,11 @@ class ModelAttemptSession:
         if not self._output.get('complete'):
             self._save_output(self._merged_output(), complete=False)
         span, self.span = self.span, None
+        observation, self.observation = self.observation, None
         try:
             if not self._terminal:
                 span.set_attribute('nexent.business_status', 'cancelled' if cancelled else 'interrupted')
-            span.set_attributes(duration_attributes(self._started, time.perf_counter()))
+            self._write_measurements(span, observation, cancelled)
             span.set_attribute('nexent.raw.value', _encoded(self._raw))
             span.set_attribute('output.value', _encoded(self._output))
             if self._provider_response.seen and not self._provider_response.failed:

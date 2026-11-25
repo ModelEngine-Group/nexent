@@ -1322,7 +1322,7 @@ wait_for_nexent_ready() {
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         deployments="$deployments nexent-openssh"
     fi
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ]; then
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
         deployments="$deployments nexent-otel-collector"
         case "$DEPLOYMENT_MONITORING_PROVIDER" in
             phoenix) deployments="$deployments nexent-phoenix" ;;

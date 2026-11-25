@@ -23,7 +23,6 @@ from management.services.conversation.creator_checkpoints import (
     checkpoint_creator_stream,
 )
 from management.services.conversation.creator_runtime import (
-    agent_run_manager,
     CreatorControl,
     agent_run_manager,
     claim_creator,
@@ -318,10 +317,10 @@ async def start_creation_turn(
         options = {"execution_id": durable.execution_id} if durable is not None else {}
         reservation = await claim_creator(conversation_id, user_id, control.generation, **options)
 
-    async def prepare_history():
+    async def prepare_history(task_name="creator-prepare-history"):
         nonlocal conversation_id
         conversation_id, index = await run_blocking(
-            "creator-prepare-history", prepare_creation_history,
+            task_name, prepare_creation_history,
             conversation_id=conversation_id, minio_files=request.minio_files, tenant_id=tenant_id,
             message_receipt=message_receipt, **history_options,
         )
@@ -384,10 +383,23 @@ async def start_creation_turn(
                     ))
         if not coordinated:
             await claim_request_id()
+        retry_index = None
+        if request.retry_user_message_id is not None or request.retry_message_index is not None:
+            # Validate the existing turn before the runtime can advance a card.
+            retry_index = await step(prepare_history("creator-validate-retry"))
+            if kind == "agent" and history and history.get("message_records"):
+                last = history["message_records"][-1]
+                effective.__dict__["_resume_confirmed_requirements"] = (
+                    last.get("role") == "assistant"
+                    and last.get("message_index") == retry_index
+                    and last.get("status") in {"failed", "stopped"}
+                )
         stream = await stream_factory(effective, ref)
         if not coordinated:
             await control.admit()
-        index = await step(prepare_history())
+        index = retry_index if retry_index is not None else await step(prepare_history())
+        if kind == "agent":
+            effective.conversation_id = conversation_id
         if reservation is None:
             await claim_stream()
             preparation_guard = control.guard_preparation(conversation_id, user_id)
@@ -396,7 +408,7 @@ async def start_creation_turn(
             runtime_state_service.bind_execution_message_async, user_id, conversation_id, durable.execution_id, message_id,
         )):
             raise RuntimeCoordinationUnavailableError("Creator no longer owns its replay")
-        extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents"}
+        extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents", "creator_mode": f"nl2{kind}"}
         source_id = message_receipt.get("message_id")
         if type(source_id) is int and 0 < source_id <= 2147483647:
             extra_metadata["trajectory_source_message_id"] = str(source_id)

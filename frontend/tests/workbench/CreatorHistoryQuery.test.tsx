@@ -50,24 +50,22 @@ beforeEach(() => {
   state.request.mockReset();
 });
 
-it("loads all target histories by pages and reports the server count", async () => {
-  state.request.mockResolvedValueOnce(page(12)).mockResolvedValueOnce(page(11));
-  const view = setup();
-  await waitFor(() => expect(view.result.current.total).toBe(2));
-  expect(state.request).toHaveBeenCalledWith("agent", 42, 0);
-  await act(async () => {
-    await view.result.current.loadMore();
-  });
-  await waitFor(() =>
-    expect(
-      view.result.current.items.map((item) => item.conversation_id)
-    ).toEqual([12, 11])
-  );
-  expect(state.request).toHaveBeenLastCalledWith("agent", 42, 1);
-  expect(view.result.current.hasMore).toBe(false);
-  view.unmount();
-  view.client.clear();
-});
+it.each(["agent", "skill"] as const)(
+  "loads only three %s histories in a single request",
+  async (kind) => {
+    state.request.mockResolvedValue({
+      items: [12, 11, 10, 9].flatMap((id) => page(id).items),
+      total: 20,
+    });
+    const view = setup(42, kind);
+    await waitFor(() => expect(view.result.current.items).toHaveLength(3));
+    expect(view.result.current.total).toBe(3);
+    expect(state.request).toHaveBeenCalledExactlyOnceWith(kind, 42);
+    expect(view.result.current).not.toHaveProperty("loadMore");
+    view.unmount();
+    view.client.clear();
+  }
+);
 
 it("separates query data when resource, user or tenant changes", async () => {
   state.request.mockImplementation(async (_kind, id) => page(id, 1));
@@ -131,7 +129,7 @@ it("shows zero without querying an unsaved skill and loads its records after an 
   state.request.mockResolvedValue(page(12, 1));
   view.rerender({ id: 8 });
   await waitFor(() => expect(view.result.current.total).toBe(1));
-  expect(state.request).toHaveBeenCalledWith("skill", 8, 0);
+  expect(state.request).toHaveBeenCalledWith("skill", 8);
   expect(
     view.client.getQueryData(["creator-histories", "u", "t", "skill", 8])
   ).toBeDefined();

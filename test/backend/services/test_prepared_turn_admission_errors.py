@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError as RequestValidationError
 from starlette.responses import Response
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
@@ -18,6 +19,35 @@ from contracts.errors.exceptions import (
 )
 from management.services.agent import prepared_turn
 from test.backend.services.test_prepared_public_turn import ACTOR, PAYLOAD, REFERENCE, flow
+
+
+@pytest.mark.parametrize("overrides", [
+    {"agent_id": None}, {"agent_id": 0}, {"agent_id": -1},
+    {"is_debug": True}, {"enable_automation_tool": False},
+])
+def test_automation_request_requires_an_interactive_agent_with_proposal_tool(overrides):
+    request = {**PAYLOAD.request, "entrypoint": "automation", "enable_automation_tool": True, **overrides}
+
+    with pytest.raises(RequestValidationError, match="automation entrypoint requires an interactive Agent"):
+        AgentRequest.model_validate(request)
+
+
+async def test_automation_turn_requires_compiled_proposal_binding_before_runtime_admission(flow, mocker):
+    operations, compile_snapshot, runtime, _ = flow
+    compile_snapshot.return_value.resource = SimpleNamespace(tools=[])
+    reject = mocker.patch.object(prepared_turn, "set_conversation_admission")
+    request = AgentRequest.model_validate({**PAYLOAD.request, "entrypoint": "automation", "enable_automation_tool": True})
+
+    assert prepared_turn.is_prepared_candidate(PAYLOAD, request)
+    with pytest.raises(HTTPException) as exc:
+        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == {"code": "AUTOMATION_PROPOSAL_UNAVAILABLE"}
+    assert operations == []
+    reject.assert_called_once()
+    assert reject.call_args.kwargs == {"conversation_id": None, "journal_available": False}
+    runtime.start_prepared_run.assert_not_awaited()
 
 
 @pytest.mark.parametrize("error,status,code", [
@@ -83,14 +113,17 @@ async def test_authorized_workbench_stages_skill_root(flow, mocker):
     mocker.patch.object(prepared_turn, "_prepare_workbench", return_value=plan)
     compile_snapshot.return_value.resource = SimpleNamespace(
         agent_id=7, version_no=4, workbench_skill_refs=[{"skill_id": 8}],
+        tools=[ToolBinding(tool_id=prepared_turn.AUTOMATION_PROPOSAL_TOOL, version="1")],
     )
+    compile_snapshot.return_value.models = SimpleNamespace(llm=SimpleNamespace(model_id=11))
     request = AgentRequest(
-        query="question", conversation_id=42, entrypoint="workbench", workbench=config, enable_automation_tool=False,
+        query="question", conversation_id=42, entrypoint="workbench", workbench=config, enable_automation_tool=True,
     )
     response = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
     assert response.headers["X-Workbench-Config-Version"] == "3"
     turn = prepared_turn.store.stage_turn.call_args.args[5]
     assert turn["workbench_skill_root"] == {"agent_id": 7, "version_no": 4}
+    assert turn["automation"]["model_id"] is None
     assert turn["workbench_update"] == {"config": config.model_dump(mode="json"), "expected_version": 2, "version": 3}
 
 

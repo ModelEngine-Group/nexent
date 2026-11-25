@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
@@ -27,6 +28,23 @@ from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
 from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
+
+
+@pytest_asyncio.fixture
+async def memory_read_manager(monkeypatch):
+    from infrastructure import memory_io
+
+    manager = ThreadManager("memory-policy-test", {"memory-read": LanePolicy(
+        name="memory-read", max_workers=1, max_queue_size=0, queue_timeout_seconds=0,
+        cancel_grace_seconds=0, shutdown_grace_seconds=1,
+    )})
+    manager.start()
+    monkeypatch.setattr(memory_io, "get_current_thread_manager", lambda: None)
+    monkeypatch.setattr(memory_io, "get_default_thread_manager", lambda: manager)
+    try:
+        yield manager
+    finally:
+        await manager.shutdown(timeout=1)
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -299,7 +317,7 @@ async def test_workbench_debug_checks_root_metadata_policy_before_dispatch(mocke
 @pytest.mark.parametrize(("kind", "persisted_parameters"), [
     (kind, persisted_parameters)
     for kind in ("evaluation", "ordinary", "clarification", "saved_preferences", "saved_preferences_clear", "planning",
-                 "default", "new", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
+                 "default", "new", "automation_entry", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
                  "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope", "workbench_preferences",
                  "workbench_preferences_clear",
                  "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
@@ -311,7 +329,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         kind = "a2a"
     debug_planning = kind == "debug_planning"
     planning = kind == "planning" or debug_planning
-    new = kind in {"new", "first_metadata", "workbench_first_metadata"}
+    new = kind in {"new", "automation_entry", "first_metadata", "workbench_first_metadata"}
     use_workbench = kind.startswith("workbench")
     workbench_metadata = use_workbench and "metadata" in kind
     redis = object()
@@ -393,7 +411,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         } if kind == "clarification" else None
         request = AgentRequest(
             query="hello", agent_id=7, conversation_id=42, clarification_response=clarification,
-            enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
+            entrypoint="automation" if kind == "automation_entry" else None,
+            enable_automation_tool=kind in {"default", "new", "automation_entry"}, enable_plan=planning, metadata=metadata,
         )
         conversation_preferences = {}
         if kind in {"saved_preferences", "workbench_preferences"}:
@@ -475,6 +494,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         if clarification is not None:
             assert "Original form" not in prepared.model_dump_json()
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
+        assert payload.automation_proposal_only is (True if kind == "automation_entry" else None)
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
         if conversation_preferences:
             assert payload.models.llm.conversation_parameters == conversation_preferences["11"]
@@ -611,7 +631,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     try:
         for agent in [info.agent_config, *info.agent_config.worker_agents]:
             expected = ["parallel_executor", "download_from_s3", "upload_to_s3"]
-            if kind in {"default", "new"} and agent is info.agent_config:
+            if kind in {"default", "new", "automation_entry"} and agent is info.agent_config:
                 expected.insert(1, "create_scheduled_task_proposal")
                 tool = next(tool for tool in agent.tools if tool.name == "create_scheduled_task_proposal")
                 assert callable(tool.metadata["create_proposal"])
@@ -663,9 +683,10 @@ async def test_prepared_conversation_scope_is_checked_before_compilation(mocker)
 
 
 @pytest.mark.asyncio
-async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mocker):
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mocker, memory_read_manager, enabled):
     mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={})
-    memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=True)
+    memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=enabled)
     compile_run = mocker.patch.object(run, "create_agent_run_info")
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
@@ -674,8 +695,8 @@ async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mo
         request, reference, "actor", "tenant",
     ) is compile_run.return_value
     memory.assert_called_once_with("actor")
-    assert compile_run.await_args.kwargs["allow_memory_search"] is True
-    assert compile_run.await_args.kwargs["prepared_conversation"].memory_enabled is True
+    assert compile_run.await_args.kwargs["allow_memory_search"] is enabled
+    assert compile_run.await_args.kwargs["prepared_conversation"].memory_enabled is (True if enabled else None)
 
 
 @pytest.mark.asyncio
@@ -729,6 +750,24 @@ async def test_prepared_conversation_cannot_export_unowned_message_boundary(mock
     compile_run.assert_not_called()
 
 
+def test_prepared_conversation_keeps_authorized_tool_records_across_runtime_boundary():
+    records = [{
+        "record_type": "execution_logs", "content": "Actual result 2603", "unit_index": 7,
+        "tool_call_id": "call-1", "invocation_id": None,
+    }]
+    history = {"conversation_turns": [{
+        "user_message": "Calculate", "assistant_final_answer": "The result is 2603",
+        "user_message_id": 21, "assistant_message_id": 22, "execution_records": records,
+    }]}
+
+    prepared = evaluation_snapshot._prepare_conversation_history(history, "actor", "tenant")
+    restored = prepared_evaluation._restore_conversation_history(prepared, ServicePrincipal("actor", "tenant"))
+
+    assert restored["conversation_turns"][0]["execution_records"] == [
+        record | {"execution_event": None} for record in records
+    ]
+
+
 def test_prepared_conversation_rejects_foreign_history_attachment():
     from contracts.agentos import PreparedConversationHistory
     from contracts.constants.environment import MINIO_DEFAULT_BUCKET
@@ -745,6 +784,45 @@ def test_prepared_conversation_rejects_foreign_history_attachment():
     with pytest.raises(HTTPException) as error:
         prepared_evaluation._restore_conversation_history(context, ServicePrincipal("actor", "tenant"))
     assert error.value.status_code == 403
+
+
+def test_prepared_conversation_keeps_persisted_execution_records():
+    """Regression: the repository attaches execution_records, so the contract must allow them.
+
+    The projection emits read-only evidence for completed turns and the SDK renders it as
+    reference data. A contract without that field rejected the whole snapshot and turned
+    every follow-up message into a 500.
+    """
+    from contracts.agentos import PreparedConversationHistory
+    from contracts.agentos import PreparedHistoryExecutionRecord
+
+    turn = {
+        "user_message": "previous request", "assistant_final_answer": "previous answer",
+        "user_message_id": 21, "assistant_message_id": 22, "attachments": None,
+        "execution_records": [
+            {"record_type": "tool", "content": '{"tool_name":"lookup"}',
+             "tool_call_id": "call-1", "invocation_id": None},
+            # Persisted unit bodies are nullable, so a missing body must not reject the turn.
+            {"record_type": "execution_logs", "content": None,
+             "tool_call_id": None, "invocation_id": "inv-2"},
+        ],
+    }
+    prepared = evaluation_snapshot._prepare_conversation_history(
+        {"history_summary": None, "conversation_turns": [turn]}, "actor", "tenant",
+    )
+
+    records = prepared.conversation_turns[0].execution_records
+    assert [record.record_type for record in records] == ["tool", "execution_logs"]
+    assert records[0].tool_call_id == "call-1" and records[0].invocation_id is None
+    assert records[1].content is None and records[1].invocation_id == "inv-2"
+    assert all(isinstance(record, PreparedHistoryExecutionRecord) for record in records)
+
+    restored = prepared_evaluation._restore_conversation_history(
+        prepared, ServicePrincipal("actor", "tenant"),
+    )
+    assert [record["record_type"] for record in restored["conversation_turns"][0]["execution_records"]] == [
+        "tool", "execution_logs",
+    ]
 
 
 @pytest.mark.asyncio

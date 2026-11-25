@@ -128,7 +128,10 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     assert env["JWT_SECRET"]["valueFrom"]["secretKeyRef"]["key"] == "JWT_SECRET"
     assert env["GATEWAY_SIGNING_SECRET"]["valueFrom"]["secretKeyRef"]["optional"] is True
     assert set(env) == {"TZ", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
-                        "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "GATEWAY_OPS_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT"}
+                        "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "GATEWAY_OPS_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT",
+                        "GATEWAY_NB_EXCLUDED_CAPABILITIES"}
+    # The emergency kill switch defaults to empty (expose all declared rows).
+    assert env["GATEWAY_NB_EXCLUDED_CAPABILITIES"]["value"] == ""
 
 
 def test_offline_application_includes_gateway():
@@ -136,7 +139,8 @@ def test_offline_application_includes_gateway():
                       "--version gateway-fixture --components application --image-source general "
                       "--include-sandbox false --dry-run")
     assert "nexent/nexent-gateway:gateway-fixture" in result
-    assert "nexent/nexent:gateway-fixture" in result
+    assert "nexent/nexent-management:gateway-fixture" in result
+    assert "nexent/nexent:gateway-fixture" not in result
 
 
 def test_custom_gateway_image_uses_registry_prefix():
@@ -152,6 +156,9 @@ printf '%s' "$NEXENT_GATEWAY_IMAGE"
 
 
 @pytest.mark.parametrize("registry", ["overseas", "mainland"])
-def test_release_matrix_publishes_gateway(registry):
+def test_release_matrix_publishes_gateway_and_service_images(registry):
     workflow = yaml.safe_load((ROOT / f".github/workflows/docker-build-push-{registry}.yml").read_text(encoding="utf-8"))
-    assert "gateway" in workflow["jobs"]["build-and-push"]["strategy"]["matrix"]["image"]
+    images = workflow["jobs"]["build-and-push"]["strategy"]["matrix"]["image"]
+    assert {"gateway", "management", "runtime", "ops", "mcp"}.issubset(images)
+    assert "main" not in images
+    assert "mcp-service" not in images

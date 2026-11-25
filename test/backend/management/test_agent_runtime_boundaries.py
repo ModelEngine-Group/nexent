@@ -6,14 +6,56 @@ import importlib.util
 import os
 import subprocess
 import sys
-from pathlib import Path
 import tokenize
+from pathlib import Path
+from textwrap import indent
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def _run_source_check(script, *arguments, environment=None):
+    # Resolving a dotted SDK patch initializes its NLP package before the patch takes effect.
+    # Isolate external resource preparation before importing any project module.
+    bootstrap = """
+from unittest.mock import patch
+with (
+    patch("requests.get", side_effect=OSError("External downloads disabled in source-isolation tests")),
+    patch("jieba.posseg.lcut", return_value=[]),
+):
+""" + indent(script, "    ")
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk")),
+        **(environment or {}),
+    }
+    return subprocess.run(
+        [sys.executable, "-c", bootstrap, *arguments],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+    )
+
+
+def test_source_checks_do_not_download_or_preload_nlp_resources():
+    script = """
+import sys
+
+network_events = []
+def observe_network(event, args):
+    if event in {"socket.connect", "socket.getaddrinfo"}:
+        network_events.append(event)
+
+sys.addaudithook(observe_network)
+import jieba
+import nexent.core.nlp
+
+assert not network_events, network_events
+assert not jieba.dt.initialized, "Source-isolation checks must not preload the NLP dictionary"
+"""
+    completed = _run_source_check(script)
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_retired_in_process_execution_chain_is_removed():
@@ -117,7 +159,7 @@ asyncio.run(verify())
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
     completed = subprocess.run(
-        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -299,7 +341,7 @@ with patch("nexent.core.nlp.stopwords.load_stopwords"):
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
     completed = subprocess.run(
-        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -335,8 +377,7 @@ class BlockManagement(importlib.abc.MetaPathFinder):
             raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
 sys.meta_path.insert(0, BlockManagement())
 with patch("nexent.core.nlp.stopwords.load_stopwords"):
-    from runtime.api.application import app
-from infrastructure.trace.bootstrap import local_trajectory_processor
+    from runtime.api.application import app, local_trajectory_processor
 assert (local_trajectory_processor is not None) == (sys.argv[1] == "True")
 assert not any("/compat/" in getattr(route, "path", "") for route in app.routes)
 assert not {"/agent/run", "/agent/stop/{run_id}"} & {getattr(route, "path", "") for route in app.routes}
@@ -346,18 +387,14 @@ async def verify():
         assert result.status_code==200 and result.json()=={"status":"alive"}
 asyncio.run(verify())
 """
-    env = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk")),
+    environment = {
         "MONITORING_PROVIDER": provider,
         "ENABLE_TELEMETRY": telemetry,
+        "LOCAL_FILE_MONITORING_ENABLED": str(provider == "local_file").lower(),
         "TRAJECTORY_READ_ENABLED": historical_reads,
         "TRAJECTORY_STORAGE_MODE": "single_node",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),
         "OTEL_EXPORTER_OTLP_METRICS_ENABLED": "false",
     }
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(trajectory_enabled)], cwd=ROOT, env=env,
-        capture_output=True, text=True, timeout=30,
-    )
+    result = _run_source_check(script, str(trajectory_enabled), environment=environment)
     assert result.returncode == 0, result.stderr

@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-PROMPT-CONFIRMATION-20261113
+  change_type: requirement
+  requirement_id: NL2AGENT-PROMPT-CONFIRMATION-20261113
+  title: Confirm generated replacements before saving an existing prompt
+  description: Implement proposal AC-011 and design 6.5 with server-owned pending text, revision checks, apply/cancel and continuation after real persistence.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COMPLETION-D3-001]
+    added: [NL2A-PROMPT-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_nl2agent_prompt_confirmation.py
+    - test/backend/services/test_nl2agent_completion_tool.py
+    - frontend/tests/workbench/Nl2AgentPromptConfirmation.test.tsx
+    - frontend/tests/workbench/Nl2AgentProtocolRepair.test.ts
+    behaviors:
+      - Empty prompts save directly; existing prompts produce pending cards without writes.
+      - Apply saves server text once; cancel, stale revisions and foreign conversations never replace it.
+      - Pending cards stop the runtime, preserve conversation input, and restore applied/cancelled history.
+    reason: Existing completion UT covers trusted receipts but not pending replacement and concurrent edits. Add isolated service and card tests; reuse the runtime D3 boundary and add browser journey proof, without duplicate D1.
+  notes: F-045 belongs to agent_config. D3 owns its disposable database and protocol services; D4 owns controlled browser routes and closes its context. Neither uses shared preparation families.

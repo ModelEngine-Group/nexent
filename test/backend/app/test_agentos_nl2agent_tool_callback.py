@@ -97,7 +97,10 @@ async def test_draft_tool_uses_grant_actor_and_preserves_policy_guard(grants, mo
     call = NL2AgentToolCall(
         run_id=_RUN_ID, agent_id=7, tool="save_agent_draft_fields", arguments={"fields": {"description": "updated"}},
     )
-    assert '"status":"success"' in await service.execute_nl2agent_tool(call, _ACTOR)
+    result = await service.execute_nl2agent_tool(call, _ACTOR)
+    assert result["agentos_tool_result"] is True
+    assert '"status":"success"' in result["content"][0]["text"]
+    assert result["meta"][tools.NL2AGENT_RECEIPT_KEY]["run_id"] == _RUN_ID
     assert save.call_args.kwargs["tenant_id"] == _ACTOR.tenant_id
     assert save.call_args.kwargs["user_id"] == _ACTOR.user_id
     save.reset_mock()

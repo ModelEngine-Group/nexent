@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CM-MESSAGE-FORMAT-20261120
+  change_type: requirement
+  requirement_id: CM-MESSAGE-FORMAT-20261120
+  title: Preserve fixed runtime message formats and real native call identities
+  description: Share context assembly and final wire accounting across CodeAgent and Chat Completions, preserving authorized
+    call/result groups.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-171, JIUWEN-CONTEXT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CONTEXT-POST-RESPONSE-D3-001, JIUWEN-CONTEXT-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Fix formats at Runtime construction, reject unsupported Responses, and keep final messages, tools and request
+        prompts aligned with accounting before/after maintenance.
+      - Render authorized native calls in model order and results in completion order, retaining real errors; incomplete
+        or ambiguous groups remain read-only data without replay.
+      - Preserve same-name parallel, duplicate, cross-step, child and nested isolation; match converted text/native results
+        by provider ID rather than guessed name/order.
+      - Maintain unique legacy completion and duplicate/cancel isolation with post-response-only scheduling; add no execution
+        authority or reasoning-as-answer fallback.
+    reason: Reuse unit and protocol assertions for pairing and formats; existing D3 history/protocol boundaries remain
+      independent acceptance.
+    test_selectors:
+      - test/sdk/core/agents/test_context_message_format.py
+      - test/sdk/core/agents/test_jiuwen_context.py
+      - test/sdk/core/agents/test_jiuwen_errors.py
+      - test/sdk/core/agents/test_jiuwen_output.py
+  notes: 'SPEC: remove-output-budget history reconstruction audit, CMF-001..004 and AC-006/008/009/011. No new format
+    selection above Runtime, Responses adapter, DB table, output cap, retry or vendor fallback.'

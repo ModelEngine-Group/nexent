@@ -10,12 +10,11 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from runtime.api.agent import execution as agent_app_execution
 from management.api.agent import creator as agent_creator_api
 from management.api.skill import creation as skill_app_creation
 from management.services.skill import creation as skill_service
 from management.services.model import creator_snapshot
-from gateway.security.context import identity_context
+from gateway.identity.context import identity_context
 from infrastructure import agent_model_config
 from infrastructure.agent_model_overrides import apply_turn_model_generation
 from management.services.model import run_bindings
@@ -66,6 +65,7 @@ def install_fixture_gateway_session(app, user_id, tenant_id):
 
 
 def api_fixture(monkeypatch):
+    from runtime.api.agent import execution as agent_app_execution
     app = FastAPI()
     install_fixture_gateway_session(app, "fixture-owner", "tenant")
     app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from contracts.roles import normalize_roles
 from infrastructure.rdb.client import get_db_session
-from management.db.models import RolePermission
+from management.db.identity.models import RolePermission
 from infrastructure.rdb.orm import as_dict
 
 

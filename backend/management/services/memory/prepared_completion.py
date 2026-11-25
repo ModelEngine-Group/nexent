@@ -8,7 +8,7 @@ from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.conversation import memory_completion as queue
 from management.db.conversation.repository import get_units_by_message
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.services.configuration.user.memory import get_memory_switch
+from management.services.memory.access import can_write_automatic_memory
 from management.services.memory.extraction import AgentOSMemoryExtractionModel, FaMemoryExtractor
 from management.services.memory.provider import _build_ingestion_event_service, build_memory_service_for_fa_extraction
 from nexent.core.concurrency import run_blocking
@@ -45,7 +45,9 @@ async def _extract_answer(job, source):
     items = job.selected_items
     extractor = FaMemoryExtractor(
         tenant_id=source.tenant_id, user_id=source.user_id, agent_id=str(job.agent_id),
-        conversation_id=str(source.conversation_id), memory_service=build_memory_service_for_fa_extraction(),
+        conversation_id=str(source.conversation_id), memory_service=build_memory_service_for_fa_extraction(
+            agent_version_no=source.agent_version_no,
+        ),
     )
     if items is None:
         model_id = await _io(
@@ -67,9 +69,14 @@ async def process_memory_job(job):
     try:
         async with asyncio.timeout(240):
             source = await _io("memory-completion-source", queue.read_source, job)
-            if source is not None and await _io("memory-completion-switch", get_memory_switch, source.user_id):
+            if source is not None and await _io(
+                "memory-completion-switch", can_write_automatic_memory,
+                source.tenant_id, source.user_id, job.agent_id, source.agent_version_no,
+            ):
                 if job.job_type == queue.TURN_COMPLETED:
-                    await _ingest_turn(job, source)
+                    from contracts.constants.environment import MEMORY_WRITE_TIMEOUT_SECONDS
+                    async with asyncio.timeout(MEMORY_WRITE_TIMEOUT_SECONDS):
+                        await _ingest_turn(job, source)
                 else:
                     await _extract_answer(job, source)
     except Exception as exc:

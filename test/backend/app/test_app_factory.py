@@ -9,6 +9,8 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
+import httpx
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -114,25 +116,44 @@ class TestCreateApp:
 
         assert app.router.lifespan_context is lifespan
 
-    def test_create_app_wires_gateway_identity_middleware(self):
-        from gateway.downstream.middleware import GatewayIdentityMiddleware
-        def is_runtime_service_request(method, path):
-            return method == "POST" and path == "/service"
+    def test_create_app_forwards_internal_runtime_request(self):
+        """The runtime launcher passes a predicate that must reach the middleware."""
+
+        def is_internal(method, path):
+            return method == "POST" and path == "/internal/run"
 
         app = create_app(
-            enable_monitoring=False,
             gateway_identity_audience="runtime",
-            internal_runtime_request=is_runtime_service_request,
+            internal_runtime_request=is_internal,
         )
 
-        middleware = next(item for item in app.user_middleware if item.cls is GatewayIdentityMiddleware)
-        assert middleware.kwargs["audience"] == "runtime"
-        assert middleware.kwargs["internal_runtime_request"] is is_runtime_service_request
-    def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        identity_middleware = [
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "GatewayIdentityMiddleware"
+        ]
+        assert len(identity_middleware) == 1
+        assert identity_middleware[0].kwargs["audience"] == "runtime"
+        assert identity_middleware[0].kwargs["internal_runtime_request"] is is_internal
+
+    def test_create_app_identity_middleware_without_internal_predicate(self):
+        """Non-runtime services keep the predicate unset instead of guessing."""
+        app = create_app(gateway_identity_audience="management")
+
+        identity_middleware = [
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "GatewayIdentityMiddleware"
+        ]
+        assert len(identity_middleware) == 1
+        assert identity_middleware[0].kwargs["internal_runtime_request"] is None
+
+    @pytest.mark.asyncio
+    async def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
         monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
         monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
         monkeypatch.setattr(
-            "gateway.downstream.internal_tokens.verify_internal_runtime_jwt",
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
             lambda _authorization: ("fixture-user", "fixture-tenant"),
         )
         app = create_app(
@@ -140,11 +161,15 @@ class TestCreateApp:
             gateway_identity_audience="runtime",
             internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
         )
-        app.add_api_route("/service", lambda: {"ok": True}, methods=["POST"])
-        app.add_api_route("/ordinary", lambda: {"ok": True}, methods=["POST"])
-        client = TestClient(app)
-        assert client.post("/service").json() == {"ok": True}
-        assert client.post("/ordinary").status_code == 401
+
+        async def ok():
+            return {"ok": True}
+
+        app.add_api_route("/service", ok, methods=["POST"])
+        app.add_api_route("/ordinary", ok, methods=["POST"])
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
+            assert (await client.post("/service")).json() == {"ok": True}
+            assert (await client.post("/ordinary")).status_code == 401
 
 
 class TestRegisterExceptionHandlers:

@@ -1089,6 +1089,7 @@ def _list_published_agents_sync(
                     agent.get("allow_mcp_header_passthrough", False)
                 ),
                 "model_params_override": agent.get("model_params_override"),
+                "enable_memory": agent.get("enable_memory") is not False,
                 "enable_protocol_repair_retry": agent.get("enable_protocol_repair_retry") is True,
             })
 

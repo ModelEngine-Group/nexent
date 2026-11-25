@@ -84,7 +84,7 @@ def test_former_tenant_archive_is_not_reported_as_uncaptured(archived):
 
 @pytest.mark.parametrize("missing", ["conversation", "membership"])
 def test_compensation_skips_revoked_owner_without_database_error(mocker, missing):
-    from infrastructure.rdb.trajectory_repository import ExecutionRepository
+    from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
     session = Mock()
     session.execute.return_value.scalar_one_or_none.return_value = (
@@ -103,7 +103,7 @@ def test_compensation_skips_revoked_owner_without_database_error(mocker, missing
             errors.append(error)
             raise
 
-    mocker.patch("infrastructure.rdb.trajectory_repository.get_db_session", scoped)
+    mocker.patch("infrastructure.rdb.trajectory.repository.get_db_session", scoped)
     owner = CaptureIdentity("t", "u", "123", "7")
     ExecutionRepository().sync(owner, {"trajectory_id": "run", "status": "success"})
     assert errors == []
@@ -112,7 +112,7 @@ def test_compensation_skips_revoked_owner_without_database_error(mocker, missing
 
 
 def test_registration_keeps_strict_owner_check(mocker):
-    from infrastructure.rdb.trajectory_repository import ExecutionRepository
+    from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
     session = Mock()
     session.execute.return_value.scalar_one_or_none.return_value = None
@@ -121,14 +121,14 @@ def test_registration_keeps_strict_owner_check(mocker):
     def scoped():
         yield session
 
-    mocker.patch("infrastructure.rdb.trajectory_repository.get_db_session", scoped)
+    mocker.patch("infrastructure.rdb.trajectory.repository.get_db_session", scoped)
     with pytest.raises(PermissionError, match="no longer authorized"):
         ExecutionRepository().begin(CaptureIdentity("t", "u", "123", "7"), str(uuid4()))
     session.add.assert_not_called()
 
 
 def test_compensation_does_not_hide_database_failure(mocker):
-    from infrastructure.rdb.trajectory_repository import ExecutionRepository
+    from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
     session = Mock()
     session.execute.side_effect = RuntimeError("database unavailable")
@@ -137,7 +137,7 @@ def test_compensation_does_not_hide_database_failure(mocker):
     def scoped():
         yield session
 
-    mocker.patch("infrastructure.rdb.trajectory_repository.get_db_session", scoped)
+    mocker.patch("infrastructure.rdb.trajectory.repository.get_db_session", scoped)
     with pytest.raises(RuntimeError, match="database unavailable"):
         ExecutionRepository().sync(CaptureIdentity("t", "u", "123", "7"), {})
 

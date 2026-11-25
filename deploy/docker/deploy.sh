@@ -675,7 +675,6 @@ disable_dashboard() {
 }
 
 docker_monitoring_active_services() {
-  [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ] || return 0
   printf '%s\n' otel-collector
 
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
@@ -1153,6 +1152,9 @@ prepare_core_service_deployment() {
 
   for service in "$@"; do
     case "$service" in
+      nexent-config|nexent-mcp) image="${NEXENT_MANAGEMENT_IMAGE:-}" ;;
+      nexent-runtime) image="${NEXENT_RUNTIME_IMAGE:-}" ;;
+      nexent-ops) image="${NEXENT_OPS_IMAGE:-}" ;;
       nexent-gateway) image="${NEXENT_GATEWAY_IMAGE:-}" ;;
       nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
       nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
@@ -1375,7 +1377,7 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || [ "$DEPLOYMENT_MONITORING_PROVIDER" = "local_file" ]; then
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     stop_monitoring_services || return 1
     return 0
   fi

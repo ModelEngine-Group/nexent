@@ -103,6 +103,10 @@ class RuntimeServiceUnavailableError(Exception):
     pass
 
 
+class NorthboundStopInProgressError(Exception):
+    """The targeted run still occupies its conversation after the Northbound wait."""
+
+
 class RuntimeServiceTimeoutError(Exception):
     """Raised when a request to the runtime service times out."""
 

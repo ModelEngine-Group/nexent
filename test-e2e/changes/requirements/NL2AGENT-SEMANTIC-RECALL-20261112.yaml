@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-SEMANTIC-RECALL-20261112
+  change_type: requirement
+  requirement_id: NL2AGENT-SEMANTIC-RECALL-20261112
+  title: Optional hybrid resource retrieval with lazy versioned vector caching
+  description: Run lexical and configured embedding retrieval concurrently, union candidates, lazily reuse seven-day vectors by safe content and model fingerprint, and bound semantic waiting with lexical fallback. No embedding uses lexical only; no additional quality comparison is required.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/services/test_nl2agent_semantic_retrieval.py
+      - test/backend/services/test_nl2agent_bilingual_recall.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+    behaviors:
+      - Concurrent hybrid reference union, explicit name fragments, safe resource projection, fixed seven-day lazy caching, content and model changes, and bounded similarity ranking.
+      - Cache hits do not renew expiry; irrelevant edits and credential rotation reuse vectors, expiry and corruption rebuild, concurrent cold requests recheck cache under a finite Redis lock.
+      - No-model lexical behavior, one-time fallback on embedding failure, stable references and verified coverage.
+      - Trusted progress with current run ownership and no side effects.
+    reason: Existing bilingual UT covers lexical merging but not vector math, caches, fallback or progress; preserve it and strengthen the actual runtime D3 boundary.
+  notes: >-
+    SPEC: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/ (2026-11-12).
+    F-045 inherits agent_config ownership. Runtime case retains owned preparation and cleanup.
+    Hybrid/lazy-cache increment strengthens the same runtime case for HTTP call counts, content/model switches, actual Redis TTL and no-model behavior; no new comparison or frontend protocol. Historical browser/performance obligations remain separate, not inferred from UT.

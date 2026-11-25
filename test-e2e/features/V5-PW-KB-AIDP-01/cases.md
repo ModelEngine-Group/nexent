@@ -3,3 +3,4 @@
 此页由结构化用例生成，不手工编辑。
 
 - D4 [PW-KB-AIDP-01](../../cases/PW-KB-AIDP-01/case.yaml) · active
+- D4 [V5-BASELINE-KB-AIDP-CHUNK-D4-001](../../cases/V5-BASELINE-KB-AIDP-CHUNK-D4-001/case.yaml) · active

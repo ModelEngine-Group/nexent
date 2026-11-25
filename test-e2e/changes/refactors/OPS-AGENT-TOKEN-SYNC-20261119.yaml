@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-TOKEN-SYNC-20261119
+  change_type: refactor
+  requirement_id: OPS-AGENT-TOKEN-SYNC-20261119
+  title: Preserve Agent monitoring on the updated integration baseline and batch Token failure reads
+  description: Rebase the eight Agent commits onto the complete current integration branch, adopt its identity and Gateway contracts and replace per-tenant Token batch-failure reads with one scoped query without changing publication status.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_agent_tokens.py, test/backend/ops/test_monitoring_store.py, test/backend/ops/test_agent_monitoring_api.py, test/backend/ops/test_agent_monitoring_views.py, test/backend/ops/test_agent_token_api.py, test/backend/gateway/test_model_monitoring.py, test/sdk/core/agents/test_adapter_failure_lifecycle.py, test/sdk/core/agents/test_root_clarification.py]
+    behaviors:
+    - Read failed model batch tenants once for the selected scope and preserve date intersections, queued or pending failures, soft deletion and legacy empty dates.
+    - Preserve independent global, per-Agent and per-day Token status, empty selections and sanitized storage failures.
+    - Keep Agent and model session routes, tenant permissions and current main or child execution identities working after the baseline migration.
+    reason: Existing Token and API tests prove attribution and status arithmetic but do not detect per-tenant SQL growth. Strengthen them and reuse the existing real Agent pipeline D3 with a real PostgreSQL equivalence check. No new D1 is needed.
+  notes: Base 6a98c461a29c33fa527b27c5b66807b2bc144f64; old Agent tip 937e70192 is preserved in a local backup branch. No storage schema or Token contract change.

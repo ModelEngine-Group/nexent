@@ -21,7 +21,7 @@ from contracts.agentos import ChatInvocation, ChatMessage, ChatOptions, Embeddin
 from contracts.constants import environment
 from contracts.model_administration import ModelHealthcheck, ModelRegistration, ModelTenantDeactivation
 from contracts.errors.exceptions import RuntimeUpstreamError
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.identity.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
 from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from management.services.memory.extraction import AgentOSMemoryExtractionModel
@@ -130,9 +130,14 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
 
         records = {}
 
-        def insert(model, user_id, tenant_id):
-            records[(tenant_id, model["display_name"])] = {**model, "model_id": 12, "created_by": user_id}
-            return True
+        def insert(profile, user_id, tenant_id, *, registered_references, api_key, connect_status):
+            from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+
+            row = encode_resolved_model_profile(profile, registered_references=registered_references)
+            records[(tenant_id, row["display_name"])] = {
+                **row, "model_id": 12, "created_by": user_id, "api_key": api_key, "connect_status": connect_status,
+            }
+            return 12
 
         def created_ids(names, tenant, model_type):
             return {records[(tenant, name)]["model_id"] for name in names}
@@ -151,17 +156,18 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
 
         checked_keys = []
 
-        async def probe_saved(*args, **kwargs):
-            checked_keys.append(args[3])
-            return True
+        async def probe_saved(profile, api_key, *, http_headers):
+            assert profile.outlet_id == 12 and profile.identity.tenant_id == "tenant-a"
+            checked_keys.append(api_key)
+            return {"ok": True, "error": None}
 
         monkeypatch.setattr("runtime.agentos.model_administration.deactivate_tenant_models", retire_tenant)
-        monkeypatch.setattr(registry, "create_model_record", insert)
+        monkeypatch.setattr("infrastructure.rdb.outlets.create_resolved_model_record", insert)
+        monkeypatch.setattr("infrastructure.rdb.outlets.update_model_outlet_connectivity", lambda *args: None)
         monkeypatch.setattr(registry, "get_created_model_ids", created_ids)
         monkeypatch.setattr(registry, "get_models_by_display_name", lambda *args: [])
         monkeypatch.setattr(health, "get_model_by_display_name", load_saved)
-        monkeypatch.setattr(health, "update_model_record", lambda *args, **kwargs: True)
-        monkeypatch.setattr(health, "_perform_connectivity_check", probe_saved)
+        monkeypatch.setattr("runtime.model.profile_probe.probe_model_profile", probe_saved)
 
         app = FastAPI(root_path="/api")
         app.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
@@ -281,7 +287,10 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert provider_input["temperature"] == 0.3
     assert provider_input["top_p"] == 0.95
     assert provider_input["messages"][-1]["content"] == "verify model"
-    assert provider_input["max_tokens"] == 700
+    output_limits = {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+    for _, body in calls:
+        assert output_limits.isdisjoint(body)
+        assert output_limits.isdisjoint(body.get("extra_body") or {})
     assert embed_calls == [
         ("Bearer provider-secret", {"model": "test-embedding", "input": [query]})
         for query in ("search", "recall", "store memory", "updated memory")

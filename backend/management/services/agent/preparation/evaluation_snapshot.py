@@ -396,7 +396,7 @@ async def prepare_conversation_snapshot(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
     if request.is_debug or (workbench is None and (
-        request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None
+        request.agent_id is None or request.entrypoint == "workbench" or conversation.get("workbench_config") is not None
     )):
         return None
     if workbench is None and native_knowledge is None and (
@@ -406,9 +406,13 @@ async def prepare_conversation_snapshot(
             "snapshot-conversation-knowledge", prepare_native_knowledge,
             request, None if new_conversation else conversation, user_id, tenant_id, lane="control-io", owner="management",
         )
-    memory_enabled = await run_blocking(
-        "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
-    )
+    from infrastructure.memory_io import memory_deadline, optional_memory_io
+
+    automation_proposal_only = request.entrypoint == "automation"
+    memory_query_deadline = memory_deadline()
+    memory_enabled = not automation_proposal_only and bool(await optional_memory_io(
+        "snapshot-memory-policy", get_memory_switch, user_id, deadline=memory_query_deadline,
+    ))
     compile_options = {}
     metadata_policy_version = request.version_no or 0
     if workbench is not None:
@@ -483,6 +487,7 @@ async def prepare_conversation_snapshot(
     scope = PreparedConversationScope(
         **reference.model_dump(),
         memory_enabled=True if memory_enabled else None,
+        automation_proposal_only=True if automation_proposal_only else None,
         historical_context=historical_context,
         workbench_config_version=workbench.version if workbench is not None else None,
         native_knowledge=True if native_knowledge is not None else None,
@@ -499,7 +504,7 @@ async def prepare_conversation_snapshot(
         requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
         conversation_id=reference.conversation_id, context_policy=request.context_policy,
         enable_automation_tool=request.enable_automation_tool, enable_planning=bool(request.enable_plan),
-        prepared_conversation=scope, **compile_options,
+        prepared_conversation=scope, memory_query_deadline=memory_query_deadline, **compile_options,
     )
     if snapshot is not None and metadata_from_northbound and request.metadata is not None:
         from management.services.agent.mcp_passthrough import prepare_bound_mcp_header_metadata
@@ -598,6 +603,11 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
     else:
         rows = read_bound_skills(agent.agent_id, agent.version_no, tenant_id)
     configs = {row["name"]: row["config"] for row in rows}
+    skill_name_to_id = {
+        row["name"]: row["skill_id"]
+        for row in rows
+        if row.get("name") and row.get("skill_id") is not None
+    }
     if not rows or len(configs) != len(rows):
         raise ValueError("Ambiguous evaluation skill bindings")
     validate_skill_context(context_items, rows)
@@ -605,17 +615,18 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
     metadata = {"agent_id": agent.agent_id, "tenant_id": tenant_id, "version_no": agent.version_no}
     for tool in tools:
         builtin = EvaluationSkillTool(tool.name)
-        expected = {"local_skills_dir": environment.CONTAINER_SKILLS_PATH}
+        expected = {"local_skills_dir": environment.CONTAINER_SKILLS_PATH,
+                    "authorized_skill_names": sorted(configs)}
         actual = dict(tool.params or {})
         if builtin is EvaluationSkillTool.SCRIPT:
             actual.pop("workspace_path", None)
-            expected.update(isolated_skills_root=False, authorized_skill_names=sorted(configs))
+            expected["isolated_skills_root"] = False
         elif builtin is EvaluationSkillTool.GUIDE:
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs
-        if workbench_skills:
-            expected["authorized_skill_names"] = sorted(configs)
+        if builtin in {EvaluationSkillTool.SCRIPT, EvaluationSkillTool.GUIDE} and "skill_name_to_id" in actual:
+            expected["skill_name_to_id"] = skill_name_to_id if actual["skill_name_to_id"] else {}
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):
             raise ValueError("Unsupported evaluation skill tool configuration")
@@ -927,7 +938,10 @@ def compile_snapshot(
             ),
         )
         if prepared_conversation is not None:
-            return PreparedAgentRun(**fields, **prepared_conversation.model_dump())
+            conversation = prepared_conversation.model_dump()
+            if not getattr(agent, "automatic_memory_enabled", True):
+                conversation["memory_enabled"] = None
+            return PreparedAgentRun(**fields, **conversation)
         return PreparedEvaluationRun(**fields, conversation_id=conversation_id if conversation_id is not None else 0)
     except (LookupError, OSError, TypeError, ValueError, PydanticSerializationError) as exc:
         raise SnapshotCompilationError(stage, exc) from exc

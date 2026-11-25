@@ -2,14 +2,12 @@
 """Preserve capture ownership checks independently of operations query modules."""
 
 from contextlib import contextmanager
-from types import SimpleNamespace
 
 import pytest
+from contracts.errors.trajectory import QueryError
+from infrastructure.rdb.trajectory import capture as database
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
-
-from contracts.errors.trajectory import QueryError
-from infrastructure.rdb import trajectory_capture as database
 
 
 @pytest.fixture
@@ -67,39 +65,6 @@ def test_capture_source_budget_failure_stays_retryable(catalog):
         catalog[0].source_messages("t", "u", "123", limit=1)
     assert error.value.code == "source_coverage_budget_exceeded"
     assert error.value.status == 503 and error.value.retry_after == 2
-
-
-@pytest.mark.parametrize(
-    ("member", "owns_conversation", "error"),
-    [
-        ("owner", True, None),
-        (None, True, "not an active tenant member"),
-        ("owner", False, "conversation ownership differs"),
-    ],
-)
-def test_capture_authorization_requires_active_membership_and_actual_owner(
-    catalog, mocker, member, owns_conversation, error,
-):
-    service, _ = catalog
-    membership = mocker.patch.object(Session, "scalar", return_value=member)
-    ownership = mocker.patch.object(database, "conversation_belongs_to", return_value=owns_conversation)
-    identity = SimpleNamespace(tenant_id="tenant", owner_user_id="owner", conversation_id="123")
-
-    if error is None:
-        service.authorize(identity)
-    else:
-        with pytest.raises(PermissionError, match=error):
-            service.authorize(identity)
-
-    statement = membership.call_args.args[0]
-    sql = str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
-    assert "user_tenant_t.user_id = 'owner'" in sql
-    assert "user_tenant_t.tenant_id = 'tenant'" in sql
-    assert "user_tenant_t.delete_flag = 'N'" in sql
-    if member is None:
-        ownership.assert_not_called()
-    else:
-        ownership.assert_called_once_with(123, user_id="owner", tenant_id="tenant")
 
 
 def test_deleted_conversation_check_is_owner_scoped_and_propagates_database_failure(

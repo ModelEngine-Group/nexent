@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import hashlib
@@ -10,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 logger = logging.getLogger("capacity_resolver")
 
 
-RESOLVER_VERSION = "1.0.0"
-FINGERPRINT_SCHEMA_VERSION = 1
+RESOLVER_VERSION = "2.0.0"
+FINGERPRINT_SCHEMA_VERSION = 2
 
 
 CountingMode = Literal["exact", "estimated"]
@@ -79,7 +81,7 @@ class ModelCapacitySnapshot(BaseModel):
     max_output_tokens: Optional[int] = None
     default_output_reserve_tokens: Optional[int] = None
 
-    requested_output_tokens: int
+    requested_output_tokens: Optional[int] = None
     provider_input_limit_tokens: int
 
     tokenizer_family: Optional[str] = None
@@ -156,10 +158,7 @@ def compute_fingerprint(
         "provider": provider,
         "model_name": model_name,
         "context_window_tokens": context_window_tokens,
-        "max_input_tokens": max_input_tokens,
         "max_output_tokens": max_output_tokens,
-        "default_output_reserve_tokens": default_output_reserve_tokens,
-        "requested_output_tokens": requested_output_tokens,
         "provider_input_limit_tokens": provider_input_limit_tokens,
         "tokenizer_family": tokenizer_family,
         "counting_mode": counting_mode,
@@ -184,17 +183,6 @@ _OVERRIDABLE_FIELDS = (
     "default_output_reserve_tokens",
     "tokenizer_family",
 )
-
-# Last-resort fallback when neither the agent nor the model record sets a
-# requested_output_tokens / default_output_reserve_tokens. 1024 was too small
-# in practice: tool-using agents often write multi-hundred-token JSON tool
-# calls plus a few hundred tokens of thought per step, and 1024 produced
-# mid-JSON truncation that surfaced to users as "tool failed" instead of a
-# capacity-config issue. 4096 covers the median single-turn output reliably
-# without overshooting tiny-output models — those still get caught by the
-# RequestedOutputExceedsCap check (capacity_resolver line 276-283 and
-# the agent-edit form rule).
-_DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096
 
 
 def resolve_capacity(
@@ -236,18 +224,19 @@ def resolve_capacity(
         return None
 
     context_window_tokens = _pick("context_window_tokens")
-    max_input_tokens = _pick("max_input_tokens")
+    max_input_tokens = None  # Retained storage compatibility; never a runtime constraint.
     max_output_tokens = _pick("max_output_tokens")
-    default_output_reserve_tokens = _pick("default_output_reserve_tokens")
+    default_output_reserve_tokens = None
+    requested_output_tokens = None
     tokenizer_family = _pick("tokenizer_family")
     capability_profile_version = (
         profile.capability_profile_version if profile is not None else None
     )
 
-    if context_window_tokens is None and max_input_tokens is None:
+    if context_window_tokens is None:
         raise ProviderCapabilityUnknown(
             f"No known hard capacity for ({provider!r}, {model_id!r}); "
-            f"set context_window_tokens or max_input_tokens via operator override "
+            f"set context_window_tokens via operator override "
             f"or add a capability profile entry."
         )
 
@@ -272,48 +261,9 @@ def resolve_capacity(
             f"({context_window_tokens})"
         )
 
-    if (
-        max_input_tokens is not None
-        and context_window_tokens is not None
-        and max_input_tokens > context_window_tokens
-    ):
-        raise InvalidCapacityConfiguration(
-            f"max_input_tokens ({max_input_tokens}) exceeds context_window_tokens "
-            f"({context_window_tokens}); operators who fill an input cap above the "
-            f"window will be silently clipped by the derived provider_input_limit, "
-            f"so the override never takes effect"
-        )
-
-    if requested_output_tokens is None:
-        requested_output_tokens = (
-            default_output_reserve_tokens
-            if default_output_reserve_tokens is not None
-            else _DEFAULT_REQUESTED_OUTPUT_TOKENS
-        )
-    if requested_output_tokens <= 0:
-        raise InvalidCapacityConfiguration(
-            f"requested_output_tokens must be positive, got {requested_output_tokens}"
-        )
-    if (
-        max_output_tokens is not None
-        and requested_output_tokens > max_output_tokens
-    ):
-        raise RequestedOutputExceedsCap(
-            f"requested_output_tokens ({requested_output_tokens}) exceeds "
-            f"max_output_tokens ({max_output_tokens})"
-        )
-
-    derived_limits: list[int] = []
-    if max_input_tokens is not None:
-        derived_limits.append(max_input_tokens)
-    if context_window_tokens is not None:
-        derived_limits.append(context_window_tokens - requested_output_tokens)
-    provider_input_limit_tokens = min(derived_limits)
-    if provider_input_limit_tokens <= 0:
-        raise InvalidCapacityConfiguration(
-            f"derived provider_input_limit_tokens is non-positive: "
-            f"{provider_input_limit_tokens}"
-        )
+    # The combined window is the only input capacity. Output capability is
+    # metadata, not a requested generation allowance or a fixed subtraction.
+    provider_input_limit_tokens = context_window_tokens
 
     _, counting_mode = _tokenizer_registry.resolve(tokenizer_family)
 

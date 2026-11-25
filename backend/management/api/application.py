@@ -14,6 +14,7 @@ from management.api.automation.agent_automation import (
 )
 from management.api.skill.creation import skill_creator_router
 from management.api.agent.creator import router as agent_creator_router
+from management.api.dev.clock import router as clock_router
 from management.api.agent.nl2agent_callback import router as nl2agent_callback_router
 from management.api.agent.workbench_callback import router as workbench_callback_router
 from management.api.automation.agentos_callback import router as automation_callback_router
@@ -82,7 +83,7 @@ from management.services.model.outlet_migration import migrate_legacy_outlets
 from nexent.core.concurrency import (
     run_blocking,
 )
-from ops.api.access import router as ops_access_router
+from management.api.permission.ops_access import router as ops_access_router
 
 logger = logging.getLogger("base_app")
 
@@ -264,9 +265,20 @@ app.include_router(memory_dreaming_router)
 app.include_router(memory_provider_router)
 app.include_router(tag_management_router)
 
+# Sample domain router used for OpenAPI→MCP conversion demo endpoints.
+app.include_router(clock_router)
+
 # Northbound and A2A business routes share Management lifecycle and ownership.
 app.include_router(northbound_router)
 app.include_router(a2a_router)
 app.include_router(gateway_identity_router)
+
+# Phase-one northbound capability gates (conversations/automations/files).
+# The gates declare their exposure via @nb_exposed; the offline generator
+# compiles those declarations into the Gateway exposure snapshot.
+from management.api.northbound_gates import nb_capability_routers
+
+for _gate_router in nb_capability_routers():
+    app.include_router(_gate_router)
 
 app.include_router(ops_access_router)

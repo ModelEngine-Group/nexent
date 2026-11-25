@@ -163,10 +163,10 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     conversation_deleted = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "infrastructure.trace.bootstrap",
+        "runtime.trajectory",
         _module(
-            "infrastructure.trace.bootstrap",
-            local_trajectory_processor=trajectory_processor,
+            "runtime.trajectory",
+            configure_runtime_trajectory=MagicMock(return_value=trajectory_processor),
         ),
     )
     monkeypatch.setitem(

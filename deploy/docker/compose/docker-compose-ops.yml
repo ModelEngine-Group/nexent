@@ -1,6 +1,6 @@
 services:
   nexent-ops:
-    image: ${NEXENT_IMAGE:?Set NEXENT_IMAGE to a backend image containing ops_service.py}
+    image: ${NEXENT_OPS_IMAGE:-nexent/nexent-ops:latest}
     container_name: nexent-ops
     restart: unless-stopped
     ports:
@@ -9,7 +9,7 @@ services:
       - nexent
     volumes:
       - ${ROOT_DIR:?Set ROOT_DIR for persistent ops logs}/logs:/mnt/nexent-data/logs
-      - ${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory
+      - ${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -20,7 +20,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: "off"
       PYTHON_DOTENV_DISABLED: "1"
     entrypoint:
-      - /opt/nexent/scripts/start-backend.sh
+      - /opt/nexent/scripts/start-ops.sh
       - python
       - -m
       - backend.http.ops_service

@@ -674,6 +674,7 @@ export const Composer: FC<ComposerProps> = ({
     <div className="relative w-full min-w-0 font-sans">
       {workbenchPresentation && workbenchPresentation.actions}
       <fieldset
+        data-slot="chat-composer"
         disabled={fieldsetDisabled}
         aria-disabled={fieldsetDisabled}
         className={cn(

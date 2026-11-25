@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import JSON, MetaData
 from sqlalchemy.dialects import postgresql
 
+from infrastructure.rdb.agent_execution import AgentExecution
 from infrastructure.rdb.conversation_record import ConversationMessage
 from management.db.conversation import memory_completion as queue
 from test.backend.database.test_prepared_saved_user import database
@@ -28,6 +29,11 @@ def leased(database, receipt_table, mocker):
         metadata.create_all(session.get_bind())
         add_assistant(session)
         add_receipt(session, RUN_ID)
+        session.add(AgentExecution(
+            run_id=RUN_ID, conversation_id=42, tenant_id="tenant", status="completed",
+            resource_versions={"agent_id": 7, "agent_version_no": 1},
+            created_by="actor", updated_by="actor", delete_flag="N",
+        ))
         session.add(queue.MemoryCompletion(
             job_id=f"{RUN_ID}:{queue.TURN_COMPLETED}", run_id=RUN_ID, job_type=queue.TURN_COMPLETED, agent_id=7,
             lease_token=TOKEN, next_attempt_at=datetime.now(timezone.utc) + timedelta(hours=1),
@@ -56,7 +62,7 @@ def test_owned_completion_uses_original_input_only(leased, case):
     )
     source = queue.read_source(job)
     if case in {"chat", "automation"}:
-        assert source == queue.MemorySource("tenant", "actor", 42, 61, "finished", "hello")
+        assert source == queue.MemorySource("tenant", "actor", 42, 61, "finished", "hello", 1)
     else:
         assert source is None
 
@@ -118,3 +124,25 @@ def test_claim_resets_exhausted_job_and_issues_a_fresh_lease(mocker, attempts):
         assert job == queue.MemoryJob(RUN_ID, queue.TURN_COMPLETED, 7, TOKEN, 2, ["previous"], 23)
         assert row.next_attempt_at is not None
         assert row.finished_at is None
+
+
+@pytest.mark.parametrize("version", [0, 1])
+@pytest.mark.parametrize("change", [None, "tenant", "user", "conversation", "agent", "deleted"])
+def test_source_version_is_bound_to_the_owned_execution(leased, version, change):
+    with leased() as session:
+        row = session.get(AgentExecution, RUN_ID)
+        row.resource_versions = {"agent_id": 8 if change == "agent" else 7, "agent_version_no": version}
+        if change == "tenant":
+            row.tenant_id = "other"
+        elif change == "user":
+            row.created_by = "other"
+        elif change == "conversation":
+            row.conversation_id = 43
+        elif change == "deleted":
+            row.delete_flag = "Y"
+    job = queue.MemoryJob(RUN_ID, queue.TURN_COMPLETED, 7, TOKEN, 1, None)
+    source = queue.read_source(job)
+    if change is None:
+        assert source.agent_version_no == version
+    else:
+        assert source is None

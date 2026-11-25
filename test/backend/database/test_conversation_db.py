@@ -206,8 +206,15 @@ db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
 db_models_mod.UserTenant = MagicMock(name="UserTenant")
 
-sys.modules["management.db.models"] = db_models_mod
-sys.modules["management.db.models"] = db_models_mod
+for model_module in (
+    "management.db.agent.models",
+    "management.db.automation.models",
+    "management.db.conversation.models",
+    "management.db.identity.models",
+    "management.db.knowledge_base.models",
+    "management.db.models",
+):
+    sys.modules[model_module] = db_models_mod
 
 
 # Stub management.utils.audit_fields with the tracking helpers used by conversation_db
@@ -524,11 +531,11 @@ def test_delete_conversation_success(monkeypatch, mock_session_ctx):
 
 
 def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
-    """delete_conversation returns False when no conversation row affected."""
+    """delete_conversation returns False when no owned conversation row is affected."""
     session, ctx = mock_session_ctx
     conversation_result = MagicMock()
     conversation_result.rowcount = 0
-    session.execute.side_effect = [conversation_result, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    session.execute.side_effect = [conversation_result]
 
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
@@ -3580,10 +3587,10 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_id = save_history_summary(
-        1, "user-a", "tenant-a", {"task_overview": "done"}, 24,
+        1, "user-a", "tenant-a", {"markdown": "Plain summary without headings or original identifiers."}, 24,
         trigger="compaction_trigger_threshold_exceeded",
         history_tokens_before=9000,
-        history_tokens_after=5000,
+        history_tokens_after=12000,
         compaction_attempts=2,
         compaction_trigger_threshold_tokens=8000,
         compaction_target_tokens=6000,
@@ -3595,10 +3602,11 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     assert fresh_insert_mock["unit_type"] == "history_summary"
     assert fresh_insert_mock["unit_status"] == "completed"
     payload = __import__("json").loads(fresh_insert_mock["unit_content"])
+    assert payload["summary"] == {"markdown": "Plain summary without headings or original identifiers."}
     assert payload["covered_through_message_id"] == 24
     assert payload["trigger"] == "compaction_trigger_threshold_exceeded"
     assert payload["history_tokens_before"] == 9000
-    assert payload["history_tokens_after"] == 5000
+    assert payload["history_tokens_after"] == 12000
     assert payload["compaction_attempts"] == 2
     assert payload["compaction_trigger_threshold_tokens"] == 8000
     assert payload["compaction_target_tokens"] == 6000
@@ -3782,7 +3790,7 @@ def _isolated_imports(monkeypatch):
 def isolated_trajectory_projection(monkeypatch):
     """Keep the new persistence collaborator outside this legacy SQL-double unit."""
     projection = types.SimpleNamespace(seed_conversation=MagicMock(), delete_summaries=MagicMock())
-    monkeypatch.setitem(sys.modules, "management.db.trajectory.repository", projection)
+    monkeypatch.setitem(sys.modules, "infrastructure.rdb.trajectory.repository", projection)
     return projection
 
 

@@ -22,6 +22,7 @@ from ...monitor.model_attempt import ModelAttemptSession
 from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
     _detect_model_type,
+    _MonitoredChatCompletions,
     _MonitoredClient,
     _monitoring_display_name,
     _monitoring_operation,
@@ -30,7 +31,7 @@ from ..concurrency import RunCancellationScope, run_blocking
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.token_estimation import estimate_tokens_text
 from .capacity_budget import (
-    CallerMaxTokensOverrideForbidden,
+    CallerMaxTokensOverrideForbidden as CallerMaxTokensOverrideForbidden,
     ContextBudgetSnapshot,
     parse_context_budget_snapshot,
     verify_context_budget_capacity,
@@ -196,7 +197,7 @@ class OpenAIModel(OpenAIServerModel):
 
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
-    def __init__(self, observer: MessageObserver = MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=None,
+    def __init__(self, observer: Optional[MessageObserver] = None, temperature=DEFAULT_TEMPERATURE, top_p=None,
                  ssl_verify=True, reasoning_effort: Optional[str] = None,
                  reasoning_budget_tokens: Optional[int] = None,
                  reasoning_capability: Optional[Dict[str, Any]] = None,
@@ -224,7 +225,8 @@ class OpenAIModel(OpenAIServerModel):
         Initialize OpenAI Model with observer and SSL verification option.
 
         Args:
-            observer: MessageObserver instance for tracking model output
+            observer: Observer instance for tracking model output. None creates
+                      a default MessageObserver for this client.
             temperature: Sampling temperature (None uses the service default)
             top_p: Top-p sampling parameter (None uses the service default)
             reasoning_effort: Optional canonical reasoning effort level declared
@@ -259,10 +261,14 @@ class OpenAIModel(OpenAIServerModel):
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
+        if isinstance(observer, type):
+            raise TypeError("observer must be an instance or None")
+        self.observer = MessageObserver() if observer is None else observer
+
         capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
+        monitoring_identity = kwargs.pop("monitoring_identity", None)
 
-        self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
         self.explicit_sampling = tuple(explicit_sampling or ())
@@ -341,6 +347,8 @@ class OpenAIModel(OpenAIServerModel):
         base_client = getattr(self, "client", None)
         if base_client is not None and model_id is not None:
             self.client = _MonitoredClient(base_client, model_id, model_type)
+            if monitoring_identity is not None:
+                self.client.chat.completions.catalog_identity = monitoring_identity
         else:
             logger.warning(
                 "OpenAIModel: no `client` attribute after init; "
@@ -383,13 +391,7 @@ class OpenAIModel(OpenAIServerModel):
             trusted_budget_snapshot = (
                 context_budget_snapshot or self.context_budget_snapshot
             )
-            invocation_parameters = {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))},
-            }
             trace_attributes = {
-                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
                 "model_id": self.model_id,
             }
             input_attr_key = (
@@ -512,19 +514,6 @@ class OpenAIModel(OpenAIServerModel):
             context_budget_snapshot or self.context_budget_snapshot
         )
 
-        # Bound completion length unless the caller passed their own override
-        # via kwargs (which already landed in completion_kwargs above).
-        # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
-        # W2 decides whether a configured output cap should be dispatched.
-        # Skip pre-W2 auto-fill so a capacity ceiling cannot masquerade as an
-        # explicit caller cap or override an internal-only planning reserve.
-        if (
-            self.max_output_tokens is not None
-            and "max_tokens" not in completion_kwargs
-            and trusted_budget_snapshot is None
-        ):
-            completion_kwargs["max_tokens"] = self.max_output_tokens
-
         selected_cache_profile = resolve_prompt_cache_profile(
             self.model_factory or "unknown", self.prompt_cache
         )
@@ -540,8 +529,17 @@ class OpenAIModel(OpenAIServerModel):
         # and assembles the result. Drop a stale construction-time ``stream``
         # so it cannot collide with the explicit ``stream=True`` at dispatch.
         dispatch_kwargs.pop("stream", None)
+        invocation_parameters = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) and k != "stop"},
+        }
+        actual_stop = (dispatch_kwargs.get("extra_body") or {}).get("stop", dispatch_kwargs.get("stop"))
+        if actual_stop is not None:
+            invocation_parameters["stop"] = actual_stop
         self._monitoring.set_span_attributes(
             **{
+                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
                 "llm.prompt_cache.mode": cache_advice.mode,
                 "llm.prompt_cache.supported": cache_advice.supported,
                 "llm.prompt_cache.directive_reason": cache_advice.reason,
@@ -810,13 +808,7 @@ class OpenAIModel(OpenAIServerModel):
                         "nonstandard_chunk_count": nonstandard_chunk_count,
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
-                        "requested_output_tokens": (
-                            self._provider_output_tokens(
-                                self._coerce_context_budget_snapshot(trusted_budget_snapshot),
-                                self.capacity_snapshot,
-                                dispatch_kwargs.get("max_tokens"),
-                            )
-                        ),
+                        "requested_output_tokens": None,
                         "reasoning_only_budget_exhausted": (
                             finish_reason == "length"
                             and reasoning_char_count > 0
@@ -892,6 +884,9 @@ class OpenAIModel(OpenAIServerModel):
                             input_tokens=input_tokens,
                             output_tokens=output_tokens
                         )
+                    message.provider_input_tokens = (
+                        getattr(usage, "prompt_tokens", None) if usage is not None else None
+                    )
                     message.raw = current_request
                     message.role = MessageRole.ASSISTANT
                     message.model_attempt_id = attempt_id
@@ -1189,20 +1184,15 @@ class OpenAIModel(OpenAIServerModel):
                 budget_snapshot=snapshot,
                 capacity_snapshot=capacity_snapshot,
             )
-            trusted_max_tokens = snapshot.requested_output_tokens
-            caller_max_tokens = completion_kwargs.get("max_tokens")
-            if caller_max_tokens is not None and caller_max_tokens != trusted_max_tokens:
-                raise CallerMaxTokensOverrideForbidden(
-                    snapshot_value=trusted_max_tokens,
-                    caller_value=caller_max_tokens,
-                )
-            provider_max_tokens = self._provider_output_tokens(
-                snapshot, capacity_snapshot, caller_max_tokens
-            )
-            if provider_max_tokens is None:
-                completion_kwargs.pop("max_tokens", None)
-            else:
-                completion_kwargs["max_tokens"] = provider_max_tokens
+        # Omission is the OpenAI chat protocol contract, including historical
+        # caller/constructor values and extra_body overrides.
+        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+            completion_kwargs.pop(key, None)
+        if completion_kwargs.get("extra_body"):
+            completion_kwargs["extra_body"] = {
+                key: value for key, value in completion_kwargs["extra_body"].items()
+                if key not in {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+            }
         logger.info(
             "event=chat_completion_create model_id=%s kwargs=%s",
             self.model_id,
@@ -1221,7 +1211,11 @@ class OpenAIModel(OpenAIServerModel):
                     "adapter_ref": {"ref": "legacy_openai_chat", "version": 1},
                     "parameters": {key: value for key, value in wire_body.items() if key not in {"messages", "tools"}},
                 })
-            return self.client.chat.completions.create(**parameters)
+            completions = self.client.chat.completions
+            if (_trajectory_capture is not None and _trajectory_capture.enabled
+                    and isinstance(completions, _MonitoredChatCompletions)):
+                return completions.create(_trajectory_capture=_trajectory_capture, **parameters)
+            return completions.create(**parameters)
 
         try:
             return dispatch(completion_kwargs)
@@ -1520,26 +1514,6 @@ class OpenAIModel(OpenAIServerModel):
         }
 
     @staticmethod
-    def _provider_output_tokens(
-        snapshot: Optional[ContextBudgetSnapshot],
-        capacity_snapshot: Optional[Dict[str, Any]],
-        caller_max_tokens: Optional[int],
-    ) -> Optional[int]:
-        """Keep an unconfigured planning reserve out of provider output caps."""
-        if snapshot is None:
-            return caller_max_tokens
-        if (
-            caller_max_tokens is None
-            and snapshot.output_reserve_source == "model_default"
-            and capacity_snapshot is not None
-            and "default_output_reserve_tokens" in capacity_snapshot
-            and capacity_snapshot["default_output_reserve_tokens"] is None
-        ):
-            return None
-        # Legacy snapshots without reserve metadata retain their cap semantics.
-        return snapshot.requested_output_tokens
-
-    @staticmethod
     def _verify_w1_w2_consistency(
         *,
         budget_snapshot: ContextBudgetSnapshot,
@@ -1584,7 +1558,7 @@ class OpenAIModel(OpenAIServerModel):
         return {
             "w2.budget_fingerprint": snapshot.fingerprint,
             "w2.w1_fingerprint": snapshot.w1_fingerprint,
-            "w2.requested_output_tokens": snapshot.requested_output_tokens,
+            "w2.requested_output_tokens": None,
             "w2.output_reserve_source": snapshot.output_reserve_source,
             "context.effective_input_limit_tokens": snapshot.effective_input_limit_tokens,
             "context.compaction_trigger_threshold_tokens": (

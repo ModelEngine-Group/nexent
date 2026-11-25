@@ -109,6 +109,7 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     TrajectoryFileStore.provision(tmp_path, storage_mode="shared_directory")
     values = {
         "ENABLE_TELEMETRY": True,
+        "LOCAL_FILE_MONITORING_ENABLED": True,
         "TRAJECTORY_READ_ENABLED": True,
         "MONITORING_PROVIDER": "local_file",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),
@@ -151,6 +152,6 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
 @pytest.fixture(autouse=True)
 def isolated_summary_database(mocker):
     from contextlib import nullcontext
-    repository=mocker.patch("infrastructure.rdb.trajectory_repository.ExecutionRepository")
+    repository=mocker.patch("infrastructure.rdb.trajectory.repository.ExecutionRepository")
     repository.return_value.initialize.side_effect=lambda identity:nullcontext()
     return repository

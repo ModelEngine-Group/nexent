@@ -97,6 +97,10 @@ spec:
               value: "http://nexent-runtime:5014"
             - name: GATEWAY_NORTHBOUND_URL
               value: "http://nexent-config:5010"
+            # Emergency kill switch: comma-separated capability ids/paths
+            # removed from the exposure registry at gateway startup.
+            - name: GATEWAY_NB_EXCLUDED_CAPABILITIES
+              value: {{ .Values.nbExcludedCapabilities | default "" | quote }}
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
           startupProbe:

@@ -507,7 +507,9 @@ class ExternalA2AExecutionBinding(RunSpecModel):
 
 
 class PreparedMemorySearch(RunSpecModel):
-    query: str = Field(max_length=65536)
+    # Preserve the complete, already-validated user request so signed snapshots
+    # can replay memory presearch without a second, narrower character limit.
+    query: str
     result: str = Field(max_length=131072)
 
     def observer_events(self) -> list[dict[str, JsonValue]]:
@@ -563,6 +565,15 @@ class AgentRunSpec(RunSpecModel):
 
 
 class HistoryCheckpointCandidate(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_source_extensions(cls, value):
+        """Read older persisted checkpoints without activating withdrawn source catalogs."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items()
+                    if key not in {"structured_source_proofs", "execution_sources"}}
+        return value
+
     summary: dict[str, JsonValue]
     covered_through_message_id: PositiveInt
     previous_summary_unit_id: PositiveInt | None = None
@@ -574,16 +585,44 @@ class HistoryCheckpointCandidate(RunSpecModel):
     compaction_target_tokens: int | None = Field(default=None, ge=0)
 
 
+class CompletedTurnHistoryCheckpointCandidate(RunSpecModel):
+    """A root Runtime proposal whose final boundary is assigned only by Management."""
+
+    coverage_scope: Literal["current_completed_turn"]
+    summary: dict[str, JsonValue]
+    history_tail_message_id: PositiveInt | None = None
+    previous_summary_unit_id: PositiveInt | None = None
+    trigger: Literal["completed_turn"] = "completed_turn"
+
+
 class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
 
 
+class PreparedHistoryExecutionRecord(RunSpecModel):
+    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result"]
+    unit_index: int | None = Field(default=None, strict=True, ge=0)
+    content: str | None
+    tool_call_id: str | None = None
+    invocation_id: str | None = None
+    execution_event: dict[str, JsonValue] | None = None
+
+
 class PreparedHistoryTurn(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_user_original(cls, value):
+        """Keep older Prepared turns readable without a second user-original channel."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "user_source_content"}
+        return value
+
     user_message: str
     assistant_final_answer: str
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    execution_records: list[PreparedHistoryExecutionRecord] = Field(default_factory=list, exclude_if=lambda records: not records)
 
 
 class PreparedConversationHistory(RunSpecModel):
@@ -593,6 +632,7 @@ class PreparedConversationHistory(RunSpecModel):
 
 class PreparedConversationScope(AgentRunReference):
     memory_enabled: Literal[True] | None = None
+    automation_proposal_only: Literal[True] | None = None
     workbench_config_version: PositiveInt | None = None
     native_knowledge: Literal[True] | None = None
     historical_context: PreparedConversationHistory | None = None
@@ -618,7 +658,7 @@ class PreparedConversationScope(AgentRunReference):
     @model_serializer(mode="wrap")
     def serialize_optional_scope(self, handler):
         data = handler(self)
-        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata"):
+        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata", "automation_proposal_only"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data
@@ -663,6 +703,13 @@ class SkillCreatorDraft(RunSpecModel):
     content: str
 
 
+class CreatorTrajectoryScope(RunSpecModel):
+    """Server-owned history receipt for a request-owned creator execution."""
+
+    conversation_id: Annotated[int, Field(gt=0, le=2147483647)]
+    source_message_id: Annotated[int, Field(gt=0, le=2147483647)] | None = None
+
+
 class PreparedCreatorRun(RunSpecModel):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
     input: RunInput
@@ -673,6 +720,20 @@ class PreparedCreatorRun(RunSpecModel):
     capacity_snapshot: dict[str, JsonValue] | None = None
     context_budget_snapshot: dict[str, JsonValue] | None = None
     system_agent: AgentVersionReference | None = None
+    trajectory: CreatorTrajectoryScope | None = None
+
+    @model_validator(mode="after")
+    def validate_trajectory_scope(self):
+        if self.trajectory is not None and self.system_agent is None:
+            raise ValueError("Creator trajectory requires a system Agent reference")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_trajectory_scope(self, handler):
+        data = handler(self)
+        if self.trajectory is None:
+            data.pop("trajectory", None)
+        return data
 
 
 class PreparedSkillCreatorRun(PreparedCreatorRun):
@@ -689,6 +750,8 @@ class PreparedAgentCreatorRun(PreparedCreatorRun):
     mode: Literal["nl2agent"]
     agent_id: PositiveInt
     bound_resources: str = Field(min_length=1)
+    conversation_id: PositiveInt | None = None
+    resource_pending: bool = False
 
 
 class PreparedEvaluationRun(AgentRunSpec):
@@ -728,6 +791,7 @@ class MemoryOperation(str, Enum):
 
 class AgentMemoryStore(RunSpecModel):
     agent_id: PositiveInt
+    agent_version_no: int | None = Field(default=None, ge=0)
     conversation_id: PositiveInt | None = None
     content: str = Field(min_length=1, max_length=65536)
     idempotency_key: str = Field(min_length=1, max_length=128)
@@ -743,6 +807,7 @@ class AgentMemoryReceipt(RunSpecModel):
 
 
 class AgentMemoryStored(RunSpecModel):
+    agent_version_no: int | None = Field(default=None, ge=0)
     memory_id: PositiveInt
     agent_id: PositiveInt
     conversation_id: PositiveInt
@@ -753,7 +818,9 @@ class NL2AgentToolCall(RunSpecModel):
     agent_id: PositiveInt
     tool: Literal[
         "search_installed_resources", "search_uninstalled_resources", "recommend_resources", "wrapper",
-        "save_agent_draft_fields",
+        "save_agent_draft_fields", "validate_agent_generation_complete", "discover_requirements",
+        "verify_requirements", "show_resource_card", "read_generation_context",
+        "read_agent_configuration", "save_agent_configuration",
     ]
     arguments: dict[str, JsonValue]
 
@@ -839,6 +906,8 @@ class ChatInvocation(ModelInvokeBase):
 class EmbeddingInvocation(ModelInvokeBase):
     operation: Literal["embedding"] = "embedding"
     input: Annotated[list[str], Field(min_length=1)]
+    # Automatic Memory only; other model callers retain their existing policy.
+    memory_timeout_seconds: Annotated[float, Field(gt=0, le=10)] | None = None
 
 
 class RerankInput(BaseModel):

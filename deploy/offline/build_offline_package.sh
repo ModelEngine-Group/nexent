@@ -322,9 +322,9 @@ show_dry_run_plan() {
 }
 
 get_nexent_images() {
-  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MANAGEMENT_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_RUNTIME_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_OPS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_GATEWAY_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_WEB_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_DOCKER_IMAGE"
@@ -356,9 +356,7 @@ get_third_party_images() {
     echo_image_ref "nginx:alpine"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    if [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ]; then
-      echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
-    fi
+    echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
       phoenix) echo_image_ref "arizephoenix/phoenix:15" ;;
       langfuse)
@@ -366,7 +364,6 @@ get_third_party_images() {
           "docker.io/langfuse/langfuse-worker:3" \
           "docker.io/langfuse/langfuse:3" \
           "docker.io/clickhouse/clickhouse-server:26.3-alpine" \
-          "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
           "docker.io/redis:alpine" \
           "docker.io/postgres:15-alpine"; do
           echo_image_ref "$image"

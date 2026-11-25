@@ -9,9 +9,14 @@ from fastapi.testclient import TestClient
 
 from contracts.constants import environment
 from contracts.errors.exceptions import TokenExpiredError
-from gateway.downstream import internal_tokens
-from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity
+from gateway.identity import internal_tokens
+from gateway.identity.downstream import IDENTITY_HEADER, identity_context, sign_identity
 from backend.http.server.app_factory import create_app
+
+
+def is_runtime_service_request(method, path):
+    """Supply an explicit fixture policy for the optional factory hook."""
+    return method == "POST" and path == "/agent/internal/northbound/run"
 
 
 def test_application_factory_enforces_gateway_identity_and_preserves_health(monkeypatch):
@@ -47,3 +52,35 @@ def test_runtime_service_token_requires_explicit_policy_and_time_claims(monkeypa
     token = jwt.encode(claims, key, algorithm="HS256")
     with pytest.raises(TokenExpiredError):
         internal_tokens.verify_internal_runtime_jwt("Bearer " + token)
+
+
+@pytest.mark.parametrize("audience", ["runtime", "management"])
+@pytest.mark.parametrize("path", ["/agent/internal/northbound/run", "/private"])
+@pytest.mark.parametrize("credential", ["missing", "invalid", "valid"])
+def test_factory_keeps_internal_runtime_credentials_scoped(monkeypatch, audience, path, credential):
+    key = "local-runtime-factory-fixture-not-for-deployment"
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
+    monkeypatch.setattr(internal_tokens, "JWT_SECRET", key)
+    app = create_app(
+        enable_monitoring=False,
+        gateway_identity_audience=audience,
+        internal_runtime_request=is_runtime_service_request,
+    )
+
+    @app.post(path)
+    async def principal():
+        return identity_context.get()
+
+    headers = {}
+    if credential != "missing":
+        token = internal_tokens.generate_internal_runtime_jwt("u1", "t1") if credential == "valid" else "invalid"
+        headers["Authorization"] = "Bearer " + token
+    with TestClient(app) as client:
+        response = client.post("/api" + path, headers=headers)
+        allowed = audience == "runtime" and path == "/agent/internal/northbound/run" and credential == "valid"
+        assert response.status_code == (200 if allowed else 401)
+        if allowed:
+            assert response.json() == {"user_id": "u1", "tenant_id": "t1", "kind": "internal"}
+        assert client.get("/health/ready").status_code == 200
+        assert identity_context.get() is None

@@ -9,10 +9,12 @@ import pytest
 from fastapi import HTTPException
 
 from contracts.agentos import AgentRunReference, PreparedEvaluationRun
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import SnapshotCompilationError
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
-from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from runtime.agentos import prepared_evaluation
 
@@ -46,21 +48,17 @@ def skill_snapshot(mocker, tmp_path):
     stub_resolved_model_catalog(mocker, model)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model)
     binding = create_model_config_from_record(model)
-    metadata = {"agent_id": 7, "tenant_id": "tenant-a", "version_no": 2}
-    tools = [
-        ("RunSkillScriptTool", "run_skill_script", {"workspace_path": None, "authorized_skill_names": ["summarize"],
-                                                   "isolated_skills_root": False}),
-        ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False}),
-        ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": row["config"]}}),
-    ]
+    from management.services.agent.preparation.tools import _get_skill_script_tools
+
+    tools = _get_skill_script_tools(
+        7, "tenant-a", 2,
+        runtime_skill_snapshot=[{"name": row["name"], "config_values": row["config"]}],
+    )
     agent = AgentConfig(
         agent_id=7, version_no=2, name="evaluation", description="", model_name=binding.cite_name,
         context_items=[{"id": "skill:summarize", "type": "skill",
                         "content": {"name": "summarize", "description": "Summarize"}}],
-        tools=[ToolConfig(
-            class_name=class_name, name=name, source="builtin", usage="builtin", metadata=metadata,
-            params={"local_skills_dir": str(skills), **params},
-        ) for class_name, name, params in tools],
+        tools=[tool for tool in tools if tool.name in {"run_skill_script", "read_skill_md", "read_skill_config"}],
     )
     return agent, binding, directory, row, runtime_read
 
@@ -118,12 +116,73 @@ def test_evaluation_skill_snapshot_authorizes_and_pins_local_files(skill_snapsho
     runtime_read.assert_called_once_with(7, 2, actor.tenant_id)
 
 
+def test_evaluation_skill_snapshot_uses_bound_skill_id_for_regular_agent(skill_snapshot, mocker):
+    agent, binding, _, row, _ = skill_snapshot
+    bound = {**row, "skill_id": 53}
+    mocker.patch.object(evaluation_snapshot, "read_bound_skills", return_value=[bound])
+    for tool in agent.tools:
+        if tool.name in {"run_skill_script", "read_skill_md"}:
+            tool.params["skill_name_to_id"] = {"summarize": 53}
+
+    snapshot = evaluation_snapshot.export_snapshot(
+        agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+    )
+    assert snapshot is not None
+
+
 def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot):
     agent, binding, *_ = skill_snapshot
     agent.tools[1].params["local_skills_dir"] = "/wrong-source"
     assert evaluation_snapshot.export_snapshot(
         agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
     ) is None
+
+
+@pytest.mark.parametrize("tool_name", ["run_skill_script", "read_skill_md", "read_skill_config"])
+@pytest.mark.parametrize("names", [None, [], ["another-skill"], ["summarize", "another-skill"],
+                                  ["summarize", "summarize"]])
+def test_published_skill_export_rejects_missing_or_unbound_authorization(skill_snapshot, tool_name, names):
+    agent, binding, *_ = skill_snapshot
+    tool = next(tool for tool in agent.tools if tool.name == tool_name)
+    if names is None:
+        tool.params.pop("authorized_skill_names")
+    else:
+        tool.params["authorized_skill_names"] = names
+    with pytest.raises(SnapshotCompilationError) as error:
+        evaluation_snapshot.compile_snapshot(
+            agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+        )
+    assert str(error.value.__cause__) == "Unsupported evaluation skill tool configuration"
+
+
+@pytest.mark.parametrize("tool_name", ["run_skill_script", "read_skill_md", "read_skill_config"])
+def test_published_skill_export_rejects_extra_parameters_with_valid_authorization(skill_snapshot, tool_name):
+    agent, binding, *_ = skill_snapshot
+    next(tool for tool in agent.tools if tool.name == tool_name).params["unexpected"] = True
+    with pytest.raises(SnapshotCompilationError) as error:
+        evaluation_snapshot.compile_snapshot(
+            agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+        )
+    assert str(error.value.__cause__) == "Unsupported evaluation skill tool configuration"
+
+
+@pytest.mark.parametrize("tool_name", ["run_skill_script", "read_skill_md", "read_skill_config"])
+def test_published_skill_export_rejects_reordered_authorization(skill_snapshot, mocker, tool_name):
+    agent, binding, _, row, _ = skill_snapshot
+    other = {"instance_id": 24, "name": "another-skill", "description": "Another", "config": {}}
+    mocker.patch.object(evaluation_snapshot, "read_bound_skills", return_value=[row, other])
+    agent.context_items.append({"id": "skill:another-skill", "type": "skill",
+                                "content": {"name": "another-skill", "description": "Another"}})
+    for tool in agent.tools:
+        tool.params["authorized_skill_names"] = ["another-skill", "summarize"]
+        if tool.name == "read_skill_config":
+            tool.params["config_overrides"]["another-skill"] = {}
+    next(tool for tool in agent.tools if tool.name == tool_name).params["authorized_skill_names"].reverse()
+    with pytest.raises(SnapshotCompilationError) as error:
+        evaluation_snapshot.compile_snapshot(
+            agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+        )
+    assert str(error.value.__cause__) == "Unsupported evaluation skill tool configuration"
 
 
 
@@ -287,20 +346,25 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
     ("none", None), ("revoked", 404), ("config", 409), ("file", 409),
 ])
 @pytest.mark.parametrize("debug", [False, True])
-def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status, debug):
+@pytest.mark.parametrize("owner", ["tenant-a", ASSET_OWNER_TENANT_ID])
+def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status, debug, owner):
     from infrastructure.skill_execution import capture_skill_files
     from management.services.agent.workbench import ResolvedSkillMount
     from runtime.agentos import prepared_skills
 
     agent, _, directory, row, ordinary = skill_snapshot
+    if owner != "tenant-a":
+        directory = directory.parent.parent / owner / row["name"]
+        directory.mkdir(parents=True)
+        (directory / "SKILL.md").write_text("platform guide", encoding="utf-8")
     agent.origin = "SYSTEM"
     for tool in agent.tools:
         tool.params["authorized_skill_names"] = ["summarize"]
     catalog = {"skill_id": 53, "name": row["name"], "description": row["description"],
-               "config": row["config"], "tool_ids": []}
+               "config": row["config"], "tool_ids": [], "owner_tenant_id": owner}
     skill = ResolvedSkillMount(
         53, row["name"], row["description"], (), row["config"],
-        files=tuple(capture_skill_files("tenant-a", row["name"]).items()),
+        files=tuple(capture_skill_files(owner, row["name"]).items()),
     )
     resource = evaluation_snapshot._export_resource(
         agent, {}, "tenant-a", "en", None, {}, workbench_skills=(skill,),
@@ -331,6 +395,8 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
             )
             assert tools["read_skill_config"].params["config_overrides"] == {"summarize": row["config"]}
             assert tools["read_skill_md"].params["authorized_skill_names"] == ["summarize"]
+            staged = Path(tools["read_skill_md"].params["local_skills_dir"]) / actor.tenant_id / "summarize"
+            assert (staged / "SKILL.md").read_bytes() == (directory / "SKILL.md").read_bytes()
             assert verified == [catalog]
         else:
             with pytest.raises(HTTPException) as error:
@@ -347,6 +413,40 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
         read.assert_called_once_with(7, 2, actor, mounts, {53})
         ordinary.assert_not_called()
     finally:
+        prepared_evaluation._remove_skill_files(workspace)
+
+
+def test_runtime_materialization_rebuilds_skill_id_mapping_and_emits_usage(skill_snapshot, mocker, tmp_path):
+    from nexent.monitor.facts import set_fact_sink
+    from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
+    from runtime.agentos import prepared_skills
+
+    agent, binding, _, row, _ = skill_snapshot
+    bound = {**row, "skill_id": 53}
+    for tool in agent.tools:
+        if tool.name in {"run_skill_script", "read_skill_md"}:
+            tool.params["skill_name_to_id"] = {"summarize": 53}
+    mocker.patch.object(evaluation_snapshot, "read_bound_skills", return_value=[bound])
+    snapshot = evaluation_snapshot.export_snapshot(
+        agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+    )
+    mocker.patch.object(prepared_skills, "read_bound_skills", return_value=[bound])
+    resource = snapshot.resource
+    actor = ServicePrincipal("user-a", "tenant-a")
+    workspace = str(tmp_path / "runs" / actor.user_id / "evaluation")
+    events = []
+    set_fact_sink(events.append)
+    try:
+        tools, _ = prepared_skills.materialize_skill_tools(resource, actor, workspace)
+        assert tools["read_skill_md"].params["skill_name_to_id"] == {"summarize": 53}
+        sdk_tool = NexentAgent.create_builtin_tool(None, tools["read_skill_md"])
+        with agent_monitoring_context(AgentRunMetadata(
+            tenant_id="tenant-a", monitoring_run_id="run-1", agent_id=7,
+        )):
+            assert "skill guide" in sdk_tool.forward("summarize")
+        assert events and events[0]["skill_id"] == "53"
+    finally:
+        set_fact_sink(None)
         prepared_evaluation._remove_skill_files(workspace)
 
 

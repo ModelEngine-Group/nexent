@@ -2,6 +2,7 @@
 """Authorized and serialized persistence for Agent short-term Memory writes."""
 
 import json
+import time
 from collections.abc import Callable
 
 from sqlalchemy import select, text
@@ -62,20 +63,67 @@ def _lock(session, tenant_id: str, key: str) -> None:
 
 def find_existing_memory(
     tenant_id: str, user_id: str, agent_id: int, conversation_id: int | None, key: str, content: str,
+    *, agent_version_no: int | None = None,
 ) -> int | None:
     with get_db_session() as session:
         _require_scope(session, tenant_id, user_id, agent_id, conversation_id)
+        _require_automatic_memory(session, tenant_id, user_id, agent_id, agent_version_no)
         row = _find(session, tenant_id, key, user_id, agent_id)
         return row.memory_id if row is not None and row.content == content else None
 
 
+def _require_automatic_memory(session, tenant_id, user_id, agent_id, agent_version_no=None):
+    rows = session.execute(text("""
+        SELECT config_key, config_value FROM nexent.memory_user_config_t
+        WHERE user_id = :user_id AND delete_flag = 'N'
+          AND config_key IN ('MEMORY_SWITCH', 'DISABLE_AGENT_ID', 'DISABLE_USERAGENT_ID')
+        ORDER BY config_id
+    """), {"user_id": user_id}).all()
+    enabled = True
+    disabled = set()
+    for key, value in rows:
+        if key == "MEMORY_SWITCH":
+            enabled = value == "Y"
+        else:
+            disabled.add(value)
+    if not enabled or str(agent_id) in disabled:
+        raise MemoryStoreScopeError("Automatic memory is disabled")
+    tenant_switch = session.scalar(select(TenantConfig.config_value).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == "TENANT_MEMORY_SWITCH",
+        TenantConfig.delete_flag == "N",
+    ).order_by(TenantConfig.tenant_config_id.desc()).limit(1))
+    if tenant_switch is not None and tenant_switch != "Y":
+        raise MemoryStoreScopeError("Tenant automatic memory is disabled")
+    agent_switch = session.execute(text("""
+        SELECT enable_memory FROM nexent.ag_tenant_agent_t
+        WHERE agent_id = :agent_id AND delete_flag = 'N'
+          AND (tenant_id = :tenant_id OR (tenant_id = :platform_tenant AND version_no > 0))
+          AND version_no = COALESCE(:version_no, (
+              SELECT COALESCE(current_version_no, 0) FROM nexent.ag_tenant_agent_t
+              WHERE agent_id = :agent_id AND version_no = 0 AND delete_flag = 'N'
+                AND tenant_id IN (:tenant_id, :platform_tenant)
+              ORDER BY CASE WHEN tenant_id = :tenant_id THEN 0 ELSE 1 END LIMIT 1
+          ))
+        ORDER BY CASE WHEN tenant_id = :tenant_id THEN 0 ELSE 1 END LIMIT 1
+    """), {"agent_id": agent_id, "tenant_id": tenant_id,
+             "platform_tenant": ASSET_OWNER_TENANT_ID, "version_no": agent_version_no}).first()
+    if agent_switch is None or agent_switch[0] is False:
+        raise MemoryStoreScopeError("Agent automatic memory is disabled")
+
+
 def write_agent_memory(
     tenant_id: str, user_id: str, agent_id: int, conversation_id: int | None, key: str, content: str, index_name: str,
+    *, deadline: float | None = None, agent_version_no: int | None = None,
 ) -> tuple[int, str]:
     with get_db_session() as session:
         _lock(session, tenant_id, key)
         _require_scope(session, tenant_id, user_id, agent_id, conversation_id)
         row = _find(session, tenant_id, key, user_id, agent_id)
+        if deadline is not None:
+            _require_automatic_memory(session, tenant_id, user_id, agent_id, agent_version_no)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Memory write budget expired")
         if row is not None:
             if row.content == content:
                 return row.memory_id, "UNCHANGED"
@@ -96,6 +144,7 @@ def write_agent_memory(
 
 def mirror_current_memory(
     tenant_id: str, key: str, memory_id: int, content: str, index_name: str, publish: Callable[[dict], bool],
+    *, deadline: float | None = None,
 ) -> bool:
     with get_db_session() as session:
         _lock(session, tenant_id, key)
@@ -109,6 +158,8 @@ def mirror_current_memory(
         ))
         if row is None:
             return False
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Memory index budget expired")
         return publish(as_dict(row))
 
 

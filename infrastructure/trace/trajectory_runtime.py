@@ -5,24 +5,23 @@ from __future__ import annotations
 
 
 def authorize_capture(identity):
-    """Require an active tenant member and their live conversation."""
-    from infrastructure.rdb.trajectory_capture import CaptureCatalog
+    """Use the existing tenant membership and conversation ownership queries."""
+    from infrastructure.rdb.trajectory.capture import CaptureCatalog
 
     CaptureCatalog().authorize(identity)
 
 
-def create_local_processor(config, metadata_provider):
+def create_local_processor(config, metadata_provider, *, repository=None):
     """Keep environment reads in the backend configuration module."""
-    capturing = config.ENABLE_TELEMETRY and config.MONITORING_PROVIDER == "local_file"
-    maintaining = config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
-    if not capturing and not maintaining:
+    if not trajectory_storage_enabled(config):
         return None
-    from infrastructure.rdb.trajectory_repository import ExecutionRepository
+    from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
     from .trajectory_processor import LocalTrajectoryProcessor
     from .trajectory_store import TrajectoryFileStore
 
-    repository = ExecutionRepository()
+    if repository is None:
+        repository = ExecutionRepository()
     store = TrajectoryFileStore(
         config.TRAJECTORY_ROOT_DIR,
         authorize=authorize_capture,
@@ -43,9 +42,17 @@ def create_local_processor(config, metadata_provider):
     )
 
 
+def trajectory_storage_enabled(config):
+    return (
+        config.LOCAL_FILE_MONITORING_ENABLED
+        or config.TRAJECTORY_READ_ENABLED
+        or config.MONITORING_PROVIDER == "local_file"
+    )
+
+
 def capture_sources(identity, upper=None):
     """Read only scalar IDs from the same currently authorized conversation."""
-    from infrastructure.rdb.trajectory_capture import CaptureCatalog
+    from infrastructure.rdb.trajectory.capture import CaptureCatalog
 
     return CaptureCatalog().source_messages(
         identity.tenant_id, identity.owner_user_id, identity.conversation_id, upper=upper,
@@ -54,7 +61,7 @@ def capture_sources(identity, upper=None):
 
 def conversation_deleted(identity):
     """Only a confirmed PG absence permits maintenance to reclaim an orphan."""
-    from infrastructure.rdb.trajectory_capture import CaptureCatalog
+    from infrastructure.rdb.trajectory.capture import CaptureCatalog
 
     return CaptureCatalog().conversation_deleted(identity.conversation_id, identity.owner_user_id)
 
@@ -63,7 +70,7 @@ def request_conversation_cleanup(conversation_ids, owner_user_id):
     """Submit confirmed deletions without doing filesystem work on the HTTP loop."""
     from contracts.constants import environment as config
 
-    if config.MONITORING_PROVIDER != "local_file" and not config.TRAJECTORY_READ_ENABLED:
+    if not trajectory_storage_enabled(config):
         return True
     from .bootstrap import local_trajectory_processor
 

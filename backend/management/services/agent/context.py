@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from contracts.agent import AgentRunContext
-from contracts.constants.environment import APP_VERSION
+from contracts.constants.environment import APP_VERSION, OPS_MONITORING_ENABLED
 from nexent.core.agents.contracts.context import ContextInput, ContextItemInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
@@ -126,16 +126,20 @@ def build_agent_run_context(
     request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict,
     user_query: str | None = None,
 ):
-    """Preview memory once and bind the metadata shared by both consumers."""
-    from management.services.configuration.user.memory import build_memory_context
+    """Bind shared monitoring metadata before the compiler resolves memory policy."""
     from infrastructure.trace.bootstrap import monitoring_manager
     from management.services.monitor.identity import resolve_monitoring_user_email
     from nexent.monitor.local_content import local_capture_enabled
 
-    memory = build_memory_context(
-        user_id, tenant_id, request.agent_id, skip_query=request.is_debug
-    )
-    enabled = memory.user_config.memory_switch
+    monitoring_groups = None
+    if OPS_MONITORING_ENABLED and not request.is_debug:
+        from management.db.identity.group import query_group_ids_by_user_in_tenant
+
+        try:
+            monitoring_groups = tuple(query_group_ids_by_user_in_tenant(user_id, tenant_id))
+        except Exception:
+            monitoring_groups = None
+
     extra_metadata = {**extra_metadata}
     extra_metadata.pop("trajectory_source_message_id", None)
     if local_capture_enabled(monitoring_manager):
@@ -148,20 +152,16 @@ def build_agent_run_context(
             agent_id=request.agent_id,
             conversation_id=request.conversation_id,
             user_id=user_id,
+            monitoring_group_ids=monitoring_groups,
             user_email=resolve_monitoring_user_email(user_id, tenant_id),
             tenant_id=tenant_id,
             query=user_query if user_query is not None else request.query,
             is_debug=request.is_debug,
             language=language,
-            memory_enabled=enabled,
+            memory_enabled=False if request.is_debug else None,
             history_count=len(request.history) if request.history else 0,
             minio_files_count=len(request.minio_files) if request.minio_files else 0,
-            extra_metadata={
-                "agent_share_option": getattr(
-                    memory.user_config, "agent_share_option", "unknown"
-                ),
-                **extra_metadata,
-            },
+            extra_metadata=extra_metadata,
         )
     )
-    return AgentRunContext(metadata, enabled and not request.is_debug)
+    return AgentRunContext(metadata, not request.is_debug)

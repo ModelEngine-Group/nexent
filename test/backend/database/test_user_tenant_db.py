@@ -86,6 +86,7 @@ install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 db_models_mock = MagicMock()
 db_models_mock.UserTenant = MagicMock()
 sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.identity.models'] = db_models_mock
 sys.modules['infrastructure.rdb.account_record'] = db_models_mock
 
 # Mock exceptions module
@@ -105,7 +106,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Trajectory persistence is a collaborator of tenant membership writes.
-sys.modules['management.db.trajectory.repository'] = MagicMock()
+sys.modules['infrastructure.rdb.trajectory.repository'] = MagicMock()
 
 # Now import the functions to be tested
 from management.db.identity.user_tenant import (
@@ -929,13 +930,12 @@ def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
         pass
 
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    from test.backend.configuration.helpers import system_config_snapshot
-
-    monkeypatch.setattr(
-        module,
-        "get_config_snapshot",
-        lambda: system_config_snapshot(MAX_ADMINS_PER_TENANT=1, MAX_SUPER_ADMIN_COUNT=1),
-    )
+    snapshot = MagicMock()
+    snapshot.get.side_effect = lambda key: {
+        "MAX_USERS_PER_TENANT": 10000,
+        "MAX_ADMINS_PER_TENANT": 1,
+    }[key]
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: snapshot)
 
     admin_session = MagicMock()
     admin_user_count = MagicMock()
@@ -952,8 +952,13 @@ def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
     su_role_count = MagicMock()
     su_role_count.filter.return_value.count.return_value = 1
     su_session.query.side_effect = [su_user_count, su_role_count]
+    monkeypatch.setattr(module, "MAX_SUPER_ADMIN_COUNT", 1)
     with pytest.raises(ResourceLimitError, match="Super administrator limit"):
         module._validate_user_tenant_limit(su_session, "tenant-1", "SU")
+    assert all(
+        call.args[0] != "MAX_SUPER_ADMIN_COUNT"
+        for call in snapshot.get.call_args_list
+    )
 
 
 @pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
@@ -972,7 +977,15 @@ def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, r
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     from test.backend.configuration.helpers import system_config_snapshot
 
-    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(**{config_key: 1}))
+    if config_key == "MAX_SUPER_ADMIN_COUNT":
+        monkeypatch.setattr(module, "MAX_SUPER_ADMIN_COUNT", 1)
+        monkeypatch.setattr(module, "get_config_snapshot", system_config_snapshot)
+    else:
+        monkeypatch.setattr(
+            module,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(**{config_key: 1}),
+        )
 
     if should_reject:
         with pytest.raises(ResourceLimitError):

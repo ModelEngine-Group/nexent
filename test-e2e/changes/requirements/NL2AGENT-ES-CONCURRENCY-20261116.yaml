@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-ES-CONCURRENCY-20261116
+  change_type: requirement
+  requirement_id: NL2AGENT-ES-CONCURRENCY-20261116
+  title: Bound concurrent resource searches per recommendation and backend process
+  description: Configure default limits of eight actual ES searches per recommendation and eight per process. Share admission across query/source/name/chunk searches, keep preparation in managed workers, deduplicate queries, and count waiting and requests within the existing semantic deadline. Cancel and drain searches before closing clients without weakening permission filters.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_search_concurrency.py
+      - test/backend/services/test_nl2agent_semantic_retrieval.py
+      - test/backend/services/test_nl2agent_resource_index.py
+    behaviors:
+      - Defaults and explicit positive configuration for per-recommendation and process search limits.
+      - Bounded workers, shared process admission across recommendations and event loops, deduplicated query search, and deterministic merged results.
+      - Waiting and active deadlines, cancellation before dispatch, sibling draining on error, reusable permits and closed clients.
+      - Shared scope filters and timeout on each actual ES search, including name and authorization chunks.
+    reason: Existing ES tests prove serial scoring and authorization but not concurrent admission, cross-loop process limits or async transport cleanup. Extend runtime D3 with actual ES and controlled delay; unit tests own isolated admission races. The prior synthetic benchmark selects defaults but is not product execution evidence.
+  notes: >-
+    SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/, TASK-024.
+    F-045 inherits agent_config responsibility. Reuse the self-contained D3
+    ownership and cleanup of ES indices, PostgreSQL schema, Redis, HTTP providers
+    and workers. No new UI or external API contract, no duplicate D1 and no
+    production throughput/SLA claim. Risk cases are exercised in the real ES
+    runtime boundary and isolated cancellation tests, not a new D5 quota.

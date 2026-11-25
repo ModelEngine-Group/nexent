@@ -15,8 +15,8 @@ from uuid import UUID, uuid5
 from sqlalchemy import select, text
 
 from contracts.constants.environment import AGENT_WORKSPACE_ROOT, POSTGRES_HOST
-from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
-from gateway.downstream.internal_tokens import generate_internal_runtime_jwt
+from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
+from gateway.identity.internal_tokens import generate_internal_runtime_jwt
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.evaluation.models import AgentEvaluation, AgentEvaluationCase, Evaluator

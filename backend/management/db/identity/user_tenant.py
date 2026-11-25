@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import exists, func, or_, text
 
 from contracts.constants.constants import DEFAULT_TENANT_ID
+from contracts.constants.environment import MAX_SUPER_ADMIN_COUNT
 from infrastructure.rdb import account_access
 from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RoleAssignmentConflict, TenantResourceLimitError
@@ -28,14 +29,14 @@ from management.db.identity.membership import (
     locked_members,
 )
 from management.db.identity.roles import replace_member_roles
-from management.db.models import (
+from management.db.identity.models import (
     TenantGroupInfo,
     TenantGroupUser,
     UserOAuthAccount,
     UserTenant,
 )
 from infrastructure.rdb.orm import as_dict
-from management.db.trajectory.repository import detach_owner
+from infrastructure.rdb.trajectory.repository import detach_owner
 from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def _validate_user_tenant_limit(
     snapshot = get_config_snapshot()
     user_limit = snapshot.get("MAX_USERS_PER_TENANT")
     admin_limit = snapshot.get("MAX_ADMINS_PER_TENANT")
-    super_admin_limit = snapshot.get("MAX_SUPER_ADMIN_COUNT")
+    super_admin_limit = MAX_SUPER_ADMIN_COUNT
     _lock_resource_limit(session, f"tenant-user-limit:{tenant_id}")
     if include_user_count:
         user_count = _count_or_zero(

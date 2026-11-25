@@ -80,6 +80,7 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "clarification",
         "configuration",
         "conversation",
+        "northbound_exposure",
         "evaluation",
         "file",
         "identity",
@@ -87,6 +88,8 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "knowledge",
         "memory",
         "model",
+        "nl2agent_configuration",
+        "nl2agent_resources",
         "skill",
         "tag",
         "tool",
@@ -141,6 +144,7 @@ def test_error_definitions_have_one_canonical_directory():
         "trajectory.py",
         "capabilities.py",
         "ingestion.py",
+        "domain.py",
     }
     assert not any(
         (CONTRACTS / name).exists()

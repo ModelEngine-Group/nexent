@@ -128,6 +128,10 @@ export const API_ENDPOINTS = {
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
+    nl2agentResourceInstallations: `${API_BASE_URL}/agent/nl2agent/resource_installations`,
+    nl2agentResourceInstallationAttempts: `${API_BASE_URL}/agent/nl2agent/resource_installation_attempts`,
+    nl2agentResourceLinks: `${API_BASE_URL}/agent/nl2agent/resource_links`,
+    nl2agentKnowledgeRecommendations: `${API_BASE_URL}/agent/nl2agent/knowledge_recommendations`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     listPage: `${API_BASE_URL}/agent/list/page`,
@@ -615,6 +619,7 @@ export const API_ENDPOINTS = {
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
       embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
+      tenantSwitch: `${API_BASE_URL}/memory/config/tenant-switch`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>

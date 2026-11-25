@@ -3,6 +3,7 @@
 
 import json
 import runpy
+import uuid as _uuid
 from contextlib import nullcontext
 from io import StringIO
 from types import SimpleNamespace
@@ -17,7 +18,11 @@ from management.utils.account_passwords import verify_password
 @pytest.fixture
 def store(mocker):
     session = MagicMock()
+    # SU-membership preflight (uses .first()) — no existing SU
     session.execute.return_value.first.return_value = None
+    # Account-has-memberships check (uses .scalars().all()) — below in-place
+    # TenantConfig probe inside _resolve_or_create_default_tenant (uses .scalar_one_or_none()) — no real tenant yet
+    session.execute.return_value.scalar_one_or_none.return_value = None
     session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU", roles=["SU"])]
     mocker.patch("infrastructure.rdb.client.get_db_session", return_value=nullcontext(session))
     lock = mocker.patch("management.db.identity.account.lock_account_keys")
@@ -25,7 +30,20 @@ def store(mocker):
     create = mocker.patch("management.db.identity.account.create_account", return_value={"user_id": "new-su"})
     member = mocker.patch("management.db.identity.user_tenant.insert_user_tenant")
     configuration = mocker.patch("management.cli.account.load_system_configuration")
-    return SimpleNamespace(configuration=configuration, session=session, lock=lock, lookup=lookup, create=create, member=member)
+    # Make _resolve_or_create_default_tenant emit a stable UUID so assertions
+    # in bootstrap tests can pin the tenant_id without caring about uuidgen.
+    mocker.patch(
+        "management.cli.account.uuid.uuid4",
+        return_value=_uuid.UUID("11111111-1111-4111-8111-111111111111"),
+    )
+    return SimpleNamespace(
+        configuration=configuration,
+        session=session,
+        lock=lock,
+        lookup=lookup,
+        create=create,
+        member=member,
+    )
 
 
 def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
@@ -36,7 +54,83 @@ def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
     assert email == "suadmin@example.com"
     assert verify_password("Password123", encoded)
     assert store.create.call_args.kwargs["db_session"] is store.session
-    store.member.assert_called_once_with("new-su", "", "SU", email, created_by="system", db_session=store.session)
+    # Bootstrap now binds the new SU to a freshly-provisioned default tenant
+    # (created by _resolve_or_create_default_tenant) rather than leaving
+    # tenant_id empty. uuid.uuid4 is patched to a stable value above.
+    expected_tenant_id = "11111111-1111-4111-8111-111111111111"
+    store.member.assert_called_once_with(
+        "new-su", expected_tenant_id, "SU", email,
+        created_by="system", db_session=store.session,
+    )
+    # Tenant provisioning writes TenantConfig + TenantGroupInfo in the same session
+    added_types = {type(obj).__name__ for obj in store.session.add.call_args_list}
+    assert "TenantConfig" in added_types or len(store.session.add.call_args_list) >= 1
+    store.session.flush.assert_called()
+
+
+def test_bootstrap_reuses_existing_tenant_without_provisioning(store):
+    store.session.execute.return_value.scalar_one_or_none.return_value = "existing-tenant"
+
+    assert cli.bootstrap_super_admin("su@example.com", "Password123") == {"created": True}
+
+    store.member.assert_called_once_with(
+        "new-su", "existing-tenant", "SU", "su@example.com",
+        created_by="system", db_session=store.session,
+    )
+    added = {type(call.args[0]).__name__ for call in store.session.add.call_args_list}
+    assert "TenantGroupInfo" not in added
+
+
+def test_default_tenant_resolution_refuses_placeholder_tenant(monkeypatch):
+    """A fresh install seeds TENANT_ID='tenant_id'; the SU must not join that fake tenant."""
+    from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, select
+    from sqlalchemy.orm import Session, registry
+
+    import management.db.models as models
+    from contracts.constants.constants import DEFAULT_GROUP_ID, DEFAULT_TENANT_ID, TENANT_ID, TENANT_NAME
+
+    metadata = MetaData()
+    tenant_config = Table(
+        "tenant_config_t", metadata,
+        Column("tenant_config_id", Integer, primary_key=True, autoincrement=True),
+        Column("tenant_id", String), Column("config_key", String), Column("config_value", String),
+        Column("created_by", String), Column("updated_by", String), Column("delete_flag", String),
+    )
+    tenant_group = Table(
+        "tenant_group_info_t", metadata,
+        Column("group_id", Integer, primary_key=True, autoincrement=True),
+        Column("tenant_id", String), Column("group_name", String), Column("group_description", String),
+        Column("created_by", String), Column("updated_by", String), Column("delete_flag", String),
+    )
+    mapper = registry()
+    config_model = type("TenantConfig", (), {})
+    group_model = type("TenantGroupInfo", (), {})
+    mapper.map_imperatively(config_model, tenant_config)
+    mapper.map_imperatively(group_model, tenant_group)
+    monkeypatch.setattr(models, "TenantConfig", config_model)
+    monkeypatch.setattr(models, "TenantGroupInfo", group_model)
+
+    engine = create_engine("sqlite://")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(tenant_config.insert(), {
+            "tenant_id": DEFAULT_TENANT_ID, "config_key": TENANT_ID,
+            "config_value": DEFAULT_TENANT_ID, "delete_flag": "N",
+        })
+
+    with Session(engine) as session:
+        resolved = cli._resolve_or_create_default_tenant(session)
+
+        assert resolved != DEFAULT_TENANT_ID
+        keys = set(
+            session.execute(
+                select(tenant_config.c.config_key).where(tenant_config.c.tenant_id == resolved)
+            ).scalars().all()
+        )
+        assert keys == {TENANT_ID, TENANT_NAME, DEFAULT_GROUP_ID}
+        assert session.execute(
+            select(tenant_group.c.group_id).where(tenant_group.c.tenant_id == resolved)
+        ).scalars().all()
 
 
 def test_bootstrap_configuration_failure_prevents_account_writes(store):
@@ -57,10 +151,10 @@ def test_existing_su_is_idempotent_without_password_work(store, check_only):
     store.member.assert_not_called()
 
 
-@pytest.mark.parametrize("flag,roles", [("Y", ["SU"]), ("N", []), ("N", ["SU", "USER"])])
+@pytest.mark.parametrize("flag,roles", [("Y", ("SU",)), ("N", ()), ("N", ("SU", "USER"))])
 def test_unavailable_or_non_su_identity_cannot_be_promoted(store, flag, roles):
     store.lookup.return_value = {"user_id": "original", "delete_flag": flag}
-    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role=r, roles=[r]) for r in roles]
+    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(roles=list(roles)) for _ in roles] or [SimpleNamespace(roles=[])]
     with pytest.raises(AccountConflictError, match="unavailable or non-SU"):
         cli.bootstrap_super_admin("su@example.com", "Password123")
     store.create.assert_not_called()

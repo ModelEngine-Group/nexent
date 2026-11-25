@@ -18,6 +18,8 @@ notes: 'The fixed journey uses the product frontend from the configured base URL
   Agent versions on model/tool selection. Code-tree fixtures use the simplified Ops DTO; the journey checks
   code groups, Python-call timing, named tools and navigation to the retained parent. Input/output wrapping
   checks independent toggle state, browser whitespace styles, long-line width and unchanged text.
+  Model output format switching checks the scroll offset in the real detail viewport,
+  including the shorter text mode at the bottom of the pane.
   Cleanup scope assertions cover SU global-setting confirmation/cancellation and selected-tenant manual
   batches; the fixture owns all policy data and routes. This binding records the existing partial
   journey, not complete acceptance: delayed-response, complete availability, SU/locale/keyboard

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Answer streaming regressions for completion, retries and invocation ownership."""
 
 from collections import deque
@@ -106,6 +108,41 @@ def test_completed_event_without_cached_fragments_falls_back_to_event_content():
     observer = MessageObserver()
     observer.add_message("agent", ProcessType.FINAL_ANSWER, "Fallback", answer_phase="complete")
     assert observer.get_final_answer() == "Fallback"
+
+
+def test_complete_trailer_carries_accepted_answer_metadata():
+    # Regression for the evaluation extraction defect: the trailer's content
+    # is empty when the answer was fully streamed, so downstream consumers
+    # rely on the accepted_answer metadata as the authoritative value.
+    observer = MessageObserver()
+    observer.add_message("agent", ProcessType.STEP_COUNT, 1)
+    observer.begin_model_attempt("accepted", 1)
+    observer.add_model_new_token("<final_answer>Streamed answer</final_answer>")
+    observer.flush_remaining_tokens()
+    observer.complete_final_answer("agent", "Streamed answer")
+    trailers = [item for item in events(observer)
+                if item["type"] == "final_answer" and item.get("answer_phase") == "complete"]
+    assert len(trailers) == 1
+    assert trailers[0]["content"] == ""
+    assert trailers[0]["accepted_answer"] == "Streamed answer"
+
+    # Rewritten answers keep accepted_answer equal to the final value even
+    # though the trailer content repeats it.
+    observer.add_message("agent", ProcessType.STEP_COUNT, 2)
+    observer.complete_final_answer("agent", "Runtime result")
+    trailer = [item for item in events(observer)
+               if item["type"] == "final_answer" and item.get("answer_phase") == "complete"][-1]
+    assert trailer["accepted_answer"] == "Runtime result"
+
+    # Reclassified bodies advertise the accepted answer too.
+    observer.add_message("agent", ProcessType.STEP_COUNT, 3)
+    observer.add_model_new_token("Bare body result")
+    observer.mark_direct_final_answer()
+    observer.complete_final_answer("agent", "Bare body result")
+    trailer = [item for item in events(observer)
+               if item["type"] == "final_answer" and item.get("answer_phase") == "complete"][-1]
+    assert trailer["reclassify_step"] is True
+    assert trailer["accepted_answer"] == "Bare body result"
 
 
 def test_retry_discards_failed_answer_state_before_accepted_completion():

@@ -31,6 +31,6 @@ change:
     reason: Isolated subprocesses and controlled database I/O reproduce the import defect and exercise the existing capture checks. The deployment Case owns live image and storage verification.
     test_selectors:
     - test/backend/management/test_agent_runtime_boundaries.py::test_runtime_app_serves_liveness_without_management_source
-    - test/backend/utils/test_trajectory_bootstrap.py::test_backend_bootstrap_writes_full_local_agent_model_tool_trace
-    - test/backend/utils/test_trajectory_capture_catalog.py::test_capture_authorization_requires_active_membership_and_actual_owner
+    - test/backend/utils/test_trajectory_bootstrap.py::test_backend_bootstrap_routes_agent_model_and_tool_traces
+    - test/backend/utils/test_trajectory_runtime.py::test_capture_authorization_requires_active_membership_and_actual_owner
   notes: Reuses TRJ-RULE-002, TRJ-RULE-005 and TRJ-RULE-007 and the existing independent Runtime boundary. The referenced sibling SPEC checkout is unavailable locally. The D5 Case retains its existing blocked deployment status.

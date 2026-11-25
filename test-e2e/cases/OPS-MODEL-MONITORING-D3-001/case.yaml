@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D3
+module: OPS-PLATFORM
+case:
+  case_id: OPS-MODEL-MONITORING-D3-001
+  feature_id: OPS-MODEL-MONITORING
+  requirement_ids: [OPS-MODEL-MONITORING-20261116, OPS-MONITORING-DAILY-CLEANUP-20261117, OPS-MODEL-TRACE-20261117]
+  business_rule_ids: [OPS-MODEL-MONITORING-RULE-02, OPS-MODEL-MONITORING-RULE-03, OPS-MODEL-MONITORING-RULE-04]
+  title: Model attempts appear in published tenant-scoped statistics
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the model runtime, Ops control store, Elasticsearch and the statistics reader together.
+  integration_boundary: [Actual SDK HTTP transport, Ops PostgreSQL replay state and Elasticsearch publication]
+  observations: [Provider attempts, persisted fact identities and published metric values]
+  cleanup: [Close clients and remove only test-owned database and index data]
+  preconditions: [An isolated Ops database and Elasticsearch are available, A protocol model stub can return an error and a success]
+  test_data: {workload: One failing attempt followed by one successful attempt with known total usage}
+  steps:
+  - order: 1
+    action: Send the model request and wait for Ops publication.
+    expected: Two attempts and one error appear with known usage from the successful attempt.
+  - order: 2
+    action: Replay the completed event and query the newly published result.
+    expected: Request count and known usage remain unchanged.
+  - order: 3
+    action: Simulate a lost confirmation after Elasticsearch accepted a bulk write and recover the pending batch.
+    expected: The batch becomes confirmed and the same version is published after retry.
+  - order: 4
+    action: Extend the existing Elasticsearch indices with a synthetic MCP kind, publish its own tool metric, and query the Ops application with its Web-facing and direct paths.
+    expected: The custom tool field is searchable, the daily tool count is published separately, and both model paths return the original tenant-scoped model metrics.
+  - order: 5
+    action: Query a trend across a missing date and a published date, then request a refresh for that interval.
+    expected: Both dates appear with null metrics on the missing date, and the refresh rejects the uncovered interval.
+  - order: 6
+    action: Block Elasticsearch fact writes, attempt another batch, read the current statistics, then unblock writes and publish the pending batch.
+    expected: The covered date is stale while the batch is blocked, other dates are unaffected, and recovery clears staleness.
+  - order: 7
+    action: Publish newer model data and run the scheduled sweep while an HTTP request is reading the prior publication.
+    expected: The obsolete documents are deleted, the in-flight request returns the prior metrics, and subsequent requests return the new publication.
+  - order: 8
+    action: Compare the physical attempt spans to the corresponding persisted Elasticsearch facts.
+    expected: Each fact identifies its own physical span and preserves the same outcome, duration and reported usage.
+  expected_results: [Two attempts and one failure are visible, Replayed events do not inflate results, Lost confirmation recovers from the PG payload, The second kind publishes its own fields and metrics without changing the model publication, Trend and refresh expose uncovered dates, Failed writes mark only affected statistics stale until recovery, The scheduled sweep deletes superseded documents and existing HTTP snapshots complete, Trace identifiers and shared measurements are stored on each fact]
+  forbidden_side_effects: [Publishing a model event under a different tenant or fact type, Deleting active documents on another date or an unrelated type or deleting source facts, Writing request or response bodies into model facts]
+  acceptance:
+  - id: AC-01
+    description: Actual retries count independently and event replay is idempotent.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Date gaps and Elasticsearch write failures surface through the monitoring APIs without corrupting published data.
+    steps: [5, 6]
+    expected_results: [5, 6]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: A new kind can publish its own fields and aggregation on the existing monitoring indices and control store.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: The scheduled sweep removes only superseded daily documents and preserves both current publications and in-flight HTTP reads.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [2]
+  - id: AC-05
+    description: Physical attempt spans and stored facts share an identity and measurements without copying trace content into Ops.
+    steps: [8]
+    expected_results: [8]
+    forbidden_side_effects: [3]

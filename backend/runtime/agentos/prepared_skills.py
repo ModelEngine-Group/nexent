@@ -91,9 +91,11 @@ def materialize_skill_tools(
         row = rows[ref.skill_id if workbench_refs else ref.instance_id]
         name = row["name"]
         try:
-            files = capture_skill_files(tenant, name)
-            revision = skill_execution_revision(tenant, resource.agent_id, resource.version_no, row, files)
-        except (OSError, TypeError, ValueError) as exc:
+            revision_row = dict(row)
+            owner = revision_row.pop("owner_tenant_id") if workbench_refs else tenant
+            files = capture_skill_files(owner, name)
+            revision = skill_execution_revision(tenant, resource.agent_id, resource.version_no, revision_row, files)
+        except (KeyError, OSError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc
         if not compare_digest(revision, ref.revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"})
@@ -106,6 +108,13 @@ def materialize_skill_tools(
 
     metadata = {"agent_id": resource.agent_id, "version_no": resource.version_no, "tenant_id": tenant}
     params = {"local_skills_dir": str(stage), "isolated_skills_root": True, "authorized_skill_names": sorted(configs)}
+    skill_name_to_id = {
+        row["name"]: row["skill_id"]
+        for row in rows.values()
+        if row.get("name") and row.get("skill_id") is not None
+    }
+    if skill_name_to_id:
+        params["skill_name_to_id"] = skill_name_to_id
     tools = {}
     for binding in bindings:
         if binding.version != "1" or binding.credential_ref is not None:

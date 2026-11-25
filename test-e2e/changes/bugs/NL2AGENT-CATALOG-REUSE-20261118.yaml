@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-CATALOG-REUSE-20261118
+  change_type: bugfix
+  bug_id: NL2AGENT-CATALOG-REUSE-20261118
+  title: Reuse authorized resource catalogs within each recommendation stage
+  description: Avoid reloading full catalogs when assembling results from a source catalog just read in the same stage.
+  observed_behavior: A single installed-resource requirement loads the installed catalog three times in discovery and twice each in verification and card creation.
+  expected_behavior: Discovery retains initial search and post-search authorization reads, while verification and card assembly each reuse their own current source read. New stages and replays reauthorize. Catalogs remain local backend variables and never enter persisted state or model data.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing authorization tests protect source changes but do not detect redundant full catalog loads within a stage.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [NL2A-COVERAGE-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_catalog_reuse.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/backend/services/test_nl2agent_service.py
+    behaviors:
+      - Installed and repository source catalogs are reused within each stage while later stages reread current sources.
+      - Revocation after search, before verification, before card publication and during replay blocks stale disclosure.
+      - Source failures propagate and explicitly empty catalogs never trigger a fallback reload.
+      - Standalone recommendation calls retain their default source loading and existing card data contracts.
+    reason: Query reuse belongs to UT orchestration proof. Reuse the real-runtime coverage and authorization Case without creating a duplicate D1.
+  notes: >-
+    See owning SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md
+    section 7.4 and tasks resource catalog reuse section. Existing D3 preparation
+    owns PostgreSQL, Redis, ES, schemas, keys and workers with verified cleanup.
+    No UI, HTTP, deployment or cross-request cache changes are introduced.

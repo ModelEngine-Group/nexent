@@ -148,7 +148,7 @@ services:
     entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.runtime_service"]
 
   nexent-mcp:
-    image: ${NEXENT_IMAGE}
+    image: ${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:latest}
     container_name: nexent-mcp
     restart: always
     volumes:
@@ -162,6 +162,8 @@ services:
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
+      OPS_MONITORING_ENABLED: "false"
+      PYTHON_DOTENV_DISABLED: "1"
       skip_proxy: "true"
       UMASK: "0022"
     env_file:
@@ -205,6 +207,9 @@ services:
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_OPS_URL: "http://nexent-ops:${OPS_PORT:-5016}"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
+      # Emergency kill switch: comma-separated capability ids/paths removed
+      # from the exposure registry at gateway startup (empty = expose all).
+      GATEWAY_NB_EXCLUDED_CAPABILITIES: "${GATEWAY_NB_EXCLUDED_CAPABILITIES:-}"
     entrypoint: ["python", "-m", "backend.http.gateway_service"]
     healthcheck:
       test: ["CMD", "python", "-m", "gateway.healthcheck"]

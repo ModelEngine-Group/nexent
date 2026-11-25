@@ -67,7 +67,7 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                         if isinstance(content, str)
                         else dict(content)
                     )
-                    payload["card_id"] = f"{message_id}:{index}"
+                    payload.setdefault("card_id", f"{message_id}:{index}")
                     content = json.dumps(payload, ensure_ascii=False)
                     chunk["content"] = content
                 if not isinstance(content, str):

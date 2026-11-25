@@ -217,6 +217,10 @@ class MessageObserver:
         """Identify an untagged body as final after runtime classification."""
         self._step_output()["reclassify_step"] = True
 
+    def mark_answer_fallback(self) -> None:
+        """Keep an empty-answer placeholder outside measured answer output."""
+        self._step_output()["answer_fallback"] = True
+
     def complete_final_answer(self, agent_name: str, answer: str) -> None:
         """Finalize the existing answer slot without appending its body twice."""
         state = self._step_output()
@@ -228,7 +232,14 @@ class MessageObserver:
             ProcessType.FINAL_ANSWER,
             "" if streamed and streamed.strip() == answer.strip() else answer,
             agent_name=agent_name,
-            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
+            metadata={
+                "answer_phase": "complete",
+                "reclassify_step": state.get("reclassify_step", False),
+                # Authoritative answer carried alongside the phase marker so
+                # consumers (evaluation, exports) never have to guess whether
+                # the content field holds the answer or an empty trailer.
+                "accepted_answer": answer,
+            },
         )
 
     @property
@@ -371,6 +382,15 @@ class MessageObserver:
         step_id = self._step_output().get("step_id")
         if step_id:
             metadata.setdefault("step_id", step_id)
+        if process_type in {ProcessType.FINAL_ANSWER, ProcessType.MODEL_OUTPUT}:
+            from nexent.monitor.agent_fact import record_agent_answer
+
+            state = self._step_output()
+            if not state.get("answer_fallback"):
+                answer = (
+                    state.get("accepted_answer", content) if metadata.get("answer_phase") == "complete" else content
+                )
+                record_agent_answer(answer, agent_id=resolved_agent_id, invocation_id=resolved_invocation)
         self._append_message(
             Message(
                 process_type,
@@ -748,6 +768,7 @@ class MessageObserver:
                    if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
                               "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
                               "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "source_protocol", "call_group_id", "call_index", "call_count", "parent_call_id",
                               "step_number", "duration", "step_error", "status", "end_reason", "final_content",
                               "final_block_ids", "error", "context_capacity"}}
             },

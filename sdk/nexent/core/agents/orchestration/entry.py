@@ -4,10 +4,10 @@
 import asyncio
 import logging
 import threading
-import time
 from concurrent.futures import CancelledError
 from contextvars import Context, copy_context
 from dataclasses import replace
+from uuid import uuid4
 
 from nexent.consts.mcp_errors import (
     classify_mcp_failure, describe_exception_leaf, find_mcp_server_url,
@@ -49,6 +49,8 @@ from nexent.monitor import (
     set_monitoring_capacity_snapshot,
     set_monitoring_context_budget_snapshot,
 )
+from nexent.monitor.agent_fact import AgentRunObservation
+from nexent.monitor.run_timing import RunTiming
 
 
 logger = logging.getLogger("run_agent")
@@ -205,49 +207,52 @@ class DeferredAgentRun:
 def agent_run_thread(agent_run_info: AgentRunInfo):
     """Trace the complete SDK worker, including setup and resource cleanup."""
     current = get_agent_monitoring_context() or AgentRunMetadata()
+    run_id = str(getattr(agent_run_info, "workspace_run_id", None) or uuid4())
     metadata = replace(
         current,
+        monitoring_run_id=run_id,
+        monitoring_root_run_id=run_id,
+        monitoring_parent_run_id=None,
         agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
         agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
         agent_version_no=getattr(agent_run_info.agent_config, "version_no", None),
         agent_version_name=getattr(agent_run_info.agent_config, "version_name", None),
         query=current.query if current.query is not None else agent_run_info.query,
     )
-    from nexent.monitor.duration import duration_attributes
     from nexent.monitor.local_content import local_capture_enabled
-    from nexent.monitor.phase_capture import emit_preparation, preparation_start
+    from nexent.monitor.phase_capture import emit_preparation
     from nexent.monitor.run_capture import capture_run_input, capture_run_result
 
     manager = get_monitoring_manager()
-    records = getattr(agent_run_info, "preparation_trace", None)
-    started_monotonic = min(r["started_monotonic"] for r in records) if isinstance(records, list) and records else None
-    started_at = preparation_start(agent_run_info)
-    run_scope = (
-        manager.start_agent_run(metadata, start_time=started_at)
-        if started_at is not None else manager.start_agent_run(metadata)
-    )
-    with run_scope as span:
-        emit_preparation(agent_run_info)
-        if local_capture_enabled(manager):
-            capture_run_input(
-                manager, span, query=metadata.query, agent_config=agent_run_info.agent_config,
-                model_configs=agent_run_info.model_config_list, history=_get_authorized_history(agent_run_info),
-                context_items=_get_authorized_context_items(agent_run_info),
-                attachments=getattr(agent_run_info, "minio_files", None),
-                app_version=(metadata.extra_metadata or {}).get("app_version"),
-            )
+    timing = getattr(agent_run_info, "run_timing", None) or RunTiming()
+    timing.bind_run_id(run_id)
+    timing.start()
+    agent_run_info.run_timing = timing
+    with manager.start_agent_run(metadata, run_timing=timing) as span:
+        observation = AgentRunObservation.from_context(get_agent_monitoring_context())
         try:
-            _agent_run_thread(agent_run_info)
+            emit_preparation(agent_run_info)
+            if local_capture_enabled(manager):
+                capture_run_input(
+                    manager, span, query=metadata.query, agent_config=agent_run_info.agent_config,
+                    model_configs=agent_run_info.model_config_list, history=_get_authorized_history(agent_run_info),
+                    context_items=_get_authorized_context_items(agent_run_info),
+                    attachments=getattr(agent_run_info, "minio_files", None),
+                    app_version=(metadata.extra_metadata or {}).get("app_version"),
+                )
+            _agent_run_thread(agent_run_info, observation=observation)
         finally:
-            capture_run_result(manager, span, outcome=getattr(agent_run_info, "attempt_outcome", None))
-            if started_at is not None and span is not None:
-                try:
-                    span.set_attributes(duration_attributes(started_monotonic, time.perf_counter()))
-                except Exception:
-                    logger.debug("Unable to attach preparation duration to Agent span")
+            try:
+                capture_run_result(manager, span, outcome=getattr(agent_run_info, "attempt_outcome", None))
+            finally:
+                result = timing.finish()
+                if observation is not None:
+                    observation.report_terminal(
+                        getattr(agent_run_info, "attempt_outcome", None), timing_result=result,
+                    )
 
 
-def _agent_run_thread(agent_run_info: AgentRunInfo):
+def _agent_run_thread(agent_run_info: AgentRunInfo, *, observation=None):
     mcp_host = getattr(agent_run_info, "mcp_host", None)
     if hasattr(agent_run_info, "run_result"):
         agent_run_info.run_result = None
@@ -264,7 +269,10 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         )
         _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
-        execute_adapter(agent_run_info)
+        run_scope = observation.measure(
+            agent_run_info.stop_event, run_timing=agent_run_info.run_timing,
+        ) if observation is not None else None
+        execute_adapter(agent_run_info, run_scope=run_scope)
 
         from nexent.core.agents.contracts.output import RunResult
 

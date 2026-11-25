@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sys
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -12,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 from infrastructure.trace.trajectory_runtime import (
+    authorize_capture,
     create_local_processor,
     request_conversation_cleanup,
 )
@@ -25,6 +27,7 @@ from ops.services.trajectory.lifecycle import create_maintenance_processor
 def configuration(root="", **overrides):
     values = {
         "ENABLE_TELEMETRY": False,
+        "LOCAL_FILE_MONITORING_ENABLED": False,
         "MONITORING_PROVIDER": "otlp",
         "TRAJECTORY_ROOT_DIR": str(root),
         "TRAJECTORY_READ_ENABLED": bool(root),
@@ -124,6 +127,42 @@ def test_read_only_maintenance_initializes_persistent_directory(tmp_path):
     processor = create_local_processor(configuration(root), lambda: None)
     assert processor.store.root == root
     assert (root / ".storage-root.json").exists()
+
+
+@pytest.mark.parametrize(
+    "member,effective_tenant,conversation,allowed",
+    [
+        (True, "tenant", 123, True),
+        (False, "tenant", 123, False),
+        (True, "other", 123, False),
+        (True, "tenant", None, False),
+    ],
+)
+def test_capture_authorization_requires_active_membership_and_actual_owner(
+    monkeypatch, member, effective_tenant, conversation, allowed,
+):
+    from infrastructure.rdb.trajectory import capture
+
+    session = Mock()
+    session.scalars.return_value.first.side_effect = [
+        SimpleNamespace(tenant_id="tenant") if member else None,
+        SimpleNamespace(tenant_id=effective_tenant),
+    ]
+    session.query.return_value.filter.return_value.first.return_value = conversation
+    monkeypatch.setattr(capture, "_session", lambda: nullcontext(session))
+    identity = CaptureIdentity("tenant", "owner", "123", "42")
+    if allowed:
+        authorize_capture(identity)
+    else:
+        with pytest.raises(PermissionError):
+            authorize_capture(identity)
+    membership_query = str(session.scalars.call_args_list[0].args[0].compile(
+        compile_kwargs={"literal_binds": True},
+    ))
+    assert "user_tenant_t.user_id = 'owner'" in membership_query
+    assert "user_tenant_t.tenant_id = 'tenant'" in membership_query
+    assert "user_tenant_t.delete_flag = 'N'" in membership_query
+    assert session.query.called == (member and effective_tenant == "tenant")
 
 
 def test_deleted_conversation_reclamation_uses_confirmed_pg_result(tmp_path, caplog):
@@ -231,7 +270,7 @@ def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
 @pytest.fixture(autouse=True)
 def isolated_summary_database(mocker):
     from contextlib import nullcontext
-    repository=mocker.patch("infrastructure.rdb.trajectory_repository.ExecutionRepository")
+    repository=mocker.patch("infrastructure.rdb.trajectory.repository.ExecutionRepository")
     mocker.patch("ops.db.trajectory.cleanup_schedule.CleanupScheduleRepository").return_value.read_all.return_value = {}
     mocker.patch("ops.services.trajectory.lifecycle.ExecutionRepository", repository)
     mocker.patch("ops.services.trajectory.lifecycle.conversation_deleted", return_value=False)

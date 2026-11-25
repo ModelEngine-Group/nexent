@@ -6,6 +6,7 @@ case:
   feature_id: AUTH-MULTI-ROLE
   requirement_ids:
   - AUTH-MULTI-ROLE-20261031
+  - SYSTEM-CONFIGURATION-20261123
   business_rule_ids:
   - AUTH-MULTI-ROLE-RULE-01
   - AUTH-MULTI-ROLE-RULE-02
@@ -36,13 +37,13 @@ case:
   steps:
   - order: 1
     action: As SU assign DEV plus OPS to tenant_a_user, then read /user/current_user_info using that user session.
-    expected: Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes
+    expected: Response retains its original envelope, includes both roles once, and permissions and accessiblePages
       contain both grants without duplicate entries.
   - order: 2
     action: Assign OPS only, ADMIN plus OPS, and SU fixtures in turn; read permission metadata and use resource
       read/write routes including the shared resource page lists, group members and model creation. Check the public authentication probe and the existing self-service token list with an OPS session.
       Check the selected tenant's API Key list and attempt revocation as SU.
-    expected: Pure OPS receives exactly the three approved entry grants and credential-free tenant resource responses. The authentication probe and self-service token list accept the OPS session. Foreign tenant resource reads and model
+    expected: Pure OPS receives exactly the dashboard and shared-resource entry grants and credential-free tenant resource responses. The authentication probe and self-service token list accept the OPS session. Foreign tenant resource reads and model
       writes are denied; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is
       own tenant. For another tenant, SU can list API Key metadata and revocation is denied.
   - order: 3
@@ -57,9 +58,9 @@ case:
       an implicit SPEED identity; ASSET_OWNER feature gating and special-resource decisions retain the original
       contract.
   expected_results:
-  - Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes contain
+  - Response retains its original envelope, includes both roles once, and permissions and accessiblePages contain
     both grants without duplicate entries.
-  - Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business writes
+  - Pure OPS receives exactly the dashboard and shared-resource entry grants and permitted tenant resource reads, business writes
     with a missing action grant return 403. The authentication probe and self-service token list retain their ordinary behavior. SU receives API Key metadata for the selected tenant without credentials or
     cross-tenant revocation. ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
   - Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous input is rejected
@@ -71,7 +72,7 @@ case:
     capabilities.
   acceptance:
   - id: AC-01
-    description: Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes
+    description: Response retains its original envelope, includes both roles once, and permissions and accessiblePages
       contain both grants without duplicate entries.
     steps:
     - 1
@@ -114,7 +115,7 @@ case:
     - With valid SU or ADMIN fixtures attempt user and invitation grants containing SPEED, then request protected
       identity and resource APIs without credentials after disabling old speed-mode fallback.
     response_expectations:
-    - Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes contain
+    - Response retains its original envelope, includes both roles once, and permissions and accessiblePages contain
       both grants without duplicate entries.
     - Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business writes
       with a missing action grant return 403. The authentication probe and self-service token list retain their ordinary behavior. SU receives API Key metadata for the selected tenant without credentials or

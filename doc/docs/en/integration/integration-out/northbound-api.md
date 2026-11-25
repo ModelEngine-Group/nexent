@@ -260,7 +260,7 @@ curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
 
 ### Ordinary stop and compatibility
 
-Continue using `GET /nb/v1/chat/stop/{conversation_id}`. Success acknowledges the stop request; the run remains reserved until its worker actually exits. If the next send receives `X-Stream-Status: conflict`, preserve the draft and ask the user to send again shortly without automatically retrying. A new query after stopping can read the original task, the stop notice, and saved partial results. Stopping does not roll back external operations already performed.
+Use `GET /nb/v1/chat/stop/{conversation_id}` to cancel the current run. After HTTP 200, the stopped run has released its conversation reservation and you can send the next query with the same ID. A new query can read the original task, the stop notice, and saved partial results. Stopping does not roll back external operations already performed.
 
 The old HITL routes, approvals, pause/resume engine, four-table runtime dependencies, and encryption-key settings have been removed. Northbound `/chat/run` returns `400` for any request containing `enable_hitl`, `hitl_run_id`, or `hitl_after_event`, including false, null, and zero values. Update Web and runtime together. Existing identity, permissions, attachment, metadata, and ordinary error contracts remain unchanged.
 
@@ -310,6 +310,8 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/attachments/upload" \
 Use the returned `s3_url` as the value of the `attachments` field in the `/nb/v1/chat/run` API.
 
 ## Stop Conversation
+
+After requesting cancellation, this endpoint waits up to 5 seconds for the targeted worker to exit and the conversation reservation to clear. HTTP 200 confirms release or an already idle conversation. If release is still pending, the endpoint returns HTTP 409 with `code: NORTHBOUND_STOP_IN_PROGRESS` and `Retry-After: 1`. Cancellation continues. Keep the next query pending until stop is confirmed. Concurrent requests starting a new run can still conflict.
 
 Terminate an ongoing conversation (streaming response).
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18next from "i18next";
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
@@ -59,6 +61,7 @@ async function requestJson(
 // ---------------------------------------------------------------------------
 export interface MemoryConfig {
   memoryEnabled: boolean;
+  dreamingEnabled?: boolean;
   shareOption: "always" | "ask" | "never";
   disableAgentIds: string[];
   disableUserAgentIds: string[];
@@ -137,6 +140,25 @@ export async function loadMemoryEmbeddingStatus(): Promise<MemoryEmbeddingStatus
   });
 }
 
+export type TenantMemorySettings = { enabled: boolean; can_edit: boolean };
+
+export async function loadTenantMemorySettings(): Promise<TenantMemorySettings> {
+  return requestJson(API_ENDPOINTS.memory.config.tenantSwitch, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function setTenantMemoryEnabled(
+  enabled: boolean
+): Promise<TenantMemorySettings> {
+  return requestJson(API_ENDPOINTS.memory.config.tenantSwitch, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export async function loadMemoryConfig(
   options: { throwOnError?: boolean } = {}
 ): Promise<MemoryConfig> {
@@ -164,6 +186,7 @@ export async function loadMemoryConfig(
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
+      dreamingEnabled: (cfg.DREAMING_SWITCH ?? "Y") === "Y",
       shareOption: (shareVal || "always") as "always" | "ask" | "never",
       disableAgentIds,
       disableUserAgentIds,
@@ -574,6 +597,7 @@ export interface DreamingAudit {
 export interface DreamingParameters {
   source_limit: number;
   long_term_max_chars: number;
+  long_term_length_tolerance_percent: number;
   summarization_max_attempts: number;
 }
 
@@ -594,6 +618,7 @@ export interface DreamingSchedule {
   min_unique_queries?: number | null;
   source_limit?: number | null;
   long_term_max_chars?: number | null;
+  long_term_length_tolerance_percent?: number | null;
   summarization_max_attempts?: number | null;
 }
 

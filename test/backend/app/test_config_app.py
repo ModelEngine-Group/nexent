@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import sys
 import types
+from contextlib import asynccontextmanager
 import warnings
 
 import pytest
@@ -149,7 +150,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.conversation.conversation_share": {"router": APIRouter()},
             "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
-            "ops.api.access": {"router": APIRouter()},
+            "management.api.permission.ops_access": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
             "management.api.prompt.prompt": {"router": APIRouter()},
@@ -162,6 +163,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
+            "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.identity.api_key": {"router": api_key_router},
             "management.api.identity.invitation": {"router": APIRouter()},
             "management.api.notification.notification": {"router": APIRouter()},
@@ -175,6 +177,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.evaluation.evaluator": {"router": APIRouter()},
             "management.api.evaluation.evaluation_annotation": {"router": APIRouter()},
             "management.api.identity.cas": {"router": APIRouter()},
+            "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.memory.memory_config": {"router": APIRouter()},
             "management.api.memory.memory_record": {"router": APIRouter()},
             "management.api.memory.memory_long_term": {"router": APIRouter()},
@@ -197,6 +200,23 @@ class TestConfigAppRouterConfiguration:
         retired_module = types.ModuleType("management.api.prompt.prompt_template")
         retired_module.router = retired_router
         monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
+
+        # The northbound capability gates import real conversation/automation
+        # services; stub the gate package so the stubbed application module
+        # does not pull the database layer.
+        gates_pkg = types.ModuleType("management.api.northbound_gates")
+        gates_pkg.__path__ = []
+        gates_pkg.nb_capability_routers = lambda: ()
+        monkeypatch.setitem(sys.modules, "management.api.northbound_gates", gates_pkg)
+
+        component = types.ModuleType("management.api.northbound_application")
+
+        @asynccontextmanager
+        async def _northbound_lifespan(_app):
+            yield
+
+        component.northbound_lifespan = _northbound_lifespan
+        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
 
         const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
@@ -317,7 +337,10 @@ class TestConfigAppRouterConfiguration:
             agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
         ))
 
-        from contextlib import asynccontextmanager
+        # The function-wide local binding from a mid-function import would
+        # shadow the module-level `from contextlib import asynccontextmanager`
+        # and turn the earlier decorator use at the `_northbound_lifespan`
+        # definition into an UnboundLocalError. Rely on the top-level import.
         prepared_events = []
 
         @asynccontextmanager

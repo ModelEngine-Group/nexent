@@ -11,10 +11,10 @@ import pytest
 
 from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
-from gateway.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
-from gateway.mcp import identity_router as mcp
-from gateway.security.context import identity_context
-from gateway.mcp.credential_client import resolve_mcp_identity
+from gateway.identity.protocol import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
+from backend.mcp import identity_router as mcp
+from gateway.identity.context import identity_context
+from backend.mcp.credential_client import resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
@@ -84,7 +84,7 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
             closed.append(True)
 
     def transport(request):
-        from gateway.security.identity import verify_delegation
+        from gateway.identity.protocol import verify_delegation
 
         verify_delegation(request.headers["x-nexent-service-token"], request.content, key=KEY)
         assert json.loads(request.content)["path"] == SCOPE["path"]
@@ -98,6 +98,39 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
             await resolve_mcp_identity(SCOPE, "Bearer test", gateway_url="http://gateway", key=KEY,
                                        transport=httpx.MockTransport(transport))
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_delegated_identity_adapter_reads_gateway_origin_and_key_from_settings(monkeypatch):
+    """TenantMCPRouter calls the resolver with (scope, authorization) only.
+
+    The adapter must therefore bind the Gateway origin and the derived signing key
+    from configuration; leaving them as required keyword arguments made every
+    authenticated MCP call fail with a TypeError that surfaced as a 403.
+    """
+    from contracts.constants import environment
+
+    from backend.http import mcp_service
+    from gateway.identity.protocol import derive_signing_key
+
+    seen = {}
+
+    async def fake_resolve(scope, authorization, *, gateway_url, key, transport=None):
+        seen.update(gateway_url=gateway_url, key=key, authorization=authorization, scope=scope)
+        return PRINCIPAL
+
+    monkeypatch.setattr(mcp_service, "GATEWAY_SERVICE_URL", "http://gateway:5013")
+    monkeypatch.setattr(environment, "JWT_SECRET", KEY)
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "")
+    monkeypatch.setattr(mcp_service, "_resolve_gateway_mcp_identity", fake_resolve)
+
+    result = await mcp_service._gateway_mcp_identity(SCOPE, "Bearer test")
+
+    assert result == PRINCIPAL
+    assert seen["gateway_url"] == "http://gateway:5013"
+    assert seen["key"] == derive_signing_key(KEY, "")
+    assert seen["authorization"] == "Bearer test"
+    assert seen["scope"] is SCOPE
 
 
 @pytest.mark.asyncio
@@ -139,8 +172,8 @@ async def test_mcp_service_binds_gateway_origin_and_signing_key(monkeypatch):
     tenant_app = AsyncMock()
     monkeypatch.setattr(service, "gateway_identity_enabled", lambda: True)
     monkeypatch.setattr(service, "GATEWAY_SERVICE_URL", "http://gateway-fixture")
-    monkeypatch.setattr(service, "signing_key", lambda: KEY)
-    monkeypatch.setattr(service, "resolve_mcp_identity", delegate)
+    monkeypatch.setattr(service, "gateway_signing_key", lambda: KEY)
+    monkeypatch.setattr(service, "_resolve_gateway_mcp_identity", delegate)
     monkeypatch.setattr(service, "_tenant_app", lambda tenant: tenant_app if tenant == "t1" else None)
     scope = {**SCOPE, "headers": [(b"authorization", b"Bearer test")]}
     await service.TenantMCPRouter()(scope, AsyncMock(), AsyncMock())

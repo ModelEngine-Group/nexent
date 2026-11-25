@@ -19,7 +19,7 @@ def test_long_text_preserves_preparation_and_calls_same_model(openai_profile, mo
     adapter._build_model()
     assert isinstance(adapter._model, LegacyChatModel)
     assert adapter.max_context_tokens == (
-        openai_profile.capabilities.context.combined_window - openai_profile.capabilities.context.output_limit
+        openai_profile.capabilities.context.combined_window
     )
     mocker.patch.object(adapter, "_get_tokenizer", return_value=None)
     generate = mocker.patch.object(adapter._model, "generate", return_value="answer")
@@ -37,7 +37,7 @@ def test_long_text_missing_capacity_does_not_guess_legacy_limit(openai_profile):
     profile = openai_profile.__class__.model_validate(data)
     ctx = context(profile, LongContextLLMContext, "llm_long_context")
     ctx.max_tokens = 128000
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="combined context window"):
         OpenAILongContextLLMAdapter(ctx)._build_model()
 
 

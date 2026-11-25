@@ -13,7 +13,7 @@ from uuid import UUID, uuid5
 from sqlalchemy import select, text
 
 from contracts.constants.environment import POSTGRES_HOST, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_STATE_REDIS_URL
-from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
 from infrastructure.rdb.client import get_db_session
 from infrastructure.redis.run_state import runtime_state_service
 from management.db.conversation.models import ConversationMessage, ConversationRecord

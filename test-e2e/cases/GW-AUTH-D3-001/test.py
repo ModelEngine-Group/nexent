@@ -27,11 +27,11 @@ from contracts.constants import environment
 from gateway.application import create_gateway_app
 from gateway.security.management_client import lookup_identity
 from gateway.configuration import GatewaySettings
-from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
+from gateway.identity.downstream import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
 from backend.http.server.app_factory import create_app
-from gateway.mcp.credential_client import resolve_mcp_identity
-from gateway.mcp.identity_router import TenantMCPRouter
-from gateway.security.identity import sign_delegation
+from backend.mcp.credential_client import resolve_mcp_identity
+from backend.mcp.identity_router import TenantMCPRouter
+from gateway.identity.protocol import sign_delegation
 from management.api.identity import gateway_identity as lookup_routes
 from nexent.core.concurrency import LanePolicy, ThreadManager
 
@@ -255,7 +255,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 key_record["delete_flag"] = "Y"
                 response = await client.get(gateway_url + "/nb/v1/agents", headers={"Authorization": "Bearer fixture-api-key"})
                 assert response.status_code == 401 and reached == baseline
-                from gateway.downstream import internal_tokens
+                from gateway.identity import internal_tokens
 
                 monkeypatch.setattr(internal_tokens, "JWT_SECRET", secret)
                 response = await client.post(runtime_url + "/api/agent/internal/northbound/run", headers={

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from nexent.monitor.facts import set_fact_sink
 from nexent.monitor.model_attempt import ModelAttemptSession
 from nexent.monitor.monitoring import LLMTokenTracker
 from nexent.monitor.span_processor import MonitoringSpanProcessor
@@ -14,6 +15,12 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from test_model_service import Sender, complete, frame
 from test_model_service import setup as setup  # noqa: PLC0414 - Shared pytest fixture.
+
+
+class DispatchingSender(Sender):
+    def invoke(self, request, **kwargs):
+        request.on_dispatch()
+        return super().invoke(request, **kwargs)
 
 
 @pytest.fixture
@@ -27,6 +34,7 @@ def capture():
         _config=SimpleNamespace(provider="local_file", export_traces=True),
         tracer=provider.get_tracer("test"),
         record_llm_metrics=Mock(),
+        record_model_http_request=Mock(),
     )
     manager.create_token_tracker = lambda model, span: LLMTokenTracker(
         manager, model, span
@@ -85,6 +93,31 @@ def test_default_sink_does_not_start_local_attempts(capture, sink):
     session.complete({"content_parts": []})
     session.end()
     assert not local.get_finished_spans()
+
+
+@pytest.mark.parametrize("provider, export_traces", [
+    ("otlp", True),
+    ("otlp", False),
+    ("local_file", True),
+], ids=["dual-capture", "local-only", "legacy-local-only"])
+def test_stream_tokens_emit_events_only_on_the_remote_logical_span(capture, provider, export_traces):
+    manager, local, remote = capture
+    manager._config = SimpleNamespace(
+        provider=provider, export_traces=export_traces, capture_local_traces=provider == "otlp",
+    )
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        tracker = session.begin({"messages": []})
+        tracker.record_token("answer")
+        session.end()
+
+    attempt = next(span for span in local.get_finished_spans() if span.name == "model.attempt")
+    assert attempt.attributes["llm.ttft_basis"] == "content"
+    assert all(event.name != "token_generated" for event in attempt.events)
+    logical_span, = remote.get_finished_spans()
+    assert logical_span.name == "logical"
+    token_events = [dict(event.attributes) for event in logical_span.events if event.name == "token_generated"]
+    assert token_events == ([{"token_count": 1, "token_length": 6}] if export_traces and provider == "otlp" else [])
 
 
 @pytest.mark.parametrize("elapsed", [0, 0.125, -1, float("nan"), float("inf")])
@@ -152,6 +185,27 @@ def test_raw_error_credentials_are_scrubbed_and_partial_result_survives(capture)
     assert attempt.attributes["nexent.output_complete"] is False
 
 
+@pytest.mark.parametrize(("category", "message"), [
+    ("model_timeout", "The model request timed out. Please try again later."),
+    ("MODEL_EMPTY_RESPONSE", "The model returned no answer content or tool calls."),
+    ("unknown_diagnostic", None),
+])
+def test_legacy_attempt_records_safe_reason_without_provider_exception(capture, category, message):
+    manager, local, _ = capture
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        session.begin({"messages": []})
+        session.legacy_failure(RuntimeError("private provider exception"), category=category, will_retry=True)
+
+    attempt = local.get_finished_spans()[0]
+    assert attempt.attributes["nexent.business_status"] == "failed"
+    assert json.loads(attempt.attributes["nexent.error"]) == {
+        "category": category, "http_status": None, "safe_message": message,
+        "retryable": False, "will_retry": True,
+    }
+    assert "private provider exception" not in str(attempt.attributes)
+
+
 def test_capture_budget_preserves_business_success_and_reports_missing_body(capture):
     manager, local, _ = capture
     manager._config.local_span_processor = SimpleNamespace(run_queue_max_bytes=100)
@@ -196,8 +250,9 @@ def test_remote_children_keep_public_parent_when_local_context_is_hidden(capture
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("trace_enabled", [False, True])
 async def test_service_retries_save_actual_requests_and_known_usage(
-    capture, setup, asynchronous
+    capture, setup, asynchronous, trace_enabled
 ):
     from nexent.core.model_service.http_contracts import (
         ModelTransportError,
@@ -206,12 +261,14 @@ async def test_service_retries_save_actual_requests_and_known_usage(
     from nexent.core.model_service.service import ModelService
 
     manager, local, remote = capture
+    if not trace_enabled:
+        manager._config.provider = "otlp"
     profile, request, limiter, _ = setup
     policy = SimpleNamespace(max_attempts=2, calculate_backoff=lambda attempt: 0)
     response = complete()
     value = json.loads(response.body)
     value["usage"] = {"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13}
-    sender = Sender(
+    sender = DispatchingSender(
         [
             ModelTransportError("HTTP_ERROR", response=RawHttpResponse(429, {}, b"{}")),
             RawHttpResponse(200, {}, json.dumps(value).encode()),
@@ -228,15 +285,28 @@ async def test_service_retries_save_actual_requests_and_known_usage(
     service = ModelService(
         lambda _: sender, limiter=limiter, retry_policy=policy, monitoring=manager
     )
-    answer = (
-        await service.ainvoke(request, profile)
-        if asynchronous
-        else service.invoke(request, profile)
-    )
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        answer = (
+            await service.ainvoke(request, profile)
+            if asynchronous
+            else service.invoke(request, profile)
+        )
+    finally:
+        set_fact_sink(None)
     assert answer.content_parts[0]["text"] == "answer"
+    assert [fact["outcome"] for fact in facts] == ["started", "failed", "started", "succeeded"]
+    assert len(sender.calls) == 2
+    assert facts[0]["fact_id"] != facts[2]["fact_id"]
+    assert facts[-1]["total_tokens"] == 13
     attempts = [
         span for span in local.get_finished_spans() if span.name == "model.attempt"
     ]
+    if not trace_enabled:
+        assert not attempts
+        assert all("trace_id" not in fact and "span_id" not in fact for fact in facts)
+        return
     assert len(attempts) == len(sender.calls) == 2
     for saved, sent in zip(attempts, sender.calls):
         assert json.loads(saved.attributes["nexent.raw.value"])[
@@ -247,6 +317,13 @@ async def test_service_retries_save_actual_requests_and_known_usage(
     assert attempts[1].attributes["llm.token_count.completion"] == 4
     assert attempts[1].attributes["nexent.usage_origin"] == "provider"
     assert len(remote.get_finished_spans()) == 1
+    assert facts[-1]["total_tokens"] == attempts[1].attributes["llm.token_count.total"] == 13
+    for span, fact in zip(attempts, facts[1::2], strict=True):
+        assert span.attributes["nexent.model_attempt.fact_id"] == fact["fact_id"]
+        assert span.attributes["nexent.model_attempt.outcome"] == fact["outcome"]
+        assert span.attributes["nexent.duration_ms"] == fact["duration_ms"]
+        assert fact["trace_id"] == f"{span.context.trace_id:032x}"
+        assert fact["span_id"] == f"{span.context.span_id:016x}"
 
 
 @pytest.mark.asyncio
@@ -264,17 +341,22 @@ async def test_consumer_close_saves_partial_output_and_closes_attempt(
     manager.add_span_event = Mock()
     manager.set_span_attributes = Mock()
     manager.set_openinference_output = Mock()
-    sender = Sender(
+    sender = DispatchingSender(
         [[frame({"reasoning_content": "保留思考"}), frame({"content": "unread"})]]
     )
     service = ModelService(lambda _: sender, limiter=limiter, monitoring=manager)
     request = request.model_copy(update={"stream": True})
-    if asynchronous:
-        async with service.astream(request, profile) as events:
-            await anext(events)
-    else:
-        with service.stream(request, profile) as events:
-            next(events)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        if asynchronous:
+            async with service.astream(request, profile) as events:
+                await anext(events)
+        else:
+            with service.stream(request, profile) as events:
+                next(events)
+    finally:
+        set_fact_sink(None)
     attempt = next(
         span for span in local.get_finished_spans() if span.name == "model.attempt"
     )
@@ -283,6 +365,7 @@ async def test_consumer_close_saves_partial_output_and_closes_attempt(
     assert "保留思考" in attempt.attributes["nexent.reasoning.value"]
     assert "unread" not in attempt.attributes["nexent.raw.value"]
     assert sender.closed == 1
+    assert facts[-1]["outcome"] == attempt.attributes["nexent.model_attempt.outcome"] == "cancelled"
 
 
 @pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
@@ -418,17 +501,23 @@ async def test_service_stream_preserves_deltas_but_archives_final_message(captur
     manager.add_span_event = Mock()
     manager.set_span_attributes = Mock()
     manager.set_openinference_output = Mock()
-    sender = Sender([[frame({"reasoning_content": "分析"}), frame({"reasoning_content": "完成"}),
+    sender = DispatchingSender([[frame({"reasoning_content": "分析"}), frame({"reasoning_content": "完成"}),
                       frame({"content": "完整"}), frame({"content": "回答"}),
-                      frame(finish="stop"), SSEEvent("[DONE]")]])
+                      frame(finish="stop"), SSEEvent('{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":2}}'),
+                      SSEEvent("[DONE]")]])
     service = ModelService(lambda _: sender, limiter=limiter, monitoring=manager)
     request = request.model_copy(update={"stream": True})
-    if asynchronous:
-        async with service.astream(request, profile) as events:
-            received = [event async for event in events]
-    else:
-        with service.stream(request, profile) as events:
-            received = list(events)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        if asynchronous:
+            async with service.astream(request, profile) as events:
+                received = [event async for event in events]
+        else:
+            with service.stream(request, profile) as events:
+                received = list(events)
+    finally:
+        set_fact_sink(None)
     assert [event.delta for event in received if event.type == "text_delta"] == ["完整", "回答"]
     assert [event.delta for event in received if event.type == "reasoning_delta"] == ["分析", "完成"]
     assert len(sender.calls) == sender.closed == 1
@@ -438,4 +527,8 @@ async def test_service_stream_preserves_deltas_but_archives_final_message(captur
     assert output["content_parts"] == [{"type": "text", "text": "完整回答"}]
     assert output["reasoning_parts"] == [{"type": "text", "text": "分析完成"}]
     assert "stream" not in json.loads(attempt.attributes["nexent.raw.value"])
-    assert attempt.attributes["llm.ttft_ms"] >= 0
+    assert attempt.attributes["llm.ttft_ms"] == facts[-1]["ttft_ms"]
+    assert attempt.attributes["llm.token_count.prompt"] == facts[-1]["input_tokens"] == 0
+    assert attempt.attributes["llm.token_count.completion"] == facts[-1]["output_tokens"] == 2
+    assert "llm.token_count.total" not in attempt.attributes
+    assert "total_tokens" not in facts[-1]

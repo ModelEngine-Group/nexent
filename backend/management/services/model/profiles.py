@@ -308,7 +308,7 @@ async def probe_model_profile(profile, key, *, http_headers=None, user_id=None):
     from contracts.agentos import ModelAdministrationOperation
     from contracts.constants.environment import RUNTIME_SERVICE_URL
     from contracts.model_administration import ModelProfileProbe
-    from gateway.security.context import trusted_identity
+    from gateway.identity.context import trusted_identity
     from management.clients.agentos import AgentOSClient
 
     tenant_id = profile.identity.tenant_id

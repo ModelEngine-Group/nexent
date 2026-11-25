@@ -23,7 +23,7 @@ spec:
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
-        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "managementImage" "" .Values.global | quote }}
     spec:
       initContainers:
         - name: wait-for-management
@@ -32,7 +32,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - until curl --noproxy '*' -fsS http://nexent-config:5010/health/ready >/dev/null; do sleep 2; done
+            - until python -c "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://nexent-config:5010/health/ready', timeout=3).close()" 2>/dev/null; do sleep 2; done
       containers:
         - name: nexent-mcp
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -65,6 +65,10 @@ spec:
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
+            - name: OPS_MONITORING_ENABLED
+              value: "false"
+            - name: PYTHON_DOTENV_DISABLED
+              value: "1"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy
