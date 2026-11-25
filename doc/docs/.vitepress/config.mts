@@ -263,6 +263,26 @@ export default defineConfig({
                   {
                     "text": "ModelEngine Integration",
                     "link": "/en/user-guide/modelengine"
+                  },
+                  {
+                    "text": "Dify Integration",
+                    "link": "/en/user-guide/dify"
+                  },
+                  {
+                    "text": "RAGFlow Integration",
+                    "link": "/en/user-guide/ragflow"
+                  },
+                  {
+                    "text": "Haotian Integration",
+                    "link": "/en/user-guide/haotian"
+                  },
+                  {
+                    "text": "iData Integration",
+                    "link": "/en/user-guide/idata"
+                  },
+                  {
+                    "text": "AIDP Integration",
+                    "link": "/en/user-guide/aidp"
                   }
                 ]
               }
@@ -686,6 +706,26 @@ export default defineConfig({
                   {
                     "text": "ModelEngine 对接",
                     "link": "/zh/user-guide/modelengine"
+                  },
+                  {
+                    "text": "Dify 知识库对接",
+                    "link": "/zh/user-guide/dify"
+                  },
+                  {
+                    "text": "RAGFlow 知识库对接",
+                    "link": "/zh/user-guide/ragflow"
+                  },
+                  {
+                    "text": "昊天 Haotian 知识库对接",
+                    "link": "/zh/user-guide/haotian"
+                  },
+                  {
+                    "text": "iData 知识库对接",
+                    "link": "/zh/user-guide/idata"
+                  },
+                  {
+                    "text": "AIDP 知识库对接",
+                    "link": "/zh/user-guide/aidp"
                   }
                 ]
               }
