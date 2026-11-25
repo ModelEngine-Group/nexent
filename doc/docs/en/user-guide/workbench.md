@@ -77,14 +77,14 @@ Creation controls appear according to your account permissions. The Workbench op
 
 1. Click **Create Agent**. Describe the intended users, the tasks the agent should perform, its inputs and outputs, and any constraints. You can also start from an example in the interface.
 2. Review the extracted requirements in the **Requirements and resources** card. To make changes, edit the requirements and click **Update requirements and search again**. Select recommended tools, skills, or knowledge bases as needed, and finish configuring and binding your selections. If you need no resources, click **Continue without resources**.
-3. In the **Generated prompt** card, review or edit the prompt and click **Confirm and apply**. Once the draft is ready, use **Edit current draft** to open its configuration or click **Go to Agent Development** in the result card to review, debug, and publish it. See [Agent Configuration](./agent-development) for publishing steps.
+3. When the result card shows **Draft Generated**, click **Edit current draft** above the composer or **Go to Agent Development** in the result card. In the configuration, review or edit the prompts under **Model and Prompts**, then follow the [Agent Configuration](./agent-development) guide to debug and publish the agent.
 
 <!-- Screenshot pending. Capture the Requirements and resources card with one resource ready and the control for continuing.
 ![Reviewing agent requirements and binding resources](./assets/workbench/agent-creation-resources.png)
 -->
 
-<!-- Screenshot pending. Capture the Generated prompt card with its edit control and the Confirm and apply button.
-![Reviewing and applying the generated agent prompt](./assets/workbench/agent-creation-prompt.png)
+<!-- Screenshot pending. Capture the result card with its Draft Generated status and Go to Agent Development link, along with Edit current draft above the composer.
+![Reviewing the generated agent draft and opening its configuration](./assets/workbench/agent-creation-result.png)
 -->
 
 ### Create a skill
