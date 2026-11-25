@@ -91,7 +91,13 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
-from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common, aidp_sensitive_word_routes
+from ext_components.aidp.apps import (
+    aidp_chunk_routes,
+    aidp_mgmt_app,
+    aidp_mgmt_common,
+    aidp_sensitive_word_routes,
+    aidp_summary_routes,
+)
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
@@ -239,8 +245,11 @@ def configure_aidp_constants(monkeypatch, _isolated_imports):
 
 
 def _build_app() -> FastAPI:
+    from ext_components.aidp.apps.aidp_ontology_app import aidp_ontology_router
+
     app = FastAPI()
     app.include_router(aidp_mgmt_router)
+    app.include_router(aidp_ontology_router)
     register_exception_handlers(app)
     return app
 
@@ -2982,6 +2991,420 @@ class TestDeleteKnowledgeBaseFailure:
         mock_soft.assert_not_called()
 
 
+class TestChunkEndpoints:
+    """Semantic chunk proxy: READ for reads, EDIT for writes, contract fields only."""
+
+    FILE_UUID = "fdde6c86-39b2-4ed5-9490-45a22d3931bc"
+
+    def test_list_requires_read_and_forwards_file_scoped_paging(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        page = {
+            "value": [{"chunk_id": 1, "chunk_text": "正文"}],
+            # Real AIDP reports the current page's row count, not a global
+            # total, and returns next_link on every page; the proxy derives
+            # pagination from the page being full instead of either field.
+            "total_count": 1,
+            "next_link": "/next",
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
+                          return_value=page) as list_chunks:
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}"
+                "&page=2&page_size=20",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_perm.assert_called_once()
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        list_chunks.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", self.FILE_UUID, 2, 20
+        )
+        body = response.json()
+        assert body["total_count"] == 21  # (page - 1) * page_size + len(rows)
+        assert body["has_more"] is False  # a short page is the last page
+        assert body["total_reliable"] is False
+
+    def test_search_requires_read_and_forwards_file_name(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        result = {
+            "value": [{"chunk_id": 1001, "chunk_text": "检索内容"}],
+            "total_count": 1,
+            "has_more": False,
+            "total_reliable": True,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "search_aidp_chunks_impl",
+                          return_value=result) as search_chunks:
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/chunks/search"
+                f"?file_uuid={self.FILE_UUID}&file_name=%E6%BC%94%E7%A4%BA.pdf"
+                "&query=%E6%A3%80%E7%B4%A2&topk=5",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_perm.assert_called_once()
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        search_chunks.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", "演示.pdf", "检索", 5
+        )
+        assert response.json() == result
+
+    def test_list_reports_more_from_total_when_page_is_full(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        rows = [{"chunk_id": index} for index in range(20)]
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
+                          return_value={"value": rows, "total_count": 21}):
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}"
+                "&page=1&page_size=20",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["has_more"] is True
+
+    def test_list_derives_count_when_upstream_total_is_missing(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
+                          return_value={"value": [{"chunk_id": 1}, {"chunk_id": 2}]}):
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}"
+                "&page=3&page_size=2",
+                headers=_bearer(),
+            )
+
+        body = response.json()
+        assert body["total_reliable"] is False
+        assert body["total_count"] == 6  # (page - 1) * page_size + rows
+        assert body["has_more"] is True
+
+    def test_list_rejects_malformed_upstream_payload(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
+                          return_value={"total_count": 1}):
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == 502
+        assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
+
+    def test_read_denied_does_not_call_aidp(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          side_effect=aidp_mgmt_app.HTTPException(
+                              status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl") as list_chunks:
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        list_chunks.assert_not_called()
+
+    def test_detail_requires_read_and_forwards_chunk_id(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        chunk = {"chunk_id": 7, "chunk_text": "完整文本", "page_ids": [1]}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
+                          return_value=chunk) as get_chunk:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/7",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == chunk
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        get_chunk.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", 7)
+
+    def test_create_requires_edit_and_sends_trimmed_contract_fields(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl",
+                          return_value={"chunk_id": "12"}) as create_chunk:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"file_uuid": self.FILE_UUID, "chunk_text": "  新切片  "},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == {"chunk_id": "12"}
+        assert mock_perm.call_args.kwargs["required"] == "EDIT"
+        create_chunk.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", self.FILE_UUID, "新切片"
+        )
+
+    @pytest.mark.parametrize("chunk_text", ["", "   ", "\n\t ", "x" * 10241])
+    def test_create_rejects_invalid_text_without_calling_aidp(self, chunk_text):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl") as create_chunk:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"file_uuid": self.FILE_UUID, "chunk_text": chunk_text},
+            )
+
+        assert response.status_code == 422
+        create_chunk.assert_not_called()
+
+    def test_create_rejects_extra_fields_without_calling_aidp(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl") as create_chunk:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={
+                    "file_uuid": self.FILE_UUID,
+                    "chunk_text": "文本",
+                    "metadata": {"k": "v"},
+                },
+            )
+
+        assert response.status_code == 422
+        create_chunk.assert_not_called()
+
+    def test_update_sends_only_chunk_text(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        updated = {
+            "chunk_id": 5,
+            "chunk_text": "改后文本",
+            "chunk_type": "TEXT",
+            "page_ids": [1],
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
+                          return_value={"chunk_id": 5, "chunk_type": "TEXT"}) as get_chunk, \
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl",
+                          return_value=updated) as update_chunk:
+            response = client.patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
+                headers=_bearer(),
+                json={"chunk_text": " 改后文本 "},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == updated
+        assert mock_perm.call_args.kwargs["required"] == "EDIT"
+        get_chunk.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", 5)
+        update_chunk.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", 5, "改后文本"
+        )
+
+    @pytest.mark.parametrize("chunk_type", ["IMAGE", "image", "", None])
+    def test_update_rejects_non_editable_chunk_without_patching(self, chunk_type):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current = {"chunk_id": 5}
+        if chunk_type is not None:
+            current["chunk_type"] = chunk_type
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
+                          return_value=current), \
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl") as update_chunk:
+            response = client.patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
+                headers=_bearer(),
+                json={"chunk_text": "文本"},
+            )
+
+        assert response.status_code == 400
+        assert response.json()["message"] == "Only TEXT and TABLE chunks can be edited"
+        update_chunk.assert_not_called()
+
+    @pytest.mark.parametrize("chunk_type", ["TEXT", "text", " Text ", "TABLE", "table"])
+    def test_update_accepts_editable_chunk_type_case_insensitively(self, chunk_type):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
+                          return_value={"chunk_id": 5, "chunk_type": chunk_type}), \
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl",
+                          return_value={"chunk_id": 5, "chunk_type": "TEXT"}) as update_chunk:
+            response = client.patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
+                headers=_bearer(),
+                json={"chunk_text": "文本"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        update_chunk.assert_called_once()
+
+    @pytest.mark.parametrize("chunk_text", ["", "   ", "x" * 10241])
+    def test_update_rejects_invalid_text_without_calling_aidp(self, chunk_text):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl") as update_chunk:
+            response = client.patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
+                headers=_bearer(),
+                json={"chunk_text": chunk_text},
+            )
+
+        assert response.status_code == 422
+        update_chunk.assert_not_called()
+
+    def test_write_denied_does_not_call_aidp(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          side_effect=aidp_mgmt_app.HTTPException(
+                              status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl") as create_chunk:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"file_uuid": self.FILE_UUID, "chunk_text": "文本"},
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        create_chunk.assert_not_called()
+
+    def test_remove_forwards_selected_ids(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl",
+                          return_value={}) as remove_chunks:
+            response = client.request(
+                "DELETE",
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"chunk_ids": [3, 1, 2]},
+            )
+
+        assert response.status_code == HTTPStatus.NO_CONTENT
+        assert response.content == b""
+        assert mock_perm.call_args.kwargs["required"] == "EDIT"
+        remove_chunks.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", [3, 1, 2])
+
+    @pytest.mark.parametrize("chunk_ids", [[], list(range(2001)), [-1], [True], ["1"]])
+    def test_remove_rejects_id_counts_outside_1_to_2000(self, chunk_ids):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl") as remove_chunks:
+            response = client.request(
+                "DELETE",
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"chunk_ids": chunk_ids},
+            )
+
+        assert response.status_code == 422
+        remove_chunks.assert_not_called()
+
+    def test_remove_accepts_the_2000_id_limit(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        chunk_ids = list(range(2000))
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl",
+                          return_value={}) as remove_chunks:
+            response = client.request(
+                "DELETE",
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"chunk_ids": chunk_ids},
+            )
+
+        assert response.status_code == HTTPStatus.NO_CONTENT
+        remove_chunks.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", chunk_ids)
+
+    def test_upstream_failure_is_not_reported_as_success(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl",
+                          side_effect=AppException(
+                              ErrorCode.AIDP_SERVICE_ERROR, "upstream down")):
+            response = client.request(
+                "DELETE",
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks",
+                headers=_bearer(),
+                json={"chunk_ids": [1]},
+            )
+
+        assert response.status_code == 502
+        assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
 class TestKnowledgeBaseSensitiveIntercept:
     """BE-SW-001: the KB toggle keeps 0/1 intact across the whole chain."""
 
@@ -3539,3 +3962,534 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+
+
+class TestChunkImageEndpoint:
+    """The ViewImage proxy returns the picture bytes, not a JSON body."""
+
+    FILE_ID = "142515840_4e779b95-bc61-4d2d-bec4-3405717e1836.png"
+    PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    def test_view_image_requires_read_and_returns_png(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "get_aidp_image_impl",
+                          return_value=(self.PNG_BYTES, "image/png")) as view_image:
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/images/{self.FILE_ID}",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.headers["Content-Type"] == "image/png"
+        assert response.content == self.PNG_BYTES
+        mock_perm.assert_called_once()
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        view_image.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", self.FILE_ID
+        )
+
+    def test_view_image_rejects_malformed_file_id(self):
+        client = _client()
+        response = client.get(
+            "/aidp-mgmt/knowledge-bases/kb-1/images/not%20a%20file.png",
+            headers=_bearer(),
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_view_image_missing_file_id_suffix_rejected(self):
+        client = _client()
+        response = client.get(
+            "/aidp-mgmt/knowledge-bases/kb-1/images/142515840_4e779b95-bc61-4d2d-bec4-3405717e1836",
+            headers=_bearer(),
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+class TestFileSummaryEndpoints:
+    """Summary config on KB creation and the file summary/retry proxies."""
+
+    FILE_UUID = "fdde6c86-39b2-4ed5-9490-45a22d3931bc"
+
+    def _create_kb(self, payload: dict):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        body = {
+            "name": "摘要知识库",
+            "description": "summary",
+            "embedding_model": "bge-m3",
+            "ingroup_permission": "PRIVATE",
+            **payload,
+        }
+        with patch.object(aidp_mgmt_app, "create_aidp_kb_impl",
+                          return_value={"kds_id": "kb-summary"}) as create_kb, \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1), \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True):
+            response = _client().post(
+                "/aidp-mgmt/knowledge-bases", headers=_bearer(), json=body
+            )
+        return response, create_kb
+
+    def test_create_requires_model_when_summary_enabled(self):
+        response, create_kb = self._create_kb({"summary_enable": True})
+        assert response.status_code == 422
+        create_kb.assert_not_called()
+
+    def test_create_forces_preview_and_trims_summary_model(self):
+        response, create_kb = self._create_kb({
+            "summary_enable": True,
+            "summary_model": "  qwen3  ",
+            "summary_preview": False,
+        })
+        assert response.status_code == HTTPStatus.OK
+        payload = create_kb.call_args.args[2]
+        assert payload["summary_enable"] is True
+        assert payload["summary_preview"] is True
+        assert payload["summary_model"] == "qwen3"
+
+    def test_create_sends_explicit_false_summary_fields_when_disabled(self):
+        response, create_kb = self._create_kb({
+            "summary_enable": False,
+            "summary_model": "qwen3",
+        })
+        assert response.status_code == HTTPStatus.OK
+        payload = create_kb.call_args.args[2]
+        assert payload["summary_enable"] is False
+        assert payload["summary_preview"] is False
+        assert "summary_model" not in payload
+
+    def test_detail_normalizes_summary_fields_and_old_kbs(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        old = aidp_mgmt_app._normalize_kb_config_fields({})
+        assert old["summary_enable"] is False
+        assert old["summary_model"] == ""
+        assert old["summary_preview"] is False
+
+        enabled = aidp_mgmt_app._normalize_kb_config_fields({
+            "kms_config_str": json.dumps({
+                "summary_enable": "true",
+                "summary_model": "qwen3",
+                "summary_preview": "false",
+            }),
+        })
+        assert enabled["summary_enable"] is True
+        assert enabled["summary_model"] == "qwen3"
+        assert enabled["summary_preview"] is False
+
+    def test_summary_read_requires_read_and_forwards_file(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        payload = {"result": {"summary_status": "pending"}}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_summary_routes, "get_aidp_file_summary_impl",
+                          return_value=payload) as get_summary:
+            response = _client().get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/documents/{self.FILE_UUID}/summary",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == payload
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        get_summary.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", self.FILE_UUID
+        )
+
+    def test_summary_read_denied_does_not_call_aidp(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          side_effect=aidp_mgmt_app.HTTPException(
+                              status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
+             patch.object(aidp_summary_routes, "get_aidp_file_summary_impl") as get_summary:
+            response = _client().get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/documents/{self.FILE_UUID}/summary",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        get_summary.assert_not_called()
+
+    def test_summary_edit_via_permission_save_forwards_three_fields(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        result = {"success": True, "permissions_saved": True, "metadata_status": "updated"}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings",
+                          return_value=result) as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={
+                    "ingroup_permission": "PRIVATE",
+                    "group_ids": [],
+                    "summary_enable": True,
+                    "summary_model": "  qwen3  ",
+                    "summary_preview": False,
+                },
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        metadata = save_settings.call_args.kwargs["metadata"]
+        assert metadata == {
+            "summary_enable": True,
+            "summary_model": "qwen3",
+            "summary_preview": True,
+        }
+
+    def test_summary_edit_requires_model_when_enabled(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings") as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "summary_enable": True},
+            )
+
+        assert response.status_code == 422
+        save_settings.assert_not_called()
+
+    def test_summary_edit_rejects_summary_fields_without_switch(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings") as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "summary_model": "qwen3"},
+            )
+
+        assert response.status_code == 422
+        save_settings.assert_not_called()
+
+    def test_summary_edit_disable_sends_explicit_false(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings",
+                          return_value={"success": True, "permissions_saved": True,
+                                        "metadata_status": "updated"}) as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "summary_enable": False,
+                      "summary_model": "qwen3"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        metadata = save_settings.call_args.kwargs["metadata"]
+        assert metadata["summary_enable"] is False
+        assert metadata["summary_preview"] is False
+        assert "summary_model" not in metadata
+
+    def test_summary_edit_via_kb_patch_uses_same_fields(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"summary_enable": True}) as update_kb, \
+             patch.object(aidp_permission_service, "update_permission"):
+            response = _client().put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"summary_enable": True, "summary_model": "qwen3"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        payload = update_kb.call_args.args[3]
+        assert payload["summary_enable"] is True
+        assert payload["summary_model"] == "qwen3"
+        assert payload["summary_preview"] is True
+
+    def test_summary_edit_via_kb_patch_requires_model(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl") as update_kb:
+            response = _client().put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"summary_enable": True},
+            )
+
+        assert response.status_code == 422
+        update_kb.assert_not_called()
+
+
+class TestChunkMetadataBatchEndpoints:
+    """Batch metadata edit and auto-tagging proxies added with the chunk contract."""
+
+    @staticmethod
+    def _perms():
+        from ext_components.aidp.services import aidp_permission_service
+
+        return aidp_permission_service
+
+    def test_batch_metadata_rejects_empty_metadata_json(self):
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")):
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={"od_id": 1, "metadata_json": {}, "chunk_id_list": [1]},
+            )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_batch_metadata_requires_exactly_one_scope_list(self):
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")):
+            both = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={
+                    "od_id": 1,
+                    "metadata_json": {"部门": "研发"},
+                    "chunk_id_list": [1],
+                    "file_uuid_list": ["a" * 32],
+                },
+            )
+            neither = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={"od_id": 1, "metadata_json": {"部门": "研发"}},
+            )
+        assert both.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert neither.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_batch_metadata_rejects_more_than_300_ids_on_sync(self):
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")):
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={
+                    "od_id": 1,
+                    "metadata_json": {"部门": "研发"},
+                    "chunk_id_list": list(range(1, 302)),
+                },
+            )
+        assert response.status_code == HTTPStatus.BAD_REQUEST, response.json()
+
+    def test_batch_metadata_forwards_sync_payload(self):
+        from ext_components.aidp.apps import aidp_chunk_routes
+
+        result = {
+            "kds_id": 1,
+            "od_id": 2,
+            "total_chunks": 3,
+            "updated_chunks": 3,
+            "partial_failure": False,
+        }
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")) as mock_perm, \
+             patch.object(aidp_chunk_routes, "update_chunk_metadata_impl",
+                          return_value=result) as edit_metadata:
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={
+                    "od_id": 2,
+                    "metadata_json": {"部门": "研发"},
+                    "tag": ["示例实体"],
+                    "chunk_id_list": [1, 2, 3],
+                },
+            )
+        assert response.status_code == HTTPStatus.OK
+        mock_perm.assert_called_once()
+        assert mock_perm.call_args.kwargs["required"] == "EDIT"
+        assert edit_metadata.call_args.kwargs["od_id"] == 2
+        assert edit_metadata.call_args.kwargs["metadata_json"] == {"部门": "研发"}
+        assert edit_metadata.call_args.kwargs["tag"] == ["示例实体"]
+        assert edit_metadata.call_args.kwargs["chunk_id_list"] == [1, 2, 3]
+        assert response.json() == result
+
+    def test_batch_metadata_async_accepts_large_chunk_list(self):
+        from ext_components.aidp.apps import aidp_chunk_routes
+
+        result = {"task_id": 9, "task_type": "metadata_edit", "status": "pending"}
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "update_chunk_metadata_impl",
+                          return_value=result) as edit_metadata:
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata-async",
+                headers=_bearer(),
+                json={
+                    "od_id": 2,
+                    "metadata_json": {"部门": "研发"},
+                    "chunk_id_list": list(range(1, 302)),
+                },
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert edit_metadata.call_args.kwargs["async_mode"] is True
+        assert response.json() == result
+
+    def test_sync_tags_uses_the_path_kb_id(self):
+        from ext_components.aidp.apps import aidp_chunk_routes
+
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "sync_chunk_tags_impl",
+                          return_value={"task_id": 10086}) as sync_tags:
+            response = _client().post(
+                "/aidp-mgmt/knowledge-bases/7/tags/sync",
+                headers=_bearer(),
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert sync_tags.call_args.args[2] == [7]
+        assert response.json() == {"task_id": 10086}
+
+
+class TestOntologyChunkMetadataEndpoints:
+    """Ontology-domain chunk metadata export/import/unbind/tag-sync proxies."""
+
+    def _manager(self, user_role="SUPER_ADMIN"):
+        return (
+            patch(
+                "ext_components.aidp.apps.aidp_ontology_validation.get_user_role_by_tenant",
+                return_value={user_role},
+            ),
+            patch(
+                "ext_components.aidp.apps.aidp_ontology_validation.has_any_role",
+                return_value=True,
+            ),
+        )
+
+    def test_export_forwards_kds_and_chunk(self):
+        from ext_components.aidp.apps import aidp_ontology_metadata_routes
+
+        result = {"od_id": 1, "kds_id": 2, "chunk_id": 3, "metadata_json": {"a": "b"}}
+        role_patch, has_patch = self._manager()
+        with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes, "export_chunk_metadata_impl",
+                          return_value=result) as export_metadata:
+            response = _client().post(
+                "/aidp-mgmt/ontology/domains/1/chunks/metadata/export",
+                headers=_bearer(),
+                json={"kds_id": 2, "chunk_id": 3},
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert export_metadata.call_args.kwargs["kds_id"] == 2
+        assert export_metadata.call_args.kwargs["chunk_id"] == 3
+        assert response.json() == result
+
+    def test_import_rejects_empty_metadata_json(self):
+        role_patch, has_patch = self._manager()
+        with role_patch, has_patch:
+            response = _client().post(
+                "/aidp-mgmt/ontology/domains/1/chunks/metadata/import",
+                headers=_bearer(),
+                json={"kds_id": 2, "metadata_json": {}, "chunk_id_list": [1]},
+            )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_import_forwards_payload(self):
+        from ext_components.aidp.apps import aidp_ontology_metadata_routes
+
+        result = {
+            "kds_id": 2,
+            "domain_id": 1,
+            "total_chunks": 2,
+            "updated_chunks": 1,
+            "partial_failure": True,
+            "chunk_results": [
+                {"chunk_id": 1, "success": True},
+                {"chunk_id": 2, "success": False, "error_message": "x"},
+            ],
+        }
+        role_patch, has_patch = self._manager()
+        with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes, "import_chunk_metadata_impl",
+                          return_value=result) as import_metadata:
+            response = _client().post(
+                "/aidp-mgmt/ontology/domains/1/chunks/metadata/import",
+                headers=_bearer(),
+                json={
+                    "kds_id": 2,
+                    "metadata_json": {"部门": "研发"},
+                    "chunk_id_list": [1, 2],
+                },
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert import_metadata.call_args.kwargs["chunk_id_list"] == [1, 2]
+        assert response.json() == result
+
+    def test_batch_unbind_sync_forwards_ids(self):
+        from ext_components.aidp.apps import aidp_ontology_metadata_routes
+
+        result = {
+            "od_id": 1,
+            "total_unbind": 2,
+            "succeeded_unbind": 2,
+            "failed_unbind": 0,
+            "cleared_rows": 10,
+            "partial_failure": False,
+        }
+        role_patch, has_patch = self._manager()
+        with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes, "batch_unbind_metadata_sync_impl",
+                          return_value=result) as unbind_metadata:
+            response = _client().post(
+                "/aidp-mgmt/ontology/domains/1/metadata/batch-unbind-sync",
+                headers=_bearer(),
+                json={"metadata_id_list": [1, 2]},
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert unbind_metadata.call_args.kwargs["metadata_ids"] == [1, 2]
+        assert response.json() == result
+
+    def test_ontology_tag_sync_forwards_kb_ids(self):
+        from ext_components.aidp.apps import aidp_ontology_metadata_routes
+
+        result = {"task_id": 42, "task_type": "ontology_auto_extract"}
+        role_patch, has_patch = self._manager()
+        with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes, "sync_ontology_tags_impl",
+                          return_value=result) as sync_tags:
+            response = _client().post(
+                "/aidp-mgmt/ontology/tags/sync",
+                headers=_bearer(),
+                json={"kb_ids": [7, 8]},
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert sync_tags.call_args.kwargs["kb_ids"] == [7, 8]
+        assert response.json() == result
+
+    def test_ontology_chunk_metadata_rejects_non_manager(self):
+        role_patch, _ = self._manager(user_role="USER")
+        with role_patch, patch(
+            "ext_components.aidp.apps.aidp_ontology_validation.has_any_role",
+            return_value=False,
+        ):
+            response = _client().post(
+                "/aidp-mgmt/ontology/domains/1/chunks/metadata/export",
+                headers=_bearer(),
+                json={"kds_id": 2, "chunk_id": 3},
+            )
+        assert response.status_code == HTTPStatus.FORBIDDEN

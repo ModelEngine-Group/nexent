@@ -115,6 +115,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
         : [];
       const normalizedNewGroupIds =
         newPermission === "PRIVATE" ? [] : newGroupIds;
+
       const permissionChanged =
         newPermission !== originalPermission ||
         normalizedNewGroupIds.length !== originalGroupIds.length ||

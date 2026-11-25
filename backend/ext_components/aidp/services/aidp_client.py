@@ -340,6 +340,59 @@ def _get_ocr_annotate_path(
     )
 
 
+def _get_chunks_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the knowledge-base scoped document chunk API path.
+
+    The chunk endpoints follow the same tenant-scoped shape as the other
+    knowledge-file endpoints, but address the file through a query parameter
+    (list) or the chunk id in the path (detail/update).
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/Chunks"
+    )
+
+
+def _get_view_image_path(
+    kds_id: str, file_id: str, tenant_id: str | None = None
+) -> str:
+    """Build the ViewImage path that returns a chunk image as PNG bytes.
+
+    AIDP stores each image chunk's picture under
+    ``{kds_id}/{file_ino_no}/{image_uuid}.png`` (the chunk's ``file_url``) and
+    serves it by ``file_id = {file_ino_no}_{image_uuid}.png`` (2026-11-20
+    contract note, verified on five real knowledge bases).
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/ViewImage/{file_id}"
+    )
+
+
+def _get_retrieval_path(tenant_id: str | None = None) -> str:
+    """Build the FusionSearch retrieval path shared by chunk search and tools."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        "/Retrieval/FusionSearch"
+    )
+
+
+def _get_batch_metadata_path(
+    kds_id: str, *, async_mode: bool = False, tenant_id: str | None = None
+) -> str:
+    """Build the batch chunk-metadata edit path (sync or async variant)."""
+    suffix = "BatchMetadataJsonAsync" if async_mode else "BatchMetadataJson"
+    return f"{_get_chunks_path(kds_id, tenant_id)}/{suffix}"
+
+
+def _get_tags_sync_path(tenant_id: str | None = None) -> str:
+    """Build the knowledge-base level auto-tagging trigger path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        "/KnowledgeBases/Tags/Sync"
+    )
+
+
 def _build_list_query(page: int, page_size: int, keyword: str | None = None) -> str:
     """Build the query string for a knowledge-base list request.
 
@@ -454,12 +507,15 @@ def _request_aidp_json(
     context: str,
     params: Dict[str, Any] | None = None,
     json_body: Dict[str, Any] | None = None,
+    retry: bool = True,
 ) -> Dict[str, Any]:
     """Run one AIDP JSON request and translate transport/HTTP faults.
 
     Folder and knowledge-file path operations share the same small contract:
     JSON in, JSON (or an empty body for 204) out. Only the URL and body differ,
     so they go through one helper instead of repeating the error mapping.
+    ``retry`` defaults to True; non-idempotent writes pass False so a lost
+    response cannot replay the write upstream.
     """
     normalized_url = _validate_params(server_url, api_key)
     headers = {
@@ -475,15 +531,17 @@ def _request_aidp_json(
             timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
-        response = _request_with_retry(
-            lambda: client.request(
-                method,
-                request_url,
-                headers=headers,
-                params=params,
-                json=json_body,
-            ),
-            context=context,
+        request_fn = lambda: client.request(
+            method,
+            request_url,
+            headers=headers,
+            params=params,
+            json=json_body,
+        )
+        response = (
+            _request_with_retry(request_fn, context=context)
+            if retry
+            else request_fn()
         )
         response.raise_for_status()
         if response.status_code == 204 or not response.content:

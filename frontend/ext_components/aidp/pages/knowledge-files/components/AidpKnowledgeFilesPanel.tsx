@@ -15,6 +15,7 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   FolderOutlined,
+  TagsOutlined,
   MoreOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -36,8 +37,12 @@ import { ApiError } from "@/services/api";
 import log from "@/lib/logger";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
+import AidpFileMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpFileMetadataDrawer";
+import {
+  useKbOntologyBinding,
+  useOntologyMetadataSchema,
+} from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpChunkMetadata";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { useAidpFolderTree } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpFolderTree";
 import { useAidpIngestedFileSearch } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpIngestedFileSearch";
 import AidpFolderTree, {
@@ -74,6 +79,12 @@ interface AidpKnowledgeFilesPanelProps {
   knowledgeBase: AidpKbDetail;
   canEdit: boolean;
   isAvailable: boolean;
+  /** Open one file in the routed file-detail page. */
+  onOpenFile: (file: AidpDocumentItem, folderPath: string) => void;
+  /** Reflect the current folder in the knowledge base URL. */
+  onFolderChange: (folderPath: string) => void;
+  /** Folder restored from the URL after returning from a file detail. */
+  initialPath?: string;
   pollingPaused?: boolean;
   onFilesChanged?: () => void;
 }
@@ -123,7 +134,7 @@ const FILE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   created_at: 100,
   updated_at: 100,
   file_status: 80,
-  actions: 105,
+  actions: 135,
 };
 
 // AIDP caps a single batch document removal request at 10 files.
@@ -143,13 +154,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   knowledgeBase,
   canEdit,
   isAvailable,
+  onOpenFile,
+  onFolderChange,
+  initialPath = "/",
   pollingPaused = false,
   onFilesChanged,
 }) => {
   const { t, i18n } = useTranslation();
   const { message, modal } = App.useApp();
 
-  const [currentPath, setCurrentPath] = useState("/");
+  const [currentPath, setCurrentPath] = useState(initialPath);
   // Top box = full-tree search; table header search = current folder.
   const [globalKeywordInput, setGlobalKeywordInput] = useState("");
   const [globalKeyword, setGlobalKeyword] = useState("");
@@ -184,7 +198,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [fileRenameSaving, setFileRenameSaving] = useState(false);
   const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<AidpDocumentItem | null>(null);
+  // Whole-file metadata editing through the batch-metadata file_uuid_list
+  // variant; only offered while the KB is bound to an ontology domain.
+  const [metadataFile, setMetadataFile] = useState<AidpDocumentItem | null>(
+    null
+  );
+  const [metadataSubmitting, setMetadataSubmitting] = useState(false);
+  const bindingQuery = useKbOntologyBinding(knowledgeBase.kds_id);
+  const odId = bindingQuery.data?.binding?.od_id ?? null;
+  const metadataSchemaQuery = useOntologyMetadataSchema(odId);
+  const metadataFields = metadataSchemaQuery.data ?? [];
   const [moveFailures, setMoveFailures] = useState<FileMoveFailure | null>(
     null
   );
@@ -203,7 +226,14 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     fileMoveRequest !== null ||
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
-    previewFile !== null;
+    metadataFile !== null;
+
+  // Keep the knowledge-base URL in sync with the current folder so browser
+  // back from a file detail returns to the same folder instead of the root.
+  useEffect(() => {
+    if (currentPath === initialPath) return;
+    onFolderChange(currentPath);
+  }, [currentPath, initialPath, onFolderChange]);
 
   const treeQuery = useAidpFolderTree(
     knowledgeBase.kds_id,
@@ -1262,7 +1292,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             <span className="truncate">{record.name}</span>
           </button>
         ) : (
-          <Tooltip title={t("common.preview")}>
+          <Tooltip title={t("aidpKnowledge.fileDetailTitle")}>
             <button
               type="button"
               disabled={
@@ -1272,7 +1302,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               }
               data-aidp-file-name="true"
               className="flex max-w-full items-center gap-2 truncate text-left text-blue-600 hover:text-blue-700 hover:underline disabled:cursor-default disabled:text-gray-500 disabled:no-underline"
-              onClick={() => setPreviewFile(toDocumentItem(record.file))}
+              onClick={() =>
+                onOpenFile(toDocumentItem(record.file), currentPath)
+              }
             >
               <FileTextOutlined className="shrink-0 text-blue-500" />
               <span className="truncate">{record.name || "-"}</span>
@@ -1340,7 +1372,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       title: t("aidpKnowledge.detailOperation"),
       key: "actions",
       fixed: "right",
-      width: 120,
+      width: 150,
       render: (_value, record) => {
         if (record.kind === "folder") {
           const items = folderMenuItems();
@@ -1378,6 +1410,18 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         const menuItems = fileMenuItems(record.file);
         return (
           <div className="flex items-center gap-2 whitespace-nowrap">
+            {odId !== null && (
+              <Tooltip title={t("aidpKnowledge.fileMetadataEdit")}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<TagsOutlined />}
+                  disabled={!record.file.file_uuid}
+                  aria-label={t("aidpKnowledge.fileMetadataEdit")}
+                  onClick={() => setMetadataFile(toDocumentItem(record.file))}
+                />
+              </Tooltip>
+            )}
             <Tooltip title={t("aidpKnowledge.download")}>
               <Button
                 type="text"
@@ -1448,6 +1492,38 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         handleInternalMoveDrop(event, path, () => setBreadcrumbDropPath(null)),
     }),
     [breadcrumbDropPath, handleInternalMoveDrop]
+  );
+
+  const handleSaveFileMetadata = useCallback(
+    async (metadataJson: Record<string, string>) => {
+      if (!metadataFile || odId === null) return;
+      setMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(
+          knowledgeBase.kds_id,
+          {
+            od_id: Number(odId),
+            metadata_json: metadataJson,
+            file_uuid_list: [metadataFile.file_uuid],
+          }
+        );
+        message.success(t("aidpKnowledge.fileMetadataSaved"));
+        setMetadataFile(null);
+        refreshAll();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.chunkMetadataSaveFailed")
+          )
+        );
+        throw error;
+      } finally {
+        setMetadataSubmitting(false);
+      }
+    },
+    [knowledgeBase.kds_id, message, metadataFile, odId, refreshAll, t]
   );
 
   const segments = folderPathSegments(currentPath);
@@ -1828,28 +1904,17 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         }}
       />
 
-      {previewFile && (
-        <FilePreviewDrawer
-          open
-          source="remote"
-          objectName={previewFile.file_uuid}
-          fileName={previewFile.file_name}
-          fileType={previewFile.file_type}
-          fileSize={
-            typeof previewFile.file_size === "string"
-              ? Number(previewFile.file_size)
-              : previewFile.file_size
-          }
-          previewUrl={aidpKnowledgeService.getPreviewUrl(
-            knowledgeBase.kds_id,
-            previewFile.file_uuid
-          )}
-          rawStream
-          presentation="fullscreen"
-          previewContext="knowledgeBase"
-          onClose={() => setPreviewFile(null)}
-        />
-      )}
+      <AidpFileMetadataDrawer
+        open={metadataFile !== null}
+        fileName={metadataFile?.file_name ?? ""}
+        odId={odId}
+        metadataFields={metadataFields}
+        submitting={metadataSubmitting}
+        onClose={() => {
+          if (!metadataSubmitting) setMetadataFile(null);
+        }}
+        onSave={handleSaveFileMetadata}
+      />
     </section>
   );
 };

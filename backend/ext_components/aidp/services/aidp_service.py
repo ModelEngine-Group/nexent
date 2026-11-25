@@ -36,6 +36,7 @@ from ext_components.aidp.services.aidp_client import (
     _get_knowledge_files_path,
     _get_list_path,
     _get_ocr_annotate_path,
+    _get_retrieval_path,
     _normalize_upstream_error,
     _raise_aidp_http_error,
     _request_with_retry,
@@ -1610,6 +1611,7 @@ def list_aidp_docs_impl(
         )
 
 
+
 # ==================== Knowledge-file history (all-status listing) ====================
 
 # Channel entries are read through alias lists because AIDP deployments spell
@@ -2107,11 +2109,6 @@ def get_aidp_graph_template_impl(
     except ValueError as exc:
         logger.exception("Failed to parse AIDP graph template response")
         raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Invalid AIDP graph template JSON") from exc
-
-
-def _get_retrieval_path(tenant_id: str | None = None) -> str:
-    """Build the tenant-scoped retrieval (FusionSearch) API path."""
-    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Retrieval/FusionSearch"
 
 
 def fusion_search_impl(

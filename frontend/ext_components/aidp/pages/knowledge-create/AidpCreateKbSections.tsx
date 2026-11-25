@@ -59,7 +59,8 @@ interface AidpCreateKbSectionsProps {
   onRestorePrompt: () => void;
 }
 
-type CollapsibleSection = "graph" | "chunk" | "vector" | "retrieval";
+type CollapsibleSection =
+  "graph" | "chunk" | "summary" | "vector" | "retrieval";
 
 const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
   form,
@@ -82,10 +83,12 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
 }) => {
   const graphEnabled = Form.useWatch("is_exist_graph", form) === true;
   const captionEnabled = Form.useWatch("caption_enable", form) === true;
+  const summaryEnabled = Form.useWatch("summary_enable", form) === true;
   const [expanded, setExpanded] = useState<Record<CollapsibleSection, boolean>>(
     {
       graph: false,
       chunk: false,
+      summary: false,
       vector: false,
       retrieval: false,
     }
@@ -100,6 +103,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       if (name.startsWith("graph_") || name === "llm_model_name")
         return ["graph"];
       if (name.startsWith("chunk_")) return ["chunk"];
+      if (["summary_enable", "summary_model"].includes(name))
+        return ["summary"];
       if (["embedding_model", "vlm_model", "caption_enable"].includes(name))
         return ["vector"];
       if (["topk", "similarity"].includes(name)) return ["retrieval"];
@@ -561,6 +566,56 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                   [AIDP_OVERLAP_PERCENT_MAX]: `${AIDP_OVERLAP_PERCENT_MAX}%`,
                 }}
                 ariaLabel={t("aidpKnowledge.createOverlapPercent")}
+              />
+            </Form.Item>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.formSection}>
+        {sectionHeading(
+          "summary",
+          t("aidpKnowledge.createSectionSummary"),
+          t("aidpKnowledge.createSummarySectionHint")
+        )}
+        <div id="aidp-create-summary-panel" hidden={!expanded.summary}>
+          <div className={styles.formGrid}>
+            <Form.Item
+              name="summary_enable"
+              label={label(
+                t("aidpKnowledge.createSummaryEnable"),
+                t("aidpKnowledge.createSummaryEnableHint")
+              )}
+              valuePropName="checked"
+            >
+              <Switch aria-label={t("aidpKnowledge.createSummaryEnable")} />
+            </Form.Item>
+            <Form.Item
+              name="summary_model"
+              label={label(
+                t("aidpKnowledge.createSummaryModel"),
+                t("aidpKnowledge.createSummaryModelHint")
+              )}
+              rules={[
+                {
+                  required: summaryEnabled,
+                  message: t("aidpKnowledge.createSummaryModelRequired"),
+                },
+              ]}
+            >
+              <Select
+                showSearch
+                allowClear
+                disabled={!summaryEnabled}
+                loading={llmModelsLoading}
+                notFoundContent={
+                  llmModelsLoading
+                    ? t("aidpKnowledge.createModelLoading")
+                    : t("aidpKnowledge.createModelNone")
+                }
+                placeholder={t("aidpKnowledge.createModelSearch")}
+                optionFilterProp="label"
+                options={llmModelOptions}
               />
             </Form.Item>
           </div>

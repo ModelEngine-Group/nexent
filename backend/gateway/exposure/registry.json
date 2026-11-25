@@ -7195,6 +7195,171 @@
       "credential_kinds": [
         "session"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-b99667a56c401a66",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-761345f08587223d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-30875f96e524edad",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks/search",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-4622942d7d091425",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks/{chunk_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-1a1f5624087045c1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks/{chunk_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-49ebb4fff7c8f7b1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks/batch-metadata",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-8e2b2684bed6c6b9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks/batch-metadata-async",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-039daca5fc85e893",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/tags/sync",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-b3f79034c9fe8599",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/images/{file_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-8fed6d52a1a0ee75",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/documents/{file_uuid}/summary",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_summary_routes.py",
+      "route_id": "route-568188123783baa8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/chunks/metadata/export",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-544198b7c5750b47",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/chunks/metadata/import",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-6e7b9cee2195a86e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/metadata/batch-unbind-sync",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-27383597fe9281a0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/ontology/tags/sync",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-366ec1812f5d3da0",
+      "credential_kinds": [
+        "session"
+      ]
     }
   ],
   "revision": "2026-11-25.aidp-integration"

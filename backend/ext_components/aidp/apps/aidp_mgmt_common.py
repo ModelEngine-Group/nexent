@@ -8,7 +8,7 @@ from http import HTTPStatus
 from typing import Annotated
 
 from fastapi import HTTPException, Request
-from pydantic import AfterValidator, StringConstraints
+from pydantic import AfterValidator, Field, StringConstraints
 
 import management.services.permission.identity.session as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
@@ -16,6 +16,21 @@ from contracts.errors.exceptions import UnauthorizedError
 
 
 _FOLDER_NAME_MAX_LENGTH = 255
+
+# AIDP reports file_uuid in two shapes across deployments: 32-char hex
+# without dashes (the 2026-11-20 contract run) and the standard 36-char UUID
+# with dashes (earlier environments). Every UUID the page sends came from an
+# AIDP response, so the proxy forwards it verbatim and only enforces this
+# loose shape instead of normalizing through uuid.UUID (which would rewrite
+# the 32-hex form and break the upstream lookup).
+AIDP_FILE_UUID_PATTERN = r"^[0-9a-fA-F-]{32,36}$"
+AidpFileUuid = Annotated[
+    str,
+    Field(
+        pattern=AIDP_FILE_UUID_PATTERN,
+        description="AIDP file UUID exactly as returned upstream",
+    ),
+]
 
 
 async def _auth(request: Request) -> tuple[str, str]:

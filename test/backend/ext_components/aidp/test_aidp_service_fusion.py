@@ -29,6 +29,14 @@ def fusion():
     return importlib.import_module("ext_components.aidp.services.aidp_service")
 
 
+@pytest.fixture
+def chunk_service():
+    """Freshly imported split chunk service (search lives there now)."""
+    if "ext_components.aidp.services.aidp_chunk_service" in sys.modules:
+        del sys.modules["ext_components.aidp.services.aidp_chunk_service"]
+    return importlib.import_module("ext_components.aidp.services.aidp_chunk_service")
+
+
 def _install_client(monkeypatch, fusion, response) -> MagicMock:
     """Swap the shared http client for one returning ``response`` on POST."""
     client = MagicMock()
@@ -129,3 +137,69 @@ class TestFusionSearchImpl:
         with pytest.raises(Exception) as ei:
             _call_fusion(fusion)
         assert ei.value.error_code == fusion.ErrorCode.AIDP_CONNECTION_ERROR
+
+
+class TestChunkSearchImpl:
+    """The dedicated chunk search path reuses the SDK payload builder."""
+
+    def test_builds_file_name_condition_and_maps_hits(
+        self, chunk_service, monkeypatch
+    ):
+        captured = {}
+
+        def fake_request(
+            server_url, api_key, method, path, *, context=None,
+            params=None, json_body=None,
+        ):
+            captured.update({
+                "server_url": server_url,
+                "api_key": api_key,
+                "method": method,
+                "path": path,
+                "context": context,
+                "payload": json_body,
+            })
+            return {
+                "result": [
+                    {
+                        "id": 1001,
+                        "score": 0.91,
+                        "title": "演示.pdf",
+                        "text": "检索内容",
+                        "chunk_type": "table",
+                        "pages": [2],
+                        "metadata": {"章节": "检索指标"},
+                        "file_url": "https://example.test/demo.pdf",
+                    },
+                ]
+            }
+
+        monkeypatch.setattr(chunk_service, "_request_aidp_json", fake_request)
+
+        result = chunk_service.search_aidp_chunks_impl(
+            SERVER_URL, API_KEY, "aidp-kb-demo", "演示.pdf", "检索", top_k=5,
+            tenant_id="aidp",
+        )
+
+        payload = captured["payload"]
+        assert captured["method"] == "POST"
+        assert "/KnowledgeBase/Tenants/aidp/Retrieval/FusionSearch" in captured["path"]
+        assert payload["kds_list"] == ["aidp-kb-demo"]
+        assert payload["search_method"] == "vector_search|full_text_search"
+        assert payload["topk"] == 5
+        assert payload["multi_modal_enable"] is True
+        assert payload["metadata_condition"] == {
+            "logical_operator": "or",
+            "conditions": [{
+                "name": "original_file_name",
+                # Real AIDP rejects "=" on string fields (400 code 1002);
+                # "contains" is the verified operator for the file-name filter.
+                "comparison_operator": "contains",
+                "value": "演示.pdf",
+            }],
+        }
+        assert result["total_count"] == 1
+        assert result["value"][0]["chunk_id"] == 1001
+        assert result["value"][0]["chunk_type"] == "TABLE"
+        assert result["value"][0]["page_ids"] == [2]
+        assert result["value"][0]["metadata"] == {"章节": "检索指标"}

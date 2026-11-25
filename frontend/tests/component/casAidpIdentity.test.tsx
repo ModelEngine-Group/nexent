@@ -101,6 +101,8 @@ describe("AIDP creator presentation", () => {
           onBack={vi.fn()}
           onDelete={vi.fn()}
           onUpdated={vi.fn()}
+          onOpenFile={vi.fn()}
+          onFolderChange={vi.fn()}
         />
       </App>
     );
@@ -115,6 +117,8 @@ describe("AIDP creator presentation", () => {
           onBack={vi.fn()}
           onDelete={vi.fn()}
           onUpdated={vi.fn()}
+          onOpenFile={vi.fn()}
+          onFolderChange={vi.fn()}
         />
       </App>
     );
