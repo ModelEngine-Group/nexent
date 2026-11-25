@@ -86,13 +86,21 @@ def _redact_urls(text, depth=0):
     return _URL_PATTERN.sub(replace, text)
 
 
+def local_capture_configured(config):
+    """Recognize independent local capture and the legacy local-only provider."""
+    if getattr(config, 'capture_local_traces', False) is True:
+        return True
+    sink = getattr(config, 'provider', None)
+    return (getattr(config, 'export_traces', False) is True
+            and type(sink) is str and sink == 'local_file')
+
+
 def local_capture_enabled(manager):
     """Use concrete configuration values; permissive test doubles must stay disabled."""
-    config = getattr(manager, '_config', None)
-    sink = getattr(config, 'provider', None)
-    return (getattr(manager, 'is_enabled', False) is True
-            and getattr(config, 'export_traces', False) is True
-            and type(sink) is str and sink == 'local_file')
+    return (
+        getattr(manager, 'is_enabled', False) is True
+        and local_capture_configured(getattr(manager, '_config', None))
+    )
 
 
 def local_content_value(value):

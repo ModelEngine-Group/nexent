@@ -19,8 +19,12 @@ from nexent.core.utils.observer import MessageObserver
 
 
 @asynccontextmanager
-async def collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay=0):
-    state = {"parent": [], "child": [], "remote": [], "closed": False, "errors": [], "handlers": set(), "auth_ok": [], "effects": [], "parent_effects": []}
+async def collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay=0,
+                                 remote_stream=False, repeat_child=False):
+    state = {"parent": [], "child": [], "remote": [], "closed": False, "errors": [], "handlers": set(),
+             "auth_ok": [], "effects": [], "parent_effects": [], "remote_methods": [], "remote_auth": [],
+             "native_invocations": []}
+    both_children_started = asyncio.Event()
 
     async def handle(reader, writer):
         state["handlers"].add(asyncio.current_task())
@@ -40,10 +44,51 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
                 state["closed"] = True
                 return
             if key == "remote":
+                state["remote_methods"].append(body.get("method", path))
+                state["remote_auth"].append(
+                    b"authorization: bearer remote-only" in headers.lower()
+                    and b"x-a2a-test: bound" in headers.lower()
+                    and b"authorization: bearer parent-only" not in headers.lower()
+                )
                 await asyncio.sleep(remote_delay)
-                payload = {"message": {"role": "agent", "parts": [{"text": "CHILD_DONE"}]}}
+                payload = {"message": {"role": "ROLE_AGENT", "messageId": "remote-reply",
+                                       "parts": [{"text": "CHILD_DONE"}]}}
+                if body.get("method") == "CancelTask":
+                    if fault == "partial_timeout_unresponsive_cancel":
+                        await reader.read()
+                        return
+                    payload = {"id": "remote-task", "contextId": "remote-context",
+                               "status": {"state": "TASK_STATE_CANCELED"}}
+                elif body.get("method") == "GetTask":
+                    payload = {"id": "remote-task", "contextId": "remote-context",
+                               "status": {"state": "TASK_STATE_COMPLETED"},
+                               "artifacts": [{"artifactId": "text", "parts": [{"text": "CHILD_DONE"}]}]}
+                elif fault == "remote_poll":
+                    payload = {"task": {"id": "remote-task", "contextId": "remote-context",
+                                        "status": {"state": "TASK_STATE_WORKING"}}}
+                elif remote_stream:
+                    def event(value):
+                        if remote_protocol == "JSONRPC":
+                            value = {"jsonrpc": "2.0", "id": body["id"], "result": value}
+                        writer.write(("data: " + json.dumps(value) + "\n\n").encode())
+
+                    writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
+                    event({"artifactUpdate": {"taskId": "remote-task", "contextId": "remote-context",
+                           "artifact": {"artifactId": "text", "parts": [{"text": "CHILD_"}]}}})
+                    await writer.drain()
+                    if fault in {"partial_timeout", "partial_timeout_unresponsive_cancel", "partial_cancel"}:
+                        await reader.read()
+                        state["closed"] = True
+                        return
+                    event({"artifactUpdate": {"taskId": "remote-task", "contextId": "remote-context",
+                           "append": True, "artifact": {"artifactId": "text", "parts": [{"text": "DONE"}]}}})
+                    terminal = "FAILED" if fault == "remote_failed" else "COMPLETED"
+                    event({"statusUpdate": {"taskId": "remote-task", "contextId": "remote-context",
+                           "status": {"state": "TASK_STATE_" + terminal}}})
+                    await writer.drain()
+                    return
                 if remote_protocol == "JSONRPC":
-                    payload = {"jsonrpc": "2.0", "id": 1, "result": payload}
+                    payload = {"jsonrpc": "2.0", "id": body["id"], "result": payload}
                 encoded = json.dumps(payload).encode()
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
                              + str(len(encoded)).encode() + b"\r\nConnection: close\r\n\r\n" + encoded)
@@ -52,7 +97,12 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
             core = parent_core if key == "parent" else child_core
             first = len(state[key]) == 1
             call = first and key == "parent"
-            if fault == "missing_information" and key == "child":
+            if repeat_child and key == "child":
+                if len(state["child"]) == 2:
+                    both_children_started.set()
+                await asyncio.wait_for(both_children_started.wait(), timeout=3)
+                content, calls = "CHILD_DONE", []
+            elif fault == "missing_information" and key == "child":
                 content, calls = "MISSING_INPUT: birth date", []
                 if core == "smolagents":
                     content = '<final_answer>' + content + '</final_answer>'
@@ -68,6 +118,8 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
                 content = ""
                 calls = [{"id": "call-child", "type": "function", "function": {
                     "name": "delegate", "arguments": json.dumps({"task": "CHILD_TASK_ONLY"})}}]
+                if repeat_child:
+                    calls.append({**calls[0], "id": "call-child-repeat"})
             elif call:
                 content = '<code>\nvalue = delegate(task="CHILD_TASK_ONLY")\nprint(value)\n</code>'
                 calls = []
@@ -127,7 +179,8 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
 
 
 async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwen", protocol="native",
-                            remote_protocol="JSONRPC", fault=None, run_timeouts=None, remote_delay=0):
+                            remote_protocol="JSONRPC", fault=None, run_timeouts=None, remote_delay=0,
+                            remote_stream=False, repeat_child=False):
     monitoring = Mock()
     monitoring.trace_llm_request.side_effect = lambda *args, **kwargs: nullcontext(None)
     monkeypatch.setattr("nexent.core.model_service.service.get_monitoring_manager", lambda: monitoring)
@@ -146,10 +199,33 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
         original_prepare(adapter)
         cards.extend(card.id for card in adapter.native_agent.ability_manager.list())
     monkeypatch.setattr(JiuwenAdapter, "prepare", prepare)
-    async with collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay) as (url, state):
+    async with collaboration_provider(
+        parent_core, child_core, protocol, remote_protocol, fault, remote_delay, remote_stream, repeat_child,
+    ) as (url, state):
+        from nexent.core.agents.cores.jiuwen.collaboration import CollaborationAgent
         from nexent.core.agents.cores.smolagents import agent as nexent_agent
         import nexent.core.tools as shared_tool_types
         from smolagents import Tool
+
+        original_invoke = CollaborationAgent.invoke
+
+        async def invoke(agent, inputs, session=None):
+            state["native_invocations"].append((agent.card.id, session.get_session_id()))
+            return await original_invoke(agent, inputs, session=session)
+
+        monkeypatch.setattr(CollaborationAgent, "invoke", invoke)
+        remote_task_seen = Event()
+        if fault == "partial_cancel":
+            from nexent.core.agents.cores.jiuwen.a2a import _RemoteResult
+
+            original_accept = _RemoteResult.accept
+
+            def accept(result, event):
+                original_accept(result, event)
+                if result.task_id:
+                    remote_task_seen.set()
+
+            monkeypatch.setattr(_RemoteResult, "accept", accept)
 
         class ChildEchoTool(Tool):
             name, description, inputs, output_type = "child_echo", "Child effect", {}, "string"
@@ -191,16 +267,21 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
             name="delegate", description="Delegate task", invocation_name="delegate", model_name="shared", tools=[ToolConfig(name="child_echo", class_name="ChildEchoTool",
                 source="local", params={})],
             max_steps=3, runtime_model_config=child_model, instructions="CHILD_SYSTEM_ONLY")
+        if repeat_child:
+            child.tools = []
         root = AgentConfig(agent_core=parent_core, name="parent", description="Parent", model_name="shared",
                            tools=[ToolConfig(name="parent_only", class_name="ParentOnlyTool", source="local", params={})],
                            instructions="PARENT_SYSTEM_ONLY", max_steps=3,
                            worker_agents=[] if child_core == "a2a" else [child])
         if child_core == "a2a":
             root.external_a2a_agents = [ExternalA2AAgentConfig(agent_id="remote-id", name="delegate",
-                url=url + "/remote", protocol_type=remote_protocol, timeout=0.3 if fault == "timeout" else 5)]
+                url=url + "/remote", protocol_type=remote_protocol, api_key="remote-only",
+                custom_headers={"X-A2A-Test": "bound"}, raw_card={"capabilities": {"streaming": remote_stream}},
+                timeout=0.5 if fault in {"timeout", "partial_timeout", "partial_timeout_unresponsive_cancel"} else 5)]
         manager = ThreadManager("collaboration-runtime", {
             # Reserve service ownership for both monitoring and the shared Jiuwen loop.
             name: LanePolicy(name=name, max_workers=2 if name == "background-service" or
+                             repeat_child and name == "control-io" or
                              name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
             for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
         manager.start()
@@ -212,11 +293,17 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
             model_config_list=[model("/parent", 0.9, "parent-only", 7)], observer=MessageObserver(lang="en"),
             stop_event=Event(), thread_manager=manager, **timeouts,
             tenant_id="spike-tenant", user_context={"user_id": "trusted"})
+        info.runtime_metadata = {"user_context": {"user_id": "spoof"}, "request_tag": "authorized-metadata"}
+
         async def cancel():
-            while not (state["child"] or state["remote"]):
-                await asyncio.sleep(0.01)
+            async with asyncio.timeout(5):
+                while not (state["child"] or state["remote"]):
+                    await asyncio.sleep(0.01)
+                if fault == "partial_cancel":
+                    while not remote_task_seen.is_set():
+                        await asyncio.sleep(0.01)
             info.stop_event.set()
-        canceller = asyncio.create_task(cancel()) if fault == "cancel" else None
+        canceller = asyncio.create_task(cancel()) if fault in {"cancel", "partial_cancel"} else None
         output = []
         cancelled = False
         try:
@@ -225,14 +312,20 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
         except asyncio.CancelledError:
             # The public stream stops immediately on user cancellation. Inspect
             # only the real owned observer after the worker has drained below.
-            if fault not in {"cancel", "capacity", "timeout"} or not info.stop_event.is_set():
+            if fault not in {"cancel", "capacity", "timeout", "partial_cancel"} or not info.stop_event.is_set():
                 raise
             cancelled = True
         finally:
-            if canceller:
-                await canceller
-            drained = await manager.shutdown(timeout=5)
-            assert not drained.stuck_execution_ids
+            try:
+                if canceller:
+                    await canceller
+                if cancelled and info.thread_future is not None:
+                    # The loopback peer runs on this loop and must be able to
+                    # respond while the worker is sending its cancellation RPC.
+                    await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(info.thread_future)), 4)
+            finally:
+                drained = await manager.shutdown(timeout=5)
+                assert not drained.stuck_execution_ids
         if cancelled:
             output.extend(json.loads(event) for event in info.observer.get_cached_message())
         for _ in range(50):
@@ -241,6 +334,8 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
             await asyncio.sleep(0.01)
         from openjiuwen.core.runner import Runner
         assert all(Runner.resource_mgr.get_tool(card) is None for card in cards)
+        for card, _session_id in state["native_invocations"]:
+            assert await Runner.resource_mgr.get_agent(card) is None
         assert manager.snapshot().active_count == 0
         assert not state["errors"]
         return info, state, output, cores

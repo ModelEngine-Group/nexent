@@ -64,7 +64,7 @@ class CompactReplay:
         return replay_after(self.entries, cursor)
 
 
-async def subscribe_shared_checkpoint(service, user_id, conversation_id, initial):
+async def subscribe_shared_checkpoint(service, user_id, conversation_id, initial, **reference):
     """Use compact suffixes after waking; a trimmed Redis tail is only a wakeup."""
     checkpoint = initial
     generation = checkpoint["generation"]
@@ -76,23 +76,23 @@ async def subscribe_shared_checkpoint(service, user_id, conversation_id, initial
         chunks, position = replay_after(checkpoint["entries"], position)
         for chunk in chunks:
             yield chunk
-        stream_status = await service.get_stream_status_async(user_id, conversation_id)
-        run = await service.get_run_state_async(user_id, conversation_id)
+        stream_status = await service.get_stream_status_async(user_id, conversation_id, **reference)
+        run = await service.get_run_state_async(user_id, conversation_id, **reference)
         if run.get("generation") and run["generation"] != generation:
             yield f'data: {json.dumps({"status": "stopped"})}\n\n'
             return
         outcome = stream_status.get("status") or run.get("status")
         if outcome in {"completed", "failed", "stopped"}:
             # Terminal status can commit after our read. Drain its last events.
-            final = await service.read_replay_checkpoint_async(user_id, conversation_id)
+            final = await service.read_replay_checkpoint_async(user_id, conversation_id, **reference)
             if final and final["generation"] == generation:
                 chunks, _ = replay_after(final["entries"], position)
                 for chunk in chunks:
                     yield chunk
             yield f'data: {json.dumps({"status": outcome})}\n\n'
             return
-        await service.wait_for_stream_events_async(user_id, conversation_id, checkpoint["cursor"])
-        newer = await service.read_replay_checkpoint_async(user_id, conversation_id)
+        await service.wait_for_stream_events_async(user_id, conversation_id, checkpoint["cursor"], **reference)
+        newer = await service.read_replay_checkpoint_async(user_id, conversation_id, **reference)
         if newer is None:
             raise RuntimeError("Execution replay checkpoint is no longer available")
         checkpoint = newer

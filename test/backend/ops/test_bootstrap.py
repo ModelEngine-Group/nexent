@@ -20,7 +20,10 @@ from backend.http import ops_service
 BACKEND = Path(__file__).resolve().parents[3] / 'backend'
 
 
-def test_health_follows_application_lifetime():
+def test_health_follows_application_lifetime(monkeypatch):
+    monkeypatch.setattr(lifespan.config, 'MONITORING_PROVIDER', 'otlp')
+    monkeypatch.setattr(lifespan.config, 'LOCAL_FILE_MONITORING_ENABLED', False)
+    monkeypatch.setattr(lifespan.config, 'TRAJECTORY_READ_ENABLED', False)
     app = create_app()
     client = TestClient(app)
     assert client.get('/health/live').json() == {'status': 'alive'}

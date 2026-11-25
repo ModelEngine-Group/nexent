@@ -527,11 +527,11 @@ def test_delete_conversation_success(monkeypatch, mock_session_ctx):
 
 
 def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
-    """delete_conversation returns False when no conversation row affected."""
+    """delete_conversation returns False when no owned conversation row is affected."""
     session, ctx = mock_session_ctx
     conversation_result = MagicMock()
     conversation_result.rowcount = 0
-    session.execute.side_effect = [conversation_result, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    session.execute.side_effect = [conversation_result]
 
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 

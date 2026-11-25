@@ -20,12 +20,24 @@ _CAPABILITY = re.compile(r"是否|能否|可否|能不能|可以|支持|\b(?:can
 _HELP = re.compile(r"帮我|为我|\bplease\b", re.I)
 _ACTION = re.compile(r"调用|使用|委派(?:给)?|交给|让|\b(?:call|invoke|use|ask|delegate)\b", re.I)
 _GENERIC = re.compile(r"子智能体|子\s*agent|\b(?:sub[\s-]?agents?|workers?|a2a)\b", re.I)
+_PARALLEL = re.compile(r"并行|并发|同时|\b(?:parallel(?:ly)?|concurrently|simultaneously)\b", re.I)
+
+
+_PARENT_PYTHON = re.compile(
+    r"^\s*(?:"
+    r"(?:step\s+)?\d+[.、:：)）]\s*(?:(?:由)?(?:主|父)智能体\s*(?:先\s*)?|"
+    r"(?:the\s+)?(?:parent|main)\s+agent\s+(?:should\s+)?)?"
+    r"|(?:请\s*)?(?:(?:由)?(?:主|父)智能体\s*)?先\s*(?:(?:由)?(?:主|父)智能体\s*)?"
+    r"|(?:please\s+)?first\s+(?:(?:have\s+)?(?:the\s+)?(?:parent|main)\s+agent\s+)?"
+    r")(?:实际\s*)?(?:执行|运行|(?:execute|run)\s+(?:a\s+)?)\s*python\b",
+    re.I,
+)
 
 
 class DelegationPolicy:
     """Require actual authorized dispatch, never a proposed call or old history."""
 
-    def __init__(self, query, collaborators, *, enabled=True):
+    def __init__(self, query, collaborators, *, enabled=True, allow_parent_preparation=False):
         aliases = {}
         for child in collaborators:
             name = getattr(child, "invocation_name", None) or child.name
@@ -33,9 +45,22 @@ class DelegationPolicy:
             if getattr(child, "display_name", None):
                 aliases[name].add(child.display_name.casefold())
         self.required = False
+        self.parallel_requested = False
+        self.parent_preparation = False
+        self.parent_prepared = False
+        self.collaborator_names = frozenset(aliases)
+        saw_parent_preparation = False
         selected = set()
         for clause in re.split(r"[，。！？!?;,\n]", _QUOTED.sub("", (query or "") if enabled else "")):
             action = _ACTION.search(clause)
+            if allow_parent_preparation and not self.required:
+                preparation = clause[:action.start()] if action else clause
+                if (
+                    _PARENT_PYTHON.search(preparation)
+                    and not _NEGATIVE.search(preparation)
+                    and not _QUESTION.search(preparation)
+                ):
+                    saw_parent_preparation = True
             if action is None or _NEGATIVE.search(clause[: action.end()]) or _QUESTION.search(clause[: action.end()]):
                 continue
             prefix = clause[: action.end()]
@@ -45,6 +70,8 @@ class DelegationPolicy:
             named = {name for name, values in aliases.items() if any(value in target for value in values)}
             if named or _GENERIC.search(target):
                 self.required = True
+                self.parallel_requested |= bool(_PARALLEL.search(clause))
+                self.parent_preparation = saw_parent_preparation
                 selected.update(named)
         self.names = frozenset(selected or aliases)
         self.dispatched = False
@@ -58,8 +85,19 @@ class DelegationPolicy:
     def instruction(self):
         if not self.required:
             return ""
+        if self.parent_preparation and not self.parent_prepared:
+            return (
+                "Execute the requested initial Python step in the parent first, in its own action. "
+                "Then call an authorized collaborator: " + ", ".join(sorted(self.names)) + ". "
+                "Wait for the actual child result before continuing the parent task or answering."
+            )
+        introduction = (
+            "The initial parent Python step is complete. "
+            if self.parent_preparation
+            else "The latest request explicitly requires delegation before direct execution. "
+        )
         return (
-            "The latest request explicitly requires delegation before direct execution. "
+            introduction +
             "Call an authorized collaborator: " + ", ".join(sorted(self.names)) + ". "
             "Do not create the file yourself or return a final answer before that call executes. "
             "Pass the concrete task, deliverable and requested format, not an instruction to delegate again. "

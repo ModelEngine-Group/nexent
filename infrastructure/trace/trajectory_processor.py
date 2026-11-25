@@ -19,10 +19,12 @@ from opentelemetry.sdk.trace import SpanProcessor
 from .trajectory_audit import cleanup_audit
 from .trajectory_identity import invocation_attributes
 from .trajectory_io import digest, json_chunks
-from .trajectory_otlp import span_request
+from .trajectory_otlp import LOCAL_PREFIX, span_request
 from .trajectory_store import CaptureIdentity, business_id, component, timestamp
 
 logger = logging.getLogger(__name__)
+_LOCAL_RUN_ID = f"{LOCAL_PREFIX}nexent.trajectory_id"
+_LOCAL_ROOT = f"{LOCAL_PREFIX}nexent.trajectory.root"
 
 
 def _observed_time(nanoseconds):
@@ -128,10 +130,11 @@ class LocalTrajectoryProcessor(SpanProcessor):
         from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult
 
         class LocalRecordingSampler(Sampler):
-            def should_sample(self, *args, **kwargs):
-                result = delegate.should_sample(*args, **kwargs)
+            def should_sample(self, parent_context, trace_id, name, kind=None, attributes=None,
+                              links=None, trace_state=None):
+                result = delegate.should_sample(parent_context, trace_id, name, kind, attributes, links, trace_state)
                 if result.decision == Decision.DROP:
-                    return SamplingResult(Decision.RECORD_ONLY, result.attributes, result.trace_state)
+                    return SamplingResult(Decision.RECORD_ONLY, attributes, result.trace_state)
                 return result
 
             def get_description(self):
@@ -231,7 +234,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
             started = time.perf_counter()
             parent = trace.get_current_span(parent_context)
             inherited = getattr(parent, "attributes", None) or {}
-            run_id = inherited.get("nexent.trajectory_id")
+            run_id = inherited.get(_LOCAL_RUN_ID)
             root = not run_id and span.name == "agent.run"
             if root:
                 metadata = self.metadata_provider()
@@ -271,10 +274,8 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     return
             elif run_id:
                 values = {
-                    key: value
-                    for key, value in inherited.items()
-                    if key
-                    in {
+                    key: inherited[f"{LOCAL_PREFIX}{key}"]
+                    for key in (
                         "tenant.id",
                         "nexent.owner_user_id",
                         "conversation.id",
@@ -283,15 +284,20 @@ class LocalTrajectoryProcessor(SpanProcessor):
                         "nexent.trajectory_id",
                         "nexent.turn_id",
                         "nexent.root_agent_id",
-                    }
+                    )
+                    if f"{LOCAL_PREFIX}{key}" in inherited
                 }
-                if inherited.get("nexent.record_id"):
-                    values["nexent.parent_record_id"] = inherited["nexent.record_id"]
+                parent_record_id = inherited.get(f"{LOCAL_PREFIX}nexent.record_id")
+                if parent_record_id:
+                    values["nexent.parent_record_id"] = parent_record_id
             else:
                 return
             values["nexent.record_id"] = str(uuid4())
-            values.update(invocation_attributes(span.attributes or {}, inherited, values["nexent.record_id"], root=root))
-            span.set_attributes(values)
+            local_values = {f"{LOCAL_PREFIX}{key}": value for key, value in values.items()}
+            local_values.update(invocation_attributes(
+                span.attributes or {}, inherited, values["nexent.record_id"], root=root,
+            ))
+            span.set_attributes(local_values)
             with self._lock:
                 if len(self._active) >= 10000:
                     self._gaps.add(run_id)
@@ -303,7 +309,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
 
     def on_end(self, span):
         values = span.attributes or {}
-        run_id = values.get("nexent.trajectory_id")
+        run_id = values.get(_LOCAL_RUN_ID)
         if not run_id:
             return
         try:
@@ -321,7 +327,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                 self._enqueue(run_id, "span", request, size)
                 self._active.pop(span.context.span_id, None)
                 self._started.pop(span.context.span_id, None)
-                if values.get("nexent.trajectory.root"):
+                if values.get(_LOCAL_ROOT):
                     status = _business_status(values, span.status.status_code.value == 2)
                     self._terminal[run_id] = (status, _observed_time(span.end_time))
         except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
@@ -329,7 +335,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                 self._gaps.add(run_id)
                 self._active.pop(span.context.span_id, None)
                 self._started.pop(span.context.span_id, None)
-                if values.get("nexent.trajectory.root"):
+                if values.get(_LOCAL_ROOT):
                     self._terminal[run_id] = (
                         _business_status(values, span.status.status_code.value == 2),
                         _observed_time(span.end_time),
@@ -414,7 +420,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
             active = list(self._active.values())
         for span in active:
             values = span.attributes or {}
-            run_id = values["nexent.trajectory_id"]
+            run_id = values[_LOCAL_RUN_ID]
             if run_id not in self._writers:
                 continue
             request = span_request(span)
@@ -471,7 +477,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
 
     def _publish_completed(self):
         with self._lock:
-            active_runs = {(span.attributes or {}).get("nexent.trajectory_id") for span in self._active.values()}
+            active_runs = {(span.attributes or {}).get(_LOCAL_RUN_ID) for span in self._active.values()}
         for run_id in list(self._terminal):
             if run_id in active_runs or self._run_bytes.get(run_id, 0):
                 continue

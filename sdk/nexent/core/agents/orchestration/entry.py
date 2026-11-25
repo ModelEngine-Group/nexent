@@ -161,6 +161,11 @@ class DeferredAgentRun:
         if cancelled:
             agent_run_info.cancellation_scope.cancel()
 
+    @property
+    def is_bound(self) -> bool:
+        with self._lock:
+            return self._agent_run_info is not None
+
     def cancel(self) -> None:
         with self._lock:
             self._cancelled = True
@@ -207,6 +212,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         current,
         monitoring_run_id=run_id,
         monitoring_root_run_id=run_id,
+        monitoring_mcp_servers=getattr(agent_run_info, "monitoring_mcp_servers", None) or current.monitoring_mcp_servers,
         monitoring_parent_run_id=None,
         agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
         agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),

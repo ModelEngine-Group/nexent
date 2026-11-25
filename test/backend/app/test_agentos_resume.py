@@ -1,5 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from datetime import datetime, timezone
+from threading import Event
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -99,6 +102,45 @@ async def test_signed_inspect_supports_owned_terminal_message_reference(mocker):
     with pytest.raises(RuntimeUpstreamError) as denied:
         await agentos.inspect_run(message, ACTOR.user_id, "other")
     assert denied.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scheduler_reads_recovery_cutoff_through_the_signed_route(mocker):
+    import httpx
+    from fastapi import FastAPI
+
+    from contracts.agentos import AgentOperation
+    from contracts.constants import environment
+    from contracts.errors.exceptions import RuntimeUpstreamError
+    from infrastructure.agentos_identity import sign_call
+    from management.clients.agentos import AgentOSClient
+    from runtime.agentos.middleware import AgentOSMiddleware
+
+    mocker.patch.object(environment, "JWT_SECRET", "synthetic-recovery-status-key")
+    app = FastAPI(root_path="/api")
+    app.add_middleware(AgentOSMiddleware)
+    app.include_router(resume.create_run_lifecycle_router())
+    transport = httpx.ASGITransport(app=app)
+    agentos = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs))
+    lost = Event()
+    app.state.sandbox_coordinator = SimpleNamespace(lost_coordination=lost)
+    app.state.sandbox_restart_cutoff = None
+    assert (await agentos.recovery_status()).restart_cutoff is None
+
+    cutoff = datetime(2026, 11, 20, tzinfo=timezone.utc)
+    app.state.sandbox_restart_cutoff = cutoff
+    assert (await agentos.recovery_status()).restart_cutoff == cutoff
+
+    operation = AgentOperation.RECOVERY_STATUS
+    token = sign_call(operation, b"{}", ACTOR)
+    async with httpx.AsyncClient(transport=transport, base_url="http://runtime") as client:
+        denied = await client.post(f"/api{operation.value}", content=b"{}", headers={"Authorization": f"Bearer {token}"})
+    assert denied.status_code == 401
+
+    lost.set()
+    with pytest.raises(RuntimeUpstreamError) as unavailable:
+        await agentos.recovery_status()
+    assert unavailable.value.status_code == 503
 
 
 @pytest.mark.asyncio

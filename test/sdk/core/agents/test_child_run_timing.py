@@ -3,7 +3,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from threading import Barrier, Event
+from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -19,7 +19,7 @@ from nexent.core.agents.orchestration.children import invoke_child
 from nexent.core.agents.resources.subagents import SubAgentToolWrapper
 from nexent.monitor import MonitoringConfig, agent_monitoring_context, get_monitoring_manager
 from nexent.monitor.facts import set_fact_sink
-from test.sdk.core.agents.test_child_run_facts import child_capture
+from test.sdk.core.agents.test_child_run_facts import child_capture, make_child_run_info
 
 
 def unix_ns(value):
@@ -126,7 +126,7 @@ async def test_concurrent_calls_bind_separate_info_and_timing(child_capture, mon
     infos = []
 
     def target(task):
-        info = SimpleNamespace(stop_event=Event(), run_result=None, attempt_outcome=None)
+        info = make_child_run_info()
         infos.append(info)
         barrier.wait(timeout=5)
         assert invoke_child(info, task) == "answer"

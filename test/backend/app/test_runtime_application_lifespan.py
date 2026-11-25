@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[3] / "backend"
 
@@ -60,7 +62,12 @@ class RuntimeThreadManager:
         return {"service_name": "runtime", "active_count": 0}
 
 
-def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
+@pytest.mark.parametrize("distributed", [False, True])
+def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, distributed):
+    configure_ownership = MagicMock()
+    monkeypatch.setitem(sys.modules, "runtime.identity", _module("runtime.identity", uses_distributed_runtime=lambda: distributed))
+    monkeypatch.setitem(sys.modules, "runtime.sandbox_runtime",
+                        _module("runtime.sandbox_runtime", configure_runtime_coordination=configure_ownership))
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
@@ -98,6 +105,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
         ("runtime.agentos.middleware", "AgentOSMiddleware"),
         ("runtime.agentos.debug", "stop_agentos_debug"),
         ("runtime.api.voice.streaming", "voice_runtime_router"),
+        ("runtime.api.sandbox", "router"),
         ("infrastructure.model_adapter", "get_adapter_from_config"),
     ):
         monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: MagicMock()}))
@@ -192,7 +200,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     shutdown_order.attach_mock(manager.shutdown, "thread_manager")
 
     async def exercise():
-        async with application.runtime_lifespan(None):
+        async with application.runtime_lifespan(application.app):
             pass
 
     asyncio.run(exercise())
@@ -211,8 +219,11 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
     recover_models.assert_called_once_with()
-    recover.assert_called_once_with()
-    cleanup.assert_called_once_with()
+    assert recover.call_count == cleanup.call_count == int(not distributed)
+    if distributed:
+        configure_ownership.assert_called_once_with(manager, application.app.state)
+    else:
+        configure_ownership.assert_not_called()
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()

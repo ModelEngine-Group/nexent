@@ -170,6 +170,7 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
         conversation_id, user_id
     )
     channel.generation = control.generation
+    channel.is_creator = True
     info = control.registered_info()
     agent_run_manager.register_agent_run(conversation_id, info, user_id, reservation)
     started = asyncio.Event()

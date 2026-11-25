@@ -30,7 +30,7 @@ def test_context_failure_preserves_history(monkeypatch,protocol,fault):
         assert result["infos"][1].attempt_outcome=="stopped"
         assert result["phase"]["closed"]
         assert result["phase"]["cancel_elapsed"] < 10
-        assert not [body for phase,body in result["calls"] if phase=="followup"]
+        assert len([body for phase,body in result["calls"] if phase=="followup"])==1
     else:
         assert result["infos"][1].attempt_outcome=="completed"
     assert result["infos"][-1].attempt_outcome=="completed"

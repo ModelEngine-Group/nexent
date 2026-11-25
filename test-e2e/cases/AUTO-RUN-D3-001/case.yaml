@@ -17,8 +17,7 @@ case:
   preconditions:
   - Product Python dependencies and PostgreSQL are available; all database rows use
     a disposable schema.
-  - A disposable Redis database/key namespace is available; real Redis cancellation
-    pollers are used by lifecycle variants.
+  - A disposable Redis database/key namespace is available; the run-scoped AgentOS Redis journal is used by lifecycle variants.
   test_data:
     profile: mock
     identities:
@@ -39,7 +38,7 @@ case:
       and successful fallback remains successful; failure counters follow the actual
       terminal outcome.
   - order: 3
-    action: Exercise consecutive background turns with real Redis cancellation pollers;
+    action: Exercise consecutive background turns with real run-scoped Redis cancellation;
       cancel during preparation and await the original manual-run caller.
     expected: A previous cancellation cannot stop the next run; current cancellation
       survives preparation; business cancellation returns CANCELED while caller cancellation
@@ -98,4 +97,4 @@ case:
     - 1
   integration_boundary:
   - Real automation runner, adapter, background orchestration, stream finalizer and
-    PostgreSQL; SDK/model/settings boundaries are controlled.
+    PostgreSQL; AgentOS journal and replay are real and model output is controlled.

@@ -22,8 +22,10 @@ def current_routing():
 
 
 @pytest.mark.parametrize("feature_id,domain", [
-    ("AIDP-RETRIEVAL", "knowledge"), ("AUTH-LOCAL", "system"),
-    ("F-003", "system"), ("SYS-AGENT-LIFECYCLE", "system"),
+    ("AIDP-RETRIEVAL", "aidp"), ("AUTH-LOCAL", "user_permissions"),
+    ("F-003", "user_permissions"), ("SYS-AGENT-LIFECYCLE", "system"),
+    ("RESOURCE-TAG-MANAGEMENT", "resource_management"), ("OPS-AGENT-FACTS", "ops_dashboard"),
+    ("CHAT-TRAJECTORY", "observability"), ("SYSTEM-CONFIGURATION", "system_configuration_alerts"),
 ])
 def test_features_use_existing_functional_domains(current_routing, feature_id, domain):
     features, _, rules = current_routing
@@ -34,11 +36,11 @@ def test_features_use_existing_functional_domains(current_routing, feature_id, d
 
 
 @pytest.mark.parametrize("case_id,domain", [
-    ("AIDP-RET-CONFIG-API-D2-001", "knowledge"), ("AIDP-RET-JOURNEY-D4-001", "knowledge"),
-    ("AIDP-RET-MIGRATION-D5-001", "knowledge"), ("AIDP-RET-PROTOCOL-D2-001", "knowledge"),
-    ("AIDP-RET-REAL-D3-001", "knowledge"), ("AIDP-RET-RUNTIME-D3-001", "knowledge"),
-    ("API-005", "system"), ("API-006", "system"),
-    ("AUTH-LOCAL-D2-001", "system"), ("AUTH-LOCAL-D5-001", "system"),
+    ("AIDP-RET-CONFIG-API-D2-001", "aidp"), ("AIDP-RET-JOURNEY-D4-001", "aidp"),
+    ("AIDP-RET-MIGRATION-D5-001", "aidp"), ("AIDP-RET-PROTOCOL-D2-001", "aidp"),
+    ("AIDP-RET-REAL-D3-001", "aidp"), ("AIDP-RET-RUNTIME-D3-001", "aidp"),
+    ("API-005", "user_permissions"), ("API-006", "user_permissions"),
+    ("AUTH-LOCAL-D2-001", "user_permissions"), ("AUTH-LOCAL-D5-001", "user_permissions"),
     ("SYS-AGENT-D5-001", "system"),
 ])
 def test_cases_inherit_their_feature_contact_without_contract_edits(current_routing, case_id, domain):

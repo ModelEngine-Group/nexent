@@ -94,7 +94,7 @@ def test_end_serialization_failure_keeps_terminal_outcome_and_releases_active_sp
         with provider.get_tracer("test").start_as_current_span(
             "agent.run", attributes={"nexent.cancelled": True}
         ) as span:
-            run_id = span.attributes["nexent.trajectory_id"]
+            run_id = span.attributes["nexent.local.nexent.trajectory_id"]
         assert processor._terminal[run_id][0] == "cancelled"
         assert not processor._active and not processor._started
         assert run_id in processor._gaps
@@ -117,7 +117,7 @@ def test_start_failure_and_capacity_limit_do_not_escape_to_agent(
     span.set_attributes.assert_not_called()
     mocker.patch(
         "infrastructure.trace.trajectory_processor.trace.get_current_span",
-        return_value=SimpleNamespace(attributes={"nexent.trajectory_id": "run"}),
+        return_value=SimpleNamespace(attributes={"nexent.local.nexent.trajectory_id": "run"}),
     )
     processor._active = dict.fromkeys(range(10000))
     processor.on_start(span)
@@ -174,7 +174,7 @@ def test_active_snapshot_failure_cannot_retain_or_publish_generated_body(
     writer = processor._writers["run"] = Mock()
     processor._active = {
         1: SimpleNamespace(
-            attributes={"nexent.trajectory_id": "run"},
+            attributes={"nexent.local.nexent.trajectory_id": "run"},
             context=SimpleNamespace(span_id=1),
         )
     }

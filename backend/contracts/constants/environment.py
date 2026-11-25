@@ -51,9 +51,24 @@ MAX_KNOWLEDGE_FILE_SIZE_MB = parse_positive_int(os.getenv('MAX_KNOWLEDGE_FILE_SI
 MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_KNOWLEDGE_FILE_SIZE_MB * 1024 * 1024
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
+NEXENT_SANDBOX_PROVIDER = os.getenv('NEXENT_SANDBOX_PROVIDER', 'docker').strip().lower()
+NEXENT_SANDBOX_ENABLED = os.getenv('NEXENT_SANDBOX_ENABLED', 'true').strip().lower() == 'true'
 NEXENT_SANDBOX_WORKSPACE_MODE = os.getenv('NEXENT_SANDBOX_WORKSPACE_MODE', 'legacy')
 NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT = os.getenv('NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT', '')
-NEXENT_SANDBOX_FAILURE_POLICY = os.getenv('NEXENT_SANDBOX_FAILURE_POLICY', 'local')
+_DEFAULT_SANDBOX_FAILURE_POLICY = 'error' if NEXENT_SANDBOX_PROVIDER == 'kubernetes' else 'local'
+NEXENT_SANDBOX_FAILURE_POLICY = os.getenv('NEXENT_SANDBOX_FAILURE_POLICY', _DEFAULT_SANDBOX_FAILURE_POLICY)
+# Kubernetes identity is injected only into the trusted Runtime Pod.
+NEXENT_RUNTIME_DEPLOYMENT_ID = os.getenv('NEXENT_RUNTIME_DEPLOYMENT_ID', '')
+NEXENT_RUNTIME_POD_NAMESPACE = os.getenv('NEXENT_RUNTIME_POD_NAMESPACE', '')
+NEXENT_RUNTIME_POD_NAME = os.getenv('NEXENT_RUNTIME_POD_NAME', '')
+NEXENT_RUNTIME_POD_UID = os.getenv('NEXENT_RUNTIME_POD_UID', '')
+NEXENT_RUNTIME_POD_IP = os.getenv('NEXENT_RUNTIME_POD_IP', '')
+NEXENT_RUNTIME_CONTAINER_NAME = os.getenv('NEXENT_RUNTIME_CONTAINER_NAME', 'nexent-runtime')
+NEXENT_SANDBOX_WORKSPACE_CLAIM = os.getenv('NEXENT_SANDBOX_WORKSPACE_CLAIM', '')
+NEXENT_SANDBOX_WORKSPACE_MOUNT = os.getenv('NEXENT_SANDBOX_WORKSPACE_MOUNT', '/mnt/nexent')
+NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT = os.getenv('NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT', 'false').lower() == 'true'
+NEXENT_SANDBOX_EXECUTION_UID = int(os.getenv('NEXENT_SANDBOX_EXECUTION_UID', '1000'))
+NEXENT_SANDBOX_EXECUTION_GID = int(os.getenv('NEXENT_SANDBOX_EXECUTION_GID', '1000'))
 ROOT_DIR = os.getenv('ROOT_DIR')
 PER_WAVE_TIMEOUT = int(os.getenv('DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S', '30'))
 MAX_TIMEOUT = int(os.getenv('DP_SPLIT_WAIT_TIMEOUT_MAX_S', '1800'))
@@ -221,6 +236,11 @@ MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY')
 MINIO_REGION = os.getenv('MINIO_REGION')
 MINIO_DEFAULT_BUCKET = os.getenv('MINIO_DEFAULT_BUCKET')
 MINIO_SECURE = os.getenv('MINIO_SECURE', 'true').lower() == 'true'
+# Optional externally reachable authority (host:port) for presigned URLs that
+# leave the container network. A presigned URL's signature covers the Host
+# header, so the URL must be signed against the authority the caller will
+# actually use; empty/unset falls back to MINIO_ENDPOINT (internal-only).
+MINIO_EXTERNAL_ENDPOINT = os.getenv('MINIO_EXTERNAL_ENDPOINT', '')
 
 # Postgres Configuration
 POSTGRES_HOST = os.getenv('POSTGRES_HOST')
@@ -384,10 +404,13 @@ DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
 
-# Telemetry and Monitoring Configuration (OTLP Protocol)
+# Telemetry and Monitoring Configuration
 MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
-ENABLE_TELEMETRY = (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
+_LOCAL_FILE_TELEMETRY = MONITORING_PROVIDER == 'local_file'
+_LOCAL_FILE_MONITORING_RAW = os.getenv('LOCAL_FILE_MONITORING_ENABLED') or (ENABLE_TELEMETRY_RAW if _LOCAL_FILE_TELEMETRY else None)
+LOCAL_FILE_MONITORING_ENABLED = (_LOCAL_FILE_MONITORING_RAW or 'true').strip().lower() == 'true'
+ENABLE_TELEMETRY = LOCAL_FILE_MONITORING_ENABLED if _LOCAL_FILE_TELEMETRY else (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
 OTEL_SERVICE_NAME_RAW = os.getenv('OTEL_SERVICE_NAME')
 OTEL_SERVICE_NAME = OTEL_SERVICE_NAME_RAW or 'nexent-backend'
 OTEL_EXPORTER_OTLP_ENDPOINT_RAW = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT')
@@ -423,7 +446,8 @@ MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROL
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
-TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
+_TRAJECTORY_READ_DEFAULT = 'true' if _LOCAL_FILE_TELEMETRY or LOCAL_FILE_MONITORING_ENABLED else 'false'
+TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', _TRAJECTORY_READ_DEFAULT).lower() == 'true'
 TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
 TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
 # ZIP exchange budgets shared by temporary and saved trajectory imports.
@@ -465,7 +489,7 @@ APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 NEXENT_TOOL_FASTPATH_ENABLED = os.getenv('NEXENT_TOOL_FASTPATH_ENABLED', 'true').strip().lower() == 'true'
 NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip()))
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv('NEXENT_SANDBOX_DEFAULT_LEVEL', 'local').lower()
-# Default sandbox isolation level: local / docker / wasm.
+# Default sandbox level: local / docker / kubernetes / wasm.
 #    Default 'local' preserves backward-compatibility for existing deployments.
 NEXENT_SANDBOX_DEFAULT_SCOPE = os.getenv('NEXENT_SANDBOX_DEFAULT_SCOPE', 'system').lower()
 # Default sandbox container lifecycle scope: session / system.

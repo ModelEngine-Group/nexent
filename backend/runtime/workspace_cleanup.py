@@ -14,6 +14,12 @@ _RUN_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 def cleanup_orphaned_agent_workspaces(workspace_root: str = AGENT_WORKSPACE_ROOT) -> int:
     """Remove run-scoped workspaces left behind by a previous Runtime process."""
+    from runtime.identity import uses_distributed_runtime
+
+    if uses_distributed_runtime():
+        # Scoped recovery owns protected run paths. A UUID-shaped directory is
+        # never evidence that another Runtime stopped using its files.
+        return 0
     root = Path(workspace_root)
     if not root.exists() or not root.is_dir() or root.is_symlink():
         return 0

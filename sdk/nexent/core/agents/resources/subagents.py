@@ -16,7 +16,7 @@ perspective.
 from __future__ import annotations
 
 import uuid
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any, Callable, Iterable
@@ -192,6 +192,33 @@ class SubAgentToolWrapper:
 
     def _invoke(self, target: Callable, args: tuple, kwargs: dict, *, forward_call: bool = False) -> Any:
         """Keep tracing and observer boundaries identical for both entry points."""
+        with self._observe_invocation(args, kwargs) as manager:
+            invocation = (
+                self._invocation_factory()
+                if self._invocation_factory is not None
+                else nullcontext(self._inner)
+            )
+            with invocation as agent:
+                if self._invocation_factory is not None:
+                    target = getattr(agent, "forward", agent) if forward_call else agent
+                result = target(*args, **kwargs)
+            self._record_result(manager, result)
+            return result
+
+    async def invoke_async(self, target, **kwargs):
+        """Observe an asynchronous remote delegate for its full request lifetime."""
+        with self._observe_invocation((), kwargs) as manager:
+            result = await target(**kwargs)
+            self._record_result(manager, result)
+            return result
+
+    def _record_result(self, manager, result):
+        manager.set_openinference_output(result)
+        if self._on_success is not None:
+            self._on_success(self.name)
+
+    @contextmanager
+    def _observe_invocation(self, args, kwargs):
         task_text = self._task_extractor(args, kwargs)
         invocation_id = uuid.uuid4().hex
         start_kwargs = dict(self._runtime_identity)
@@ -227,19 +254,7 @@ class SubAgentToolWrapper:
                 run_timing=timing, **attributes,
             ):
                 with child_run_scope(metadata, timing):
-                    invocation = (
-                        self._invocation_factory()
-                        if self._invocation_factory is not None
-                        else nullcontext(self._inner)
-                    )
-                    with invocation as agent:
-                        if self._invocation_factory is not None:
-                            target = getattr(agent, "forward", agent) if forward_call else agent
-                        result = target(*args, **kwargs)
-                    manager.set_openinference_output(result)
-                    if self._on_success is not None:
-                        self._on_success(self.name)
-                    return result
+                    yield manager
         finally:
             end_kwargs = dict(self._runtime_identity)
             if self._invocation_name is not None:
