@@ -507,7 +507,9 @@ class ExternalA2AExecutionBinding(RunSpecModel):
 
 
 class PreparedMemorySearch(RunSpecModel):
-    query: str = Field(max_length=65536)
+    # Preserve the complete, already-validated user request so signed snapshots
+    # can replay memory presearch without a second, narrower character limit.
+    query: str
     result: str = Field(max_length=131072)
 
     def observer_events(self) -> list[dict[str, JsonValue]]:
