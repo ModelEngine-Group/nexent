@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Segmented } from "antd";
+import { Activity, Box, ChartNoAxesColumnIncreasing } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -65,6 +66,7 @@ export function ModelMonitoringPanels({
           {
             id: "inventory",
             title: label("current"),
+            Icon: Box,
             value: inventory.loading
               ? t("common.loading")
               : number(inventory.count),
@@ -74,12 +76,14 @@ export function ModelMonitoringPanels({
     {
       id: "requests",
       title: label("requests"),
+      Icon: Activity,
       value: renderValue(metrics?.request_count ?? null),
       unit: metrics?.request_count != null ? label("requestUnit") : undefined,
     },
     {
       id: "tokens",
       title: t("ops.monitoring.agent.tokenCard"),
+      Icon: ChartNoAxesColumnIncreasing,
       value:
         summaryLoading && !metrics
           ? t("common.loading")
@@ -106,8 +110,9 @@ export function ModelMonitoringPanels({
         aria-label={label("summary")}
         aria-busy={summaryLoading || summary.isFetching}
       >
-        {cards.map(({ id, title, value, unit }) => (
+        {cards.map(({ id, title, value, unit, Icon }) => (
           <div className={styles.card} key={id}>
+            <Icon className={styles.icon} size={24} aria-hidden />
             <div>
               <dt>{title}</dt>
               <dd>
