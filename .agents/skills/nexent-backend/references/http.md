@@ -1,6 +1,6 @@
 # HTTP layer
 
-Applies to service API modules in `backend/management/api/`, `backend/runtime/api/`, `backend/ops/api/`, and `backend/data_process/api/`, and internal routes registered from `backend/runtime/agentos/`. Shared FastAPI assembly lives in `backend/http/server/`.
+Start with the owning API under `backend/management/api/`, `backend/runtime/api/`, or `backend/ops/api/`. Runtime also registers internal routes from `backend/runtime/agentos/`. Shared FastAPI assembly lives in `backend/http/server/`.
 
 ## Boundary and compatibility
 

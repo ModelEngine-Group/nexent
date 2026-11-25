@@ -2,7 +2,7 @@
 
 ## Repository map
 
-- `backend/` contains Gateway, Management, Runtime, Ops, and Data Process. Shared backend adapters live in `infrastructure/`; the agent framework lives in `sdk/nexent/`.
+- The backend service map centers on Gateway, Management, Runtime, and Ops under `backend/`. Management and Runtime communicate through AgentOS. Shared technical adapters live in `infrastructure/`, and the execution framework lives in `sdk/nexent/`.
 - `frontend/` contains the Next.js UI. Deployment resources live in `deploy/`, `docker/`, and `k8s/`.
 - Python tests live in `test/backend/` and `test/sdk/`.
 
