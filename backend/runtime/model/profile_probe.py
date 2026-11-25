@@ -57,16 +57,19 @@ async def probe_model_profile(profile, key, *, http_headers=None):
     return {"ok": False, "error": error}
 
 
-async def probe_until_disconnect(profile, key, headers, is_disconnected):
-    task = asyncio.create_task(probe_model_profile(profile, key, http_headers=headers),
-                               name="runtime-model-outlet-connectivity")
+async def probe_until_disconnect(profile, key, headers, wait_for_disconnect):
+    probe = asyncio.create_task(
+        probe_model_profile(profile, key, http_headers=headers), name="runtime-model-outlet-connectivity",
+    )
+    disconnect = asyncio.create_task(wait_for_disconnect())
     try:
-        while not task.done():
-            await asyncio.wait({task}, timeout=0.05)
-            if not task.done() and await is_disconnected():
-                raise asyncio.CancelledError()
-        return await task
+        finished, _ = await asyncio.wait({probe, disconnect}, return_when=asyncio.FIRST_COMPLETED)
+        if disconnect in finished:
+            disconnect.result()
+            raise asyncio.CancelledError()
+        return probe.result()
     finally:
-        if not task.done():
-            task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        for task in (probe, disconnect):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(probe, disconnect, return_exceptions=True)

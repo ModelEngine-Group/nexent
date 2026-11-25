@@ -32,6 +32,7 @@ change:
     reason: Unit coverage proves filtering and UI state; the HTTP Case exercises the live probe path.
     test_selectors:
     - test/backend/services/test_agentos_model_administration.py
+    - test/backend/services/test_agentos_profile_probe.py
     - test/backend/gateway/test_edge.py
     - test/backend/app/test_model_managment_app.py::test_inventory_healthcheck_hides_diagnostic
     - test/backend/services/test_model_health_service.py

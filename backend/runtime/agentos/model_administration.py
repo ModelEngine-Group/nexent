@@ -111,7 +111,12 @@ async def _profile_probe(payload, actor, request):
     profile = ResolvedModelProfile.model_validate(payload.profile)
     if profile.identity.tenant_id != actor.tenant_id:
         raise ValueError("Model profile tenant does not match the authenticated actor")
-    return await probe_until_disconnect(profile, payload.api_key, payload.http_headers, request.is_disconnected)
+    async def wait_for_disconnect():
+        # A blocking receive lets ASGI middleware forward the disconnect across checkpoints.
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    return await probe_until_disconnect(profile, payload.api_key, payload.http_headers, wait_for_disconnect)
 
 
 def _endpoint(schema, call, *, request_aware=False, serialize=_safe_result):
