@@ -7445,6 +7445,7 @@
   "ops.monitoring.mcp.toolTop": "工具调用量 Top 5",
   "ops.monitoring.mcp.serviceDetails": "MCP 服务明细",
   "ops.monitoring.mcp.toolDetails": "工具明细",
+  "ops.monitoring.mcp.noPublishedStatistics": "所选时间范围暂无已发布统计",
   "ops.monitoring.mcp.serviceName": "服务名称",
   "ops.monitoring.mcp.toolName": "工具名称",
   "ops.monitoring.mcp.searchServices": "搜索服务名称",

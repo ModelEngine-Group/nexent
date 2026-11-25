@@ -61,9 +61,10 @@ export function McpMonitoringDetails({
     enabled: selection !== null,
   });
   const response = details.isError ? undefined : details.data;
-  const total = response?.data.total;
+  const uncovered = response?.coverage_state === "uncovered";
+  const total = uncovered ? undefined : response?.data.total;
   const lastPage = Math.max(1, Math.ceil((total ?? 0) / list.pageSize));
-  if (listScope === scope && response && list.page > lastPage) {
+  if (listScope === scope && total !== undefined && list.page > lastPage) {
     setList({ ...list, page: lastPage });
   }
   const loading =
@@ -177,8 +178,8 @@ export function McpMonitoringDetails({
   };
   const emptyLabel = !hasRange
     ? t("ops.monitoring.chooseRange")
-    : response?.coverage_state === "uncovered"
-      ? "—"
+    : uncovered
+      ? label("noPublishedStatistics")
       : t("ops.empty");
 
   return (

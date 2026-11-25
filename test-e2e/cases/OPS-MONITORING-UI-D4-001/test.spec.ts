@@ -1447,6 +1447,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     );
     await expectCards(["当前 MCP 总数", "工具调用量"], ["1", "—"]);
     await expect(trend.getByText("—", { exact: true })).toBeVisible();
+    await expect(services.getByText("所选时间范围暂无已发布统计", { exact: true })).toBeVisible();
+    await expect(services.locator(".ant-pagination")).toHaveCount(0);
+    await expect(services.getByText("共 0 个服务", { exact: true })).toHaveCount(0);
+    await screenshot("mcp-uncovered");
     failMcpService = true;
     await choose("MCP", "研发服务");
     await expect(mcp.getByRole("alert").filter({ hasText: "加载失败" })).toHaveCount(4);

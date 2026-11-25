@@ -7448,6 +7448,7 @@
   "ops.monitoring.mcp.toolTop": "Top 5 tools by calls",
   "ops.monitoring.mcp.serviceDetails": "MCP service details",
   "ops.monitoring.mcp.toolDetails": "Tool details",
+  "ops.monitoring.mcp.noPublishedStatistics": "No published statistics for the selected period",
   "ops.monitoring.mcp.serviceName": "Service name",
   "ops.monitoring.mcp.toolName": "Tool name",
   "ops.monitoring.mcp.searchServices": "Search service names",
