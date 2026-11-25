@@ -9,6 +9,7 @@ from sqlalchemy import select
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
+from infrastructure.rdb.skill_execution_records import SkillInfo
 from management.utils.serialization import convert_string_to_list
 from ops.monitoring.agent import summarize_agent
 from ops.monitoring.model import summarize
@@ -202,3 +203,56 @@ def metric_value(row, metric):
     if isinstance(value, dict):
         return int(value["value"]) if value["value"] is not None else None
     return value
+
+
+def skill_catalog(tenant: str | None) -> list[dict]:
+    columns = (SkillInfo.tenant_id, SkillInfo.skill_id, SkillInfo.skill_name)
+    statement = select(*columns).where(SkillInfo.delete_flag != "Y")
+    if tenant is not None:
+        statement = statement.where(SkillInfo.tenant_id == tenant)
+    with get_db_session() as session:
+        return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def read_skills(service, *, tenant, start: date, end: date, groups, skill_id, skill_name):
+    write_failed = service.store.has_failed_batches(tenant, "skill", start, end)
+    rows, states, published = _read_published_rows(
+        service, tenant=tenant, kind="skill", start=start, end=end,
+        initiator_group_ids=groups, skill_id=skill_id, skill_name=skill_name,
+    )
+    available = sorted({row["statistic_date"] for row in published})
+    inventory = [dict(row, skill_id=str(row["skill_id"])) for row in skill_catalog(tenant)
+                 if (skill_id is None or str(row["skill_id"]) == str(skill_id))
+                 and (skill_name is None or row["skill_name"] == skill_name)]
+    tenants = {row["tenant_id"] for row in inventory}
+    if tenant is not None:
+        tenants.add(tenant)
+    status = _publication_status(
+        service, kind="skill", start=start, end=end, tenants=tenants,
+        states=states, published=published, write_failed=write_failed,
+    )
+    return rows, inventory, available, status
+
+
+def skill_rows(rows, inventory, *, covered):
+    by_skill = defaultdict(list)
+    identities = {(row["tenant_id"], row["skill_id"]): row for row in inventory}
+    for row in rows:
+        raw_skill_id = row.get("skill_id")
+        if raw_skill_id is None:
+            continue
+        key = row["tenant_id"], str(raw_skill_id)
+        by_skill[key].append(row)
+        identities.setdefault(key, {"tenant_id": key[0], "skill_id": key[1],
+                                    "skill_name": row.get("skill_name")})
+    result = []
+    for key, skill in identities.items():
+        usage_rows = by_skill.get(key, ())
+        usage_count = sum(row.get("usage_count", 0) for row in usage_rows)
+        result.append({**skill, "metrics": {"usage_count": usage_count}
+                       if covered or key in by_skill else None})
+    return result
+
+
+def skill_metric_value(row):
+    return (row["metrics"] or {}).get("usage_count")

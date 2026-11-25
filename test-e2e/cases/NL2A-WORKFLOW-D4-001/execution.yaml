@@ -1,0 +1,34 @@
+schema_version: '1.0'
+case_id: NL2A-WORKFLOW-D4-001
+timeout_seconds: 600
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: NL2A-WORKFLOW-D4-001
+acceptance_bindings:
+  AC-KNOWLEDGE-AUTO:
+  - NL2A-WORKFLOW-D4-001
+  AC-KNOWLEDGE-CHOICE:
+  - NL2A-WORKFLOW-D4-001
+  AC-STEPS:
+  - NL2A-WORKFLOW-D4-001
+  AC-REPLAY:
+  - NL2A-WORKFLOW-D4-001
+  AC-UNIFIED-CARD:
+  - NL2A-WORKFLOW-D4-001
+  AC-COVERAGE-STAGE:
+  - NL2A-WORKFLOW-D4-001
+  AC-KNOWLEDGE-DIALOG:
+  - NL2A-WORKFLOW-D4-001
+  AC-BOUND-LIST:
+  - NL2A-WORKFLOW-D4-001
+  AC-SKILL-SYNC:
+  - NL2A-WORKFLOW-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained editor and creator transport/history fixtures live only in the
+  browser context. No persistent tenant/model/Agent is created. Cleanup closes the
+  context and verifies no unexpected Agent writes. F-045 owns agent_config responsibility.

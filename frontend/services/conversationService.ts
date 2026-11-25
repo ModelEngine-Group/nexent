@@ -44,14 +44,11 @@ const getWebSocketUrl = (endpoint: string): string => {
 export const conversationService = {
   async getCreatorHistories(
     kind: ConversationTarget["type"],
-    targetId: number,
-    offset = 0
+    targetId: number
   ): Promise<CreatorHistoryPage> {
     const query = new URLSearchParams({
       kind,
       target_id: String(targetId),
-      offset: String(offset),
-      limit: "20",
     });
     const response = await fetchWithErrorHandling(
       `${API_ENDPOINTS.conversation.creatorHistories}?${query}`,

@@ -3381,8 +3381,20 @@ class TestRunStreamRealExecution:
         agent.observer.commit_model_attempt.assert_not_called()
         agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
         assert response.model_attempt_commit_deferred is False
-        expected_stops = ["<RESULT>", "</code>"] if supports_stop else None
+        expected_stops = ["<RESULT>"] if supports_stop else None
         assert agent.model.call_args.kwargs["stop_sequences"] == expected_stops
+
+    def test_strict_stop_does_not_execute_unclosed_code(self):
+        module = core_agent_module
+        agent, action_step, _ = self._create_cmsr_007_step_agent("<code>print(1)", finish_reason="stop")
+        agent.enable_protocol_repair_retry = True
+        agent.python_executor = MagicMock()
+
+        with pytest.raises(module.ModelOutputProtocolError):
+            list(agent._step_stream(action_step))
+
+        agent.python_executor.assert_not_called()
+        agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
 
     @pytest.mark.parametrize("content", [
         "A complete plain answer.",

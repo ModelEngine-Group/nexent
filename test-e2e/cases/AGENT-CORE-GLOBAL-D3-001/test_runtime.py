@@ -131,7 +131,7 @@ def _assert_creator_history(monkeypatch, info, output):
 
 @pytest.mark.parametrize("protocol", ["native", "text"])
 def test_global_creator_card_completes_at_interactive_boundary(monkeypatch, protocol):
-    from services.nl2agent_service import _Nl2AgentBoundaryObserver
+    from management.services.agent.nl2agent import _Nl2AgentBoundaryObserver
     monkeypatch.setattr(core_policy, "NEXENT_AGENT_CORE", "jiuwen")
 
     def configure(info):
@@ -185,7 +185,7 @@ def test_global_creator_native_mcp_card_and_history(monkeypatch, protocol, tmp_p
     from management.services.conversation.creation_history import persist_creation_stream
     from management.services.conversation.service import get_conversation_history_service
     from nexent.core.agents.contracts.config import ToolConfig
-    from services import nl2agent_service as service
+    from management.services.agent import nl2agent as service
 
     monkeypatch.setattr(core_policy, "NEXENT_AGENT_CORE", "jiuwen")
     with creator_mcp(tmp_path) as url:

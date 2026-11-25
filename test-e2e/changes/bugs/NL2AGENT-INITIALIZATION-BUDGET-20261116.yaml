@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-INITIALIZATION-BUDGET-20261116
+  change_type: bugfix
+  bug_id: NL2AGENT-INITIALIZATION-BUDGET-20261116
+  title: Give resource vector initialization a separate deadline
+  description: Separate bounded resource preparation from the ten-second ES search budget.
+  observed_behavior: Cold resource embedding and ES indexing exhaust the shared ten-second deadline before hybrid search can start.
+  expected_behavior: Preparation has an independent 120-second budget, followed by a fresh ten-second search budget. NL2Agent MCP calls allow 150 seconds for both phases and surrounding work. Both phases stop on timeout or cancellation and retain completed documents.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing unit tests enforce a single deadline but do not assert cold initialization longer than ten seconds can reach semantic search.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: [NL2A-COVERAGE-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_semantic_retrieval.py
+      - test/backend/services/test_nl2agent_search_concurrency.py
+      - test/backend/services/test_nl2agent_service.py
+    behaviors:
+      - Cold initialization exceeding ten seconds completes before a fresh search deadline starts.
+      - Preparation deadline exhaustion retains completed documents and never starts search.
+      - Both outer phase timeouts and cancellation stop work and report the correct phase budget.
+      - Existing vector reuse, model changes, authorization and bounded searches remain intact.
+    reason: Deadline reset is a unit orchestration contract. Strengthen its owning UT without adding a duplicate D1; reuse existing real-ES runtime coverage for adjacent regressions.
+  notes: >-
+    SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md,
+    initialization budget section and task TASK-025. F-045-RULE-10 owns this fix.
+    Existing D3 owns disposable ES, database, Redis and listeners; no new test
+    resources or deployment mode are introduced. D2/D4/D5 are unaffected because
+    routes, progress payloads, persistence identity and deployment remain unchanged.

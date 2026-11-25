@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-SEARCH-ALTERNATIVES-20261116
+  change_type: bugfix
+  bug_id: NL2AGENT-SEARCH-ALTERNATIVES-20261116
+  title: Retain interchangeable search tools through recall and capability verification
+  description: Broaden bounded lexical recall and require independent reasoned candidate assessments before selecting binding
+    defaults.
+  observed_behavior: Same-tenant available DeepSeek and Tavily were absent from hybrid candidates; Linkup with an adequate
+    public-web declaration was excluded while equivalent Exa alone was accepted.
+  expected_behavior: Bounded recall admits alternative tools beyond Top-3; every offered candidate receives an independent
+    reasoned assessment and every positive assessment is retained. Binding alone chooses the default.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing bilingual and semantic tests did not assert four interchangeable web-search tools or complete per-candidate
+      assessments with acceptance consistency.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - F-045
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - NL2A-COVERAGE-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_nl2agent_search_alternatives.py
+    - test/backend/services/test_nl2agent_bilingual_recall.py
+    - test/backend/services/test_nl2agent_resource_flow.py
+    behaviors:
+    - Recall actual public-web declarations beyond Top-3, preserve score ties within a hard limit, and reject sub-threshold
+      matches.
+    - Require exhaustive reasoned assessments, reject duplicates/unknown references/acceptance mismatch and preserve legacy
+      in-flight calls.
+    - Accumulate qualified alternatives and assessment evidence across pages; card defaults do not remove alternatives.
+    reason: Unit tests own ranking and validation; strengthen the existing runtime Case instead of adding a duplicate D1.
+  notes: 'SPEC: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md section 7.3 and search-alternatives-fix.md.
+    Existing D3 case retains Agent configuration routing and self-contained preparation with owned PostgreSQL/Redis/ES, listeners
+    and workers cleanup. D3 execution requires disposable services; live-provider semantic ranking and real-model compliance
+    remain separate evidence.'

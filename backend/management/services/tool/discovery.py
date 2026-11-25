@@ -342,6 +342,10 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
     tools_info = []
     for record in mcp_info:
+        # API-converted tools are exposed by the tenant MCP below, not by their REST server.
+        config = record.get("config_json")
+        if isinstance(config, dict) and "openapi" in config:
+            continue
         # Only scan MCP services that are explicitly enabled and currently healthy.
         if bool(record.get("enabled")) and bool(record.get("status")):
             try:
@@ -355,7 +359,8 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
                     )
                 )
             except Exception as e:
-                logger.error(f"mcp connection error: {str(e)}")
+                logger.error("mcp connection error: service=%s exception_type=%s",
+                             record["mcp_name"], type(e).__name__)
 
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     tools_info.extend(

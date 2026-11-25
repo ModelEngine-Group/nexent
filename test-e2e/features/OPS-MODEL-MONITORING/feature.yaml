@@ -9,7 +9,7 @@ feature:
   description: Capture model request attempts and publish tenant-scoped monitoring results from the independent operations database and shared Elasticsearch indexes.
   business_rules:
   - rule_id: OPS-MODEL-MONITORING-RULE-01
-    description: Enable monitoring by default, automatically initialize independent Ops control storage during deployment, and apply shared monitoring mappings. Explicit false disables the monitoring data plane.
+    description: Enable monitoring by default. Only the Ops service initializes its independent control storage and shared monitoring mappings during deployment; producer services collect and retry without running Ops migrations. Explicit false disables the monitoring data plane.
   - rule_id: OPS-MODEL-MONITORING-RULE-02
     description: Count real model attempts and publish matching daily results without duplicating replayed events or mixing tenant or fact types.
   - rule_id: OPS-MODEL-MONITORING-RULE-03

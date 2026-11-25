@@ -1,0 +1,55 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: NL2A-INPUT-D3-001
+  feature_id: F-045
+  business_rule_ids: [F-045-RULE-05, F-045-RULE-06]
+  title: NL2Agent validates resource search input and reaches later repository pages
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Distinguish an empty search from invalid input or pagination failure and find matching resources on later pages.
+  preconditions:
+  - The local backend test environment can create a disposable PostgreSQL schema.
+  test_data:
+    model: Case-owned deterministic HTTP provider
+    target: Case-owned editable Agent draft
+    catalogs: Controlled empty installed and installable catalogs
+  steps:
+  - order: 1
+    action: Through the run endpoint, call both resource searches with nine distinct requirements.
+    expected: Both tools report the technical limit of eight without querying either catalog.
+  - order: 2
+    action: Resubmit the first eight requirements through the run endpoint.
+    expected: Both tools accept the complete batch and report all eight IDs as uncovered in the controlled empty catalogs.
+  - order: 3
+    action: Search installable resources where the exact matches are on the fourth page of each repository.
+    expected: Both matches are returned even when the first 300 listings cannot satisfy the requirement.
+  - order: 4
+    action: Retry with a repository that repeats an already-consumed continuation cursor.
+    expected: The tool reports a retryable search error, without a normal empty result.
+  expected_results:
+  - The oversized batch gets a distinct non-retryable error and the maximum batch size.
+  - Both runs terminate normally and the accepted batch keeps all submitted IDs.
+  - The Skill page and MCP cursor advance until the last page or an explicit search error.
+  forbidden_side_effects:
+  - Searching creates no resource card, updates no draft and publishes no version.
+  integration_boundary:
+  - Real run endpoint, SDK code actions, local MCP discovery and dispatch, tool validation, search service and SSE; identity, model and catalog data are controlled.
+  observations:
+  - Tool results and terminal SSE events, catalog call counts, and persistent draft and version readback.
+  cleanup:
+  - Own and release the PostgreSQL schema, model provider, MCP listener, workspace and runtime workers. No shared preparation families.
+  acceptance:
+  - id: AC-RESOURCE-INPUT-LIMIT
+    description: Both tool calls reject the oversized batch without searching, and accept all requirements in a supported batch.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-RESOURCE-PAGINATION
+    description: Both listing sources advance beyond 300 records and a stalled cursor is distinguishable from no results.
+    steps: [3, 4]
+    expected_results: [3]
+    forbidden_side_effects: [1]

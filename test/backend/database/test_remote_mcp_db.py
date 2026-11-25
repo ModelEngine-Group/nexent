@@ -139,11 +139,15 @@ def test_create_mcp_record_success(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("management.db.mcp.remote.filter_property", lambda data, model: data)
-    monkeypatch.setattr("management.db.mcp.remote.McpRecord", lambda **kwargs: MagicMock())
+    record = MagicMock(mcp_id=None)
+    session.flush.side_effect = lambda: setattr(record, "mcp_id", 42)
+    monkeypatch.setattr("management.db.mcp.remote.McpRecord", lambda **kwargs: record)
 
     mcp_data = {"mcp_name": "test_mcp", "mcp_server": "http://test.server.com", "status": True}
-    create_mcp_record(mcp_data, "tenant1", "user1")
-    session.add.assert_called_once()
+    assert create_mcp_record(mcp_data, "tenant1", "user1") == 42
+    session.add.assert_called_once_with(record)
+    session.flush.assert_called_once()
+    mock_ctx.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_create_mcp_record_with_custom_headers(monkeypatch, mock_session):

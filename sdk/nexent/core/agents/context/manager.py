@@ -53,9 +53,9 @@ class ContextManager:
         if message_format == "openai_chat_completions":
             handlers = {ContextItemType.CONVERSATION_TURN: render_native_turn,
                         ContextItemType.CURRENT_ACTION: render_chat_action}
-        self._item_renderer = ContextItemRenderer(handlers)
         self._request_token_estimator = request_token_estimator
         self.config = config or ContextManagerConfig()
+        self._item_renderer = ContextItemRenderer(handlers, execution_result_role=self.config.execution_result_role)
         self.use_result_observations = False
         if max_steps is not None:
             self.config.keep_recent_steps = min(self.config.keep_recent_steps, max_steps)

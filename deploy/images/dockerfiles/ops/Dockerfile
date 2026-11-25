@@ -120,8 +120,10 @@ COPY infrastructure/rdb/trajectory /opt/infrastructure/rdb/trajectory
 COPY infrastructure/trace /opt/infrastructure/trace
 COPY sdk/nexent /opt/nexent
 COPY VERSION /opt/nexent/VERSION
-COPY --chmod=0755 deploy/common/start-backend.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+COPY --chmod=0755 deploy/common/start-ops.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+# Preserve older deployed command paths with the same Ops-only initialization.
+RUN ln -s start-ops.sh /opt/nexent/scripts/start-backend.sh
 COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
 COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 
-ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service"]
+ENTRYPOINT ["/opt/nexent/scripts/start-ops.sh", "python", "-m", "backend.http.ops_service"]

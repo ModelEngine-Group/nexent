@@ -12,14 +12,16 @@ from infrastructure.rdb.client import get_db_session
 from management.db.models import McpRecord
 
 logger = logging.getLogger("remote_mcp_db")
-def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
+
+
+def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str) -> int:
     """
     Create new MCP record
 
     :param mcp_data: Dictionary containing MCP information
     :param tenant_id: Tenant ID
     :param user_id: User ID
-    :return: Created MCP record
+    :return: ID of the committed MCP record
 
     """
     allowed_fields = {
@@ -74,6 +76,9 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
             )
         new_mcp = McpRecord(**filtered_data)
         session.add(new_mcp)
+        session.flush()
+        mcp_id = new_mcp.mcp_id
+    return mcp_id
 
 
 def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str):

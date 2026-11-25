@@ -5,6 +5,11 @@ implementations:
   file: test.test.tsx
   selector: NL2A-RESOURCE-D1-001
 acceptance_bindings:
+  AC-06:
+  - NL2A-RESOURCE-D1-001 > loads deferred tool configuration before opening from Bind
+  - NL2A-RESOURCE-D1-001 > loads deferred skill configuration before opening from Bind
+  - NL2A-RESOURCE-D1-001 > keeps failed tool configuration closed and permits retry
+  - NL2A-RESOURCE-D1-001 > keeps failed skill configuration closed and permits retry
   AC-01:
   - NL2A-RESOURCE-D1-001 > renders three resource types and preserves ordinary Tool
     and Skill configuration
