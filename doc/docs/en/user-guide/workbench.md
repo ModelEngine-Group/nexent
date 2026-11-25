@@ -99,14 +99,4 @@ If the draft has no prompt yet, Workbench saves the first generated prompt direc
 ![Reviewing and saving a skill draft](./assets/workbench/skill-creation.png)
 -->
 
-## Reopen a conversation
-
-1. Select an existing conversation in the Workbench sidebar to view its saved messages and run status. If you switch pages, use the same history entry to return to the task.
-2. If the run is still active, check its progress when you return. If it is complete, review the result and ask follow-up questions. In a reopened creation conversation, you can view saved steps and results and continue when the page offers an action.
-3. Use the menu next to a conversation to **Pin to top**, **Unpin**, **Rename**, or **Delete** it. Click **New conversation** to start a separate task.
-
-<!-- Screenshot pending. Capture an open conversation from history with its sidebar entry and action menu visible.
-![Reopening a Workbench conversation and viewing its action menu](./assets/workbench/conversation-history.png)
--->
-
 See also [Home Page](./home-page) and [Agent Chat](./start-chat).
