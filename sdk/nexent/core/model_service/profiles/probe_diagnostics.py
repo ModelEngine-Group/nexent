@@ -2,14 +2,13 @@
 """Safe model connectivity diagnostics independent of deployment ownership."""
 
 import ssl
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
 import httpx
-import openai
 import requests
-from websockets.exceptions import InvalidStatus
 
 
 @dataclass
@@ -35,26 +34,38 @@ def capture_connectivity_diagnostics():
         _active_diagnostics.reset(token)
 
 
+def _is_adapter_error(error: Exception | None, module: str, name: str) -> bool:
+    # These exception types are available when their adapter uses the protocol.
+    error_type = getattr(sys.modules.get(module), name, None)
+    return isinstance(error_type, type) and isinstance(error, error_type)
+
+
 def record_connectivity_failure(error: Exception | None = None, *, status: int | None = None) -> bool:
     """Capture safe metadata when a caller asked for diagnostics."""
     diagnostics = _active_diagnostics.get()
     if diagnostics is None:
         return False
 
-    from nexent.core.model_service.errors import model_http_error_category
-
-    if isinstance(error, (httpx.HTTPStatusError, requests.exceptions.HTTPError, openai.APIStatusError)):
+    if isinstance(error, (httpx.HTTPStatusError, requests.exceptions.HTTPError)) or _is_adapter_error(
+        error, "openai", "APIStatusError"
+    ):
         status = getattr(error.response, "status_code", None)
-    elif isinstance(error, InvalidStatus):
+    elif _is_adapter_error(error, "websockets.exceptions", "InvalidStatus"):
         status = error.response.status_code
     if status is not None:
+        from nexent.core.model_service.errors import model_http_error_category
+
         diagnostics.category = model_http_error_category(status)
         diagnostics.http_status = status
-    elif isinstance(error, (TimeoutError, httpx.TimeoutException, requests.exceptions.Timeout, openai.APITimeoutError)):
+    elif isinstance(error, (TimeoutError, httpx.TimeoutException, requests.exceptions.Timeout)) or _is_adapter_error(
+        error, "openai", "APITimeoutError"
+    ):
         diagnostics.category, diagnostics.http_status = "MODEL_TIMEOUT", None
     elif isinstance(error, (ssl.SSLError, requests.exceptions.SSLError)):
         diagnostics.category, diagnostics.http_status = "MODEL_TLS_ERROR", None
-    elif isinstance(error, (httpx.NetworkError, requests.exceptions.ConnectionError, openai.APIConnectionError)):
+    elif isinstance(error, (httpx.NetworkError, requests.exceptions.ConnectionError)) or _is_adapter_error(
+        error, "openai", "APIConnectionError"
+    ):
         diagnostics.category, diagnostics.http_status = "MODEL_NETWORK_ERROR", None
     elif isinstance(error, ValueError):
         diagnostics.category, diagnostics.http_status = "MODEL_REQUEST_INVALID", None

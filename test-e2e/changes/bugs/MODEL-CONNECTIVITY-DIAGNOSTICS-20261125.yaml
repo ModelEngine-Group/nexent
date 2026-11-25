@@ -27,6 +27,7 @@ change:
     behaviors:
     - Preserve only the approved diagnostic fields at AgentOS and retain the legacy response shape.
     - Propagate pre-header outlet probe disconnects through Gateway without dropping request-body chunks or leaving the upstream open.
+    - Isolate optional SDK exception types during imports while preserving typed classification at execution.
     - Classify non-LLM transport errors and verify cancel and success produce no failure warning.
     - Display specific diagnostics and their request IDs, and clear the previous issue on success.
     reason: Unit coverage proves filtering and UI state; the HTTP Case exercises the live probe path.
@@ -38,6 +39,7 @@ change:
     - test/backend/services/test_model_health_service.py
     - test/backend/services/test_model_health_outlet_routing.py
     - test/sdk/core/models/test_volc_tts_model.py
+    - test/sdk/core/model_service/test_errors_registry.py
     - frontend/tests/component/modelLibraryChecks.test.tsx
     - frontend/tests/component/modelConfigVerify.test.tsx
     - frontend/tests/component/modelEditDialog.test.tsx

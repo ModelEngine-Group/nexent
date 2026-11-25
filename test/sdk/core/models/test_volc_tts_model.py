@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import sys as _sys
 
+from nexent.core.model_service.profiles.probe_diagnostics import capture_connectivity_diagnostics
+
 _models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../sdk/nexent/core/models"))
 _core_dir = os.path.dirname(_models_dir)
 _nexent_dir = os.path.dirname(_core_dir)
@@ -708,8 +710,6 @@ class TestVolcTTSModelCheckConnectivity:
 
     @pytest.mark.asyncio
     async def test_capture_probe_timeout_without_logging_raw_exception(self, volc_model, caplog):
-        from nexent.core.model_service.profiles.probe_diagnostics import capture_connectivity_diagnostics
-
         with patch.object(volc_model, "generate_speech", side_effect=TimeoutError("private-test-value")):
             with capture_connectivity_diagnostics() as diagnostic:
                 assert not await volc_model.check_connectivity()

@@ -4,7 +4,12 @@
 
 import json
 
+import httpx
+import openai
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response as WebSocketResponse
 from nexent.core.model_service.adapters.openai_chat import (
     ModelAdapterError,
     OpenAIChatAdapter,
@@ -14,6 +19,10 @@ from nexent.core.model_service.errors import normalize_model_error
 from nexent.core.model_service.http_contracts import (
     ModelTransportError,
     RawHttpResponse,
+)
+from nexent.core.model_service.profiles.probe_diagnostics import (
+    capture_connectivity_diagnostics,
+    record_connectivity_failure,
 )
 from pydantic import ValidationError
 
@@ -271,3 +280,36 @@ def test_all_known_categories_and_diagnostics_have_both_locales():
                        safe_message="Legacy internal English", request_id="empty")
     assert model_error_message(error, "zh") == "模型没有返回有效正文或工具调用。"
     assert model_error_message(error, "en") == "The model returned no answer content or tool calls."
+
+
+@pytest.mark.parametrize("exception,category,status", [
+    (
+        openai.AuthenticationError(
+            "private diagnostic",
+            response=httpx.Response(401, request=httpx.Request("POST", "https://provider.test")),
+            body=None,
+        ),
+        "MODEL_AUTHENTICATION_ERROR",
+        401,
+    ),
+    (
+        InvalidStatus(WebSocketResponse(429, "Too Many Requests", Headers())),
+        "MODEL_RATE_LIMITED",
+        429,
+    ),
+    (
+        openai.APITimeoutError(httpx.Request("POST", "https://provider.test")),
+        "MODEL_TIMEOUT",
+        None,
+    ),
+    (
+        openai.APIConnectionError(request=httpx.Request("POST", "https://provider.test")),
+        "MODEL_NETWORK_ERROR",
+        None,
+    ),
+])
+def test_capture_connectivity_diagnostic_from_loaded_adapter(exception, category, status):
+    with capture_connectivity_diagnostics() as diagnostic:
+        assert record_connectivity_failure(exception)
+    assert diagnostic.category == category
+    assert diagnostic.http_status == status
