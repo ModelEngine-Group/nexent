@@ -62,6 +62,12 @@ def resolve_config(config):
     result["search_method"] = normalize_method(result["search_method"])
     if not result["reranking_enable"]:
         result["graph_reranking_enable"] = False
+    # Legacy zero caps mean "not set"; treat them as the default so old
+    # instances flow through the omit-default-caps path without migration.
+    if result["hybrid_top_k"] == 0:
+        result["hybrid_top_k"] = DEFAULTS["hybrid_top_k"]
+    if result["graph_top_k"] == 0:
+        result["graph_top_k"] = DEFAULTS["graph_top_k"]
     return result
 
 

@@ -57,6 +57,10 @@ export function aidpMethods(method: unknown): string[] {
 export function resolveAidpConfig(raw: Record<string, unknown>) {
   const result = { ...aidpDefaults, ...mergeAidpConfig(raw) };
   if (!result.reranking_enable) result.graph_reranking_enable = false;
+  // Legacy zero caps mean "not set"; treat them as the default.
+  if (result.hybrid_top_k === 0)
+    result.hybrid_top_k = aidpDefaults.hybrid_top_k;
+  if (result.graph_top_k === 0) result.graph_top_k = aidpDefaults.graph_top_k;
   return result;
 }
 export function aidpErrors(
