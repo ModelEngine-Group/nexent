@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-ORDERED-DELEGATION-20261120
+  change_type: bugfix
+  bug_id: KSM-ORDERED-DELEGATION-20261120
+  title: Preserve explicitly ordered CodeAgent parent and child execution
+  description: Allow a requested initial parent Python action before mandatory authorized delegation.
+  observed_behavior: The pre-execution delegation gate rejects the first parent action before it reaches the executor.
+  expected_behavior: A successful parent action opens the child phase and the authorized child must return before final completion.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: The SYSTEM integration fixture invokes the executor and child directly, bypassing latest-request delegation policy.
+  feature_contract_changed: false
+  affected_features:
+    existing: [KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [KSM-EXECUTION-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/core/agents/test_shared_agent_policy.py
+      - test/sdk/core/agents/test_jiuwen_delegation.py
+    behaviors:
+      - Execute parent, selected child and parent continuation in the requested order.
+      - Refuse early delegation, a different child and premature final output during an ordered request.
+      - Preserve delegation-first requests and the Jiuwen contract.
+    reason: Drive real CodeAgent parsing with fixed model replies and assert executor call order.
+  notes: >-
+    Baseline runtime-sandbox-kubernetes-migration and KSM-EXECUTION-D3-001 cover kernel state and release.
+    The isolated browser probe supplies the missing latest-request policy boundary with actual parent and child kernels.
+    The D3 fixture contract and formal registry remain applicable as kernel-lifecycle regression coverage.

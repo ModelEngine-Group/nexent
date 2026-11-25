@@ -10,13 +10,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from nexent.core.agents.resources.workspace import SandboxWorkspace, validate_container_root
+from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
 
 
 class SandboxLevel(str, Enum):
-    """Sandbox isolation level, ordered by increasing security."""
+    """Sandbox execution backend; the values are not security rankings."""
 
     LOCAL = "local"
     DOCKER = "docker"
+    KUBERNETES = "kubernetes"
     WASM = "wasm"
 
 
@@ -81,8 +83,22 @@ class SandboxConfig:
     workspace_mode: str = "legacy"
     container_workspace_root: str = ""
     failure_policy: str = "local"
+    owner: Optional[SandboxOwner] = None
+    system_profile: Optional[SystemSandboxProfile] = None
+    runtime_backend: Any = field(default=None, repr=False)
+    callback_registry: Any = field(default=None, repr=False)
+    callback_endpoint: Optional[str] = None
+    workspace_access: Any = field(default=None, repr=False)
+    run_lifecycle: Any = field(default=None, repr=False)
+
+    @property
+    def execution_image(self) -> str:
+        """Retain docker_image as the compatible serialized image field."""
+        return self.docker_image
 
     def __post_init__(self) -> None:
+        if self.level == SandboxLevel.KUBERNETES and self.scope != SandboxScope.SYSTEM:
+            raise ValueError("Kubernetes SESSION sandbox is not supported in S1")
         if self.workspace_mode not in {"legacy", "bind"}:
             raise ValueError("Unknown sandbox workspace mode")
         if self.failure_policy not in {"local", "error"}:

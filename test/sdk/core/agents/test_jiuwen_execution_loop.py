@@ -150,27 +150,40 @@ def test_failure_and_terminal_clarification_keep_their_types_without_stopping_se
     assert owner.run(lambda: asyncio.sleep(0, result="healthy")) == "healthy"
 
 
-def test_shutdown_cancels_owned_tasks_and_waits_for_cleanup_before_thread_finishes(manager):
+@pytest.mark.parametrize("cancel_kind", ["owned_scope", "direct", "broken_callback"])
+def test_shutdown_cancels_owned_tasks_and_waits_for_cleanup_before_thread_finishes(manager, caplog, cancel_kind):
     from nexent.core.agents.cores.jiuwen.execution_loop import get_execution_loop
 
     owner = get_execution_loop(manager)
     entered, cleaned, cancelled = Event(), Event(), Event()
+    scope = RunCancellationScope(cancelled)
 
     async def blocked():
+        task = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        token = scope.register_closer(lambda: loop.call_soon_threadsafe(task.cancel))
         entered.set()
         try:
             await asyncio.sleep(10)
         finally:
             await asyncio.sleep(0.02)
             cleaned.set()
+            scope.unregister_closer(token)
 
-    run = submit(manager, lambda: owner.run(blocked, cancel=cancelled.set))
+    def broken_callback():
+        raise RuntimeError("private callback details")
+
+    callback = {"owned_scope": scope.cancel, "direct": None, "broken_callback": broken_callback}[cancel_kind]
+    run = submit(manager, lambda: owner.run(blocked, cancel=callback))
     assert entered.wait(3)
     owner.stop()
     owner.execution.future.result(timeout=4)
     with pytest.raises(asyncio.CancelledError):
         run.future.result(timeout=3)
-    assert cleaned.is_set() and cancelled.is_set()
+    assert cleaned.is_set()
+    assert cancelled.is_set() is (cancel_kind == "owned_scope")
+    assert ("Jiuwen shutdown cancel callback failed" in caplog.text) is (cancel_kind == "broken_callback")
+    assert "private callback details" not in caplog.text
     from nexent.core.concurrency.cancellation import RunTerminated
     with pytest.raises(RunTerminated):
         owner.run(blocked)

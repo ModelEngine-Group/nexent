@@ -108,6 +108,49 @@ def test_restores_only_owned_local_config_and_retains_private_before_images(aban
         modes.assert_recovered(home, allow_retry=True)
 
 
+@pytest.mark.parametrize("outside_change", [None, "mount", "monitoring", "deployment"])
+def test_tfp_retry_restores_the_six_file_snapshot_without_overwriting_unrelated_changes(tmp_path, outside_change):
+    repo, home = tmp_path / "repo", tmp_path / "home"
+    (repo / ".git").mkdir(parents=True)
+    root_env, _, _, test_env, monitoring, config = recovery.configuration_paths(repo, home, monitoring=True)
+    for path in (root_env, config, test_env):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    root_env.write_bytes(b"ENABLE_AIDP_KNOWLEDGE=false\nDATABASE=preserved\n")
+    config.write_bytes(b'components:\n  - application\nsandboxMode: "lightweight"\nmonitoringProvider: "otlp"\n')
+    test_env.write_text("features:\n  aidp_knowledge: false\n", encoding="utf-8")
+    monitoring.write_bytes(b"MONITORING_PROVIDER=otlp\nLANGFUSE_INIT_PROJECT_SECRET_KEY=baseline\n")
+    batch = home / "runs/repository-daily/old-tfp"
+    save(batch / "status.json", {"status": "INCOMPLETE"})
+    settings = {"command_timeout_seconds": 30,
+                "hooks": {"deploy": [["bash", "{repo}/deploy/docker/deploy.sh", "--use-local-config"]],
+                          "preflight": [["wait"]]}}
+    switch = modes.ModeSwitch(repo, home, batch, settings, {}, lambda *_args: None)
+    switch.tfp_requested = True
+    switch.snapshot()
+    with patch.object(switch, "verify"), patch.object(modes, "apply_tfp_workspace"):
+        switch.apply("tfp", recovery.TFP_MODE)
+    config.write_bytes(config.read_bytes().replace(b"  - application", b"  - application\n  - monitoring")
+                       .replace(b"otlp", b"langfuse"))
+    if outside_change == "mount":
+        root_env.write_bytes(modes.patch_env(root_env.read_bytes(), {"AGENT_WORKSPACE_ROOT": "/another/workspace"}))
+    elif outside_change == "monitoring":
+        monitoring.write_bytes(modes.patch_env(monitoring.read_bytes(), {"LANGFUSE_INIT_PROJECT_SECRET_KEY": "changed"}))
+    elif outside_change == "deployment":
+        config.write_bytes(config.read_bytes().replace(b"lightweight", b"disabled"))
+    marker = home / modes.MARKER
+    with patch.object(recovery, "owner_alive", return_value=False), deployment_lock(repo):
+        launch = home / "runs/daily-launch/tfp-retry"
+        if outside_change:
+            with pytest.raises(RuntimeError, match="failed safety validation"), recovery.prepare_daily_retry(repo, home, launch):
+                pytest.fail("An unrelated change reached the retry")
+        else:
+            with recovery.prepare_daily_retry(repo, home, launch):
+                assert root_env.read_bytes() == switch.originals[root_env]
+                assert config.read_bytes() == switch.originals[config]
+                assert monitoring.read_bytes() == switch.originals[monitoring]
+    assert marker.exists()
+
+
 @pytest.mark.parametrize("problem", ["backup", "active-owner"])
 def test_launcher_updates_code_before_recovery_blocks_execution(abandoned, problem):
     repo, home, _, marker, switch = abandoned

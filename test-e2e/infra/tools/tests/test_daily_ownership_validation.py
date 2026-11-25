@@ -154,10 +154,10 @@ def test_offline_daily_executes_unassigned_and_unrelated_cases_but_cannot_be_gre
     assert all(row["responsibility"]["status"] == "UNASSIGNED" for row in rows if row["case_id"] in OPS_CASES)
 
 
-def test_ops_feature_and_both_cases_inherit_existing_system_domain():
+def test_ops_bootstrap_feature_and_cases_inherit_deployment_domain():
     _, _, features, cases = ownership_catalog.catalog(REPO)
     rules = ownership_catalog.load_rules(REPO)
-    expected = rules["domains"]["system"]
+    expected = rules["domains"]["deployment"]
     for route in (features["OPS-BOOTSTRAP"], *(cases[cid] for cid in OPS_CASES)):
         assert route["status"] == "ASSIGNED"
         assert route["domain"] == expected["label"] and route["owner"] == expected["owner"]

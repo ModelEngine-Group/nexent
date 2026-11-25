@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: KSM-DOWNLOAD-D4-001
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: KSM-DOWNLOAD-D4-001
+    profiles: [mock]
+timeout_seconds: 900
+notes: Requires a disposable SYSTEM Kubernetes deployment and a configured controlled provider. The fixture creates and removes its own model, agent, conversation and generated object; deployment setup is external.
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [KSM-DOWNLOAD-D4-001]

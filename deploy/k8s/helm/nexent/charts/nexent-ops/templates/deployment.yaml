@@ -1,6 +1,7 @@
 {{- $global := default dict .Values.global -}}
 {{- $monitoring := default dict $global.monitoring -}}
-{{- $trajectory := or (default false $monitoring.trajectoryReadEnabled) (eq (default "otlp" $monitoring.provider) "local_file") -}}
+{{- $localCapture := ternary (get $monitoring "localFileEnabled") true (hasKey $monitoring "localFileEnabled") | toString | lower -}}
+{{- $trajectory := or (eq (toString $monitoring.trajectoryReadEnabled | lower) "true") (eq $localCapture "true") -}}
 {{- $logs := dig "sharedStorage" "logs" (dict) $global -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -57,6 +58,15 @@ spec:
                 name: nexent-secrets
           {{- end }}
           env:
+            {{- if not $trajectory }}
+            {{- range list "MONITORING_PROVIDER" "LOCAL_FILE_MONITORING_ENABLED" "TRAJECTORY_READ_ENABLED" }}
+            - name: {{ . }}
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: {{ . }}
+            {{- end }}
+            {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:

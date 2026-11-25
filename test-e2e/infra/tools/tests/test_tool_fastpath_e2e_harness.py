@@ -2,6 +2,7 @@
 """Negative checks for test oracles; these do not count as deployed E2E runs."""
 
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -11,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from zipfile import ZipFile
 
 import httpx
 from fastapi import FastAPI
@@ -38,6 +40,68 @@ CFG = {"config": {"marker": "TFP_RULES", "value": 7}, "skill_name": "tfp-verific
 IDENTITY = SimpleNamespace(id="tenant_a_admin", user_id="owned-user", tenant_id="tenant-a", access_token="private")
 KEY = f"workspace/{IDENTITY.user_id}/{'c' * 32}/outputs/tfp-{NONCE}.txt"
 URL = "s3://bucket/" + KEY
+
+
+class ManagedFixtureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_registers_only_the_versioned_skill_and_its_owner(self):
+        name = "tfp-verification-" + NONCE
+        api = AsyncMock()
+        api.post.return_value = httpx.Response(201, json={"name": name, "skill_id": 73})
+        fixture = {}
+        with patch.object(deployed, "register_asset") as register:
+            skill_id = await deployed.create_owned_skill(api, IDENTITY, name, "TFP-D3-001", fixture)
+        self.assertEqual(skill_id, 73)
+        self.assertEqual(fixture, {"owned_skill": name})
+        sent = api.post.await_args
+        self.assertEqual(sent.args, ("/skills/upload",))
+        self.assertEqual(sent.kwargs["data"], {"skill_name": name})
+        with ZipFile(io.BytesIO(sent.kwargs["files"]["file"][1])) as archive:
+            self.assertEqual(set(archive.namelist()), {f"{name}/{path}" for path in (
+                "SKILL.md", "config/schema.yaml", "config/config.yaml", "scripts/report.py",
+            )})
+            self.assertIn(f"\nname: {name}\n", archive.read(f"{name}/SKILL.md").decode("utf-8"))
+            self.assertIn(b"TFP_RULES", archive.read(f"{name}/config/config.yaml"))
+        self.assertEqual(register.call_args.kwargs["owner_case_id"], "TFP-D3-001")
+        self.assertEqual(register.call_args.kwargs["cleanup"]["path"], "/skills/" + name)
+
+    async def test_dependency_failures_precede_provider_and_skill_writes(self):
+        with (patch.dict(os.environ, {"NEXENT_CASE_DEPLOYMENT_PROFILE": "tfp"}),
+              patch.object(deployed, "inspect_deployment", return_value=({}, NONCE * 2)),
+              patch.object(deployed, "verify_trace_access", AsyncMock()),
+              patch.object(deployed, "controlled_asset_url"),
+              patch.object(deployed, "sign_in", AsyncMock(return_value=IDENTITY)),
+              patch.object(deployed, "control", AsyncMock()) as control,
+              patch.object(deployed, "client") as client):
+            with self.assertRaisesRegex(deployed.AssetDependencyError, "different tenants"):
+                await deployed.setup("TFP-D4-001")
+        control.assert_not_awaited()
+        client.assert_not_called()
+
+    async def test_setup_error_cleans_owned_skill(self):
+        api = AsyncMock()
+        api.get.return_value = httpx.Response(404, request=httpx.Request("GET", "http://config.test/skills/fixture"))
+        identity_b = SimpleNamespace(tenant_id="tenant-b")
+
+        async def upload(_api, _identity, name, _case_id, fixture):
+            fixture["owned_skill"] = name
+            return 42
+
+        with (patch.dict(os.environ, {"NEXENT_CASE_DEPLOYMENT_PROFILE": "tfp",
+                                    "NEXENT_TFP_LANGFUSE_URL": "http://langfuse.example.test"}),
+              patch.object(deployed, "inspect_deployment", return_value=({}, NONCE * 2)),
+              patch.object(deployed, "verify_trace_access", AsyncMock()),
+              patch.object(deployed, "controlled_asset_url"),
+              patch.object(deployed, "sign_in", AsyncMock(side_effect=[IDENTITY, identity_b])),
+              patch.object(deployed, "client") as client,
+              patch.object(deployed, "create_owned_skill", side_effect=upload),
+              patch.object(deployed, "_delete_skill", AsyncMock()) as delete,
+              patch.object(deployed, "control", AsyncMock()) as control):
+            client.return_value.__aenter__.return_value = api
+            with self.assertRaises(AssertionError):
+                await deployed.setup("TFP-D3-001")
+        self.assertEqual(delete.await_args.args[0], IDENTITY)
+        self.assertTrue(delete.await_args.args[1].startswith("tfp-verification-"))
+        self.assertEqual(control.await_args.args[1], "delete")
 
 
 def units(promoted):
@@ -310,6 +374,31 @@ class OracleTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             observation.verify_warmups([warm], False)
 
+    def test_sandbox_event_capture_starts_before_run_and_reclaims_its_observer(self):
+        records = []
+        with patch.object(observation.subprocess, "Popen") as start:
+            process = start.return_value
+            process.poll.return_value = None
+            with observation.capture_sandbox_events({"workspace_mount_id": "fixture"}, records):
+                stream = start.call_args.kwargs["stdout"]
+                self.assertIn("event=create", start.call_args.args[0])
+                self.assertNotIn("--until", start.call_args.args[0])
+                for action in ("create", "destroy"):
+                    stream.write((json.dumps({"Action": action, "Actor": {"ID": "sandbox", "Attributes": {
+                        "com.nexent.workspace": "fixture",
+                    }}}) + "\n").encode())
+            process.terminate.assert_called_once()
+            process.wait.assert_called_once_with(timeout=5)
+        self.assertEqual(records, [{"action": "create", "id": "sandbox"}, {"action": "destroy", "id": "sandbox"}])
+        observation.verify_sandbox_events(records, True)
+
+    def test_sandbox_event_capture_rejects_an_early_disconnect_as_evidence(self):
+        with patch.object(observation.subprocess, "Popen") as start:
+            start.return_value.poll.return_value = 0
+            with self.assertRaisesRegex(AssertionError, "capture exited"):
+                with observation.capture_sandbox_events({"workspace_mount_id": "fixture"}, []):
+                    pass
+
 
 class AsyncOracleTests(unittest.IsolatedAsyncioTestCase):
     async def test_v2_waits_for_delayed_warmup_indexing(self):
@@ -382,33 +471,108 @@ class AsyncOracleTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(AssertionError):
                 await deployed.verify_artifact(IDENTITY, parts, CFG, NONCE, "TFP-D3-001")
 
-    async def test_trace_pagination_empty_observations_and_unrelated_rows_are_rejected(self):
+    async def test_v1_finds_the_owned_final_in_child_observations_and_waits_for_warmup(self):
         cfg = {"langfuse": {"url": "http://trace.invalid", "public_key_env": "PUBLIC", "secret_key_env": "PRIVATE"}}
         api = AsyncMock()
-        valid_trace = {"data": [{"id": "t", "sessionId": "12", "output": "FINAL"}], "meta": {"totalItems": 1}}
-        variants = [
-            ({**valid_trace, "meta": {"totalItems": 101}}, None),
-            (valid_trace, {"data": [], "meta": {"totalItems": 0}}),
-            (valid_trace, {"data": [{"traceId": "t"}], "meta": {"totalItems": 101}}),
-            (valid_trace, {"data": [{"traceId": "sibling"}], "meta": {"totalItems": 1}}),
-            ({"data": [{"id": "t", "sessionId": "other", "output": "FINAL"}]}, None),
+        trace = {"id": "t", "sessionId": "12", "output": None}
+        root = {"id": "root", "traceId": "t", "endTime": "ended"}
+        agent = {"id": "agent", "traceId": "t", "endTime": "ended", "parentObservationId": "root",
+                 "name": "agent.run", "output": {"result": "FINAL"}}
+        warm = {"id": "warm", "traceId": "t", "endTime": "ended", "parentObservationId": "agent",
+                "name": "agent.sandbox.warmup", "metadata": {"sandbox.backend": "docker"}}
+        children = [{"id": str(i), "traceId": "t", "parentObservationId": "agent"} for i in range(98)]
+
+        def page(rows, total=None):
+            return response(body={"data": rows, "meta": {"totalItems": len(rows) if total is None else total}})
+
+        api.get.side_effect = [
+            page([trace], 3), page([root, agent]),
+            page([trace], 3), page([root, agent, *children], 101), page([warm], 101),
         ]
         with (
             patch.object(observation, "load_secret_env", return_value={"PUBLIC": "public", "PRIVATE": "private"}),
             patch.object(observation.httpx, "AsyncClient") as make_client,
+            patch.object(observation.asyncio, "sleep", AsyncMock()) as sleep,
         ):
             make_client.return_value.__aenter__.return_value = api
-            for traces, observations in variants:
-                api.get.side_effect = [response(body=traces), response(body=observations)]
-                with self.subTest(traces=traces, observations=observations), self.assertRaises(AssertionError):
-                    await observation.trace_observations(cfg, 12, "FINAL")
-            api.get.side_effect = [
-                response(body=valid_trace),
-                response(body={"data": [{"traceId": "t", "name": "agent.run"}], "meta": {"totalItems": 1}}),
-            ]
-            self.assertEqual(
-                await observation.trace_observations(cfg, 12, "FINAL"), [{"traceId": "t", "name": "agent.run"}]
-            )
+            observed = await observation.trace_observations(cfg, 12, "FINAL", expected_warmups=1)
+        self.assertEqual(observed, [root, agent, *children, warm])
+        observation.verify_warmups(observed, True)
+        self.assertEqual(api.get.call_args_list[-1].kwargs["params"], {"traceId": "t", "limit": 100, "page": 2})
+        sleep.assert_awaited_once()
+
+    async def test_v1_sparse_trace_index_reads_every_advertised_page(self):
+        api = AsyncMock()
+        api.get.side_effect = [response(body={
+            "data": [{"id": name}], "meta": {"page": page, "totalItems": 101, "totalPages": 2},
+        }) for page, name in enumerate(("first", "last"), 1)]
+        rows = await observation.numbered_pages(api, "/api/public/traces", {"sessionId": "12"}, float("inf"),
+                                                sparse=True)
+        self.assertEqual(rows, [{"id": "first"}, {"id": "last"}])
+        self.assertEqual(api.get.call_args.kwargs["params"]["page"], 2)
+
+    async def test_v1_cold_run_waits_for_stable_children_and_detects_a_late_warmup(self):
+        settings = {"url": "http://trace.invalid"}
+        trace = [{"id": "t", "sessionId": "12"}]
+        root = {"id": "root", "traceId": "t", "endTime": "ended"}
+        agent = {"id": "agent", "traceId": "t", "endTime": "ended", "parentObservationId": "root",
+                 "name": "agent.run", "output": "FINAL"}
+        warm = {"id": "warm", "traceId": "t", "parentObservationId": "agent", "name": "agent.sandbox.warmup"}
+        with (
+            patch.object(observation, "trace_credentials", return_value=(settings, ("a", "b"))),
+            patch.object(observation, "numbered_pages", AsyncMock(side_effect=[
+                trace, [root, agent], trace, [root, agent, warm], trace, [root, agent, warm],
+            ])),
+            patch.object(observation.asyncio, "sleep", AsyncMock()) as sleep,
+        ):
+            found = await observation.trace_observations({}, 12, "FINAL", expected_warmups=0)
+        self.assertEqual(sleep.await_count, 2)
+        with self.assertRaisesRegex(AssertionError, "Unexpected warm-up count"):
+            observation.verify_warmups(found, False)
+
+    async def test_v1_rejects_inconsistent_pagination_and_unrelated_trace(self):
+        api = AsyncMock()
+        body = {"data": [{"id": str(i)} for i in range(100)], "meta": {"totalItems": 101}}
+        for last in (
+            {"data": [{"id": "100"}], "meta": {"totalItems": 102}},
+            {"data": [{"id": "1"}], "meta": {"totalItems": 101}},
+            {"data": [], "meta": {"totalItems": 101}},
+        ):
+            api.get.side_effect = [response(body=body), response(body=last)]
+            self.assertIsNone(await observation.numbered_pages(
+                api, "/api/public/observations", {"traceId": "t"}, float("inf")))
+
+        cfg = {"langfuse": {"url": "http://trace.invalid"}}
+        with (
+            patch.object(observation, "trace_credentials", return_value=(cfg["langfuse"], ("a", "b"))),
+            patch.object(observation, "numbered_pages", AsyncMock(side_effect=[
+                [{"id": "t", "sessionId": "12"}], [{"id": "a", "traceId": "sibling"}],
+            ])),
+        ):
+            with self.assertRaisesRegex(AssertionError, "Unrelated Agent observation"):
+                await observation.trace_observations(cfg, 12, "FINAL")
+
+    async def test_owned_memory_exclusion_is_journaled_and_cleaned_independently(self):
+        api = AsyncMock()
+        api.post.return_value = response(body={"success": True})
+        api.delete.return_value = response(body={"success": True})
+        api.request.return_value = response(body={})
+        api.get.side_effect = [response(body={"DISABLE_AGENT_ID": ["15", "77"], "MEMORY_SWITCH": "Y"}),
+                               response(body={"DISABLE_AGENT_ID": ["77"], "MEMORY_SWITCH": "Y"})]
+        fixture = {"nonce": NONCE, "agent_id": 15}
+        with (
+            patch.object(deployed, "register_asset") as registered,
+            patch.object(deployed, "mark_asset_state") as marked,
+            patch.object(deployed, "control", AsyncMock()),
+            patch.object(deployed, "client") as make_client,
+        ):
+            make_client.return_value.__aenter__.return_value = api
+            await deployed.disable_owned_agent_memory(api, IDENTITY, "TFP-D3-001", fixture)
+            self.assertEqual(registered.call_args.kwargs["cleanup"]["path"], "/memory/config/disable_agent/15")
+            await deployed.cleanup_fixture(fixture, identity=IDENTITY)
+        api.post.assert_awaited_once_with("/memory/config/disable_agent", json={"agent_id": "15"})
+        api.delete.assert_awaited_once_with("/memory/config/disable_agent/15")
+        marked.assert_any_call("owned_agent_memory_exclusions", "15", "DELETED")
 
     async def test_deployment_preflight_rejects_wrong_mount_scope_before_mutation(self):
         cfg = {"runtime_container": "fixture", "workspace_mount_id": "d" * 64}

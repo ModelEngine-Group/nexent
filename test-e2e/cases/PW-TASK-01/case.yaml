@@ -28,7 +28,7 @@ case:
     expected: Run/History/Edit/Pause/Resume/Delete可达且状态正确。
   - order: 3
     action: 输入固定自然语言任务需求。
-    expected: 准时触发/锁/misfire由API/REL。
+    expected: 会话请求携带 automation 入口，进入定时任务提案流程。
   - order: 4
     action: 等待任务proposal并检查title/instruction/schedule后确认创建。
     expected: 准时触发/锁/misfire由API/REL。
@@ -57,7 +57,18 @@ case:
   - Create in Chat真实创建任务。
   - Run/History/Edit/Pause/Resume/Delete可达且状态正确。
   - 准时触发/锁/misfire由API/REL。
-  forbidden_side_effects: []
+  forbidden_side_effects:
+  - 点击确认前不发送任务确认请求。
+  acceptance:
+  - id: AC-01
+    description: 从会话创建入口提交定时需求，提案卡片存在且只有点击确认后才提交创建请求。
+    steps: [1, 2, 3, 4, 5]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 确认后的任务支持手动运行、查历史、编辑、暂停、恢复和删除。准时调度和锁由对应 API/REL 用例验收。
+    steps: [6, 7, 8, 9, 10, 11]
+    expected_results: [2, 3]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey

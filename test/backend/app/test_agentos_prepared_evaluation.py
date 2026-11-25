@@ -616,3 +616,97 @@ def test_runtime_rejects_invalid_prepared_planning_before_model_lookup(mocker, s
 
     assert error.value.status_code == 422
     read.assert_not_called()
+
+
+def test_monitoring_catalog_projects_prepared_payload_onto_used_urls(monkeypatch):
+    """Runtime keeps only the prepared catalog entries whose URLs this run materialized."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+    payload = SimpleNamespace(monitoring_mcp_servers=[
+        {"url": "https://a.example/mcp", "mcp_server_id": 1},
+        {"url": "https://b.example/mcp", "mcp_server_id": 2},
+        {"url": "https://c.example/mcp", "mcp_server_id": 3},
+    ])
+
+    catalog = prepared_evaluation._build_run_monitoring_catalog(
+        payload, SimpleNamespace(used_urls=["https://c.example/mcp", "https://b.example/mcp"]), debug=False,
+    )
+
+    assert catalog == [
+        {"url": "https://b.example/mcp", "mcp_server_id": 2},
+        {"url": "https://c.example/mcp", "mcp_server_id": 3},
+    ]
+    # A payload catalog with no URL intersection stays omitted.
+    assert prepared_evaluation._build_run_monitoring_catalog(
+        payload, SimpleNamespace(used_urls=["https://other.example/mcp"]), debug=False,
+    ) is None
+
+
+def test_monitoring_catalog_omitted_without_used_urls(monkeypatch):
+    """Runs without MCP URLs skip catalog projection entirely."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+    payload = SimpleNamespace(monitoring_mcp_servers=[{"url": "https://a.example/mcp", "mcp_server_id": 1}])
+
+    result = prepared_evaluation._build_run_monitoring_catalog(
+        payload, SimpleNamespace(used_urls=[]), debug=False,
+    )
+
+    assert result is None
+
+
+def test_monitoring_catalog_omitted_without_prepared_catalog(monkeypatch):
+    """Payloads without a prepared catalog stay omitted; run preparation is unaffected."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+
+    result = prepared_evaluation._build_run_monitoring_catalog(
+        SimpleNamespace(), SimpleNamespace(used_urls=["https://mcp.example/mcp"]), debug=False,
+    )
+
+    assert result is None
+
+
+def test_monitoring_catalog_skips_debug_and_disabled_runs(monkeypatch):
+    """Debug runs and monitoring-disabled deployments never carry a catalog."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+    payload = SimpleNamespace(monitoring_mcp_servers=[{"url": "https://a.example/mcp", "mcp_server_id": 1}])
+    mcp = SimpleNamespace(used_urls=["https://a.example/mcp"])
+
+    assert prepared_evaluation._build_run_monitoring_catalog(payload, mcp, debug=True) is None
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", False)
+    assert prepared_evaluation._build_run_monitoring_catalog(payload, mcp, debug=False) is None
+
+
+def test_prepared_mcp_accessors_stay_empty_before_materialization():
+    """PreparedMCP server/url accessors are safe to read before and after materialization."""
+    from types import SimpleNamespace
+
+    from runtime.agentos.prepared_mcp import PreparedMCP
+
+    prepared = PreparedMCP(SimpleNamespace(tenant_id="tenant-1"))
+    assert prepared.servers == []
+    assert prepared.used_urls == []
+
+    servers = [{"mcp_id": 3, "mcp_name": "docs"}]
+    prepared._servers = servers
+    assert prepared.servers == servers
+    assert prepared.servers is not servers
+
+    prepared.hosts["s1"] = {"url": "http://a.example/mcp"}
+    prepared.hosts[None] = {}
+    assert prepared.used_urls == ["http://a.example/mcp"]

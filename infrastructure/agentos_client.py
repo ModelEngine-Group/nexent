@@ -11,6 +11,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
+    RECOVERY_STATUS_ACTOR,
     ManagementOperation,
     AgentActiveRun,
     AgentMemoryReceipt,
@@ -38,6 +39,8 @@ from contracts.agentos import (
     PreparedEvaluationRun,
     PreparedSkillCreatorRun,
     TrackedBackgroundResult,
+    RunSpecModel,
+    RuntimeRecoveryStatus,
 )
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.constants import environment
@@ -150,6 +153,15 @@ class AgentOSClient:
             AgentOperation.EVALUATION_CASE, payload, user_id, tenant_id, _STREAM_TIMEOUT,
         )
         return self._validate_result(EvaluationAgentResult, result)
+
+    async def recovery_status(self) -> RuntimeRecoveryStatus:
+        result = await self._post_json(
+            AgentOperation.RECOVERY_STATUS, RunSpecModel(), RECOVERY_STATUS_ACTOR, RECOVERY_STATUS_ACTOR,
+        )
+        try:
+            return RuntimeRecoveryStatus.model_validate(result, strict=False)
+        except ValidationError as exc:
+            raise RuntimeServiceUnavailableError("Invalid AgentOS recovery status") from exc
 
     async def find_active_run(self, conversation_id: int, user_id: str, tenant_id: str) -> str | None:
         result = await self._post_json(

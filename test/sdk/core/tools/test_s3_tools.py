@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 import json
 import os
 import tempfile
@@ -24,7 +24,7 @@ def mock_minio_client():
     client.default_bucket = "nexent-bucket"
     client.get_file_size.return_value = 1024
     client.download_file.return_value = (True, "Downloaded successfully")
-    client.upload_file.return_value = (True, "/nexent-bucket/workspace/u1/outputs/test.txt")
+    client.upload_fileobj.return_value = (True, "/nexent-bucket/workspace/u1/outputs/test.txt")
     client.get_file_url.return_value = (True, "https://minio.example.com/presigned-url")
     return client
 
@@ -396,7 +396,7 @@ class TestUploadToS3ToolForward:
         assert data["url"] == data["s3_url"]
         assert "presigned_url" not in data
         assert data["file_size_bytes"] == len("Hello, world!")
-        mock_minio_client.upload_file.assert_called_once()
+        mock_minio_client.upload_fileobj.assert_called_once()
         mock_minio_client.get_file_url.assert_not_called()
 
     def test_upload_with_target_filename(self, tool_with_file, mock_minio_client):
@@ -424,8 +424,8 @@ class TestUploadToS3ToolForward:
         data = json.loads(tool.forward("test.txt"))
 
         assert data["local_path"] == os.path.join("outputs", "test.txt")
-        mock_minio_client.upload_file.assert_called_once_with(
-            output_file,
+        mock_minio_client.upload_fileobj.assert_called_once_with(
+            ANY,
             "workspace/user1/run1/outputs/test.txt",
         )
 
@@ -450,8 +450,8 @@ class TestUploadToS3ToolForward:
         data = json.loads(tool.forward("result.txt"))
 
         assert data["local_path"] == os.path.join("outputs", "result.txt")
-        mock_minio_client.upload_file.assert_called_once_with(
-            output_file,
+        mock_minio_client.upload_fileobj.assert_called_once_with(
+            ANY,
             "workspace/user1/run1/outputs/result.txt",
         )
 
@@ -590,7 +590,7 @@ class TestUploadToS3ToolForward:
 
     def test_upload_minio_failure_raises(self, tool_with_file, mock_minio_client):
         tool, _ = tool_with_file
-        mock_minio_client.upload_file.return_value = (False, "Upload failed")
+        mock_minio_client.upload_fileobj.return_value = (False, "Upload failed")
         with pytest.raises(Exception, match="Failed to upload"):
             tool.forward("test_report.txt")
 

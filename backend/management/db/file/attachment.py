@@ -255,7 +255,13 @@ def download_file(object_name: str, file_path: str, bucket: Optional[str] = None
     return response
 
 
-def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Dict[str, Any]:
+def get_file_url(
+    object_name: str,
+    bucket: Optional[str] = None,
+    expires: int = 86400,
+    *,
+    external: bool = False,
+) -> Dict[str, Any]:
     """
     Get presigned URL for file
 
@@ -263,12 +269,14 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
         object_name: Object name
         bucket: Bucket name, if not specified will use default bucket
         expires: URL expiration time in seconds (default 86400 = 24 hours)
+        external: Sign against the configured external endpoint (partner
+            direct-link callers only); default keeps the internal authority
 
     Returns:
         Dict[str, Any]: Result containing success flag, URL and error message (if any)
     """
     # Get presigned URL
-    success, result = minio_client.get_file_url(object_name, bucket, expires)
+    success, result = minio_client.get_file_url(object_name, bucket, expires, external=external)
 
     # Build response
     response = {"success": success, "object_name": object_name, "expires_in": expires}

@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ steps: [] as unknown[] | undefined }));
 vi.mock("@assistant-ui/react", () => ({
@@ -77,3 +77,104 @@ it.each(["passthrough", "adaptive_compact"])(
     expect(container.querySelector('[data-token-usage="summary"]')).toBeNull();
   }
 );
+
+it("shows the final request instead of cumulative usage across steps", () => {
+  state.steps = [
+    {
+      stepNumber: 1,
+      stepInputTokens: 12000,
+      stepOutputTokens: 1000,
+      contextWindowTokens: 16000,
+      tokenThreshold: 12800,
+      inputKnown: true,
+      outputKnown: true,
+    },
+    {
+      stepNumber: 2,
+      stepInputTokens: 12000,
+      stepOutputTokens: 2000,
+      contextWindowTokens: 16000,
+      tokenThreshold: 12800,
+      inputKnown: true,
+      outputKnown: true,
+    },
+  ];
+
+  render(<SingleTurnTokenUsage />);
+
+  expect(screen.getByRole("button")).toHaveTextContent("75%");
+  expect(screen.getByRole("button")).not.toHaveTextContent("150%");
+});
+
+it("uses the final request even when an earlier request had higher occupancy", () => {
+  state.steps = [
+    {
+      stepNumber: 1,
+      stepInputTokens: 6000,
+      stepOutputTokens: 0,
+      contextWindowTokens: 8000,
+      tokenThreshold: null,
+      inputKnown: true,
+      outputKnown: true,
+    },
+    {
+      stepNumber: 2,
+      stepInputTokens: 12000,
+      stepOutputTokens: 0,
+      contextWindowTokens: 32000,
+      tokenThreshold: null,
+      inputKnown: true,
+      outputKnown: true,
+    },
+  ];
+
+  render(<SingleTurnTokenUsage />);
+
+  expect(screen.getByRole("button")).toHaveTextContent("38%");
+  fireEvent.click(screen.getByRole("button"));
+  expect(screen.getByText("12,000 / 32,000")).toBeVisible();
+  expect(screen.getByText("12,000 · 38%")).toBeVisible();
+  expect(screen.getByText("20,000 · 62%")).toBeVisible();
+});
+
+it("does not treat generated output as request context input", () => {
+  Object.assign(state.steps![0] as Record<string, unknown>, {
+    contextWindowTokens: 16000,
+    stepInputTokens: 4000,
+    stepOutputTokens: 12000,
+    inputKnown: true,
+    outputKnown: true,
+  });
+
+  render(<SingleTurnTokenUsage />);
+
+  expect(screen.getByRole("button")).toHaveTextContent("25%");
+});
+
+it("does not borrow an earlier known request when the final request is unknown", () => {
+  state.steps = [
+    {
+      stepNumber: 1,
+      stepInputTokens: 8000,
+      stepOutputTokens: 0,
+      contextWindowTokens: 16000,
+      tokenThreshold: null,
+      inputKnown: true,
+      outputKnown: false,
+    },
+    {
+      stepNumber: 2,
+      stepInputTokens: 0,
+      stepOutputTokens: 0,
+      contextWindowTokens: 16000,
+      tokenThreshold: null,
+      inputKnown: false,
+      outputKnown: false,
+    },
+  ];
+
+  render(<SingleTurnTokenUsage />);
+
+  expect(screen.getByText(/input Unknown \/.*output Unknown/)).toBeVisible();
+  expect(screen.queryByRole("button")).toBeNull();
+});

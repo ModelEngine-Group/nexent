@@ -28,6 +28,7 @@ RUNTIME_LANES = {
     'agent-run',
     'control-io',
     'model-tool-io',
+    'model-embedding',
     'mcp-session',
     'sandbox',
     'background-service',
@@ -83,6 +84,11 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
     assert agent_run.cancel_grace_seconds == RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS
 
     assert rt._policies['model-tool-io'].max_workers == max(4, RUNTIME_AGENT_THREAD_MAX_WORKERS)
+    _assert_policy(
+        rt._policies['model-embedding'], 'model-embedding', max(4, RUNTIME_AGENT_THREAD_MAX_WORKERS),
+        RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE, 0, RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
+        RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+    )
 
     for lane in ('control-io', 'model-tool-io', 'mcp-session', 'sandbox',
                  'background-service', 'evaluation'):

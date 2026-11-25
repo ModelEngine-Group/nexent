@@ -11,8 +11,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from openjiuwen.core.foundation.tool import ToolCard
 
 from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.cores.jiuwen import a2a
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -21,15 +24,18 @@ from nexent.core.utils.observer import MessageObserver, ProcessType
 
 @pytest.fixture
 def adapter():
-    info = SimpleNamespace(agent_config=AgentConfig(name="fixture", description="Fixture", model_name="model", tools=[],
+    info = AgentRunInfo(query="Latest request", model_config_list=[],
+        agent_config=AgentConfig(name="fixture", description="Fixture", model_name="model", tools=[],
         pre_run_tool_events=[{"type": "tool", "content": "prepared"}]), observer=MessageObserver(),
-        stop_event=Event(), mcp_close_timeout_seconds=2, run_result=None)
+        stop_event=Event(), mcp_close_timeout_seconds=2)
     instance = JiuwenAdapter(info)
     instance.scope = RunCancellationScope(info.stop_event)
     instance.query = "Latest request"
     instance.manager = Mock()
     instance.native_agent = SimpleNamespace(ability_manager=Mock())
-    instance.native_agent.ability_manager.list.return_value = [SimpleNamespace(id="owned-tool")]
+    instance.native_agent.ability_manager.list.return_value = [
+        ToolCard(id="owned-tool", name="owned-tool", description="Owned fixture tool"),
+    ]
     return instance
 
 
@@ -140,6 +146,97 @@ def test_mcp_close_failure_still_closes_resources_and_reports_failure(adapter, m
     adapter.resources.close.assert_called_once()
     finish.assert_called_once_with("failed")
     assert adapter.run_info.run_result == "failed-result"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,status,category", [
+    ("answer", "completed", None),
+    ("cancelled", "stopped", None),
+    ("timeout", "failed", "a2a_timeout"),
+    ("expired", "failed", "a2a_timeout"),
+    ("error", "failed", "a2a_execution_error"),
+])
+async def test_remote_delegate_emits_public_terminal_and_uses_owned_settings(adapter, mocker, caplog,
+                                                                     outcome, status, category):
+    external = SimpleNamespace(name="External", timeout=9, agent_id="remote-id", to_a2a_agent_info=Mock())
+    info = adapter.run_info
+    info.runtime_metadata = {"trace": "parent-id"}
+    info.user_context = {"user_id": "authorized"}
+    clock = mocker.patch("nexent.core.agents.cores.jiuwen.adapter.time")
+    clock.monotonic.return_value = 100
+    mocker.patch.object(adapter, "_collaboration_deadline", return_value=99 if outcome == "expired" else 103)
+
+    async def invoke_observed(forward, *, task):
+        return await forward(task)
+
+    tool = SimpleNamespace(name="remote_lookup", invoke_async=AsyncMock(side_effect=invoke_observed))
+    error = {
+        "cancelled": asyncio.CancelledError(), "timeout": TimeoutError("private response"),
+        "error": RuntimeError("private response"),
+    }.get(outcome)
+    native = mocker.patch.object(a2a, "invoke_native_a2a", side_effect=error,
+                                 return_value="<final_answer>Public reply</final_answer>")
+    invoke = adapter._remote_handler(tool, external)
+    if outcome == "answer":
+        assert await invoke("search") == "Public reply"
+    elif outcome == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            await invoke("search")
+    elif category == "a2a_timeout":
+        with pytest.raises(TimeoutError, match="^A2A request timed out$"):
+            await invoke("search")
+    else:
+        with pytest.raises(RuntimeError, match="^A2A request failed$"):
+            await invoke("search")
+
+    tool.invoke_async.assert_awaited_once()
+    assert tool.invoke_async.await_args.kwargs == {"task": "search"}
+    if outcome == "expired":
+        native.assert_not_awaited()
+        external.to_a2a_agent_info.assert_not_called()
+    else:
+        native.assert_awaited_once_with(
+            external.to_a2a_agent_info.return_value, "search", scope=adapter.scope,
+            runtime_metadata=info.runtime_metadata, user_context=info.user_context,
+            timeout=3, close_timeout=info.mcp_close_timeout_seconds,
+        )
+    events = [json.loads(item) for item in info.observer.message_query]
+    terminal, = [event for event in events if event["type"] == ProcessType.RUN_TERMINAL.value]
+    assert terminal["status"] == status
+    assert terminal["final_content"] == ("Public reply" if outcome == "answer" else "")
+    assert (terminal["error"]["category"] if terminal.get("error") else None) == category
+    assert "private response" not in json.dumps(events) and "private response" not in caplog.text
+
+
+@pytest.mark.parametrize("mode,completed,stopped,stuck", [
+    ("read_only", True, False, False), ("sandbox", True, False, False),
+    ("sandbox", False, False, False), ("sandbox", True, True, False), ("sandbox", False, False, True),
+])
+def test_parallel_child_cleanup_releases_only_safe_outputs(adapter, mocker, mode, completed, stopped, stuck):
+    adapter.run_info.parallel_child_mode = mode
+    adapter._run_completed = completed
+    adapter.native_agent.ability_manager.list.return_value = []
+    adapter.resources = Mock()
+    adapter.resources._workspace_uploads = [
+        {"name": "safe.txt", "url": "s3://bucket/safe.txt", "private": "not public"},
+        {"name": "missing-url"}, {"url": "s3://bucket/missing-name"},
+    ]
+    adapter._tool_executions = [SimpleNamespace(execution_id="owned", future=Future())]
+    adapter.manager.cancel.return_value.stuck = stuck
+    if stopped:
+        adapter.scope.cancel()
+    if stuck:
+        with pytest.raises(RuntimeError, match="retaining its owned resources"):
+            adapter._close_resources()
+        adapter.resources.close.assert_not_called()
+    else:
+        published = mode == "sandbox" and completed and not stopped
+        adapter._close_resources()
+        adapter.resources.close.assert_called_once_with(publish_outputs=published)
+        assert adapter.run_info.published_child_files == (
+            [{"name": "safe.txt", "url": "s3://bucket/safe.txt"}] if published else []
+        )
+    assert adapter.manager.cancel.call_args.args == ("owned",)
 
 
 @pytest.mark.parametrize("ending", ["answer", "missing_terminal", "boundary", "cancel", "cancel_at_boundary"])

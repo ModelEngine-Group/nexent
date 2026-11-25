@@ -4326,6 +4326,8 @@ class TestSandboxWarmUp:
         class SandboxLevel(str, Enum):
             LOCAL = "local"
             DOCKER = "docker"
+            KUBERNETES = "kubernetes"
+            WASM = "wasm"
 
         mock_sandbox_config = MagicMock()
         mock_sandbox_config.level = SandboxLevel.LOCAL
@@ -6655,6 +6657,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         class SandboxLevel(str, Enum):
             LOCAL = "local"
             DOCKER = "docker"
+            KUBERNETES = "kubernetes"
             WASM = "wasm"
 
         return SandboxLevel

@@ -5,6 +5,7 @@ from contracts.agentos import AgentMemoryStored
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from management.db.memory.record import get_memory_record
+from management.services.memory.access import can_write_automatic_memory
 from management.services.memory.provider import _fanout_external_ingest
 from nexent.core.concurrency import run_blocking
 
@@ -17,6 +18,8 @@ def _read_owned_memory(notice: AgentMemoryStored, actor: ServicePrincipal) -> di
         record["tenant_id"], record["user_id"], record["agent_id"],
         record["layer"], record["memory_type"], record["status"],
     ) != (actor.tenant_id, actor.user_id, str(notice.agent_id), "agent", "short_term", "active"):
+        return None
+    if not can_write_automatic_memory(actor.tenant_id, actor.user_id, notice.agent_id, notice.agent_version_no):
         return None
     return {**record, "conversation_id": str(notice.conversation_id)}
 

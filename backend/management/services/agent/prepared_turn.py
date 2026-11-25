@@ -43,7 +43,7 @@ async def _io(name, fn, *args, **kwargs):
 def is_prepared_candidate(payload, request):
     return bool(
         not payload.resume and not request.is_debug
-        and (request.entrypoint == "workbench" or (request.agent_id and not request.entrypoint))
+        and (request.entrypoint == "workbench" or request.agent_id)
         and (request.conversation_id is None or request.conversation_id > 0)
     )
 
@@ -94,7 +94,10 @@ def _definitive_rejection(error):
     if error.status_code == 503:
         try:
             payload = json.loads(error.content)
-            return payload["detail"]["code"] == "AGENTOS_EVENT_STORE_UNAVAILABLE"
+            return payload["detail"]["code"] in {
+                "AGENTOS_EVENT_STORE_UNAVAILABLE",
+                "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN",
+            }
         except (TypeError, ValueError, KeyError):
             pass
     return False
@@ -189,6 +192,8 @@ async def start_turn(
                 "tool_params": tool_params.model_dump(mode="json") if tool_params else None,
                 "has_attachments": bool(request.minio_files),
             }
+        if request.entrypoint == "automation" and automation is None:
+            raise HTTPException(status_code=422, detail={"code": "AUTOMATION_PROPOSAL_UNAVAILABLE"})
         creation = {"initial_title": initial_title} if initial_title is not None else {}
         if initial_title is not None:
             if request.model_id is not None:

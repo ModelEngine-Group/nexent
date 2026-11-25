@@ -15,7 +15,7 @@ For example, you can ask an agent to:
 Before creating a task, make sure that:
 
 1. a working language model is configured under [Model Configuration](./agent-development/model-configuration);
-2. an agent is created and saved under [Agent Development](./agent-development);
+2. an agent is created and saved under [Agent Configuration](./agent-development);
 3. the agent has the tools, knowledge bases, Skills, memory, or other agents required by the task;
 4. you can access the conversation used to create the task.
 
@@ -27,11 +27,9 @@ If a required capability is missing, the proposal asks you to configure the agen
 
 Select **Automation Tasks** in the left navigation, then click **Create in chat** in the upper-right corner. Nexent opens a new conversation.
 
-You can also open [Start Chat](./start-chat) directly, select an agent, and submit a scheduled request.
+You can also open [Agent Chat](./start-chat) directly, select an agent, and submit a scheduled request.
 
-<div style="display: flex; justify-content: center;">
-  <img src="./assets/auto-tasks/01-automation-task-list.png" style="width: 100%; height: auto;" alt="Automation Tasks entry and task list" />
-</div>
+![Automation Tasks entry and task list](./assets/auto-tasks/01-automation-task-list.png)
 
 ### 2. Select an Agent and Describe the Task
 
@@ -62,10 +60,6 @@ Check the service status every 30 minutes and list any unhealthy services.
 ```
 
 If the request is missing the business action, date, time, or recurrence, the agent asks for the most important missing detail. Immediate requests, questions about data at a particular time, and requests that only explain a time expression are not treated as automation tasks.
-
-<div style="display: flex; justify-content: center;">
-  <img src="./assets/auto-tasks/02-create-task-in-chat.png" style="width: 75%; height: auto;" alt="Describe an automation task in chat" />
-</div>
 
 ### 3. Review the Proposal
 
@@ -133,11 +127,25 @@ Open **Automation Tasks** from the left navigation to see tasks created by the c
 - executing agent;
 - current status;
 - one-time or recurring schedule;
-- next run time;
+- last run time;
 - latest run result.
 
 Click a task name to open its linked conversation. You can filter by task name, agent name, and status, and use pagination or refresh to update the list.
 
+
+### View the Latest Run Result
+
+For a task with run records, click **View result** (the eye icon) beside **Latest result** to expand details below the task row. Click again to collapse the panel.
+
+Depending on the information returned for the run, the panel shows:
+
+- run status and trigger type;
+- scheduled time, actual trigger time, and duration when recorded;
+- execution instructions through **Expand Prompt**;
+- error code and message for a failed run;
+- agent output.
+
+Tasks without run records cannot expand a result. Use **View full conversation** or the task name to open the linked conversation for full context. For older runs, use **More actions > Run history**.
 
 ### Run Now
 
@@ -149,7 +157,7 @@ The linked conversation cannot run multiple agent jobs at the same time. If an a
 
 - Click **Pause** to stop future scheduled triggers;
 - Click **Resume** to calculate the next run from the current time and the existing schedule;
-- A recurring task is **Paused by system** after five consecutive failures or timeouts. Fix the agent configuration or task instructions, then resume it manually;
+- A recurring task is **Paused by system** after five consecutive scheduled-run failures or timeouts when future executions remain. Fix the agent configuration or task instructions, then resume it manually;
 - A completed one-time task has no future schedule and cannot be resumed. Create a new task or use **Run now** when you need to run it again.
 
 ### Use the More Actions Menu
@@ -249,7 +257,7 @@ An agent run or another automation run was already active in the linked conversa
 
 ### Why is the task Paused by system?
 
-A recurring task is automatically paused after five consecutive failures or timeouts, or when its schedule is invalid during recovery. Review run history and the latest error, fix the agent capability, model, tool, or task instructions, then resume the task.
+A recurring task is automatically paused after five consecutive scheduled-run failures or timeouts when future executions remain, or when its schedule is invalid during recovery. Review run history and the latest error, fix the agent capability, model, tool, or task instructions, then resume the task.
 
 ### Does deleting a task delete its conversation?
 
@@ -257,6 +265,6 @@ No. Deleting a task stops future runs but keeps the linked conversation. However
 
 ## Next Steps
 
-- [Start Chat](./start-chat): select an agent and create an automation task in natural language.
-- [Agent Development](./agent-development): configure the model, tools, knowledge bases, Skills, and memory required by the task.
+- [Agent Chat](./start-chat): select an agent and create an automation task in natural language.
+- [Agent Configuration](./agent-development): configure the model, tools, knowledge bases, Skills, and memory required by the task.
 - [Model Configuration](./agent-development/model-configuration): verify the language model used by the task.

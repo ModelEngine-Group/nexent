@@ -1,0 +1,59 @@
+{{- if and (eq (default "docker" .Values.global.sandboxProvider) "kubernetes") (ne (default "lightweight" .Values.global.sandboxMode) "disabled") }}
+# Enforcement requires a NetworkPolicy-capable CNI verified in the target cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nexent-sandbox-control
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      nexent.ai/sandbox: system
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nexent-runtime
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nexent-runtime
+      ports:
+        - protocol: TCP
+          port: 5014
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nexent-sandbox-online
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      nexent.ai/sandbox: system
+      nexent.ai/network: online
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        - ipBlock:
+            cidr: ::/0
+{{- end }}

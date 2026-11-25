@@ -55,13 +55,15 @@ def materialize_memory(resource, actor: ServicePrincipal, conversation_id: int |
 
     async def bounded_store(payload, deadline):
         receipt = await get_memory_store_service().store(AgentMemoryStore(
-            agent_id=resource.agent_id, conversation_id=conversation_id, content=payload["content"],
+            agent_id=resource.agent_id, agent_version_no=resource.version_no,
+            conversation_id=conversation_id, content=payload["content"],
             idempotency_key=payload["idempotency_key"],
         ), actor, deadline=deadline)
         try:
             async with asyncio.timeout(max(0.001, remaining_time(deadline) - 0.01)):
                 await notify_memory_stored(AgentMemoryStored(
-                    memory_id=receipt.memory_id, agent_id=resource.agent_id, conversation_id=conversation_id,
+                    memory_id=receipt.memory_id, agent_id=resource.agent_id,
+                    agent_version_no=resource.version_no, conversation_id=conversation_id,
                 ), actor)
         except TimeoutError:
             logger.warning("External Memory notification exceeded write budget memory_id=%s", receipt.memory_id)

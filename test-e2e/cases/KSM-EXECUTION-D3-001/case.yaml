@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "RUNTIME-SANDBOX",
+  "case": {
+    "case_id": "KSM-EXECUTION-D3-001",
+    "feature_id": "KSM-SYSTEM",
+    "business_rule_ids": [
+      "KSM-SYSTEM-R1",
+      "KSM-SYSTEM-R2"
+    ],
+    "title": "SYSTEM Gateway runs isolated invocations and existing scripts on one owner Pod",
+    "type": "AGENT-IT",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "SYSTEM Gateway runs isolated invocations and existing scripts on one owner Pod",
+    "preconditions": [
+      "An isolated Kubernetes namespace has a verified single-node shared workspace, Runtime ServiceAccount and current verification images.",
+      "Controlled model and tool protocol fixtures drive the real NexentAgent factory."
+    ],
+    "test_data": {
+      "resource_prefix": "ksm-disposable",
+      "profile": "controlled model; real Kubernetes/Redis/storage"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Run twenty simultaneous first acquisitions and inject a lost create response and a transient pinned HTTPS readiness failure.",
+        "expected": "Exactly one create request produces the owned Pod. The original Pod and Service are confirmed by UID and profile, the read-only readiness probe succeeds after retry, and foreign resources are rejected."
+      },
+      {
+        "order": 2,
+        "action": "Use Python state twice in one invocation and invoke parent and child concurrently.",
+        "expected": "State persists within one invocation; parent and child use distinct kernels and shared owner files; closing a child preserves the parent."
+      },
+      {
+        "order": 3,
+        "action": "Run original Skill py/sh and workspace py/js/mjs using argv, cwd, environment, nonzero exits and timeout.",
+        "expected": "Existing argument, stderr, exit and timeout semantics are preserved; full offline seed works without rewriting original source; no business execution is replayed."
+      },
+      {
+        "order": 4,
+        "action": "Call an allowed host tool from simultaneous owners A and B, then close A's context and retry its token.",
+        "expected": "Each callback reaches its exact owner; stale or unauthorized contexts fail and B continues."
+      },
+      {
+        "order": 5,
+        "action": "Cancel one invocation and close all test-owned resources.",
+        "expected": "Only its kernel is cancelled; sibling state and shared SYSTEM Pods survive per-invocation cleanup; the fixture releases only its own namespace resources without relying on Runtime drain."
+      }
+    ],
+    "expected_results": [
+      "One SYSTEM Pod per Runtime owner; cold unused runs create none.",
+      "HTTPS/WSS, real Jupyter execution, script exit results and paired tool observer events are recorded."
+    ],
+    "forbidden_side_effects": [
+      "No local fallback after remote effects, replay, root exec or fake Docker container facade.",
+      "No result or callback contamination between invocations or owners."
+    ],
+    "integration_boundary": [
+      "NexentAgent factory and deferred executor",
+      "Kubernetes API Pod/Service/exec",
+      "Jupyter HTTPS/WSS",
+      "Runtime host-tool route"
+    ],
+    "observations": [
+      "Pod/Service UID and owner UID",
+      "Kernel IDs and exact state markers",
+      "Script stdout/stderr/status",
+      "Owner callback and cleanup evidence"
+    ],
+    "cleanup": [
+      "Close kernels and per-invocation callback contexts.",
+      "Delete only test-owned resources using UID preconditions; preserve shared claims."
+    ],
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ],
+      "timeout_seconds": 900
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Complete the declared boundary and enforce all forbidden effects.",
+        "steps": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}

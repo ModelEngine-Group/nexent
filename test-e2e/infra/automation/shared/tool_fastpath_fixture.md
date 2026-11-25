@@ -5,7 +5,52 @@ provider is controlled. Nexent APIs, authentication, the SDK Agent loop,
 official tools, Docker execution, PostgreSQL history, MinIO and the browser
 are real. These scripts do not implement the existing D3 `real_smoke` profile.
 
-## Prepare a disposable deployment
+## Daily and targeted suite execution
+
+The `tfp` deployment profile selects `TFP-D3-001` and `TFP-D4-001`. The runner
+reuses the images from the current build and runs these Cases serially after
+the ordinary and existing exception groups. It adds the monitoring component
+and selects Langfuse in a copy of the standard Docker deploy command, preserving
+the other deployment arguments and the configured compatible sandbox image.
+The profile temporarily enables session-scoped
+Docker with a bind workspace, official tool fast-path and Langfuse tracing.
+It uses a per-batch workspace under the test home, mounted at the same absolute
+path in Runtime and on the Docker host. The runner verifies that it can reproduce
+the running Runtime's Compose configuration, then explicitly adds the test-only
+`compose.tfp.override.yaml` for that service. The existing named workspace volume
+stays attached. Restoring Local removes the temporary mount and verifies the
+original active workspace, then runs a Local knowledge smoke test.
+Use a test-only environment where the runner owns the deployment window.
+
+Set `NEXENT_TFP_LANGFUSE_URL` in the test home's `config/daily.env` to the
+local monitoring project's read API URL. Set `TFP_TRACE_PUBLIC_KEY` and
+`TFP_TRACE_SECRET_KEY` in `config/secrets.env` to keys for the same project
+used by the deployment's collector. The default `NEXENT_TFP_LANGFUSE_API_VERSION`
+is `v1`. Use `v2` only when the deployment already has matching v4 trace export
+settings. Configure `tenant_a_admin` and `tenant_b_user` in `config/users.yaml`
+and their passwords in `config/secrets.env`. They must belong to different
+test tenants and use an isolated workspace, with memory pre-search disabled.
+
+Each scenario discovers its workspace mapping from the running SDK and uploads
+its own Skill from the repository's maintained fixture. It registers the Skill,
+Agent, model and other owned resources for cleanup. A generated credential file
+or pre-uploaded Skill is unnecessary in this profile. If fixture configuration
+is missing, only these two Cases are dependency-blocked. After the profile is
+applied, the runner restores the saved Local configuration and requires
+`PW-KB-LOCAL-01` to pass with successful cleanup before completing recovery.
+The separate receipt lives in `restore-local/business-smoke.json` and is not
+counted as another planned Case.
+
+To run this group alone on an opted-in test machine, use:
+
+```sh
+python test-e2e/infra/scripts/run-suite.py run --test-home <local-test-home> --case TFP-D3-001 --case TFP-D4-001 --execute
+```
+
+## Manually prepared disposable deployment
+
+The fixture-file format below is retained for direct harness debugging against
+an already prepared deployment.
 
 Use the current checkout's SDK in the runtime container. Preflight compares
 the deployed `nexent_agent.py`, `tool_fastpath.py` and `sandbox.py` SHA-256
@@ -18,6 +63,7 @@ Configure the disposable runtime with:
 NEXENT_SANDBOX_DEFAULT_LEVEL=docker
 NEXENT_SANDBOX_DEFAULT_SCOPE=session
 NEXENT_SANDBOX_WORKSPACE_MODE=bind
+NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT=/mnt/nexent/workdir
 NEXENT_TOOL_FASTPATH_ENABLED=true
 ```
 
@@ -87,13 +133,7 @@ disposable deployment. The direct D3 `run_cases.py` path does not start those
 services itself; use the suite worker below, or supply an already runner-owned
 controlled service when invoking that direct path.
 
-## Execute and inspect
-
-Run through the existing configured test interpreter:
-
-```sh
-python test-e2e/infra/scripts/run-suite.py run --test-home <local-test-home> --case TFP-D3-001 --case TFP-D4-001 --execute
-```
+## Inspect evidence
 
 D3 executes independent cold and promoted API runs plus a promoted run with
 a controlled post-run assertion failure. It compares SSE to terminal
@@ -110,11 +150,10 @@ Owned resource IDs are journaled under each run's `RESULT_DIR/runtime/`.
 The D4 `tfp-fixture.json` receipt contains no credentials and has `0600`
 permissions. Cleanup stops only owned conversations, waits for terminal
 persistence, deletes only nonce-matched report objects and owned conversations,
-then removes the test Agent, test model and provider scenario. Cleanup errors
-are retained without hiding the original test failure. The prepared skill
-and shared service deployment are retained.
+then removes the test Agent, test model, provider scenario, and its Daily-owned
+Skill. Cleanup errors are retained without hiding the original test failure.
+A manually prepared Skill remains owned by the person who installed it.
 
 Missing deployment, fixture, identities, trace credentials or browser
 prerequisites are blockers. Static validation, collection and harness unit
-tests are not deployed E2E passes. Keep the formal Case status `blocked`
-until those prerequisites and actual execution evidence exist.
+tests do not establish deployed E2E results.

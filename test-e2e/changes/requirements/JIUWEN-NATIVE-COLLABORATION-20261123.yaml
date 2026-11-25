@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-NATIVE-COLLABORATION-20261123
+  change_type: requirement
+  requirement_id: JIUWEN-NATIVE-COLLABORATION-20261123
+  title: Dispatch local collaborators and remote A2A through Jiuwen
+  description: Use run-owned AgentCards and the native A2A client while preserving Nexent collaboration policy.
+  affected_features:
+    existing: []
+    modified: [JIUWEN-RESOURCES]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-OUTPUT-D3-001, JIUWEN-OUTPUT-D4-001, JIUWEN-RESOURCES-D5-003]
+    modified: [JIUWEN-RESOURCES-D3-002]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Native cards accept only their owner's session and schema.
+    - A2A combines text updates by artifact ID and requires a successful terminal state.
+    - Existing authorization, observer nesting, timeouts and sandbox cleanup remain valid.
+    reason: Tests isolate argument and status handling. D3 runs the real Runner and HTTP transports, including
+      cancellation, stream projection and persisted history. D4 exercises the unchanged renderer. D5 covers
+      cancellation and recovery. No new D1 adds a distinct boundary.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_collaboration.py
+    - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/sdk/core/agents/test_jiuwen_tool_timeouts.py
+    - test/sdk/core/agents/test_a2a_active_cancellation.py
+    - test/backend/utils/test_runtime_output.py
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/changes/runtime-jiuwen-native-collaboration/.
+    Uses the existing runtime responsibility mapping and self-contained fixtures. Each fixture owns its native
+    sessions, workers, A2A endpoints and disposable sandbox resources.
