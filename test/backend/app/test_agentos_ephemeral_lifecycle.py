@@ -144,12 +144,17 @@ def creator_payload(mode, **fields):
 
 
 @pytest.mark.parametrize("mode", ["nl2agent", "nl2skill"])
-@pytest.mark.parametrize("persisted", [True, False])
-async def test_trajectory_metadata_uses_signed_creator_scope(runtime, mode, persisted):
+@pytest.mark.parametrize("trajectory, expected_source_id", [
+    ({"conversation_id": 9, "source_message_id": 10}, "10"),
+    ({"conversation_id": 9}, None),
+    (None, None),
+], ids=["saved-turn", "saved-session", "unsaved"])
+async def test_trajectory_metadata_uses_signed_creator_scope(runtime, mode, trajectory, expected_source_id):
     runtime.info.agent_config = SimpleNamespace(agent_core="jiuwen")
+    persisted = trajectory is not None
     creator = creator_payload(mode, **({
         "system_agent": {"agent_id": 77, "version_no": 1},
-        "trajectory": {"conversation_id": 9, "source_message_id": 10},
+        "trajectory": trajectory,
     } if persisted else {}))
     response = await ephemeral._open_ephemeral(creator, ACTOR)
     metadata = response.metadata
@@ -157,7 +162,10 @@ async def test_trajectory_metadata_uses_signed_creator_scope(runtime, mode, pers
     assert metadata.is_debug is not persisted
     assert metadata.conversation_id == (9 if persisted else None)
     assert metadata.agent_id == (77 if persisted else 201 if mode == "nl2agent" else None)
-    assert metadata.extra_metadata.get("trajectory_source_message_id") == ("10" if persisted else None)
+    if expected_source_id is None:
+        assert "trajectory_source_message_id" not in metadata.extra_metadata
+    else:
+        assert metadata.extra_metadata["trajectory_source_message_id"] == expected_source_id
     assert metadata.extra_metadata.get("core_type") == ("jiuwen" if persisted else None)
     assert response.debug_run_id is None
     runtime.registry.reserve_agent_capacity.assert_not_called()
