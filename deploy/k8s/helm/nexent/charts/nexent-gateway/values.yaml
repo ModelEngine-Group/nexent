@@ -1,5 +1,9 @@
 replicaCount: 1
 
+# Emergency kill switch: comma-separated capability ids/paths removed from
+# the exposure registry at gateway startup (empty = expose all declared rows).
+nbExcludedCapabilities: ""
+
 strategy:
   type: RollingUpdate
 

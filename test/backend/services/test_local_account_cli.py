@@ -151,10 +151,10 @@ def test_existing_su_is_idempotent_without_password_work(store, check_only):
     store.member.assert_not_called()
 
 
-@pytest.mark.parametrize("flag,roles", [("Y", ["SU"]), ("N", []), ("N", ["SU", "USER"])])
+@pytest.mark.parametrize("flag,roles", [("Y", ("SU",)), ("N", ()), ("N", ("SU", "USER"))])
 def test_unavailable_or_non_su_identity_cannot_be_promoted(store, flag, roles):
     store.lookup.return_value = {"user_id": "original", "delete_flag": flag}
-    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role=r, roles=[r]) for r in roles]
+    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(roles=list(roles)) for _ in roles] or [SimpleNamespace(roles=[])]
     with pytest.raises(AccountConflictError, match="unavailable or non-SU"):
         cli.bootstrap_super_admin("su@example.com", "Password123")
     store.create.assert_not_called()

@@ -786,6 +786,45 @@ def test_prepared_conversation_rejects_foreign_history_attachment():
     assert error.value.status_code == 403
 
 
+def test_prepared_conversation_keeps_persisted_execution_records():
+    """Regression: the repository attaches execution_records, so the contract must allow them.
+
+    The projection emits read-only evidence for completed turns and the SDK renders it as
+    reference data. A contract without that field rejected the whole snapshot and turned
+    every follow-up message into a 500.
+    """
+    from contracts.agentos import PreparedConversationHistory
+    from contracts.agentos import PreparedHistoryExecutionRecord
+
+    turn = {
+        "user_message": "previous request", "assistant_final_answer": "previous answer",
+        "user_message_id": 21, "assistant_message_id": 22, "attachments": None,
+        "execution_records": [
+            {"record_type": "tool", "content": '{"tool_name":"lookup"}',
+             "tool_call_id": "call-1", "invocation_id": None},
+            # Persisted unit bodies are nullable, so a missing body must not reject the turn.
+            {"record_type": "execution_logs", "content": None,
+             "tool_call_id": None, "invocation_id": "inv-2"},
+        ],
+    }
+    prepared = evaluation_snapshot._prepare_conversation_history(
+        {"history_summary": None, "conversation_turns": [turn]}, "actor", "tenant",
+    )
+
+    records = prepared.conversation_turns[0].execution_records
+    assert [record.record_type for record in records] == ["tool", "execution_logs"]
+    assert records[0].tool_call_id == "call-1" and records[0].invocation_id is None
+    assert records[1].content is None and records[1].invocation_id == "inv-2"
+    assert all(isinstance(record, PreparedHistoryExecutionRecord) for record in records)
+
+    restored = prepared_evaluation._restore_conversation_history(
+        prepared, ServicePrincipal("actor", "tenant"),
+    )
+    assert [record["record_type"] for record in restored["conversation_turns"][0]["execution_records"]] == [
+        "tool", "execution_logs",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_a2a_metadata_requires_permission_on_published_version(mocker):
     from contracts.errors.codes import ErrorCode

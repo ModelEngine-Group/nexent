@@ -7364,6 +7364,7 @@
   "workbench.creationConfirmation.noPermission": "你没有进入该创建模式的权限。",
   "workbench.creationConfirmation.saveFailed": "保存确认失败，请重试。",
   "workbench.creationConfirmation.originalRequest": "用户原始需求：",
+  "ui.sidebar.toggle": "切换侧边栏",
   "user.role.ops": "运维管理员",
   "ops.dashboard": "运维看板",
   "ops.configuration": "系统配置",

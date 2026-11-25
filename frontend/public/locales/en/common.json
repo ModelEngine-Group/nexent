@@ -7367,6 +7367,7 @@
   "workbench.creationConfirmation.noPermission": "You do not have permission to enter this creation mode.",
   "workbench.creationConfirmation.saveFailed": "Could not save the confirmation. Please retry.",
   "workbench.creationConfirmation.originalRequest": "Original user request:",
+  "ui.sidebar.toggle": "Toggle Sidebar",
   "user.role.ops": "Operations",
   "ops.dashboard": "Operations dashboard",
   "ops.configuration": "System configuration",

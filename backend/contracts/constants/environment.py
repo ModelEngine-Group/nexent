@@ -221,6 +221,11 @@ MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY')
 MINIO_REGION = os.getenv('MINIO_REGION')
 MINIO_DEFAULT_BUCKET = os.getenv('MINIO_DEFAULT_BUCKET')
 MINIO_SECURE = os.getenv('MINIO_SECURE', 'true').lower() == 'true'
+# Optional externally reachable authority (host:port) for presigned URLs that
+# leave the container network. A presigned URL's signature covers the Host
+# header, so the URL must be signed against the authority the caller will
+# actually use; empty/unset falls back to MINIO_ENDPOINT (internal-only).
+MINIO_EXTERNAL_ENDPOINT = os.getenv('MINIO_EXTERNAL_ENDPOINT', '')
 
 # Postgres Configuration
 POSTGRES_HOST = os.getenv('POSTGRES_HOST')
