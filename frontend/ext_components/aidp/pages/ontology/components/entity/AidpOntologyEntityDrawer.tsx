@@ -433,14 +433,9 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     const childIds = (values.demo_children ?? []).filter(Boolean);
     const initialPrimaryValues = entity?.primary_properties ?? [];
     // The primary-property editor is intentionally hidden: AIDP no longer
-    // returns the field on entity detail. When the form has no value for it,
-    // treat the existing values as unchanged so the guard below cannot wipe
-    // them on an unrelated edit.
-    const primary = (
-      values.primary_properties === undefined
-        ? initialPrimaryValues
-        : values.primary_properties
-    ).filter((name) =>
+    // returns the field on entity detail. Never derive a primary change from
+    // the form, so an unrelated edit cannot wipe upstream values.
+    const primary = initialPrimaryValues.filter((name) =>
       properties.some((property) => property.api_name === name)
     );
     const detailsLoaded = entity?.detail_loaded !== false;

@@ -149,10 +149,10 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
       onImported();
     } catch (error) {
       if (error instanceof ApiError) {
-        const details = error.details as { errors?: unknown } | undefined;
-        if (Array.isArray(details?.errors)) {
-          setServerErrors(details.errors as AidpOntologyImportError[]);
-        }
+        const serverIssues = (
+          error.details as { errors?: AidpOntologyImportError[] } | undefined
+        )?.errors;
+        if (serverIssues) setServerErrors(serverIssues);
       }
       setErrorMessage(
         getAidpErrorMessage(error, t, t("aidpKnowledge.ontologyImportFailed"))

@@ -2676,26 +2676,14 @@ def _require_kb(kds_id: str) -> None:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
 
-def _name_conflict(path: str) -> HTTPException:
-    """AIDP 1089: a folder or file already uses this name in the location."""
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": 1089,
-            "message": f"name already exists: {path}",
-        },
+def _name_conflict(path: str, *, code: int = 1089) -> HTTPException:
+    """AIDP 1089 for file/folder duplicates; 1092 for folder-move duplicates."""
+    message = (
+        f"folder already exists at target: {path}"
+        if code == 1092
+        else f"name already exists: {path}"
     )
-
-
-def _folder_move_conflict(path: str) -> HTTPException:
-    """AIDP 1092: moving a folder onto an existing same-named folder."""
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": 1092,
-            "message": f"folder already exists at target: {path}",
-        },
-    )
+    return HTTPException(status_code=409, detail={"code": code, "message": message})
 
 
 @app.get(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{folder_id}}")
@@ -2924,7 +2912,7 @@ def move_folder(
     destination = _join_folder_path(target, name)
     if destination in _all_folder_paths(kds_id):
         if not body.merge_on_conflict:
-            raise _folder_move_conflict(destination)
+            raise _name_conflict(destination, code=1092)
         _merge_folder_into(kds_id, source, destination)
     else:
         _rewrite_folder_prefix(kds_id, source, destination)
