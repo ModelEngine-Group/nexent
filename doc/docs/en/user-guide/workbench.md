@@ -32,7 +32,6 @@ Before sending, use the composer controls to add resources as needed. Availabili
 | **Agents** | Search for available agents, select them, and click **Confirm selection**. You can select multiple agents if your deployment supports multi-agent mode. If general chat is enabled, you can also send a task directly. |
 | **Knowledge** | Open **Knowledge bases for this conversation** and choose what to search. Sources may include **Local knowledge bases** and **AIDP knowledge bases**. |
 | **Skills** | Select the skills you need, fill in any required configuration, and click **Confirm selection**. |
-| **Model** | Switch to a model you have permission to use. The selector shows the available models and settings. |
 
 To remove a resource, use its label in the composer.
 
@@ -46,6 +45,18 @@ To remove a resource, use its label in the composer.
 
 <!-- Screenshot pending. Capture the Skills picker with a selected skill and the Confirm selection button.
 ![Selecting skills for the conversation](./assets/workbench/skill-picker.png)
+-->
+
+### Select a model
+
+1. Before sending a message, click the model name next to the send button in the composer, or click **Select model**.
+2. Choose a model for the current conversation. The composer displays the selected model and uses it for subsequent messages. If a response is in progress, wait for it to finish before switching.
+3. To adjust parameters, reopen the model selector. Depending on the model, you can use **Deep thinking**, adjust **Thinking intensity**, or change Temperature and Top P under **Advanced settings**. Use **Restore defaults** to clear custom sampling values.
+
+The list depends on your tenant's model configuration. If the model you need is missing, ask your administrator to check that it is connected and available. See [Model Configuration](./agent-development/model-configuration).
+
+<!-- Screenshot pending. Capture the open model selector with the selected model and the Advanced settings control visible.
+![Selecting a model and finding advanced settings in the Workbench](./assets/workbench/model-selector.png)
 -->
 
 ## Run the task and review the result
