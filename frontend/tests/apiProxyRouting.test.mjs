@@ -183,3 +183,41 @@ test("system configuration requests preserve their URL through the Gateway proxy
     assert.equal(result.req.url, path);
   }
 });
+
+test("attachment proxy only claims static attachment paths", () => {
+  const calls = [];
+  const start = source.indexOf("function isAttachmentProxyPath(");
+  const end = source.indexOf("function handleNorthboundProxy(", start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({
+    MINIO_BACKEND: "http://minio:9010",
+    proxy: { web: (_req, _res, config) => calls.push(config) },
+  });
+  vm.runInContext(source.slice(start, end), context);
+
+  const dispatch = (pathname) => {
+    calls.length = 0;
+    const handled = context.handleAttachmentProxy(pathname, {}, {});
+    return { handled, targets: calls.map((call) => call.target) };
+  };
+
+  for (const pathname of [
+    "/attachments/owner/report.txt",
+    "/attachments/image.png",
+  ]) {
+    assert.deepEqual(dispatch(pathname), {
+      handled: true,
+      targets: ["http://minio:9010"],
+    });
+  }
+
+  for (const pathname of [
+    "/nb/v1/chat/attachments/upload",
+    "/nb/attachments/file",
+    "/api/file/download/attachments/owner/report.txt",
+    "/files/attachments/owner/report.txt",
+    "/attachments",
+  ]) {
+    assert.deepEqual(dispatch(pathname), { handled: false, targets: [] });
+  }
+});
