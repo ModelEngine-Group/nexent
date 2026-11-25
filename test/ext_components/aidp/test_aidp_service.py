@@ -4392,7 +4392,7 @@ class TestChunkImpls:
         assert result["message"] == "ok"
 
 class TestFileSummaryImpls:
-    """File summary reads and retries stay on the documented AIDP paths."""
+    """File summary reads stay on the documented AIDP POST contract."""
 
     @staticmethod
     def _install_client(aidp_summary_service_module, client):
@@ -4410,16 +4410,14 @@ class TestFileSummaryImpls:
         response.content = b"{}"
         return response
 
-    def test_summary_reads_file_scoped_path_and_passes_fields_through(
+    def test_summary_posts_uuid_and_passes_fields_through(
         self, aidp_summary_service_module
     ):
         mock_client = MagicMock()
         mock_client.request.return_value = self._json_response({
-            "result": {
-                "summary_status": "pending",
-                "summary_text": "摘要正文",
-                "summary_model": "qwen3",
-            }
+            "summary_status": "pending",
+            "summary_text": "摘要正文",
+            "summary_model": "qwen3",
         })
         self._install_client(aidp_summary_service_module, mock_client)
 
@@ -4427,10 +4425,13 @@ class TestFileSummaryImpls:
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
         )
 
-        assert mock_client.request.call_args.args[1] == (
+        call = mock_client.request.call_args
+        assert call.args[0] == "POST"
+        assert call.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
-            "/KnowledgeBases/kb-1/KnowledgeFiles/file-1/Summary"
+            "/KnowledgeBases/kb-1/KnowledgeFiles/Summary"
         )
+        assert call.kwargs["json"] == {"file_uuid": "file-1"}
         assert result == {
             "result": {
                 "summary_status": "pending",
@@ -4441,7 +4442,7 @@ class TestFileSummaryImpls:
 
     def test_summary_keeps_empty_result(self, aidp_summary_service_module):
         mock_client = MagicMock()
-        mock_client.request.return_value = self._json_response({"result": {}})
+        mock_client.request.return_value = self._json_response({})
         self._install_client(aidp_summary_service_module, mock_client)
 
         empty = aidp_summary_service_module.get_aidp_file_summary_impl(

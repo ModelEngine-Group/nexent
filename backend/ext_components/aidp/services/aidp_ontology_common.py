@@ -18,7 +18,10 @@ from nexent.utils.http_client_manager import http_client_manager
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from ext_components.aidp.services.aidp_client import _extract_upstream_code
+from ext_components.aidp.services.aidp_client import (
+    _AIDP_ACCEPT_LANGUAGE,
+    _extract_upstream_code,
+)
 from ext_components.aidp.services.aidp_service import (
     _extract_upstream_error,
     _raise_aidp_http_error,
@@ -86,6 +89,7 @@ def _ontology_request(
     url = urljoin(f"{base_url}/", path)
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
     client = http_client_manager.get_sync_client(

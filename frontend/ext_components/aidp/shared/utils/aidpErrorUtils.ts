@@ -10,10 +10,20 @@ const upstreamCodeOf = (error: ApiError): string | null => {
     : null;
 };
 
-/** AIDP code 1089 means a file or folder name already exists in that location. */
-export const isAidpNameConflictError = (error: unknown): boolean =>
-  error instanceof ApiError &&
-  (String(error.code) === "1089" || upstreamCodeOf(error) === "1089");
+/**
+ * AIDP code 1089 (file/folder duplicate) and 1092 (folder-move duplicate)
+ * mean that the name already exists in the target location.
+ */
+const NAME_CONFLICT_CODES = new Set(["1089", "1092"]);
+
+export const isAidpNameConflictError = (error: unknown): boolean => {
+  if (!(error instanceof ApiError)) return false;
+  const upstreamCode = upstreamCodeOf(error);
+  return (
+    NAME_CONFLICT_CODES.has(String(error.code)) ||
+    (upstreamCode !== null && NAME_CONFLICT_CODES.has(upstreamCode))
+  );
+};
 
 /** Resolve an upstream message without remapping its business code. */
 export const getAidpPlainMessage = (

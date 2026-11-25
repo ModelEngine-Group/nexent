@@ -21,6 +21,7 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpSensitiveWordError
 from ext_components.aidp.services.aidp_client import (
+    _AIDP_ACCEPT_LANGUAGE,
     _AIDP_READ_TIMEOUT_SECONDS,
     _extract_upstream_code,
     _extract_upstream_error,
@@ -111,6 +112,7 @@ def _request(
     url = urljoin(f"{normalized_url}/", path)
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
     try:

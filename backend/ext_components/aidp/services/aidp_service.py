@@ -27,6 +27,7 @@ from pydantic import (
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.services.aidp_client import (
+    _AIDP_ACCEPT_LANGUAGE,
     _AIDP_DOWNLOAD_TIMEOUT_SECONDS,
     _AIDP_READ_TIMEOUT_SECONDS,
     _build_list_query,
@@ -360,6 +361,7 @@ def fetch_aidp_knowledge_bases_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -502,6 +504,7 @@ def fetch_all_aidp_knowledge_bases_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -650,6 +653,7 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -826,6 +830,7 @@ def create_aidp_kb_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -911,6 +916,7 @@ def get_aidp_kb_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -991,6 +997,7 @@ def update_aidp_kb_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -1062,6 +1069,7 @@ def delete_aidp_kb_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -1135,6 +1143,7 @@ def upload_aidp_docs_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
     }
 
     upload_path = f"{_get_knowledge_files_path(kds_id)}/Upload"
@@ -1251,6 +1260,7 @@ def remove_aidp_docs_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
     remove_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Remove"
@@ -1300,6 +1310,7 @@ def retry_aidp_docs_impl(
     normalized_url = _validate_params(server_url, api_key)
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
     retry_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Retry"
@@ -1355,6 +1366,7 @@ async def stream_aidp_doc_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
     download_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Download"
@@ -1411,7 +1423,10 @@ async def stream_aidp_preview_impl(
     """
     normalized_url = _validate_params(server_url, api_key)
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
+    }
     preview_path = _get_ocr_annotate_path(kds_id, file_uuid)
     preview_url = urljoin(f"{normalized_url}/", preview_path)
     logger.info("Previewing AIDP document %s from %s", file_uuid, preview_url)
@@ -1462,6 +1477,7 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -1542,6 +1558,7 @@ def list_aidp_docs_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -1763,6 +1780,7 @@ def list_aidp_channels_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -1871,6 +1889,7 @@ def list_aidp_doc_history_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -2005,6 +2024,7 @@ def list_aidp_models_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
 
@@ -2088,12 +2108,16 @@ def get_aidp_graph_template_impl(
     normalized_url = _validate_params(server_url, api_key)
     url = urljoin(f"{normalized_url}/", f"{_get_list_path()}/GraphConfigTemplate?language={language}")
     logger.info("Fetching AIDP graph template from %s", url)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
+    }
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url, timeout=_AIDP_READ_TIMEOUT_SECONDS, verify_ssl=False,
         )
         response = _request_with_retry(
-            lambda: client.get(url, headers={"Authorization": f"Bearer {api_key}"}),
+            lambda: client.get(url, headers=headers),
             context="graph-template",
         )
         response.raise_for_status()
@@ -2135,6 +2159,7 @@ def fusion_search_impl(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
         "Content-Type": "application/json",
     }
     payload = {

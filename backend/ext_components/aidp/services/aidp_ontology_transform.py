@@ -60,13 +60,22 @@ def _issue(
     object_type: str,
     api_name: Any,
     field: str,
+    reason: str,
     message: str,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build one field-level import issue.
+
+    ``message`` is an English fallback for non-browser callers; the browser
+    translates ``reason`` + ``params`` into the active locale.
+    """
     return {
         "index": index,
         "type": object_type,
         "api_name": api_name if isinstance(api_name, str) else None,
         "field": field,
+        "reason": reason,
+        "params": params or {},
         "message": message,
     }
 
@@ -85,7 +94,7 @@ def _resolve_export_groups(
     caller does not have to remember which wrapper it holds.
     """
     if not isinstance(document, dict):
-        errors.append(_issue(None, "document", None, "$", "JSON 顶层必须是对象"))
+        errors.append(_issue(None, "document", None, "$", "json_root_object", "JSON root must be an object"))
         return []
 
     if any(key in document for key in ("types", "entities", "relations")):
@@ -104,7 +113,7 @@ def _resolve_export_groups(
                 "document",
                 None,
                 "$",
-                "未找到本体库分组，需要以本体库名称为键并包含 types/entities/relations",
+                "group_missing", "No ontology group found; the key must be the ontology name and include types/entities/relations",
             )
         )
     return groups
@@ -119,11 +128,11 @@ def _project_entity(
 ) -> dict[str, Any] | None:
     object_type = "type" if kind == ONTOLOGY_KIND_TYPE else "entity"
     if not isinstance(item, dict):
-        errors.append(_issue(index, object_type, None, "$", "条目必须是对象"))
+        errors.append(_issue(index, object_type, None, "$", "item_not_object", "Each entry must be an object"))
         return None
     api_name = _clean_text(item.get("api_name"))
     if not api_name:
-        errors.append(_issue(index, object_type, None, "api_name", "api_name 不能为空"))
+        errors.append(_issue(index, object_type, None, "api_name", "api_name_required", "api_name is required"))
         return None
     declared_kind = _clean_text(item.get("kind")).lower()
     if declared_kind and declared_kind != kind:
@@ -133,7 +142,7 @@ def _project_entity(
                 object_type,
                 api_name,
                 "kind",
-                f"kind 与分组不一致：分组为 {kind}，条目为 {declared_kind}",
+                "kind_mismatch", f"kind mismatch: group is {kind}, entry is {declared_kind}", {"kind": kind, "declared": declared_kind},
             )
         )
         return None
@@ -145,7 +154,7 @@ def _project_entity(
     properties = projected.get("properties")
     if properties is not None and not isinstance(properties, list):
         errors.append(
-            _issue(index, object_type, api_name, "properties", "properties 必须是数组")
+            _issue(index, object_type, api_name, "properties", "properties_not_array", "properties must be an array")
         )
         return None
     primary = projected.get("primary_properties")
@@ -156,7 +165,7 @@ def _project_entity(
                 object_type,
                 api_name,
                 "primary_properties",
-                "primary_properties 必须是数组",
+                "primary_properties_not_array", "primary_properties must be an array",
             )
         )
         return None
@@ -168,7 +177,7 @@ def _project_entity(
                     object_type,
                     api_name,
                     f"properties[{position}].api_name",
-                    "属性 api_name 不能为空",
+                    "property_api_name_required", "Property api_name is required",
                 )
             )
             return None
@@ -194,7 +203,7 @@ def _resolve_relation_endpoint(
 ) -> bool:
     endpoint_name = _clean_text(relation.get(field))
     if not endpoint_name:
-        errors.append(_issue(index, "relation", api_name, field, f"{field} 不能为空"))
+        errors.append(_issue(index, "relation", api_name, field, "relation_field_required", f"{field} is required", {"field": field}))
         return False
     declared_kind = _clean_text(relation.get(kind_field)).lower()
     known_kinds = entity_kinds.get(endpoint_name, set())
@@ -206,7 +215,7 @@ def _resolve_relation_endpoint(
                     "relation",
                     api_name,
                     kind_field,
-                    f"{kind_field} 只能是 type 或 entity",
+                    "relation_kind_invalid", f"{kind_field} must be type or entity", {"field": kind_field},
                 )
             )
             return False
@@ -217,7 +226,7 @@ def _resolve_relation_endpoint(
                     "relation",
                     api_name,
                     field,
-                    f"关系端点 {endpoint_name} 不在本次导入的实体中",
+                    "relation_endpoint_missing", f"Relation endpoint {endpoint_name} is not part of this import", {"endpoint": endpoint_name},
                 )
             )
             return False
@@ -228,7 +237,7 @@ def _resolve_relation_endpoint(
                     "relation",
                     api_name,
                     kind_field,
-                    f"关系端点 {endpoint_name} 的 kind 为 {next(iter(known_kinds))}，与 {declared_kind} 不一致",
+                    "relation_kind_mismatch", f"Relation endpoint {endpoint_name} has kind {next(iter(known_kinds))}, which conflicts with {declared_kind}", {"endpoint": endpoint_name, "actual": next(iter(known_kinds)), "declared": declared_kind},
                 )
             )
             return False
@@ -240,7 +249,7 @@ def _resolve_relation_endpoint(
                 "relation",
                 api_name,
                 field,
-                f"关系端点 {endpoint_name} 不在本次导入的实体中，无法确定 kind",
+                "relation_endpoint_kind_unknown", f"Relation endpoint {endpoint_name} is not part of this import; cannot determine kind", {"endpoint": endpoint_name},
             )
         )
         return False
@@ -251,7 +260,7 @@ def _resolve_relation_endpoint(
                 "relation",
                 api_name,
                 kind_field,
-                f"关系端点 {endpoint_name} 同时以 type 和 entity 出现，需显式提供 {kind_field}",
+                "relation_kind_ambiguous", f"Relation endpoint {endpoint_name} appears as both type and entity; provide {kind_field} explicitly", {"endpoint": endpoint_name, "field": kind_field},
             )
         )
         return False
@@ -267,11 +276,11 @@ def _project_relation(
     errors: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     if not isinstance(item, dict):
-        errors.append(_issue(index, "relation", None, "$", "条目必须是对象"))
+        errors.append(_issue(index, "relation", None, "$", "item_not_object", "Each entry must be an object"))
         return None
     api_name = _clean_text(item.get("api_name"))
     if not api_name:
-        errors.append(_issue(index, "relation", None, "api_name", "api_name 不能为空"))
+        errors.append(_issue(index, "relation", None, "api_name", "api_name_required", "api_name is required"))
         return None
 
     projected: dict[str, Any] = {"api_name": api_name}
@@ -339,7 +348,7 @@ def build_import_request(
             raw_items = group.get(source_key) or []
             if not isinstance(raw_items, list):
                 errors.append(
-                    _issue(None, kind, None, source_key, f"{source_key} 必须是数组")
+                    _issue(None, kind, None, source_key, "field_array_required", f"{source_key} must be an array", {"field": source_key})
                 )
                 continue
             for index, item in enumerate(raw_items):
@@ -354,7 +363,7 @@ def build_import_request(
                             kind,
                             projected["api_name"],
                             "api_name",
-                            "同一文件内 (api_name, kind) 重复",
+                            "duplicate_api_name", "Duplicate (api_name, kind) in the same file",
                         )
                     )
                     continue
@@ -370,7 +379,7 @@ def build_import_request(
         raw_items = group.get("relations") or []
         if not isinstance(raw_items, list):
             errors.append(
-                _issue(None, "relation", None, "relations", "relations 必须是数组")
+                _issue(None, "relation", None, "relations", "field_array_required", "relations must be an array", {"field": "relations"})
             )
             continue
         for index, item in enumerate(raw_items):
@@ -440,7 +449,7 @@ def _extract_error_message(item: dict[str, Any]) -> str:
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    return "导入失败"
+    return "Import failed"
 
 
 def _import_result_data(payload: Any) -> dict[str, Any]:

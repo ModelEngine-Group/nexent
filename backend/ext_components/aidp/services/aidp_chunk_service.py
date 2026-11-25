@@ -24,6 +24,7 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_client
 from ext_components.aidp.services.aidp_client import (
+    _AIDP_ACCEPT_LANGUAGE,
     _AIDP_READ_TIMEOUT_SECONDS,
     _get_batch_metadata_path,
     _get_chunks_path,
@@ -206,15 +207,17 @@ def get_aidp_image_impl(
         f"{normalized_url}/", _get_view_image_path(kds_id, file_id, tenant_id)
     )
     logger.info("AIDP view-image: GET %s", url)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
+    }
     try:
         client = aidp_client.http_client_manager.get_sync_client(
             base_url=normalized_url,
             timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
-        response = client.get(
-            url, headers={"Authorization": f"Bearer {api_key}"}
-        )
+        response = client.get(url, headers=headers)
         response.raise_for_status()
     except httpx.RequestError as e:
         logger.exception("AIDP image request failed: %s", e)

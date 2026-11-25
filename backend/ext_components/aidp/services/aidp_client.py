@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any, Callable, Dict, NoReturn
 from urllib.parse import quote, urljoin
@@ -34,6 +35,10 @@ _AIDP_RETRY_BACKOFF_FACTOR = 0.5
 _AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _AIDP_READ_TIMEOUT_SECONDS = 30.0
 _AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
+
+# Default language for AIDP-returned error messages. AIDP falls back to
+# English when the header is missing; override via AIDP_ACCEPT_LANGUAGE.
+_AIDP_ACCEPT_LANGUAGE = os.getenv("AIDP_ACCEPT_LANGUAGE", "zh-CN")
 
 
 def _normalize_upstream_error(value: Any) -> str | None:
@@ -521,6 +526,7 @@ def _request_aidp_json(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
     }
     request_url = urljoin(f"{normalized_url}/", path.lstrip("/"))
     logger.info("AIDP %s request to %s", method, request_url)
