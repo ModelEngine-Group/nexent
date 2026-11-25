@@ -568,6 +568,9 @@ class AgentRunSpec(RunSpecModel):
     input: RunInput
     language: Literal["zh", "en"] = "zh"
     tool_caller: ToolCallerContext | None = None
+    # Tenant MCP server identity catalog for monitoring facts; Management
+    # attaches it, Runtime filters it to the URLs the run materializes.
+    monitoring_mcp_servers: list[dict[str, JsonValue]] | None = Field(default=None, repr=False)
 
 
 class HistoryCheckpointCandidate(RunSpecModel):

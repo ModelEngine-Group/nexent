@@ -165,6 +165,10 @@ class AgentRunInfo(BaseModel):
         description="Authorized files uploaded with the current run request.",
         default=None,
     )
+    monitoring_mcp_servers: Optional[List[Dict[str, Any]]] = Field(
+        description="Per-run MCP server identity catalog resolved by preparation for monitoring facts.",
+        default=None,
+    )
 
     class Config:
         arbitrary_types_allowed = True

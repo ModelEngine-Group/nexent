@@ -204,6 +204,7 @@ class AgentRunMetadata:
     monitoring_group_ids: Optional[tuple[int, ...]] = None
     monitoring_run_id: Optional[str] = None
     monitoring_root_run_id: Optional[str] = None
+    monitoring_mcp_servers: Optional[List[Dict[str, Any]]] = None
     monitoring_parent_run_id: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:

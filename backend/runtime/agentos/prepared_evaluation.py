@@ -20,8 +20,9 @@ from contracts.agentos import (
     WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
-    NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE,
+    NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED, OPS_MONITORING_ENABLED,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from contracts.errors.exceptions import RunModelControlsError, ValidationError as AgentValidationError
 from infrastructure.a2a_execution import (
@@ -353,6 +354,22 @@ def _restore_conversation_history(history, actor):
     }
 
 
+def _build_run_monitoring_catalog(payload, mcp: PreparedMCP, debug: bool):
+    """Per-run MCP server identity catalog for monitoring facts (design D-003).
+
+    Management attaches the tenant catalog to the prepared payload; Runtime
+    projects it onto the URLs this run materialized. Omitted when monitoring
+    is off, for debug runs, or when no MCP tools were materialized; filtering
+    failures must never interrupt the business run.
+    """
+    from infrastructure.monitoring.catalog import filter_prepared_catalog
+
+    return filter_prepared_catalog(
+        getattr(payload, "monitoring_mcp_servers", None), mcp.used_urls,
+        enabled=OPS_MONITORING_ENABLED, is_debug=debug,
+    )
+
+
 def prepare_run_snapshot(
     payload: PreparedEvaluationRun | PreparedAgentRun | PreparedEphemeralRun, actor: ServicePrincipal,
     *, sandbox_run_id: str | None = None,
@@ -440,6 +457,9 @@ def prepare_run_snapshot(
                 list(mcp.hosts.values()), header_metadata, passthrough_allowed=header_metadata is not None,
                 agent_id=payload.resource.agent_id, run_id=workspace_run_id,
             )
+            monitoring_mcp_servers = _build_run_monitoring_catalog(payload, mcp, debug)
+        else:
+            monitoring_mcp_servers = None
         user_context = None
         if mcp.hosts or payload.tool_caller is not None:
             user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
@@ -468,6 +488,7 @@ def prepare_run_snapshot(
             user_id=actor.user_id,
             tenant_id=actor.tenant_id,
             redis_client=get_redis_client() if agent_config.enable_planning and not debug else None,
+            **({"monitoring_mcp_servers": monitoring_mcp_servers} if monitoring_mcp_servers else {}),
         )
         if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
             info.runtime_metadata = strip_reserved_runtime_metadata_fields(payload.runtime_metadata)

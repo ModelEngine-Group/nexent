@@ -116,3 +116,53 @@ async def test_preflight_rejects_registered_but_unbound_or_unknown_servers(prepa
     assert error.value.error_code == ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND
     assert error.value.http_status == 400
     preparation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepared_snapshot_attaches_tenant_monitoring_catalog(preparation, mocker):
+    catalog = [{"url": BOUND, "mcp_server_id": 29, "mcp_server_name": "bound", "mcp_server_type": "remote"}]
+    mocker.patch("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+    mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", "http://local.invalid/mcp")
+    mocker.patch("management.services.mcp.addressing.get_tenant_local_mcp_server",
+                 side_effect=lambda tenant_id: f"http://local.invalid/mcp/{tenant_id}/sse")
+    attach = mocker.patch("management.services.agent.monitoring_catalog.prepare_tenant_monitoring_catalog",
+                          return_value=catalog)
+
+    _, snapshot = await prepare(None)
+
+    assert snapshot.model_dump().get("monitoring_mcp_servers") == catalog
+    attach.assert_called_once_with("tenant-a", f"http://local.invalid/mcp/{ACTOR.tenant_id}/sse")
+
+
+@pytest.mark.asyncio
+async def test_prepared_snapshot_keeps_running_when_monitoring_catalog_is_absent(preparation, mocker):
+    mocker.patch("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+    mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", None)
+    attach = mocker.patch("management.services.agent.monitoring_catalog.prepare_tenant_monitoring_catalog",
+                          return_value=None)
+
+    _, snapshot = await prepare(None)
+
+    assert snapshot is not None
+    assert snapshot.model_dump().get("monitoring_mcp_servers") is None
+    attach.assert_called_once_with("tenant-a", None)
+
+
+@pytest.mark.asyncio
+async def test_prepared_snapshot_skips_monitoring_catalog_when_disabled(preparation, mocker):
+    mocker.patch("contracts.constants.environment.OPS_MONITORING_ENABLED", False)
+    attach = mocker.patch("management.services.agent.monitoring_catalog.prepare_tenant_monitoring_catalog")
+
+    _, snapshot = await prepare(None)
+
+    assert snapshot is not None
+    attach.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepared_snapshot_returns_none_without_a_compiled_run(preparation, mocker):
+    mocker.patch.object(run, "create_agent_run_info", return_value=None)
+
+    _, snapshot = await prepare(None)
+
+    assert snapshot is None

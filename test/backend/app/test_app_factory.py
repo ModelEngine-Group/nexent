@@ -979,3 +979,57 @@ class TestGenericHandlerAppExceptionDelegation:
             "message": "Session expired, please log in again",
             "code": "TOKEN_EXPIRED",
         }
+
+
+
+
+class TestOpsMonitoringLifespanWiring:
+    """The shared producer from infrastructure.monitoring wraps app lifespans."""
+
+    @staticmethod
+    def _stub_lifespan(state):
+        @asynccontextmanager
+        async def lifespan(_app):
+            state["lifespan"] = True
+            yield
+
+        return lifespan
+
+    @staticmethod
+    def _stub_producer(state):
+        @asynccontextmanager
+        async def producer_lifespan():
+            state["producer"] = True
+            yield
+
+        return producer_lifespan
+
+    def test_enabled_combines_producer_and_lifespan(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["producer"] is True
+        assert state["lifespan"] is True
+
+    def test_disabled_keeps_lifespan_unwrapped(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", False)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["lifespan"] is True
+        assert "producer" not in state
