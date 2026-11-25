@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the rerank modality adapters (base + OpenAI/Jina/Cohere)."""
 
 from unittest.mock import AsyncMock, MagicMock
@@ -12,6 +14,7 @@ from nexent.core.gateway.modality import (
 )
 from nexent.core.gateway.modality.rerank.rerank_adapter import _apply_defaults
 from nexent.core.gateway.model_context import ModelContext
+from nexent.core.model_service.profiles.probe_diagnostics import capture_connectivity_diagnostics
 
 
 def _ctx(**overrides):
@@ -255,6 +258,26 @@ async def test_connectivity_check_other_error():
     adapter = OpenAICompatibleRerankAdapter(_ctx())
     adapter.rerank = MagicMock(side_effect=RuntimeError("boom"))
     assert await adapter.connectivity_check() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type,status,category", [
+    (requests.exceptions.Timeout, None, "MODEL_TIMEOUT"),
+    (requests.exceptions.ConnectionError, None, "MODEL_NETWORK_ERROR"),
+    (requests.exceptions.HTTPError, 429, "MODEL_RATE_LIMITED"),
+])
+async def test_rerank_probe_retains_safe_diagnostics(error_type, status, category, caplog):
+    adapter = OpenAICompatibleRerankAdapter(_ctx())
+    error = error_type("private provider response")
+    if status is not None:
+        response = requests.Response()
+        response.status_code = status
+        error.response = response
+    adapter.rerank = MagicMock(side_effect=error)
+    with capture_connectivity_diagnostics() as diagnostic:
+        assert await adapter.connectivity_check() is False
+    assert (diagnostic.category, diagnostic.http_status) == (category, status)
+    assert "private provider response" not in caplog.text
 
 
 @pytest.mark.asyncio

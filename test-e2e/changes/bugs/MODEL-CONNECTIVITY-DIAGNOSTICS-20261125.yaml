@@ -39,6 +39,8 @@ change:
     - test/backend/services/test_model_health_service.py
     - test/backend/services/test_model_health_outlet_routing.py
     - test/sdk/core/models/test_volc_tts_model.py
+    - test/sdk/core/gateway/modality/test_embedding_adapter.py
+    - test/sdk/core/gateway/modality/test_rerank_adapter.py
     - test/sdk/core/model_service/test_errors_registry.py
     - frontend/tests/component/modelLibraryChecks.test.tsx
     - frontend/tests/component/modelConfigVerify.test.tsx

@@ -85,19 +85,33 @@ async def test_http_preserves_body_query_status_and_cookies(path):
 
 
 @pytest.mark.asyncio
-async def test_outlet_validation_disconnect_cancels_upstream_before_headers():
+@pytest.mark.parametrize("returns_late_response", [False, True])
+async def test_outlet_validation_disconnect_cancels_upstream_before_headers(returns_late_response):
     incoming = asyncio.Queue()
     seen_body = asyncio.Event()
     closed = asyncio.Event()
     sent = []
+    closed_responses = []
     await incoming.put({"type": "http.request", "body": b"first-", "more_body": True})
     await incoming.put({"type": "http.request", "body": b"last", "more_body": False})
+
+    class LateResponseBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            pytest.fail("Gateway read the discarded response")
+            yield b"unexpected"
+
+        async def aclose(self):
+            closed_responses.append(True)
 
     async def upstream(request):
         assert await request.aread() == b"first-last"
         seen_body.set()
         try:
             await asyncio.Future()
+        except asyncio.CancelledError:
+            if returns_late_response:
+                return httpx.Response(200, stream=LateResponseBody())
+            raise
         finally:
             closed.set()
 
@@ -122,6 +136,32 @@ async def test_outlet_validation_disconnect_cancels_upstream_before_headers():
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+    assert sent[0]["status"] == 499
+    assert closed_responses == ([True] if returns_late_response else [])
+
+
+@pytest.mark.asyncio
+async def test_outlet_validation_disconnect_during_upload_does_not_reach_upstream():
+    incoming = asyncio.Queue()
+    sent = []
+    await incoming.put({"type": "http.request", "body": b"incomplete", "more_body": True})
+    await incoming.put({"type": "http.disconnect"})
+
+    async def upstream(request):
+        pytest.fail("Gateway sent an incomplete probe")
+
+    async def send(message):
+        sent.append(message)
+
+    path = "/api/model/outlet_validations"
+    scope = {
+        "type": "http", "method": "POST", "scheme": "http",
+        "path": path, "raw_path": path.encode(), "query_string": b"",
+        "headers": [], "server": ("edge", 80), "client": ("test", 1234),
+    }
+    app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        await asyncio.wait_for(app(scope, incoming.get, send), 3)
     assert sent[0]["status"] == 499
 
 
