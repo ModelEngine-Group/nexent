@@ -104,8 +104,8 @@ assert len(SimpleTableBase.metadata.tables) == 5
 assert models.OuterApiTool is models.OuterApiService
 assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
 assert models.ModelMonitoringRecord.__module__ == 'infrastructure.rdb.model_monitoring'
-assert models.TrajectoryExecution.__module__ == 'management.db.trajectory.models'
-assert models.TrajectoryStatistics.__module__ == 'management.db.trajectory.models'
+assert models.TrajectoryExecution.__module__ == 'infrastructure.rdb.trajectory_record'
+assert models.TrajectoryStatistics.__module__ == 'infrastructure.rdb.trajectory_record'
 assert all(value.metadata is TableBase.metadata or value.metadata is SimpleTableBase.metadata
            for value in classes)
 assert 'infrastructure.rdb.client' not in sys.modules

@@ -3,11 +3,13 @@
 
 from contextlib import contextmanager
 
+from sqlalchemy import select, text
+
 from contracts.errors.trajectory import QueryError
+from infrastructure.rdb.account_record import UserAccount, UserTenant
 from infrastructure.rdb.client import get_db_session
-from management.db.conversation.models import ConversationMessage, ConversationRecord
-from management.db.identity.models import UserAccount, UserTenant
-from sqlalchemy import text
+from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
+from infrastructure.rdb.conversation_state import conversation_belongs_to
 
 
 @contextmanager
@@ -18,6 +20,25 @@ def _session():
 
 
 class CaptureCatalog:
+    def authorize(self, identity):
+        """Require explicit tenant membership before checking conversation ownership."""
+        with _session() as session:
+            member = session.scalar(
+                select(UserTenant.user_id)
+                .where(
+                    UserTenant.user_id == identity.owner_user_id,
+                    UserTenant.tenant_id == identity.tenant_id,
+                    UserTenant.delete_flag == "N",
+                )
+                .limit(1)
+            )
+        if member is None:
+            raise PermissionError("Trajectory capture owner is not an active tenant member")
+        if not conversation_belongs_to(
+            int(identity.conversation_id), user_id=identity.owner_user_id, tenant_id=identity.tenant_id,
+        ):
+            raise PermissionError("Trajectory capture conversation ownership differs")
+
     @staticmethod
     def _query(session, tenants):
         return (

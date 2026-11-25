@@ -76,7 +76,7 @@ def test_lifecycle_allocates_one_id_and_reuses_it_for_capture_even_when_disabled
     from nexent.monitor import AgentRunMetadata
 
     repository = mocker.patch(
-        "management.db.trajectory.repository.ExecutionRepository"
+        "infrastructure.rdb.trajectory_repository.ExecutionRepository"
     ).return_value
     repository.begin.return_value = 4
     metadata = AgentRunMetadata(
@@ -94,7 +94,7 @@ def test_lifecycle_allocates_one_id_and_reuses_it_for_capture_even_when_disabled
 def test_idempotent_registration_and_expired_compensation_do_not_revive(
     mocker, identity
 ):
-    from management.db.trajectory.repository import ExecutionRepository
+    from infrastructure.rdb.trajectory_repository import ExecutionRepository
 
     session = Mock()
     row = SimpleNamespace(
@@ -110,7 +110,7 @@ def test_idempotent_registration_and_expired_compensation_do_not_revive(
     def scoped():
         yield session
 
-    mocker.patch("management.db.trajectory.repository.get_db_session", scoped)
+    mocker.patch("infrastructure.rdb.trajectory_repository.get_db_session", scoped)
     mocker.patch.object(ExecutionRepository, "_owner")
     repository = ExecutionRepository()
     assert repository.begin(identity, "id") == 4
@@ -142,7 +142,7 @@ def test_summary_worker_failure_retries_without_publishing_partial(mocker):
 
 
 def test_registration_uses_file_highwater_and_does_not_reuse_a_turn(mocker, identity):
-    from management.db.trajectory.repository import ExecutionRepository
+    from infrastructure.rdb.trajectory_repository import ExecutionRepository
 
     session = Mock()
     session.get.return_value = None
@@ -152,9 +152,9 @@ def test_registration_uses_file_highwater_and_does_not_reuse_a_turn(mocker, iden
     def scoped():
         yield session
 
-    mocker.patch("management.db.trajectory.repository.get_db_session", scoped)
+    mocker.patch("infrastructure.rdb.trajectory_repository.get_db_session", scoped)
     mocker.patch.object(ExecutionRepository, "_owner")
-    dirty = mocker.patch("management.db.trajectory.repository.dirty")
+    dirty = mocker.patch("infrastructure.rdb.trajectory_repository.dirty")
     assert (
         ExecutionRepository().begin(
             identity, str(uuid4()), agent_version_no=0, prior_turn=8
@@ -400,7 +400,7 @@ def test_lifecycle_still_registers_latest_request_when_archive_is_unreadable(moc
     from nexent.monitor import AgentRunMetadata
 
     repository = mocker.patch(
-        "management.db.trajectory.repository.ExecutionRepository"
+        "infrastructure.rdb.trajectory_repository.ExecutionRepository"
     ).return_value
     repository.begin.return_value = 8
     store = Mock()
@@ -429,7 +429,7 @@ def test_pg_reader_construction_never_opens_or_provisions_the_file_root(mocker):
 
 
 def test_multiple_dirty_tenant_scopes_never_lock_the_global_scope():
-    from management.db.trajectory.repository import dirty
+    from infrastructure.rdb.trajectory_repository import dirty
 
     session = Mock()
     dirty(session, ["old", "new", "old"])

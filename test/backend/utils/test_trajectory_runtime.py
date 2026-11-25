@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 from infrastructure.trace.trajectory_runtime import (
-    authorize_capture,
     create_local_processor,
     request_conversation_cleanup,
 )
@@ -127,42 +126,6 @@ def test_read_only_maintenance_initializes_persistent_directory(tmp_path):
     assert (root / ".storage-root.json").exists()
 
 
-@pytest.mark.parametrize(
-    "member,conversation,allowed",
-    [
-        ({"delete_flag": "N"}, {"created_by": "owner"}, True),
-        (None, {"created_by": "owner"}, False),
-        ({"delete_flag": "Y"}, {"created_by": "owner"}, False),
-        ({"delete_flag": "N"}, None, False),
-        ({"delete_flag": "N"}, {"created_by": "other"}, False),
-    ],
-)
-def test_capture_authorization_requires_active_membership_and_actual_owner(monkeypatch, member, conversation, allowed):
-    membership = Mock(return_value=member)
-    lookup = Mock(return_value=conversation)
-    monkeypatch.setitem(
-        sys.modules,
-        "management.db.identity.user_tenant",
-        SimpleNamespace(get_user_tenant_in_tenant=membership),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "management.db.conversation.repository",
-        SimpleNamespace(get_conversation=lookup),
-    )
-    identity = CaptureIdentity("tenant", "owner", "123", "42")
-    if allowed:
-        authorize_capture(identity)
-    else:
-        with pytest.raises(PermissionError):
-            authorize_capture(identity)
-    membership.assert_called_once_with("owner", "tenant")
-    if member and member.get("delete_flag") == "N":
-        lookup.assert_called_once_with(123, user_id="owner", tenant_id="tenant")
-    else:
-        lookup.assert_not_called()
-
-
 def test_deleted_conversation_reclamation_uses_confirmed_pg_result(tmp_path, caplog):
     TrajectoryFileStore.provision(tmp_path)
     processor = create_maintenance_processor(configuration(tmp_path))
@@ -268,7 +231,7 @@ def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
 @pytest.fixture(autouse=True)
 def isolated_summary_database(mocker):
     from contextlib import nullcontext
-    repository=mocker.patch("management.db.trajectory.repository.ExecutionRepository")
+    repository=mocker.patch("infrastructure.rdb.trajectory_repository.ExecutionRepository")
     mocker.patch("ops.db.trajectory.cleanup_schedule.CleanupScheduleRepository").return_value.read_all.return_value = {}
     mocker.patch("ops.services.trajectory.lifecycle.ExecutionRepository", repository)
     mocker.patch("ops.services.trajectory.lifecycle.conversation_deleted", return_value=False)

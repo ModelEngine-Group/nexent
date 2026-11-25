@@ -14,18 +14,27 @@ def test_backend_bootstrap_writes_full_local_agent_model_tool_trace(tmp_path):
     root = Path(__file__).resolve().parents[3]
     code = r"""
 import asyncio
+import importlib.abc
 import json
 import socket
+import sys
 from contextlib import nullcontext
 from unittest.mock import patch
+
+class BlockManagement(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"management", "backend.management"} or fullname.startswith(("management.", "backend.management.")):
+            raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+
+sys.meta_path.insert(0, BlockManagement())
 
 def forbid_network(*args, **kwargs):
     raise AssertionError("Local Trace with Metrics disabled must not open outbound sockets")
 
 socket.socket.connect = forbid_network
 # PG remains a controlled external boundary for this bootstrap unit test.
-from management.db.trajectory.repository import ExecutionRepository
-patch.object(ExecutionRepository, "begin", return_value=1).start()
+from infrastructure.rdb.trajectory_repository import ExecutionRepository
+begin = patch.object(ExecutionRepository, "begin", return_value=1).start()
 patch.object(ExecutionRepository, "initialize", side_effect=lambda _: nullcontext()).start()
 patch.object(ExecutionRepository, "expire", return_value=None).start()
 from infrastructure.trace.bootstrap import monitoring_manager, local_trajectory_processor
@@ -49,6 +58,7 @@ try:
             monitoring_manager.set_tool_output({"answer": "完整工具输出" * 10000})
         monitoring_manager.set_openinference_output("最终答案")
     assert local_trajectory_processor.force_flush(5000)
+    begin.assert_called_once()
     documents = [json.loads(line) for path in local_trajectory_processor.store.root.rglob("*.otlp.jsonl") for line in path.read_text().splitlines()]
     spans = {span["name"]: span for doc in documents for resource in doc["resourceSpans"] for scope in resource["scopeSpans"] for span in scope["spans"]}
     assert {"agent.run", "model.attempt", "agent.tool.lookup"} <= set(spans)
@@ -74,7 +84,7 @@ assert manager.snapshot().active_count == 0
         "MONITORING_INSTRUMENT_REQUESTS": "false",
         "MONITORING_TRACE_MAX_CHARS": "3",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),
-
+        "TRAJECTORY_STORAGE_MODE": "single_node",
         "TRAJECTORY_CLEANUP_ENABLED": "false",
     }
     completed = subprocess.run(

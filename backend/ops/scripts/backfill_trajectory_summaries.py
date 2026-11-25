@@ -11,8 +11,8 @@ from contracts.constants import environment as config
 from infrastructure.trace.trajectory_runtime import authorize_capture
 from infrastructure.trace.trajectory_store import TrajectoryFileStore
 from infrastructure.rdb.client import get_db_session
-from management.db.trajectory.models import TrajectoryExecution
-from management.db.trajectory.repository import ExecutionRepository
+from infrastructure.rdb.trajectory_record import TrajectoryExecution
+from infrastructure.rdb.trajectory_repository import ExecutionRepository
 from ops.services.trajectory.projection import Projector, manifest_runs
 
 logger = logging.getLogger(__name__)

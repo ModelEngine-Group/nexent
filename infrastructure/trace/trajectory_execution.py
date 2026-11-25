@@ -22,7 +22,7 @@ def execution_observer(*, capturing, store=None):
         ):
             yield metadata
             return
-        from management.db.trajectory.repository import ExecutionRepository
+        from infrastructure.rdb.trajectory_repository import ExecutionRepository
 
         repository = ExecutionRepository()
         identity = CaptureIdentity(

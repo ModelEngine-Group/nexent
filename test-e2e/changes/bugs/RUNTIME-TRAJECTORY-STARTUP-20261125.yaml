@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-TRAJECTORY-STARTUP-20261125
+  change_type: bugfix
+  bug_id: RUNTIME-TRAJECTORY-STARTUP-20261125
+  title: Restore independent Runtime startup with local trajectories enabled
+  description: Make the trajectory persistence and access dependencies available to the independent Runtime image.
+  observed_behavior: Runtime monitoring bootstrap imports the Management package when local capture or historical reads are enabled, but the target image omits that package.
+  expected_behavior: The independent Runtime initializes local capture and historical-read support with its own packaged code. Capture retains tenant and conversation ownership checks.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_boundary
+    description: The existing Runtime import regression does not enable local trajectories. The existing trajectory deployment Case requires a real deployment and has no executable binding.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT, CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-TRAJECTORY-DEPLOYMENT-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Initialize monitoring with Management imports denied and verify local execution registration and OTLP file capture.
+    - Verify startup behavior for local capture, historical reads with OTLP selected, and OTLP with historical reads disabled.
+    - Reject inactive tenant membership and missing or foreign conversations when capturing.
+    reason: Isolated subprocesses and controlled database I/O reproduce the import defect and exercise the existing capture checks. The deployment Case owns live image and storage verification.
+    test_selectors:
+    - test/backend/management/test_agent_runtime_boundaries.py::test_runtime_app_serves_liveness_without_management_source
+    - test/backend/utils/test_trajectory_bootstrap.py::test_backend_bootstrap_writes_full_local_agent_model_tool_trace
+    - test/backend/utils/test_trajectory_capture_catalog.py::test_capture_authorization_requires_active_membership_and_actual_owner
+  notes: Reuses TRJ-RULE-002, TRJ-RULE-005 and TRJ-RULE-007 and the existing independent Runtime boundary. The referenced sibling SPEC checkout is unavailable locally. The D5 Case retains its existing blocked deployment status.

@@ -44,7 +44,7 @@ def test_strict_aggregate_keeps_cleaned_metrics_and_actual_unknowns(
 
 
 def test_expiry_compensation_keeps_existing_metrics_and_metadata(mocker):
-    from management.db.trajectory.repository import ExecutionRepository
+    from infrastructure.rdb.trajectory_repository import ExecutionRepository
 
     row = SimpleNamespace(
         trajectory_id="run",
@@ -63,11 +63,11 @@ def test_expiry_compensation_keeps_existing_metrics_and_metadata(mocker):
     session = Mock()
     session.get.return_value = row
     mocker.patch(
-        "management.db.trajectory.repository.get_db_session",
+        "infrastructure.rdb.trajectory_repository.get_db_session",
         side_effect=lambda: nullcontext(session),
     )
     mocker.patch.object(ExecutionRepository, "_owner", return_value=object())
-    mocker.patch("management.db.trajectory.repository.dirty")
+    mocker.patch("infrastructure.rdb.trajectory_repository.dirty")
     ExecutionRepository().sync(
         SimpleNamespace(conversation_id="123", owner_user_id="u", tenant_id="t"),
         {
@@ -98,15 +98,15 @@ def test_expiry_compensation_keeps_existing_metrics_and_metadata(mocker):
 
 
 def test_expire_only_updates_availability_and_audit_fields(mocker):
-    from management.db.trajectory.repository import ExecutionRepository
+    from infrastructure.rdb.trajectory_repository import ExecutionRepository
 
     session = Mock()
     session.execute.return_value.rowcount = 1
     mocker.patch(
-        "management.db.trajectory.repository.get_db_session",
+        "infrastructure.rdb.trajectory_repository.get_db_session",
         side_effect=lambda: nullcontext(session),
     )
-    dirty = mocker.patch("management.db.trajectory.repository.dirty")
+    dirty = mocker.patch("infrastructure.rdb.trajectory_repository.dirty")
     owner = SimpleNamespace(conversation_id="123", owner_user_id="u", tenant_id="t")
     ExecutionRepository().expire(owner, ["run"])
     params = session.execute.call_args.args[0].compile().params
@@ -118,12 +118,12 @@ def test_expire_only_updates_availability_and_audit_fields(mocker):
 
 
 def test_compaction_only_reclaims_soft_deleted_rows(mocker):
-    from management.db.trajectory.repository import ExecutionRepository
+    from infrastructure.rdb.trajectory_repository import ExecutionRepository
 
     session = Mock()
     session.execute.return_value.scalars.return_value.all.return_value = []
     mocker.patch(
-        "management.db.trajectory.repository.get_db_session",
+        "infrastructure.rdb.trajectory_repository.get_db_session",
         side_effect=lambda: nullcontext(session),
     )
     assert ExecutionRepository().compact() == 0
