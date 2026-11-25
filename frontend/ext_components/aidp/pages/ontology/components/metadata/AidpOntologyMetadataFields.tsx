@@ -820,7 +820,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
                       t("aidpKnowledge.ontologyMetadataNameRequired")
                     );
                   }
-                  const error = validateFieldName(value ?? "");
+                  const error = validateFieldName(value ?? "", t);
                   if (error) throw new Error(error);
                 },
               },
@@ -903,7 +903,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
                       t("aidpKnowledge.ontologyMetadataNameRequired")
                     );
                   }
-                  const error = validateFieldName(value ?? "");
+                  const error = validateFieldName(value ?? "", t);
                   if (error) throw new Error(error);
                 },
               },

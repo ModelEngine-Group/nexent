@@ -27,7 +27,10 @@ import type {
   AidpKbDetail,
 } from "@/ext_components/aidp/shared/types/management";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
-import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import {
+  getAidpErrorMessage,
+  isAidpNameConflictError,
+} from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { getAidpDownloadFilename } from "@/ext_components/aidp/shared/utils/aidpDownloadFilename";
 import { ApiError } from "@/services/api";
 import log from "@/lib/logger";
@@ -36,6 +39,7 @@ import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImp
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { useAidpFolderTree } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpFolderTree";
+import { useAidpIngestedFileSearch } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpIngestedFileSearch";
 import AidpFolderTree, {
   type AidpFolderNodeTarget,
 } from "@/ext_components/aidp/pages/knowledge-files/components/AidpFolderTree";
@@ -146,9 +150,17 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const { message, modal } = App.useApp();
 
   const [currentPath, setCurrentPath] = useState("/");
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+  // Top box = full-tree search; table header search = current folder.
+  const [globalKeywordInput, setGlobalKeywordInput] = useState("");
+  const [globalKeyword, setGlobalKeyword] = useState("");
+  const [folderKeywordInput, setFolderKeywordInput] = useState("");
+  const [folderKeyword, setFolderKeyword] = useState("");
+  const [folderSearchOpen, setFolderSearchOpen] = useState(false);
   const [pageParams, setPageParams] = useState({
+    page: 1,
+    pageSize: AIDP_DETAIL_PAGE_SIZE,
+  });
+  const [searchPageParams, setSearchPageParams] = useState({
     page: 1,
     pageSize: AIDP_DETAIL_PAGE_SIZE,
   });
@@ -198,7 +210,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     currentPath,
     pageParams.page,
     pageParams.pageSize,
-    keyword,
+    folderKeyword,
     pollingPaused || dialogOpen
   );
   const folders = useMemo(
@@ -219,13 +231,59 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       )
     : undefined;
 
+  const globalSearchActive = globalKeyword.trim().length > 0;
+  const searchQuery = useAidpIngestedFileSearch(
+    knowledgeBase.kds_id,
+    searchPageParams.page,
+    searchPageParams.pageSize,
+    globalKeyword,
+    pollingPaused || dialogOpen
+  );
+  const searchFiles = useMemo(
+    () => searchQuery.data?.value ?? [],
+    [searchQuery.data]
+  );
+  const displayedFiles = globalSearchActive ? searchFiles : files;
+  const displayedTotal = globalSearchActive
+    ? (searchQuery.data?.total_count ?? searchFiles.length)
+    : fileTotal;
+  const displayedLoading = globalSearchActive
+    ? searchQuery.isFetching
+    : loading;
+  const displayedError = globalSearchActive
+    ? searchQuery.isError
+      ? getAidpErrorMessage(
+          searchQuery.error,
+          t,
+          t("aidpKnowledge.detailFilesLoadFailed")
+        )
+      : undefined
+    : fileError;
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const next = keywordInput.trim();
-      setKeyword((current) => (current === next ? current : next));
+      const next = globalKeywordInput.trim();
+      setGlobalKeyword((current) => (current === next ? current : next));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [keywordInput]);
+  }, [globalKeywordInput]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = folderKeywordInput.trim();
+      setFolderKeyword((current) => (current === next ? current : next));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [folderKeywordInput]);
+
+  useEffect(() => {
+    if (!globalKeyword.trim()) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- Full-tree search takes over the single search mode. */
+    setFolderKeywordInput("");
+    setFolderKeyword("");
+    setFolderSearchOpen(false);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [globalKeyword]);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- Filter changes restart pagination and clear the previous page's selection. */
@@ -235,7 +293,23 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     setSelectedFileKeys([]);
     setMoveFailures(null);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [currentPath, keyword]);
+  }, [currentPath, folderKeyword]);
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- Full-tree filter changes restart its own pagination. */
+    setSearchPageParams((current) =>
+      current.page === 1 ? current : { ...current, page: 1 }
+    );
+    setSelectedFileKeys([]);
+    setMoveFailures(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [globalKeyword]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- A new search page cannot keep keys from the previous page.
+    setSelectedFileKeys([]);
+    setMoveFailures(null);
+  }, [searchPageParams.page, searchPageParams.pageSize]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- A new page cannot keep keys from the previous page.
@@ -246,14 +320,19 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const refreshAll = useCallback(() => {
     setTreeReloadToken((current) => current + 1);
     void treeQuery.refetch();
+    void searchQuery.refetch();
     onFilesChanged?.();
-  }, [onFilesChanged, treeQuery]);
+  }, [onFilesChanged, searchQuery, treeQuery]);
 
   const openFolder = useCallback((path: string) => {
     setCurrentPath(path);
-    setKeyword("");
-    setKeywordInput("");
+    setGlobalKeyword("");
+    setGlobalKeywordInput("");
+    setFolderKeyword("");
+    setFolderKeywordInput("");
+    setFolderSearchOpen(false);
     setPageParams((current) => ({ ...current, page: 1 }));
+    setSearchPageParams((current) => ({ ...current, page: 1 }));
     setSelectedFileKeys([]);
     setMoveFailures(null);
   }, []);
@@ -267,7 +346,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
 
   const rows = useMemo<FileTableRecord[]>(() => {
     const folderRows: FolderTableRow[] =
-      pageParams.page === 1 && !keyword.trim()
+      !globalSearchActive && pageParams.page === 1 && !folderKeyword.trim()
         ? folders.map((folder) => {
             const path = joinFolderPath(currentPath, folder.folder_name);
             return {
@@ -278,34 +357,41 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             };
           })
         : [];
-    const fileRows: FileTableRow[] = files.map((file, index) => ({
+    const fileRows: FileTableRow[] = displayedFiles.map((file, index) => ({
       key: `file:${file.file_uuid || `${index}:${file.file_name || ""}`}`,
       kind: "file",
       name: file.file_name || "",
       file,
     }));
     return [...folderRows, ...fileRows];
-  }, [currentPath, files, folders, keyword, pageParams.page]);
+  }, [
+    currentPath,
+    displayedFiles,
+    folders,
+    folderKeyword,
+    globalSearchActive,
+    pageParams.page,
+  ]);
 
   const selectedFileUuids = useMemo(() => {
     const selected = new Set(selectedFileKeys);
-    return files
+    return displayedFiles
       .filter(
         (file) =>
           selected.has(`file:${file.file_uuid || ""}`) &&
           Boolean(file.file_uuid)
       )
       .map((file) => file.file_uuid as string);
-  }, [files, selectedFileKeys]);
+  }, [displayedFiles, selectedFileKeys]);
 
   const fileNameByUuid = useMemo(
     () =>
       new Map(
-        files
+        displayedFiles
           .filter((file) => file.file_uuid)
           .map((file) => [file.file_uuid as string, file.file_name || ""])
       ),
-    [files]
+    [displayedFiles]
   );
 
   const permissionsForFile = useCallback(
@@ -316,11 +402,11 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
 
   const selectedFileItems = useMemo(
     () =>
-      files.filter(
+      displayedFiles.filter(
         (file) =>
           file.file_uuid && selectedFileKeys.includes(`file:${file.file_uuid}`)
       ),
-    [files, selectedFileKeys]
+    [displayedFiles, selectedFileKeys]
   );
 
   const selectedDeletableUuids = useMemo(
@@ -565,7 +651,10 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
 
   const hasContent = rows.length > 0;
   const showEmptyState =
-    !loading && !fileError && !hasContent && treeQuery.isSuccess;
+    !displayedLoading &&
+    !displayedError &&
+    !hasContent &&
+    (globalSearchActive ? searchQuery.isSuccess : treeQuery.isSuccess);
 
   const handleDownload = useCallback(
     async (file: AidpFolderFileItem) => {
@@ -898,12 +987,14 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         return;
       }
       setFolderMoveTarget(null);
-      try {
+
+      const runMove = async (mergeOnConflict: boolean) => {
         const result = await aidpKnowledgeService.moveFolder(
           knowledgeBase.kds_id,
           parent,
           target.name,
-          targetFolder
+          targetFolder,
+          mergeOnConflict
         );
         const newPath =
           result.folder_path || joinFolderPath(targetFolder, target.name);
@@ -915,9 +1006,52 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             replaceFolderPrefix(currentPath, target.path, newPath)
           );
         }
-        message.success(t("aidpKnowledge.folderMoveSuccess"));
+        const conflicts = Array.isArray(result.conflict_paths)
+          ? result.conflict_paths.length
+          : 0;
+        if (conflicts > 0) {
+          message.warning(
+            t("aidpKnowledge.folderMergeConflicts", { count: conflicts })
+          );
+        } else {
+          message.success(t("aidpKnowledge.folderMoveSuccess"));
+        }
         refreshAll();
+      };
+
+      try {
+        await runMove(false);
       } catch (error) {
+        if (isAidpNameConflictError(error)) {
+          modal.confirm({
+            title: t("aidpKnowledge.folderMergeTitle"),
+            content: t("aidpKnowledge.folderMergeContent", {
+              name: target.name,
+            }),
+            okText: t("aidpKnowledge.folderMergeConfirm"),
+            cancelText: t("common.cancel"),
+            onOk: async () => {
+              try {
+                await runMove(true);
+              } catch (mergeError) {
+                log.error("Failed to merge AIDP folder:", {
+                  id: knowledgeBase.kds_id,
+                  path: target.path,
+                  targetFolder,
+                  mergeError,
+                });
+                message.error(
+                  getAidpErrorMessage(
+                    mergeError,
+                    t,
+                    t("aidpKnowledge.folderMergeFailed")
+                  )
+                );
+              }
+            },
+          });
+          return;
+        }
         log.error("Failed to move AIDP folder:", {
           id: knowledgeBase.kds_id,
           path: target.path,
@@ -934,6 +1068,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       folderMoveTarget,
       knowledgeBase.kds_id,
       message,
+      modal,
       refreshAll,
       t,
     ]
@@ -1328,16 +1463,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         <Input
           allowClear
           prefix={<SearchOutlined className="text-gray-400" />}
-          value={keywordInput}
-          onChange={(event) => setKeywordInput(event.target.value)}
-          placeholder={t("aidpKnowledge.detailFileSearchInFolder")}
+          value={globalKeywordInput}
+          onChange={(event) => setGlobalKeywordInput(event.target.value)}
+          placeholder={t("aidpKnowledge.detailFileSearchAll")}
           style={{ width: 240, maxWidth: "100%" }}
         />
         <div className="flex items-center gap-2">
           <Tooltip title={t("aidpKnowledge.refresh")}>
             <Button
               aria-label={t("aidpKnowledge.refresh")}
-              icon={<ReloadOutlined spin={loading} />}
+              icon={<ReloadOutlined spin={displayedLoading} />}
               onClick={refreshAll}
             />
           </Tooltip>
@@ -1389,8 +1524,8 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         </div>
       </div>
 
-      {fileError && (
-        <Alert type="error" showIcon title={fileError} className="mb-4" />
+      {displayedError && (
+        <Alert type="error" showIcon title={displayedError} className="mb-4" />
       )}
 
       {moveFailures && (
@@ -1486,9 +1621,38 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             </div>
           )}
 
+          {!globalSearchActive && (
+            <div className="mb-2 flex items-center justify-end gap-2">
+              {folderSearchOpen ? (
+                <Input
+                  allowClear
+                  autoFocus
+                  size="small"
+                  prefix={<SearchOutlined className="text-gray-400" />}
+                  value={folderKeywordInput}
+                  onChange={(event) =>
+                    setFolderKeywordInput(event.target.value)
+                  }
+                  placeholder={t("aidpKnowledge.detailFileSearchInFolder")}
+                  style={{ width: 220 }}
+                />
+              ) : (
+                <Tooltip title={t("aidpKnowledge.detailFileSearchInFolder")}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<SearchOutlined />}
+                    aria-label={t("aidpKnowledge.detailFileSearchInFolder")}
+                    onClick={() => setFolderSearchOpen(true)}
+                  />
+                </Tooltip>
+              )}
+            </div>
+          )}
+
           {showEmptyState ? (
             <AidpFilesEmptyState
-              keyword={keyword}
+              keyword={globalSearchActive ? globalKeyword : folderKeyword}
               folderLabel={folderLabel}
               isRoot={currentPath === "/"}
               canUpload={canEdit && isAvailable}
@@ -1502,7 +1666,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                 rowKey={(record) => record.key}
                 columns={columns}
                 dataSource={rows}
-                loading={loading}
+                loading={displayedLoading}
                 onRow={(record) => getTableRowProps(record)}
                 rowSelection={
                   canEdit
@@ -1534,11 +1698,25 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               />
               <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
                 <AidpPagination
-                  currentPage={pageParams.page}
-                  pageSize={pageParams.pageSize}
-                  total={fileTotal}
-                  totalReliable
-                  hasMore={pageParams.page * pageParams.pageSize < fileTotal}
+                  currentPage={
+                    globalSearchActive ? searchPageParams.page : pageParams.page
+                  }
+                  pageSize={
+                    globalSearchActive
+                      ? searchPageParams.pageSize
+                      : pageParams.pageSize
+                  }
+                  total={displayedTotal}
+                  totalReliable={
+                    globalSearchActive
+                      ? Boolean(searchQuery.data?.total_reliable)
+                      : true
+                  }
+                  hasMore={
+                    globalSearchActive
+                      ? Boolean(searchQuery.data?.has_more)
+                      : pageParams.page * pageParams.pageSize < fileTotal
+                  }
                   selectedCount={selectedFileKeys.length}
                   selectionHint={
                     selectedFileUuids.length > 0
@@ -1546,14 +1724,22 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                       : undefined
                   }
                   onPageChange={(page) =>
-                    setPageParams((current) => ({ ...current, page }))
+                    globalSearchActive
+                      ? setSearchPageParams((current) => ({ ...current, page }))
+                      : setPageParams((current) => ({ ...current, page }))
                   }
                   onPageSizeChange={(pageSize) =>
-                    setPageParams((current) => ({
-                      ...current,
-                      pageSize,
-                      page: 1,
-                    }))
+                    globalSearchActive
+                      ? setSearchPageParams((current) => ({
+                          ...current,
+                          pageSize,
+                          page: 1,
+                        }))
+                      : setPageParams((current) => ({
+                          ...current,
+                          pageSize,
+                          page: 1,
+                        }))
                   }
                 />
               </div>
@@ -1649,7 +1835,11 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           objectName={previewFile.file_uuid}
           fileName={previewFile.file_name}
           fileType={previewFile.file_type}
-          fileSize={previewFile.file_size}
+          fileSize={
+            typeof previewFile.file_size === "string"
+              ? Number(previewFile.file_size)
+              : previewFile.file_size
+          }
           previewUrl={aidpKnowledgeService.getPreviewUrl(
             knowledgeBase.kds_id,
             previewFile.file_uuid

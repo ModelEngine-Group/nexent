@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import Path
+from pydantic import AfterValidator, StringConstraints
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.codes import ErrorCode
@@ -16,26 +17,72 @@ from contracts.roles import has_any_role
 from management.db.identity.user_tenant import get_user_role_by_tenant
 
 
-_DOMAIN_NAME_MAX_CHARS = 64
+def _utf8_max_bytes(limit: int):
+    """Return a validator enforcing AIDP's UTF-8 byte ceiling."""
+
+    def _validate(value: str) -> str:
+        if len(value.encode("utf-8")) > limit:
+            raise ValueError(f"String should have at most {limit} UTF-8 bytes")
+        return value
+
+    return _validate
 
 
-_DOMAIN_DESCRIPTION_MAX_CHARS = 512
-
-
-_METADATA_FIELD_NAME_MAX_CHARS = 63
-
-
-_METADATA_FIELD_NAME_MAX_BYTES = 64
-
-
-_ENTITY_NAME_MAX_CHARS = 64
-
-
-_ENTITY_DESCRIPTION_MAX_CHARS = 512
-
-
-def _utf8_size(value: str) -> int:
-    return len(value.encode("utf-8"))
+# AIDP publishes these limits as UTF-8 bytes. Character caps are only the
+# matching upper bounds for ASCII; the byte validator is the authoritative one.
+DomainName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[^-]+$",
+    ),
+    AfterValidator(_utf8_max_bytes(64)),
+]
+DomainDescription = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, max_length=512),
+    AfterValidator(_utf8_max_bytes(512)),
+]
+MetadataFieldName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=63),
+    AfterValidator(_utf8_max_bytes(64)),
+]
+EntityApiName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$",
+    ),
+]
+EntityName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+    AfterValidator(_utf8_max_bytes(64)),
+]
+EntityDescription = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, max_length=512),
+    AfterValidator(_utf8_max_bytes(512)),
+]
+RuleName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
+    AfterValidator(_utf8_max_bytes(128)),
+]
+RuleDescription = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, max_length=512),
+    AfterValidator(_utf8_max_bytes(512)),
+]
+NumericId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=20, pattern=r"^\d+$"),
+]
 
 
 def _bad_request(
@@ -60,57 +107,8 @@ def _require_ontology_manager(user_id: str, tenant_id: str) -> None:
     """
     role = get_user_role_by_tenant(user_id, tenant_id)
     if not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
-        raise _forbidden("当前用户没有本体库管理权限")
-
-
-def _clean_required(value: Any, message: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise _bad_request(message)
-    return value.strip()
-
-
-def _validate_domain_name(value: str) -> str:
-    name = _clean_required(value, "本体库名称不能为空")
-    if len(name) > _DOMAIN_NAME_MAX_CHARS:
-        raise _bad_request(f"本体库名称不能超过 {_DOMAIN_NAME_MAX_CHARS} 个字符")
-    # AIDP rejects hyphens with an opaque 500/code1001; fail fast with a
-    # readable 400 before the request leaves Nexent.
-    if "-" in name:
-        raise _bad_request("本体库名称不能包含连字符 -")
-    return name
-
-
-def _validate_domain_description(value: str | None) -> str:
-    description = (value or "").strip()
-    if len(description) > _DOMAIN_DESCRIPTION_MAX_CHARS:
-        raise _bad_request(f"本体库描述不能超过 {_DOMAIN_DESCRIPTION_MAX_CHARS} 个字符")
-    return description
-
-
-def _validate_field_name(value: str, *, message: str = "字段名不能为空") -> str:
-    """Apply the conservative AIDP field-name limits.
-
-    The documentation states an upper bound of 64 but also notes that the
-    deployed check rejects ``len() >= 64``, so the usable limit is 63
-    characters. A separate 64-byte key limit applies to non-ASCII names.
-    """
-    name = _clean_required(value, message)
-    if len(name) > _METADATA_FIELD_NAME_MAX_CHARS:
-        raise _bad_request(f"字段名不能超过 {_METADATA_FIELD_NAME_MAX_CHARS} 个字符")
-    if _utf8_size(name) > _METADATA_FIELD_NAME_MAX_BYTES:
-        raise _bad_request(f"字段名不能超过 {_METADATA_FIELD_NAME_MAX_BYTES} 字节")
-    return name
+        raise _forbidden("the current user cannot manage ontologies")
 
 
 def _domain_id_path() -> Any:
     return Path(..., min_length=1, max_length=20, pattern=r"^\d+$")
-
-
-def _numeric_domain_id(domain_id: str) -> int:
-    try:
-        value = int(domain_id)
-    except (TypeError, ValueError):
-        raise _bad_request("本体库 ID 必须是数字") from None
-    if value < 0:
-        raise _bad_request("本体库 ID 不合法")
-    return value

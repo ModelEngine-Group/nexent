@@ -20,8 +20,10 @@ import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/ai
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
-  ONTOLOGY_DESCRIPTION_MAX_CHARS,
+  ONTOLOGY_DESCRIPTION_MAX_BYTES,
+  ONTOLOGY_NAME_MAX_BYTES,
   ONTOLOGY_NAME_MAX_CHARS,
+  byteCountText,
   validateOntologyDescription,
   validateOntologyName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
@@ -162,11 +164,15 @@ const AidpOntologyCreatePage: React.FC = () => {
                     help={t("aidpKnowledge.ontologyDomainNameHint")}
                   />
                 }
-                extra={`${nameValue.length}/${ONTOLOGY_NAME_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+                extra={byteCountText(
+                  nameValue,
+                  ONTOLOGY_NAME_MAX_BYTES,
+                  t("aidpKnowledge.ontologyBytesUnit")
+                )}
                 rules={[
                   {
                     validator: async (_rule, value: string) => {
-                      const error = validateOntologyName(value ?? "");
+                      const error = validateOntologyName(value ?? "", t);
                       if (error) throw new Error(error);
                     },
                   },
@@ -182,11 +188,15 @@ const AidpOntologyCreatePage: React.FC = () => {
                     help={t("aidpKnowledge.ontologyDomainDescriptionHint")}
                   />
                 }
-                extra={`${descriptionValue.length}/${ONTOLOGY_DESCRIPTION_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+                extra={byteCountText(
+                  descriptionValue,
+                  ONTOLOGY_DESCRIPTION_MAX_BYTES,
+                  t("aidpKnowledge.ontologyBytesUnit")
+                )}
                 rules={[
                   {
                     validator: async (_rule, value: string) => {
-                      const error = validateOntologyDescription(value ?? "");
+                      const error = validateOntologyDescription(value ?? "", t);
                       if (error) throw new Error(error);
                     },
                   },

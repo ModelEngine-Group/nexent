@@ -19,8 +19,6 @@ interface AidpOntologyDeleteModalProps {
   onDeleted: (domain: AidpOntologyDomain) => void;
 }
 
-const CONFIRM_TEXT = "删除";
-
 const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
   open,
   domain,
@@ -28,6 +26,7 @@ const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
   onDeleted,
 }) => {
   const { t } = useTranslation();
+  const requiredConfirmText = t("aidpKnowledge.ontologyDelete");
   const [confirmText, setConfirmText] = React.useState("");
   const [deleting, setDeleting] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
@@ -44,7 +43,7 @@ const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!domain || confirmText.trim() !== CONFIRM_TEXT) return;
+    if (!domain || confirmText.trim() !== requiredConfirmText) return;
     setDeleting(true);
     setErrorMessage(null);
     try {
@@ -75,7 +74,7 @@ const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
       okText={t("aidpKnowledge.ontologyDomainDeleteSubmit")}
       cancelText={t("common.cancel")}
       okButtonProps={{
-        disabled: confirmText.trim() !== CONFIRM_TEXT,
+        disabled: confirmText.trim() !== requiredConfirmText,
         loading: deleting,
       }}
       onOk={() => void handleDelete()}

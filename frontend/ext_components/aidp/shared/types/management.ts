@@ -41,7 +41,7 @@ export interface AidpDocumentItem {
   file_name: string;
   /** ``file_name`` plus ``file_type`` when the upstream list omits the suffix. */
   original_file_name?: string;
-  file_size?: number;
+  file_size?: number | string;
   file_type?: string;
   created_at?: string;
   updated_at?: string;
@@ -73,7 +73,7 @@ export interface AidpFolderFileItem {
   file_uuid?: string;
   file_name?: string;
   file_type?: string;
-  file_size?: number;
+  file_size?: number | string;
   /** Folder/Files status (AIDP HistoryStatus): 0 nothing to do, 1 completed, 2 extracting, 3 failed, 4 uploading, 5 graph failed, 6 removing, 7 remove failed. */
   status?: string | number | null;
   /** Actual creation/upload time; never fall back to update_time for the UI. */
@@ -82,6 +82,13 @@ export interface AidpFolderFileItem {
   update_time?: number | string | null;
   updated_at?: string | null;
   [key: string]: unknown;
+}
+
+export interface AidpIngestedFileListResponse {
+  value: AidpDocumentItem[];
+  total_count: number;
+  has_more: boolean;
+  total_reliable: boolean;
 }
 
 export interface AidpFolderTreeFiles {
