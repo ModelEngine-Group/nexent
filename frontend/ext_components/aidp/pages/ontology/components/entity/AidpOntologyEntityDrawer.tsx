@@ -645,7 +645,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             { required: true, whitespace: true },
             {
               validator: async (_rule, value: string) => {
-                const error = validateEntityName(value ?? "");
+                const error = validateEntityName(value ?? "", t);
                 if (error) throw new Error(error);
               },
             },
@@ -711,7 +711,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           rules={[
             {
               validator: async (_rule, value: string) => {
-                const error = validateEntityDescription(value ?? "");
+                const error = validateEntityDescription(value ?? "", t);
                 if (error) throw new Error(error);
               },
             },

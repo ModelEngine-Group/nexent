@@ -2,6 +2,8 @@
 
 /** Shared client-side limits for ontology forms. Values mirror the AIDP contract. */
 
+import type { TFunction } from "i18next";
+
 export const ONTOLOGY_NAME_MAX_CHARS = 64;
 export const ONTOLOGY_NAME_MAX_BYTES = 64;
 export const ONTOLOGY_DESCRIPTION_MAX_CHARS = 512;
@@ -23,80 +25,129 @@ export const utf8ByteLength = (value: string): number =>
 export const byteCountText = (
   value: string,
   maxBytes: number,
-  unit = "字节"
+  unit: string
 ): string => `${utf8ByteLength(value)}/${maxBytes} ${unit}`;
 
-export const validateOntologyName = (value: string): string | null => {
+export const validateOntologyName = (
+  value: string,
+  t: TFunction
+): string | null => {
   const name = value.trim();
-  if (!name) return "请输入本体库名称";
+  if (!name) return t("aidpKnowledge.ontologyNameRequired");
   if (name.length > ONTOLOGY_NAME_MAX_CHARS) {
-    return `名称不能超过 ${ONTOLOGY_NAME_MAX_CHARS} 个字符（当前 ${name.length} 个字符）`;
+    return t("aidpKnowledge.ontologyNameTooLongChars", {
+      max: ONTOLOGY_NAME_MAX_CHARS,
+      current: name.length,
+    });
   }
   const bytes = utf8ByteLength(name);
   if (bytes > ONTOLOGY_NAME_MAX_BYTES) {
-    return `名称不能超过 ${ONTOLOGY_NAME_MAX_BYTES} 字节（当前 ${bytes} 字节）`;
+    return t("aidpKnowledge.ontologyNameTooLongBytes", {
+      max: ONTOLOGY_NAME_MAX_BYTES,
+      current: bytes,
+    });
   }
   return null;
 };
 
-export const validateOntologyDescription = (value: string): string | null => {
+export const validateOntologyDescription = (
+  value: string,
+  t: TFunction
+): string | null => {
   const description = value.trim();
   if (description.length > ONTOLOGY_DESCRIPTION_MAX_CHARS) {
-    return `描述不能超过 ${ONTOLOGY_DESCRIPTION_MAX_CHARS} 个字符（当前 ${description.length} 个字符）`;
+    return t("aidpKnowledge.ontologyDescriptionTooLongChars", {
+      max: ONTOLOGY_DESCRIPTION_MAX_CHARS,
+      current: description.length,
+    });
   }
   const bytes = utf8ByteLength(description);
   if (bytes > ONTOLOGY_DESCRIPTION_MAX_BYTES) {
-    return `描述不能超过 ${ONTOLOGY_DESCRIPTION_MAX_BYTES} 字节（当前 ${bytes} 字节）`;
+    return t("aidpKnowledge.ontologyDescriptionTooLongBytes", {
+      max: ONTOLOGY_DESCRIPTION_MAX_BYTES,
+      current: bytes,
+    });
   }
   return null;
 };
 
-export const validateEntityName = (value: string): string | null => {
+export const validateEntityName = (
+  value: string,
+  t: TFunction
+): string | null => {
   const name = value.trim();
-  if (!name) return "请输入名称";
+  if (!name) return t("aidpKnowledge.ontologyEntityNameRequired");
   const bytes = utf8ByteLength(name);
   if (bytes > ENTITY_NAME_MAX_BYTES) {
-    return `名称不能超过 ${ENTITY_NAME_MAX_BYTES} 字节（当前 ${bytes} 字节）`;
+    return t("aidpKnowledge.ontologyEntityNameTooLongBytes", {
+      max: ENTITY_NAME_MAX_BYTES,
+      current: bytes,
+    });
   }
   return null;
 };
 
-export const validateEntityDescription = (value: string): string | null => {
+export const validateEntityDescription = (
+  value: string,
+  t: TFunction
+): string | null => {
   const description = value.trim();
   const bytes = utf8ByteLength(description);
   if (bytes > ENTITY_DESCRIPTION_MAX_BYTES) {
-    return `描述不能超过 ${ENTITY_DESCRIPTION_MAX_BYTES} 字节（当前 ${bytes} 字节）`;
+    return t("aidpKnowledge.ontologyEntityDescriptionTooLongBytes", {
+      max: ENTITY_DESCRIPTION_MAX_BYTES,
+      current: bytes,
+    });
   }
   return null;
 };
 
-export const validateRuleName = (value: string): string | null => {
+export const validateRuleName = (
+  value: string,
+  t: TFunction
+): string | null => {
   const name = value.trim();
-  if (!name) return "请输入规则名称";
+  if (!name) return t("aidpKnowledge.ontologyRuleNameRequired");
   const bytes = utf8ByteLength(name);
   if (bytes > RULE_NAME_MAX_BYTES) {
-    return `规则名称不能超过 ${RULE_NAME_MAX_BYTES} 字节（当前 ${bytes} 字节）`;
+    return t("aidpKnowledge.ontologyRuleNameTooLongBytes", {
+      max: RULE_NAME_MAX_BYTES,
+      current: bytes,
+    });
   }
   return null;
 };
 
-export const validateRuleDescription = (value: string): string | null => {
+export const validateRuleDescription = (
+  value: string,
+  t: TFunction
+): string | null => {
   const description = value.trim();
   const bytes = utf8ByteLength(description);
   if (bytes > RULE_DESCRIPTION_MAX_BYTES) {
-    return `规则描述不能超过 ${RULE_DESCRIPTION_MAX_BYTES} 字节（当前 ${bytes} 字节）`;
+    return t("aidpKnowledge.ontologyRuleDescriptionTooLongBytes", {
+      max: RULE_DESCRIPTION_MAX_BYTES,
+      current: bytes,
+    });
   }
   return null;
 };
 
-export const validateFieldName = (value: string): string | null => {
+export const validateFieldName = (
+  value: string,
+  t: TFunction
+): string | null => {
   const name = value.trim();
-  if (!name) return "请输入字段名";
+  if (!name) return t("aidpKnowledge.ontologyFieldNameRequired");
   if (name.length > METADATA_FIELD_NAME_MAX_CHARS) {
-    return `字段名不能超过 ${METADATA_FIELD_NAME_MAX_CHARS} 个字符`;
+    return t("aidpKnowledge.ontologyFieldNameTooLongChars", {
+      max: METADATA_FIELD_NAME_MAX_CHARS,
+    });
   }
   if (utf8ByteLength(name) > METADATA_FIELD_NAME_MAX_BYTES) {
-    return `字段名不能超过 ${METADATA_FIELD_NAME_MAX_BYTES} 字节`;
+    return t("aidpKnowledge.ontologyFieldNameTooLongBytes", {
+      max: METADATA_FIELD_NAME_MAX_BYTES,
+    });
   }
   return null;
 };

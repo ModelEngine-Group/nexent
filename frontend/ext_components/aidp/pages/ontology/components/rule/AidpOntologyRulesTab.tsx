@@ -272,7 +272,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
           <div className={ruleStyles.conditionList}>
             {conditions.map((condition, index) => (
               <div key={`${condition.field}-${index}`}>
-                {condition.field}: {ruleOperatorLabel(condition.operator)}
+                {condition.field}: {ruleOperatorLabel(condition.operator, t)}
                 {condition.value !== undefined &&
                 condition.value !== null &&
                 condition.value !== ""

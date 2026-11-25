@@ -154,7 +154,7 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
           rules={[
             {
               validator: async (_rule, value: string) => {
-                const error = validateOntologyName(value ?? "");
+                const error = validateOntologyName(value ?? "", t);
                 if (error) throw new Error(error);
               },
             },
@@ -178,7 +178,7 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
           rules={[
             {
               validator: async (_rule, value: string) => {
-                const error = validateOntologyDescription(value ?? "");
+                const error = validateOntologyDescription(value ?? "", t);
                 if (error) throw new Error(error);
               },
             },

@@ -504,7 +504,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
               { required: true, whitespace: true },
               {
                 validator: async (_rule, value: string) => {
-                  const error = validateRuleName(value ?? "");
+                  const error = validateRuleName(value ?? "", t);
                   if (error) throw new Error(error);
                 },
               },
@@ -533,7 +533,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             rules={[
               {
                 validator: async (_rule, value: string) => {
-                  const error = validateRuleDescription(value ?? "");
+                  const error = validateRuleDescription(value ?? "", t);
                   if (error) throw new Error(error);
                 },
               },
@@ -646,7 +646,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                                 options={OPERATORS_BY_TYPE[fieldType].map(
                                   (operator) => ({
                                     value: operator,
-                                    label: ruleOperatorLabel(operator),
+                                    label: ruleOperatorLabel(operator, t),
                                   })
                                 )}
                               />
