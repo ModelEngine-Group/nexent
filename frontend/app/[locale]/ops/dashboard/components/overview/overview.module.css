@@ -78,6 +78,10 @@
   font-weight: 600;
 }
 
+.description {
+  color: var(--color-text-secondary);
+}
+
 .chart {
   min-width: 0;
   font-size: 12px;

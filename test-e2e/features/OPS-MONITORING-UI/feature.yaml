@@ -27,10 +27,10 @@ feature:
   - rule_id: OPS-MONITORING-UI-RULE-09
     description: Model details sort six metrics on the server. A sort change resets the page and keeps list search and monitoring filters. Each row opens statistics scoped to its tenant and model ID while keeping the date range.
   - rule_id: OPS-MONITORING-UI-RULE-10
-    description: Skill monitoring uses the tenant's directory for selection. All skills show the total and usage cards, daily trend, Top 5 and details. One skill shows usage, a full-width daily trend and details. All statistics are marked unavailable until connected.
+    description: Skill monitoring uses the tenant's directory for selection and reads the scoped published summary and daily trend. All skills show current total and usage, and one Skill shows usage and a full-width trend. Missing statistics and true zero are distinct. Top 5 and details remain unavailable until connected.
   - rule_id: OPS-MONITORING-UI-RULE-11
-    description: MCP monitoring switches between all services, one service and one tool. Services come from authorized inventory and tools come from the session tenant's service directory. Skill and MCP statistics stay unavailable until their data is connected.
+    description: MCP monitoring switches between all services, one service and one tool. Services come from authorized inventory and tools come from the session tenant's service directory. MCP statistics stay unavailable until their data is connected.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124, OPS-MODEL-UI-NAVIGATION-20261124, OPS-SKILL-UI-SHELL-20261124, OPS-MCP-UI-SHELL-20261124]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124, OPS-MODEL-UI-NAVIGATION-20261124, OPS-SKILL-UI-SHELL-20261124, OPS-MCP-UI-SHELL-20261124, OPS-SKILL-UI-METRICS-20261125]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md

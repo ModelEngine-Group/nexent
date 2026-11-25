@@ -26,9 +26,13 @@ interface OverviewPoint {
 
 export function OverviewTrend({
   title,
+  description,
+  emptyDescription,
   trend,
 }: {
   title: string;
+  description?: string;
+  emptyDescription?: string;
   trend?: {
     points?: OverviewPoint[];
     publication?: MonitoringPublication;
@@ -63,9 +67,11 @@ export function OverviewTrend({
     content = (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={t(
-          trend.hasRange ? "ops.empty" : "ops.monitoring.chooseRange"
-        )}
+        description={
+          trend.hasRange
+            ? (emptyDescription ?? t("ops.empty"))
+            : t("ops.monitoring.chooseRange")
+        }
       />
     );
   }
@@ -78,6 +84,9 @@ export function OverviewTrend({
       data-chart-palette="default"
     >
       <h3 id={titleId}>{title}</h3>
+      {description && (
+        <small className={styles.description}>{description}</small>
+      )}
       {content ? (
         <div className={styles.chartState}>{content}</div>
       ) : (

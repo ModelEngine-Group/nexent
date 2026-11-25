@@ -20,6 +20,10 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { hasRole } from "@/lib/roles";
 import type { ModelMonitoringSelection } from "@/types/modelMonitoring";
 import type { OperationsResource } from "@/types/operations";
+import type {
+  SkillMonitoringQueryKey,
+  SkillMonitoringSelection,
+} from "@/types/skillMonitoring";
 import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
@@ -249,12 +253,37 @@ function MonitoringScope({
     userTenant,
     modelSelection,
   ] as const;
+  const selectedSkill =
+    tab === "skill"
+      ? directories.skills.data?.find(
+          (item) =>
+            resourceKey(directories.tenant ?? "", item.skill_id) ===
+            resourceSelection
+        )
+      : undefined;
+  const skillSelection: SkillMonitoringSelection | null =
+    tab === "skill" && directories.tenant !== undefined && range
+      ? {
+          tenantId: directories.tenant || null,
+          skillId: selectedSkill ? String(selectedSkill.skill_id) : null,
+          groupIds: group ? [Number(group)] : [],
+          startDate: range[0],
+          endDate: range[1],
+        }
+      : null;
+  const skillQueryKey: SkillMonitoringQueryKey = [
+    "skillMonitoring",
+    userId,
+    userTenant,
+    skillSelection,
+  ];
   const selectedMonitoringResource =
     selectedAgent ?? selectedModel ?? directories.mcpService;
   const selectedMcpTool = directories.canReadTools
     ? directories.tools.data?.find((tool) => tool.name === filters.tool)
     : undefined;
   const modelFetching = useIsFetching({ queryKey: modelQueryKey }) > 0;
+  const skillFetching = useIsFetching({ queryKey: skillQueryKey }) > 0;
   const queryClient = useQueryClient();
   const scopeLoading = Boolean(
     range && scopePending && !directories.scope.isError
@@ -308,7 +337,10 @@ function MonitoringScope({
         <Button
           icon={<RefreshCw size={15} aria-hidden />}
           loading={
-            directories.fetching || agentMonitoring.fetching || modelFetching
+            directories.fetching ||
+            agentMonitoring.fetching ||
+            modelFetching ||
+            skillFetching
           }
           onClick={() => {
             void directories.refresh();
@@ -316,6 +348,11 @@ function MonitoringScope({
             if (modelSelection)
               void queryClient.refetchQueries({
                 queryKey: modelQueryKey,
+                type: "active",
+              });
+            if (skillSelection)
+              void queryClient.refetchQueries({
+                queryKey: skillQueryKey,
                 type: "active",
               });
           }}
@@ -526,7 +563,12 @@ function MonitoringScope({
               />
             </>
           ) : tab === "skill" ? (
-            <SkillMonitoring singleSkill={Boolean(resource)} />
+            <SkillMonitoring
+              queryKey={skillQueryKey}
+              singleSkill={Boolean(selectedSkill)}
+              scopeLoading={scopeLoading}
+              hasRange={Boolean(range)}
+            />
           ) : (
             <McpMonitoring
               scope={
