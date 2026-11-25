@@ -72,6 +72,13 @@ def test_execution_body_preserves_safe_text_exactly(body):
     assert safe_local_content(body, redact_json_strings=True) == body
 
 
+def test_malformed_json_preserves_text_and_redacts_url_credentials():
+    body = '[download](https://example.test/file?token=private&format=pdf)\nFile ready.'
+    assert safe_local_content(body, redact_json_strings=True) == (
+        '[download](https://example.test/file?token=REDACTED_CREDENTIAL&format=pdf)\nFile ready.'
+    )
+
+
 def test_execution_body_redacts_encoded_objects_inside_carriers():
     inner = json.dumps({'password': 'secret', 'link': 'https://example.test/?token=sensitive&lang=en'})
     data = {'result': json.dumps([{'text': inner}])}
@@ -94,4 +101,18 @@ def test_failed_body_capture_only_marks_local_gap(mocker):
     span.set_attributes.assert_called_once_with({
         'nexent.local.nexent.trajectory.gap': True,
         'nexent.local.nexent.availability.output': 'serialization_failed',
+    })
+
+
+def test_span_write_errors_do_not_interrupt_execution(mocker):
+    span = mocker.Mock()
+    span.set_attribute.side_effect = RuntimeError('span is closed')
+    span.set_attributes.side_effect = RuntimeError('span is closed')
+
+    set_local_span_content(span, 'input', 'user request')
+
+    span.set_attribute.assert_called_once_with('nexent.local.input.value', 'user request')
+    span.set_attributes.assert_called_once_with({
+        'nexent.local.nexent.trajectory.gap': True,
+        'nexent.local.nexent.availability.input': 'serialization_failed',
     })

@@ -206,6 +206,28 @@ def test_shared_attempt_keeps_provider_total_and_generation_rate(generation_rate
     assert nodes[1]["throughput"] == (float(generation_rate) if generation_rate is not None else None)
 
 
+@pytest.mark.parametrize(("missing_field", "expected_input", "expected_output"), [
+    (None, 13_000, 610),
+    ("llm.token_count.prompt", None, 610),
+    ("llm.token_count.completion", 13_000, None),
+])
+def test_agent_keeps_reported_total_when_model_breakdown_is_partial(missing_field, expected_input, expected_output):
+    first = {"llm.token_count.prompt": "7000", "llm.token_count.completion": "600", "llm.token_count.total": "7600"}
+    second = {"llm.token_count.prompt": "6000", "llm.token_count.completion": "10", "llm.token_count.total": "6010"}
+    second.pop(missing_field, None)
+    nodes, _, coverage = build_nodes(request(
+        span("root"), span("first", "root", "LLM", **first), span("child", "root"),
+        span("second", "child", "LLM", **second),
+    ), conversation_id="1")
+
+    root = next(node for node in nodes if node["id"] == "root")
+    usage = root["usage"]
+    assert coverage["complete"] and root["model_call_count"] == 2
+    assert (usage["input"], usage["output"]) == (expected_input, expected_output)
+    assert usage["known"]["total"] == usage["total"] == 13_610
+    assert usage["complete"] is (missing_field is None)
+
+
 def test_invocation_association_is_preserved_in_node_details():
     nodes, _, _ = build_nodes(
         request(
@@ -393,8 +415,11 @@ def test_duplicate_large_bodies_compare_full_content_not_preview(tmp_path):
 def test_dropped_otlp_facts_make_subtree_metrics_partial(dropped):
     record = span("root")
     record[dropped] = 1
-    nodes, _, coverage = build_nodes(
-        request(record, span("m", "root", "LLM")), conversation_id="1"
-    )
+    model = span("m", "root", "LLM", **{
+        "llm.token_count.prompt": "13000", "llm.token_count.completion": "610", "llm.token_count.total": "13610",
+    })
+    nodes, _, coverage = build_nodes(request(record, model), conversation_id="1")
     assert not coverage["complete"] and coverage["capture_gap"]
+    assert nodes[1]["usage"]["complete"]
     assert nodes[0]["model_call_count"] is None and not nodes[0]["usage"]["complete"]
+    assert nodes[0]["usage"]["total"] is None and nodes[0]["usage"]["known"]["total"] == 13_610
