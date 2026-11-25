@@ -135,6 +135,15 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
   const tableHtml = chunkType === "TABLE" ? sanitizeAidpTableHtml(text) : null;
   const tableData =
     chunkType === "TABLE" && !tableHtml ? parsePipeTable(text) : null;
+  // Mount the sanitized DOM directly; no HTML string is injected.
+  const mountTable = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node && tableHtml) {
+        node.replaceChildren(tableHtml.table.cloneNode(true));
+      }
+    },
+    [tableHtml]
+  );
   const editable = isAidpChunkEditable(chunk);
   const imageFileId =
     chunkType === "IMAGE" ? deriveAidpImageFileId(chunk?.file_url) : undefined;
@@ -330,10 +339,10 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
                     </div>
                   )}
                   <div
+                    ref={mountTable}
                     className={styles.chunkTableScroll}
-                    // Rebuilt from a table-only whitelist by
-                    // sanitizeAidpTableHtml; no script-capable markup survives.
-                    dangerouslySetInnerHTML={{ __html: tableHtml.tableHtml }}
+                    // Built from a table-only whitelist and mounted as DOM
+                    // nodes; no HTML string is injected.
                   />
                 </div>
               ) : tableData ? (

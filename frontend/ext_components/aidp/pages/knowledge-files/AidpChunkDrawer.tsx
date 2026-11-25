@@ -2,13 +2,7 @@
 
 "use client";
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Drawer, Input, Select } from "antd";
 import {
@@ -142,22 +136,21 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
     setPreviewLength(serializePreview().length);
   }, [serializePreview]);
 
-  useEffect(() => {
-    const root = tablePreviewRef.current;
-    if (!previewing || !root) return;
-    const cells = Array.from(root.querySelectorAll<HTMLElement>("td,th"));
-    for (const cell of cells) {
-      // plaintext-only keeps every edit to text, so cells cannot inject markup.
-      cell.setAttribute("contenteditable", "plaintext-only");
-      cell.setAttribute("spellcheck", "false");
-    }
-    return () => {
-      for (const cell of cells) {
-        cell.removeAttribute("contenteditable");
-        cell.removeAttribute("spellcheck");
+  // Mount the sanitized DOM directly instead of injecting an HTML string.
+  // The table is rebuilt from text nodes, so document text never becomes HTML.
+  const mountTablePreview = useCallback(
+    (node: HTMLDivElement | null) => {
+      tablePreviewRef.current = node;
+      if (!node || !preview) return;
+      node.replaceChildren(preview.table.cloneNode(true));
+      for (const cell of node.querySelectorAll<HTMLElement>("td,th")) {
+        // plaintext-only keeps every edit to text, so cells cannot inject markup.
+        cell.setAttribute("contenteditable", "plaintext-only");
+        cell.setAttribute("spellcheck", "false");
       }
-    };
-  }, [previewing, preview?.tableHtml]);
+    },
+    [preview]
+  );
 
   const togglePreview = useCallback(() => {
     if (!previewing) {
@@ -374,18 +367,16 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
                     </div>
                   )}
                   <div
-                    ref={tablePreviewRef}
+                    ref={mountTablePreview}
                     className={styles.chunkTableScroll}
                     onInput={handlePreviewInput}
                     onPaste={handlePreviewPaste}
                     onDrop={handlePreviewDrop}
                     onDragOver={handlePreviewDrop}
                     onKeyDown={handlePreviewKeyDown}
-                    // Rebuilt from a table-only whitelist by
-                    // sanitizeAidpTableHtml; no script-capable markup survives.
-                    // Cells become contenteditable after render; only their text
-                    // is committed back, never the table structure.
-                    dangerouslySetInnerHTML={{ __html: preview.tableHtml }}
+                    // Built from a table-only whitelist and mounted as DOM
+                    // nodes; cells are contenteditable but only their text is
+                    // committed back, never the table structure.
                   />
                   <div className={styles.formHint}>
                     <InfoCircleOutlined className={styles.hintIcon} />
