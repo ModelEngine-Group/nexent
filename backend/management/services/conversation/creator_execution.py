@@ -140,6 +140,7 @@ async def start_creation_turn(
     if kind == "agent" and target is None and request.agent_id is not None:
         # Compatibility for existing editors: their request agent_id names the edited draft.
         target = {"type": "agent", "id": request.agent_id}
+    history = None
     if request.conversation_id is not None:
         history = get_conversation_history(request.conversation_id, user_id)
         if not history or history.get("agent_id") != ref.agent_id:
@@ -221,6 +222,14 @@ async def start_creation_turn(
     request_claimed = False
     preparation_guard = None
     message_receipt = {}
+    history_args = dict(
+        conversation_id=request.conversation_id, mode=f"{kind}_create", query=request.query,
+        minio_files=request.minio_files, workbench_config=request.workbench_config,
+        agent_id=ref.agent_id, target=target, user_id=user_id, tenant_id=tenant_id,
+        selected_model_id=effective.model_id, model_parameter_preferences=request.model_parameter_preferences,
+        retry_user_message_id=request.retry_user_message_id, retry_message_index=request.retry_message_index,
+        message_receipt=message_receipt,
+    )
     try:
         if conversation_id is not None:
             reservation = await claim_creator(
@@ -240,35 +249,27 @@ async def start_creation_turn(
             request_claimed = await claim_request(request_key, RUNTIME_RUN_TTL_SECONDS)
             if not request_claimed:
                 raise AgentRunAlreadyActiveError("Creator request was already accepted")
+        retry_position = None
+        if request.retry_user_message_id is not None or request.retry_message_index is not None:
+            # This path only validates an existing turn. Do it before the runtime can advance a card.
+            retry_position = await run_blocking(
+                "creator-validate-retry", prepare_creation_history, **history_args,
+            )
+            if kind == "agent" and history and history.get("message_records"):
+                last = history["message_records"][-1]
+                effective.__dict__["_resume_confirmed_requirements"] = (
+                    last.get("role") == "assistant"
+                    and last.get("message_index") == retry_position[1]
+                    and last.get("status") in {"failed", "stopped"}
+                )
         # Validate/build before history writes and admit the managed worker first.
         stream = await stream_factory(effective, ref)
         await control.admit()
-        conversation_id, index = await run_blocking(
-            "creator-prepare-history",
-            prepare_creation_history,
-            conversation_id=request.conversation_id,
-            mode=f"{kind}_create",
-            query=request.query,
-            minio_files=request.minio_files,
-            workbench_config=request.workbench_config,
-            agent_id=ref.agent_id,
-            target=target,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            **(
-                {"selected_model_id": effective.model_id}
-                if effective.model_id is not None
-                else {}
-            ),
-            **(
-                {"model_parameter_preferences": request.model_parameter_preferences}
-                if request.model_parameter_preferences
-                else {}
-            ),
-            retry_user_message_id=request.retry_user_message_id,
-            retry_message_index=request.retry_message_index,
-            message_receipt=message_receipt,
+        conversation_id, index = retry_position or await run_blocking(
+            "creator-prepare-history", prepare_creation_history, **history_args,
         )
+        if kind == "agent":
+            effective.conversation_id = conversation_id
         if reservation is None:
             reservation = await claim_creator(
                 conversation_id, user_id, control.generation

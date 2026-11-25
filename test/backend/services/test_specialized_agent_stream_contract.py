@@ -70,7 +70,7 @@ async def test_creation_stream_preserves_events_and_releases_grant(mocker, grant
         expected = {"complete": "final_answer", "error": "error", "nl2a": "nl2a"}
         assert [event["type"] for event in output] == [expected[terminal]]
     remote.assert_awaited_once_with(_PAYLOAD, _ACTOR.user_id, _ACTOR.tenant_id)
-    opened.assert_called_once_with(_PAYLOAD.run_id, 7, _ACTOR, False)
+    opened.assert_called_once_with(_PAYLOAD.run_id, 7, _ACTOR, False, "", False)
     closed.assert_called_once_with(_PAYLOAD.run_id)
     assert exited
 

@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, parse_similarity_threshold, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -27,6 +27,10 @@ ES_HOST = os.getenv('ELASTICSEARCH_HOST')
 ES_API_KEY = os.getenv('ELASTICSEARCH_API_KEY')
 ES_PASSWORD = os.getenv('ELASTIC_PASSWORD')
 ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
+NL2AGENT_ES_SEARCH_CONCURRENCY = parse_positive_int(os.getenv('NL2AGENT_ES_SEARCH_CONCURRENCY'), 'NL2AGENT_ES_SEARCH_CONCURRENCY', 8)
+NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY = parse_positive_int(os.getenv('NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY'), 'NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY', 8)
+NL2AGENT_EMBEDDING_MIN_SIMILARITY = parse_similarity_threshold(os.getenv('NL2AGENT_EMBEDDING_MIN_SIMILARITY'), 'NL2AGENT_EMBEDDING_MIN_SIMILARITY', 0.5)
+NL2AGENT_KNOWLEDGE_MIN_SIMILARITY = parse_similarity_threshold(os.getenv('NL2AGENT_KNOWLEDGE_MIN_SIMILARITY'), 'NL2AGENT_KNOWLEDGE_MIN_SIMILARITY', 0.6)
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
@@ -231,6 +235,7 @@ OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_op
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_BACKEND_URL = os.getenv('REDIS_BACKEND_URL')
+NL2AGENT_RESOURCE_STATE_TTL_SECONDS = int(os.getenv('NL2AGENT_RESOURCE_STATE_TTL_SECONDS', '7200'))
 REDIS_PORT = int(os.getenv('REDIS_PORT', '6379'))
 RUNTIME_STATE_REDIS_URL = os.getenv('RUNTIME_STATE_REDIS_URL') or REDIS_URL
 RUNTIME_STREAM_TTL_SECONDS = int(os.getenv('RUNTIME_STREAM_TTL_SECONDS', '86400'))
@@ -383,14 +388,9 @@ DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
 _LOCAL_FILE_TELEMETRY = MONITORING_PROVIDER == 'local_file'
-LOCAL_FILE_MONITORING_ENABLED = (
-    os.getenv('LOCAL_FILE_MONITORING_ENABLED')
-    or (ENABLE_TELEMETRY_RAW if _LOCAL_FILE_TELEMETRY else None)
-    or 'true'
-).strip().lower() == 'true'
-ENABLE_TELEMETRY = (
-    LOCAL_FILE_MONITORING_ENABLED if _LOCAL_FILE_TELEMETRY else (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
-)
+_LOCAL_FILE_MONITORING_RAW = os.getenv('LOCAL_FILE_MONITORING_ENABLED') or (ENABLE_TELEMETRY_RAW if _LOCAL_FILE_TELEMETRY else None)
+LOCAL_FILE_MONITORING_ENABLED = (_LOCAL_FILE_MONITORING_RAW or 'true').strip().lower() == 'true'
+ENABLE_TELEMETRY = LOCAL_FILE_MONITORING_ENABLED if _LOCAL_FILE_TELEMETRY else (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
 OTEL_SERVICE_NAME_RAW = os.getenv('OTEL_SERVICE_NAME')
 OTEL_SERVICE_NAME = OTEL_SERVICE_NAME_RAW or 'nexent-backend'
 OTEL_EXPORTER_OTLP_ENDPOINT_RAW = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT')
@@ -426,9 +426,8 @@ MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROL
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
-TRAJECTORY_READ_ENABLED = os.getenv(
-    'TRAJECTORY_READ_ENABLED', 'true' if _LOCAL_FILE_TELEMETRY or LOCAL_FILE_MONITORING_ENABLED else 'false'
-).lower() == 'true'
+_TRAJECTORY_READ_DEFAULT = 'true' if _LOCAL_FILE_TELEMETRY or LOCAL_FILE_MONITORING_ENABLED else 'false'
+TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', _TRAJECTORY_READ_DEFAULT).lower() == 'true'
 TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
 TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
 # ZIP exchange budgets shared by temporary and saved trajectory imports.

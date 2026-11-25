@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import TagChips from "@/components/tag/TagChips";
 import { tagManagementApi } from "@/services/tagManagementService";
+import { subscribeToAssignmentChanges } from "@/services/tagAssignmentCache";
 import type { TagAssignmentValue } from "@/types/tagManagement";
 
 interface ResourceTagChipsProps {
@@ -25,9 +26,9 @@ interface ResourceTagChipsProps {
 }
 
 /**
- * Compact value-only chips for one resource, loaded on mount and cached by
- * the tag service client. The owning TagChips component keeps the tag name in
- * tooltips and accessibility labels so value-only chips never lose context.
+ * Compact value-only chips for one resource, reloaded on resource invalidation
+ * and cached by the tag service client. The owning TagChips component keeps the
+ * tag name in tooltips and accessibility labels so value-only chips never lose context.
  */
 export default function ResourceTagChips({
   resourceType,
@@ -49,18 +50,29 @@ export default function ResourceTagChips({
 
   useEffect(() => {
     let cancelled = false;
-    tagManagementApi
-      .getAssignments(resourceType, resourceId, options ?? {})
-      .then((result) => {
-        if (cancelled) return;
-        setAssignments(result.assignments ?? []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAssignments([]);
-      });
+    let requestId = 0;
+    const refresh = () => {
+      const currentRequest = ++requestId;
+      tagManagementApi
+        .getAssignments(resourceType, resourceId, options ?? {})
+        .then((result) => {
+          if (cancelled || currentRequest !== requestId) return;
+          setAssignments(result.assignments ?? []);
+        })
+        .catch(() => {
+          if (cancelled || currentRequest !== requestId) return;
+          setAssignments([]);
+        });
+    };
+    const unsubscribe = subscribeToAssignmentChanges(
+      resourceType,
+      resourceId,
+      refresh
+    );
+    refresh();
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [resourceType, resourceId, optionsKey, refreshKey]);
 

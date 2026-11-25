@@ -44,6 +44,9 @@ case:
     expected: Initial recommendation names/None render; cancelling keeps recommendation
       attribution; confirming a manual selection changes the label to Selected; successful
       binding uses Associated. Existing ranges and deferred persistence remain.
+  - order: 6
+    action: Bind unconfigured version 2 Tool and Skill resources with delayed and failing configuration adapters, then retry.
+    expected: No dialog or binding while loading; successful loads show fields and saved values; failures show an error and permit retry.
   expected_results:
   - One card displays Local/MCP/Skill sources plus Knowledge without exposing managed
     names.
@@ -55,6 +58,8 @@ case:
   - Suggested ranges preselect without premature persistence; manual confirmation
     labels chosen ranges Selected, cancellation retains attribution, and bound ranges
     use Associated.
+  - Version 2 Bind loads Tool or Skill fields and saved values before opening configuration;
+    failed loads remain closed and retryable without binding.
   forbidden_side_effects:
   - No persistence on drawer cancellation or empty selection; no generation on failed
     binding.
@@ -66,6 +71,11 @@ case:
   assertions:
   - Type labels, knowledge selection draft, persistence payload, continuation gating.
   acceptance:
+  - id: AC-06
+    description: Bind-triggered configuration waits for schema and saved values, handles load failure and retries without premature persistence.
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [1]
   - id: AC-01
     description: Mixed resource presentation
     steps:

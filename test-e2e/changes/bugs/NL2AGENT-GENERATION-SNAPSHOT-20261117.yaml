@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-GENERATION-SNAPSHOT-20261117
+  change_type: bugfix
+  bug_id: NL2AGENT-GENERATION-SNAPSHOT-20261117
+  title: Reuse generation binding reads for facts and revision
+  description: Remove duplicate binding reads within each generation context or prompt validation snapshot.
+  observed_behavior: Tool and Skill instances are queried once for verified facts and again for the prompt binding revision.
+  expected_behavior: Each snapshot reads each binding kind once and derives facts and revision from those records. Later validation snapshots still reread current bindings. Private configuration and the internal digest do not enter model context.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing prompt UT mock snapshots and verify conflicts, but do not assert binding query counts or shared data for facts and revision.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [NL2A-COMPLETION-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_generation_snapshot.py
+      - test/backend/services/test_nl2agent_prompt_confirmation.py
+    behaviors:
+      - Both generation context and validation snapshot query tools and Skills once and derive the revision from those records.
+      - Tool configuration, Skill configuration and schema changes remain detectable by a later snapshot.
+      - Empty bindings are stable, authorization and query failures propagate, and private data stays server-side.
+      - Prompt conflicts, exact approved text and interrupted confirmation recovery retain their existing behavior.
+    reason: Query reuse is a service orchestration assertion owned by UT. Existing D3 verifies real generation and confirmation; no new formal Case or browser change is needed.
+  notes: >-
+    Owning SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md
+    section 6.5 and tasks generation binding snapshot section. Reuse the existing
+    D3 PostgreSQL, Redis, MCP and controlled-provider setup and its owned cleanup.
+    Routes, payloads, permissions, confirmation transitions and deployment are unchanged.

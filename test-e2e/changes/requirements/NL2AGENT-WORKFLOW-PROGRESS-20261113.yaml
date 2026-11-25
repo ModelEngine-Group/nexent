@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-WORKFLOW-PROGRESS-20261113
+  change_type: requirement
+  requirement_id: NL2AGENT-WORKFLOW-PROGRESS-20261113
+  title: NL2Agent steps project trusted execution facts
+  description: Four fixed steps above chat reuse cards and trusted execution facts without additional model output, restoring history and isolating conversations. No-model fuzzy matching is normal, not a semantic failure.
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [NL2A-COVERAGE-D3-001]
+    modified: []
+    added: [NL2A-WORKFLOW-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/Nl2AgentWorkflowProgress.test.tsx
+      - frontend/tests/workbench/Nl2AgentRetrievalProgress.test.tsx
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+      - frontend/tests/workbench/AgentCreationHistoryCard.test.ts
+      - test/backend/services/test_nl2agent_semantic_retrieval.py
+    behaviors:
+      - Header is hidden before creation starts and during local optimization; saving a creation description does not hide the active workflow.
+      - Derive steps from trusted events/cards, restore historical progress and isolate target, conversation and run changes.
+      - No-model mode has no semantic-unavailable warning; genuine hybrid failure keeps fallback information.
+      - Waiting, cancellation, errors and completion never invent business success or model output.
+    reason: Existing retrieval and card tests do not prove panel-level steps and replay; add frontend tests, reuse backend contracts, and add browser proof.
+  notes: F-045 inherits agent_config ownership. D4 owns browser routes and fixture state, creates no persistent resources, and closes its context for cleanup.

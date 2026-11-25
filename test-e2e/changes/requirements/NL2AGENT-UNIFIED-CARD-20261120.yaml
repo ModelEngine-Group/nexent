@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-UNIFIED-CARD-20261120
+  change_type: requirement
+  requirement_id: NL2AGENT-UNIFIED-CARD-20261120
+  title: Merge requirements and resource selection with mutually exclusive editing
+  description: One card owns query editing and resource binding; unchanged Redis results are reused.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-045
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - NL2A-COVERAGE-D3-001
+    - NL2A-WORKFLOW-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Mixed gap and bindable resources, real readiness gating and stale-action rejection.
+    - Changed query prepares bilingual phrases while unchanged Redis evidence is reused.
+    - Edit mode pauses resource writes, cancel restores drafts and shared resources bind once.
+    reason: Extend existing backend and frontend UT plus actual runtime D3 and browser D4; no duplicate D1.
+    test_selectors:
+    - test/backend/services/test_nl2agent_unified_card.py
+    - frontend/tests/workbench/Nl2AgentUnifiedCard.test.tsx
+    - frontend/tests/workbench/Nl2AgentUnifiedBinding.test.tsx
+    - frontend/tests/workbench/Nl2AgentUnifiedPayload.test.ts
+    - test/backend/app/test_nl2agent_resource_operations.py
+    - test/backend/services/test_creator_checkpoint_stream.py
+  notes: 'SPEC: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/. Inherits agent_config. Existing D3/D4 own setup
+    and cleanup; no deployment change.'

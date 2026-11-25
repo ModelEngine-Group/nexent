@@ -18,6 +18,7 @@ export function formatNl2AgentActionSummary(
         "nl2agent.resourceInstallation.submittedSummary",
         "Resource installation completed"
       );
+    case "requirement_resources":
     case "installed_resource_binding":
       return t(
         "nl2agent.resourceBinding.submittedSummary",

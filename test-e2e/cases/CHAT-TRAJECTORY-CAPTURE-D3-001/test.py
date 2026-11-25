@@ -73,26 +73,64 @@ def test_capture_generated_code_result_and_logs_survive_cold_read(runtime):
 
 
 @pytest.mark.parametrize('creator', [False, True], ids=['clarification', 'creator-card'])
-def test_capture_interactive_card_preserves_stop_status(runtime, creator):
+def test_capture_interactive_card_preserves_stop_status(runtime, monkeypatch, creator):
+    from infrastructure.nl2agent_tool_config import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
+    from nexent.core.agents.cores.smolagents import agent as module
     from ops.services.trajectory.projection import execution_values
-    from services.nl2agent_service import _Nl2AgentBoundaryObserver
+    from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
-    payload = {'subtype': 'requirement_clarification', 'questions': [{
+    payload = {'agent_id': 7, 'subtype': 'requirement_clarification', 'questions': [{
         'question_id': 'scope', 'question_type': 'text', 'title': 'Which region?',
         'required': True, 'options': [], 'allow_other': False, 'other_input_expanded': False,
     }]}
-    wrapper = '<nl2a>' + json.dumps(payload) + '</nl2a>'
-    code = (f'print({wrapper!r})' if creator else
+    run_id = 'controlled-creator-card'
+    conversation_id = '123'
+    stop_event = None
+    receipt = {NL2AGENT_RECEIPT_KEY: {
+        'run_id': run_id, 'conversation_id': conversation_id, 'event_id': 'card', 'payload': payload,
+    }}
+
+    class CaptureCreatorCardTool(Tool):
+        name = 'capture_creator_card'
+        description = 'Deliver a controlled creator card receipt'
+        inputs: ClassVar[dict] = {}
+        output_type = 'string'
+        observer = None
+
+        def forward(self) -> str:
+            self.observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, receipt)
+            assert self.observer.boundary_reached
+            # A valid receipt completes the turn gracefully. Request an explicit stop after delivery.
+            assert not stop_event.is_set()
+            stop_event.set()
+            return 'Card delivered'
+
+    def make_observer(stop):
+        nonlocal stop_event
+        stop_event = stop
+        return _Nl2AgentBoundaryObserver(
+            lang='en', stop_event=stop, agent_id=7, run_id=run_id, conversation_id=conversation_id,
+        )
+
+    config = None
+    if creator:
+        monkeypatch.setattr(module, 'CaptureCreatorCardTool', CaptureCreatorCardTool, raising=False)
+        config = AgentConfig(
+            name='root', description='Controlled Agent', model_name='model', max_steps=2,
+            tools=[ToolConfig(class_name='CaptureCreatorCardTool', name='capture_creator_card',
+                              source='local', params={})],
+        )
+    code = ('capture_creator_card()' if creator else
             "ask_user(questions=[{'id': 'scope', 'type': 'text', 'title': 'Which region?'}])")
+    factory = make_observer if creator else None
 
     def reply(request, number, emit):
         emit(f'<code>{code}</code>')
         emit(usage={'prompt_tokens': 9, 'completion_tokens': 4, 'total_tokens': 13})
         emit(done=True)
 
-    factory = (lambda stop: _Nl2AgentBoundaryObserver(lang='en', stop_event=stop)) if creator else None
     with runtime.http(reply) as (base, requests):
-        info, _ = runtime.run(base, observer_factory=factory)
+        info, _ = runtime.run(base, config=config, observer_factory=factory)
         assert len(requests) == 1
     assert info.attempt_outcome == ('stopped' if creator else 'completed')
     events = [json.loads(item) for item in info.observer.get_cached_message()]

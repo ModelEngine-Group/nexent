@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import log from "@/lib/logger";
 import { fetchWithAuth } from "@/lib/auth";
 import {
@@ -144,6 +146,7 @@ export const suggestMcpContainerPortService = async () => {
       throw new Error("Failed to suggest MCP port");
     }
     return { success: true, data: data.data } as McpToolsApiResult<{
+      mcp_id?: number;
       port: number;
     }>;
   } catch (error) {
@@ -229,7 +232,8 @@ export const addContainerMcpToolService = async (
     });
     if (!response.ok) {
       const errorBody = await parseJson<{ detail?: string }>(response);
-      throw new Error(
+      throw new ApiError(
+        String(response.status),
         errorBody.detail || `Request failed (${response.status})`
       );
     }
@@ -251,6 +255,7 @@ export const addContainerMcpToolService = async (
 };
 
 type ContainerMcpDeploymentResult = {
+  mcp_id?: number;
   container_id?: string;
   container_name?: string;
   host_port?: number;
@@ -652,17 +657,18 @@ export const addMcpToolService = async (payload: AddMcpServicePayload) => {
       const errorBody = await parseJson<{ detail?: string; message?: string }>(
         response
       );
-      throw new Error(
+      throw new ApiError(
+        String(response.status),
         errorBody.detail ||
           errorBody.message ||
           `Request failed (${response.status})`
       );
     }
-    const data = await parseJson<ApiEnvelope>(response);
+    const data = await parseJson<ApiEnvelope & { mcp_id?: number }>(response);
     if (data.status !== "success") {
       throw new Error("Failed to add MCP service");
     }
-    return { success: true, data: null } as McpToolsApiResult<null>;
+    return { success: true, data: null, mcpId: data.mcp_id };
   } catch (error) {
     log.error("addMcpToolService failed", error);
     throw error;

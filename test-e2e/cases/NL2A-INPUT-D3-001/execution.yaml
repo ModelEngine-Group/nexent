@@ -1,0 +1,20 @@
+schema_version: '1.0'
+case_id: NL2A-INPUT-D3-001
+timeout_seconds: 240
+implementations:
+  - framework: pytest
+    file: test_runtime.py
+    selector: test_
+acceptance_bindings:
+  AC-RESOURCE-INPUT-LIMIT: [test_search_reports_limit_and_accepts_complete_batch]
+  AC-RESOURCE-PAGINATION: [test_search_reads_later_repository_pages_and_rejects_stalled_cursor]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Agent configuration proof. The runtime fixture owns and cleans up the
+  disposable PostgreSQL schema, controlled model and catalog fixtures,
+  MCP listener, runtime workspace, and workers. A PostgreSQL connection
+  is the only external prerequisite.
