@@ -7486,6 +7486,7 @@
   "ops.monitoring.agent.trend": "Call trend",
   "ops.monitoring.agent.daily": "By calendar day",
   "ops.monitoring.agent.trendMetric": "Call trend metric",
+  "ops.monitoring.tenantNameUnavailable": "Tenant name unavailable",
   "ops.monitoring.agent.executionStatus": "Execution data",
   "ops.monitoring.agent.coverage.covered": "Fully covered",
   "ops.monitoring.agent.coverage.partial": "Partially covered",

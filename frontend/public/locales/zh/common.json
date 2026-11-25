@@ -7483,6 +7483,7 @@
   "ops.monitoring.agent.trend": "调用趋势",
   "ops.monitoring.agent.daily": "按自然日",
   "ops.monitoring.agent.trendMetric": "调用趋势指标",
+  "ops.monitoring.tenantNameUnavailable": "租户名称暂不可用",
   "ops.monitoring.agent.executionStatus": "执行数据",
   "ops.monitoring.agent.coverage.covered": "覆盖完整",
   "ops.monitoring.agent.coverage.partial": "部分覆盖",

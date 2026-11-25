@@ -9,7 +9,7 @@ import {
   listOperationsResources,
 } from "@/services/operationsService";
 import { fetchSkillsList } from "@/services/skillService";
-import { listTenants, type Tenant } from "@/services/tenantService";
+import { getTenant, listTenants, type Tenant } from "@/services/tenantService";
 import type { MonitoringTab } from "./monitoringFilters";
 
 export function resourceKey(tenantId: string, id: number | string): string {
@@ -49,9 +49,10 @@ export function useMonitoringDirectories({
   });
   const tenant = scope.isSuccess ? scope.data.tenant_id : undefined;
   const tenants = useQuery({
-    queryKey: [...queryKey, "tenants"],
-    enabled: canChooseTenant,
+    queryKey: [...queryKey, "tenants", canChooseTenant],
+    enabled: canChooseTenant || Boolean(userTenant),
     queryFn: async () => {
+      if (!canChooseTenant) return [await getTenant(userTenant)];
       const pageSize = 100;
       const choices: Tenant[] = [];
       let end = 1;
@@ -121,7 +122,7 @@ export function useMonitoringDirectories({
 
   const fetching =
     scope.isFetching ||
-    (canChooseTenant && tenants.isFetching) ||
+    tenants.isFetching ||
     (tab !== "overview" && groups.isFetching) ||
     (tab === "skill" ? skills.isFetching : inventory.isFetching) ||
     mcpCatalog.isFetching ||

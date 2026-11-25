@@ -144,10 +144,16 @@ function MonitoringScope({
   const tenantChoices =
     directories.tenants.data?.map((tenant) => ({
       value: tenant.tenant_id,
-      label: tenant.tenant_name || tenant.tenant_id,
+      label:
+        tenant.tenant_name?.trim() || t("ops.monitoring.tenantNameUnavailable"),
     })) ?? [];
   const tenantLabel = (id: string) =>
-    tenantChoices.find((choice) => choice.value === id)?.label ?? id;
+    tenantChoices.find((choice) => choice.value === id)?.label ??
+    t(
+      directories.tenants.isPending
+        ? "common.loading"
+        : "ops.monitoring.tenantNameUnavailable"
+    );
   const visibleTenant =
     directories.tenant === undefined
       ? canChooseTenant
@@ -175,8 +181,10 @@ function MonitoringScope({
       aria-label={t("ops.tenant")}
       className={styles.select}
       disabled
+      loading={directories.tenants.isFetching}
+      status={directories.tenants.isError ? "error" : undefined}
       value={userTenant}
-      options={[{ value: userTenant, label: userTenant }]}
+      options={[{ value: userTenant, label: tenantLabel(userTenant) }]}
     />
   );
 
