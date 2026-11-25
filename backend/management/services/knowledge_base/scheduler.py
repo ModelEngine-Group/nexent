@@ -32,7 +32,10 @@ def _parse_last_summary_time(last_summary_time) -> Optional[datetime]:
         return last_summary_time.replace(tzinfo=None)
     if isinstance(last_summary_time, str):
         try:
-            return datetime.fromisoformat(last_summary_time)
+            # ``as_dict`` appends a fake "Z" to naive local timestamps; strip
+            # the resulting tzinfo instead of converting, so wall-clock time
+            # stays comparable with datetime.now().
+            return datetime.fromisoformat(last_summary_time).replace(tzinfo=None)
         except (ValueError, TypeError):
             return None
     return None
