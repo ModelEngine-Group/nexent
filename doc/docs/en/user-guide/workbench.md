@@ -29,13 +29,13 @@ Before sending, use the composer controls to add resources as needed. Availabili
 
 | Control | What to do |
 | --- | --- |
-| **Agents** | Search for available agents, select them, and click **Confirm selection**. You can select multiple agents if your deployment supports multi-agent mode. If general chat is enabled, you can also send a task directly. |
-| **Knowledge** | Open **Knowledge bases for this conversation** and choose what to search. Sources may include **Local knowledge bases** and **AIDP knowledge bases**. |
-| **Skills** | Select the skills you need, fill in any required configuration, and click **Confirm selection**. |
+| **Agents** | Search for available agents, select them, and click **Confirm**. You can select up to eight agents if your deployment supports multi-agent mode. If general chat is enabled, you can also send a task directly. |
+| **Knowledge** | Open **Knowledge bases for this conversation**, choose what to search from the available **Local knowledge bases** or **AIDP knowledge bases**, and click **Confirm**. |
+| **Skills** | Select the skills you need, fill in any required configuration, and click **Confirm**. |
 
 To remove a resource, use its label in the composer.
 
-<!-- Screenshot pending. Capture the Agents picker with a selected agent and the Confirm selection button.
+<!-- Screenshot pending. Capture the Agents picker with a selected agent and the Confirm button.
 ![Selecting agents for the conversation](./assets/workbench/agent-picker.png)
 -->
 
@@ -43,7 +43,7 @@ To remove a resource, use its label in the composer.
 ![Setting the knowledge base scope for the conversation](./assets/workbench/knowledge-scope.png)
 -->
 
-<!-- Screenshot pending. Capture the Skills picker with a selected skill and the Confirm selection button.
+<!-- Screenshot pending. Capture the Skills picker with a selected skill and the Confirm button.
 ![Selecting skills for the conversation](./assets/workbench/skill-picker.png)
 -->
 
@@ -76,8 +76,10 @@ Creation controls appear according to your account permissions. The Workbench op
 ### Create an agent
 
 1. Click **Create Agent**. Describe the intended users, the tasks the agent should perform, its inputs and outputs, and any constraints. You can also start from an example in the interface.
-2. Review the extracted requirements in the **Requirements and resources** card. To make changes, edit the requirements and click **Update requirements and search again**. Select recommended tools, skills, or knowledge bases as needed, and finish configuring and binding your selections. If you need no resources, click **Continue without resources**.
-3. When the result card shows **Draft Generated**, click **Edit current draft** above the composer or **Go to Agent Development** in the result card. In the configuration, review or edit the prompts under **Model and Prompts**, then follow the [Agent Configuration](./agent-development) guide to debug and publish the agent.
+2. When the **Requirements and resources** card appears, review the extracted requirements. To make changes, edit the requirements and click **Update requirements and search again**. Select any recommended tools, skills, or knowledge bases you need. Configure any unbound selections and click **Bind selected**. When the resources are ready, click **Continue**. If the task needs no resources, use **Continue without resources** when the option is available.
+3. When the result card shows **Draft Generated**, click **Edit current draft** above the composer or **Go to Agent Development** in the result card. In the configuration, review or edit the prompts under **Model and prompt**, then follow the [Agent Configuration](./agent-development) guide to debug and publish the agent.
+
+If the draft has no prompt yet, Workbench saves the first generated prompt directly. When a conversation generates a replacement for an existing prompt, review the changes in the **Generated prompt** card and click **Confirm and apply** to save.
 
 <!-- Screenshot pending. Capture the Requirements and resources card with one resource ready and the control for continuing.
 ![Reviewing agent requirements and binding resources](./assets/workbench/agent-creation-resources.png)
