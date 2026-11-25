@@ -40,6 +40,15 @@ def test_complete_payload_filters_channels(method):
     if "graph_search" in channels:
         assert payload["graph_search_config"] == {"graph_top_k": 2, "graph_score_threshold": 0, "graph_reranking_enable": True}
 
+    # Default caps are omitted from the payload; AIDP fills in its own values.
+    default_payload = build_payload(validate_config({"search_method": method, "multi_modal": False}), "query", ["kb"])
+    if channels & set(CHANNELS[:2]):
+        assert "hybrid_top_k" not in default_payload["hybrid_search_config"]
+    if "graph_search" in channels:
+        assert "graph_top_k" not in default_payload["graph_search_config"]
+        assert "graph_score_threshold" in default_payload["graph_search_config"]
+        assert "graph_reranking_enable" in default_payload["graph_search_config"]
+
 
 def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
     base = {"top_k": 10, "vector_candidates": 30, "reranking_enable": False, "multi_modal": False}
@@ -67,6 +76,7 @@ def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
     ({"hybrid_top_k":8,"graph_top_k":5},"hybrid_top_k"),
     ({"hybrid_top_k":8,"graph_top_k":5,"graph_reranking_enable":False},"hybrid_top_k"),
     ({"search_method":"full_text_search","hybrid_top_k":6,"full_text_candidates":5},"full_text_candidates"),
+    ({"search_method":"vector_search","hybrid_top_k":11},"hybrid_top_k"),
     ({"search_method":"graph_search","graph_top_k":11},"graph_top_k"),
     ({"search_method":"vector_search|"},"search_method"), ({"search_method":""},"search_method"),
     ({"search_method":"unknown"},"search_method"), ({"query_expansion_enable":1},"query_expansion_enable"),
@@ -82,6 +92,11 @@ def test_boundary_default_caps_and_jargon(k):
     assert c["top_k"] == k
     assert c["hybrid_top_k"] == c["graph_top_k"] == 5
     assert resolve_config({"hybrid_top_k":5,"graph_top_k":5})["top_k"] == 10
+    # Both caps at default: AIDP fills the omitted values, so 5+5>7 is allowed.
+    assert validate_config({"top_k": 7})["top_k"] == 7
+    # Inactive-channel fields are skipped even when their values are valid.
+    assert validate_config({"search_method": "vector_search", "graph_reranking_enable": True})["search_method"] == "vector_search"
+    assert validate_config({"search_method": "vector_search", "graph_score_threshold": 0.5})["search_method"] == "vector_search"
 
 
 def test_method_normalization_and_inactive_quota():
