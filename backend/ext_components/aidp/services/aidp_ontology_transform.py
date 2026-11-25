@@ -69,15 +69,17 @@ def _issue(
     ``message`` is an English fallback for non-browser callers; the browser
     translates ``reason`` + ``params`` into the active locale.
     """
-    return {
+    issue = {
         "index": index,
         "type": object_type,
         "api_name": api_name if isinstance(api_name, str) else None,
         "field": field,
         "reason": reason,
-        "params": params or {},
         "message": message,
     }
+    if params:
+        issue["params"] = params
+    return issue
 
 
 def _clean_text(value: Any) -> str:

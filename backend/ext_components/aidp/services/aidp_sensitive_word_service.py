@@ -21,8 +21,8 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpSensitiveWordError
 from ext_components.aidp.services.aidp_client import (
-    _AIDP_ACCEPT_LANGUAGE,
     _AIDP_READ_TIMEOUT_SECONDS,
+    _aidp_headers,
     _extract_upstream_code,
     _extract_upstream_error,
     _get_sensitive_words_path,
@@ -110,11 +110,7 @@ def _request(
     duplicate-word rejection would only repeat the same failure.
     """
     url = urljoin(f"{normalized_url}/", path)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
-        "Content-Type": "application/json",
-    }
+    headers = _aidp_headers(api_key)
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,

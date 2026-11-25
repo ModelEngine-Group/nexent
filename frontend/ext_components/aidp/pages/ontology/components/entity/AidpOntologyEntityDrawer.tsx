@@ -367,7 +367,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       api_name: entity?.api_name ?? "",
       description: entity?.description ?? "",
       type_id: entity?.type_id ?? undefined,
-      primary_properties: entity?.primary_properties ?? [],
       properties: initialProperties,
       demo_parents: (entity?.parent_entities ?? [])
         .map(relationId)
@@ -431,19 +430,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     }
     const parentIds = (values.demo_parents ?? []).filter(Boolean);
     const childIds = (values.demo_children ?? []).filter(Boolean);
-    const initialPrimaryValues = entity?.primary_properties ?? [];
-    // The primary-property editor is intentionally hidden: AIDP no longer
-    // returns the field on entity detail. Never derive a primary change from
-    // the form, so an unrelated edit cannot wipe upstream values.
-    const primary = initialPrimaryValues.filter((name) =>
-      properties.some((property) => property.api_name === name)
-    );
     const detailsLoaded = entity?.detail_loaded !== false;
-    const initialPrimary = initialPrimaryValues
-      .map((name) => String(name))
-      .sort();
-    const primaryChanged =
-      JSON.stringify([...primary].sort()) !== JSON.stringify(initialPrimary);
 
     setSaving(true);
     setErrorMessage(null);
@@ -462,9 +449,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           ...(detailsLoaded ? { properties } : {}),
-          ...(detailsLoaded && primaryChanged
-            ? { primary_properties: primary }
-            : {}),
           // Only send relation fields that actually changed so a plain edit
           // does not trigger an extra Relations read/write round trip.
           ...(parentIdsChanged ? { parent_entities: parentIds } : {}),
@@ -480,7 +464,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           properties,
-          primary_properties: primary,
           ...(typeId ? { type_id: typeId } : {}),
           ...(entityKind === "entity" && parentIdsWithoutType.length
             ? { parent_entities: parentIdsWithoutType }
@@ -550,7 +533,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           display_name: entity?.display_name ?? "",
           api_name: entity?.api_name ?? "",
           description: entity?.description ?? "",
-          primary_properties: entity?.primary_properties ?? [],
           properties: initialProperties,
           demo_parents: (entity?.parent_entities ?? [])
             .map(relationId)

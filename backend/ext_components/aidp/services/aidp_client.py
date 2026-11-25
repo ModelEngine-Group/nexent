@@ -41,6 +41,17 @@ _AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 _AIDP_ACCEPT_LANGUAGE = os.getenv("AIDP_ACCEPT_LANGUAGE", "zh-CN")
 
 
+def _aidp_headers(api_key: str, *, content_type: bool = True) -> dict[str, str]:
+    """Build the common headers for an outbound AIDP request."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
+    }
+    if content_type:
+        headers["Content-Type"] = "application/json"
+    return headers
+
+
 def _normalize_upstream_error(value: Any) -> str | None:
     """Extract a concise human-readable reason from an upstream error value."""
     if isinstance(value, str):
@@ -523,11 +534,7 @@ def _request_aidp_json(
     response cannot replay the write upstream.
     """
     normalized_url = _validate_params(server_url, api_key)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
-    }
+    headers = _aidp_headers(api_key)
     request_url = urljoin(f"{normalized_url}/", path.lstrip("/"))
     logger.info("AIDP %s request to %s", method, request_url)
 
@@ -537,13 +544,15 @@ def _request_aidp_json(
             timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
-        request_fn = lambda: client.request(
-            method,
-            request_url,
-            headers=headers,
-            params=params,
-            json=json_body,
-        )
+        def request_fn():
+            return client.request(
+                method,
+                request_url,
+                headers=headers,
+                params=params,
+                json=json_body,
+            )
+
         response = (
             _request_with_retry(request_fn, context=context)
             if retry
