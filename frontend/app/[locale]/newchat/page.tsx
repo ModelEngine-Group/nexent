@@ -8,7 +8,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type FC,
+  type SetStateAction,
 } from "react";
 import {
   AssistantRuntimeProvider,
@@ -306,7 +308,7 @@ const HomeContent: FC<{
   runtime: AssistantRuntime;
   selectedAgent: Agent | null;
   restoreViewTarget: LastChatViewState | null | undefined;
-  setSelectedAgent: (agent: Agent | null) => void;
+  setSelectedAgent: Dispatch<SetStateAction<Agent | null>>;
   isLoadingAgents: boolean;
   agents: Agent[];
   onAgentSelected: (agent: Agent) => Promise<void>;
@@ -760,7 +762,8 @@ const HomeContent: FC<{
     previousActiveThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
 
-  // Resolve the selected conversation's agent from thread metadata.
+  // Restore from a thread change or newly available metadata. A card click
+  // can update the selected Agent before the runtime leaves the old thread.
   useEffect(() => {
     if (
       !shouldRestoreAgentRef.current ||
@@ -773,17 +776,15 @@ const HomeContent: FC<{
     if (agentId === undefined || agentId === null) return;
 
     const matchedAgent = agents.find((agent) => agent.id === String(agentId));
-    if (matchedAgent && matchedAgent.id !== selectedAgent?.id) {
-      log.log(
-        `[HomeContent] Thread changed to ${activeThreadId}, updating selectedAgent to: ${matchedAgent.display_name || matchedAgent.name}`
+    if (matchedAgent) {
+      setSelectedAgent((current) =>
+        current?.id === matchedAgent.id ? current : matchedAgent
       );
-      setSelectedAgent(matchedAgent);
     }
   }, [
     activeThreadId,
     activeAgentId,
     agents,
-    selectedAgent?.id,
     setSelectedAgent,
   ]);
 
@@ -917,12 +918,8 @@ const HomeContent: FC<{
     invalidateDetail: conversationDetails.invalidate,
   });
 
-  // Publish the server conversation id registry to the thread-list adapter so
-  // `generateTitle` can wait for the real backend id before issuing its
-  // request. Without this, a brand-new thread would forward an empty-string
-  // `remoteId` (placeholder from `initialize()`), which `Number("")` coerces
-  // to `0`, and the backend's `rename_conversation(0, ...)` would silently
-  // no-op via `WHERE conversation_id = 0`.
+  // Let adapter operations resolve the server ID for threads that still have
+  // their local draft ID in the runtime.
   useEffect(() => {
     setServerConversationIdState({
       idsRef: serverConversationIdsRef,
@@ -994,7 +991,8 @@ const HomeContent: FC<{
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
-      shouldRestoreAgentRef.current = true;
+      // Keep the explicit selection while the runtime opens its new thread.
+      shouldRestoreAgentRef.current = false;
       await onAgentSelected(agent);
     },
     [onAgentSelected]
@@ -1003,7 +1001,7 @@ const HomeContent: FC<{
   const handleAgentSwitched = useCallback(
     async (agent: Agent) => {
       try {
-        shouldRestoreAgentRef.current = true;
+        shouldRestoreAgentRef.current = false;
         await startAgentConversation(runtime, Number(agent.id));
         setSelectedAgent(agent);
       } catch (error) {

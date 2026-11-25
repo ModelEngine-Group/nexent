@@ -67,6 +67,12 @@ const agent = {
   display_name: "Fixed Agent",
   current_version_no: 1,
 };
+const secondAgent = {
+  ...agent,
+  id: "42",
+  agent_id: 42,
+  display_name: "Second Agent",
+};
 type PageAgent = typeof agent;
 
 let capturedRuntimeOptions: Record<string, unknown> | undefined;
@@ -126,6 +132,9 @@ vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
           <div>
             <div>Agent list</div>
             <button onClick={() => onAgentSelected(agent)}>select agent</button>
+            <button onClick={() => onAgentSelected(secondAgent)}>
+              select second agent
+            </button>
           </div>
         )}
       </>
@@ -220,6 +229,10 @@ describe("newchat refresh restore wiring", () => {
   });
 
   beforeEach(() => {
+    usePublishedAgentList.mockReturnValue({
+      isLoading: false,
+      agents: [agent],
+    });
     switchToNewThread.mockClear().mockResolvedValue(undefined);
     reloadThreads.mockClear().mockResolvedValue(undefined);
     initializeThread.mockClear();
@@ -425,6 +438,46 @@ describe("newchat refresh restore wiring", () => {
     await screen.findByText("Agent list");
     expect(window.sessionStorage.getItem(CONVERSATION_KEY)).toBeNull();
     expect(window.sessionStorage.getItem(AGENT_KEY)).toBeNull();
+  });
+
+  it("keeps an explicit Agent selection while the previous thread metadata is still visible", async () => {
+    usePublishedAgentList.mockReturnValue({
+      isLoading: false,
+      agents: [agent, secondAgent],
+    });
+    const user = userEvent.setup();
+    const page = render(<Home />);
+    await user.click(screen.getByText("select agent"));
+    expect(screen.getByText("Agent chat: Fixed Agent")).toBeVisible();
+    runtimeState.threads.threadItems = [
+      { id: "main-thread", custom: { agentId: 41 } },
+    ];
+    page.rerender(<Home />);
+
+    await user.click(screen.getByText("back to list"));
+    expect(screen.getByText("Agent list")).toBeVisible();
+    let finishSwitch!: () => void;
+    switchToNewThread.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSwitch = resolve;
+        })
+    );
+    await user.click(screen.getByText("select second agent"));
+    try {
+      expect(screen.getByText("Agent chat: Second Agent")).toBeVisible();
+    } finally {
+      finishSwitch();
+    }
+    await waitFor(() =>
+      expect(updateThreadCustom).toHaveBeenLastCalledWith({ agentId: 42 })
+    );
+    runtimeState.threads.mainThreadId = "second-thread";
+    runtimeState.threads.threadItems = [
+      { id: "second-thread", custom: { agentId: 42 } },
+    ];
+    page.rerender(<Home />);
+    expect(screen.getByText("Agent chat: Second Agent")).toBeVisible();
   });
 
   it("stores the agent id while the user is in an unsent blank conversation", async () => {
