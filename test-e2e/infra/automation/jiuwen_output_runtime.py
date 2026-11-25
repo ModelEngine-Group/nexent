@@ -6,7 +6,6 @@ import json
 import uuid
 from types import SimpleNamespace
 
-from sqlalchemy import select
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
@@ -16,28 +15,16 @@ from jiuwen_context_runtime import context_database as context_database
 async def persist_output(monkeypatch, info, output):
     from contracts.agentos import AgentResume, AgentRunReference
     from contracts.conversation import MessageSource
-    from infrastructure.rdb.account_record import UserAccount, UserTenant
-    from infrastructure.rdb.client import get_db_session
-    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
-    from management.db.trajectory.models import TrajectoryStatistics
     from management.db.conversation.repository import (
         create_conversation, create_conversation_message, get_conversation_history,
     )
-    from management.services.agent import prepared_projection, runtime_client
-    from management.services.agent import agentos_events
+    from management.services.agent import agentos_events, prepared_projection, runtime_client
     from management.services.agent.agentos_events import present_public_resume
 
     # Match the fixed Management deployment to the actual root runtime under test.
     monkeypatch.setattr(runtime_client, "NEXENT_AGENT_CORE", info.agent_config.agent_core)
     monkeypatch.setattr(agentos_events, "NEXENT_AGENT_CORE", info.agent_config.agent_core)
 
-    # The SDK run has already drained. Control only retained-journal delivery and
-    # the I/O scheduler; keep the production parser, public projection and DAL.
-    with get_db_session() as session:
-        for model in (UserAccount, ConversationProjectionReceipt, TrajectoryStatistics):
-            model.__table__.create(session.get_bind(), checkfirst=True)
-        if session.scalar(select(UserTenant.user_tenant_id).where(UserTenant.user_id == "owner")) is None:
-            session.add(UserTenant(user_id="owner", tenant_id="spike-tenant", created_by="owner"))
     conversation = create_conversation("Output contract", "owner", agent_id=42)["conversation_id"]
     create_conversation_message({"conversation_id": conversation, "message_idx": 0, "role": "user",
                                  "content": "Current task"}, "owner")
@@ -62,6 +49,7 @@ async def persist_output(monkeypatch, info, output):
     frames = tuple(f"id: {reference.run_id}:{index}\nevent: {kind}\ndata: {json.dumps(value)}\n\n".encode()
                    for index, (kind, value) in enumerate(values, 1))
 
+    # Control retained-journal delivery and scheduling, while using the production projection and DAL.
     async def resume(request, user_id, tenant_id):
         assert request.run_id == reference.run_id and request.conversation_id == conversation
         assert (user_id, tenant_id) == ("owner", "spike-tenant")

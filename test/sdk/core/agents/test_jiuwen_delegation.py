@@ -253,7 +253,8 @@ def test_common_manager_instruction_survives_native_prompt_compilation(mocker):
     adapter = JiuwenAdapter(
         SimpleNamespace(
             query="Create a file",
-            agent_config=SimpleNamespace(name="files", instructions="User duties", description=""),
+            parallel_child_mode=None,
+            agent_config=SimpleNamespace(name="files", instructions="User duties", description="", response_mode="chat"),
         )
     )
     prompt = adapter._compile_context()
@@ -268,8 +269,9 @@ def test_explicit_delegation_takes_precedence_over_direct_file_guidance(mocker):
     adapter = JiuwenAdapter(
         SimpleNamespace(
             query="调用子智能体，帮我生成一个docx文件",
+            parallel_child_mode=None,
             agent_config=SimpleNamespace(
-                name="files", instructions="User duties", description="", worker_agents=[child]
+                name="files", instructions="User duties", description="", worker_agents=[child], response_mode="chat"
             ),
         )
     )

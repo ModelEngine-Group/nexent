@@ -5,6 +5,7 @@
 import asyncio
 from concurrent.futures import Future
 from contextlib import nullcontext
+from contextvars import ContextVar
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -23,6 +24,7 @@ def adapter():
     instance.run_info = info
     instance.scope = RunCancellationScope(Event())
     instance.manager = Mock()
+    instance._child_context = ContextVar("jiuwen_child_context", default=(None, None))
     instance._tool_executions = []
     instance._observe_tool = Mock(return_value=nullcontext())
     instance._resource_result = Mock()
@@ -68,7 +70,7 @@ async def test_async_tool_keeps_handler_ownership_across_await():
         return "finished"
 
     task = asyncio.create_task(instance._business_handler("async-tool", work)())
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=2)
     lifecycle.begin.assert_called_once_with("callback")
     lifecycle.finish.assert_not_called()
     release.set()
@@ -90,7 +92,7 @@ async def test_sync_tool_returning_awaitable_keeps_handler_ownership_until_await
     future.set_result(result())
     instance.manager.submit.return_value = SimpleNamespace(execution_id="owned", future=future)
     task = asyncio.create_task(instance._business_handler("tool", Mock())())
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=2)
     lifecycle.finish.assert_called_once_with("worker")
     release.set()
     assert await task == "finished"

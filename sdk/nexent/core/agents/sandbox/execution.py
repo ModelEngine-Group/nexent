@@ -45,12 +45,8 @@ from types import SimpleNamespace
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from nexent.core.agents.resources.workspace import SandboxWorkspace, validate_container_root
-from nexent.core.agents.sandbox_callbacks import SandboxCallbackContextError
-from nexent.core.agents.sandbox_contracts import (
-    DEFAULT_PNPM_STORE_PATH, SandboxBackendUnavailableError, SandboxOwner, SandboxPreExecutionError, SystemSandboxProfile,
-)
 from nexent.core.agent_names import validate_callable_names
+from nexent.core.agents.resources.workspace import SandboxWorkspace, validate_container_root
 from nexent.core.agents.sandbox.compatibility import (
     _AgentLoggerAdapter,
     _LogLevel,
@@ -70,6 +66,14 @@ from nexent.core.agents.sandbox.tls import (
     SandboxTLSRecoveryError,
     load_container_tls,
     require_tls_container,
+)
+from nexent.core.agents.sandbox_callbacks import SandboxCallbackContextError
+from nexent.core.agents.sandbox_contracts import (
+    DEFAULT_PNPM_STORE_PATH,
+    SandboxBackendUnavailableError,
+    SandboxOwner,
+    SandboxPreExecutionError,
+    SystemSandboxProfile,
 )
 from nexent.core.concurrency import (
     ManagedTaskSpec,
@@ -2114,8 +2118,19 @@ class _JupyterKernelLease:
         """Delete this kernel while leaving the shared container running."""
         if self._closed:
             return
+        from requests.exceptions import ConnectionError as RequestsConnectionError
+
+        url = f"{self.base_url}/api/kernels/{self.kernel_id}"
+        deadline = time.monotonic() + 5
         try:
-            response = self._requests.delete(f"{self.base_url}/api/kernels/{self.kernel_id}", timeout=5)
+            try:
+                response = self._requests.delete(url, timeout=5)
+            except RequestsConnectionError:
+                # Retrying the same lease is safe if the gateway applied the first DELETE.
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                response = self._requests.delete(url, timeout=remaining)
             if response.status_code not in (204, 404):
                 self._logger.warning(
                     "Failed to delete sandbox kernel %s: status=%s",

@@ -9,7 +9,9 @@ import pytest
 
 from nexent.core.agents.sandbox import execution as sandbox
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.resources.provider import AgentResources
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
+from nexent.core.utils.observer import MessageObserver
 
 
 def owner():
@@ -71,3 +73,33 @@ def test_child_releases_only_its_executor_and_root_cleans_shared_skills(mocker):
     root._cleanup_sandbox()
     runner.cleanup.assert_called_once()
     assert cleanup.call_args.args[0] is root_lease
+
+
+@pytest.mark.parametrize("scope", ["system", "session"])
+def test_cancelled_child_discards_workspace_without_finalizing_artifacts(tmp_path, mocker, scope):
+    workspace = tmp_path / "owned"
+    workspace.mkdir()
+    workspace = workspace.resolve()
+    (workspace / "partial.txt").write_text("unpublished", encoding="utf-8")
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    resources = AgentResources(MessageObserver(), [], Event(), workspace_path=str(workspace), workspace_run_id="owned")
+    resources._sandbox_scope = scope
+    container = Mock()
+    container.exec_run.return_value.exit_code = 0
+    find = mocker.patch.object(resources, "_sandbox_containers", return_value=[container])
+    finalize = mocker.patch.object(resources, "_finalize_file_workspace")
+    cleanup = mocker.patch.object(resources, "_cleanup_sandbox")
+
+    resources.close(publish_outputs=False)
+    resources.close(publish_outputs=False)
+
+    finalize.assert_not_called()
+    cleanup.assert_called_once()
+    if scope == "system":
+        find.assert_called_once()
+        container.exec_run.assert_called_once_with(["rm", "-rf", "--", str(workspace)], user="0")
+    else:
+        find.assert_not_called()
+        container.exec_run.assert_not_called()
+    assert not workspace.exists() and sibling.exists()

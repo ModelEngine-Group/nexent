@@ -149,16 +149,21 @@ class JiuwenEventAdapter:
                     phase="intermediate")
         self.last_error = None
 
-    def tool_call(self, name, arguments, call_id, *, parent_call_id=None):
-        provider_id = None
+    def tool_call(self, name, arguments, call_id, *, parent_call_id=None, provider_call_id=None):
+        provider_id = provider_call_id
         metadata = {}
         with self._lock:
-            matches = [index for index, call in enumerate(self.calls) if parent_call_id is None
-                       and call.name == name and call.parsed_arguments == arguments]
-            if not matches and parent_call_id is None and name in self.local_tool_schemas:
-                matches = [index for index, call in enumerate(self.calls) if call.name == name
-                           and _matches_schema_defaults(call.parsed_arguments, arguments,
-                                                        self.local_tool_schemas[name])]
+            matches = []
+            if provider_id is not None:
+                matches = [index for index, call in enumerate(self.calls)
+                           if call.name == name and call.provider_call_id == provider_id]
+            elif parent_call_id is None:
+                matches = [index for index, call in enumerate(self.calls)
+                           if call.name == name and call.parsed_arguments == arguments]
+                if not matches and name in self.local_tool_schemas:
+                    matches = [index for index, call in enumerate(self.calls) if call.name == name
+                               and _matches_schema_defaults(call.parsed_arguments, arguments,
+                                                            self.local_tool_schemas[name])]
             if len(matches) == 1:
                 provider_id = self.calls.pop(matches[0]).provider_call_id
                 metadata = self._call_history.pop(provider_id, {})

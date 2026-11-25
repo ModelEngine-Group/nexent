@@ -104,11 +104,17 @@ class AgentResources(ToolResources, WorkspaceResources, SubagentResources):
 
         self.agent = None
 
-    def close(self):
+    def close(self, *, publish_outputs=True):
         """Drain children before tearing down owned workspace and executors."""
         if self._resources_closed:
             return
         self._close_subagent_invocations()
+        if not publish_outputs:
+            containers = self._sandbox_containers() if getattr(self, "_sandbox_scope", None) == "system" else []
+            self._cleanup_sandbox()
+            self._cleanup_file_workspace(containers=containers)
+            self._resources_closed = True
+            return
         try:
             self._finalize_file_workspace()
         finally:

@@ -40,7 +40,8 @@ def test_nested_stop_and_recovery(monkeypatch, child, fault, protocol):
         assert info.attempt_outcome == "stopped"
         assert len(state["parent"]) == 1
     else:
-        assert "Error:" in str(output)
+        failed, = [event for event in output if event.get("invocation_id") and event["type"] == "run_terminal"]
+        assert failed["status"] == "failed" and failed["error"]["category"] == "a2a_timeout"
     with monkeypatch.context() as patch:
         recovered, state, output, cores = asyncio.run(run_collaboration(patch, child_core=child, protocol=protocol))
     assert recovered.attempt_outcome == "completed" and "CHILD_DONE" in str(output)
@@ -74,12 +75,8 @@ def test_configured_outer_deadline_closes_stalled_a2a_and_recovers(monkeypatch, 
     assert state["closed"] and len(state["remote"]) == 1
     assert not state["effects"] and not state["parent_effects"]
     assert "CHILD_DONE" not in str(events)
-    # Prove the configured outer boundary fired, rather than the 0.3-second A2A fallback.
-    if setting == "RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS":
-        assert "event=agent_collaboration_timeout" in caplog.text
-        assert "timeout_seconds=0.100" in caplog.text
-    else:
-        assert "Tool 'delegate' timed out after 0.1s" in caplog.text
+    # Prove the effective deadline used the smaller configured limit rather than the endpoint timeout.
+    assert "event=a2a_request_timeout" in caplog.text and "timeout_seconds=0.100" in caplog.text
     with monkeypatch.context() as patch:
         recovered, state, events, _ = asyncio.run(run_collaboration(patch, child_core="a2a"))
     assert recovered.attempt_outcome == "completed"
