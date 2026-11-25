@@ -29,13 +29,16 @@ change:
     - frontend/tests/workbench/ConversationModelDrafts.test.ts
     - test/backend/app/test_agentos_prepared_run.py
     - test/backend/app/test_agentos_evaluation_compiler.py
+    - test/backend/services/test_agentos_automation_callback.py
     - test/backend/services/test_agent_automation_lifecycle.py
+    - test/backend/services/test_prepared_turn_admission_errors.py
     - test/sdk/core/agents/test_agent_prompt_composer.py
     behaviors:
     - Successful empty and populated results are reusable, concurrent opens share a load, and load errors can be retried.
     - The automation entry selects a signed prepared proposal turn, while ordinary chats keep their current execution path.
     - Replaying the recorded no-tool model answer in the general chat path does not prevent the dedicated path from journaling a pending proposal.
     - The user must confirm the proposal to create the task, and missing scheduling data or proposal failure does not expose a confirmable card.
+    - The dedicated entry rejects invalid Agent requests and rejects missing tool bindings before starting a run. Signed proposal callbacks retain the owned turn and handle upstream errors and malformed replies.
     reason: Existing D4 cases cover observable UI behavior; the isolated tests fix the historical model reply and verify dispatch and state boundaries without depending on model sampling.
   notes: >
     Design in nexent-doc/docs/Developing/chat-automation-proposal-routing/design.md.

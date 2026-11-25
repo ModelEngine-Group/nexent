@@ -195,22 +195,28 @@ async def test_automation_entry_does_not_end_with_recorded_no_tool_reply(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("result", "final", "terminal"), [
-    ({"status": "needs_clarification", "user_message": "Which interval?"}, "Which interval?", "completed"),
-    ({"status": "not_automation", "user_message": "Specify the schedule."}, "Specify the schedule.", "completed"),
-    ({"status": "error", "user_message": "Provider failed. Try again."}, "Provider failed. Try again.", "failed"),
-    ({"status": "proposal_ready", "user_message": "Incomplete result"},
+@pytest.mark.parametrize(("result", "language", "final", "terminal"), [
+    ({"status": "needs_clarification", "user_message": "Which interval?"}, "en", "Which interval?", "completed"),
+    ({"status": "not_automation", "user_message": "Specify the schedule."}, "en", "Specify the schedule.", "completed"),
+    ({"status": "error", "user_message": "Provider failed. Try again."}, "en", "Provider failed. Try again.", "failed"),
+    ({"status": "proposal_ready", "user_message": "Incomplete result"}, "zh",
      "暂时无法生成定时任务提案，请稍后重试。", "failed"),
-    (None, "暂时无法生成定时任务提案，请稍后重试。", "failed"),
+    ({"status": "proposal_ready", "proposal": {}, "user_message": "Missing proposal ID"}, "zh",
+     "暂时无法生成定时任务提案，请稍后重试。", "failed"),
+    ({"status": "proposal_ready", "proposal": {"proposal_id": 73}}, "en",
+     "The scheduled-task proposal could not be generated. Try again shortly.", "failed"),
+    ({"status": "proposal_ready", "proposal": {"proposal_id": 73}, "user_message": ""}, "en",
+     "The scheduled-task proposal could not be generated. Try again shortly.", "failed"),
+    (None, "zh", "暂时无法生成定时任务提案，请稍后重试。", "failed"),
 ])
 async def test_automation_entry_reports_clarification_or_retry_without_card(
-    monkeypatch, payload, runtime, result, final, terminal,
+    monkeypatch, payload, runtime, result, language, final, terminal,
 ):
     call = AsyncMock(return_value=result) if result else AsyncMock(side_effect=RuntimeError("unavailable"))
     monkeypatch.setattr(prepared_run, "request_automation_proposal", call)
     data = payload.model_dump()
     data["resource"]["tools"] = [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]
-    request = PreparedAgentRun.model_validate({**data, "automation_proposal_only": True, "language": "zh"})
+    request = PreparedAgentRun.model_validate({**data, "automation_proposal_only": True, "language": language})
 
     await prepared_run.start_prepared_run(request, ACTOR)
     await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)

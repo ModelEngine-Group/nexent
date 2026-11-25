@@ -112,6 +112,64 @@ async def test_dedicated_proposal_request_signs_the_same_owned_turn(monkeypatch)
     assert seen == ["POST"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status_code", "body", "error", "cause"), [
+    (503, b'{}', "unavailable", httpx.HTTPStatusError),
+    (200, b'not JSON', "unavailable", ValueError),
+    (200, b'[]', "invalid result", type(None)),
+    (200, b'{"status": 1}', "invalid result", type(None)),
+])
+async def test_dedicated_proposal_request_rejects_invalid_upstream_results(
+    monkeypatch, status_code, body, error, cause,
+):
+    from contracts.constants import environment
+
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-agentos-secret-for-callback")
+    monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", "http://management.test")
+    transport = httpx.MockTransport(lambda _request: httpx.Response(status_code, content=body))
+    client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr(prepared_automation.httpx, "AsyncClient", lambda **_options: client)
+
+    with pytest.raises(RuntimeError, match=error) as exc:
+        await prepared_automation.request_automation_proposal(REFERENCE, ACTOR)
+
+    assert isinstance(exc.value.__cause__, cause)
+
+
+@pytest.mark.parametrize("status_code", [200, 503])
+def test_runtime_bound_tool_uses_the_owned_turn_instead_of_model_text(monkeypatch, status_code):
+    from contracts.constants import environment
+
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-agentos-secret-for-callback")
+    monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", "http://management.test")
+    result = {"status": "proposal_ready", "proposal": {"proposal_id": 1, "task_id": None}}
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(status_code, json=result)
+
+    client = httpx.Client(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(prepared_automation.httpx, "Client", lambda **_options: client)
+    binding = ToolBinding(tool_id=AUTOMATION_PROPOSAL_TOOL, version="1")
+    tool = materialize_automation_tool(SimpleNamespace(tools=[binding]), ACTOR, REFERENCE)[AUTOMATION_PROPOSAL_TOOL]
+    create_proposal = tool.metadata["create_proposal"]
+
+    if status_code == 200:
+        assert create_proposal("Use a different conversation") == result
+    else:
+        with pytest.raises(RuntimeError, match="unavailable") as exc:
+            create_proposal("Use a different conversation")
+        assert isinstance(exc.value.__cause__, httpx.HTTPStatusError)
+
+    request, = requests
+    operation = ManagementOperation.AUTOMATION_PROPOSAL
+    assert request.method == "POST"
+    assert request.url == httpx.URL(f"http://management.test/api{operation.value}")
+    assert request.content == REFERENCE.model_dump_json().encode()
+    assert verify_call(request.headers["authorization"].removeprefix("Bearer "), operation, request.content) == ACTOR
+
+
 @pytest.mark.parametrize("change", [{"version": "2"}, {"parameters": {"query": "untrusted"}}, {"credential_ref": "key"}])
 def test_runtime_rejects_unapproved_tool_parameters(change):
     binding = ToolBinding.model_validate({"tool_id": AUTOMATION_PROPOSAL_TOOL, "version": "1"} | change)
