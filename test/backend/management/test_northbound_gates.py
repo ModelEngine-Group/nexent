@@ -353,3 +353,92 @@ def test_file_download_stream_closes_body_when_a_read_fails(gate_client, monkeyp
     with pytest.raises(Exception):
         client.get("/nb/v1/file/download/reports/broken.bin", params={"download": "stream"})
     assert body_holder[0].closed is True
+
+
+@pytest.fixture()
+def kb_ledger(monkeypatch):
+    """Drive the real storage-object resolver with a controlled ledger."""
+    from management.services.knowledge_base import storage as kb_storage
+
+    monkeypatch.setattr(kb_storage, "MINIO_DEFAULT_BUCKET", "test-bucket")
+    state = {"ledger": None, "knowledge": None}
+    monkeypatch.setattr(
+        kb_storage, "get_storage_object_by_identity",
+        lambda bucket_name, object_name: state["ledger"],
+    )
+    monkeypatch.setattr(kb_storage, "get_knowledge_record", lambda query: state["knowledge"])
+    return state
+
+
+def _kb_rows(tenant):
+    ledger = {"tenant_id": tenant, "knowledge_id": 7, "index_name": "idx-7"}
+    knowledge = {"knowledge_id": 7, "index_name": "idx-7", "tenant_id": tenant}
+    return ledger, knowledge
+
+
+def test_file_download_denies_cross_tenant_kb_object_in_both_modes(gate_client, kb_ledger):
+    """A partner key must not read another tenant's KB source objects.
+
+    The browser read compatibility rule (any authenticated user may read
+    knowledge_base/*) does not extend to API-key callers: the object must
+    resolve to an active ledger row owned by the caller's own tenant.
+    """
+    client, _ = gate_client
+    from management.services.file import service as file_service
+
+    kb_ledger["ledger"], kb_ledger["knowledge"] = _kb_rows("tenant-2")  # foreign tenant
+    url_impl = file_service.get_file_url_impl
+    raw_impl = file_service.get_file_stream_raw_impl
+
+    for mode in ("ignore", "stream"):
+        response = client.get(
+            "/nb/v1/file/download/knowledge_base/idx-7/doc.pdf", params={"download": mode}
+        )
+        assert response.status_code == 403, mode
+        assert response.json()["code"] == "FORBIDDEN"
+
+    # Denied before any storage read or presigning happens.
+    assert url_impl.calls == []
+    assert raw_impl.bodies == []
+
+
+def test_file_download_allows_same_tenant_kb_object(gate_client, kb_ledger):
+    client, _ = gate_client
+    kb_ledger["ledger"], kb_ledger["knowledge"] = _kb_rows("tenant-1")  # IDENTITY's tenant
+
+    info = client.get("/nb/v1/file/download/knowledge_base/idx-7/doc.pdf")
+    assert info.status_code == 200
+    assert info.json()["data"]["object_name"] == "knowledge_base/idx-7/doc.pdf"
+
+    stream = client.get(
+        "/nb/v1/file/download/knowledge_base/idx-7/doc.pdf", params={"download": "stream"}
+    )
+    assert stream.status_code == 200
+    assert stream.content == b"file-bytes"
+
+
+def test_file_download_denies_unmapped_kb_object(gate_client, kb_ledger):
+    """Fail closed: no active ledger row means no provable ownership."""
+    client, _ = gate_client
+    kb_ledger["ledger"] = None
+    response = client.get("/nb/v1/file/download/knowledge_base/idx-7/orphan.pdf")
+    assert response.status_code == 403
+    assert response.json()["code"] == "FORBIDDEN"
+
+
+@pytest.mark.parametrize("object_name", ["images_in_attachments/shared.png", "attachments/bare.pdf"])
+def test_file_download_denies_unownable_categories(gate_client, object_name):
+    """Categories without an owner or tenant in the key are not partner-readable."""
+    client, _ = gate_client
+    for mode in ("ignore", "stream"):
+        response = client.get(
+            f"/nb/v1/file/download/{object_name}", params={"download": mode}
+        )
+        assert response.status_code == 403, (object_name, mode)
+        assert response.json()["code"] == "FORBIDDEN"
+
+
+def test_file_download_keeps_owner_scoped_attachments_readable(gate_client):
+    client, _ = gate_client
+    response = client.get("/nb/v1/file/download/attachments/user-1/report.pdf")
+    assert response.status_code == 200

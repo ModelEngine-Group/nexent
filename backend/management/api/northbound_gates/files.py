@@ -8,12 +8,13 @@ The partner contract locks ``download`` to ``ignore`` and ``stream``: the
 contract. The lock is declared on the signature (``Query(pattern=...)``),
 which is the enforced pre-check for this capability (§5.8 example three).
 
-The gate shares the same service implementations as the internal route
-(``check_file_access`` + ``get_file_url_impl`` / ``get_file_stream_impl``);
-it does not call the internal handler so the response shaping stays per
-contract: info mode goes through the northbound envelope, and a stream is
-exempt from the envelope by contract — a byte stream cannot and should not
-be wrapped in JSON (§5.4).
+The gate shares the storage service implementations with the internal route
+but applies its own per-category partner authorization: the browser read
+compatibility rules (any authenticated user may read KB sources or shared
+images) do not extend to API-key callers, so cross-tenant reads are denied.
+Response shaping stays per contract: info mode goes through the northbound
+envelope, and a stream is exempt from the envelope by contract — a byte
+stream cannot and should not be wrapped in JSON (§5.4).
 """
 
 from typing import Callable, Optional
@@ -33,6 +34,38 @@ from management.utils.domain_errors import domain_error_body
 from management.utils.request_context import get_request_id
 
 nb_file_router = APIRouter(prefix="/nb/v1/file", tags=["northbound-gates"])
+
+
+def _partner_file_access(object_name: str, user_id: str, tenant_id: str) -> bool:
+    """Per-category resource authorization for partner (API-key) callers.
+
+    The internal browser read policy keeps some categories readable by any
+    authenticated user (KB sources, shared rendering images, bare attachment
+    keys). That compatibility rule must not extend to partner keys: a key
+    from one tenant must never read another tenant's assets. KB objects
+    therefore resolve to an active ledger row owned by the caller's tenant
+    (fail closed when unmapped), categories without an ownership model are
+    denied outright, and owner-scoped categories keep the shared check.
+    """
+    from management.services.file.access import check_file_access
+
+    if object_name.startswith("knowledge_base/"):
+        from management.services.knowledge_base.storage import resolve_storage_object_knowledge
+
+        try:
+            ownership = resolve_storage_object_knowledge(object_name=object_name, tenant_id=tenant_id)
+        except Exception:
+            return False
+        return ownership is not None
+    if object_name.startswith("images_in_attachments/"):
+        # Legacy shared rendering category: no owner or tenant in the key and
+        # no ledger to resolve one from, so partners cannot be authorized.
+        return False
+    if object_name.startswith("attachments/") and "/" not in object_name.removeprefix("attachments/"):
+        # Bare attachment keys carry no owner folder; only owner-scoped
+        # attachments/{user_id}/... keys are partner-readable.
+        return False
+    return check_file_access(object_name, user_id, tenant_id)
 
 
 def _error_response(exc: Exception, request) -> JSONResponse:
@@ -64,21 +97,22 @@ async def nb_get_storage_file(
 ):
     """Download one file: info (ignore) or byte stream (stream).
 
-    Ownership and access control reuse the internal route's service
-    implementation; domain failures are translated by the shared registry
-    into the three-field error body (403 for foreign objects, 404 for
-    missing ones in both modes).
+    Partner authorization is per object category (``_partner_file_access``):
+    KB objects must resolve to an active ledger row owned by the caller's
+    tenant, unownable legacy categories are denied, and owner-scoped keys
+    reuse the shared access check. Domain failures are translated by the
+    shared registry into the three-field error body (403 for foreign
+    objects, 404 for missing ones in both modes).
 
     Info mode signs against the external endpoint (partner direct links);
     stream mode iterates the raw storage body in chunks so neither the
     event loop nor memory carries the whole object.
     """
     # Late import: keeps the MinIO stack out of module import time.
-    from management.services.file.access import check_file_access
     from management.services.file.service import get_file_stream_raw_impl, get_file_url_impl
     from management.api.file.http import _build_object_etag, build_content_disposition_header
 
-    if not check_file_access(object_name, ctx.user_id, ctx.tenant_id):
+    if not _partner_file_access(object_name, ctx.user_id, ctx.tenant_id):
         return _error_response(
             ForbiddenError("You don't have permission to access this file"), request
         )
