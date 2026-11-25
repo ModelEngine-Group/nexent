@@ -88,6 +88,8 @@ The repository also shows built-in official agents with an "Official" badge, cov
 
 The **My Agents** tab manages agents you can edit, including agents you created and agents copied from the repository.
 
+> 💡 **Entry note**: The "Apply for listing" and "Evaluate" entries have moved to the "..." menu at the top-right of agent cards on the **[Agent Configuration](../agent-development/agent-configuration)** page — see the "Listing" section there for the application form; this tab handles listing status tracking and review progress management (canceling applications and taking down).
+
 ### Filter and Search
 
 - **All / Created by me / Others**: filter by ownership
@@ -122,32 +124,14 @@ Each card shows lifecycle and listing status for quick recognition:
 
 On an agent card, you can:
 
-- **Edit**: open the agent development page to change configuration (not available with read-only permission)
+- **Edit**: open the Agent Configuration page to change configuration (not available with read-only permission)
 - **View**: view details of the published version
-- **Evaluate**: jump to the agent evaluation page
-- **More actions**:
-  - **Apply for listing**: submit the current published version for repository review
-  - **View review progress / View update review progress**: check application status, and cancel the application or take the agent down
-  - **Delete**: delete the agent
-
-### Apply for Listing
-
-You can apply only when the agent has a published version and the current version is not yet listed:
-
-1. Click **Apply for listing** in the more menu
-2. Fill in the listing information:
-   - **Agent icon** (required): upload an image as the icon
-   - **Agent tags** (optional): up to 5 tags; choose presets or enter custom tags
-   - **Listing note** (optional): extra context for reviewers
-3. Click **Submit application** and wait for admin review
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/resource-repository/apply-listing.png" style="width: 80%; height: auto;" alt="Apply for listing" />
-</div>
+- **View review progress / View update review progress**: check application status, and cancel the application or take the agent down
+- **Delete**: delete the agent
 
 ### View Review Progress
 
-Open the review status dialog from the more menu to see:
+Open the review status dialog from an agent card in **My Agents** to see:
 
 - Current status: Under review / Approved / Rejected
 - Review version, submitted time, listing note, and review comments (if any)
@@ -197,7 +181,7 @@ The tab shows a pending-count badge so admins can handle applications promptly.
 
 After managing agents in the Agent Repository, you can:
 
-1. Interact with agents in **[Start Chat](../start-chat)**
+1. Interact with agents in **[Agent Chat](../start-chat)**
 2. Continue creating or iterating agents in **[Agent Configuration](../agent-development/agent-configuration)**
 3. Configure **[Memory Configuration](../agent-development/memory-configuration)** to improve agent memory
 

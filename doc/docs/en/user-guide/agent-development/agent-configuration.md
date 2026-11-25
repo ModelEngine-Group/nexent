@@ -281,6 +281,27 @@ Click **Select Agent** to browse the complete list of agents you can edit in the
 
 The icons on the right side of each agent represent the available management actions. From left to right, they are:
 
+### 📢 Listing
+
+Submit the current published version to the Agent Space for review. You can apply only when the agent has a published version and the current version is not yet listed:
+
+1. Select "Listing" in the "..." menu at the top-right of the target agent card
+2. Fill in the listing information:
+   - **Agent icon** (required): upload an image as the icon
+   - **Agent tags** (optional): up to 5 tags; choose presets or enter custom tags
+   - **Listing note** (optional): extra context for reviewers
+3. Click **Submit application** and wait for admin review
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/apply-listing.png" style="width: 80%; height: auto;" alt="Apply for listing" />
+</div>
+
+For the review workflow and status tracking, see [Agent Space](../resource-repository/agent-repository).
+
+### 🧪 Evaluate
+
+Jump to the Agent Evaluation page and run an evaluation against the agent's published version; see [Agent Evaluation](../evaluation) for details.
+
 ### 📋 Copy
 
 Create an identical clone of an agent for version backups or parallel testing.
@@ -305,8 +326,8 @@ Permanently delete the agent from the local environment.
 
 After completing agent development, you can:
 
-1. Manage and publish your agents, or discover agents from other developers, in **[Agent Repository](../agent-development.md)**
-2. Interact with agents in **[Start Chat](../start-chat.md)**
-3. Configure **[Memory Management](./memory-configuration.md)** to enhance the agent's personalization capabilities
+1. Manage and publish your agents, or discover agents from other developers, in **[Agent Space](../resource-repository/agent-repository)**
+2. Interact with agents in **[Agent Chat](../start-chat.md)**
+3. Configure **[Memory Configuration](./memory-configuration.md)** to enhance the agent's personalization capabilities
 
 If you encounter any issues during agent development, please refer to our **[FAQ](../../quick-start/faq.md)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
