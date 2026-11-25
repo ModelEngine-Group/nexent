@@ -25,6 +25,7 @@ def resolve_deployed_sandbox(database_policy: dict[str, Any] | None) -> SandboxC
         workspace_mode=environment.NEXENT_SANDBOX_WORKSPACE_MODE,
         container_workspace_root=environment.NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
         failure_policy=environment.NEXENT_SANDBOX_FAILURE_POLICY,
+        **get_runtime_sandbox_options(),
     )
 
 

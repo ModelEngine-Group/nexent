@@ -77,6 +77,7 @@ from nexent.core.agents.prompt.clarification import clarification_policy
 from nexent.core.agents.prompt.user_context import has_current_time_marker, render_user_context
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.utils.model_output_diagnostics import bounded_rejected_output_preview, rejected_output_preview_enabled
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.core.utils.token_estimation import msg_token_count
@@ -1346,7 +1347,8 @@ Additional Args:
                 code = None
         except (ValueError, TypeError, KeyError, AttributeError):
             code = None
-        policy.validate_code(code)
+        executor = getattr(self, "tools", {}).get(ParallelExecutorTool.name)
+        policy.validate_code(code, allow_parallel=isinstance(executor, ParallelExecutorTool))
 
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """

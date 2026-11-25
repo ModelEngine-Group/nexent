@@ -12,6 +12,7 @@ acceptance_bindings:
   - test_capture_versions_are_frozen_per_execution_and_cold_read
   - test_capture_parallel_tools_nested_output_and_full_local_body
   - test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry
+  - test_capture_explicit_parallel_delegation_executes_both_children
   - test_capture_actual_worker_cancel_preserves_partial_output
   - test_capture_rejected_protocol_retains_output_without_executing_code
   - test_capture_preparation_phases_survive_authorized_worker_and_cold_read

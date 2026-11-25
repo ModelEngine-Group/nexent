@@ -32,6 +32,7 @@ from nexent.core.agents.prompt.policies import (
 )
 from nexent.core.agents.resources.subagents import SubAgentToolWrapper
 from nexent.core.prompts import load_prompt
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
 
 def worker(name="writer"):
@@ -81,7 +82,54 @@ def smolagent():
     agent.observer = SimpleNamespace(turn_complete=False)
     agent._delegation = SmolagentsDelegation("调用子智能体", [worker()])
     agent._use_structured_outputs_internally = False
+    agent.tools = {}
     return agent
+
+
+@pytest.mark.parametrize("arguments", [
+    'tasks=[(writer, {"task": "left"}, "left"), (writer, {"task": "right"}, "right")], max_workers=2',
+    '[(writer, {"task": "left"}), (writer, {"task": "right"})], 30, 2',
+])
+def test_smolagents_accepts_parallel_delegation_to_the_authorized_child(arguments):
+    agent = smolagent()
+    agent.tools["parallel_executor"] = ParallelExecutorTool()
+
+    agent._validate_delegation_output(f"<code>results = parallel_executor({arguments})\nprint(results)</code>")
+
+    assert agent._delegation.pending
+    agent._delegation.record_dispatch("writer")
+    assert not agent._delegation.pending
+
+
+@pytest.mark.parametrize("tool", [None, SimpleNamespace(name="parallel_executor")])
+def test_smolagents_requires_the_bound_parallel_executor(tool):
+    agent = smolagent()
+    agent.tools["parallel_executor"] = tool
+
+    with pytest.raises(DelegationError, match="DELEGATION_REQUIRED"):
+        agent._validate_delegation_output('<code>parallel_executor(tasks=[(writer, {"task": "left"})])</code>')
+
+
+@pytest.mark.parametrize("code", [
+    'parallel_executor(tasks=[(writer, {"task": "left"}), (uploader, {"task": "right"})])',
+    'parallel_executor(tasks=[(writer, {"task": "left"}), (other_child, {"task": "right"})])',
+    'parallel_executor(tasks=[])',
+    'parallel_executor(tasks=[(writer, {})], max_workers=writer(task="configure"))',
+    'parallel_executor(tasks=[(writer, {"task": print("side effect")})])',
+    'parallel_executor(tasks=[(writer, {}), (writer, {}, "right")])',
+    'parallel_executor = writer(task="left")\nparallel_executor(tasks=[(writer, {})])',
+])
+def test_smolagents_rejects_parallel_actions_outside_the_delegation_contract(code):
+    agent = smolagent()
+    agent.tools["parallel_executor"] = ParallelExecutorTool()
+    agent._delegation = SmolagentsDelegation("请使用文件生成助手", [
+        worker(), SimpleNamespace(name="other_child", invocation_name=None),
+    ])
+
+    with pytest.raises(DelegationError, match="DELEGATION_REQUIRED"):
+        agent._validate_delegation_output(f"<code>{code}</code>")
+
+    assert agent._delegation.pending
 
 
 @pytest.mark.parametrize(
