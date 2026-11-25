@@ -104,7 +104,7 @@ Application Secret values are rendered after credentials are finalized and writt
 
 Ordinary backend configuration is injected through these file Secrets instead of being copied field by field into generated common values. The common ConfigMap and Chart values remain the fallback for omitted keys and direct Helm use. The runtime renderer retains timezone and Web's Northbound URL/upload limit, plus Redis URL and part-processor count because they also supply the runtime-state Redis fallback and derived worker concurrency. Deployment overrides, finalized credentials and infrastructure configuration keep their dedicated rendering paths.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; the chart does not pin these workloads to a node. Use this mode only on a single-node cluster so the Runtime and its maintenance Job see the same workspace. On multiple nodes, use `dynamic` or `existing` with actual shared RWX storage. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; the chart does not pin these workloads to a node. Use this mode only on a single-node cluster so backend Pods see the same workspace. On multiple nodes, use `dynamic` or `existing` with actual shared RWX storage. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
@@ -112,38 +112,38 @@ Config and Data Process remain single-replica workloads. Runtime also defaults t
 
 ### Kubernetes SYSTEM Sandbox
 
-Set `global.sandboxProvider: kubernetes` in this chart's `values.yaml` and deploy with the project script. Kubernetes SYSTEM creates one sandbox Pod per Runtime Pod on first use. Existing Agent sandbox policies at the `docker` level select the Kubernetes provider when this setting is enabled. Runtime replicas keep the normal offline maintenance sequence.
+Set `global.sandboxProvider: kubernetes` in this chart's `values.yaml` and deploy with the project script. Kubernetes SYSTEM creates one sandbox Pod per Runtime Pod on first use. Existing Agent sandbox policies at the `docker` level select the Kubernetes provider when this setting is enabled.
 
 Set `global.sandboxNetworkPolicyVerified: true` after verifying that the cluster's CNI enforces the sandbox NetworkPolicy. Use shared RWX workspace storage, or set `global.sandboxSingleNodeDevelopment: true` for a single-node development cluster. The sandbox image configured for Nexent must be available to Kubernetes when the first Agent run needs it.
 
-### Runtime Maintenance
+### Deploying During an Idle Window
 
-Use `bash deploy.sh k8s` (or `--release-scope nexent`) to deploy or upgrade Runtime. The script holds a PostgreSQL session lock while it stops old business Pods, runs system bootstrap, and submits the Runtime maintenance Job. The Job uses the Management image configured for `nexent-config` and settles interrupted AgentOS executions in the maintenance transaction. The script activates the release after verifying the paused batch and its committed completion marker. Each Runtime Pod checks the same marker and renews only its own execution leases.
+Use `bash deploy.sh k8s` (or `--release-scope nexent`) during an idle window with no in-flight work. The script acquires a PostgreSQL session lock, stops and waits for the old business Pods, runs system bootstrap, and starts the configured replica counts. System bootstrap applies pending SQL migrations and initializes the system Agents. The deployment finishes after the enabled workloads are ready.
 
-Before bootstrap, the script waits for each existing business Deployment to report zero replicas for its current generation and for its Pods to disappear. The maintenance Job independently checks both conditions for Runtime; an empty Pod list by itself does not confirm that the controller has applied the scale-to-zero request.
+Before bootstrap, the script waits for each existing business Deployment to report zero replicas for its current generation and for its Pods to disappear.
 
-Reserve the database, Redis keyspace, and workspace for one Nexent application release. The script needs permission to exec into the PostgreSQL Deployment and manage the release's maintenance Job and namespaced RBAC. If bootstrap or maintenance fails, leave workloads paused and inspect the Jobs and their logs. To retry a failed Runtime maintenance Job after resolving the underlying problem, rerun the same application deployment settings and add `--release-scope nexent --retry-runtime-maintenance <UUID>` using the batch UUID from the failure. Keep the original target replica count and do not rotate credentials during the retry. Only the matching paused release can retry the batch, and only its failed Job is replaced. Do not activate Runtime using standalone `helm upgrade` or `kubectl scale`; those commands bypass the maintenance window. Runtime file logs are under `/mnt/nexent-data/logs/<pod-name>` inside its container.
+Reserve the database, Redis keyspace, and workspace for one Nexent application release. The script needs permission to exec into the PostgreSQL Deployment and manage the release's bootstrap Job. Runtime file logs are under `/mnt/nexent-data/logs/<pod-name>` inside its container.
 
-If the maintenance Job succeeded but the final pre-activation check could not verify the PostgreSQL lock, the completion record alone does not authorize activation. Confirm that the release is still paused and no other deployment is in progress, address the connection failure, then rerun the normal application deployment with the same settings and without `--retry-runtime-maintenance`. This acquires a new lock and starts a new maintenance batch; the retry flag is only for failed Jobs.
+Before pausing the release, the script checks for unfinished bootstrap Jobs, legacy Runtime maintenance Jobs, and their Pods from earlier attempts. If bootstrap or the pre-activation lock check fails, resolve the reported issue and rerun the application deployment during an idle window. An unfinished Job from the earlier attempt must finish or be stopped before the retry.
 
-Before pausing the release, the script also checks for unfinished bootstrap or maintenance Jobs and their Pods from an earlier attempt. A Job can still start work even if it has no Pod yet. If the check fails, inspect the reported Job or Pod and wait until the old work has stopped before rerunning deployment. The script does not delete the reported resource automatically. If the deployment lock is lost while synchronizing official skills, the script does not signal the bootstrap Job to start SQL.
+If an unexpected shutdown leaves abandoned work that requires repair, pause the business Deployments and wait for their Pods and any previous bootstrap or maintenance writers to exit. Provision a one-off Pod using the Management image and the release's database and Redis configuration. Mount the same workspace PVC at `/mnt/nexent`, carry over any custom `AGENT_WORKSPACE_ROOT`, and use a service account that can list Deployments and Pods in the release namespace. In the Pod, run `python -m management.maintenance --namespace <namespace> --release <release>`. Complete repair separately before running the deployment script. Routine idle-window scaling uses the deployment script alone.
 
 ### Fixed Runtime Replicas
 
-To change the fixed Runtime count on an application release already using shared storage, edit `nexent-runtime.replicaCount` in this chart's `values.yaml` and run the deployment script in a maintenance window:
+To change the fixed Runtime count on an application release already using shared storage, edit `nexent-runtime.replicaCount` in this chart's `values.yaml` and run the deployment script in an idle window.
 
 ```bash
 bash deploy.sh k8s --release-scope nexent --defaults
 ```
 
-You can also set the count explicitly for a deployment:
+You can also set the count explicitly for a deployment.
 
 ```bash
 bash deploy.sh k8s --release-scope nexent --defaults --runtime-replicas 3 \
   --persistence-mode dynamic --storage-class my-rwx-storage
 ```
 
-An explicit `--runtime-replicas` takes precedence. Without it, a changed count in `values.yaml` takes precedence over the saved `runtimeReplicas` in `deploy/k8s/deploy.options`. Subsequent deployments reuse the saved count while the chart value is unchanged. For older saved options, the script treats `1` as the previous chart value. Use the release's current persistence settings. To roll back, set the count to `1` and deploy during a maintenance window. Each invocation stops business workloads while it runs bootstrap and maintenance. Changing the count does not migrate data or claims. No HPA or KEDA controller is created.
+An explicit `--runtime-replicas` takes precedence. Without it, a changed count in `values.yaml` takes precedence over the saved `runtimeReplicas` in `deploy/k8s/deploy.options`. Subsequent deployments reuse the saved count while the chart value is unchanged. For older saved options, the script treats `1` as the previous chart value. Use the release's current persistence settings. To return to a single replica, set the count to `1` and redeploy during an idle window.
 
 More than one Runtime replica requires `dynamic` with an explicit RWX-capable StorageClass, or `existing` with precreated PVCs. The deployment identity needs read access to the Runtime PVCs and their bound PVs. Before starting bootstrap writes, the script requires the workspace, skills, memory-plugin, logs, and trajectory volumes to be `Bound` with `ReadWriteMany` access and `Filesystem` volume mode. PVs with `spec.local` remain unsupported. A `hostPath` PV that meets these checks can be used for single-node deployments. For multi-node deployments, verify cross-node reads and writes on the backing storage. With existing storage, the workspace, skills, and logs claim names honor `--existing-claim-prefix`. The memory-plugin and trajectory claims use `nexent-memory-plugins` and `nexent-trajectory`.
 
@@ -166,8 +166,7 @@ Budget threads, database and Redis connections, object storage, and downstream m
 | `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
 | `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
-| `--runtime-replicas` | Explicit override of the fixed Runtime replica count after offline maintenance | Positive integer |
-| `--retry-runtime-maintenance` | Retry a paused Runtime maintenance batch | Batch UUID; use with `--release-scope nexent` |
+| `--runtime-replicas` | Fixed Runtime replica count after an idle deployment | Positive integer |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
 | `--local-node-name` | Deprecated compatibility option | Ignored; local mode uses hostPath and does not require nodeAffinity |

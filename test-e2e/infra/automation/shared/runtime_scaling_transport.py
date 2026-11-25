@@ -12,10 +12,15 @@ from uuid import UUID
 from aiohttp import ClientSession, ClientTimeout, web
 from yarl import URL
 
+from contracts.agentos import AgentOperation
 
-ROUTES = {"web-cut": "/api/agent/run", "northbound-cut": "/api/agent/internal/northbound/run"}
-CONTROL_PATHS = {"web": (ROUTES["web-cut"], "GET", "/api/agent/stop/"),
-                 "northbound": (ROUTES["northbound-cut"], "POST", "/api/agent/internal/northbound/stop/")}
+
+RUN_PATH = "/api" + AgentOperation.RUN.value
+RESUME_PATH = "/api" + AgentOperation.RESUME.value
+STOP_PATH = "/api" + AgentOperation.STOP.value
+CUT_TARGETS = {"web-cut": "producer", "northbound-cut": "peer"}
+CONTROL_TARGETS = {f"public-{entrance}-{action}": "producer" for entrance in ("web", "northbound")
+                   for action in ("resume", "stop")}
 NORTHBOUND_ADMISSION_TARGETS = {"a": "producer", "b": "peer"}
 NORTHBOUND_ADMISSION_TAGS = {
     f"nb-{operation}-{side}": target for operation in ("race", "overlap", "second", "quota", "retry")
@@ -39,59 +44,55 @@ def verify_origin(origin):
     return origin
 
 
-class RouteReceipts:
+class OwnedRouting:
+    def __init__(self, token, targets):
+        self.queries = {f"runtime-stream:{token}:{tag}": tag for tag in targets}
+        self.targets = targets
+        self.runs = {}
+
+    def classify(self, method, path, payload):
+        run_id = payload.get("run_id")
+        identifier = payload.get("conversation_id")
+        if method != "POST" or not isinstance(run_id, str) or len(run_id) != 32:
+            return None
+        if path == RUN_PATH:
+            run_input = payload.get("input")
+            if not isinstance(run_input, dict) or type(identifier) is not int or identifier < 1:
+                return None
+            query = run_input.get("user_query") or run_input.get("query")
+            tag = self.queries.get(query) if isinstance(query, str) else None
+            if tag is None:
+                return None
+            self.runs[run_id] = (identifier, tag)
+            return tag, "start", self.targets[tag]
+
+        owned = self.runs.get(run_id)
+        if owned is None:
+            return None
+        conversation, tag = owned
+        if path == RESUME_PATH and identifier == conversation:
+            if payload.get("after_event_id"):
+                return tag, "replay", "peer"
+            return tag, "initial-resume", self.targets[tag]
+        if path == STOP_PATH and identifier in (None, conversation):
+            return tag, "stop", "peer"
+        return None
+
+
+class RouteReceipts(OwnedRouting):
+    def __init__(self, token, targets):
+        super().__init__(token, targets)
+        self.receipts = {tag: [] for tag in targets}
+
     def observe(self, routing, response):
         tag, operation, target = routing
+        # Cursorless reads also restore public formatting or project a terminal reply.
+        if operation == "initial-resume":
+            return
         if len(self.receipts[tag]) >= 8:
             raise web.HTTPTooManyRequests(text="Too many requests for the owned transport fixture")
         self.receipts[tag].append({"operation": operation, "target": target, "status": response.status,
                                    "origin": str(response.url.origin())})
-
-
-class StreamControlRouting(RouteReceipts):
-    def __init__(self, token):
-        self.tags = {f"public-{entrance}-{action}": entrance for entrance in CONTROL_PATHS
-                     for action in ("resume", "stop")}
-        self.queries = {f"runtime-stream:{token}:{tag}": tag for tag in self.tags}
-        self.conversations = {}
-        self.receipts = {tag: [] for tag in self.tags}
-
-    def classify(self, method, path, payload):
-        for entrance, (run_path, stop_method, stop_prefix) in CONTROL_PATHS.items():
-            if method == "POST" and path == run_path:
-                identifier = payload.get("conversation_id")
-                if type(identifier) is not int or identifier < 1:
-                    continue
-                if isinstance(payload.get("replay_cursor"), str) and payload["replay_cursor"]:
-                    tag = self.conversations.get((entrance, identifier))
-                    return (tag, "replay", "peer") if tag else None
-                query = payload.get("query")
-                tag = self.queries.get(query) if isinstance(query, str) else None
-                if self.tags.get(tag) == entrance:
-                    self.conversations[(entrance, identifier)] = tag
-                    return tag, "start", "producer"
-            elif method == stop_method and path.startswith(stop_prefix):
-                identifier = path.removeprefix(stop_prefix)
-                if identifier.isascii() and identifier.isdecimal() and 1 <= len(identifier) <= 10:
-                    tag = self.conversations.get((entrance, int(identifier)))
-                    return (tag, "stop", "peer") if tag else None
-        return None
-
-
-class NorthboundAdmissionRouting(RouteReceipts):
-    def __init__(self, token):
-        self.queries = {f"runtime-stream:{token}:{tag}": tag for tag in NORTHBOUND_ADMISSION_TAGS}
-        self.receipts = {tag: [] for tag in NORTHBOUND_ADMISSION_TAGS}
-
-    def classify(self, method, path, payload):
-        if method != "POST" or path != ROUTES["northbound-cut"]:
-            return None
-        query = payload.get("query")
-        tag = self.queries.get(query) if isinstance(query, str) else None
-        identifier = payload.get("conversation_id")
-        if tag is None or type(identifier) is not int or identifier < 1 or payload.get("replay_cursor"):
-            raise web.HTTPBadRequest(text="Expected an owned Northbound admission request")
-        return tag, "start", NORTHBOUND_ADMISSION_TAGS[tag]
 
 
 def transport_app(token, web_origin, northbound_origin, mode="cut"):
@@ -100,10 +101,13 @@ def transport_app(token, web_origin, northbound_origin, mode="cut"):
     if mode not in {"cut", "stream-control", "northbound-admission"}:
         raise ValueError("Unsupported Runtime transport fixture mode")
     web_origin, northbound_origin = map(verify_origin, (web_origin, northbound_origin))
-    routing_class = {"stream-control": StreamControlRouting, "northbound-admission": NorthboundAdmissionRouting}.get(mode)
-    routing = routing_class(token) if routing_class else None
-    counts = {tag: {"attempts": 0, "prefix_observed": False, "transport_aborted": False} for tag in ROUTES}
-    cuts = {tag: asyncio.Event() for tag in ROUTES}
+    cut_mode = mode == "cut"
+    targets = {"cut": CUT_TARGETS, "stream-control": CONTROL_TARGETS, "northbound-admission": NORTHBOUND_ADMISSION_TAGS}
+    routing = OwnedRouting(token, targets[mode]) if cut_mode else RouteReceipts(token, targets[mode])
+    counts = {tag: {"attempts": 0, "resume_attempts": 0, "prefix_observed": False, "transport_aborted": False}
+              for tag in CUT_TARGETS}
+    cuts = {tag: asyncio.Event() for tag in CUT_TARGETS}
+    finished = set()
     client = None
 
     async def session(_app):
@@ -119,45 +123,55 @@ def transport_app(token, web_origin, northbound_origin, mode="cut"):
     async def probe(request):
         if request.remote not in {"127.0.0.1", "::1"}:
             raise web.HTTPNotFound()
-        return web.json_response(routing.receipts if routing is not None else counts)
+        return web.json_response(counts if cut_mode else routing.receipts)
 
     async def cut(request):
         tag = request.match_info["tag"]
-        if routing is not None or request.remote not in {"127.0.0.1", "::1"} or tag not in counts:
+        if not cut_mode or request.remote not in {"127.0.0.1", "::1"} or tag not in counts:
             raise web.HTTPNotFound()
         if not counts[tag]["prefix_observed"] or counts[tag]["transport_aborted"]:
             raise web.HTTPConflict()
         cuts[tag].set()
         return web.json_response({"cut_requested": True})
 
+    async def finish(request):
+        tag = request.match_info["tag"]
+        if not cut_mode or request.remote not in {"127.0.0.1", "::1"} or tag not in counts:
+            raise web.HTTPNotFound()
+        if not counts[tag]["transport_aborted"]:
+            raise web.HTTPConflict()
+        finished.add(tag)
+        return web.json_response({"finished": True})
+
     async def relay(request):
         body = await request.read()
         tag = None
         payload = {}
-        if request.method == "POST" and request.path in ROUTES.values():
+        if request.method == "POST" and request.path in {RUN_PATH, RESUME_PATH, STOP_PATH}:
             try:
                 value = json.loads(body)
                 if isinstance(value, dict):
                     payload = value
             except ValueError:
                 pass
-            if routing is None:
-                tag = next((name for name, path in ROUTES.items() if path == request.path
-                            and payload.get("query") == f"runtime-stream:{token}:{name}"), None)
-        if tag is not None:
-            counts[tag]["attempts"] += 1
-            if counts[tag]["attempts"] != 1:
-                raise web.HTTPConflict(text="The case-owned request was forwarded more than once")
-
-        route = routing.classify(request.method, request.path, payload) if routing is not None else None
-        if routing is not None:
-            origin = northbound_origin if route is not None and route[2] == "peer" else web_origin
-        else:
-            origin = northbound_origin if request.path == ROUTES["northbound-cut"] else web_origin
+        route = routing.classify(request.method, request.path, payload)
+        if cut_mode and route is not None:
+            owned_tag, operation, _ = route
+            receipt = counts[owned_tag]
+            if operation == "start":
+                receipt["attempts"] += 1
+                if receipt["attempts"] != 1:
+                    raise web.HTTPConflict(text="The case-owned RUN was forwarded more than once")
+            if operation == "initial-resume" and owned_tag not in finished:
+                receipt["resume_attempts"] += 1
+                if receipt["resume_attempts"] != 1:
+                    raise web.HTTPConflict(text="The case-owned initial RESUME was forwarded more than once")
+                tag = owned_tag
+        origin = northbound_origin if route is not None and route[2] == "peer" else web_origin
         target = URL(origin + request.raw_path, encoded=True)
         async with client.request(request.method, target, data=body or None, headers=relay_headers(request.headers),
                                   allow_redirects=False) as response:
-            if route is not None:
+            if not cut_mode and route is not None:
                 routing.observe(route, response)
             if tag is not None:
                 assert response.status == 200 and response.content_type == "text/event-stream"
@@ -168,6 +182,7 @@ def transport_app(token, web_origin, northbound_origin, mode="cut"):
                     assert len(prefix) <= 1024 * 1024
                     if marker in prefix:
                         counts[tag]["prefix_observed"] = True
+                        counts[tag]["origin"] = str(response.url.origin())
                         await asyncio.wait_for(cuts[tag].wait(), timeout=90)
                         assert request.transport is not None
                         request.transport.abort()
@@ -182,7 +197,7 @@ def transport_app(token, web_origin, northbound_origin, mode="cut"):
                     await downstream.write(chunk)
                 await downstream.write_eof()
             except ConnectionResetError:
-                if routing is None:
+                if cut_mode:
                     raise
             return downstream
 
@@ -191,6 +206,7 @@ def transport_app(token, web_origin, northbound_origin, mode="cut"):
     app.router.add_get("/test-relay/ready", ready)
     app.router.add_get("/test-relay/probe", probe)
     app.router.add_post("/test-relay/cut/{tag}", cut)
+    app.router.add_post("/test-relay/finish/{tag}", finish)
     app.router.add_route("*", "/{path:.*}", relay)
     return app
 

@@ -15,8 +15,8 @@ metadata:
   labels:
     app: nexent-system-bootstrap
     app.kubernetes.io/instance: {{ .Release.Name | quote }}
-    {{- with .Values.global.maintenanceEpoch }}
-    nexent.io/maintenance-epoch: {{ . | quote }}
+    {{- with .Values.global.bootstrapRunId }}
+    nexent.io/bootstrap-run-id: {{ . | quote }}
     {{- end }}
 spec:
   backoffLimit: 0

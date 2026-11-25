@@ -6,6 +6,7 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-03
   - RUNTIME-REPLICAS-RULE-04
@@ -18,7 +19,7 @@ case:
   preconditions:
   - 固定脚本已绑定普通 Agent、Workbench 和 Northbound 的同会话竞争和配额；用例仍阻塞，正式执行使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
   - 评测分支用两个定向内部入口访问同一 PENDING 评测；事务屏障仅锁住本次种子的评测执行键和记录，可观察实际等待者。
-  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   test_data:
@@ -38,7 +39,7 @@ case:
     expected: 同一执行键只有一个接纳；失败请求无用户消息、流重置或模型调用。NL2Agent/NL2Skill 均先预约再写历史/建流；评测认领失败或提交失败不会遗留无实际 worker 的 RUNNING。
   - order: 2
     action: 配置同租户同 Agent 全局上限为 2，分别在 A/B 启动两条长运行，再向两端分别提交第三条。
-    expected: 跨实例合计只有两个预约；额外请求被拒；PREPARING 和 FINALIZING 仍计入容量。
+    expected: 跨实例合计只有两个预约；额外请求被拒；统一执行记录从 starting 到实际收尾前的 running 均计入容量。
   - order: 3
     action: 用 tenant_b 的 Workbench/共享 Creator 作用域启动，另在 tenant_a 用另一 Agent 启动；制造 A 本地 lane 满而 B 仍有容量。
     expected: 租户和 Agent 作用域按设计隔离；本地拒绝不泄漏共享配额，也不会迁移已有本地队列。
@@ -87,13 +88,13 @@ case:
   - phase-1
   source:
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 已绑定跨副本接纳和配额、评测竞争与真实满池拒绝、准备和收尾占额、Workbench 旧终态写入、Agent 本地排队、预约前依赖故障和预约后准备故障。手动/自动互斥由 RUNTIME-SCHEDULER-D3-001 证明。仍缺实集群验收和清理；满池证据不涵盖任意内部提交异常。
+    blocked_reason: 缺少已启用的隔离集群。现有用例包括跨副本会话互斥和配额、Creator 准备阶段、Workbench 旧运行结束回调，以及评测表独立认领。北向代理和注入故障仍需要候选环境核对协议，实集群运行及清理待验证。
     primary_domain: runtime
     preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
     cleanup_plan: finally 释放受控模型，恢复测试独占 Runtime Service 后回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
   integration_boundary:
   - 两个独立 Runtime 进程→Management 协调→真实 PostgreSQL 事务与 Redis→真实执行器→受控模型协议。
   observations:
-  - A/B owner_instance_id、数据库未终态预约、业务消息数、按请求标签聚合的模型调用、worker 实际结束信号与稳定错误响应。
+  - A/B 实际 Runtime 或 Management owner、数据库尚未结束的持久会话执行、业务消息数、按请求标签聚合的模型调用、worker 实际结束信号与稳定错误响应。
   cleanup:
   - finally 结束本次运行，按资源标签删除会话/预约/模型场景；回收两个测试实例，核对无活动 worker 和遗留工作区。

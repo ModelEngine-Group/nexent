@@ -102,7 +102,7 @@ def runtime(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("version", "scope"), [(None, "agent:7"), (4, "workbench_main")])
 async def test_fixed_replicas_apply_tenant_quota_before_publishing(monkeypatch, payload, runtime, version, scope):
-    monkeypatch.setattr(prepared_run, "NEXENT_RECOVERY_MODE", "maintenance")
+    monkeypatch.setattr(prepared_run, "NEXENT_RECOVERY_MODE", "fixed_replicas")
     start_worker = AsyncMock()
     monkeypatch.setattr(prepared_run._AdmissionSlot, "start_worker", start_worker)
     runtime.begin.side_effect = AgentRunConcurrencyExceededError

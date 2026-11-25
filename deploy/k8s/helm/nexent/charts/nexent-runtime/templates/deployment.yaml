@@ -1,16 +1,9 @@
 {{- if ne .Values.strategy.type "Recreate" -}}
-{{- fail "nexent-runtime strategy.type must be Recreate for offline maintenance" -}}
+{{- fail "nexent-runtime strategy.type must be Recreate for idle deployments" -}}
 {{- end -}}
 {{- $global := default dict .Values.global -}}
-{{- $epoch := default "" $global.maintenanceEpoch -}}
-{{- if and $epoch (not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $epoch)) -}}
-{{- fail "global.maintenanceEpoch must be a canonical UUID" -}}
-{{- end -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
-  {{- if not $epoch -}}
-    {{- fail "nexent-runtime multi-replica deployment requires global.maintenanceEpoch" -}}
-  {{- end -}}
   {{- if not (has $sharedStorage.mode (list "dynamic" "existing")) -}}
     {{- fail "nexent-runtime multi-replica deployment requires dynamic or existing shared RWX storage" -}}
   {{- end -}}
@@ -47,10 +40,6 @@ metadata:
     app: nexent-runtime
   annotations:
     "helm.sh/hook-weight": "20"
-    nexent.io/maintenance-epoch: {{ $epoch | quote }}
-    {{- if .Values.global.businessPaused }}
-    nexent.io/maintenance-target-replicas: {{ .Values.replicaCount | quote }}
-    {{- end }}
 spec:
   replicas: {{ ternary 0 .Values.replicaCount (default false .Values.global.businessPaused) }}
   strategy:
@@ -167,12 +156,8 @@ spec:
               value: {{ default false $global.sandboxSingleNodeDevelopment | toString | quote }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
-{{- if $epoch }}
             - name: NEXENT_RECOVERY_MODE
-              value: "maintenance"
-            - name: NEXENT_MAINTENANCE_EPOCH
-              value: {{ $epoch | quote }}
-{{- end }}
+              value: "fixed_replicas"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy

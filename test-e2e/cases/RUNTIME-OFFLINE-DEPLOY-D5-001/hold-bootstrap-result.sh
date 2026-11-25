@@ -8,17 +8,20 @@ if [[ $# -ge 13 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == 'exec -i -n nexent depl
 fi
 
 if [[ $# == 7 && "$1 $2 $4 $5 $6" == 'get job -n nexent -o' &&
-      "$3" =~ ^nexent-runtime-maintenance-([0-9a-f-]{36})$ &&
+      "$3" =~ ^nexent-system-bootstrap-[0-9]+$ &&
       "$7" == 'jsonpath={.status.succeeded}:{.status.failed}' ]]; then
-    epoch="${BASH_REMATCH[1]}"
     status=$("$D5_REAL_KUBECTL" "$@")
     if [[ "$status" == '1:' || "$status" == '1:0' ]]; then
-        printf '%s\n' "$epoch" > "$D5_KUBECTL_GATE/maintenance-arrived.tmp"
-        mv "$D5_KUBECTL_GATE/maintenance-arrived.tmp" "$D5_KUBECTL_GATE/maintenance-arrived"
-        while [ ! -f "$D5_KUBECTL_GATE/maintenance-decision" ]; do
+        printf '%s\n' "$3" > "$D5_KUBECTL_GATE/bootstrap-arrived.tmp"
+        mv "$D5_KUBECTL_GATE/bootstrap-arrived.tmp" "$D5_KUBECTL_GATE/bootstrap-arrived"
+        while [ ! -f "$D5_KUBECTL_GATE/bootstrap-decision" ]; do
             sleep 0.1
         done
-        [ "$(cat "$D5_KUBECTL_GATE/maintenance-decision")" = allow ] || exit 1
+        case "$(cat "$D5_KUBECTL_GATE/bootstrap-decision")" in
+            allow) ;;
+            fail) status=':1' ;;
+            *) exit 1 ;;
+        esac
     fi
     printf '%s' "$status"
 else

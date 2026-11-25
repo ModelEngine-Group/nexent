@@ -59,9 +59,8 @@ def deploy_admission_pair(isolated_release):
     names = {tag: pod["metadata"]["name"] for tag, pod in (("race-a", pod_a), ("race-b", pod_b))}
     nodes = {pod["spec"]["nodeName"] for pod in (pod_a, pod_b)}
     assert len(set(names.values())) == len(nodes) == 2 and nodes <= eligible
-    epoch = cluster.resources("deployment", RUNTIME)["metadata"]["annotations"]["nexent.io/maintenance-epoch"]
-    assert cluster.committed_maintenance_count(epoch) == 1
-    return cluster, pod_a, pod_b, names, nodes, epoch
+    generation = cluster.fixed_runtime_deployment()["metadata"]["generation"]
+    return cluster, pod_a, pod_b, names, nodes, generation
 
 
 def call_admission_probe(cluster, pod, *arguments):
@@ -77,7 +76,7 @@ def read_snapshot(cluster, pod, role, identifiers):
 
 
 def test_agent_cross_pod_conflict_and_quota(isolated_release):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
 
     identities = cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="admission")
@@ -92,12 +91,12 @@ def test_agent_cross_pod_conflict_and_quota(isolated_release):
         evidence = exercise_admission_race(url_a, url_b, stable_url, identities["owner"], agent, cluster.run_id,
                                            control=cluster.runtime_model_control, snapshot=snapshot,
                                            wait_seconds=cluster.profile.wait_seconds, expected_hosts=names)
-    write_case_evidence("runtime-ordinary-agent-admission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-ordinary-agent-admission", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
 @pytest.mark.parametrize("isolated_release", [1], indirect=True)
 def test_agent_backlog_stays_on_origin_when_peer_accepts(isolated_release):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
     identities = cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="stream")
     agent = cluster.seed_runtime_agent(pod_a, other_scope=True)
@@ -115,26 +114,30 @@ def test_agent_backlog_stays_on_origin_when_peer_accepts(isolated_release):
                                           control=cluster.runtime_model_control, snapshot=snapshot, capacity=capacity,
                                           wait_seconds=cluster.profile.wait_seconds,
                                           expected_hosts=(names["race-a"], names["race-b"]))
-    write_case_evidence("runtime-agent-backlog", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-agent-backlog", {**evidence, "generation": generation, "nodes": sorted(nodes)})
+
+
+def coordination_fault_probe(cluster, pod, agent_id, action, identifier):
+    probe_path = Path(__file__).resolve().parents[1] / "RUNTIME-ADMISSION-D2-001" / "coordination_fault_probe.py"
+    source = probe_path.read_text(encoding="utf-8")
+    lines = cluster.run_fixture_python(pod, source, cluster.run_id, action, str(identifier), str(agent_id)).splitlines()
+    prefix = "SCALING_COORDINATION_FAULT "
+    record, = (line.removeprefix(prefix) for line in lines if line.startswith(prefix))
+    return json.loads(record)
 
 
 def test_agent_coordination_faults_do_not_mutate_peer(isolated_release):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
     identities = cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="stream")
     agent = cluster.seed_runtime_agent(pod_a)
     gateway_a, gateway_b = [cluster.create_runtime_gateway(pod) for pod in (pod_a, pod_b)]
-    probe_path = Path(__file__).resolve().parents[1] / "RUNTIME-ADMISSION-D2-001" / "coordination_fault_probe.py"
-    source = probe_path.read_text(encoding="utf-8")
 
     def snapshot(*identifiers):
         return read_snapshot(cluster, names["race-b"], "owner", identifiers)
 
     def fault_probe(action, identifier):
-        lines = cluster.run_fixture_python(names["race-b"], source, cluster.run_id, action, str(identifier)).splitlines()
-        prefix = "SCALING_COORDINATION_FAULT "
-        record, = (line.removeprefix(prefix) for line in lines if line.startswith(prefix))
-        return json.loads(record)
+        return coordination_fault_probe(cluster, names["race-b"], agent["agent_id"], action, identifier)
 
     def capacity(slot):
         return call_admission_probe(cluster, names[f"race-{slot}"], "--agent-lane")
@@ -146,12 +149,12 @@ def test_agent_coordination_faults_do_not_mutate_peer(isolated_release):
             control=cluster.runtime_model_control, snapshot=snapshot, capacity=capacity, fault_probe=fault_probe,
             wait_seconds=cluster.profile.wait_seconds, expected_hosts=(names["race-a"], names["race-b"]),
         )
-    write_case_evidence("runtime-agent-coordination-faults", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-agent-coordination-faults", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
-@pytest.mark.parametrize("fault_kind", ["message-write", "stream-reset"])
+@pytest.mark.parametrize("fault_kind", ["message-write", "journal-write"])
 def test_agent_failed_preparation_releases_shared_quota(isolated_release, fault_kind):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
     identities = cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="stream")
     agent = cluster.seed_runtime_agent(pod_a)
@@ -161,8 +164,11 @@ def test_agent_failed_preparation_releases_shared_quota(isolated_release, fault_
         return read_snapshot(cluster, names["race-b"], "owner", identifiers)
 
     def fault_probe(action, identifier):
-        option = {"message-write": "--user-message-fault", "stream-reset": "--stream-reset-fault"}[fault_kind]
-        return call_admission_probe(cluster, names["race-b"], option, action, str(identifier))
+        if fault_kind == "message-write":
+            return call_admission_probe(cluster, names["race-b"], "--user-message-fault", action, str(identifier))
+        operation = {"install": "deny-redis", "remove": "restore-redis"}[action]
+        result = coordination_fault_probe(cluster, names["race-b"], agent["agent_id"], operation, identifier)
+        return {"installed": action == "install", **result}
 
     def capacity(slot):
         return call_admission_probe(cluster, names[f"race-{slot}"], "--agent-lane")
@@ -175,11 +181,11 @@ def test_agent_failed_preparation_releases_shared_quota(isolated_release, fault_
             fault_kind=fault_kind,
             wait_seconds=cluster.profile.wait_seconds, expected_hosts=(names["race-a"], names["race-b"]),
         )
-    write_case_evidence(f"runtime-agent-{fault_kind}-failure", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence(f"runtime-agent-{fault_kind}-failure", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
 def test_workbench_cross_pod_conflict_and_tenant_quota(isolated_release):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
     identities = cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="stream")
     prepared = cluster.seed_runtime_workbench(pod_a)
@@ -200,16 +206,16 @@ def test_workbench_cross_pod_conflict_and_tenant_quota(isolated_release):
                                                 control=cluster.runtime_model_control, snapshot=snapshot, gate=gate,
                                                 replay_completion=replay_completion,
                                                 wait_seconds=cluster.profile.wait_seconds, expected_hosts=names)
-    write_case_evidence("runtime-workbench-admission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-workbench-admission", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
 def test_northbound_cross_pod_conflict_and_quota(isolated_release):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
     identity = cluster.seed_runtime_identities(pod_a)["owner"]
     cluster.create_runtime_model(pod_a, mode="stream")
     agent = cluster.seed_runtime_agent(pod_a)
     source = Path(__file__).resolve().parents[1] / "RUNTIME-ADMISSION-D2-001" / "public_identity_probe.py"
-    lines = cluster.run_fixture_python(names["race-a"], source.read_text(encoding="utf-8"), cluster.run_id).splitlines()
+    lines = cluster.run_fixture_python("deployment/nexent-config", source.read_text(encoding="utf-8"), cluster.run_id).splitlines()
     credentials, = (line.removeprefix("SCALING_PUBLIC_IDENTITIES ") for line in lines
                     if line.startswith("SCALING_PUBLIC_IDENTITIES "))
     api_key = json.loads(credentials)["api_keys"]["owner"]
@@ -217,19 +223,22 @@ def test_northbound_cross_pod_conflict_and_quota(isolated_release):
     def snapshot(*identifiers):
         return read_snapshot(cluster, names["race-a"], "owner", identifiers)
 
-    with (cluster.route_runtime_through_transport_fixture(pod_a, pod_b, mode="northbound-admission") as origins,
+    gateway_a, gateway_b = [cluster.create_runtime_gateway(pod) for pod in (pod_a, pod_b)]
+    with (cluster.gateway_http(gateway_a) as url_a, cluster.gateway_http(gateway_b) as url_b,
           cluster.gateway_http() as stable_url):
         evidence = exercise_northbound_admission(
-            stable_url, identity, api_key, agent, cluster.run_id, control=cluster.runtime_model_control,
-            snapshot=snapshot, transport=cluster.runtime_transport_control, origins=origins,
-            wait_seconds=cluster.profile.wait_seconds, expected_hosts={"a": names["race-a"], "b": names["race-b"]},
+            {"a": url_a, "b": url_b}, stable_url, identity, api_key, agent, cluster.run_id,
+            control=cluster.runtime_model_control, snapshot=snapshot, wait_seconds=cluster.profile.wait_seconds,
+            hosts={"a": names["race-a"], "b": names["race-b"]},
         )
-    write_case_evidence("runtime-northbound-admission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-northbound-admission", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
-def evaluation_probe(cluster, owners):
+def evaluation_probe(cluster, pods):
     probe_path = Path(__file__).resolve().parents[1] / "RUNTIME-POD-RESTART-D5-001" / "peer_restart_probe.py"
     source = probe_path.read_text(encoding="utf-8")
+    owners = {side: cluster.create_evaluation_worker(pod, source) for side, pod in pods.items()}
+
     def probe(slot, action, *arguments):
         args = (cluster.run_id, action, *(str(value) for value in arguments))
         lines = cluster.run_fixture_python(owners[slot], source, *args).splitlines()
@@ -237,37 +246,36 @@ def evaluation_probe(cluster, owners):
                    if line.startswith("SCALING_PEER_RESTART "))
         return json.loads(record)
 
-    return probe
+    return probe, owners
 
 
 def test_evaluation_cross_pod_claim_and_rollback(isolated_release):
-    cluster, pod_a, _, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, _, nodes, generation = deploy_admission_pair(isolated_release)
     cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="stream")
     agent = cluster.seed_runtime_agent(pod_a)
-    owners = {side: names[f"race-{side}"] for side in ("a", "b")}
-    probe = evaluation_probe(cluster, owners)
+    probe, owners = evaluation_probe(cluster, {"a": pod_a, "b": pod_b})
     evidence = exercise_evaluation_admission(agent, probe=probe, control=cluster.runtime_model_control,
                                              wait_seconds=cluster.profile.wait_seconds, expected_owners=owners)
-    write_case_evidence("runtime-evaluation-admission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-evaluation-admission", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
 def test_evaluation_submission_capacity_rejects_only_on_full_pod(isolated_release):
-    cluster, pod_a, _, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, _, nodes, generation = deploy_admission_pair(isolated_release)
     cluster.seed_runtime_identities(pod_a)
     cluster.create_runtime_model(pod_a, mode="stream")
     agent = cluster.seed_runtime_agent(pod_a)
-    owners = {side: names[f"race-{side}"] for side in ("a", "b")}
+    probe, owners = evaluation_probe(cluster, {"a": pod_a, "b": pod_b})
     evidence = exercise_evaluation_submission(
-        agent, probe=evaluation_probe(cluster, owners), control=cluster.runtime_model_control,
+        agent, probe=probe, control=cluster.runtime_model_control,
         wait_seconds=cluster.profile.wait_seconds, expected_owners=owners,
     )
-    write_case_evidence("runtime-evaluation-submission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-evaluation-submission", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
 @pytest.mark.parametrize("kind", ["agent", "skill"])
 def test_creator_cross_pod_conflict_and_preparing_quota(isolated_release, kind):
-    cluster, pod_a, pod_b, names, nodes, epoch = deploy_admission_pair(isolated_release)
+    cluster, pod_a, pod_b, names, nodes, generation = deploy_admission_pair(isolated_release)
     identities = cluster.seed_runtime_identities(pod_a, creator=True)
     cluster.create_runtime_model(pod_a, mode="stream")
     prepared = cluster.seed_runtime_creators(pod_a, kind)
@@ -287,4 +295,4 @@ def test_creator_cross_pod_conflict_and_preparing_quota(isolated_release, kind):
             control=cluster.runtime_model_control, snapshot=snapshot, gate=gate,
             wait_seconds=cluster.profile.wait_seconds, expected_owners=owners,
         )
-    write_case_evidence(f"runtime-creator-{kind}-admission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence(f"runtime-creator-{kind}-admission", {**evidence, "generation": generation, "nodes": sorted(nodes)})

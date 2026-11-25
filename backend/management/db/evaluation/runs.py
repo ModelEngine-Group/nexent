@@ -12,8 +12,6 @@ from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
-from management.db.execution.models import ExecutionReservation
-from management.db.execution.repository import ACTIVE_STATES
 from management.db.models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
 
 
@@ -690,20 +688,8 @@ def hard_delete_agent_evaluation(
         session.commit()
 
 
-def _unowned_evaluation():
-    owned = select(ExecutionReservation.execution_id).where(
-        ExecutionReservation.tenant_id == AgentEvaluation.tenant_id,
-        ExecutionReservation.execution_key == func.concat("evaluation:", AgentEvaluation.agent_evaluation_id),
-        ExecutionReservation.service_role == "runtime",
-        ExecutionReservation.execution_kind == "evaluation",
-        ExecutionReservation.status.in_(ACTIVE_STATES),
-        ExecutionReservation.delete_flag == "N",
-    )
-    return ~owned.exists()
-
-
 def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
-    """Hard-delete old terminal evaluations that have no active Runtime owner."""
+    """Hard-delete old terminal evaluations."""
     from management.db.evaluation.sets import hard_delete_evaluation_set
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
@@ -719,7 +705,6 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
                 AgentEvaluation.tenant_id == tenant_id,
                 AgentEvaluation.create_time < cutoff,
                 AgentEvaluation.status.in_((EvalRunStatus.COMPLETED, EvalRunStatus.FAILED)),
-                _unowned_evaluation(),
             )
             .all()
         )
@@ -774,9 +759,9 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
 
 
 def reap_stale_runs(
-    tenant_id: str, timeout_minutes: int = 10, *, recover_owned: bool = False, db_session: Session | None = None,
+    tenant_id: str, timeout_minutes: int = 10, *, db_session: Session | None = None,
 ) -> int:
-    """Fail stale evaluations, including Runtime-owned work only during offline maintenance."""
+    """Fail evaluations that have stopped updating their durable status."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
     count = 0
     with get_db_session(db_session) as session:
@@ -786,8 +771,6 @@ def reap_stale_runs(
             AgentEvaluation.update_time < cutoff,
             AgentEvaluation.delete_flag == "N",
         )
-        if not recover_owned:
-            query = query.filter(_unowned_evaluation())
         stale = query.all()
         stale_ids = [eid for (eid,) in stale]
         if stale_ids:

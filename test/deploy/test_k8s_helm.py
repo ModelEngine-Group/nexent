@@ -224,19 +224,6 @@ if [ "$1" = "get" ] && [ "$2" = "deployment" ]; then
     printf '2:2:0:'
     exit 0
   fi
-  if [[ "$*" == *maintenance-epoch* ]]; then
-    upgrade=$(sed -n '/^helm upgrade --install nexent /p' "$MOCK_LOG" | tail -1)
-    if [ -z "$upgrade" ]; then exit 0; fi
-    epoch=$(sed -n 's/.*global.maintenanceEpoch=\\([^ ]*\\).*/\\1/p' <<< "$upgrade")
-    replicas=$(sed -n 's/.*nexent-runtime.replicaCount=\\([^ ]*\\).*/\\1/p' <<< "$upgrade")
-    if [ "${MOCK_FAIL_EPOCH:-false}" = "true" ]; then epoch=stale; fi
-    if [[ "$upgrade" == *global.businessPaused=true* ]]; then
-      printf 'nexent:%s:0:%s' "$epoch" "$replicas"
-    else
-      printf 'nexent:%s:%s:' "$epoch" "$replicas"
-    fi
-    exit 0
-  fi
   if [ "${MOCK_APP_EXISTS:-false}" = "true" ]; then printf 'deployment/%s\\n' "$3"; fi
   exit 0
 fi
@@ -250,19 +237,6 @@ if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then
   exit 0
 fi
 if [ "$1" = "get" ] && [ "$2" = "job" ]; then
-  if [[ "$3" == nexent-runtime-maintenance-* ]]; then
-    if [[ "$*" == *--ignore-not-found* ]]; then
-      epoch=${3#nexent-runtime-maintenance-}
-      case "${MOCK_RETRY_JOB_STATE:-absent}" in
-        failed) printf 'nexent:%s:True' "$epoch" ;;
-        running) printf 'nexent:%s:' "$epoch" ;;
-        foreign) printf 'unrelated:%s:True' "$epoch" ;;
-      esac
-      exit 0
-    fi
-    if [ "${MOCK_FAIL_MAINTENANCE:-false}" = "true" ]; then printf ':1'; else printf '1:'; fi
-    exit 0
-  fi
   if [ "${MOCK_FAIL_BOOTSTRAP:-false}" = "true" ]; then printf '1';
   elif [[ "$*" == *succeeded* ]]; then printf '1:'; fi
   exit 0
@@ -298,10 +272,9 @@ if [ "$1" = "exec" ]; then
       case "$query" in
         *pg_try_advisory_lock*)
           if [ "${MOCK_FAIL_LOCK:-false}" = "true" ]; then printf 'busy\\n'; else printf '123\\n'; fi ;;
-        *execution_reservation_t*)
-          if [ "${MOCK_FAIL_LOCK_LOSS:-false}" = "true" ]; then exit 1; fi
-          if [ "${MOCK_FAIL_COMPLETION:-false}" = "true" ]; then printf 'missing\\n'; else printf '123\\n'; fi ;;
-        *pg_locks*) printf '123\\n' ;;
+        *pg_locks*)
+          if [ "${MOCK_FAIL_LOCK_LOSS:-false}" = "true" ] && grep -Fq '.status.succeeded' "$MOCK_LOG"; then exit 1; fi
+          printf '123\\n' ;;
       esac
     done
     exit 0
@@ -777,7 +750,6 @@ def test_fixed_runtime_replicas_render_with_kubernetes_system_sandbox(
         "nexent",
         [
             *_application_dynamic_args(),
-            "--set", "global.maintenanceEpoch=abbccdef-1234-4444-8888-abcabcabcabc",
             "--set", "global.sandboxProvider=kubernetes",
             "--set", f"global.sandboxNetworkPolicyVerified={str(network_verified).lower()}",
             "--set", "nexent-runtime.replicaCount=3",
@@ -799,7 +771,7 @@ def test_fixed_runtime_replicas_render_with_kubernetes_system_sandbox(
     assert env["NEXENT_SANDBOX_PROVIDER"]["value"] == "kubernetes"
     assert env["NEXENT_SANDBOX_DEFAULT_LEVEL"]["value"] == "kubernetes"
     assert env["NEXENT_SANDBOX_DEFAULT_SCOPE"]["value"] == "system"
-    assert env["NEXENT_RECOVERY_MODE"]["value"] == "maintenance"
+    assert env["NEXENT_RECOVERY_MODE"]["value"] == "fixed_replicas"
     assert env["NEXENT_RUNTIME_POD_UID"]["valueFrom"]["fieldRef"]["fieldPath"] == "metadata.uid"
     assert any(doc["kind"] == "NetworkPolicy" and doc["metadata"]["name"] == "nexent-sandbox-control" for doc in resources)
 

@@ -165,7 +165,7 @@ async def _append_event(journal, sequence, kind, payload):
 
 
 async def _run_snapshot(payload, actor, identity, journal, slot=None):
-    options = {"settle_on_cancel": True} if NEXENT_RECOVERY_MODE == "maintenance" else {}
+    options = {"settle_on_cancel": True} if NEXENT_RECOVERY_MODE == "fixed_replicas" else {}
     info = await load_prepared_run(payload, actor, prepare_run_snapshot, **options)
     try:
         agent_run_manager.register_agent_run(identity.conversation_id, info, identity.user_id)
@@ -362,7 +362,7 @@ async def _admit(payload, actor):
     slot = _AdmissionSlot(agent_run_manager.reserve_agent_capacity(key, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS))
     try:
         options = {}
-        if NEXENT_RECOVERY_MODE == "maintenance":
+        if NEXENT_RECOVERY_MODE == "fixed_replicas":
             await slot.start_worker(identity.run_id)
             options["agent_scope"] = "workbench_main" if payload.workbench_config_version is not None else f"agent:{key}"
         loop = asyncio.get_running_loop()

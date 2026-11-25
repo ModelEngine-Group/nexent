@@ -6,6 +6,7 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-05
   - RUNTIME-REPLICAS-RULE-09
@@ -17,7 +18,7 @@ case:
   objective: 证明跨实例状态控制、Redis 回放及稳定代理兼容；断开订阅不等于取消。
   preconditions:
   - 固定脚本已绑定普通 Agent 及稳定 Web/Northbound 断流续订、跨实例停止、附件隔离和语音 WebSocket；正式执行使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
-  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   - 语音使用受控 STT/TTS WebSocket 协议服务；附件使用真实对象存储，提供两租户授权与越权场景。

@@ -83,7 +83,7 @@ def test_maintenance_enlists_automation_recovery_in_batch_transaction(monkeypatc
     assert result == {"conversation_messages": 0, "agent_evaluations": 1, "automation_runs": 2, "automation_locks": 3}
     messages.fail_streaming_assistant_messages.assert_called_once_with(db_session=session)
     evaluations.reap_stale_runs.assert_called_once_with(
-        "tenant-1", timeout_minutes=0, recover_owned=True, db_session=session,
+        "tenant-1", timeout_minutes=0, db_session=session,
     )
     automation.recover_orphaned_runs.assert_called_once_with(db_session=session)
     automation.release_all_task_locks.assert_called_once_with(db_session=session)

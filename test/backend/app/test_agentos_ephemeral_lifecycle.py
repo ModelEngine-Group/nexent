@@ -10,13 +10,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
+from redis.exceptions import RedisError
+from starlette.requests import ClientDisconnect
 
 from contracts.agentos import PreparedAgentCreatorRun, PreparedEphemeralRun, PreparedSkillCreatorRun
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.concurrency import ThreadCapacityExceeded
-from runtime.agentos import ephemeral
+from runtime.agentos import ephemeral, prepared_evaluation
 
 ACTOR = ServicePrincipal("actor", "tenant")
 RUN_ID = "a" * 32
@@ -141,6 +144,112 @@ def creator_payload(mode, **fields):
         **({"agent_id": 201, "bound_resources": "Verified"} if mode == "nl2agent" else {}),
         **fields,
     })
+
+
+async def test_persisted_snapshot_waits_for_workspace_cleanup_under_repeated_cancellation(mocker):
+    started = asyncio.Event()
+    materialized = asyncio.Event()
+    info = object()
+
+    async def prepare(*_args, **_kwargs):
+        started.set()
+        await materialized.wait()
+        return info
+
+    mocker.patch.object(prepared_evaluation, "run_blocking", side_effect=prepare)
+    discard = mocker.patch.object(prepared_evaluation, "discard_prepared_workspace")
+    operation = asyncio.create_task(prepared_evaluation.load_prepared_run(None, ACTOR, None, settle_on_cancel=True))
+    await asyncio.wait_for(started.wait(), timeout=2)
+
+    try:
+        for _ in range(2):
+            operation.cancel()
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not operation.done()
+        discard.assert_not_called()
+    finally:
+        materialized.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(operation, timeout=2)
+
+    discard.assert_called_once_with(info)
+
+
+async def test_fixed_creator_acknowledges_only_after_disconnected_worker_and_workspace_exit(runtime, mocker):
+    mocker.patch.object(ephemeral, "NEXENT_RECOVERY_MODE", "fixed_replicas")
+    acknowledge = AsyncMock(return_value="running")
+    ephemeral.runtime_state_service.creator_worker_state_async = acknowledge
+    runtime.info.agent_config = SimpleNamespace(agent_core="jiuwen")
+    payload = creator_payload(
+        "nl2skill", system_agent={"agent_id": 77, "version_no": 1}, trajectory={"conversation_id": 9},
+    )
+    response = await ephemeral._open_ephemeral(payload, ACTOR)
+
+    with pytest.raises(ClientDisconnect):
+        await response({"type": "http", "asgi": {"spec_version": "2.4"}}, AsyncMock(), AsyncMock(side_effect=OSError))
+
+    assert runtime.manager.cancel.call_count == 1
+    acknowledge.assert_awaited_once_with(ACTOR.user_id, 9, RUN_ID, "start")
+    runtime.discard.assert_not_called()
+    cleanup = tuple(ephemeral.channel_cleanup_tasks)
+    assert cleanup
+
+    async def expect_clean_workspace(*_args):
+        runtime.discard.assert_called_once_with(runtime.info)
+        return "closed"
+
+    acknowledge.side_effect = expect_clean_workspace
+    runtime.execution.future.set_result(None)
+    await asyncio.wait_for(asyncio.gather(*cleanup), timeout=2)
+    assert acknowledge.await_args.args == (ACTOR.user_id, 9, RUN_ID, "complete")
+
+
+@pytest.mark.parametrize(("error", "status"), [(None, 409), (RedisError("unavailable"), 503)])
+async def test_fixed_creator_requires_worker_claim_before_submission(runtime, mocker, error, status):
+    mocker.patch.object(ephemeral, "NEXENT_RECOVERY_MODE", "fixed_replicas")
+    ephemeral.runtime_state_service.creator_worker_state_async = AsyncMock(side_effect=error, return_value=None)
+    payload = creator_payload(
+        "nl2agent", system_agent={"agent_id": 77, "version_no": 1}, trajectory={"conversation_id": 9},
+    )
+
+    with pytest.raises(HTTPException) as failure:
+        await ephemeral._open_ephemeral(payload, ACTOR)
+
+    assert failure.value.status_code == status
+    runtime.manager.submit.assert_not_called()
+    runtime.materialize.assert_not_called()
+
+
+async def test_cancellation_during_creator_attach_acknowledges_late_claim(runtime, mocker):
+    mocker.patch.object(ephemeral, "NEXENT_RECOVERY_MODE", "fixed_replicas")
+    claiming = asyncio.Event()
+    allow_claim = asyncio.Event()
+    acknowledged = asyncio.Event()
+
+    async def state(_user_id, _conversation_id, _run_id, action):
+        if action == "start":
+            claiming.set()
+            await allow_claim.wait()
+            return "running"
+        assert action == "complete"
+        acknowledged.set()
+        return "closed"
+
+    ephemeral.runtime_state_service.creator_worker_state_async = state
+    payload = creator_payload(
+        "nl2agent", system_agent={"agent_id": 77, "version_no": 1}, trajectory={"conversation_id": 9},
+    )
+    opening = asyncio.create_task(ephemeral._open_ephemeral(payload, ACTOR))
+    await asyncio.wait_for(claiming.wait(), timeout=2)
+    opening.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(opening, timeout=2)
+    allow_claim.set()
+    await asyncio.wait_for(acknowledged.wait(), timeout=2)
+
+    runtime.manager.submit.assert_not_called()
+    runtime.materialize.assert_not_awaited()
 
 
 @pytest.mark.parametrize("mode", ["nl2agent", "nl2skill"])

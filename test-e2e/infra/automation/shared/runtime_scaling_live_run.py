@@ -8,6 +8,7 @@ import hashlib
 import json
 from time import monotonic, sleep
 from urllib.parse import quote
+from uuid import UUID
 
 import httpx
 
@@ -75,12 +76,12 @@ def delete_owned_object(client, object_name, authorization):
 def verify_completed_attachment(stable, execution, active, snapshot, owner, owner_auth, foreign_auth,
                                 object_name, content, wait_seconds):
     conversation = execution.result(timeout=min(wait_seconds, 120))
-    assert active["execution_key"] == f"conversation:{conversation}"
+    assert active["conversation_id"] == conversation
     deadline = monotonic() + min(wait_seconds, 30)
     while True:
         terminal = snapshot()
         assert terminal["execution_id"] == active["execution_id"] and terminal["owner"] == active["owner"]
-        if terminal["status"] == "COMPLETED" and terminal["run_id"] is None and not terminal.get("workspace_exists"):
+        if terminal["status"] == "completed" and terminal["run_id"] is None and not terminal.get("workspace_exists"):
             break
         assert monotonic() < deadline, "The Run did not settle and remove its own workspace"
         sleep(0.2)
@@ -119,7 +120,7 @@ def exercise_live_attachment_run(url_a, url_b, stable_url, identities, agent, to
         try:
             wait_for_model(control, execution, min(wait_seconds, 90))
             active = live_snapshot()
-            assert active["status"] == "RUNNING" and active["owner"].split(":", 1)[0] == peer_name
+            assert active["status"] == "running" and UUID(hex=active["owner"]).hex == active["owner"]
             assert active["run_id"] and active["sha256"] == digest
             if restart_writer is not None:
                 replacement = restart_writer()
@@ -131,7 +132,7 @@ def exercise_live_attachment_run(url_a, url_b, stable_url, identities, agent, to
         evidence = verify_completed_attachment(stable, execution, active, live_snapshot, owner, owner_auth,
                                                foreign_auth, object_name, content, wait_seconds)
         assert control("probe") == {"stream_calls": 2, "unexpected_calls": 0, "entered": True, "released": True}
-        return replacement, evidence
+        return replacement, {**evidence, "runtime_pod": peer_name}
 
 
 def exercise_live_attachment_pair(url_a, url_b, stable_url, identities, agents, token, *, control, live_snapshot,
@@ -170,11 +171,11 @@ def exercise_live_attachment_pair(url_a, url_b, stable_url, identities, agents, 
             for role in roles:
                 wait_for_model(control, executions[role], min(wait_seconds, 90), role=role)
                 active[role] = live_snapshot(role)
-                assert active[role]["status"] == "RUNNING"
-                assert active[role]["owner"].split(":", 1)[0] == pod_names[role]
+                assert active[role]["status"] == "running"
+                assert UUID(hex=active[role]["owner"]).hex == active[role]["owner"]
                 assert active[role]["run_id"] and active[role]["sha256"] == hashlib.sha256(content[role]).hexdigest()
             assert all(active["a"][key] != active["b"][key]
-                       for key in ("execution_id", "execution_key", "run_id", "owner"))
+                       for key in ("execution_id", "conversation_id", "run_id", "owner"))
             evidence["a"] = complete("a", "b")
             assert not executions["b"].done() and live_snapshot("b") == active["b"], "A completion changed B's Run"
             replacement = restart_writer(active)
@@ -187,4 +188,4 @@ def exercise_live_attachment_pair(url_a, url_b, stable_url, identities, agents, 
             assert progress["stream_calls"] == 4 and progress["unexpected_calls"] == 0
         finally:
             assert control("release") == {"released": True}
-        return replacement, evidence
+        return replacement, {role: {**value, "runtime_pod": pod_names[role]} for role, value in evidence.items()}

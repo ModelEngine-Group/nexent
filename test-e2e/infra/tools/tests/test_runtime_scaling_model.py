@@ -279,7 +279,7 @@ def test_scheduler_settings_are_only_written_to_the_scheduler_release(tmp_path):
     stage_deployment(repository, baseline)
     stage_deployment(repository, scheduler, scheduler_case=True)
     settings = (scheduler / relative_template).read_text(encoding="utf-8").splitlines()
-    for key, value in {"AGENT_AUTOMATION_ENABLED": "true", "AGENT_AUTOMATION_MAX_CONCURRENT_RUNS": "1",
+    for key, value in {"AGENT_AUTOMATION_ENABLED": "false", "AGENT_AUTOMATION_MAX_CONCURRENT_RUNS": "1",
                        "AGENT_AUTOMATION_POLL_INTERVAL_SECONDS": "1", "AGENT_AUTOMATION_LEASE_SECONDS": "30"}.items():
         assert [line for line in settings if line.startswith(f"{key}=")] == [f"{key}={value}"]
     assert (baseline / relative_template).read_bytes() == (repository / relative_template).read_bytes() == before

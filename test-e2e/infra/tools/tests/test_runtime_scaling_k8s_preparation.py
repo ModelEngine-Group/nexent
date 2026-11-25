@@ -22,7 +22,6 @@ from shared import runtime_scaling_k8s as runtime
 
 CANDIDATE_DIGEST = "sha256:" + "a" * 64
 STALE_DIGEST = "sha256:" + "b" * 64
-EPOCH = "4bcc5308-3b8c-4cd2-9efa-0316f414ed09"
 
 
 @pytest.fixture
@@ -223,9 +222,10 @@ def test_staging_only_changes_the_owned_run_ttl(tmp_path):
     relative = Path("deploy/env/.env.example")
     original = (ROOT / relative).read_text(encoding="utf-8").splitlines()
     staged = (scratch / relative).read_text(encoding="utf-8").splitlines()
-    key = "RUNTIME_RUN_TTL_SECONDS="
-    assert [line for line in staged if line.startswith(key)] == [key + "30"]
-    assert [line for line in staged if not line.startswith(key)] == [line for line in original if not line.startswith(key)]
+    keys = ("RUNTIME_RUN_TTL_SECONDS=", "RUNTIME_STREAM_TTL_SECONDS=")
+    for key in keys:
+        assert [line for line in staged if line.startswith(key)] == [key + "30"]
+    assert [line for line in staged if not line.startswith(keys)] == [line for line in original if not line.startswith(keys)]
 
 
 def test_initial_deployment_can_use_the_product_default(boundary, monkeypatch):
@@ -285,10 +285,11 @@ def backend_pod(name, container, image_id, *, phase="Running"):
     }
 
 
-@pytest.mark.parametrize("fault", [None, "stale-runtime", "missing-runtime", "stale-maintenance", "foreign-job-pod"])
-def test_rollout_checks_actual_candidate_runtime_and_maintenance_images(boundary, monkeypatch, fault):
+@pytest.mark.parametrize("fault", [None, "stale-runtime", "missing-runtime", "stale-bootstrap", "foreign-job-pod"])
+def test_rollout_checks_actual_candidate_runtime_and_bootstrap_images(boundary, monkeypatch, fault):
     cluster, _, _ = boundary
-    name = f"nexent-runtime-maintenance-{EPOCH}"
+    name = "nexent-system-bootstrap-1"
+    generation = 5
     runtime_ids = [f"containerd://{CANDIDATE_DIGEST}", f"docker-pullable://example/backend@{CANDIDATE_DIGEST}"]
     if fault == "stale-runtime":
         runtime_ids[1] = STALE_DIGEST
@@ -296,15 +297,19 @@ def test_rollout_checks_actual_candidate_runtime_and_maintenance_images(boundary
         runtime_ids[1] = None
     runtime_pods = [backend_pod(f"runtime-{index}", runtime.RUNTIME, image_id)
                     for index, image_id in enumerate(runtime_ids)]
-    job_image = STALE_DIGEST if fault == "stale-maintenance" else CANDIDATE_DIGEST
-    job_pod = backend_pod("maintenance-pod", "maintenance", job_image, phase="Succeeded")
+    job_image = STALE_DIGEST if fault == "stale-bootstrap" else CANDIDATE_DIGEST
+    job_pod = backend_pod("bootstrap-pod", "nexent-config", job_image, phase="Succeeded")
     job_pod["metadata"]["ownerReferences"] = [{"kind": "Job", "name": name,
                                                "uid": "foreign-uid" if fault == "foreign-job-pod" else "job-uid"}]
+    runtime_container = {"name": runtime.RUNTIME,
+                         "env": [{"name": "NEXENT_RECOVERY_MODE", "value": "fixed_replicas"}]}
+    job = {"metadata": {"uid": "job-uid", "name": name}, "status": {"succeeded": 1}}
     resources = {
-        ("deployment", runtime.RUNTIME): {"metadata": {"annotations": {"nexent.io/maintenance-epoch": EPOCH}},
-                                          "spec": {"replicas": 2}},
+        ("deployment", runtime.RUNTIME): {"metadata": {"generation": generation},
+                                          "spec": {"replicas": 2,
+                                                   "template": {"spec": {"containers": [runtime_container]}}}},
         ("pods", "-l", f"app={runtime.RUNTIME}"): {"items": runtime_pods},
-        ("job", name): {"metadata": {"uid": "job-uid", "labels": {"nexent.io/maintenance-epoch": EPOCH}}},
+        ("jobs", "-l", "app=nexent-system-bootstrap,app.kubernetes.io/instance=nexent"): {"items": [job]},
         ("pods", "-l", f"job-name={name}"): {"items": [job_pod]},
     }
     monkeypatch.setattr(cluster, "require_owned_namespace", lambda: None)
@@ -312,24 +317,30 @@ def test_rollout_checks_actual_candidate_runtime_and_maintenance_images(boundary
     monkeypatch.setattr(runtime, "_execute", lambda command, *args, **kwargs: subprocess.CompletedProcess(command, 0))
     receipts = {}
     monkeypatch.setattr(runtime, "write_case_evidence", receipts.__setitem__)
-    if fault:
-        message = "No owned maintenance Pod" if fault == "foreign-job-pod" else "candidate backend image digest"
-        with pytest.raises(runtime.IsolationError, match=message):
+    if fault in {"stale-runtime", "missing-runtime"}:
+        with pytest.raises(runtime.IsolationError, match="candidate backend image digest"):
             cluster.deploy(Path("deploy.sh"), 2, initial=True)
         assert not receipts
         return
 
     assert cluster.deploy(Path("deploy.sh"), 2, initial=True).returncode == 0
-    receipt = receipts[f"runtime-images-{cluster.run_id}-{EPOCH}"]
-    assert receipt["epoch"] == EPOCH
+    receipt = receipts[f"runtime-images-{cluster.run_id}-{generation}"]
+    assert receipt["generation"] == generation
     assert [pod["digest"] for pod in receipt["runtime"]] == [CANDIDATE_DIGEST, CANDIDATE_DIGEST]
-    assert receipt["maintenance"] == [{"pod": "maintenance-pod", "uid": "maintenance-pod-uid",
-                                        "digest": CANDIDATE_DIGEST}]
+    if fault in {"stale-bootstrap", "foreign-job-pod"}:
+        message = "successful bootstrap Pod" if fault == "foreign-job-pod" else "candidate backend image digest"
+        with pytest.raises(runtime.IsolationError, match=message):
+            cluster.bootstrap_image_receipts()
+        assert len(receipts) == 1
+        return
+
+    bootstrap = [{"pod": "bootstrap-pod", "uid": "bootstrap-pod-uid", "digest": CANDIDATE_DIGEST}]
+    assert cluster.bootstrap_image_receipts() == bootstrap
+    assert receipts[f"runtime-bootstrap-image-{cluster.run_id}-job-uid"] == {"job": name, "pods": bootstrap}
 
     job_pod["status"]["phase"] = "Failed"
-    assert cluster.maintenance_image_receipts(EPOCH, phase="Failed") == receipt["maintenance"]
-    with pytest.raises(runtime.IsolationError, match="No owned maintenance Pod reached Succeeded"):
-        cluster.maintenance_image_receipts(EPOCH)
+    with pytest.raises(runtime.IsolationError, match="successful bootstrap Pod"):
+        cluster.bootstrap_image_receipts()
 
 
 def test_failed_deploy_preserves_original_failure_before_image_checks(boundary, monkeypatch):
@@ -427,7 +438,7 @@ def test_cross_node_placement_updates_only_the_owned_runtime_pod_template(bounda
                 "annotations": {"meta.helm.sh/release-name": runtime.NAMESPACE}}
     spec = {"replicas": 2, "selector": {"matchLabels": {"app": runtime.RUNTIME}}, "template": {"spec": {}}}
     if condition == "paused":
-        metadata["annotations"]["nexent.io/maintenance-target-replicas"] = "2"
+        spec["replicas"] = 0
     elif condition == "foreign-release":
         metadata["annotations"]["meta.helm.sh/release-name"] = "foreign"
     elif condition == "existing-affinity":
@@ -520,7 +531,6 @@ def test_activation_gate_intercepts_only_activation_and_preserves_arguments(tmp_
     underlying_helm.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
     underlying_helm.chmod(0o700)
     environment = {**os.environ, "D5_REAL_HELM": str(underlying_helm), "D5_HELM_GATE": str(tmp_path)}
-    epoch = "3134807a-85c2-46e4-b75e-063c0eeee25b"
     template_args = ["template", "nexent", "global.businessPaused=false"]
     template = subprocess.run(["bash", str(wrapper), *template_args],
                               env=environment, capture_output=True, text=True, timeout=5)
@@ -528,13 +538,13 @@ def test_activation_gate_intercepts_only_activation_and_preserves_arguments(tmp_
     assert not (tmp_path / "arrived").exists()
 
     command = ["bash", str(wrapper), "upgrade", "--install", "nexent", "--set", "global.businessPaused=false",
-               "--set-string", f"global.maintenanceEpoch={epoch}"]
+               "--set-string", "global.bootstrapRunId="]
     with subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as helm:
         try:
             deadline = monotonic() + 5
             while not (tmp_path / "arrived").exists() and helm.poll() is None and monotonic() < deadline:
                 sleep(0.01)
-            assert (tmp_path / "arrived").read_text(encoding="utf-8").strip() == epoch
+            assert (tmp_path / "arrived").exists()
             assert helm.poll() is None
             (tmp_path / "decision").write_text(decision, encoding="utf-8")
             stdout, stderr = helm.communicate(timeout=5)
@@ -546,9 +556,9 @@ def test_activation_gate_intercepts_only_activation_and_preserves_arguments(tmp_
                 helm.communicate()
 
 
-@pytest.mark.parametrize("decision", ["allow", "deny"])
-def test_maintenance_gate_tags_only_the_deployment_lock_and_holds_only_success(tmp_path, decision):
-    wrapper = ROOT / "test-e2e/cases/RUNTIME-OFFLINE-DEPLOY-D5-001/hold-maintenance-result.sh"
+@pytest.mark.parametrize("decision", ["allow", "fail"])
+def test_bootstrap_gate_tags_only_the_deployment_lock_and_holds_only_success(tmp_path, decision):
+    wrapper = ROOT / "test-e2e/cases/RUNTIME-OFFLINE-DEPLOY-D5-001/hold-bootstrap-result.sh"
     underlying = tmp_path / "underlying-kubectl"
     underlying.write_text('#!/bin/bash\nif [[ "$1" == get ]]; then printf "%s" "$JOB_STATUS"; '
                           'else printf "%s\\n" "$@"; fi\n', encoding="utf-8")
@@ -566,9 +576,9 @@ def test_maintenance_gate_tags_only_the_deployment_lock_and_holds_only_success(t
     other = [*lock[:11], "runtime-scaling-d5", *lock[12:]]
     assert invoke(other).splitlines() == other
 
-    job = ["get", "job", f"nexent-runtime-maintenance-{EPOCH}", "-n", "nexent", "-o",
+    job = ["get", "job", "nexent-system-bootstrap-1", "-n", "nexent", "-o",
            "jsonpath={.status.succeeded}:{.status.failed}"]
-    arrived = tmp_path / "maintenance-arrived"
+    arrived = tmp_path / "bootstrap-arrived"
     assert invoke(job, JOB_STATUS=":1") == ":1"
     assert invoke([*job[:2], "unrelated-job", *job[3:]], JOB_STATUS="1:") == "1:"
     assert not arrived.exists()
@@ -578,11 +588,11 @@ def test_maintenance_gate_tags_only_the_deployment_lock_and_holds_only_success(t
             deadline = monotonic() + 5
             while not arrived.exists() and command.poll() is None and monotonic() < deadline:
                 sleep(0.01)
-            assert arrived.read_text(encoding="utf-8").strip() == EPOCH and command.poll() is None
-            (tmp_path / "maintenance-decision").write_text(decision, encoding="utf-8")
+            assert arrived.read_text(encoding="utf-8").strip() == job[2] and command.poll() is None
+            (tmp_path / "bootstrap-decision").write_text(decision, encoding="utf-8")
             output, error = command.communicate(timeout=5)
             assert not error
-            assert (command.returncode, output) == ((0, "1:0") if decision == "allow" else (1, ""))
+            assert (command.returncode, output) == ((0, "1:0") if decision == "allow" else (0, ":1"))
         finally:
             if command.poll() is None:
                 command.kill()
@@ -599,13 +609,23 @@ def gateway_boundary(boundary, monkeypatch):
                                "annotations": {"meta.helm.sh/release-name": runtime.NAMESPACE}},
                   "spec": {"template": {"spec": {"containers": [{"name": runtime.GATEWAY, "env": [
                       {"name": "GATEWAY_RUNTIME_URL", "value": f"http://{runtime.RUNTIME}:5014"},
+                      {"name": "GATEWAY_MANAGEMENT_URL", "value": "http://nexent-config:5010"},
+                      {"name": "GATEWAY_NORTHBOUND_URL", "value": "http://nexent-config:5010"},
                       {"name": "GATEWAY_AUTH_ENABLED", "value": "true"},
                       {"name": "JWT_SECRET", "valueFrom": {"secretKeyRef": {"name": "nexent-secrets", "key": "JWT_SECRET"}}},
                   ]}]}}}}
     service = {"metadata": {"namespace": runtime.NAMESPACE}, "spec": {"selector": {"app": runtime.GATEWAY}}}
     routed_pod = {"metadata": {"namespace": runtime.NAMESPACE,
                                "labels": {"app": runtime.ROUTING_GATEWAY, runtime.RUN_LABEL: cluster.run_id}}}
+    management = {"metadata": deepcopy(deployment["metadata"]), "spec": {"template": {"spec": {
+        "containers": [{"name": "nexent-config", "env": [
+            {"name": "RUNTIME_SERVICE_URL", "valueFrom": {"configMapKeyRef": {"name": "fixture", "key": "url"}}},
+            {"name": "NEXENT_SQL_STARTUP_MODE", "value": "migrate"},
+        ]}],
+        "volumes": [{"name": "workspace", "persistentVolumeClaim": {"claimName": "fixture-workspace"}}],
+    }}}}
     resources = {("pod", "runtime-a"): pod, ("deployment", runtime.GATEWAY): deployment,
+                 ("deployment", "nexent-config"): management,
                  ("service", runtime.GATEWAY): service, ("pod", "routing-gateway"): routed_pod,
                  ("service", runtime.WEB): {"metadata": {"namespace": runtime.NAMESPACE},
                                             "spec": {"selector": {"app": runtime.WEB}}}}
@@ -634,8 +654,18 @@ def test_directed_gateway_uses_live_runtime_ip_and_preserves_authentication(gate
     assert waited == [(f"pod/{name}", "Ready")]
     spec = manifest["spec"]
     assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
-    assert spec["containers"][0]["env"] == [{"name": "GATEWAY_RUNTIME_URL", "value": origin},
-                                            *original["containers"][0]["env"][1:]]
+    gateway, management = spec["containers"]
+    assert gateway["env"] == [
+        {"name": "GATEWAY_RUNTIME_URL", "value": origin},
+        {"name": "GATEWAY_MANAGEMENT_URL", "value": "http://127.0.0.1:5010"},
+        {"name": "GATEWAY_NORTHBOUND_URL", "value": "http://127.0.0.1:5010"},
+        *original["containers"][0]["env"][3:],
+    ]
+    assert {entry["name"]: entry["value"] for entry in management["env"]} == {
+        "RUNTIME_SERVICE_URL": origin, "NEXENT_SQL_STARTUP_MODE": "off",
+        "AGENT_AUTOMATION_ENABLED": "false", "DREAMING_SCHEDULER_ENABLED": "false",
+    }
+    assert spec["volumes"][0]["persistentVolumeClaim"]["claimName"] == "fixture-workspace"
     assert template == original
 
 

@@ -36,7 +36,7 @@ def exercise_peer_restart(stable, identity, agent, token, *, client_for, schedul
         wait_for_tag("pending")
         task, _, reservation = active_automation(auto_snapshot(), seed)
         owner, peer = slot_for_owner(task["lock_owner"])
-        instance = reservation["owner_instance_id"]
+        instance = reservation["owner_id"]
         evaluation_id = probe(owner, "seed-evaluation", agent["agent_id"], agent["model_id"])
         content = f"runtime-peer-restart:{token}\n".encode()
 
@@ -60,17 +60,14 @@ def exercise_peer_restart(stable, identity, agent, token, *, client_for, schedul
                 wait_for_tag("restart-eval")
 
                 evaluation = evaluation_snapshot()
-                evaluation_reservation, = evaluation["reservations"]
                 assert evaluation["run"]["status"] == evaluation["case"]["status"] == "RUNNING"
                 assert evaluation["run"]["progress"] == 0 and evaluation["case"]["predict"] is None
-                assert evaluation_reservation["owner"] == instance and evaluation_reservation["status"] == "RUNNING"
                 chat = chat_snapshot()
                 chat_reservation, = chat["reservations"]
                 chat_assistant, = chat["assistants"]
-                assert chat_reservation["owner"] == instance and chat_reservation["status"] == "RUNNING"
-                assert cursor == f"execution:{chat_reservation['id']}" and chat["state"]["generation"] == cursor
+                assert chat_reservation["owner"] == instance and chat_reservation["status"] == "running"
+                assert cursor == chat_reservation["id"] and chat["state"]["generation"] == cursor
                 assert chat["users"] == [payload["query"]] and chat_assistant["status"] == "streaming"
-                assert evaluation_reservation["epoch"] == chat_reservation["epoch"] == reservation["maintenance_epoch"]
 
                 file = probe(owner, "workspace")
                 assert file and file["sha256"] == sha256(content).hexdigest() and probe(peer, "workspace") == file
@@ -116,23 +113,22 @@ def exercise_peer_restart(stable, identity, agent, token, *, client_for, schedul
 
             return wait_for(settled, wait_seconds, failure)
 
-        finished_chat = done(chat_snapshot, lambda value: value["reservations"][0]["status"], "COMPLETED",
+        finished_chat = done(chat_snapshot, lambda value: value["reservations"][0]["status"], "completed",
                              "The original chat reservation did not settle")
-        assert finished_chat["reservations"] == [{**chat_reservation, "status": "COMPLETED", "finished": True}]
+        assert finished_chat["reservations"] == [{**chat_reservation, "status": "completed", "finished": True}]
         assert finished_chat["users"] == chat["users"]
         assert finished_chat["assistants"] == [{**chat_assistant, "status": "completed"}]
         assert_persisted_answer(stable, auth, chat_id, chat_assistant["id"], "restart-chat")
         wait_for(lambda: probe(owner, "workspace") is None and probe(replacement, "workspace") is None, wait_seconds,
                  "The completed run did not clean its own attachment workspace")
 
-        finished_eval = done(evaluation_snapshot, lambda value: value["reservations"][0]["status"], "COMPLETED",
+        finished_eval = done(evaluation_snapshot, lambda value: value["run"]["status"], "COMPLETED",
                              "The original evaluation worker did not settle")
-        assert finished_eval["reservations"] == [{**evaluation_reservation, "status": "COMPLETED"}]
         assert finished_eval["run"] == {**evaluation["run"], "status": "COMPLETED", "progress": 1, "score": 1.0}
         assert finished_eval["case"] == {**evaluation["case"], "status": "COMPLETED", "score": {EVALUATION_SCORE: 1.0},
                                          "predict": {"answer": "stream-tail:restart-eval:结束🌊"}}
 
-        finished_auto = done(auto_snapshot, lambda value: value["reservations"][0]["status"], "COMPLETED",
+        finished_auto = done(auto_snapshot, lambda value: value["reservations"][0]["status"], "completed",
                              "The original scheduled execution did not settle")
         completed_run = check_settled_schedule(finished_auto, seed, "SUCCEEDED")
         assert completed_run["run_id"] == scheduled_run["run_id"]
@@ -144,7 +140,7 @@ def exercise_peer_restart(stable, identity, agent, token, *, client_for, schedul
             require_status(stable.delete(path, headers=auth), 200, "Delete the owned conversation")
             assert stable.get(path, headers=auth).json()["data"] == []
         return {**restart_receipt, "owner": instance, "chat_execution": chat_reservation["id"],
-                "evaluation_id": evaluation_id, "evaluation_execution": evaluation_reservation["id"],
+                "evaluation_id": evaluation_id,
                 "scheduled_run": scheduled_run["run_id"], "lease_renewal_seconds": (lease_after - lease_before).total_seconds(),
                 "workspace_sha256": file["sha256"], "workspace_cleaned_after_completion": True, "model_calls": model["calls_by_tag"]}
     finally:

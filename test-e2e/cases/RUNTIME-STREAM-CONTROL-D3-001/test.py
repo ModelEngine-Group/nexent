@@ -41,10 +41,9 @@ def deploy_runtime_pair(isolated_release):
     names = [pod["metadata"]["name"] for pod in (pod_a, pod_b)]
     nodes = {pod["spec"]["nodeName"] for pod in (pod_a, pod_b)}
     assert len(set(names)) == len(nodes) == 2 and nodes <= eligible
-    epoch = cluster.resources("deployment", RUNTIME)["metadata"]["annotations"]["nexent.io/maintenance-epoch"]
-    assert cluster.committed_maintenance_count(epoch) == 1
+    generation = cluster.fixed_runtime_deployment()["metadata"]["generation"]
     return cluster, (pod_a, pod_b), {
-        "epoch": epoch, "nodes": sorted(nodes), "producer_pod": names[0], "control_pod": names[1],
+        "generation": generation, "nodes": sorted(nodes), "producer_pod": names[0], "control_pod": names[1],
     }
 
 
@@ -55,8 +54,8 @@ def prepare_stream_pair(isolated_release, *, model_mode="stream"):
     agent = cluster.seed_runtime_agent(pod_a)
 
     def probe(source, prefix, *args):
-        lines = cluster.run_fixture_python(deployment["control_pod"], source.read_text(encoding="utf-8"),
-                                          cluster.run_id, *args).splitlines()
+        target = "deployment/nexent-config" if source.name == "public_identity_probe.py" else deployment["control_pod"]
+        lines = cluster.run_fixture_python(target, source.read_text(encoding="utf-8"), cluster.run_id, *args).splitlines()
         record, = (line.removeprefix(prefix) for line in lines if line.startswith(prefix))
         return json.loads(record)
 
@@ -89,7 +88,7 @@ def test_public_web_and_northbound_replay_and_stop(isolated_release):
             web, gateway, identities["owner"], credentials["api_keys"]["owner"], agent, cluster.run_id,
             control=cluster.runtime_model_control, transport=cluster.runtime_transport_control,
             stream_probe=stream_probe, snapshot=snapshot, origins=origins,
-            wait_seconds=min(cluster.profile.wait_seconds, 60), producer_host=deployment["producer_pod"],
+            wait_seconds=min(cluster.profile.wait_seconds, 60),
         )
     write_case_evidence("runtime-public-replay-stop", {
         **evidence, **deployment, "original_service_targets_restored": True,
@@ -116,7 +115,7 @@ def test_cross_pod_attachment_run_keeps_access_scoped(isolated_release):
             live_snapshot=snapshot, peer_name=peer["metadata"]["name"], wait_seconds=cluster.profile.wait_seconds,
         )
     write_case_evidence("runtime-cross-pod-attachment-access", {
-        **evidence, "epoch": deployment["epoch"], "nodes": deployment["nodes"],
+        **evidence, "generation": deployment["generation"], "nodes": deployment["nodes"],
         "writer_pod": writer["metadata"]["name"], "consumer_pod": peer["metadata"]["name"],
     })
 

@@ -6,13 +6,14 @@ import json
 import sys
 from uuid import UUID, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from contracts.constants.environment import POSTGRES_HOST, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_RUN_TTL_SECONDS
+from contracts.constants.environment import POSTGRES_HOST, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_STREAM_TTL_SECONDS
+from infrastructure.rdb.agent_execution import ACTIVE, AgentExecution
 from infrastructure.rdb.client import get_db_session
+from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
-from management.db.conversation.models import ConversationMessage, ConversationRecord
-from management.db.execution.models import ExecutionReservation
+from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 
 
 def read_owned_runs(token, identifiers):
@@ -25,28 +26,31 @@ def read_owned_runs(token, identifiers):
                 ConversationRecord.conversation_id == identifier, ConversationRecord.created_by == owner,
                 ConversationRecord.delete_flag == "N",
             )).scalar_one()
-            reservations = list(session.execute(select(ExecutionReservation).where(
-                ExecutionReservation.tenant_id == tenant, ExecutionReservation.user_id == owner,
-                ExecutionReservation.execution_kind == "agent", ExecutionReservation.service_role == "runtime",
-                ExecutionReservation.execution_key == f"conversation:{identifier}", ExecutionReservation.delete_flag == "N",
-            ).order_by(ExecutionReservation.execution_id)).scalars())
+            reservations = session.scalars(select(AgentExecution).where(
+                AgentExecution.tenant_id == tenant, AgentExecution.created_by == owner,
+                AgentExecution.conversation_id == identifier, AgentExecution.delete_flag == "N",
+            ).order_by(AgentExecution.create_time, AgentExecution.run_id)).all()
+            latest = reservations[-1] if reservations else None
+            journal = RunJournal(tenant, owner, identifier, latest.run_id) if latest else None
+            ttl = runtime_state_service.client.pttl(journal.key) if journal else -2
+            journal_state = journal.run_state() if ttl > 0 else None
+            now = session.scalar(select(func.clock_timestamp()))
             messages = list(session.execute(select(ConversationMessage).where(
                 ConversationMessage.conversation_id == identifier, ConversationMessage.delete_flag == "N",
             ).order_by(ConversationMessage.message_index)).scalars())
             state[str(identifier)] = {
-                "reservations": [{"id": row.execution_id, "status": row.status, "owner": row.owner_instance_id,
-                                  "epoch": row.maintenance_epoch, "finished": row.finished_at is not None,
-                                  "error_code": row.error_code} for row in reservations],
+                "reservations": [{"id": row.run_id, "status": row.status, "owner": row.owner_id,
+                                  "finished": row.status not in ACTIVE} for row in reservations],
                 "users": [row.message_content for row in messages if row.message_role == "user"],
                 "assistants": [{"id": row.message_id, "status": row.status}
                                for row in messages if row.message_role == "assistant"],
-                "state_pttl": runtime_state_service.client.pttl(runtime_state_service._run_key(owner, identifier)),
-                "state": runtime_state_service.get_run_state(owner, identifier),
-                "cancel_ids": [row.execution_id for row in reservations if runtime_state_service.client.exists(
-                    runtime_state_service._execution_cancel_key(owner, identifier, row.execution_id),
-                )],
+                "state_pttl": ttl,
+                "state": {"generation": latest.run_id, "status": journal_state[1]} if journal_state else {},
+                "lease_expired": bool(latest and latest.lease_until and latest.lease_until <= now),
+                "cancel_ids": [row.run_id for row in reservations if row.status in ACTIVE and row.cancellation_requested],
+
             }
-    return {"quota": RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, "ttl_seconds": RUNTIME_RUN_TTL_SECONDS, "runs": state}
+    return {"quota": RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, "ttl_seconds": RUNTIME_STREAM_TTL_SECONDS, "runs": state}
 
 
 if __name__ == "__main__":

@@ -71,7 +71,7 @@ change:
     - test/backend/services/test_runtime_proxy_service.py
     - test/backend/app/test_agent_evaluation_runtime_app.py
     - test/backend/database/test_agent_evaluation_db.py
-    - test/backend/services/test_runtime_evaluation_dispatch.py
+    - test/backend/services/test_evaluation_dispatch.py
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/services/test_evaluation_maintenance.py
     - test/backend/services/test_a2a_server_service_message.py

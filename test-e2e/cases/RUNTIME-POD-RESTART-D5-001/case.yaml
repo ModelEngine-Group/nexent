@@ -6,6 +6,7 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-08
   title: B 重启不影响 A，失联预约保留至下一全停维护
@@ -16,10 +17,10 @@ case:
   objective: 证明第一阶段普通 Pod 生命周期隔离及无自动失联接管的可观察边界。
   preconditions:
   - 使用本次测试拥有的独立应用实例、专属 PostgreSQL/Redis 数据域和支持两个工作节点的真实动态 RWX。
-  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
-  - 隔离 Kubernetes namespace 及专属 DB/Redis；A 有长会话、评测、自动任务、租约和 Run 目录，B 可单独重启/强杀；维护 Job 已实现。
+  - 隔离 Kubernetes namespace 及专属 DB/Redis；A 有长会话、评测、自动任务、租约和 Run 目录，B 可单独重启/强杀；异常全停恢复入口可用。
   test_data:
     scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
     model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
@@ -29,13 +30,13 @@ case:
     action: 在 A 建立上述长运行，记录状态、消息、目录和租约快照及正常续租变化范围，然后只重启 B。
     expected: A 的状态与文件未被 B 的启动恢复改写，续租继续，没有全局 TIMEOUT 或锁释放。
   - order: 2
-    action: 确认 B 以原 epoch 就绪，让 A 的受控运行继续输出并最终完成一次正常运行。
-    expected: B 不新建维护批次，A 的有效输出与终态完整。
+    action: 确认 B 以固定副本模式就绪，让 A 的受控运行继续输出并最终完成一次正常运行。
+    expected: B 就绪后，A 的有效输出与终态完整。
   - order: 3
     action: 另起 A 的长运行后强杀 owner，重启该 Pod 并让两个实例同时请求同一会话；等待超过原 Redis 运行键 TTL。
     expected: 持久化预约及全局配额仍被失联 owner 占用；两个请求均不重放模型，不因 TTL 或进程重启释放。
   - order: 4
-    action: 向失联运行发停止请求，随后全停所有业务并执行新 epoch 维护，再启动固定副本并重试合法请求。
+    action: 向失联运行发停止请求，随后全停所有业务并运行独立异常恢复入口，再启动固定副本并重试合法请求。
     expected: 停止请求不被伪装为 worker 已完成；全停维护收敛失联预约后才允许新运行成功。
   - order: 5
     action: 结束本次运行，回收 namespace 和专属测试数据域并核对资源归属。
@@ -69,7 +70,7 @@ case:
   - phase-1
   source:
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 正常同伴重启和失联恢复路径均已绑定且隔离双进程验证通过；仍欠获准双工作节点和真实动态 RWX 上的正式执行和清理。
+    blocked_reason: 同伴重启和失联恢复路径均有固定脚本。缺少已启用的隔离双工作节点集群与动态 RWX，当前工作树的正式执行和清理待验证。
     primary_domain: runtime
     preparation_plan: 基于实际部署入口准备独占实例、数据库/Redis 数据域、身份和模型协议服务。正常重启校验健康 owner 容器标识不变；失联验证校验 Pod UID 后以短宽限期删除 owner，验证原流中断且接替 Pod 不接管。
     cleanup_plan: 关闭定向 Gateway 端口转发，回收本次 namespace、数据和动态卷；确认外部 PVC 及其他实例未被改动。
@@ -83,4 +84,4 @@ case:
   - 健康 owner 被误恢复数=0；失联后全停维护前额外业务调用数=0，预约始终未终态。
   - 维护后失联预约全部收敛，合法新运行成功；资源泄漏数=0。
   recovery_expectations:
-  - 仅下一次全停维护释放失联预约；普通 Pod 重启保持原维护批次。第一阶段不验证自动接管。
+  - 仅下一次全停维护释放失联预约；普通 Pod 重启通过运行状态和租约确认隔离。

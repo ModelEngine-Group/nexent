@@ -7,7 +7,6 @@ import hashlib
 import json
 from pathlib import Path
 from time import monotonic, sleep
-from uuid import UUID
 
 import pytest
 
@@ -86,18 +85,14 @@ def mount_claims(pod):
     return claims
 
 
-def assert_completed_epoch(cluster, pods, epoch):
-    assert str(UUID(epoch)) == epoch
-    deployment = cluster.resources("deployment", RUNTIME)
-    annotations = deployment["metadata"]["annotations"]
+def assert_fixed_deployment(cluster, pods, generation):
+    deployment = cluster.fixed_runtime_deployment()
     assert runtime_reconciled(deployment)
-    assert annotations["nexent.io/maintenance-epoch"] == epoch
-    assert "nexent.io/maintenance-target-replicas" not in annotations
-    assert cluster.committed_maintenance_count(epoch) == 1
+    assert deployment["metadata"]["generation"] == generation
     for pod in pods:
         environment = {entry["name"]: entry.get("value") for entry in runtime_container(pod)["env"]}
-        assert environment["NEXENT_MAINTENANCE_EPOCH"] == epoch
-        assert environment["NEXENT_RECOVERY_MODE"] == "maintenance"
+        assert "NEXENT_MAINTENANCE_EPOCH" not in environment
+        assert environment["NEXENT_RECOVERY_MODE"] == "fixed_replicas"
 
 
 class Probe:
@@ -106,8 +101,9 @@ class Probe:
         self.source = Path(__file__).with_name("storage_probe.py").read_text(encoding="utf-8")
 
     def __call__(self, pod, action, role, *arguments):
-        output = self.cluster.run_fixture_python(pod["metadata"]["name"], self.source, action, self.cluster.run_id,
-                                                 role, *arguments)
+        management_actions = {"verify-settings", "read-attachment"}
+        target = "deployment/nexent-config" if action in management_actions else pod["metadata"]["name"]
+        output = self.cluster.run_fixture_python(target, self.source, action, self.cluster.run_id, role, *arguments)
         record, = (line.removeprefix("D3_STORAGE ") for line in output.splitlines() if line.startswith("D3_STORAGE "))
         return json.loads(record)
 
@@ -131,6 +127,7 @@ def storage_round_trip(cluster, probe, writer, peer):
         assert probe(remote, "snapshot", role) == record
         assert probe(local, "upload", role) > 0
         assert probe(remote, "download", role) == record["output"]
+    assert probe(writer, "verify-settings", "a") == record_a["settings"]
     return record_a, record_b
 
 
@@ -180,8 +177,8 @@ def test_runtime_storage_paths_on_separate_workers(isolated_release):
         pytest.fail(f"Two-replica test deployment failed (exit {deployment.returncode})")
     eligible = cluster.spread_runtime_pair()
     writer, peer = ready_pair(cluster, eligible)
-    epoch = cluster.resources("deployment", RUNTIME)["metadata"]["annotations"]["nexent.io/maintenance-epoch"]
-    assert_completed_epoch(cluster, (writer, peer), epoch)
+    generation = cluster.fixed_runtime_deployment()["metadata"]["generation"]
+    assert_fixed_deployment(cluster, (writer, peer), generation)
     claims = mount_claims(writer)
     assert mount_claims(peer) == claims
     volumes = {name: cluster.bound_shared_volume(claim) for name, claim in claims.items()}
@@ -206,7 +203,7 @@ def test_runtime_storage_paths_on_separate_workers(isolated_release):
         assert_unrelated_storage(peer)
         cluster.restart_owned_runtime_pod(writer)
         after = ready_pair(cluster, eligible, departed_uid=retired_uid, wait_seconds=150)
-        assert_completed_epoch(cluster, after, epoch)
+        assert_fixed_deployment(cluster, after, generation)
         peer_after, = (pod for pod in after if pod["metadata"]["uid"] == peer_uid)
         replacement, = (pod for pod in after if pod["metadata"]["uid"] != peer_uid)
         assert mount_claims(replacement) == claims
@@ -215,7 +212,7 @@ def test_runtime_storage_paths_on_separate_workers(isolated_release):
         assert after_state["restartCount"] == peer_state["restartCount"]
         assert probe.live_attachment(replacement, "b") == active["b"]
         finished = probe.live_attachment(replacement, "a", active["a"]["run_id"])
-        assert finished == {**active["a"], "status": "COMPLETED", "run_id": None, "sha256": None,
+        assert finished == {**active["a"], "status": "completed", "run_id": None, "sha256": None,
                             "workspace_exists": False}
         assert_unrelated_storage(replacement)
         return replacement
@@ -227,7 +224,7 @@ def test_runtime_storage_paths_on_separate_workers(isolated_release):
     assert probe(replacement, "snapshot", "b") == {**record_b, "output": None}
 
     write_case_evidence("runtime-shared-storage-paths", {
-        "epoch": epoch, "nodes": [pod["spec"]["nodeName"] for pod in (writer, peer, replacement)],
+        "generation": generation, "nodes": [pod["spec"]["nodeName"] for pod in (writer, peer, replacement)],
         "volumes": volumes, "paths": {"a": record_a, "b": record_b}, "log_rotation": logs, "attachments": attachments,
         "surviving_pod_unchanged": True, "live_agents": live,
     })

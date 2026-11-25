@@ -23,8 +23,8 @@ def active_automation(state, seed, prior_runs=()):
     assert task["task_id"] == seed["task_id"] and task["status"] == "ACTIVE"
     assert task["next_fire_at"] == run["scheduled_fire_at"] == seed["scheduled"]
     assert task["fire_count"] == 0 and task["lock_owner"] and task["lock_until"]
-    assert run["status"] == reservation["status"] == "RUNNING" and run["trigger_type"] == "SCHEDULED"
-    assert task["lock_owner"].rsplit("-", 5)[0] == reservation["owner_instance_id"].split(":")[0]
+    assert run["status"] == "RUNNING" and run["trigger_type"] == "SCHEDULED"
+    assert reservation["status"] == "running" and reservation["run_id"] == run["runtime_run_id"]
     return task, run, reservation
 
 
@@ -42,7 +42,7 @@ def check_settled_schedule(state, seed, status, prior_runs=()):
 
 def exercise_live_lease_loss(identifier, seed, held, *, snapshot, probe, control, wait_seconds):
     task, run, reservation = active_automation(held, seed)
-    fault = probe("expire-live", identifier, run["run_id"], reservation["execution_id"])
+    fault = probe("expire-live", identifier, run["run_id"], reservation["run_id"])
     assert fault["owner"] == task["lock_owner"]
 
     def skipped_while_live():
@@ -69,7 +69,7 @@ def exercise_live_lease_loss(identifier, seed, held, *, snapshot, probe, control
     def cancellation_started():
         state = snapshot(identifier)
         old = state["reservations"][0]
-        return old["status"] in {"FINALIZING", "STOPPED"}
+        return old["status"] in {"stopped"}
 
     wait_for(cancellation_started, wait_seconds, "The old scheduler did not stop its worker after losing the lease")
     assert control("release/auto")["released"] is True
@@ -77,7 +77,7 @@ def exercise_live_lease_loss(identifier, seed, held, *, snapshot, probe, control
     def completed_next_occurrence():
         state = snapshot(identifier)
         return state if state["task"]["fire_count"] == 2 and all(
-            row["status"] in {"STOPPED", "COMPLETED"} for row in state["reservations"]
+            row["status"] in {"stopped", "completed"} for row in state["reservations"]
         ) else None
 
     completed = wait_for(completed_next_occurrence, max(wait_seconds, 75),
@@ -90,13 +90,13 @@ def exercise_live_lease_loss(identifier, seed, held, *, snapshot, probe, control
     )
     assert final_run["scheduled_fire_at"] == following_fire and final_run["finished_at"]
     old, new = completed["reservations"]
-    assert old["execution_id"] == reservation["execution_id"] and old["status"] == "STOPPED"
-    assert new["execution_id"] != old["execution_id"] and new["status"] == "COMPLETED"
+    assert old["run_id"] == reservation["run_id"] and old["status"] == "stopped"
+    assert new["run_id"] != old["run_id"] and new["status"] == "completed"
     final_task = completed["task"]
     assert final_task["task_id"] == seed["task_id"] and final_task["status"] == "COMPLETED"
     assert not any(final_task[key] for key in ("next_fire_at", "lock_owner", "lock_until"))
     return completed, final_run, {"expired_run": timed_out["run_id"], "replay_skipped": replay["run_id"],
-                                  "next_occurrence": final_run["run_id"], "old_execution": old["execution_id"]}
+                                  "next_occurrence": final_run["run_id"], "old_execution": old["run_id"]}
 
 
 def exercise_settled_lease_loss(identifier, seed, *, snapshot, probe, control, wait_seconds):
@@ -110,13 +110,13 @@ def exercise_settled_lease_loss(identifier, seed, *, snapshot, probe, control, w
 
     def original_worker_exited():
         state = snapshot(identifier)
-        terminal = state["reservations"][0]["status"] in {"COMPLETED", "FAILED", "STOPPED"}
+        terminal = state["reservations"][0]["status"] in {"completed", "failed", "stopped"}
         return state if terminal and state["task"]["lock_owner"] is None else None
 
     terminal = wait_for(original_worker_exited, wait_seconds, "The old root execution still owns the conversation")
     assert terminal["task"]["status"] == "PAUSED" and terminal["runs"][0]["status"] == "RUNNING"
     original, = terminal["reservations"]
-    assert original["execution_id"] == reservation["execution_id"]
+    assert original["run_id"] == reservation["run_id"]
     assert probe("rearm-settled", identifier)["rearmed"] is True
 
     def first_fire_settled():
@@ -138,7 +138,7 @@ def exercise_settled_lease_loss(identifier, seed, *, snapshot, probe, control, w
 
     def next_fire_settled():
         state = snapshot(identifier)
-        return state if state["task"]["fire_count"] == 2 and state["reservations"][-1]["status"] == "COMPLETED" else None
+        return state if state["task"]["fire_count"] == 2 and state["reservations"][-1]["status"] == "completed" else None
 
     completed = wait_for(next_fire_settled, max(wait_seconds, 75), "The subsequent legal occurrence did not finish")
     assert completed["runs"][:2] == [timed_out, replay] and completed["reservations"][0] == original
@@ -200,8 +200,8 @@ def exercise_scheduler(urls, stable_url, identity, agent, token, *, control, pro
                                            payload(manual_conversation, "manual"), "manual")
         manual_before = snapshot(manual_conversation)
         manual_reservation, = manual_before["reservations"]
-        assert manual_generation == f"execution:{manual_reservation['execution_id']}"
-        assert manual_reservation["owner_instance_id"] == reservation["owner_instance_id"]
+        assert manual_generation == manual_reservation["run_id"]
+        assert manual_reservation["owner_id"] == reservation["owner_id"]
         busy_seed = seed(manual_conversation, "busy")
         skipped = wait_for(lambda: settled(manual_conversation, "SKIPPED"), wait_seconds,
                            "The other scheduler did not report a busy occurrence")
@@ -280,8 +280,8 @@ def exercise_scheduler(urls, stable_url, identity, agent, token, *, control, pro
         )
         assert_persisted_answer(stable, authorization, auto_conversation, final_run["assistant_message_id"], "auto")
         manual_completed = snapshot(manual_conversation)
-        assert [(row["execution_id"], row["status"]) for row in manual_completed["reservations"]] == [
-            (manual_reservation["execution_id"], "COMPLETED"),
+        assert [(row["run_id"], row["status"]) for row in manual_completed["reservations"]] == [
+            (manual_reservation["run_id"], "completed"),
         ]
         settled_completed, settled_loss = exercise_settled_lease_loss(
             settled_conversation, seed(settled_conversation, "settled"), snapshot=snapshot, probe=probe,

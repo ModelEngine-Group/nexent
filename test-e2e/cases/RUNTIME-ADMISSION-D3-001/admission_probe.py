@@ -3,9 +3,9 @@
 """Inspect case-owned conversations and hold bounded history persistence gates."""
 
 import json
-from socket import gethostname
 import sys
 from time import monotonic, sleep
+from unittest.mock import patch
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import UUID, uuid5
@@ -14,11 +14,11 @@ from sqlalchemy import select, text
 
 from contracts.constants.environment import POSTGRES_HOST, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_STATE_REDIS_URL
 from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
+from infrastructure.rdb.agent_execution import AgentExecution, RunIdentity, finish_execution
 from infrastructure.rdb.client import get_db_session
+from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
-from management.db.conversation.models import ConversationMessage, ConversationRecord
-from management.db.execution.models import ExecutionReservation
-from management.services.execution_coordination import transition_runtime_execution
+from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 
 
 POSTGRES_HOSTS = {"nexent-postgresql", "nexent-postgresql.nexent", "nexent-postgresql.nexent.svc",
@@ -46,24 +46,32 @@ def read_batch(token, conversation_ids, *, role="owner"):
                 ConversationRecord.created_by == owner,
                 ConversationRecord.delete_flag == "N",
             )).scalar_one()
-            reservations = session.execute(select(ExecutionReservation).where(
-                ExecutionReservation.tenant_id == tenant,
-                ExecutionReservation.user_id == owner,
-                ExecutionReservation.execution_kind == "agent",
-                ExecutionReservation.execution_key == f"conversation:{identifier}",
-                ExecutionReservation.delete_flag == "N",
-            ).order_by(ExecutionReservation.execution_id)).scalars()
+            executions = session.scalars(select(AgentExecution).where(
+                AgentExecution.tenant_id == tenant,
+                AgentExecution.created_by == owner,
+                AgentExecution.conversation_id == identifier,
+                AgentExecution.delete_flag == "N",
+            ).order_by(AgentExecution.create_time, AgentExecution.run_id)).all()
             messages = session.execute(select(ConversationMessage.message_content).where(
                 ConversationMessage.conversation_id == identifier,
                 ConversationMessage.message_role == "user",
                 ConversationMessage.delete_flag == "N",
             ).order_by(ConversationMessage.message_index)).scalars()
+            stream = runtime_state_service.get_run_state(owner, identifier)
+            event_ids = [event_id for event_id, _ in runtime_state_service.read_stream_events(owner, identifier)]
+            if executions:
+                latest = executions[-1]
+                journal = RunJournal(tenant, owner, identifier, latest.run_id)
+                journal_entries = runtime_state_service.client.xrange(journal.key)
+                if journal_entries:
+                    stream = {"generation": latest.run_id, "execution_id": latest.run_id}
+                    event_ids = [event_id for event_id, _ in journal_entries]
             states[str(identifier)] = {
-                "reservations": [{"id": row.execution_id, "status": row.status, "owner": row.owner_instance_id,
-                                  "agent_scope": row.agent_scope} for row in reservations],
+                "reservations": [{"id": row.run_id, "status": row.status, "owner": row.owner_id,
+                                  "agent_scope": row.agent_scope} for row in executions],
                 "messages": list(messages),
-                "stream": runtime_state_service.get_run_state(owner, identifier),
-                "event_ids": [event_id for event_id, _ in runtime_state_service.read_stream_events(owner, identifier)],
+                "stream": stream,
+                "event_ids": event_ids,
             }
     return {"agent_limit": RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, "conversations": states}
 
@@ -108,39 +116,62 @@ def set_user_message_fault(token, action, identifier):
     return {"installed": installed}
 
 
-def set_stream_reset_fault(token, action, identifier):
-    if (action not in {"install", "remove"} or identifier < 1 or POSTGRES_HOST not in POSTGRES_HOSTS
+def creator_preparation_gate(token, action, identifier):
+    if (action not in {"hold", "probe", "release"} or identifier < 1 or POSTGRES_HOST not in POSTGRES_HOSTS
             or urlsplit(RUNTIME_STATE_REDIS_URL).hostname not in REDIS_HOSTS):
-        raise ValueError("The stream fault requires the isolated test conversation and stores")
+        raise ValueError("The preparation gate requires the case-owned conversation and stores")
     owner = str(uuid5(token, "owner:user"))
+    redis = runtime_state_service.client
+    signal = f"runtime-scaling-test:{token.hex}:creator-preparation:{identifier}"
+    release = signal + ":release"
+    table = ConversationMessage.__table__.fullname
+    name = f"rs_creator_{token.hex}_{identifier:d}"
+    function = f"{ConversationMessage.__table__.schema}.{name}"
     with get_db_session() as session:
-        session.execute(select(ConversationRecord.conversation_id).where(
-            ConversationRecord.conversation_id == identifier,
-            ConversationRecord.created_by == owner,
+        config = session.execute(select(ConversationRecord.workbench_config).where(
+            ConversationRecord.conversation_id == identifier, ConversationRecord.created_by == owner,
             ConversationRecord.delete_flag == "N",
         )).scalar_one()
-    redis = runtime_state_service.client
-    key = runtime_state_service._run_key(owner, identifier)
-    marker = f"runtime-scaling-test:{token.hex}:stream-reset-fault"
-    assert redis.ping()
-    wrongtype_errors = redis.info("errorstats").get("errorstat_WRONGTYPE", {}).get("count", 0)
-    if action == "install":
-        assert redis.set(key, marker, ex=240, nx=True), "Refusing to overwrite an existing Runtime stream state"
-        return {"installed": True, "wrongtype_errors": wrongtype_errors}
+        assert config.get("mode") in {"agent_create", "skill_create"}
+        if action == "probe":
+            return {"stage": redis.get(signal)}
+        if action == "release":
+            return {"released": bool(redis.set(release, "release", ex=120))}
 
-    removed = redis.eval("""
-        if redis.call('TYPE', KEYS[1]).ok == 'string' and redis.call('GET', KEYS[1]) == ARGV[1] then
-            return redis.call('DEL', KEYS[1])
-        end
-        return 0
-    """, 1, key, marker)
-    return {"installed": False, "removed_marker": removed == 1, "wrongtype_errors": wrongtype_errors}
-
-
-def creator_preparation_gate(token, action, identifier):
-    return history_gate(token, action, identifier, phase="creator-preparation",
-                        modes={"agent_create", "skill_create"}, relation_lock="RowExclusiveLock",
-                        receipt="history_write_blocked")
+    try:
+        with get_db_session() as gate:
+            gate.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:signal, 0))"), {"signal": signal})
+            with get_db_session() as session:
+                session.execute(text("SET LOCAL lock_timeout = '5s'"))
+                session.execute(text(
+                    f"CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                    f"BEGIN PERFORM pg_advisory_xact_lock(hashtextextended('{signal}', 0)); RETURN NEW; END; $$"
+                ))
+                session.execute(text(
+                    f"CREATE TRIGGER {name} BEFORE INSERT ON {table} FOR EACH ROW "
+                    f"WHEN (NEW.conversation_id = {identifier:d} AND NEW.message_role = 'user') "
+                    f"EXECUTE FUNCTION {function}()"
+                ))
+            assert redis.set(signal, "ready", ex=120, nx=True)
+            blocked = False
+            deadline = monotonic() + 90
+            while monotonic() < deadline:
+                if redis.get(release):
+                    return {"history_write_blocked": blocked}
+                if not blocked and gate.scalar(text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted "
+                    "AND pg_backend_pid() = ANY(pg_blocking_pids(pid)))"
+                )):
+                    blocked = True
+                    redis.set(signal, "blocked", ex=120)
+                sleep(0.1)
+            raise AssertionError("The Creator history gate was not released")
+    finally:
+        redis.delete(signal, release)
+        with get_db_session() as session:
+            session.execute(text("SET LOCAL lock_timeout = '5s'"))
+            session.execute(text(f"DROP TRIGGER IF EXISTS {name} ON {table}"))
+            session.execute(text(f"DROP FUNCTION IF EXISTS {function}()"))
 
 
 def workbench_finalization_gate(token, action, identifier):
@@ -149,11 +180,12 @@ def workbench_finalization_gate(token, action, identifier):
                         receipt="assistant_projection_blocked")
 
 
-def replay_workbench_completion(token, identifier, old_execution_id):
-    if (min(identifier, old_execution_id) < 1 or POSTGRES_HOST not in POSTGRES_HOSTS
+def replay_workbench_completion(token, identifier, old_run_id):
+    if (identifier < 1 or UUID(hex=old_run_id).hex != old_run_id or POSTGRES_HOST not in POSTGRES_HOSTS
             or urlsplit(RUNTIME_STATE_REDIS_URL).hostname not in REDIS_HOSTS):
         raise ValueError("Completion replay requires the case-owned conversation and coordination stores")
     user = str(uuid5(token, "owner:user"))
+    tenant = str(uuid5(token, "owner:tenant"))
     with get_db_session() as session:
         config = session.scalar(select(ConversationRecord.workbench_config).where(
             ConversationRecord.conversation_id == identifier, ConversationRecord.created_by == user,
@@ -164,22 +196,24 @@ def replay_workbench_completion(token, identifier, old_execution_id):
     key = str(identifier)
     before = read_batch(token, (identifier,))["conversations"][key]
     old, current = before["reservations"]
-    assert old["id"] == old_execution_id and old["status"] == "COMPLETED"
-    assert old["owner"].split(":", 1)[0] == gethostname()[:63]
-    assert current["status"] == "FINALIZING" and old["owner"] != current["owner"]
+    assert old["id"] == old_run_id and old["status"] == "completed"
+    assert current["status"] == "running" and old["owner"] != current["owner"]
     assert old["agent_scope"] == current["agent_scope"] == "workbench_main"
-    assert before["stream"]["generation"] == f"execution:{current['id']}"
-    assert runtime_state_service.client.ping() and not runtime_state_service.get_stream_status(user, identifier)
+    assert before["stream"]["generation"] == current["id"]
 
-    for _ in range(2):
-        assert not transition_runtime_execution(old_execution_id, old["owner"], "COMPLETED"), "Duplicate SQL settlement"
-        runtime_state_service.mark_stream_completed(user, identifier, "completed", generation=f"execution:{old_execution_id}")
-        assert not runtime_state_service.get_stream_status(user, identifier), "Stale generation wrote a Redis completion marker"
-    assert not transition_runtime_execution(current["id"], old["owner"], "COMPLETED"), "Wrong owner settled the active execution"
+    old_identity = RunIdentity(tenant, user, identifier, old_run_id)
+    old_journal = RunJournal(tenant, user, identifier, old_run_id)
+    old_entries = runtime_state_service.client.xrange(old_journal.key)
+    with patch("infrastructure.rdb.agent_execution.OWNER_ID", old["owner"]):
+        for _ in range(2):
+            assert not finish_execution(old_identity, "completed"), "Duplicate SQL settlement"
+            old_journal.repair_terminal("completed")
+            assert runtime_state_service.client.xrange(old_journal.key) == old_entries
+        assert not finish_execution(RunIdentity(tenant, user, identifier, current["id"]), "completed")
     after = read_batch(token, (identifier,))["conversations"][key]
     assert after == before, "Late completion changed the active execution, history or stream"
     return {"duplicate_completions_ignored": 2, "wrong_owner_rejected": True,
-            "old_execution_id": old_execution_id, "surviving_execution_id": current["id"]}
+            "old_execution_id": old_run_id, "surviving_execution_id": current["id"]}
 
 
 def history_gate(token, action, identifier, *, phase, modes, relation_lock, receipt):
@@ -233,7 +267,7 @@ def main():
     if ids == ["--agent-lane"]:
         print("SCALING_ADMISSION " + json.dumps(read_agent_lane(token)))
         return
-    preparation_faults = {"--user-message-fault": set_user_message_fault, "--stream-reset-fault": set_stream_reset_fault}
+    preparation_faults = {"--user-message-fault": set_user_message_fault}
     if ids and ids[0] in preparation_faults:
         option, action, identifier = ids
         print("SCALING_ADMISSION " + json.dumps(preparation_faults[option](token, action, int(identifier))))
@@ -245,7 +279,7 @@ def main():
         return
     if ids[:1] == ["--workbench-replay-completion"]:
         _, identifier, execution_id = ids
-        print("SCALING_ADMISSION " + json.dumps(replay_workbench_completion(token, int(identifier), int(execution_id))))
+        print("SCALING_ADMISSION " + json.dumps(replay_workbench_completion(token, int(identifier), execution_id)))
         return
     role = "foreign" if ids[:1] == ["--foreign"] else "owner"
     if role == "foreign":

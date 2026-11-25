@@ -15,7 +15,7 @@ import signal
 import subprocess
 from tempfile import TemporaryDirectory, TemporaryFile
 import time
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from jsonschema import Draft202012Validator
 import yaml
@@ -106,7 +106,7 @@ def stage_deployment(repository: Path, destination: Path, *, agent_limit=None, s
             if replacements != 1:
                 raise IsolationError(f"Expected one {key} assignment in the staging template")
     if scheduler_case:
-        for key, value in {"AGENT_AUTOMATION_ENABLED": "true", "AGENT_AUTOMATION_POLL_INTERVAL_SECONDS": "1",
+        for key, value in {"AGENT_AUTOMATION_ENABLED": "false", "AGENT_AUTOMATION_POLL_INTERVAL_SECONDS": "1",
                            "AGENT_AUTOMATION_MAX_CONCURRENT_RUNS": "1", "AGENT_AUTOMATION_LEASE_SECONDS": "30"}.items():
             body, replacements = re.subn(rf"(?m)^{key}=.*$", f"{key}={value}", body)
             if replacements > 1:
@@ -116,12 +116,13 @@ def stage_deployment(repository: Path, destination: Path, *, agent_limit=None, s
     if run_ttl_seconds is not None:
         if type(run_ttl_seconds) is not int or not 15 <= run_ttl_seconds <= 120:
             raise ValueError("Expected a bounded test Runtime run TTL")
-        assignment = f"RUNTIME_RUN_TTL_SECONDS={run_ttl_seconds}"
-        body, replacements = re.subn(r"(?m)^RUNTIME_RUN_TTL_SECONDS=.*$", assignment, body)
-        if replacements > 1:
-            raise IsolationError("Duplicate Runtime run TTL in the staging template")
-        if not replacements:
-            body = body.rstrip("\n") + "\n" + assignment + "\n"
+        for key in ("RUNTIME_RUN_TTL_SECONDS", "RUNTIME_STREAM_TTL_SECONDS"):
+            assignment = f"{key}={run_ttl_seconds}"
+            body, replacements = re.subn(rf"(?m)^{key}=.*$", assignment, body)
+            if replacements > 1:
+                raise IsolationError(f"Duplicate {key} in the staging template")
+            if not replacements:
+                body = body.rstrip("\n") + "\n" + assignment + "\n"
     if agent_limit is not None or scheduler_case or agent_lane_queue_size is not None or run_ttl_seconds is not None:
         template.write_text(body, encoding="utf-8")
     constant = Path("backend/contracts/constants/environment.py")
@@ -269,39 +270,40 @@ class RuntimeScalingCluster:
         self._kubectl("wait", "-n", NAMESPACE, f"--for=condition={condition}", resource,
                       f"--timeout={self.profile.wait_seconds}s", timeout=self.profile.wait_seconds + 10)
 
-    def run_fixture_python(self, pod, source, *args):
+    def run_fixture_python(self, pod, source, *args, container=None):
         self.require_owned_namespace()
-        return self._kubectl("exec", "-i", "-n", NAMESPACE, pod, "--", "python", "-", *args,
+        target = ("-c", container) if container else ()
+        return self._kubectl("exec", "-i", "-n", NAMESPACE, pod, *target, "--", "python", "-", *args,
                              stdin=source, timeout=self.profile.wait_seconds)
 
-    def seed_runtime_identities(self, pod, *, creator=False):
+    def seed_runtime_identities(self, _pod, *, creator=False):
         source = Path(__file__).with_name("runtime_scaling_identity_seed.py").read_text(encoding="utf-8")
         options = ("creator",) if creator else ()
-        output = self.run_fixture_python(pod["metadata"]["name"], source, self.run_id, *options)
+        output = self.run_fixture_python("deployment/nexent-config", source, self.run_id, *options)
         record, = (line.removeprefix("SCALING_IDENTITIES ") for line in output.splitlines()
                    if line.startswith("SCALING_IDENTITIES "))
         return json.loads(record)
 
-    def seed_runtime_agent(self, pod, *, other_scope=False, storage_pair=False):
+    def seed_runtime_agent(self, _pod, *, other_scope=False, storage_pair=False):
         source = Path(__file__).with_name("runtime_scaling_agent_seed.py").read_text(encoding="utf-8")
         if other_scope and storage_pair:
             raise ValueError("Select one Runtime Agent seed scenario")
         options = ("storage-pair",) if storage_pair else ("other-scope",) if other_scope else ()
-        output = self.run_fixture_python(pod["metadata"]["name"], source, self.run_id, *options)
+        output = self.run_fixture_python("deployment/nexent-config", source, self.run_id, *options)
         record, = (line.removeprefix("SCALING_AGENT ") for line in output.splitlines()
                    if line.startswith("SCALING_AGENT "))
         return json.loads(record)
 
-    def seed_runtime_workbench(self, pod):
+    def seed_runtime_workbench(self, _pod):
         source = Path(__file__).with_name("runtime_scaling_agent_seed.py").read_text(encoding="utf-8")
-        output = self.run_fixture_python(pod["metadata"]["name"], source, self.run_id, "workbench")
+        output = self.run_fixture_python("deployment/nexent-config", source, self.run_id, "workbench")
         record, = (line.removeprefix("SCALING_WORKBENCH ") for line in output.splitlines()
                    if line.startswith("SCALING_WORKBENCH "))
         return json.loads(record)
 
-    def seed_runtime_creators(self, pod, kind):
+    def seed_runtime_creators(self, _pod, kind):
         source = Path(__file__).with_name("runtime_scaling_agent_seed.py").read_text(encoding="utf-8")
-        output = self.run_fixture_python(pod["metadata"]["name"], source, self.run_id, "creator", kind)
+        output = self.run_fixture_python("deployment/nexent-config", source, self.run_id, "creator", kind)
         record, = (line.removeprefix("SCALING_CREATORS ") for line in output.splitlines()
                    if line.startswith("SCALING_CREATORS "))
         return json.loads(record)
@@ -331,6 +333,29 @@ class RuntimeScalingCluster:
         })
         self.wait_for_condition(f"pod/{MODEL_FIXTURE}", "Ready")
 
+    def create_evaluation_worker(self, pod, source):
+        _, upstream = self._owned_runtime_origin(pod)
+        deployment = self.resources("deployment", "nexent-config")
+        if deployment["metadata"].get("annotations", {}).get("meta.helm.sh/release-name") != NAMESPACE:
+            raise IsolationError("Evaluation requires the Management image of the owned release")
+        template = deepcopy(deployment["spec"]["template"]["spec"])
+        container, = template["containers"]
+        for field in ("livenessProbe", "startupProbe", "ports", "args"):
+            container.pop(field, None)
+        container["command"] = ["python", "-u", "-c", source, self.run_id, "serve-evaluation"]
+        container["env"] = [entry for entry in container["env"] if entry["name"] != "RUNTIME_SERVICE_URL"]
+        container["env"].append({"name": "RUNTIME_SERVICE_URL", "value": upstream})
+        container["readinessProbe"] = {"exec": {"command": [
+            "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8091/ready', timeout=1).close()",
+        ]}, "periodSeconds": 2}
+        template.update(restartPolicy="Never", automountServiceAccountToken=False, nodeName=pod["spec"]["nodeName"])
+        name = f"nexent-rs-evaluation-{self.run_id[:8]}-{uuid4().hex[:8]}"
+        self.create_namespaced_fixture({"apiVersion": "v1", "kind": "Pod", "metadata": {
+            "name": name, "labels": {"app": "nexent-rs-evaluation", RUN_LABEL: self.run_id},
+        }, "spec": template})
+        self.wait_for_condition(f"pod/{name}", "Ready")
+        return name
+
     def runtime_model_control(self, action):
         if action not in {"probe", "release"} and not re.fullmatch(r"release/[a-z][a-z0-9-]{0,31}", action):
             raise ValueError("Unexpected Runtime model fixture action")
@@ -355,7 +380,7 @@ class RuntimeScalingCluster:
         annotations = metadata.get("annotations", {})
         selector = spec.get("selector", {}).get("matchLabels", {})
         if (metadata.get("namespace") != NAMESPACE or annotations.get("meta.helm.sh/release-name") != NAMESPACE
-                or spec.get("replicas") != 2 or "nexent.io/maintenance-target-replicas" in annotations
+                or spec.get("replicas") != 2
                 or selector.get("app") != RUNTIME):
             raise IsolationError("Placement requires the active, owned two-replica Runtime Deployment")
         pod_spec = spec["template"]["spec"]
@@ -407,41 +432,48 @@ class RuntimeScalingCluster:
             raise IsolationError(f"{container} in Pod {metadata['name']} does not report a candidate backend image digest")
         return {"pod": metadata["name"], "uid": metadata["uid"], "digest": match.group(1)}
 
-    def maintenance_image_receipts(self, epoch, *, phase="Succeeded"):
-        if str(UUID(epoch)) != epoch or phase not in {"Succeeded", "Failed"}:
-            raise ValueError("Expected a canonical maintenance batch and terminal Pod phase")
+    def bootstrap_image_receipts(self):
         self.require_owned_namespace()
-        name = f"nexent-runtime-maintenance-{epoch}"
-        job = self.resources("job", name)
-        if not job or job.get("metadata", {}).get("labels", {}).get("nexent.io/maintenance-epoch") != epoch:
-            raise IsolationError("The expected maintenance Job is missing")
+        jobs = self.resources("jobs", "-l", f"app=nexent-system-bootstrap,app.kubernetes.io/instance={NAMESPACE}")["items"]
+        completed = [job for job in jobs if job.get("status", {}).get("succeeded") == 1]
+        if len(completed) != 1:
+            raise IsolationError("The expected completed bootstrap Job is missing or ambiguous")
+        job, = completed
+        name = job["metadata"]["name"]
         uid = job["metadata"]["uid"]
         pods = self.resources("pods", "-l", f"job-name={name}")["items"]
         owned = [pod for pod in pods if any(
             ref.get("kind") == "Job" and ref.get("name") == name and ref.get("uid") == uid
             for ref in pod["metadata"].get("ownerReferences", ())
-        )]
-        if not any(pod.get("status", {}).get("phase") == phase for pod in owned):
-            raise IsolationError(f"No owned maintenance Pod reached {phase} for the batch")
-        receipts = [self._backend_image_receipt(pod, "maintenance") for pod in owned
-                    if pod.get("status", {}).get("phase") in {"Succeeded", "Failed"}]
-        write_case_evidence(f"maintenance-image-{self.run_id}-{epoch}-{uid}", {"phase": phase, "pods": receipts})
+        ) and pod.get("status", {}).get("phase") == "Succeeded"]
+        if len(owned) != 1:
+            raise IsolationError("The expected successful bootstrap Pod is missing or ambiguous")
+        receipts = [self._backend_image_receipt(pod, "nexent-config") for pod in owned]
+        write_case_evidence(f"runtime-bootstrap-image-{self.run_id}-{uid}", {"job": name, "pods": receipts})
         return receipts
+
+    def fixed_runtime_deployment(self):
+        deployment = self.resources("deployment", RUNTIME)
+        containers = deployment["spec"]["template"]["spec"]["containers"]
+        container, = (item for item in containers if item["name"] == RUNTIME)
+        values = {entry["name"]: entry.get("value") for entry in container.get("env", ())}
+        if values.get("NEXENT_RECOVERY_MODE") != "fixed_replicas" or "NEXENT_MAINTENANCE_EPOCH" in values:
+            raise IsolationError("Runtime must use fixed-replica startup without a maintenance epoch")
+        return deployment
 
     def _verify_deployed_backend(self, replicas):
         self.require_owned_namespace()
-        deployment = self.resources("deployment", RUNTIME)
-        epoch = deployment["metadata"]["annotations"]["nexent.io/maintenance-epoch"]
+        deployment = self.fixed_runtime_deployment()
         if deployment["spec"]["replicas"] != replicas:
             raise IsolationError("The Runtime Deployment does not have the test's target replica count")
         pods = self.runtime_pods()
         if len(pods) != replicas:
             raise IsolationError("Cannot attribute the expected number of Runtime Pods to this deployment")
         receipts = [self._backend_image_receipt(pod, RUNTIME) for pod in pods]
-        maintenance = self.maintenance_image_receipts(epoch)
-        write_case_evidence(f"runtime-images-{self.run_id}-{epoch}", {
-            "epoch": epoch, "cluster_uid": self.profile.cluster_uid, "namespace_uid": self.namespace_uid,
-            "runtime": receipts, "maintenance": maintenance,
+        revision = deployment["metadata"]["generation"]
+        write_case_evidence(f"runtime-images-{self.run_id}-{revision}", {
+            "generation": revision, "cluster_uid": self.profile.cluster_uid, "namespace_uid": self.namespace_uid,
+            "runtime": receipts,
         })
 
     def _owned_runtime_origin(self, pod):
@@ -462,7 +494,7 @@ class RuntimeScalingCluster:
             raise IsolationError("Upstream target must have a routable Pod IP")
         return live, f"http://{address if address.version == 4 else f'[{address}]'}:5014"
 
-    def create_runtime_gateway(self, pod):
+    def create_runtime_gateway(self, pod, *, scheduler=False):
         """Use a separate, authenticated Gateway to route to one current Runtime Pod."""
         _, upstream = self._owned_runtime_origin(pod)
 
@@ -482,6 +514,30 @@ class RuntimeScalingCluster:
             raise IsolationError("The Runtime routing Gateway must retain production authentication")
         runtime_url.clear()
         runtime_url.update(name="GATEWAY_RUNTIME_URL", value=upstream)
+        # Public chat crosses Management before the signed Runtime request.
+        management = self.resources("deployment", "nexent-config")
+        management_template = deepcopy(management["spec"]["template"]["spec"])
+        if (management["metadata"].get("namespace") != NAMESPACE
+                or management["metadata"].get("annotations", {}).get("meta.helm.sh/release-name") != NAMESPACE
+                or management_template.get("hostNetwork")):
+            raise IsolationError("The Management template is not from the owned Helm release")
+        management_container, = management_template["containers"]
+        settings = {"RUNTIME_SERVICE_URL": upstream, "NEXENT_SQL_STARTUP_MODE": "off",
+                    "AGENT_AUTOMATION_ENABLED": "true" if scheduler else "false",
+                    "DREAMING_SCHEDULER_ENABLED": "false"}
+        management_container["env"] = [
+            entry for entry in management_container.get("env", ()) if entry["name"] not in settings
+        ] + [{"name": key, "value": value} for key, value in settings.items()]
+        for key in ("GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL"):
+            endpoint, = (entry for entry in entries if entry["name"] == key)
+            endpoint.clear()
+            endpoint.update(name=key, value="http://127.0.0.1:5010")
+        pod_spec["containers"].append(management_container)
+        volumes = pod_spec.get("volumes", []) + management_template.get("volumes", [])
+        if len({volume["name"] for volume in volumes}) != len(volumes):
+            raise IsolationError("Gateway and Management fixture volumes overlap")
+        if volumes:
+            pod_spec["volumes"] = volumes
 
         gateway_name = f"nexent-rs-gw-{self.run_id[:8]}-{uuid4().hex[:8]}"
         self.create_namespaced_fixture({"apiVersion": "v1", "kind": "Pod", "metadata": {
@@ -489,6 +545,20 @@ class RuntimeScalingCluster:
         }, "spec": pod_spec})
         self.wait_for_condition(f"pod/{gateway_name}", "Ready")
         return gateway_name
+
+    def remove_runtime_gateway(self, name):
+        self.require_owned_namespace()
+        pod = self.resources("pod", name)
+        metadata = pod["metadata"]
+        labels = metadata.get("labels", {})
+        if (metadata.get("namespace") != NAMESPACE or labels.get("app") != ROUTING_GATEWAY
+                or labels.get(RUN_LABEL) != self.run_id):
+            raise IsolationError("Refusing to remove an unowned directed Gateway")
+        options = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": metadata["uid"]}}
+        self._kubectl("delete", "--raw", f"/api/v1/namespaces/{NAMESPACE}/pods/{name}", "-f", "-",
+                      stdin=json.dumps(options))
+        self._kubectl("wait", "-n", NAMESPACE, "--for=delete", f"pod/{name}",
+                      f"--timeout={self.profile.wait_seconds}s", timeout=self.profile.wait_seconds + 10)
 
     def _switch_runtime_service(self, uid, previous, target):
         self.require_owned_namespace()
@@ -550,7 +620,7 @@ class RuntimeScalingCluster:
             self._wait_runtime_service_targets(runtime_uids)
 
     def runtime_transport_control(self, action):
-        if action not in {"probe", "cut/web-cut", "cut/northbound-cut"}:
+        if action not in {"probe", "cut/web-cut", "cut/northbound-cut", "finish/web-cut", "finish/northbound-cut"}:
             raise ValueError("Unexpected Runtime transport fixture action")
         self.require_owned_namespace()
         labels = self.resources("pod", TRANSPORT_FIXTURE)["metadata"].get("labels", {})
@@ -559,7 +629,7 @@ class RuntimeScalingCluster:
         source = (
             "import sys; from urllib.request import urlopen; action, = sys.argv[1:]; "
             "print(urlopen('http://127.0.0.1:5014/test-relay/' + action, "
-            "data=b'' if action.startswith('cut/') else None, timeout=4).read().decode())"
+            "data=b'' if action != 'probe' else None, timeout=4).read().decode())"
         )
         return json.loads(self.run_fixture_python(TRANSPORT_FIXTURE, source, action))
 
@@ -639,20 +709,6 @@ class RuntimeScalingCluster:
         path = f"/api/v1/namespaces/{NAMESPACE}/pods/{metadata['name']}"
         self._kubectl("delete", "--raw", path, "-f", "-", stdin=json.dumps(options))
 
-    def committed_maintenance_count(self, epoch):
-        if str(UUID(epoch)) != epoch:
-            raise ValueError("Expected a canonical maintenance UUID")
-        self.require_owned_namespace()
-        result = self._kubectl(
-            "exec", "-i", "-n", NAMESPACE, "deployment/nexent-postgresql", "-c", "postgresql", "--", "sh", "-c",
-            'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" '
-            '-X -qAt -w -v ON_ERROR_STOP=1 -v "batch=$1"', "runtime-scaling-d5", epoch,
-            stdin="""SELECT count(*) FROM nexent.execution_reservation_t
-                WHERE execution_kind = 'maintenance' AND service_role = 'runtime' AND status = 'COMPLETED'
-                  AND delete_flag = 'N' AND finished_at IS NOT NULL AND maintenance_epoch = :'batch';""",
-        )
-        return int(result.strip())
-
     def require_owned_namespace(self):
         self._require_test_cluster()
         current = self._read("namespace", NAMESPACE, "--ignore-not-found") or {}
@@ -684,11 +740,11 @@ class RuntimeScalingCluster:
                 raise IsolationError("Owned namespace or dynamically provisioned storage did not disappear")
             time.sleep(2)
 
-    def deploy(self, script: Path, replicas: int | None = None, *, initial=False, retry_epoch=None, helm_gate=None,
+    def deploy(self, script: Path, replicas: int | None = None, *, initial=False, helm_gate=None,
                kubectl_gate=None):
         self.require_owned_namespace()
         valid_target = initial if replicas is None else type(replicas) is int and 1 <= replicas <= 2147483647
-        if not valid_target or (initial and retry_epoch):
+        if not valid_target:
             raise ValueError("Invalid test deployment target")
         command = ["bash", str(script), "--defaults", "--release-scope", "all" if initial else "nexent",
                    "--components", "infrastructure,application,data-process", "--persistence-mode", "dynamic",
@@ -699,8 +755,6 @@ class RuntimeScalingCluster:
             command.extend(["--runtime-replicas", str(replicas)])
         if self.profile.image_registry_prefix:
             command.extend(["--image-registry-prefix", self.profile.image_registry_prefix])
-        if retry_epoch:
-            command.extend(["--retry-runtime-maintenance", retry_epoch])
         environment = dict(self._command_env)
         gates = {}
         for tool, gate in (("helm", helm_gate), ("kubectl", kubectl_gate)):

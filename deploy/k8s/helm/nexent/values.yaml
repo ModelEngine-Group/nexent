@@ -6,11 +6,9 @@ global:
   sandboxSingleNodeDevelopment: true
   # Confirm only after the target cluster passes the network-policy negative probe.
   sandboxNetworkPolicyVerified: true
-  # Deployment scripts keep business Pods stopped until bootstrap and Runtime maintenance succeed.
+  # Deployment scripts keep business Pods stopped until bootstrap succeeds.
   businessPaused: false
-  maintenanceEpoch: ""
-  renderRuntimeMaintenanceJob: false
-  runtimeMaintenanceTimeoutSeconds: 600
+  bootstrapRunId: ""
   systemBootstrapTimeoutSeconds: 1800
   namespace: nexent
   dataDir: "/var/lib/nexent-data"

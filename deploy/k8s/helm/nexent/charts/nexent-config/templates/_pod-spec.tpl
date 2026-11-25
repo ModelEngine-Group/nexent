@@ -35,12 +35,8 @@ containers:
 {{ include "nexent.backendPlatformEnv" . | indent 6 }}
       - name: NEXENT_SQL_STARTUP_MODE
         value: "migrate"
-{{- if $global.maintenanceEpoch }}
       - name: NEXENT_RECOVERY_MODE
-        value: "maintenance"
-      - name: NEXENT_MAINTENANCE_EPOCH
-        value: {{ $global.maintenanceEpoch | quote }}
-{{- end }}
+        value: "fixed_replicas"
       - name: DEPLOYMENT_VERSION
         value: {{ .Values.global.deploymentVersion | quote }}
       - name: skip_proxy

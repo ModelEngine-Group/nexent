@@ -68,7 +68,6 @@ LOCAL_NODE_NAME=""
 EXISTING_CLAIM_PREFIX=""
 RUNTIME_REPLICAS="1"
 SAVED_RUNTIME_CHART_REPLICAS=""
-RUNTIME_MAINTENANCE_RETRY_EPOCH=""
 K8S_WAIT_TIMEOUT_SECONDS="${NEXENT_K8S_WAIT_TIMEOUT_SECONDS:-600}"
 
 # Parse command line arguments. The optional "apply" command is kept as a deploy alias.
@@ -164,12 +163,8 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --retry-runtime-maintenance)
-      if ! [[ "${2:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-        echo "Error: --retry-runtime-maintenance requires a canonical maintenance UUID." >&2
-        exit 1
-      fi
-      RUNTIME_MAINTENANCE_RETRY_EPOCH="$2"
-      shift 2
+      echo "Error: --retry-runtime-maintenance was removed. Rerun the application deployment during an idle window." >&2
+      exit 1
       ;;
     --wait-timeout)
       K8S_WAIT_TIMEOUT_SECONDS="$2"
@@ -740,7 +735,7 @@ ensure_namespace() {
 }
 
 helm_application_chart() {
-    local paused="$1" epoch="$2"
+    local paused="$1" bootstrap_run_id="$2"
     shift 2
     helm "$@" "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
         --namespace "$NAMESPACE" \
@@ -749,10 +744,9 @@ helm_application_chart() {
         -f "$GENERATED_PERSISTENCE_VALUES" \
         -f "$GENERATED_SECRETS_VALUES" \
         --set global.businessPaused="$paused" \
-        --set-string global.maintenanceEpoch="$epoch" \
+        --set-string global.bootstrapRunId="$bootstrap_run_id" \
         --set nexent-runtime.replicaCount="$RUNTIME_REPLICAS" \
         --set global.systemBootstrapTimeoutSeconds="$((K8S_WAIT_TIMEOUT_SECONDS * 3))" \
-        --set global.runtimeMaintenanceTimeoutSeconds="$K8S_WAIT_TIMEOUT_SECONDS" \
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
@@ -763,13 +757,10 @@ helm_upgrade_application_release() {
 }
 
 validate_application_release() {
-    local epoch="$1" paused
+    local bootstrap_run_id="$1" paused
     for paused in true false; do
-        helm_application_chart "$paused" "$epoch" template >/dev/null || return 1
+        helm_application_chart "$paused" "$bootstrap_run_id" template >/dev/null || return 1
     done
-    if [ -n "$epoch" ]; then
-        render_runtime_maintenance_job "$epoch" >/dev/null || return 1
-    fi
 }
 
 stop_runtime_deploy_lock() {
@@ -814,32 +805,29 @@ start_runtime_deploy_lock() {
         return 1
     fi
     if ! [[ "$deployment_db_owner" =~ ^[0-9]+$ ]]; then
-        echo "Error: another deployment holds the Runtime maintenance window." >&2
+        echo "Error: another application deployment holds the Runtime deployment lock." >&2
         return 1
     fi
 }
 
 require_runtime_deploy_lock() {
-    local epoch="${1:-}" completed='' owner
-    if [ -n "$epoch" ]; then
-        [[ "$epoch" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
-        completed="AND EXISTS (SELECT 1 FROM nexent.execution_reservation_t WHERE maintenance_epoch = '$epoch' AND execution_kind = 'maintenance' AND service_role = 'runtime' AND status = 'COMPLETED' AND delete_flag = 'N' AND finished_at IS NOT NULL)"
-    fi
-    if ! owner=$(runtime_deploy_db_query "SELECT pg_backend_pid() WHERE EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted) $completed;") ||
+    local owner
+    if ! owner=$(runtime_deploy_db_query "SELECT pg_backend_pid() WHERE EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted);") ||
         [ "$owner" != "$deployment_db_owner" ]; then
-        echo "Error: Runtime deployment lock or expected maintenance completion could not be verified." >&2
+        echo "Error: Runtime deployment lock could not be verified." >&2
         return 1
     fi
 }
 
-require_previous_maintenance_stopped() {
+require_previous_deployment_jobs_stopped() {
+    # An older release may still have a maintenance Job writing shared data.
     local selector="app in (nexent-system-bootstrap,nexent-runtime-maintenance),app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME"
     local jobs pods name complete failed phase
     jobs=$(kubectl get jobs -n "$NAMESPACE" -l "$selector" -o \
         'jsonpath={range .items[*]}{.metadata.name}{":"}{.status.conditions[?(@.type=="Complete")].status}{":"}{.status.conditions[?(@.type=="Failed")].status}{"\n"}{end}') || return 1
     while IFS=: read -r name complete failed; do
         if [ -n "$name" ] && [ "$complete" != True ] && [ "$failed" != True ]; then
-            echo "Error: previous bootstrap or Runtime maintenance Job $NAMESPACE/$name is not terminal; deployment will not pause or start a new batch." >&2
+            echo "Error: previous deployment Job $NAMESPACE/$name is not terminal." >&2
             return 1
         fi
     done <<< "$jobs"
@@ -848,7 +836,7 @@ require_previous_maintenance_stopped() {
         'jsonpath={range .items[*]}{.metadata.name}{":"}{.status.phase}{"\n"}{end}') || return 1
     while IFS=: read -r name phase; do
         if [ -n "$name" ] && [ "$phase" != Succeeded ] && [ "$phase" != Failed ]; then
-            echo "Error: previous bootstrap or Runtime maintenance Pod $NAMESPACE/$name is not terminal; deployment will not pause or start a new batch." >&2
+            echo "Error: previous deployment Pod $NAMESPACE/$name is not terminal." >&2
             return 1
         fi
     done <<< "$pods"
@@ -902,9 +890,9 @@ bootstrap_job_failed() {
 }
 
 run_system_agent_bootstrap() {
-    local epoch="$1" replicas="${2:-1}" jobs job pod status elapsed
+    local bootstrap_run_id="$1" replicas="${2:-1}" jobs job pod status elapsed
     jobs=$(kubectl get jobs -n "$NAMESPACE" \
-        -l "app=nexent-system-bootstrap,app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME,nexent.io/maintenance-epoch=$epoch" \
+        -l "app=nexent-system-bootstrap,app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME,nexent.io/bootstrap-run-id=$bootstrap_run_id" \
         --sort-by=.metadata.creationTimestamp \
         -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
     job=$(printf '%s\n' "$jobs" | sed -n '$p')
@@ -947,56 +935,6 @@ run_system_agent_bootstrap() {
         sleep 2
         elapsed=$((elapsed + 2))
     done
-}
-
-render_runtime_maintenance_job() {
-    helm_application_chart true "$1" template \
-        --set global.renderRuntimeMaintenanceJob=true \
-        --show-only charts/nexent-config/templates/maintenance-job.yaml
-}
-
-prepare_runtime_maintenance_retry() {
-    local epoch="$1" job="nexent-runtime-maintenance-$1" existing
-    existing=$(kubectl get job "$job" -n "$NAMESPACE" --ignore-not-found -o \
-        'jsonpath={.metadata.labels.app\.kubernetes\.io/instance}:{.metadata.labels.nexent\.io/maintenance-epoch}:{.status.conditions[?(@.type=="Failed")].status}') || return 1
-    case "$existing" in
-        '') return 0 ;;
-        "$APPLICATION_RELEASE_NAME:$epoch:True")
-            kubectl delete job "$job" -n "$NAMESPACE" --cascade=foreground --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
-            ;;
-        *)
-            echo "Error: existing Runtime maintenance Job is not a failed Job of this release and batch; retry did not replace it." >&2
-            return 1
-            ;;
-    esac
-}
-
-run_runtime_maintenance_job() {
-    local epoch="$1" job="nexent-runtime-maintenance-$1" status elapsed=0
-    render_runtime_maintenance_job "$epoch" | kubectl apply -f - || return 1
-    while true; do
-        status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.succeeded}:{.status.failed}') || return 1
-        case "$status" in
-            *:[1-9]*) break ;;
-            1:*) return 0 ;;
-        esac
-        [ "$elapsed" -lt "$K8S_WAIT_TIMEOUT_SECONDS" ] || break
-        sleep 2
-        elapsed=$((elapsed + 2))
-    done
-    kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true --tail=200 >&2 || true
-    echo "Error: Runtime maintenance batch $epoch did not succeed; business workloads remain paused." >&2
-    return 1
-}
-
-require_paused_runtime_epoch() {
-    local epoch="$1" actual
-    actual=$(kubectl get deployment nexent-runtime -n "$NAMESPACE" -o \
-        'jsonpath={.metadata.annotations.meta\.helm\.sh/release-name}:{.metadata.annotations.nexent\.io/maintenance-epoch}:{.spec.replicas}:{.metadata.annotations.nexent\.io/maintenance-target-replicas}') || return 1
-    if [ "$actual" != "$APPLICATION_RELEASE_NAME:$epoch:0:$RUNTIME_REPLICAS" ]; then
-        echo "Error: Runtime Deployment does not match the paused maintenance batch and target replica count." >&2
-        return 1
-    fi
 }
 
 require_runtime_rwx_claim() {
@@ -1046,40 +984,30 @@ require_runtime_shared_storage() {
 deploy_application_release() {
     (
         set -o pipefail
-        local epoch='' deployment_db_read deployment_db_write deployment_db_pid deployment_db_owner
+        local bootstrap_run_id='' deployment_db_read deployment_db_write deployment_db_pid deployment_db_owner
         if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-            if [ -n "$RUNTIME_MAINTENANCE_RETRY_EPOCH" ]; then
-                epoch="$RUNTIME_MAINTENANCE_RETRY_EPOCH"
-            elif ! IFS= read -r epoch < /proc/sys/kernel/random/uuid; then
-                epoch=$(uuidgen | tr '[:upper:]' '[:lower:]') || return 1
+            if ! IFS= read -r bootstrap_run_id < /proc/sys/kernel/random/uuid; then
+                bootstrap_run_id=$(uuidgen | tr '[:upper:]' '[:lower:]') || return 1
             fi
         fi
-        validate_application_release "$epoch" || return 1
-        if [ -n "$epoch" ]; then
+        validate_application_release "$bootstrap_run_id" || return 1
+        if [ -n "$bootstrap_run_id" ]; then
             start_runtime_deploy_lock || return 1
-            require_previous_maintenance_stopped || return 1
+            require_previous_deployment_jobs_stopped || return 1
             require_runtime_deploy_lock || return 1
             if [ "$RUNTIME_REPLICAS" -gt 1 ] && [ "$PERSISTENCE_MODE" = "existing" ]; then
                 require_runtime_shared_storage || return 1
                 require_runtime_deploy_lock || return 1
             fi
-            if [ -n "$RUNTIME_MAINTENANCE_RETRY_EPOCH" ]; then
-                require_paused_runtime_epoch "$epoch" || return 1
-                require_runtime_deploy_lock || return 1
-                prepare_runtime_maintenance_retry "$epoch" || return 1
-            fi
             stop_old_business_workloads || return 1
             require_runtime_deploy_lock || return 1
-            helm_upgrade_application_release true "$epoch" || return 1
+            helm_upgrade_application_release true "$bootstrap_run_id" || return 1
             require_runtime_deploy_lock || return 1
-            run_system_agent_bootstrap "$epoch" "$RUNTIME_REPLICAS" || return 1
+            run_system_agent_bootstrap "$bootstrap_run_id" "$RUNTIME_REPLICAS" || return 1
             require_runtime_deploy_lock || return 1
-            run_runtime_maintenance_job "$epoch" || return 1
-            require_paused_runtime_epoch "$epoch" || return 1
-            require_runtime_deploy_lock "$epoch" || return 1
         fi
-        helm_upgrade_application_release false "$epoch" || return 1
-        if [ -n "$epoch" ]; then
+        helm_upgrade_application_release false "" || return 1
+        if [ -n "$bootstrap_run_id" ]; then
             require_runtime_deploy_lock || return 1
         fi
         wait_for_nexent_ready || return 1
@@ -1619,15 +1547,6 @@ apply() {
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
 
-    if [ -n "$RUNTIME_MAINTENANCE_RETRY_EPOCH" ]; then
-        if [ "$RELEASE_SCOPE" != "nexent" ] || ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application ||
-            [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" = "true" ]; then
-            echo "Error: --retry-runtime-maintenance requires --release-scope nexent with application enabled and without secret rotation." >&2
-            return 1
-        fi
-        require_paused_runtime_epoch "$RUNTIME_MAINTENANCE_RETRY_EPOCH" || return 1
-    fi
-
     # Step 2: Render release-specific values with image tags and persistence settings.
     update_values_yaml
     if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
@@ -1797,7 +1716,7 @@ apply() {
     render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
 
-    # Step 8: Pause business Pods, run bootstrap and Runtime maintenance, then activate the release.
+    # Step 8: Stop old business Pods and run bootstrap before activating the release.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
@@ -1866,8 +1785,7 @@ print_usage() {
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
         echo "  --persistence-mode MODE    local、dynamic 或 existing"
-        echo "  --runtime-replicas COUNT   显式覆盖停机维护后的 Runtime 副本数"
-        echo "  --retry-runtime-maintenance UUID   重试仍处于暂停状态的 Runtime 维护批次"
+        echo "  --runtime-replicas COUNT   设置无业务停机调整后的 Runtime 副本数"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
         echo "  --local-path PATH          本地 PV 基础路径"
         echo "  --local-node-name NAME     已废弃；local 模式使用 hostPath，不需要 nodeAffinity"
@@ -1902,8 +1820,7 @@ print_usage() {
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
-    echo "  --runtime-replicas COUNT   Explicit override of Runtime replicas after offline maintenance"
-    echo "  --retry-runtime-maintenance UUID   Retry a paused Runtime maintenance batch"
+    echo "  --runtime-replicas COUNT   Set the Runtime replica count after an idle deployment"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"
     echo "  --local-node-name NAME     Deprecated; local mode uses hostPath and does not require nodeAffinity"

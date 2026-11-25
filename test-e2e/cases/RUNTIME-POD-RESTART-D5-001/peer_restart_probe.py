@@ -3,20 +3,19 @@
 """Prepare and inspect case-owned evaluation runs and the peer-restart workspace."""
 
 from concurrent.futures import ThreadPoolExecutor
-from hashlib import sha256
+from dataclasses import asdict
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-from pathlib import Path
 import sys
 from time import monotonic, sleep
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import UUID, uuid5
 
+from fastapi import HTTPException
 from sqlalchemy import select, text
 
-from contracts.constants.environment import AGENT_WORKSPACE_ROOT, POSTGRES_HOST
-from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
-from gateway.identity.internal_tokens import generate_internal_runtime_jwt
+from contracts.constants.environment import POSTGRES_HOST
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.evaluation.models import AgentEvaluation, AgentEvaluationCase, Evaluator
@@ -24,18 +23,18 @@ from management.db.evaluation.runs import (
     create_agent_evaluation, create_agent_evaluation_cases, update_agent_evaluation_status,
 )
 from management.db.evaluation.sets import create_evaluation_set, get_evaluation_set_cases_all, insert_evaluation_set_cases
-from management.db.execution.models import ExecutionReservation
-from management.db.execution.repository import lock_admission_scope
+from management.services.evaluation.dispatch import dispatch_agent_evaluation_run
 from management.services.evaluation.scoring import validate_code_evaluator
+from management.thread_management import config_thread_manager
 
 
 EVALUATOR = "Restart fixture exact match"
 RESTART_TAG = "restart-eval"
 ADMISSION_TAGS = {"admission-eval-race": "race", "admission-eval-lost-claim": "claim"}
 WORKER_TAGS = tuple(f"admission-eval-worker-{index}" for index in range(1, 7))
-QUEUED_TAG = "admission-eval-backlog"
+QUEUED_TAGS = tuple(f"admission-eval-queue-{index}" for index in range(1, 13))
 OVERFLOW_TAG = "admission-eval-overflow"
-SUBMISSION_TAGS = (*WORKER_TAGS, QUEUED_TAG, OVERFLOW_TAG)
+SUBMISSION_TAGS = (*WORKER_TAGS, *QUEUED_TAGS, OVERFLOW_TAG)
 LOST_CLAIM_REASON = "Case changed the pending status while the conditional claim was waiting"
 CODE = '''def evaluate(query, expected, actual, runtime_events, **kwargs):
     return {"score": 1.0 if expected == actual else 0.0, "reason": "Exact answer match"}
@@ -97,28 +96,57 @@ def read_evaluation(token, evaluation_id, tag=RESTART_TAG):
             AgentEvaluationCase.created_by == owner, AgentEvaluationCase.delete_flag == "N",
         ))
         assert evaluation_case.inputs["query"] == query
-        reservations = session.scalars(select(ExecutionReservation).where(
-            ExecutionReservation.tenant_id == tenant, ExecutionReservation.user_id == owner,
-            ExecutionReservation.execution_key == f"evaluation:{evaluation_id}",
-            ExecutionReservation.execution_kind == "evaluation", ExecutionReservation.delete_flag == "N",
-        ))
         return {"run": {"id": run.agent_evaluation_id, "status": run.status, "progress": run.progress_done,
                         "score": run.score_overall, "error": run.error_message},
                 "case": {"id": evaluation_case.agent_evaluation_case_id, "status": evaluation_case.status,
                          "predict": evaluation_case.predict, "score": evaluation_case.score,
-                         "error": evaluation_case.error_message},
-                "reservations": [{"id": row.execution_id, "status": row.status, "owner": row.owner_instance_id,
-                                  "epoch": row.maintenance_epoch, "error": row.error_code} for row in reservations]}
+                         "error": evaluation_case.error_message}}
 
 
-def request_evaluation(token, evaluation_id, port):
-    assert port in (5014, 5015)
+def serve_evaluation(token):
     owner, tenant = fixture_identity(token)
-    request = Request(f"http://127.0.0.1:{port}/api/agent-evaluations/internal/run",
-                      json.dumps({"agent_evaluation_id": evaluation_id}).encode(), headers={
-                          "Content-Type": "application/json",
-                          "Authorization": f"Bearer {generate_internal_runtime_jwt(owner, tenant)}",
-                      }, method="POST")
+    config_thread_manager.start()
+
+    class Handler(BaseHTTPRequestHandler):
+        def respond(self, status, data):
+            raw = json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            if self.path == "/ready":
+                self.respond(200, {"ready": True})
+            elif self.path == "/lane":
+                snapshot = asdict(config_thread_manager.snapshot())
+                lane, = (item for item in snapshot["lanes"] if item["name"] == "evaluation")
+                self.respond(200, {**lane, "rejected_count": snapshot["rejected_count"]})
+            else:
+                self.respond(404, {})
+
+        def do_POST(self):
+            size = int(self.headers.get("Content-Length", 0))
+            if self.path != "/evaluate" or not 0 < size <= 96:
+                self.respond(404, {})
+                return
+            request = json.loads(self.rfile.read(size))
+            evaluation_id, tag = request["id"], request["tag"]
+            read_evaluation(token, evaluation_id, tag)
+            try:
+                response = dispatch_agent_evaluation_run(evaluation_id, owner, tenant)
+            except HTTPException as exc:
+                self.respond(exc.status_code, {"detail": exc.detail})
+            else:
+                self.respond(202, response)
+
+    with ThreadingHTTPServer(("127.0.0.1", 8091), Handler) as server:
+        server.serve_forever()
+
+
+def fixture_request(path, data=None):
+    request = Request(f"http://127.0.0.1:8091/{path}", data)
     try:
         response = build_opener(ProxyHandler({})).open(request, timeout=55)
     except HTTPError as exc:
@@ -127,71 +155,50 @@ def request_evaluation(token, evaluation_id, port):
         return {"status": response.status, "body": json.load(response), "retry_after": response.headers.get("Retry-After")}
 
 
-def post_evaluation(token, evaluation_id, port):
-    response = request_evaluation(token, evaluation_id, port)
+def request_evaluation(evaluation_id, tag):
+    return fixture_request("evaluate", json.dumps({"id": evaluation_id, "tag": tag}).encode())
+
+
+def post_evaluation(evaluation_id, tag):
+    response = request_evaluation(evaluation_id, tag)
     assert response["status"] == 202, response
     return response["body"]
 
 
-def evaluation_lane(token, port):
-    assert port in (5014, 5015)
-    owner, tenant = fixture_identity(token)
-    path = "/internal/thread-capacity"
-    identity = sign_identity({"user_id": owner, "tenant_id": tenant, "kind": "session"}, "runtime", "GET", path, b"")
-    request = Request(f"http://127.0.0.1:{port}{path}", headers={IDENTITY_HEADER: identity})
-    with build_opener(ProxyHandler({})).open(request, timeout=8) as response:
-        snapshot = json.load(response)
-    lane, = (item for item in snapshot["lanes"] if item["name"] == "evaluation")
-    return {**lane, "rejected_count": snapshot["rejected_count"]}
-
-
-def submit_evaluation_batch(token, mode, evaluation_ids, port):
-    if mode == "workers" and len(evaluation_ids) == len(WORKER_TAGS) and len(set(evaluation_ids)) == len(WORKER_TAGS):
-        runs = tuple(zip(WORKER_TAGS, evaluation_ids))
-    elif mode == "queue" and len(evaluation_ids) == 1:
-        runs = ((QUEUED_TAG, evaluation_ids[0]),) * 12
-    elif mode == "overflow" and len(evaluation_ids) == 1:
-        runs = ((OVERFLOW_TAG, evaluation_ids[0]),)
-    else:
-        raise ValueError("Unknown or unbounded evaluation submission group")
-
-    for tag, identifier in set(runs):
+def submit_evaluation_batch(token, mode, evaluation_ids):
+    tags = {"workers": WORKER_TAGS, "queue": QUEUED_TAGS, "overflow": (OVERFLOW_TAG,)}[mode]
+    assert len(evaluation_ids) == len(tags) and len(set(evaluation_ids)) == len(tags)
+    runs = tuple(zip(tags, evaluation_ids, strict=True))
+    for tag, identifier in runs:
         initial = read_evaluation(token, identifier, tag)
-        assert initial["run"]["status"] == initial["case"]["status"] == "PENDING" and not initial["reservations"]
+        assert initial["run"]["status"] == initial["case"]["status"] == "PENDING"
     if len(runs) == 1:
-        return [request_evaluation(token, runs[0][1], port)]
+        tag, evaluation_id = runs[0]
+        return [request_evaluation(evaluation_id, tag)]
     with ThreadPoolExecutor(max_workers=len(runs)) as executor:
-        return list(executor.map(lambda run: request_evaluation(token, run[1], port), runs))
+        return list(executor.map(lambda run: request_evaluation(run[1], run[0]), runs))
 
 
-def dispatch_evaluation(token, evaluation_id, port=5014):
+def dispatch_evaluation(token, evaluation_id):
     before = read_evaluation(token, evaluation_id)
-    assert before["run"]["status"] == before["case"]["status"] == "PENDING" and not before["reservations"]
-    return post_evaluation(token, evaluation_id, port)
+    assert before["run"]["status"] == before["case"]["status"] == "PENDING"
+    return post_evaluation(evaluation_id, RESTART_TAG)
 
 
 GATE_READY = text("""
     SELECT EXISTS (
         SELECT 1 FROM pg_locks AS held JOIN pg_stat_activity AS actor USING (pid)
         WHERE actor.datname = current_database() AND actor.application_name = :marker
-          AND held.granted AND (
-            (:mode = 'race' AND held.locktype = 'advisory') OR
-            (:mode = 'claim' AND held.locktype = 'relation' AND held.mode = 'RowShareLock'
-             AND held.relation = to_regclass(:evaluation_table))
-          )
+          AND held.granted AND held.locktype = 'relation' AND held.mode = 'RowShareLock'
+          AND held.relation = to_regclass(:evaluation_table)
     )
-""")
-RACE_WAITERS = text("""
-    SELECT DISTINCT waiting.pid
-    FROM pg_locks AS waiting JOIN pg_locks AS held USING (locktype, database, classid, objid, objsubid)
-    WHERE held.locktype = 'advisory' AND held.pid = pg_backend_pid() AND held.granted AND NOT waiting.granted
 """)
 CLAIM_WAITERS = text("""
     SELECT DISTINCT waiting.pid
-    FROM pg_locks AS waiting JOIN pg_locks AS insertion ON insertion.pid = waiting.pid
+    FROM pg_locks AS waiting JOIN pg_locks AS claim ON claim.pid = waiting.pid
     WHERE NOT waiting.granted AND pg_backend_pid() = ANY(pg_blocking_pids(waiting.pid))
-      AND insertion.locktype = 'relation' AND insertion.granted AND insertion.mode = 'RowExclusiveLock'
-      AND insertion.relation = to_regclass(:reservation_table)
+      AND claim.locktype = 'relation' AND claim.granted AND claim.mode = 'RowExclusiveLock'
+      AND claim.relation = to_regclass(:evaluation_table)
 """)
 
 
@@ -200,73 +207,47 @@ def evaluation_gate(token, evaluation_id, tag, action):
     marker = f"rs-eval:{token.hex}:{evaluation_id}:{mode}"
     owner, tenant = fixture_identity(token)
     initial = read_evaluation(token, evaluation_id, tag)
-    assert initial["run"]["status"] == initial["case"]["status"] == "PENDING" and not initial["reservations"]
+    assert initial["run"]["status"] == initial["case"]["status"] == "PENDING"
     with get_db_session() as session:
+        parameters = {"marker": marker, "evaluation_table": AgentEvaluation.__table__.fullname}
         if action == "admission-ready":
-            return {"ready": session.scalar(GATE_READY, {"marker": marker, "mode": mode,
-                                                        "evaluation_table": AgentEvaluation.__table__.fullname})}
+            return {"ready": session.scalar(GATE_READY, parameters)}
 
         session.execute(text("SELECT set_config('application_name', :marker, true)"), {"marker": marker})
-        if mode == "race":
-            lock_admission_scope(session, "execution", tenant, f"evaluation:{evaluation_id}")
-            statement, parameters, expected_waiters = RACE_WAITERS, {}, 2
-        else:
-            assert session.scalar(select(AgentEvaluation.status).where(
-                AgentEvaluation.agent_evaluation_id == evaluation_id, AgentEvaluation.tenant_id == tenant,
-                AgentEvaluation.created_by == owner, AgentEvaluation.delete_flag == "N",
-            ).with_for_update()) == "PENDING"
-            statement, parameters, expected_waiters = CLAIM_WAITERS, {
-                "reservation_table": ExecutionReservation.__table__.fullname}, 1
+        assert session.scalar(select(AgentEvaluation.status).where(
+            AgentEvaluation.agent_evaluation_id == evaluation_id, AgentEvaluation.tenant_id == tenant,
+            AgentEvaluation.created_by == owner, AgentEvaluation.delete_flag == "N",
+        ).with_for_update()) == "PENDING"
+        expected_waiters = 2 if mode == "race" else 1
 
         deadline = monotonic() + 45
         while monotonic() < deadline:
-            waiters = session.scalars(statement, parameters).all()
-            if len(waiters) == expected_waiters:
+            count = len(session.scalars(CLAIM_WAITERS, parameters).all())
+            if count == expected_waiters:
                 if mode == "claim":
                     update_agent_evaluation_status(evaluation_id, tenant, "FAILED", updated_by=owner,
                                                    error_message=LOST_CLAIM_REASON, expected_status="PENDING",
                                                    db_session=session)
-                return {"waiting_claimants": len(waiters), "mode": mode}
-            assert len(waiters) < expected_waiters, "An unexpected worker entered the case-owned evaluation gate"
+                return {"waiting_claimants": count, "mode": mode}
+            assert count < expected_waiters, "An unexpected worker entered the case-owned evaluation gate"
             sleep(0.1)
-        raise AssertionError("Real Runtime evaluation requests did not reach the owned PostgreSQL gate")
+        raise AssertionError("Management dispatch did not reach the owned PostgreSQL claim")
 
 
-def workspace_digest(token):
-    owner, _ = fixture_identity(token)
-    base = Path(AGENT_WORKSPACE_ROOT)
-    mount = Path("/mnt/nexent")
-    mountpoints = {line.split()[4] for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()}
-    if str(mount) not in mountpoints or not base.is_relative_to(mount) or base.resolve() != base:
-        raise RuntimeError("The workspace probe requires the test's shared mount")
-    records = []
-    for attachment in (base / owner).glob("*/inputs/000_peer-restart-input.txt"):
-        run_id = attachment.parents[1].name
-        if attachment.resolve() != attachment or not attachment.is_file() or UUID(hex=run_id).hex != run_id:
-            raise RuntimeError("The workspace probe only reads regular fixture run paths")
-        data = f"runtime-peer-restart:{token.hex}\n".encode()
-        with attachment.open("rb") as stream:
-            actual = stream.read(len(data) + 1)
-        assert actual == data, "The live attachment workspace content changed"
-        records.append({"run_id": run_id, "sha256": sha256(actual).hexdigest()})
-    if not records:
-        return None
-    record, = records
-    return record
-
-
-def observe(raw_token, action, *arguments, runtime_port=5014):
+def observe(raw_token, action, *arguments):
     token = UUID(hex=raw_token)
     if token.hex != raw_token or POSTGRES_HOST not in {
         "nexent-postgresql", "nexent-postgresql.nexent", "nexent-postgresql.nexent.svc",
         "nexent-postgresql.nexent.svc.cluster.local",
     }:
-        raise ValueError("The restart probe requires the case-owned database")
+        raise ValueError("The evaluation probe requires the case-owned database")
+    if action == "serve-evaluation" and not arguments:
+        return serve_evaluation(token)
     if action == "seed-evaluation" and len(arguments) in {2, 3}:
         agent_id, model_id, *tags = arguments
         return seed_evaluation(token, int(agent_id), int(model_id), *tags)
     if action == "dispatch-evaluation" and len(arguments) == 1:
-        return dispatch_evaluation(token, int(arguments[0]), port=runtime_port)
+        return dispatch_evaluation(token, int(arguments[0]))
     if action == "read-evaluation" and len(arguments) == 1:
         return read_evaluation(token, int(arguments[0]))
     if action in {"admission-gate", "admission-ready", "admission-dispatch", "admission-read"} and len(arguments) == 2:
@@ -278,23 +259,21 @@ def observe(raw_token, action, *arguments, runtime_port=5014):
             return read_evaluation(token, evaluation_id, tag)
         if action == "admission-dispatch":
             read_evaluation(token, evaluation_id, tag)
-            return post_evaluation(token, evaluation_id, runtime_port)
+            return request_evaluation(evaluation_id, tag)
         return evaluation_gate(token, evaluation_id, tag, action)
     if action == "submission-seed" and len(arguments) == 2:
         agent_id, model_id = map(int, arguments)
         return {tag: seed_evaluation(token, agent_id, model_id, tag) for tag in SUBMISSION_TAGS}
     if action == "submission-lane" and not arguments:
-        return evaluation_lane(token, runtime_port)
+        return fixture_request("lane")["body"]
     if action == "submission-dispatch" and arguments:
         mode, *identifiers = arguments
-        return submit_evaluation_batch(token, mode, tuple(map(int, identifiers)), runtime_port)
+        return submit_evaluation_batch(token, mode, tuple(map(int, identifiers)))
     if action == "submission-read" and len(arguments) in range(2, 2 * len(SUBMISSION_TAGS) + 1, 2):
         pairs = dict(zip(arguments[::2], map(int, arguments[1::2])))
         if len(pairs) * 2 != len(arguments) or not pairs.keys() <= set(SUBMISSION_TAGS):
             raise ValueError("Unknown or duplicate case-owned evaluation labels")
         return {tag: read_evaluation(token, identifier, tag) for tag, identifier in pairs.items()}
-    if action == "workspace" and not arguments:
-        return workspace_digest(token)
     raise ValueError("Unknown peer restart probe operation")
 
 

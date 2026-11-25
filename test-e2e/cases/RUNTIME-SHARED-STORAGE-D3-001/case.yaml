@@ -6,6 +6,7 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-07
   title: 两个节点共享运行文件且单实例只清理自身目录
@@ -16,7 +17,7 @@ case:
   objective: 证明实际跨节点文件路径和清理归属，不能以 hostPath 的声明代替真实共享。
   preconditions:
   - 固定脚本已绑定隔离部署、跨节点存储探针、两个真实 Agent Run 与单 Pod 重建；完整流程仍需在专用集群执行。
-  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   - 隔离 Kubernetes namespace，Runtime A/B 强制放在至少两个不同工作节点；测试用 RWX PVC 确实由共享文件系统支持。
@@ -29,7 +30,7 @@ case:
     action: 在两个工作节点上分别启动 A/B，记录 nodeName、PVC/PV 绑定、Filesystem 卷模式与实际挂载；在 A 写唯一标记，在 B 读并反向写读。
     expected: 双向内容和版本相同；节点确实不同，卷为可挂载的 RWX 文件系统，不是裸块卷或同节点 hostPath。
   - order: 2
-    action: 读取同批次 Skill/插件配置，在 A/B 分别启动带独立 Run 工作区的任务并生成输出。
+    action: 读取相同 Skill/插件配置，在 A/B 分别启动带独立 Run 工作区的任务并生成输出。
     expected: 副本读取一致配置；每次运行文件归属明确，经现有对象存储下载的结果内容正确。
   - order: 3
     action: 结束 A 的任务并重启 A，保持 B 运行；对 B 的目录和非 Run 哨兵文件读取校验。

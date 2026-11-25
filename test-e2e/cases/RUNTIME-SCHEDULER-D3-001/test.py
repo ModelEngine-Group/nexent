@@ -39,18 +39,17 @@ def test_scheduler_reservation_and_peer_restart(isolated_release):
     pods = {pod["metadata"]["name"]: pod for pod in cluster.runtime_pods()}
     nodes = {pod["spec"]["nodeName"] for pod in pods.values()}
     assert len(pods) == len(nodes) == 2 and nodes <= eligible
-    epoch = cluster.resources("deployment", RUNTIME)["metadata"]["annotations"]["nexent.io/maintenance-epoch"]
-    assert cluster.committed_maintenance_count(epoch) == 1
+    generation = cluster.fixed_runtime_deployment()["metadata"]["generation"]
     probe_pod = next(iter(pods))
     identities = cluster.seed_runtime_identities(pods[probe_pod])
     cluster.create_runtime_model(pods[probe_pod], mode="scheduler")
     agent = cluster.seed_runtime_agent(pods[probe_pod])
-    gateways = {name: cluster.create_runtime_gateway(pod) for name, pod in pods.items()}
+    gateways = {name: cluster.create_runtime_gateway(pod, scheduler=True) for name, pod in pods.items()}
     source = Path(__file__).with_name("scheduler_probe.py").read_text(encoding="utf-8")
 
     def probe_on(pod_name, action, identifier, *arguments):
-        lines = cluster.run_fixture_python(pod_name, source, cluster.run_id, action, str(identifier),
-                                          *(str(value) for value in arguments)).splitlines()
+        lines = cluster.run_fixture_python(gateways[pod_name], source, cluster.run_id, action, str(identifier),
+                                          *(str(value) for value in arguments), container="nexent-config").splitlines()
         record, = (line.removeprefix("SCALING_SCHEDULER ") for line in lines if line.startswith("SCALING_SCHEDULER "))
         return json.loads(record)
 
@@ -65,14 +64,15 @@ def test_scheduler_reservation_and_peer_restart(isolated_release):
 
     def slot_for_owner(owner):
         name = owner.rsplit("-", 5)[0]
-        assert name in pods, "The task lease must identify one of the actual Runtime Pods"
-        return name
+        runtime, = (runtime for runtime, gateway in gateways.items() if gateway == name)
+        return runtime
 
     def restart_peer(peer):
         nonlocal probe_pod
         retired_uid = pods[peer]["metadata"]["uid"]
         owner_pod, = (pod for name, pod in pods.items() if name != peer)
         owner_uid = owner_pod["metadata"]["uid"]
+        cluster.remove_runtime_gateway(gateways.pop(peer))
         cluster.restart_owned_runtime_pod(pods[peer])
 
         def replacements():
@@ -99,8 +99,8 @@ def test_scheduler_reservation_and_peer_restart(isolated_release):
         probe_pod = replacement["metadata"]["name"]
         pods.pop(peer)
         pods[probe_pod] = replacement
-        assert cluster.resources("deployment", RUNTIME)["metadata"]["annotations"]["nexent.io/maintenance-epoch"] == epoch
-        assert cluster.committed_maintenance_count(epoch) == 1
+        gateways[probe_pod] = cluster.create_runtime_gateway(replacement, scheduler=True)
+        assert cluster.fixed_runtime_deployment()["metadata"]["generation"] == generation
         return {"retired_uid": retired_uid, "replacement_uid": replacement["metadata"]["uid"],
                 "scheduler_slot": probe_pod}
 
@@ -111,4 +111,4 @@ def test_scheduler_reservation_and_peer_restart(isolated_release):
                                       cluster.run_id, control=cluster.runtime_model_control, probe=probe, contest=contest,
                                       slot_for_owner=slot_for_owner, restart_peer=restart_peer,
                                       wait_seconds=cluster.profile.wait_seconds)
-    write_case_evidence("runtime-scheduler-lease-and-exclusion", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-scheduler-lease-and-exclusion", {**evidence, "generation": generation, "nodes": sorted(nodes)})

@@ -98,8 +98,8 @@ require_runtime_rwx_claim nexent-workspace
 
 
 @pytest.mark.parametrize(
-    "failure", ["", "validate", "lock", "previous-writer", "stop", "pause", "bootstrap", "maintenance", "epoch",
-                "complete", "activate", "ready"]
+    "failure", ["", "validate", "lock", "previous-writer", "stop", "pause", "bootstrap", "lock-before-activation",
+                "activate", "ready"]
 )
 def test_application_stays_paused_until_bootstrap_success(failure):
     result = run(shell_function("k8s", "deploy_application_release") + r'''
@@ -109,18 +109,29 @@ deployment_csv_contains() { return 0; }
 stage() { echo "EVENT:$1"; [ "$failure" != "$1" ]; }
 validate_application_release() { stage validate; }
 start_runtime_deploy_lock() { stage lock; }
-require_previous_maintenance_stopped() { stage previous-writer; }
-require_runtime_deploy_lock() { if [ -n "$1" ]; then stage complete; fi; }
+require_previous_deployment_jobs_stopped() { stage previous-writer; }
+bootstrap_completed=false
+require_runtime_deploy_lock() {
+  [ "$#" = 0 ] || return 1
+  if [ "$bootstrap_completed" = true ]; then
+    bootstrap_completed=false
+    stage lock-before-activation
+  fi
+}
 stop_old_business_workloads() { stage stop; }
-helm_upgrade_application_release() { if [ "$1" = true ]; then stage pause; else stage activate; fi; }
-run_system_agent_bootstrap() { stage bootstrap; }
-run_runtime_maintenance_job() { stage maintenance; }
-require_paused_runtime_epoch() { stage epoch; }
+helm_upgrade_application_release() {
+  if [ "$1" = true ]; then
+    [ -n "$2" ] && stage pause
+  else
+    [ -z "$2" ] && stage activate
+  fi
+}
+run_system_agent_bootstrap() { stage bootstrap && bootstrap_completed=true; }
 wait_for_nexent_ready() { stage ready; }
 deploy_application_release
 ''')
-    expected = ["validate", "lock", "previous-writer", "stop", "pause", "bootstrap", "maintenance", "epoch",
-                "complete", "activate", "ready"]
+    expected = ["validate", "lock", "previous-writer", "stop", "pause", "bootstrap", "lock-before-activation",
+                "activate", "ready"]
     if failure:
         expected = expected[:expected.index(failure) + 1]
     assert result.stdout.splitlines() == ["EVENT:" + item for item in expected]
@@ -156,8 +167,8 @@ deploy_application_release
         ("", "", "pods", "API"),
     ],
 )
-def test_previous_maintenance_must_be_terminal_even_before_business_stops(jobs, pods, failing_list, blocked_by):
-    result = run(shell_function("k8s", "require_previous_maintenance_stopped") + f"""
+def test_previous_deployment_jobs_must_be_terminal_before_business_stops(jobs, pods, failing_list, blocked_by):
+    result = run(shell_function("k8s", "require_previous_deployment_jobs_stopped") + f"""
 NAMESPACE=test-ns
 APPLICATION_RELEASE_NAME=target-release
 job_rows='{jobs}'
@@ -173,7 +184,7 @@ kubectl() {
   if [ "$2" = "$failing_list" ]; then echo 'API error' >&2; return 8; fi
   case "$2" in jobs) printf '%s\n' "$job_rows" ;; pods) printf '%s\n' "$pod_rows" ;; *) return 2 ;; esac
 }
-require_previous_maintenance_stopped
+require_previous_deployment_jobs_stopped
 ''')
     assert result.returncode == (1 if blocked_by else 0), result.stderr
     assert "Unexpected" not in result.stderr
@@ -289,7 +300,7 @@ kubectl() {
     [ "$failure" != start ] || return 8
   fi
 }
-run_system_agent_bootstrap expected-epoch
+run_system_agent_bootstrap expected-bootstrap-id
 ''')
     assert result.returncode == (1 if failure else 0), result.stderr
     if failure.startswith("lock_"):
@@ -299,7 +310,7 @@ run_system_agent_bootstrap expected-epoch
         assert "FAILED:bootstrap-7" in result.stdout
     else:
         assert result.stdout.splitlines() == ["SYNC:bootstrap-pod"]
-    assert "nexent.io/maintenance-epoch=expected-epoch" in result.stderr
+    assert "nexent.io/bootstrap-run-id=expected-bootstrap-id" in result.stderr
     if failure in ("job", "ready_timeout", "copy", "lock_before_copy", "lock_after_copy"):
         assert "nexent-bootstrap-start" not in result.stderr
     else:

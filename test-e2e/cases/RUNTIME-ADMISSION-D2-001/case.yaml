@@ -6,6 +6,7 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-03
   - RUNTIME-REPLICAS-RULE-04
@@ -18,7 +19,7 @@ case:
   objective: 证明公开接纳响应、头部、鉴权和拒绝语义；真实跨进程防重另由 D3 证明。
   preconditions:
   - 使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
-  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   test_data:
@@ -42,8 +43,8 @@ case:
     action: 使用其他租户、未授权用户及缺少鉴权的请求访问运行和控制接口。
     expected: 沿用原拒绝状态，不返回他人运行内容，不发送取消信号。
   - order: 6
-    action: 恢复协调依赖并验证合法请求。另在 Web、Northbound 的标记 POST 已获接纳后，于代理收到响应头前分别断开 Runtime 上游连接，直接计数代理的上游尝试；清理本 Case 的身份、会话和实例。
-    expected: 恢复后合法请求成功；断流时两入口各返回 502 且只转发一次，原执行和 assistant 正常持久化，清理无遗留。
+    action: 恢复协调依赖并验证合法请求。另在 Web、Northbound 的标记请求获 Runtime 签名 RUN 202 后，缓冲首次签名 RESUME 的 SSE 并在转发响应头前断开连接，直接计数这两个上游请求；清理本 Case 的身份、会话和实例。
+    expected: 恢复后合法请求成功；断流时 Web 返回 503、Northbound 返回 502，RUN 和首次 RESUME 都只转发一次，原执行和 assistant 正常持久化，清理无遗留。
   expected_results:
   - 成功响应、路由、头部及 SSE 兼容；未授权访问被拒。
   - 冲突与容量错误保持既有契约；协调故障按新增 503 在接纳前拒绝。
@@ -99,4 +100,4 @@ case:
     response_expectations:
     - 成功响应及会话/运行标识兼容。
     - '冲突 HTTP 200 + SSE error + X-Stream-Status: conflict；容量 HTTP 429 + RUNTIME_CAPACITY_FULL + retryable + Retry-After。'
-    - 协调依赖故障 HTTP 503 + RUNTIME_COORDINATION_UNAVAILABLE；鉴权失败不泄露共享状态。
+    - 协调依赖故障返回 HTTP 503，分别携带 AGENTOS_EXECUTION_STORE_UNAVAILABLE 或 AGENTOS_EVENT_STORE_UNAVAILABLE；鉴权失败不泄露共享状态。

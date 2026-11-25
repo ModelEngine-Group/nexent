@@ -55,14 +55,16 @@ def exercise_workbench_admission(url_a, url_b, stable_url, identities, prepared,
             assert observed["unexpected_calls"] == 0
             return observed["calls_by_tag"]
 
+        assert expected_hosts is None or clients.keys() == expected_hosts.keys()
+        owners = {}
+
         def active(role, label, tag, target, generation):
             row = read(role)[label]
             reservation, = row["reservations"]
-            assert reservation["status"] == "RUNNING" and reservation["agent_scope"] == "workbench_main"
-            if expected_hosts is not None:
-                assert reservation["owner"].split(":", 1)[0] == expected_hosts[target]
+            assert reservation["status"] == "running" and reservation["agent_scope"] == "workbench_main"
+            assert owners.setdefault(target, reservation["owner"]) == reservation["owner"]
             assert row["messages"] == [payload(role, label, tag)["query"]]
-            assert generation == row["stream"]["generation"] == f"execution:{reservation['id']}"
+            assert generation == row["stream"]["generation"] == reservation["id"]
             assert row["event_ids"], "The model prefix must exist in the active stream"
             return row
 
@@ -76,12 +78,16 @@ def exercise_workbench_admission(url_a, url_b, stable_url, identities, prepared,
             def settled():
                 *previous, observed = read(role)[label]["reservations"]
                 assert tuple(previous) == prior
-                assert observed["status"] not in {"FAILED", "STOPPED"}, observed
-                return observed if observed["status"] == "COMPLETED" else None
+                assert observed["status"] not in {"failed", "stopped"}, observed
+                return observed if observed["status"] == "completed" else None
 
             final = wait_for(settled, timeout, f"Workbench run {tag} did not settle")
-            assert final == {**record, "status": "COMPLETED"}
-            assert_persisted_answer(stable, auth[role], conversation_id(role, label), message_id, tag)
+            assert final == {**record, "status": "completed"}
+            identifier = conversation_id(role, label)
+            wait_for(lambda: any(message["message_id"] == message_id and message["status"] == "completed"
+                                 for message in conversation_history(stable, auth[role], identifier)["message"]),
+                     timeout, "Workbench assistant projection did not finish")
+            assert_persisted_answer(stable, auth[role], identifier, message_id, tag)
 
         def complete(role, label, tag, record, message_id):
             assert control(f"release/{tag}") == {"released": True}
@@ -149,11 +155,10 @@ def exercise_workbench_admission(url_a, url_b, stable_url, identities, prepared,
         contested = conversation_id("owner", "contested")
         with held_finalization(contested, winner):
             finisher = read("owner")["contested"]
-            assert finisher["reservations"] == [{**first["reservations"][0], "status": "FINALIZING"}]
+            assert finisher["reservations"] == [{**first["reservations"][0], "status": "completed"}]
             assert finisher["messages"] == first["messages"]
             assert finisher["stream"]["generation"] == outcomes[winner]
             assert assistant("owner", "contested") == first_assistant
-            require_full_quota("finalizing")
             assert read("owner")["contested"] == finisher
             active("owner", "second", "second-slot", loser, second_generation)
             assert calls() == {winner: 1, "second-slot": 1, "foreign-tenant": 1}
@@ -166,23 +171,24 @@ def exercise_workbench_admission(url_a, url_b, stable_url, identities, prepared,
         complete("foreign", "isolated", "foreign-tenant", foreign["reservations"][0], foreign_assistant)
         assert calls() == {winner: 1, "second-slot": 1, "foreign-tenant": 1, "after-release": 1}
 
-        prior = {**first["reservations"][0], "status": "COMPLETED"}
+        prior = {**first["reservations"][0], "status": "completed"}
         successor_generation = connect(loser, "owner", "contested", "successor")
         successor_assistant = assistant("owner", "contested")
         successor_state = read("owner")["contested"]
         old, successor = successor_state["reservations"]
-        assert old == prior and successor["status"] == "RUNNING" and successor_assistant != first_assistant
+        assert old == prior and successor["status"] == "running" and successor_assistant != first_assistant
         assert successor["owner"] == second["reservations"][0]["owner"] and successor["owner"] != prior["owner"]
-        assert successor_generation == successor_state["stream"]["generation"] == f"execution:{successor['id']}"
+        assert successor_generation == successor_state["stream"]["generation"] == successor["id"]
         assert successor_state["messages"] == [*first["messages"], payload("owner", "contested", "successor")["query"]]
 
+        receipt = replay_completion(winner, contested, prior["id"])
+        assert receipt == {"duplicate_completions_ignored": 2, "wrong_owner_rejected": True,
+                           "old_execution_id": prior["id"], "surviving_execution_id": successor["id"]}
+        assert read("owner")["contested"] == successor_state
         with held_finalization(contested, "successor"):
-            before = read("owner")["contested"]
-            assert before["reservations"] == [prior, {**successor, "status": "FINALIZING"}]
-            receipt = replay_completion(winner, contested, prior["id"])
-            assert receipt == {"duplicate_completions_ignored": 2, "wrong_owner_rejected": True,
-                               "old_execution_id": prior["id"], "surviving_execution_id": successor["id"]}
-            assert read("owner")["contested"] == before and assistant("owner", "contested") == successor_assistant
+            projected = read("owner")["contested"]
+            assert projected["reservations"] == [prior, {**successor, "status": "completed"}]
+            assert assistant("owner", "contested") == successor_assistant
 
         settle("owner", "contested", "successor", successor, successor_assistant, prior=(prior,))
         assert_persisted_answer(stable, auth["owner"], contested, first_assistant, winner)
@@ -195,8 +201,8 @@ def exercise_workbench_admission(url_a, url_b, stable_url, identities, prepared,
                 deleted = stable.get(path, headers=auth[role])
                 require_status(deleted, 200, "Check deleted Workbench conversation")
                 assert deleted.json()["data"] == []
-        return {"model_calls": calls(), "quota_rejections": 4, "conflict_attempts": 2,
-                "finalizing_counted_for_quota": True, "assistant_projection_blocked": True,
+        return {"model_calls": calls(), "quota_rejections": 2, "conflict_attempts": 2,
+                "assistant_projection_blocked": True,
                 "completion_replay": receipt,
                 "sse_disconnected_while_active": True, "same_scope_tenant_isolation": True, "readmission": True,
                 "owners": [row["reservations"][0]["owner"] for row in (first, second)]}

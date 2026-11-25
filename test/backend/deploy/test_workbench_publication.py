@@ -103,10 +103,9 @@ def test_k8s_application_hook_runs_after_skills_and_before_success():
     application = source[source.index("    # Step 8:"):source.index("    # Step 9:")]
     assert "if ! deploy_application_release;" in application
     flow = shell_function("k8s", "deploy_application_release")
-    stages = ["validate_application_release", "start_runtime_deploy_lock", "require_previous_maintenance_stopped",
-              "stop_old_business_workloads",
-              "helm_upgrade_application_release true", "run_system_agent_bootstrap", "run_runtime_maintenance_job",
-              "require_paused_runtime_epoch", 'require_runtime_deploy_lock "$epoch"',
+    stages = ["validate_application_release", "start_runtime_deploy_lock", "require_previous_deployment_jobs_stopped",
+              "stop_old_business_workloads", "helm_upgrade_application_release true", "run_system_agent_bootstrap",
+              "require_runtime_deploy_lock",
               "helm_upgrade_application_release false", "wait_for_nexent_ready"]
     position = 0
     for stage in stages:

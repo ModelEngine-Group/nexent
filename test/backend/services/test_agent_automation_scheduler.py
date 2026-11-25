@@ -37,18 +37,17 @@ def _load_scheduler_with_runner_stub(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_store_uses_batch_cutoff_without_recovering_other_pods(monkeypatch):
+async def test_fixed_replica_store_starts_without_recovering_other_pods(monkeypatch):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     recover = AsyncMock()
     monkeypatch.setattr(scheduler_module, "run_blocking", recover)
-    cutoff = datetime(2026, 11, 19, tzinfo=timezone.utc)
     store = scheduler_module.AgentAutomationLeaseStore()
-    store.maintenance_cutoff = cutoff
+    store.fixed_replicas = True
 
     await store.recover()
 
     recover.assert_not_awaited()
-    assert store._recovery_time == cutoff
+    assert store._recovery_time is None
 
 
 @pytest.mark.asyncio
@@ -71,8 +70,11 @@ async def test_store_recovers_orphans_before_releasing_all_locks(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("distributed, restart_confirmed", [(False, True), (True, True), (True, False)])
-async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch, distributed, restart_confirmed):
+@pytest.mark.parametrize(
+    "fixed_replicas, distributed, restart_confirmed",
+    [(False, False, True), (False, True, True), (False, True, False), (True, True, True)],
+)
+async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch, fixed_replicas, distributed, restart_confirmed):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
     missed_fire = datetime(2026, 7, 18, 2, 0, tzinfo=timezone.utc)
@@ -93,12 +95,14 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch, distri
     }
     update = {}
 
-    monkeypatch.setattr(scheduler_module.AgentAutomationLeaseStore, "_uses_scoped_recovery", staticmethod(lambda: distributed))
+    monkeypatch.setattr(scheduler_module.environment, "IS_DEPLOYED_BY_KUBERNETES", distributed)
+    monkeypatch.setattr(scheduler_module.environment, "NEXENT_SANDBOX_PROVIDER", "kubernetes")
     status = AsyncMock(return_value=types.SimpleNamespace(restart_cutoff=recovery_time if restart_confirmed else None))
     monkeypatch.setattr(scheduler_module, "_agentos_client", lambda: types.SimpleNamespace(recovery_status=status))
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: None)
+    recovery_calls = []
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: recovery_calls.append("runs"))
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: recovery_calls.append("locks"))
     monkeypatch.setattr(
         scheduler_module.agent_automation_db,
         "claim_due_tasks",
@@ -111,14 +115,17 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch, distri
     )
 
     store = scheduler_module.AgentAutomationLeaseStore()
+    store.fixed_replicas = fixed_replicas
     await store.recover()
     jobs = await store.claim_due("scheduler-a", 2, 120)
 
-    assert status.await_count == (2 if distributed else 0)
-    if not restart_confirmed:
-        assert [job.job_id for job in jobs] == [42]
+    assert status.await_count == (2 if distributed and not fixed_replicas else 0)
+    assert recovery_calls == ([] if distributed or fixed_replicas else ["runs", "locks"])
+    if fixed_replicas or not restart_confirmed:
+        assert jobs == [ClaimedJob(job_id=42, payload=claimed_task)]
         assert update == {}
         return
+
     assert jobs == []
     assert update["next_fire_at"] == datetime(2026, 7, 21, 2, 0, tzinfo=timezone.utc)
     assert update["misfire_policy"] == "SKIP"

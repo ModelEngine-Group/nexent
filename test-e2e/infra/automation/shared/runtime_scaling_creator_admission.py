@@ -5,6 +5,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from threading import Barrier
+from uuid import UUID
 
 import httpx
 
@@ -59,9 +60,12 @@ def exercise_creator_admission(urls, stable_url, identities, prepared, token, ki
             assert observed["unexpected_calls"] == 0, observed
             return observed["calls_by_tag"]
 
+        assert set(clients) == set(expected_owners) and len(set(expected_owners.values())) == 2
+        observed_owners = {}
+
         def check_owner(reservation, slot):
-            expected = expected_owners[slot]
-            assert reservation["owner"] == expected or reservation["owner"].split(":", 1)[0] == expected
+            owner = reservation["owner"]
+            assert UUID(hex=owner).hex == owner and observed_owners.setdefault(slot, owner) == owner
             assert reservation["agent_scope"] == f"nl2{kind}_main"
 
         def running(role, label, slot, tag, generation):
@@ -69,8 +73,8 @@ def exercise_creator_admission(urls, stable_url, identities, prepared, token, ki
             row = read(role)[label]
             reservation, = row["reservations"]
             check_owner(reservation, slot)
-            assert reservation["status"] == "RUNNING"
-            assert generation == row["stream"]["generation"] == f"execution:{reservation['id']}"
+            assert reservation["status"] == "running"
+            assert generation == row["stream"]["generation"] == reservation["id"]
             assert row["messages"] == [payload(role, label, tag)["query"]]
             history = conversation_history(stable, auth[role], identifier(role, label))
             message = history["streaming_message"]
@@ -83,10 +87,10 @@ def exercise_creator_admission(urls, stable_url, identities, prepared, token, ki
 
             def settled():
                 current, = read(role)[label]["reservations"]
-                assert current["status"] not in {"FAILED", "STOPPED"}, current
-                return current if current["status"] == "COMPLETED" else None
+                assert current["status"] not in {"failed", "stopped"}, current
+                return current if current["status"] == "completed" else None
 
-            assert wait_for(settled, timeout, f"Creator {tag} did not settle") == {**reservation, "status": "COMPLETED"}
+            assert wait_for(settled, timeout, f"Creator {tag} did not settle") == {**reservation, "status": "completed"}
             history = conversation_history(stable, auth[role], identifier(role, label))
             assistant, = [message for message in history["message"] if message["message_id"] == assistant_id]
             assert assistant["status"] == "completed"
@@ -112,9 +116,9 @@ def exercise_creator_admission(urls, stable_url, identities, prepared, token, ki
             wait_for(lambda: ready() == "blocked", min(timeout, 30), "No Creator worker attempted the real history write")
             in_preparation = read("owner")["contested"]
             first_reservation, = in_preparation["reservations"]
-            assert first_reservation["status"] == "PREPARING"
+            assert first_reservation["status"] == "starting"
             assert not in_preparation["messages"] and not in_preparation["event_ids"] and calls() == {}
-            assert in_preparation["stream"]["generation"] == f"execution:{first_reservation['id']}"
+            assert in_preparation["stream"]["generation"] == first_reservation["id"]
 
             finished = wait_for(lambda: {slot for slot, result in contenders.items() if result.done()}, min(timeout, 20),
                                 "Neither contender returned the expected Creator conflict")
@@ -147,7 +151,7 @@ def exercise_creator_admission(urls, stable_url, identities, prepared, token, ki
         winning_tag = f"race-{winner}"
         generation = contenders[winner].result(timeout=timeout)
         first, first_assistant = running("owner", "contested", winner, winning_tag, generation)
-        assert first["reservations"] == [{**first_reservation, "status": "RUNNING"}]
+        assert first["reservations"] == [{**first_reservation, "status": "running"}]
         assert connect(loser, "owner", "contested", "repeat-conflict") is None
         preserved, message_id = running("owner", "contested", winner, winning_tag, generation)
         assert first_assistant == message_id and preserved["reservations"] == first["reservations"]

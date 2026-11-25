@@ -32,45 +32,17 @@ notes: >-
   Self-contained preparation uses an opted-in, isolated machine-local Kubernetes
   cluster, an owned namespace and dynamic volumes, two individually routed Runtime
   Pods, test-only identities and a controlled provider. Cleanup uses the namespace
-  UID and verifies reclamation. The bindings cover ordinary Agent, Workbench, and
-  Northbound exclusion and shared limits, a second Agent scope, same-scope Workbench tenant
-  isolation, and readmission after worker settlement. The Workbench script closes
-  the SSE subscription while the model is held and checks that the reservation
-  remains active. A bounded, case-owned PostgreSQL row lock then holds assistant
-  persistence while the first reservation is FINALIZING and the other is RUNNING;
-  both Pods reject the extra same-scope request without changing its history or
-  stream. After the original assistant settles, the actual peer starts a new
-  execution in the same conversation. With its projection held, the probe
-  replays the previous execution's SQL and Redis completion writes twice and
-  checks that the current execution rejects the previous owner. Both assistant
-  turns must persist exactly once under their own IDs. Northbound uses a
-  case-owned relay to pin both public contenders to different Runtime Pods; the
-  original stable Service selector and endpoints are restored before cleanup.
-  Evaluation uses the real internal Runtime endpoints and bounded, case-owned
-  PostgreSQL barriers to observe a two-worker claim and rollback after loss of
-  a pending claim. A separate release fills the real evaluation lane with six
-  inference workers and twelve queued submissions, then observes a retryable
-  submission rejection without a claim or model call. The same run starts on
-  the peer, queued duplicate submissions claim only once, and both lanes recover.
-  NL2Agent and NL2Skill each use a separate release, a case-owned history row gate and a
-  controlled model to exercise same-session exclusion, shared quota with a
-  PREPARING reservation, tenant isolation, and readmission after settlement.
-  A separate Agent release fills one worker and one queue slot on A and proves
-  rejection occurs before durable admission. B accepts the same request in an
-  independent Agent scope while the existing queue stays on A; after A releases
-  its worker, A owns and completes its previously queued request. Separate releases
-  inject either a PostgreSQL user-message constraint violation or a Redis stream
-  initialization type error for one owned conversation after durable admission.
-  The failed reservation settles without history, stream events or a provider call.
-  Redis initialization failure surfaces a retryable 503, and its short-lived key
-  is removed only if it still has the test marker. Removing either fault permits
-  the same request on the peer while its same-scope holder remains active. The
-  pre-reservation checks reuse the isolated D2 coordination probe, confirm the
-  two gateway routes produce different Runtime owners, direct both faulted
-  requests to A and keep a real stream running on B. Redis denies PING
-  and PostgreSQL cancels the actual waiting conversation-lock query. Both A
-  requests fail closed without a reservation, and B reads the original history
-  during the faults before accepting the same request after restoration. Manual
-  and scheduled interaction is bound in RUNTIME-SCHEDULER-D3-001. This binding
-  does not claim all dependency and preparation failure variants.
-  No real Kubernetes result is claimed.
+  UID and verifies reclamation. Directed Gateway fixtures keep the production
+  Management and Runtime calls and point Management to the selected Runtime
+  Pod. The program reads the unified SQL execution, the run-scoped AgentOS
+  journal, or the Creator stream. Workbench quota is observed while Runtime
+  work is active. An older owner's settlement runs against an active successor
+  before the successor's independent assistant projection. Creator preparation
+  holds a case-owned message write after admission, preserving the quota test.
+  Evaluation uses two isolated Management dispatch processes, a real conditional
+  PostgreSQL claim, six live workers and twelve distinct queued submissions on
+  one process. Failure to submit rolls its evaluation row back to pending.
+  Northbound uses the same directed Management path. The local Agent lane
+  and fault branches still require candidate integration against the public
+  wire contracts.
+  Formal execution and cleanup are pending for all branches.

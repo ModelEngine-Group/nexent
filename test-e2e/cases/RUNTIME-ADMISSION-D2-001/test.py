@@ -46,15 +46,14 @@ def deploy_pair(isolated_release):
     nodes = {pod["spec"]["nodeName"] for pod in pods}
     names = {pod["metadata"]["name"] for pod in pods}
     assert len(pods) == len(nodes) == 2 and nodes <= eligible
-    epoch = cluster.resources("deployment", RUNTIME)["metadata"]["annotations"]["nexent.io/maintenance-epoch"]
-    assert cluster.committed_maintenance_count(epoch) == 1
-    return cluster, pods, names, nodes, epoch
+    generation = cluster.fixed_runtime_deployment()["metadata"]["generation"]
+    return cluster, pods, names, nodes, generation
 
 
 def admission_probes(cluster, pod):
     def probe(source, prefix, *args):
-        lines = cluster.run_fixture_python(pod["metadata"]["name"], source.read_text(encoding="utf-8"),
-                                          cluster.run_id, *args).splitlines()
+        target = "deployment/nexent-config" if source.name == "public_identity_probe.py" else pod["metadata"]["name"]
+        lines = cluster.run_fixture_python(target, source.read_text(encoding="utf-8"), cluster.run_id, *args).splitlines()
         record, = (line.removeprefix(prefix) for line in lines if line.startswith(prefix))
         return json.loads(record)
 
@@ -67,7 +66,7 @@ def admission_probes(cluster, pod):
 
 
 def test_public_web_and_northbound_admission(isolated_release):
-    cluster, pods, names, nodes, epoch = deploy_pair(isolated_release)
+    cluster, pods, names, nodes, generation = deploy_pair(isolated_release)
     probe_pod = pods[0]
     identities = cluster.seed_runtime_identities(probe_pod)
     cluster.create_runtime_model(probe_pod, mode="stream")
@@ -78,39 +77,38 @@ def test_public_web_and_northbound_admission(isolated_release):
     fault_source = Path(__file__).with_name("coordination_fault_probe.py")
 
     def fault(action, identifier):
-        return probe(fault_source, "SCALING_COORDINATION_FAULT ", action, str(identifier))
+        return probe(fault_source, "SCALING_COORDINATION_FAULT ", action, str(identifier), str(agent["other_agent_id"]))
 
     with cluster.web_http() as web, cluster.gateway_http() as gateway:
         evidence = exercise_public_admission(web, gateway, identities, credentials["api_keys"], agent, cluster.run_id,
                                              control=cluster.runtime_model_control, snapshot=snapshot, fault_probe=fault,
                                              wait_seconds=cluster.profile.wait_seconds, expected_hosts=names)
-    write_case_evidence("runtime-public-admission", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-public-admission", {**evidence, "generation": generation, "nodes": sorted(nodes)})
 
 
 def test_public_proxies_do_not_retry_an_admitted_post_after_transport_failure(isolated_release):
-    cluster, pods, _, nodes, epoch = deploy_pair(isolated_release)
+    cluster, pods, _, nodes, generation = deploy_pair(isolated_release)
     first, peer = pods
     identity = cluster.seed_runtime_identities(first)["owner"]
     cluster.create_runtime_model(first, mode="stream")
     agent = cluster.seed_runtime_agent(first)
     probe, snapshot = admission_probes(cluster, first)
     credentials = probe(Path(__file__).with_name("public_identity_probe.py"), "SCALING_PUBLIC_IDENTITIES ")
-    pod_names = tuple(pod["metadata"]["name"] for pod in pods)
-    with (cluster.route_runtime_through_transport_fixture(first, peer), cluster.web_http() as web,
+    with (cluster.route_runtime_through_transport_fixture(first, peer) as origins, cluster.web_http() as web,
           cluster.gateway_http() as gateway):
         evidence = exercise_public_transport_failure(
             web, gateway, identity, credentials["api_keys"]["owner"], agent, cluster.run_id,
             transport=cluster.runtime_transport_control, control=cluster.runtime_model_control, snapshot=snapshot,
-            wait_seconds=min(cluster.profile.wait_seconds, 60), expected_hosts=pod_names,
+            wait_seconds=min(cluster.profile.wait_seconds, 60), origins=origins,
         )
     write_case_evidence("runtime-public-transport-failure", {
-        **evidence, "epoch": epoch, "nodes": sorted(nodes), "original_service_targets_restored": True,
+        **evidence, "generation": generation, "nodes": sorted(nodes), "original_service_targets_restored": True,
     })
 
 
 @pytest.mark.parametrize("isolated_release", [True], indirect=True)
 def test_local_lane_rejects_without_consuming_peer_capacity(isolated_release):
-    cluster, pods, _, nodes, epoch = deploy_pair(isolated_release)
+    cluster, pods, _, nodes, generation = deploy_pair(isolated_release)
     first, peer = pods
     identities = cluster.seed_runtime_identities(first)
     cluster.create_runtime_model(first, mode="stream")
@@ -123,4 +121,4 @@ def test_local_lane_rejects_without_consuming_peer_capacity(isolated_release):
         evidence = exercise_local_lane(url_a, url_b, stable, identities["owner"], agent, cluster.run_id,
                                        control=cluster.runtime_model_control, snapshot=snapshot,
                                        wait_seconds=cluster.profile.wait_seconds, expected_hosts=pod_names)
-    write_case_evidence("runtime-local-lane", {**evidence, "epoch": epoch, "nodes": sorted(nodes)})
+    write_case_evidence("runtime-local-lane", {**evidence, "generation": generation, "nodes": sorted(nodes)})

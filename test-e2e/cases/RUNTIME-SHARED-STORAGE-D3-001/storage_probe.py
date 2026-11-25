@@ -21,13 +21,8 @@ from contracts.constants.environment import (
     MINIO_ENDPOINT,
 )
 from infrastructure.object_storage.client import minio_client
-from management.services.memory.providers.plugins import PluginLoader
-from management.services.skill.local_config import SkillConfigPaths
-from management.services.skill.params import _parse_skill_params_from_config_bytes
-from management.services.skill.yaml_cache import skill_yaml_cache
 from nexent.core.agents.resources.workspace import cleanup_run_workspace
 from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
-from runtime.workspace import create_run_workspace
 
 
 MOUNTS = {
@@ -73,6 +68,8 @@ def configured_roots():
 
 
 def workspace(roots, token, role):
+    from runtime.workspace import create_run_workspace
+
     path = Path(create_run_workspace(token, token_run_id(token, role), workspace_root=roots["workspace"]))
     if path != path.resolve():
         raise RuntimeError("Run workspace fixture must not follow symlinks")
@@ -115,11 +112,10 @@ def seed_settings(roots, token):
 
 
 def read_settings(roots, token):
-    path_context = SkillConfigPaths(str(roots["skills"] / token))
-    (config, config_exists), _ = path_context.files_for(SETTINGS_NAME)
-    if not config_exists:
-        raise RuntimeError("The Skill configuration is not readable through the configured mount")
-    skill = skill_yaml_cache.load(config, _parse_skill_params_from_config_bytes)
+    config = roots["skills"] / token / SETTINGS_NAME / "config" / "config.yaml"
+    if config != config.resolve():
+        raise RuntimeError("Expected the owned Skill configuration")
+    skill = json.loads(config.read_bytes())
     plugins_root = roots["plugins"] / f".nexent-storage-settings-{token}"
     plugin_dirs = [path for path in plugins_root.iterdir() if path.is_dir()]
     if plugin_dirs != [plugins_root / SETTINGS_NAME]:
@@ -128,10 +124,26 @@ def read_settings(roots, token):
         path = plugins_root / SETTINGS_NAME / filename
         if path != path.resolve() or path.read_bytes() != expected:
             raise RuntimeError("Refusing to load a plugin other than the owned fixture")
+    plugin_data = json.loads((plugins_root / SETTINGS_NAME / "plugin.yaml").read_bytes())
+    return {"skill_revision": skill["revision"], "plugin_revision": plugin_data["description"],
+            "plugin_version": plugin_data["version"]}
+
+
+def verify_management_settings(token):
+    from management.services.memory.providers.plugins import PluginLoader
+    from management.services.skill.local_config import SkillConfigPaths
+    from management.services.skill.params import _parse_skill_params_from_config_bytes
+    from management.services.skill.yaml_cache import skill_yaml_cache
+
+    roots = {"skills": Path(CONTAINER_SKILLS_PATH), "plugins": Path(MEMORY_PROVIDER_PLUGINS_DIR)}
+    receipt = read_settings(roots, token)
+    path_context = SkillConfigPaths(str(roots["skills"] / token))
+    (config, exists), _ = path_context.files_for(SETTINGS_NAME)
+    assert exists and skill_yaml_cache.load(config, _parse_skill_params_from_config_bytes)["revision"] == token
+    plugins_root = roots["plugins"] / f".nexent-storage-settings-{token}"
     plugin = PluginLoader(str(plugins_root)).get_plugin(SETTINGS_NAME)
-    if plugin is None:
-        raise RuntimeError("The memory plugin is not loadable from the configured mount")
-    return {"skill_revision": skill["revision"], "plugin_revision": plugin.description, "plugin_version": plugin.version}
+    assert plugin is not None and (plugin.description, plugin.version) == (token, "1.0.0")
+    return receipt
 
 
 def seed(roots, token, role):
@@ -201,8 +213,8 @@ def read_attachment(user_id, tenant_id, object_name):
 def live_attachment_snapshot(token, roots, identity="owner", expected_run_id=None):
     from sqlalchemy import select
 
+    from infrastructure.rdb.agent_execution import AgentExecution
     from infrastructure.rdb.client import get_db_session
-    from management.db.execution.models import ExecutionReservation
 
     if identity not in {"owner", "foreign"} or (
         expected_run_id is not None and UUID(hex=expected_run_id).hex != expected_run_id
@@ -211,14 +223,13 @@ def live_attachment_snapshot(token, roots, identity="owner", expected_run_id=Non
     owner = str(uuid5(UUID(hex=token), f"{identity}:user"))
     tenant = str(uuid5(UUID(hex=token), f"{identity}:tenant"))
     with get_db_session() as session:
-        reservation = session.execute(select(ExecutionReservation).where(
-            ExecutionReservation.tenant_id == tenant,
-            ExecutionReservation.user_id == owner,
-            ExecutionReservation.execution_kind == "agent",
-            ExecutionReservation.delete_flag == "N",
-        )).scalar_one()
-        state = {"execution_id": reservation.execution_id, "execution_key": reservation.execution_key,
-                 "owner": reservation.owner_instance_id, "status": reservation.status}
+        execution = session.scalars(select(AgentExecution).where(
+            AgentExecution.tenant_id == tenant,
+            AgentExecution.created_by == owner,
+            AgentExecution.delete_flag == "N",
+        )).one()
+        state = {"execution_id": execution.run_id, "conversation_id": execution.conversation_id,
+                 "owner": execution.owner_id, "status": execution.status}
     owner_root = roots["workspace"] / owner
     if expected_run_id is not None:
         run_path = owner_root / expected_run_id
@@ -228,7 +239,7 @@ def live_attachment_snapshot(token, roots, identity="owner", expected_run_id=Non
         return {**state, "run_id": None, "sha256": None}
     attachment, = attachments
     run_id = attachment.parents[1].name
-    if UUID(hex=run_id).hex != run_id:
+    if UUID(hex=run_id).hex != run_id or run_id != state["execution_id"]:
         raise RuntimeError("Expected one Run-scoped attachment workspace")
     return {**state, "run_id": run_id, "sha256": digest(attachment)}
 
@@ -259,6 +270,8 @@ def main():
                "finish": finish, "rotate": rotate}
     if action == "read-attachment":
         record = read_attachment(*extra)
+    elif action == "verify-settings":
+        record = verify_management_settings(token)
     elif action == "live-attachment":
         record = live_attachment_snapshot(token, configured_roots(), *extra)
     else:

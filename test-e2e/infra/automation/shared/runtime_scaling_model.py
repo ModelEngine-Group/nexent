@@ -62,6 +62,14 @@ def fixture_server(token, host="0.0.0.0", port=8090, *, mode="storage"):
             return self.json_response(404, {})
 
         def do_POST(self):
+            if (self.path == "/release" or self.path.startswith("/release/")) and self.client_address[0] == "127.0.0.1":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    length = -1
+                if not 0 <= length <= 1024:
+                    return self.json_response(400, {"error": {"message": "Invalid fixture control request"}})
+                self.rfile.read(length)
             if self.path == "/release" and self.client_address[0] == "127.0.0.1":
                 release.set()
                 with lock:

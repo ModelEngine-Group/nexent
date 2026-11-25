@@ -510,7 +510,7 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
 
 def _remove_abandoned_skill_files(preparation: asyncio.Task) -> None:
     if not preparation.cancelled() and preparation.exception() is None:
-        _remove_skill_files(preparation.result().workspace_path)
+        discard_prepared_workspace(preparation.result())
 
 
 async def load_prepared_run(payload, actor, materialize, *, settle_on_cancel=False) -> AgentRunInfo:
@@ -522,13 +522,12 @@ async def load_prepared_run(payload, actor, materialize, *, settle_on_cancel=Fal
         return await asyncio.shield(preparation)
     except asyncio.CancelledError:
         if settle_on_cancel or uses_distributed_runtime():
-            while not preparation.done():
+            settled = asyncio.gather(preparation, return_exceptions=True)
+            while not settled.done():
                 try:
-                    await asyncio.shield(preparation)
+                    await asyncio.shield(settled)
                 except asyncio.CancelledError:
                     continue
-                except Exception:
-                    break
             _remove_abandoned_skill_files(preparation)
         else:
             preparation.add_done_callback(_remove_abandoned_skill_files)

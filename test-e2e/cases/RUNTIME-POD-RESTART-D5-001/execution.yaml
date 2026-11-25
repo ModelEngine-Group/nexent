@@ -19,9 +19,10 @@ notes: >-
   dynamic RWX volumes and requires an opted-in cluster with two eligible workers.
   The first holds a real chat, evaluation and due automation on the same Runtime;
   it observes the attachment across the replacement peer and verifies the original
-  scheduler renews after peer readiness, then lets all three runs complete. The
-  second interrupts the active owner, waits for natural Redis expiry, verifies
-  both Runtime Pods reject replay, and runs the real offline maintenance entry
-  point. Authenticated Gateway forwards are loopback-only, and teardown waits for
+  Management scheduler renews after peer readiness, then lets all three runs
+  complete. The second interrupts the active owner, waits for natural SQL and
+  Redis expiry, verifies both Runtime Pods reject concurrent execution, then
+  invokes the standalone recovery command with namespace-scoped read permissions
+  while product workloads are stopped. Authenticated Gateway forwards are loopback-only, and teardown waits for
   its UID-owned namespace and volume reclamation. Formal cluster execution and
   cleanup are still required for AC-P1-008.

@@ -63,7 +63,7 @@ class RuntimeThreadManager:
 
 
 @pytest.mark.parametrize("distributed", [False, True])
-@pytest.mark.parametrize("recovery_mode", ["startup", "maintenance"])
+@pytest.mark.parametrize("recovery_mode", ["startup", "fixed_replicas"])
 def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, recovery_mode, distributed):
     monkeypatch.setitem(sys.modules, "runtime.identity",
                         _module("runtime.identity", uses_distributed_runtime=lambda: distributed))
@@ -83,7 +83,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
         "contracts.constants.environment",
         _module(
             "contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1,
-            NEXENT_RECOVERY_MODE=recovery_mode, NEXENT_MAINTENANCE_EPOCH="maintenance-batch",
+            NEXENT_RECOVERY_MODE=recovery_mode,
         ),
     )
     manager = RuntimeThreadManager()
@@ -113,12 +113,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
         monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: MagicMock()}))
 
     recover_models = MagicMock()
-    verify_maintenance = MagicMock()
     initialize_sandbox = MagicMock(return_value=None)
-    monkeypatch.setitem(
-        sys.modules, "infrastructure.rdb.runtime_maintenance",
-        _module("infrastructure.rdb.runtime_maintenance", require_completed_runtime_maintenance=verify_maintenance),
-    )
     monkeypatch.setitem(
         sys.modules, "runtime.sandbox_runtime",
         _module("runtime.sandbox_runtime", configure_runtime_coordination=initialize_sandbox),
@@ -231,13 +226,11 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
     initialize_sandbox.assert_called_once_with(manager, application.app.state)
-    if recovery_mode == "maintenance":
-        verify_maintenance.assert_called_once_with("maintenance-batch")
+    if recovery_mode == "fixed_replicas":
         recover_models.assert_not_called()
         recover.assert_not_called()
         cleanup.assert_not_called()
     else:
-        verify_maintenance.assert_not_called()
         recover_models.assert_called_once_with()
         assert recover.call_count == cleanup.call_count == int(not distributed)
     shutdown_streams.assert_awaited_once()

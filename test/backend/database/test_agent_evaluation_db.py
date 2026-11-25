@@ -1084,9 +1084,8 @@ class TestCleanupAgedEvaluations:
 
         deleted = agent_evaluation_db.cleanup_aged_evaluations("t1", retention_days=30)
         assert deleted == 2
-        _, _, terminal_status, unowned = queries[0].filter.call_args.args
+        _, _, terminal_status = queries[0].filter.call_args.args
         assert terminal_status.right.value == ["COMPLETED", "FAILED"]
-        assert "execution_reservation_t" in str(unowned)
         hard_delete.assert_called_once_with(10, "t1")
         session.commit.assert_called_once()
 
@@ -1116,8 +1115,7 @@ class TestCleanupAgedEvaluations:
 
 
 class TestReapStaleRuns:
-    @pytest.mark.parametrize("recover_owned", [False, True])
-    def test_reaps_stale_runs(self, session_factory, recover_owned):
+    def test_reaps_stale_runs(self, session_factory):
         from management.db.evaluation import runs as agent_evaluation_db
 
         session, _ = session_factory
@@ -1128,12 +1126,15 @@ class TestReapStaleRuns:
         it = iter(queries)
         session.query.side_effect = lambda *a, **k: next(it)
 
-        n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10, recover_owned=recover_owned)
+        n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10)
         assert n == 2
         assert queries[1].update.called
         assert queries[2].update.called
-        guards = [str(condition) for invocation in queries[0].filter.call_args_list for condition in invocation.args]
-        assert any("NOT (EXISTS" in condition and "execution_reservation_t" in condition for condition in guards) is not recover_owned
+        tenant, status, stale_before, deleted = queries[0].filter.call_args.args
+        assert tenant.right.value == "t1"
+        assert status.right.value == "RUNNING"
+        assert stale_before.left.name == "update_time"
+        assert deleted.right.value == "N"
         session.commit.assert_not_called()
 
     def test_no_stale_runs(self, session_factory):

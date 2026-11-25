@@ -21,9 +21,8 @@ from runtime.agentos.ephemeral import create_ephemeral_run_router
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from contracts.constants.environment import (
-    NEXENT_MAINTENANCE_EPOCH, NEXENT_RECOVERY_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+    NEXENT_RECOVERY_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
 )
-from infrastructure.rdb.runtime_maintenance import require_completed_runtime_maintenance
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.sandbox import router as sandbox_router
 from infrastructure.system_configuration.runtime import (
@@ -93,15 +92,7 @@ async def runtime_lifespan(_app):
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
-        maintenance = NEXENT_RECOVERY_MODE == "maintenance"
-        if maintenance:
-            await runtime_thread_manager.run(
-                "control-io",
-                ManagedTaskSpec(task_name="verify-runtime-maintenance", owner="runtime"),
-                require_completed_runtime_maintenance,
-                NEXENT_MAINTENANCE_EPOCH,
-            )
-        else:
+        if NEXENT_RECOVERY_MODE == "startup":
             await runtime_thread_manager.run(
                 "control-io",
                 ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),

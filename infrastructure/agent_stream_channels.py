@@ -52,6 +52,7 @@ class StreamingChannel:
         self._runtime_run_reference = run_ref
         self.generation: Optional[str] = None
         self.is_creator = False
+        self.durable_replay = False
         self._history_size = max(1, history_size)
         self._history_max_bytes = max(1, RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES)
         self._history_buffer: Deque[Tuple[int, str, int]] = deque()
@@ -168,7 +169,9 @@ class StreamingChannel:
 
     @property
     def durable_event_count(self) -> int | None:
-        return self._next_event_index if self.generation and self.generation.startswith("execution:") else None
+        if self.generation and (self.durable_replay or self.generation.startswith("execution:")):
+            return self._next_event_index
+        return None
 
     def _snapshot_from(self, start_index: int) -> Tuple[List[str], int]:
         """Copy retained chunks at or after an absolute index."""

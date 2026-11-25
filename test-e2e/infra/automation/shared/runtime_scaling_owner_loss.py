@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import json
 from pathlib import Path
 from threading import Barrier
+from uuid import UUID
 
 import httpx
 
@@ -19,8 +20,12 @@ from shared.runtime_scaling_stream import RUN_PATH, assert_persisted_answer, che
 @contextmanager
 def owner_client(cluster, pod=None):
     gateway = cluster.create_runtime_gateway(pod) if pod is not None else None
-    with cluster.gateway_http(gateway) as url, httpx.Client(base_url=url, timeout=60, trust_env=False) as client:
-        yield client
+    try:
+        with cluster.gateway_http(gateway) as url, httpx.Client(base_url=url, timeout=60, trust_env=False) as client:
+            yield client
+    finally:
+        if gateway is not None:
+            cluster.remove_runtime_gateway(gateway)
 
 
 def owner_snapshot(cluster, pod, *, quota=None, ttl=None):
@@ -55,7 +60,7 @@ def stream_payload(agent, token, identifier, tag, *, minio_files=()):
     return payload
 
 
-def begin_owner_loss(stable, owner, auth, agent, token, *, epoch, snapshot, crash, control, expected_host=None,
+def begin_owner_loss(stable, owner, auth, agent, token, *, snapshot, crash, control,
                      tag="lost-owner", prior_tags=(), rounds=1, minio_files=()):
     identifier, candidate = new_conversations(stable, auth, 2)
     payload = stream_payload(agent, token, identifier, tag, minio_files=minio_files)
@@ -67,12 +72,11 @@ def begin_owner_loss(stable, owner, auth, agent, token, *, epoch, snapshot, cras
         active = before["runs"][str(identifier)]
         reservation, = active["reservations"]
         assistant, = active["assistants"]
-        assert reservation["status"] == "RUNNING" and not reservation["finished"] and reservation["epoch"] == epoch
-        assert generation == f"execution:{reservation['id']}" and active["state"]["generation"] == generation
+        assert reservation["status"] == "running" and not reservation["finished"]
+        assert generation == reservation["id"] and active["state"]["generation"] == generation
         assert 0 < active["state_pttl"] <= before["ttl_seconds"] * 1000
         assert assistant["status"] == "streaming" and active["users"] == [payload["query"]] and not active["cancel_ids"]
-        if expected_host is not None:
-            assert reservation["owner"].split(":", 1)[0] == expected_host
+        assert UUID(hex=reservation["owner"]).hex == reservation["owner"]
         assert control("probe")["calls_by_tag"] == dict.fromkeys((*prior_tags, tag), rounds)
         crash()
         try:
@@ -99,9 +103,9 @@ def verify_retained_owner(first, replacement, auth, agent, token, loss, *, snaps
         assert observed["reservations"] == active["reservations"] and observed["assistants"] == active["assistants"]
         assert observed["users"] == active["users"] and not observed["cancel_ids"]
         assert not unused["reservations"] and not unused["users"] and not unused["assistants"]
-        return observed["state_pttl"] == -2 and not observed["state"]
+        return observed["lease_expired"] and observed["state_pttl"] == -2 and not observed["state"]
 
-    wait_for(expired, wait_seconds, "The real Redis Runtime state key did not expire")
+    wait_for(expired, wait_seconds, "The SQL lease and Redis journal did not expire")
     barrier = Barrier(2)
 
     def compete(client, tag):
@@ -124,23 +128,22 @@ def verify_retained_owner(first, replacement, auth, agent, token, loss, *, snaps
     assert stopped["cancel_ids"] == [reservation["id"]] and stopped["state_pttl"] == -2
     assert stopped["reservations"] == active["reservations"] and stopped["assistants"] == active["assistants"]
     assert control("probe")["calls_by_tag"] == {"lost-owner": 1}
-    return {"redis_key_expired": True, "conflicts": 2, "quota_held": True,
+    return {"redis_key_expired": True, "lease_expired": True, "conflicts": 2, "quota_held": True,
             "stop_signal_without_settlement": True, "interrupted_id": reservation["id"]}
 
 
-def verify_interrupted_owner(loss, *, epoch, snapshot):
+def verify_interrupted_owner(loss, *, snapshot):
     identifier, _, active = loss
     reservation, = active["reservations"]
     old_assistant, = active["assistants"]
     before = snapshot(identifier)["runs"][str(identifier)]
-    interrupted = {**reservation, "status": "FAILED", "finished": True, "error_code": "RUNTIME_OWNER_INTERRUPTED"}
+    interrupted = {**reservation, "status": "stopped", "finished": True}
     assert before["reservations"] == [interrupted] and before["users"] == active["users"]
-    failed_assistant = {**old_assistant, "status": "failed"}
-    assert before["assistants"] == [failed_assistant]
+    stopped_assistant = {**old_assistant, "status": "stopped"}
+    assert before["assistants"] == [stopped_assistant] and not before["cancel_ids"]
     if before["state"]:
-        assert before["state"]["status"] == "failed"
-    assert epoch != reservation["epoch"]
-    return interrupted, failed_assistant
+        assert before["state"]["status"] == "stopped"
+    return interrupted, stopped_assistant
 
 
 def delete_owner_conversations(stable, auth, loss):
@@ -150,10 +153,10 @@ def delete_owner_conversations(stable, auth, loss):
         assert stable.get(path, headers=auth).json()["data"] == []
 
 
-def verify_after_maintenance(stable, auth, agent, token, loss, *, epoch, snapshot, control, wait_seconds, prior_tags=(),
+def verify_after_maintenance(stable, auth, agent, token, loss, *, snapshot, control, wait_seconds, prior_tags=(),
                              rounds=1, minio_files=()):
     identifier, _, active = loss
-    interrupted, failed_assistant = verify_interrupted_owner(loss, epoch=epoch, snapshot=snapshot)
+    interrupted, stopped_assistant = verify_interrupted_owner(loss, snapshot=snapshot)
     prior_calls = dict.fromkeys((*prior_tags, "lost-owner"), rounds)
     assert control("probe")["calls_by_tag"] == prior_calls
 
@@ -166,23 +169,23 @@ def verify_after_maintenance(stable, auth, agent, token, loss, *, epoch, snapsho
         generation = stream_prefix(frames, "after-maintenance")
         observed = state()
         old, current = observed["reservations"]
-        assert old == interrupted and current["status"] == "RUNNING" and current["epoch"] == epoch
-        assert current["owner"] != interrupted["owner"] and generation == f"execution:{current['id']}"
+        assert old == interrupted and current["status"] == "running"
+        assert current["owner"] != interrupted["owner"] and generation == current["id"]
         assert control("release/after-maintenance")["released"] is True
         stream_completion(frames, generation, "after-maintenance")
 
     def settled():
         observed = state()
-        return observed if observed["reservations"][-1]["status"] == "COMPLETED" else None
+        return observed if observed["reservations"][-1]["status"] == "completed" else None
 
     completed = wait_for(settled, wait_seconds, "Post-maintenance execution did not settle")
-    assert completed["reservations"] == [interrupted, {**current, "status": "COMPLETED", "finished": True}]
+    assert completed["reservations"] == [interrupted, {**current, "status": "completed", "finished": True}]
     assert completed["users"] == [*active["users"], payload["query"]]
     prior, new = completed["assistants"]
-    assert prior == failed_assistant and new["id"] != prior["id"] and new["status"] == "completed"
+    assert prior == stopped_assistant and new["id"] != prior["id"] and new["status"] == "completed"
     assert_persisted_answer(stable, auth, identifier, new["id"], "after-maintenance")
     model = control("probe")
     assert model["calls_by_tag"] == {**prior_calls, "after-maintenance": rounds} and model["unexpected_calls"] == 0
     delete_owner_conversations(stable, auth, loss)
-    return {"interrupted_state": interrupted["error_code"], "recovered_execution": current["id"],
+    return {"interrupted_state": interrupted["status"], "recovered_execution": current["id"],
             "model_calls": model["calls_by_tag"], "owned_conversations_deleted": True}

@@ -6,6 +6,7 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-03
   - RUNTIME-REPLICAS-RULE-06
@@ -17,7 +18,7 @@ case:
   objective: 保留任务数据库租约并统一手动/自动会话预约，禁止每个实例启动执行全局恢复。
   preconditions:
   - 正式执行须使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
-  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   test_data:
@@ -30,7 +31,7 @@ case:
     expected: 该周期只有一个有效领取者和一次业务执行，lock_owner 与实际 owner 一致。
   - order: 2
     action: 在 A 的自动运行长时间执行且续租时重启 B，比较 A 的任务、消息、租约和待执行周期。
-    expected: B 普通启动不全局 TIMEOUT 或释放 A 的租约；共同维护截止时间不随 B 启动改变，不跳过本应执行周期。
+    expected: B 普通启动不全局 TIMEOUT 或释放 A 的租约；不改变调度结果或跳过本应执行的周期。
   - order: 3
     action: 在同一会话手动运行期间触发到期自动任务，再反向在自动运行期间提交手动请求。
     expected: 同一时刻仅一个实际 Agent 执行；自动任务按已有 overlap/misfire 规则记录忙碌，手动请求遵守既有 conflict 契约。

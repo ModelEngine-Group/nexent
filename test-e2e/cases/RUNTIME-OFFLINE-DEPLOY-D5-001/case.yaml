@@ -6,112 +6,74 @@ case:
   feature_id: RUNTIME-REPLICAS
   requirement_ids:
   - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
   business_rule_ids:
   - RUNTIME-REPLICAS-RULE-01
   - RUNTIME-REPLICAS-RULE-02
-  title: 全停维护后固定副本 1→3→2，维护失败保持停止
+  title: 无在途业务时停机调整固定副本，初始化失败或失锁保持停止
   type: DEPLOYMENT
   priority: P0
   status: blocked
   automation: automated
-  objective: 证明真实部署顺序、全停前提、批次幂等与失败恢复，不接受在线修改副本作为第一阶段通过。
+  objective: 验证无业务窗口的真实停启顺序、失败边界和恢复。
   preconditions:
-  - 固定脚本含 Chart 边界、故障注入、遗留恢复和同批次重试；回退使用隔离的真实 Agent 运行与受控模型服务。
-  - 测试完全拥有独立 Kubernetes namespace、专属数据库/Redis 数据域及测试共享卷；可调用实际部署脚本和查询 Pod/Job。
-  - 初始固定副本 1；准备遗留 streaming 消息、RUNNING 评测、自动任务及锁、未终态预约、Run 目录、终态和非 Run 哨兵。
-  - 没有对开发者现有栈的部署权限或依赖；镜像、Helm/集群连接与机器本地数据均通过外部配置提供。
+  - 测试拥有独立 Kubernetes namespace、专属数据库与 Redis 数据域，以及支持跨节点使用的测试 RWX 卷。
+  - 初始固定副本 1，具有一条已终态的真实会话。每次调整前该数据域没有在途业务执行。
+  - 镜像、Helm、集群连接和机器本地数据通过外部配置提供。
   test_data:
-    replica_sequence:
-    - 1
-    - 3
-    - 2
-    invalid_replica_counts:
-    - 0
-    - -1
-    - 1.5
-    - invalid
-    epoch: 每次维护生成 UUID；暂停/激活同一 UUID，重试同一 UUID。
-    sentinels: 终态消息/评测、同一会话内晚于遗留 streaming 消息的已完成流、非 Run 目录和非本次产品数据的校验和。
-    preparation: 使用机器本地 runtime-scaling-k8s.yaml 指定专用集群及 RWX StorageClass；拒绝接管已有 nexent namespace。
+    replica_sequence: [1, 3, 2, 1]
+    invalid_replica_counts: ['0', '-1', '1.5', invalid]
+    sentinel: 调整前实际提交的会话消息和 Agent 执行终态。
+    preparation: 机器本地 runtime-scaling-k8s.yaml 指定专用集群及 RWX StorageClass。
   steps:
   - order: 1
-    action: 渲染并校验默认值与非法 replicaCount，再在隔离集群以固定 1 副本启动，记录无 HPA/KEDA。
-    expected: 默认 1；0/负数/小数/非法值被拒；仅部署内部暂停允许渲染 0。
+    action: 渲染默认值、内部暂停和非法 replicaCount，观察首次部署的 1 副本。
+    expected: 合法默认目标为 1；内部暂停为 0；0、负数、小数和无效配置作为目标副本时被拒绝。
   - order: 2
-    action: 旧 Runtime 仍存在时尝试维护命令；随后按部署入口停业务、调度并等待全部旧 Runtime Pod（含 Terminating）消失。
-    expected: 提前维护在恢复/文件副作用前失败；正式流程确认 Runtime 控制器已处理当前缩零配置、实际副本为零且旧 Pod 全部退出。
+    action: 提交真实聊天并等待完成，然后按 1→3→2→1 运行停启部署，在每次激活前暂停 Helm 调用并检查 Kubernetes 状态。
+    expected: 所有旧业务 Pod 退出并完成系统初始化后，目标固定副本 Ready，已保存消息和执行终态保持，运行期间无自动控制器。
   - order: 3
-    action: 观察真实运行的模型流和附件上传工具的独立对象版本后，中断其所属 Pod；配置 3 副本，故意在恢复/清理的一个受控阶段使维护失败。
-    expected: 没有完成标记和新业务 Pod；PostgreSQL 遗留状态（含调度运行与任务租约）不提交，已完成的 Redis/目录幂等步骤可重试，旧模型调用计数和工具对象版本保持不变，不启动额外业务执行。
+    action: 在独占部署中分别令本次系统初始化结果失败，或在成功后、激活前终止本次 PostgreSQL 部署持锁连接，然后重新部署。
+    expected: 两种失败均保持业务副本为 0，恢复部署可启动目标副本，旧执行不会重放。
   - order: 4
-    action: 解除故障，以同一 epoch 重试并等待维护完成，再激活 3 副本。
-    expected: 遗留状态按原规则收敛、锁和预约释放、遗留 Run 清理；终态与哨兵不变，同一会话较新轮次的完成标记、流事件和回放检查点不被旧消息覆盖；完成标记后才 3 副本就绪并恢复业务，重试、激活和重复已完成批次均不增加旧模型调用或工具对象版本。
-  - order: 5
-    action: 重复已完成 epoch 的维护调用，并重启其中一个 Pod；下一维护窗口按全停流程将 3 调整为 2。
-    expected: 已完成批次不重复清理；普通启动无全局恢复；第二窗口使用新 epoch，2 副本就绪，始终无自动控制器。
-  - order: 6
-    action: 以固定 2 副本运行真实 Agent，观察模型流和上传工具对象版本后中断其所属 Pod；经全停维护回退固定 1，并回收所有本次拥有资源。
-    expected: 回退也遵守全停维护；旧运行转为中断终态，激活前后旧模型/工具不重放，只有显式新请求才产生新执行；没有外部数据改写或资源泄漏。
-  - order: 7
-    action: 在另一个独占测试部署中，等待维护 Job 成功、完成记录提交，在提交激活前断开本次部署的 PostgreSQL 持锁会话。
-    expected: 入口不发起 Helm 激活，Deployment 仍为零且无旧或新业务 Pod；原完成记录不变，单独开始一个新批次后方可恢复业务。
-  - order: 8
-    action: 在独占 release 中保留一个尚未创建 Pod 的同 release 未终态维护 Job，再提交新一轮扩副本部署。
-    expected: 入口拒绝启动新批次；原业务副本、Pod UID 和完成记录未变，遗留 Job 不被改写或删除。
+    action: 在独占 release 保留尚未创建 Pod 的同 release 未终态 bootstrap Job，再提交一轮扩副本部署。
+    expected: 拒绝启动新的部署周期，业务 Pod UID、旧 Job UID 和目标数保持。
   expected_results:
-  - 固定副本配置与默认值边界正确，1→3→2 的每次调整均先全停。
-  - 维护前提、批次完成门槛、失败或丢失部署锁时保持停止、遗留写入程序阻止新批次、幂等重试均真实成立。
-  - 遗留状态收敛、终态和非 Run 数据保留、停机回退与清理完成。
+  - 合法固定副本调整等待旧业务 Pod 退出，启动目标数量并 Ready。
+  - 初始化失败、部署失锁和未终态的旧 bootstrap 均阻止其后激活。
+  - 停启保留已完成数据，测试环境清理完成。
   forbidden_side_effects:
-  - 旧 Runtime 未退出、维护失败或无法验证部署锁时激活新业务；普通 Pod 启动进行全局恢复。
-  - 重试导致模型工具调用、改写既有终态、清空 Redis 或共享卷。
-  - 创建 HPA/KEDA，或在有业务时直接 scale 后宣称第一阶段通过。
+  - 旧业务 Pod 未退出、系统初始化失败或无法验证部署锁时激活新业务。
+  - 日常部署创建 Runtime 维护 Job，重放已完成执行、改写会话终态或影响测试外资源。
+  - 创建 HPA/KEDA。
   acceptance:
   - id: AC-P1-001
-    description: 真实停机调整固定副本与配置边界。
-    steps:
-    - 1
-    - 5
-    - 6
-    expected_results:
-    - 1
-    - 3
-    forbidden_side_effects:
-    - 3
+    description: 核对固定副本默认值及实际停启序列。
+    steps: [1, 2]
+    expected_results: [1, 3]
+    forbidden_side_effects: [2, 3]
   - id: AC-P1-002
-    description: 全停维护、失败阻止激活、重试与保留规则。
-    steps:
-    - 2
-    - 3
-    - 4
-    - 5
-    - 6
-    - 7
-    - 8
-    expected_results:
-    - 2
-    - 3
-    forbidden_side_effects:
-    - 1
-    - 2
-  tags:
-  - phase-1
+    description: 初始化及锁门槛、失败后恢复和旧写入程序隔离。
+    steps: [2, 3, 4]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1, 2]
+  tags: [phase-1]
   source:
-    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 尚未取得隔离多节点集群准备、停机序列、模型/上传工具实地观测和实际资源清理证据。
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/changes/runtime-unify-agent-execution/proposal.md
+    blocked_reason: 必须在隔离 Kubernetes 和真实 RWX 上验证完整停启、受控故障及清理。
     primary_domain: deployment
-    preparation_plan: 固定 kubeconfig 上下文与集群 UID，确认集群 owner 已启用，使用专用动态 StorageClass 和新建的带运行标识 namespace 部署独占实例、数据库和 Redis；业务故障部分仍需身份和受控模型协议服务。
-    cleanup_plan: 测试停止后仅以本次 namespace UID 作为删除前提，等待自建 namespace 和专用 StorageClass 对应的 PV 消失；不得清空开发者栈、外部 PVC 或共享 Redis。
+    preparation_plan: 固定 kubeconfig 上下文和 UID，验证集群 owner 启用条件，使用专用动态 RWX StorageClass、带运行标识的独占 namespace、数据域和受控模型协议服务。
+    cleanup_plan: 只删除本次 UID 归属的 namespace，等待自建 namespace 和专用 StorageClass 对应的 PV 消失。
   risk_type: DEPLOYMENT
-  risk: 增加副本后每次启动全局恢复或清理，破坏其他运行；失败恢复后错误激活业务。
+  risk: 尚未完成初始化或失去部署锁时激活，或旧 Pod 与新业务重叠。
   condition:
-  - 真实部署脚本、两个维护窗口、一次受控维护故障和一次停机回退；所有测试数据域独占。
+  - 真实部署脚本与无在途业务的停启转换，依赖和测试数据域独占。
   metrics:
-  - 按时间排序的入口停止、旧 Pod 退出、维护开始/完成、N 副本 Ready 和业务恢复记录。
-  - 恢复前后状态/目录校验和、有效维护记录数、实际副本数与 HPA/KEDA 数量。
+  - 各场景的旧 Pod UID、激活前业务副本数、初始化结果、激活命令与最终 Ready 副本数。
+  - 会话终态收据、HPA/KEDA 数量及资源清理记录。
   thresholds:
-  - 任何恢复/清理开始时旧 Runtime Pod 数=0；任意维护失败后活跃业务 Pod 数=0。
-  - 成功后 readyReplicas 等于配置 N；HPA/KEDA 对象数=0；额外模型调用=0。
-  - 终态与非 Run 哨兵变化数=0；本次资源泄漏数=0。
+  - 激活前旧业务 Pod 数为 0，Ready 后副本数等于目标数。
+  - 初始化失败或激活前失去部署锁时，激活次数为 0。
+  - 日常停启新增 Runtime 维护 Job、自动伸缩对象、既有终态变更和资源泄漏均为 0。
   recovery_expectations:
-  - 故障解除后同批次重试可完成；失败期间持续停止。清理或回退同样先停止业务，不在线强制放行。
+  - 解除受控故障后再独立发起一轮无业务部署，由产品流程启动目标固定副本。

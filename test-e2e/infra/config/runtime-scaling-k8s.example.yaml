@@ -12,7 +12,7 @@ storage_class: runtime-scaling-e2e-rwx
 # The cross-node storage case also requires two schedulable worker hosts with distinct hostnames.
 image_source: general
 app_version: replace-with-tested-image-tag
-# Replace the placeholder with the candidate backend build's expected Pod imageID
+# Replace the placeholder with the candidate Runtime and Management build imageIDs
 # digest(s), including any platform-specific runtime identities. Do not adopt IDs
 # from a test run unless they are independently attributable to the candidate build.
 backend_image_digests:

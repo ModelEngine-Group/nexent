@@ -4,7 +4,7 @@ import json
 import logging
 import socket
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from nexent.core.concurrency import ManagedTaskSpec, ThreadManager
 
@@ -81,7 +81,7 @@ class RuntimeStateService:
     def _cancel_key(self, user_id: str, conversation_id: int) -> str:
         return f"runtime:cancel:{user_id}:{conversation_id}"
 
-    def _execution_cancel_key(self, user_id: str, conversation_id: int, execution_id: int) -> str:
+    def _execution_cancel_key(self, user_id: str, conversation_id: int | str, execution_id: int | str) -> str:
         return f"runtime:execution:cancel:{user_id}:{conversation_id}:{execution_id}"
 
     def _stream_key(self, user_id: str, conversation_id: int) -> str:
@@ -187,7 +187,7 @@ class RuntimeStateService:
             await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id, generation)
 
     def claim_creator_run(
-        self, user_id: str, conversation_id: int, generation: str, *, execution_id: Optional[int] = None,
+        self, user_id: str, conversation_id: int, generation: str, *, execution_id: int | str | None = None,
     ) -> bool:
         """Fence Redis writes; an established database owner can replace an obsolete lease."""
         if not self.enabled:
@@ -198,7 +198,7 @@ class RuntimeStateService:
             redis.call('DEL', KEYS[2], KEYS[3], KEYS[4], KEYS[6])
             redis.call('HSET', KEYS[1], 'generation', ARGV[1], 'status', 'running',
                 'owner_pod', ARGV[2], 'updated_at', ARGV[3])
-            redis.call('HDEL', KEYS[1], 'replay_incomplete')
+            redis.call('HDEL', KEYS[1], 'replay_incomplete', 'creator_worker')
             if ARGV[6] ~= '' then
                 redis.call('HSET', KEYS[1], 'execution_id', ARGV[6])
                 redis.call('HDEL', KEYS[1], 'message_id', 'started_at')
@@ -216,11 +216,45 @@ class RuntimeStateService:
             max(1, RUNTIME_CREATOR_LEASE_SECONDS), str(execution_id) if execution_id is not None else ""))
 
     async def claim_creator_run_async(
-        self, user_id: str, conversation_id: int, generation: str, *, execution_id: Optional[int] = None,
+        self, user_id: str, conversation_id: int, generation: str, *, execution_id: int | str | None = None,
     ) -> bool:
         return await self._run_managed(
             "creator-claim", self.claim_creator_run, user_id, conversation_id, generation,
             **({"execution_id": execution_id} if execution_id is not None else {}),
+        )
+
+    def creator_worker_state(
+        self, user_id: str, conversation_id: int, run_id: str, action: Literal["start", "complete", "seal"],
+    ) -> str | None:
+        """Fence Runtime worker attachment and completion to the persisted Creator run."""
+        return self.client.eval("""
+            if redis.call('HGET', KEYS[1], 'execution_id') ~= ARGV[1]
+                or redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return nil end
+            local worker = redis.call('HGET', KEYS[1], 'creator_worker')
+            if ARGV[2] == 'start' then
+                if worker then return nil end
+                redis.call('HSET', KEYS[1], 'creator_worker', 'running')
+                return 'running'
+            end
+            if ARGV[2] == 'seal' and worker == 'running' then
+                redis.call('EXPIRE', KEYS[1], ARGV[3])
+                return worker
+            end
+            if ARGV[2] ~= 'seal' and ARGV[2] ~= 'complete' then return nil end
+            if ARGV[2] == 'complete' and not worker then return nil end
+            redis.call('HSET', KEYS[1], 'creator_worker', 'closed')
+            if ARGV[2] == 'seal' and redis.call('HGET', KEYS[1], 'status') ~= 'running' then
+                redis.call('EXPIRE', KEYS[1], ARGV[4])
+            end
+            return 'closed'
+        """, 1, self._run_key(user_id, conversation_id), run_id, action,
+            max(1, RUNTIME_RUN_TTL_SECONDS), max(1, RUNTIME_COMPLETED_TTL_SECONDS))
+
+    async def creator_worker_state_async(
+        self, user_id: str, conversation_id: int, run_id: str, action: Literal["start", "complete", "seal"],
+    ) -> str | None:
+        return await self._run_managed(
+            "creator-remote-worker-state", self.creator_worker_state, user_id, conversation_id, run_id, action,
         )
 
     def creator_lease(self, user_id, conversation_id, generation, renew=False):
@@ -229,11 +263,16 @@ class RuntimeStateService:
         return bool(self.client.eval("""
             if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
             if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
-            if ARGV[2] == '1' then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
+            if ARGV[2] == '1' then
+                redis.call('EXPIRE', KEYS[2], ARGV[3])
+                if redis.call('HGET', KEYS[1], 'execution_id') == ARGV[1] then
+                    redis.call('EXPIRE', KEYS[1], ARGV[4])
+                end
+            end
             return 1
         """, 2, self._run_key(user_id, conversation_id),
             self._run_key(user_id, conversation_id) + ":creator-lease", generation,
-            "1" if renew else "0", max(1, RUNTIME_CREATOR_LEASE_SECONDS)))
+            "1" if renew else "0", max(1, RUNTIME_CREATOR_LEASE_SECONDS), max(1, RUNTIME_RUN_TTL_SECONDS)))
 
     async def creator_lease_async(self, user_id, conversation_id, generation, renew=False):
         return await self._run_managed("creator-lease", self.creator_lease,
@@ -292,12 +331,16 @@ class RuntimeStateService:
                 self.client.eval("""
                     if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
                     redis.call('HSET', KEYS[1], 'status', ARGV[2], 'updated_at', ARGV[3])
-                    for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ARGV[4]) end
+                    local run_ttl = ARGV[4]
+                    if redis.call('HGET', KEYS[1], 'creator_worker') == 'running' then run_ttl = ARGV[5] end
+                    redis.call('EXPIRE', KEYS[1], run_ttl)
+                    for index = 2, #KEYS do redis.call('EXPIRE', KEYS[index], ARGV[4]) end
                     return 1
                 """, 5, key, self._cancel_key(user_id, conversation_id),
                     self._stream_key(user_id, conversation_id), self._stream_done_key(user_id, conversation_id),
                     self._replay_key(user_id, conversation_id),
-                    generation, status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS))
+                    generation, status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS),
+                    max(1, RUNTIME_RUN_TTL_SECONDS))
                 return
             self.client.hset(key, mapping={
                 "status": status,
@@ -357,7 +400,7 @@ class RuntimeStateService:
                                        **({'run_ref': run_ref} if run_ref is not None else {}))
 
     def request_execution_cancel(
-        self, user_id: str, conversation_id: int | str, execution_id: int, expected_generation: Optional[str] = None,
+        self, user_id: str, conversation_id: int | str, execution_id: int | str, expected_generation: Optional[str] = None,
     ) -> bool:
         """Record a stop against an authorized database execution, not a reusable conversation key."""
         return bool(self.client.eval("""

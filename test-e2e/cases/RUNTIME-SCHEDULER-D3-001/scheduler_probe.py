@@ -17,6 +17,7 @@ from contracts.automation import ScheduleTrigger
 from contracts.constants.environment import (
     AGENT_AUTOMATION_LEASE_SECONDS, AGENT_AUTOMATION_MAX_CONCURRENT_RUNS, POSTGRES_HOST, RUNTIME_STATE_REDIS_URL,
 )
+from infrastructure.rdb.agent_execution import AgentExecution
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.orm import as_dict
 from infrastructure.redis.run_state import runtime_state_service
@@ -27,7 +28,6 @@ from management.db.automation.repository import (
     update_task_if_lock_owner,
 )
 from management.db.conversation.models import ConversationMessage, ConversationRecord
-from management.db.execution.models import ExecutionReservation
 
 
 def seed_occurrence(session, identifier, tenant, owner, instruction, agent_id, model_id, fixture_lock, max_fires):
@@ -62,17 +62,17 @@ def snapshot(session, identifier, tenant, owner):
         AgentAutomationRun.conversation_id == identifier, AgentAutomationRun.tenant_id == tenant,
         AgentAutomationRun.user_id == owner, AgentAutomationRun.delete_flag == "N",
     ).order_by(AgentAutomationRun.run_id)))
-    reservations = list(session.scalars(select(ExecutionReservation).where(
-        ExecutionReservation.execution_key == f"conversation:{identifier}", ExecutionReservation.tenant_id == tenant,
-        ExecutionReservation.user_id == owner, ExecutionReservation.execution_kind == "agent",
-        ExecutionReservation.delete_flag == "N",
-    ).order_by(ExecutionReservation.execution_id)))
+    executions = session.scalars(select(AgentExecution).where(
+        AgentExecution.conversation_id == identifier, AgentExecution.tenant_id == tenant,
+        AgentExecution.created_by == owner, AgentExecution.delete_flag == "N",
+    ).order_by(AgentExecution.create_time, AgentExecution.run_id)).all()
     messages = list(session.scalars(select(ConversationMessage).where(
         ConversationMessage.conversation_id == identifier, ConversationMessage.delete_flag == "N",
     ).order_by(ConversationMessage.message_index)))
     return {
         "task": as_dict(task) if task else None, "runs": [as_dict(row) for row in runs],
-        "reservations": [as_dict(row) for row in reservations], "messages": [as_dict(row) for row in messages],
+        "reservations": [{"run_id": row.run_id, "owner_id": row.owner_id, "status": row.status,
+                          "assistant_message_id": row.assistant_message_id} for row in executions], "messages": [as_dict(row) for row in messages],
         "scheduler_capacity": AGENT_AUTOMATION_MAX_CONCURRENT_RUNS,
     }
 
@@ -223,8 +223,7 @@ def expire_live_occurrence(identifier, tenant, owner, token, run_id, execution_i
             assert task["instruction"] == f"runtime-stream:{token}:auto"
             assert task["status"] == "ACTIVE" and task["fire_count"] == 0 and task["lock_owner"]
             assert run["run_id"] == run_id and run["status"] == "RUNNING"
-            assert reservation["execution_id"] == execution_id and reservation["status"] == "RUNNING"
-            assert task["lock_owner"].rsplit("-", 5)[0] == reservation["owner_instance_id"].split(":")[0]
+            assert reservation["run_id"] == execution_id == run["runtime_run_id"] and reservation["status"] == "running"
             current_expiry = datetime.fromisoformat(task["lock_until"])
             if previous_expiry is not None and current_expiry > previous_expiry:
                 assert_only_race_row_due(session, task["task_id"])
@@ -250,14 +249,14 @@ def gate_settled_occurrence(session, identifier, tenant, owner, token, *, arm):
     assert task["fire_count"] == 0 and task["next_fire_at"] == run["scheduled_fire_at"]
     assert run["status"] == "RUNNING" and run["user_message_id"] is not None
     if not arm:
-        assert task["status"] == "ACTIVE" and task["lock_owner"] and reservation["status"] == "RUNNING"
+        assert task["status"] == "ACTIVE" and task["lock_owner"] and reservation["status"] == "running"
         now = session.scalar(select(func.clock_timestamp()))
         parked = update_task_if_lock_owner(task["task_id"], tenant, owner, task["lock_owner"],
                                           {"status": "PAUSED", "lock_until": now - timedelta(seconds=1)})
         assert parked and parked["next_fire_at"] == run["scheduled_fire_at"]
         return {"parked": True}
     assert task["status"] == "PAUSED" and task["lock_owner"] is None
-    assert reservation["status"] in {"COMPLETED", "FAILED", "STOPPED"}
+    assert reservation["status"] in {"completed", "failed", "stopped"}
     rearmed = session.execute(update(AgentAutomationTask).where(
         AgentAutomationTask.task_id == task["task_id"], AgentAutomationTask.tenant_id == tenant,
         AgentAutomationTask.user_id == owner, AgentAutomationTask.delete_flag == "N",
@@ -290,7 +289,7 @@ def observe_schedule(raw_token, action, raw_identifier, *arguments):
         if action == "snapshot" and not arguments:
             return snapshot(session, identifier, tenant, owner)
         if action == "expire-live" and len(arguments) == 2:
-            return expire_live_occurrence(identifier, tenant, owner, raw_token, *(int(value) for value in arguments))
+            return expire_live_occurrence(identifier, tenant, owner, raw_token, int(arguments[0]), arguments[1])
         if action in {"park-settled", "rearm-settled"} and not arguments:
             return gate_settled_occurrence(session, identifier, tenant, owner, raw_token, arm=action == "rearm-settled")
         if action in {"compete", "reclaim"} and len(arguments) == 1 and arguments[0] in {"first", "second"}:

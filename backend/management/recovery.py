@@ -39,10 +39,7 @@ def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
 
     evaluations = 0
     for tenant_id in list_evaluation_tenant_ids():
-        if db_session is None:
-            evaluations += reap_stale_runs(tenant_id, timeout_minutes=0)
-        else:
-            evaluations += reap_stale_runs(tenant_id, timeout_minutes=0, recover_owned=True, **transaction)
+        evaluations += reap_stale_runs(tenant_id, timeout_minutes=0, **transaction)
 
     result = {
         "conversation_messages": len(messages),

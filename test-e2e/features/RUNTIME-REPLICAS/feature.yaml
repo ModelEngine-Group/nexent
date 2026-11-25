@@ -6,24 +6,24 @@ feature:
   feature_id: RUNTIME-REPLICAS
   name: Runtime 固定多副本与停机手动扩缩容
   status: planned
-  description: Kubernetes Runtime 在全停维护后按固定副本运行，并保持跨实例互斥、配额、控制、调度和文件隔离。
+  description: Kubernetes Runtime 在无在途业务的窗口全停并按目标固定副本启动，正常运行时保持跨实例会话互斥、配额、控制、调度和文件隔离。
   business_rules:
   - rule_id: RUNTIME-REPLICAS-RULE-01
-    description: 每次手动扩缩容都先全停维护，再配置正整数固定副本，默认 1；维护暂停为 0，运行期间没有自动伸缩控制器。
+    description: 每次手动扩缩容在无在途业务的窗口先等待全部旧业务 Pod 退出，再启动正整数固定副本，默认 1；部署暂停为 0，运行期间没有自动伸缩控制器。
   - rule_id: RUNTIME-REPLICAS-RULE-02
-    description: 全局恢复和共享 Run 清理只在旧 Runtime 全部退出的维护窗口执行；失败保持停止，重试幂等。
+    description: 停机部署确认旧业务 Pod 已退出、部署锁有效且系统初始化成功后激活，不依赖数据库维护完成批次。异常退出后的全局恢复和共享 Run 清理只在相关旧进程全部退出后由独立恢复入口执行。
   - rule_id: RUNTIME-REPLICAS-RULE-03
-    description: 所有根执行入口共享会话预约；冲突请求不能重置流、保存用户消息或调用模型工具。
+    description: 普通聊天、工作台、北向和 Creator 等绑定持久会话的根执行共享同一执行表与会话互斥。冲突请求不得重置流、保存用户消息或调用模型工具。
   - rule_id: RUNTIME-REPLICAS-RULE-04
-    description: 租户与 Agent 作用域的业务配额跨实例统一；本地 lane 有界，协调故障拒绝新执行。
+    description: 持久会话的租户与 Agent 作用域配额跨实例统一，从准备到实际收尾保持占用。本地 lane 有界，协调故障拒绝新会话执行。A2A 和请求级调试沿用各自的临时执行路径。
   - rule_id: RUNTIME-REPLICAS-RULE-05
     description: 任意副本可以订阅、查询和停止同一代次运行；断开订阅不取消执行，尾部和历史回退完整。
   - rule_id: RUNTIME-REPLICAS-RULE-06
-    description: 多调度器每个到期周期只产生一次有效执行；普通启动不全局恢复租约或覆盖共同恢复截止时间。
+    description: 多调度器每个到期周期只产生一次有效执行；普通启动不得全局恢复其他实例的租约。
   - rule_id: RUNTIME-REPLICAS-RULE-07
     description: 跨节点使用实际共享存储；运行目录与日志按所属执行/进程隔离。
   - rule_id: RUNTIME-REPLICAS-RULE-08
-    description: 普通 Pod 重启不能修改其他 owner；第一阶段失联预约保持占用至全停维护，无自动接管。
+    description: 普通 Pod 重启不得修改其他 owner；失联执行保留会话及配额占用至异常全停恢复，无自动接管。
   - rule_id: RUNTIME-REPLICAS-RULE-09
     description: 稳定 Service 下公开路由、成功响应、运行标识、鉴权、冲突和容量错误兼容；语音 WebSocket 保留连接语义，附件经对象存储跨副本合法可读。
   required_test_stages:
@@ -33,5 +33,6 @@ feature:
   source:
     requirement_ids:
     - RUNTIME-FIXED-REPLICAS-20261105
+    - RUNTIME-UNIFY-EXECUTION-20261125
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
     notes: 设计交付；尚未实施。项目内 nexent-doc 按用户指示位于 Git 排除目录。

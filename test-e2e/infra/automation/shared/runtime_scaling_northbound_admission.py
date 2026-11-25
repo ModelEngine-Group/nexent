@@ -19,11 +19,14 @@ from shared.runtime_scaling_public_admission import (
 from shared.runtime_scaling_stream import assert_persisted_answer, check_stream, conversation_history
 
 
-def exercise_northbound_admission(gateway_url, identity, api_key, agent, token, *, control, snapshot, transport,
-                                  origins, wait_seconds, expected_hosts=None):
+def exercise_northbound_admission(gateway_urls, stable_url, identity, api_key, agent, token, *, control, snapshot,
+                                  wait_seconds, hosts):
     timeout = min(wait_seconds, 90)
     with ExitStack() as stack:
-        client = stack.enter_context(httpx.Client(base_url=gateway_url, timeout=timeout, trust_env=False))
+        client = stack.enter_context(httpx.Client(base_url=stable_url, timeout=timeout, trust_env=False))
+        directed = {side: stack.enter_context(httpx.Client(base_url=url, timeout=timeout, trust_env=False))
+                    for side, url in gateway_urls.items()}
+        assert directed.keys() == hosts.keys() and len(set(hosts.values())) == 2
         executor = stack.enter_context(ThreadPoolExecutor(max_workers=2))
         stack.callback(control, "release")
         owner = sign_in(client, identity)
@@ -45,23 +48,15 @@ def exercise_northbound_admission(gateway_url, identity, api_key, agent, token, 
         def connect(identifier, tag, barrier=None):
             if barrier is not None:
                 barrier.wait(timeout=10)
-            with client.stream("POST", NORTHBOUND_RUN, headers=key, json=payload(identifier, tag)) as response:
+            side = tag.rsplit("-", 1)[1]
+            with directed[side].stream("POST", NORTHBOUND_RUN, headers=key, json=payload(identifier, tag)) as response:
                 if response.headers.get("X-Stream-Status") == "conflict":
                     response.read()
                     assert_conflict(response)
                     return None
                 return stream_prefix(check_stream(response, identifier), tag)
 
-        expected_routes = {}
-        targets = {"a": "producer", "b": "peer"}
-
-        def expect_route(tag, status):
-            target = targets[tag.rsplit("-", 1)[1]]
-            expected_routes[tag] = [{"operation": "start", "target": target, "status": status,
-                                     "origin": origins[target]}]
-
-        def assert_routes():
-            assert {name: receipts for name, receipts in transport("probe").items() if receipts} == expected_routes
+        owners = {}
 
         def model_tags():
             data = control("probe")
@@ -71,11 +66,11 @@ def exercise_northbound_admission(gateway_url, identity, api_key, agent, token, 
         def active(identifier, tag, generation):
             row = read()[str(identifier)]
             reservation, = row["reservations"]
-            assert reservation["status"] == "RUNNING" and reservation["agent_scope"] == f"agent:{agent['agent_id']}"
-            if expected_hosts is not None:
-                assert reservation["owner"].split(":", 1)[0] == expected_hosts[tag.rsplit("-", 1)[1]]
+            assert reservation["status"] == "running" and reservation["agent_scope"] == f"agent:{agent['agent_id']}"
+            side = tag.rsplit("-", 1)[1]
+            assert owners.setdefault(side, reservation["owner"]) == reservation["owner"]
             assert row["messages"] == [query(tag)]
-            assert generation == row["stream"]["generation"] == f"execution:{reservation['id']}"
+            assert generation == row["stream"]["generation"] == reservation["id"]
             assert row["event_ids"]
             return row
 
@@ -87,40 +82,36 @@ def exercise_northbound_admission(gateway_url, identity, api_key, agent, token, 
 
             def settled():
                 record, = read()[str(identifier)]["reservations"]
-                assert record["status"] not in {"FAILED", "STOPPED"}, record
-                return record if record["status"] == "COMPLETED" else None
+                assert record["status"] not in {"failed", "stopped"}, record
+                return record if record["status"] == "completed" else None
 
             assert wait_for(settled, timeout, f"Northbound run {tag} did not settle") == {
-                **reservation, "status": "COMPLETED",
+                **reservation, "status": "completed",
             }
+            wait_for(lambda: any(message["message_id"] == message_id and message["status"] == "completed"
+                                 for message in conversation_history(client, owner, identifier)["message"]),
+                     timeout, "Northbound assistant projection did not finish")
             assert_persisted_answer(client, owner, identifier, message_id, tag)
 
         for row in read().values():
             assert_unstarted(row)
         barrier = Barrier(2)
-        futures = {side: executor.submit(connect, contested, f"nb-race-{side}", barrier) for side in targets}
+        futures = {side: executor.submit(connect, contested, f"nb-race-{side}", barrier) for side in directed}
         results = {side: future.result(timeout=timeout) for side, future in futures.items()}
         winner, = (side for side, generation in results.items() if generation is not None)
         loser, = results.keys() - {winner}
-        for side in results:
-            expect_route(f"nb-race-{side}", 200)
-        assert_routes()
 
         winning_tag, second_tag, retry_tag = f"nb-race-{winner}", f"nb-second-{loser}", f"nb-retry-{loser}"
         first = active(contested, winning_tag, results[winner])
         first_assistant = assistant_id(contested)
         overlap = f"nb-overlap-{loser}"
         assert connect(contested, overlap) is None
-        expect_route(overlap, 200)
-        assert_routes()
         preserved = active(contested, winning_tag, results[winner])
         assert first["reservations"] == preserved["reservations"]
         assert preserved["event_ids"][:len(first["event_ids"])] == first["event_ids"]
         assert assistant_id(contested) == first_assistant and model_tags() == {winning_tag: 1}
 
         second_generation = connect(second, second_tag)
-        expect_route(second_tag, 200)
-        assert_routes()
         admitted = active(second, second_tag, second_generation)
         second_assistant = assistant_id(second)
         first_reservation, = first["reservations"]
@@ -128,17 +119,13 @@ def exercise_northbound_admission(gateway_url, identity, api_key, agent, token, 
         assert first_reservation["owner"] != second_reservation["owner"]
         for side in results:
             tag = f"nb-quota-{side}"
-            response = client.post(NORTHBOUND_RUN, headers=key, json=payload(candidate, tag))
+            response = directed[side].post(NORTHBOUND_RUN, headers=key, json=payload(candidate, tag))
             assert_admission_rejection(response, 429, "RUNTIME_CAPACITY_FULL")
-            expect_route(tag, 429)
-            assert_routes()
             assert_unstarted(read()[str(candidate)])
         assert model_tags() == {winning_tag: 1, second_tag: 1}
 
         complete(contested, winning_tag, first_reservation, first_assistant)
         retry_generation = connect(candidate, retry_tag)
-        expect_route(retry_tag, 200)
-        assert_routes()
         retry_reservation, = active(candidate, retry_tag, retry_generation)["reservations"]
         assert active(second, second_tag, second_generation)["reservations"] == [second_reservation]
         complete(candidate, retry_tag, retry_reservation, assistant_id(candidate))
@@ -152,6 +139,5 @@ def exercise_northbound_admission(gateway_url, identity, api_key, agent, token, 
             removed = client.get(path, headers=owner)
             require_status(removed, 200, "Check deleted Northbound conversation")
             assert removed.json()["data"] == []
-        assert_routes()
-        return {"winner": winner, "routes": expected_routes, "model_calls": observed_model_tags,
+        return {"winner": winner, "runtime_pods": hosts, "model_calls": observed_model_tags,
                 "owners": [first_reservation["owner"], second_reservation["owner"]], "owned_conversations_removed": 3}

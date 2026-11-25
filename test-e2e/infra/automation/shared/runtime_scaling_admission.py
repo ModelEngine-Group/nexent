@@ -5,6 +5,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import json
+from uuid import UUID
 from threading import Barrier
 from time import monotonic, sleep
 
@@ -39,9 +40,12 @@ def events(response):
 
 
 def assert_conflict(response):
-    require_status(response, 200, "Competing turn SSE conflict")
     assert response.headers["X-Stream-Status"] == "conflict"
-    assert [event.get("type") for event in events(response)] == ["error"]
+    if response.status_code == 409:
+        assert response.json() == {"detail": {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}}
+    else:
+        require_status(response, 200, "Competing turn SSE conflict")
+        assert [event.get("type") for event in events(response)] == ["error"]
 
 
 def assert_completed(response, identifier, tag):
@@ -63,13 +67,12 @@ def wait_for(predicate, timeout, failure):
     raise AssertionError(failure)
 
 
-def assert_active(state, token, tag, expected_owner=None):
+def assert_active(state, token, tag):
     reservation, = state["reservations"]
-    assert reservation["status"] == "RUNNING"
-    if expected_owner is not None:
-        assert reservation["owner"].split(":", 1)[0] == expected_owner
+    assert reservation["status"] == "running"
+    assert UUID(hex=reservation["owner"]).hex == reservation["owner"]
     assert state["messages"] == [marker(token, tag)]
-    assert state["stream"]["generation"] == f"execution:{reservation['id']}"
+    assert state["stream"]["generation"] == reservation["id"]
     assert state["stream"]["execution_id"] == str(reservation["id"])
     return reservation
 
@@ -111,6 +114,8 @@ def exercise_admission_race(url_a, url_b, stable_url, identity, agent, token, *,
         for state in read().values():
             assert_unstarted(state)
         clients = {"race-a": runtime_a, "race-b": runtime_b}
+        if expected_hosts is not None:
+            assert clients.keys() == expected_hosts.keys() and len(set(expected_hosts.values())) == 2
         barrier = Barrier(2)
         racers = {tag: submit(client, contested, tag, barrier) for tag, client in clients.items()}
         try:
@@ -122,18 +127,17 @@ def exercise_admission_race(url_a, url_b, stable_url, identity, agent, token, *,
             assert not racers[winner].done(), "Winning Run must remain held at the provider"
 
             before = read()[str(contested)]
-            first = assert_active(before, token, winner, expected_hosts[winner] if expected_hosts else None)
+            first = assert_active(before, token, winner)
             assert before["event_ids"], "The active stream must have events to preserve"
             assert_conflict(post_agent(clients[loser], auth, main_agent, token, contested, "repeat-conflict"))
             after = read()[str(contested)]
-            assert_active(after, token, winner, expected_hosts[winner] if expected_hosts else None)
+            assert_active(after, token, winner)
             assert after["event_ids"][:len(before["event_ids"])] == before["event_ids"]
             assert after["reservations"] == before["reservations"] and provider_tags() == {winner: 1}
 
             other = submit(clients[loser], second, "second-slot")
             wait_for(lambda: provider_tags().get("second-slot"), timeout, "The other Runtime did not claim the second slot")
-            second_record = assert_active(read()[str(second)], token, "second-slot",
-                                          expected_hosts[loser] if expected_hosts else None)
+            second_record = assert_active(read()[str(second)], token, "second-slot")
             assert first["owner"] != second_record["owner"] and first["agent_scope"] == second_record["agent_scope"]
             for client, identifier, tag in ((runtime_a, quota_a, "quota-a"), (runtime_b, quota_b, "quota-b")):
                 response = post_agent(client, auth, main_agent, token, identifier, tag)
@@ -148,9 +152,9 @@ def exercise_admission_race(url_a, url_b, stable_url, identity, agent, token, *,
             isolated = submit(runtime_b, different, "separate-agent", target=distinct_agent)
             wait_for(lambda: provider_tags().get("separate-agent"), timeout,
                      "Another Agent must be accepted while the first Agent is at its limit")
-            separated = assert_active(read()[str(different)], token, "separate-agent",
-                                      expected_hosts["race-b"] if expected_hosts else None)
+            separated = assert_active(read()[str(different)], token, "separate-agent")
             assert separated["agent_scope"] != first["agent_scope"]
+            assert separated["owner"] == (first if winner == "race-b" else second_record)["owner"]
             assert not racers[winner].done() and not other.done() and not isolated.done()
         finally:
             assert control("release") == {"released": True}
@@ -161,7 +165,7 @@ def exercise_admission_race(url_a, url_b, stable_url, identity, agent, token, *,
 
         def settled():
             observed = read()
-            return all([item["status"] for item in observed[str(identifier)]["reservations"]] == ["COMPLETED"]
+            return all([item["status"] for item in observed[str(identifier)]["reservations"]] == ["completed"]
                        for identifier in (contested, second, different))
 
         wait_for(settled, timeout, "The admitted reservations did not settle")
@@ -171,7 +175,7 @@ def exercise_admission_race(url_a, url_b, stable_url, identity, agent, token, *,
         def readmission_completed():
             observed = read()[str(quota_b)]
             assert observed["messages"] == [marker(token, "after-release")]
-            return [item["status"] for item in observed["reservations"]] == ["COMPLETED"]
+            return [item["status"] for item in observed["reservations"]] == ["completed"]
 
         wait_for(readmission_completed, timeout, "Readmitted reservation did not settle")
         return {"winner": winner, "first_execution": first["id"], "second_execution": second_record["id"],

@@ -23,7 +23,7 @@ def stream_prefix(frames, tag):
         assert frame.get("type") != "error", "The public stream failed before the controlled prefix"
         if frame.get("content") == f"stream-prefix:{tag}:界🌊":
             assert event == "message"
-            generation = re.fullmatch(r"(execution:[1-9][0-9]*):[0-9]+:[0-9]+", cursor or "")
+            generation = re.fullmatch(r"([0-9a-f]{32}):[1-9][0-9]*", cursor or "")
             assert generation, "The public stream did not forward the durable execution cursor"
             return generation[1]
     raise AssertionError("The public stream ended without the expected prefix")
@@ -47,30 +47,37 @@ def assert_admission_rejection(response, status, code):
     assert body["code"] == code and body["retryable"] is True
 
 
-def exercise_coordination_faults(identifier, *, reject_redis, reject_postgres, probe, check_unchanged, wait_seconds):
+def assert_store_rejection(response, code):
+    require_status(response, 503, code)
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.json() == {"detail": {"code": code}}
+
+
+def exercise_coordination_faults(journal_id, postgres_id, *, reject_redis, reject_postgres, probe,
+                                 check_after_fault, wait_seconds):
     try:
-        denied = probe("deny-redis", identifier)
-        assert denied == {"coordination_ping_denied": True}
-        assert_admission_rejection(reject_redis(), 503, "RUNTIME_COORDINATION_UNAVAILABLE")
+        denied = probe("deny-redis", journal_id)
+        assert denied == {"journal_xadd_denied": True}
+        assert_store_rejection(reject_redis(journal_id), "AGENTOS_EVENT_STORE_UNAVAILABLE")
     finally:
-        restored = probe("restore-redis", identifier)
+        restored = probe("restore-redis", journal_id)
     assert restored == {"acl_restored": True}
-    check_unchanged()
+    check_after_fault()
 
     with ThreadPoolExecutor(max_workers=1) as executor:
-        cancellation = executor.submit(probe, "cancel-postgres", identifier)
+        cancellation = executor.submit(probe, "cancel-postgres", postgres_id)
 
         def lock_held():
             if cancellation.done():
                 cancellation.result()
                 raise AssertionError("PostgreSQL probe completed before the request was sent")
-            return probe("postgres-ready", identifier)["locked"]
+            return probe("postgres-ready", postgres_id)["locked"]
 
         wait_for(lock_held, min(wait_seconds, 45), "The scoped PostgreSQL advisory lock was not ready")
-        assert_admission_rejection(reject_postgres(), 503, "RUNTIME_COORDINATION_UNAVAILABLE")
+        assert_store_rejection(reject_postgres(postgres_id), "AGENTOS_EXECUTION_STORE_UNAVAILABLE")
         canceled = cancellation.result(timeout=wait_seconds)
     assert canceled == {"scoped_waiter_observed": True, "query_canceled": True}
-    check_unchanged()
+    check_after_fault()
     return {"redis": {**denied, **restored}, "postgres": canceled}
 
 
@@ -82,7 +89,7 @@ def exercise_peer_coordination_recovery(url_a, url_b, stable_url, identity, agen
                                                                trust_env=False))
                                for url in (url_a, url_b, stable_url)]
         auth = sign_in(stable, identity)
-        routing, holder, candidate = new_conversations(stable, auth, 3)
+        routing, holder, candidate, postgres_id = new_conversations(stable, auth, 4)
         routing_tag = "coordination-route-a"
         holder_tag, candidate_tag = "coordination-holder", "coordination-retry"
 
@@ -112,10 +119,10 @@ def exercise_peer_coordination_recovery(url_a, url_b, stable_url, identity, agen
                 frames = check_stream(response, routing)
                 generation = stream_prefix(frames, routing_tag)
                 routed, = routing_state()["reservations"]
-                assert routed["status"] == "RUNNING" and generation == f"execution:{routed['id']}"
+                assert routed["status"] == "running" and generation == routed["id"]
                 assert control(f"release/{routing_tag}") == {"released": True}
                 stream_completion(frames, generation, routing_tag)
-            wait_for(lambda: routing_state()["reservations"] == [{**routed, "status": "COMPLETED"}], timeout,
+            wait_for(lambda: routing_state()["reservations"] == [{**routed, "status": "completed"}], timeout,
                      "The routed pre-fault execution on A did not settle")
 
             holding = stack.enter_context(peer.stream("POST", RUN_PATH, headers=auth, json=payload(holder, holder_tag)))
@@ -123,44 +130,52 @@ def exercise_peer_coordination_recovery(url_a, url_b, stable_url, identity, agen
             holder_generation = stream_prefix(holder_frames, holder_tag)
             active, unstarted = read_states()
             original, = active["reservations"]
-            assert original["status"] == "RUNNING" and holder_generation == f"execution:{original['id']}"
+            assert original["status"] == "running" and holder_generation == original["id"]
             assert routed["owner"] != original["owner"], "Both Gateways reached the same Runtime process"
-            if expected_hosts is not None:
-                assert tuple(row["owner"].split(":", 1)[0] for row in (routed, original)) == expected_hosts
+
             assert_unstarted(unstarted)
             live_history = conversation_history(peer, auth, holder)["message"]
             assert live_history
 
-            def unchanged():
-                assert read_states() == (active, unstarted)
-                assert conversation_history(peer, auth, candidate)["message"] == []
+            def after_fault():
+                surviving, attempt = read_states()
+                assert surviving == active
+                failed, = attempt["reservations"]
+                assert failed["status"] == "failed" and failed["owner"] == routed["owner"]
+                assert {**attempt, "reservations": []} == unstarted
+                postgres = snapshot(postgres_id)["conversations"][str(postgres_id)]
+                assert_unstarted(postgres)
+                for identifier in (candidate, postgres_id):
+                    assert conversation_history(peer, auth, identifier)["message"] == []
                 assert model_calls() == {routing_tag: 1, holder_tag: 1}
 
-            def reject_on_a():
+            def reject_on_a(identifier):
                 assert conversation_history(peer, auth, holder)["message"] == live_history
-                with first.stream("POST", RUN_PATH, headers=auth, json=payload(candidate, candidate_tag)) as response:
-                    require_status(response, 503, "Pre-reservation coordination failure on A")
+                with first.stream("POST", RUN_PATH, headers=auth, json=payload(identifier, candidate_tag)) as response:
+                    require_status(response, 503, "Coordination failure on A")
                     response.read()
                     return response
 
-            faults = exercise_coordination_faults(candidate, reject_redis=reject_on_a, reject_postgres=reject_on_a,
-                                                   probe=fault_probe, check_unchanged=unchanged, wait_seconds=timeout)
+            faults = exercise_coordination_faults(candidate, postgres_id, reject_redis=reject_on_a,
+                                                   reject_postgres=reject_on_a, probe=fault_probe,
+                                                   check_after_fault=after_fault, wait_seconds=timeout)
             wait_for(lambda: capacity("a")["active_count"] == 0, timeout, "A kept a worker from a rejected request")
             retry = stack.enter_context(peer.stream("POST", RUN_PATH, headers=auth, json=payload(candidate, candidate_tag)))
             retry_frames = check_stream(retry, candidate)
             retry_generation = stream_prefix(retry_frames, candidate_tag)
             surviving, readmitted = read_states()
-            recovered, = readmitted["reservations"]
-            assert surviving == active and recovered["status"] == "RUNNING"
+            failed, recovered = readmitted["reservations"]
+            assert failed["status"] == "failed"
+            assert surviving == active and recovered["status"] == "running"
             assert recovered["owner"] == original["owner"] and recovered["agent_scope"] == original["agent_scope"]
-            assert retry_generation == readmitted["stream"]["generation"] == f"execution:{recovered['id']}"
+            assert retry_generation == readmitted["stream"]["generation"] == recovered["id"]
         finally:
             assert control("release") == {"released": True}
 
         stream_completion(holder_frames, holder_generation, holder_tag)
         stream_completion(retry_frames, retry_generation, candidate_tag)
-        wait_for(lambda: all([row["status"] for row in state["reservations"]] == ["COMPLETED"]
-                             for state in read_states()), timeout, "The peer executions did not settle")
+        wait_for(lambda: all(state["reservations"][-1]["status"] == "completed" for state in read_states()),
+                 timeout, "The peer executions did not settle")
         for identifier, tag, state in zip((routing, holder, candidate), (routing_tag, holder_tag, candidate_tag),
                                           (routing_state(), *read_states()), strict=True):
             assert state["messages"] == [f"runtime-stream:{token}:{tag}"]
@@ -170,11 +185,13 @@ def exercise_peer_coordination_recovery(url_a, url_b, stable_url, identity, agen
             path = f"/api/conversation/{identifier}"
             require_status(stable.delete(path, headers=auth), 200, "Delete the owned conversation")
             assert stable.get(path, headers=auth).json()["data"] == []
+        require_status(stable.delete(f"/api/conversation/{postgres_id}", headers=auth), 200,
+                       "Delete the PostgreSQL fault conversation")
         wait_for(lambda: all(capacity(slot)["active_count"] == 0 for slot in ("a", "b")), timeout,
                  "The Agent lanes did not return to idle")
         assert model_calls() == {routing_tag: 1, holder_tag: 1, candidate_tag: 1}
         return {**faults, "routed_owners": [routed["owner"], original["owner"]], "readmitted_execution": recovered["id"],
-                "failed_requests_left_no_reservation": True, "model_calls": model_calls()}
+                "failed_requests_left_no_active_execution": True, "model_calls": model_calls()}
 
 
 def exercise_public_admission(web_url, northbound_url, identities, api_keys, agent, token, *, control, snapshot,
@@ -185,7 +202,7 @@ def exercise_public_admission(web_url, northbound_url, identities, api_keys, age
                            for url in (web_url, northbound_url)]
         session = {role: sign_in(northbound, identity) for role, identity in identities.items()}
         northbound_auth = {role: {"Authorization": f"Bearer {key}"} for role, key in api_keys.items()}
-        web_id, northbound_id, recovery_id = new_conversations(web, session["owner"], 3)
+        web_id, northbound_id, recovery_id, postgres_id = new_conversations(web, session["owner"], 4)
         producer_instances = {}
 
         def marker(tag):
@@ -205,24 +222,24 @@ def exercise_public_admission(web_url, northbound_url, identities, api_keys, age
 
         def active(identifier, tag, generation):
             observed = state(identifier)
-            reservation, = observed["reservations"]
-            assert reservation["status"] == "RUNNING" and generation == f"execution:{reservation['id']}"
+            reservation, = (row for row in observed["reservations"] if row["id"] == generation)
+            assert reservation["status"] == "running" and generation == reservation["id"]
             assert observed["messages"] == [marker(tag)] and observed["event_ids"]
             assert observed["stream"]["generation"] == generation
             producer = reservation["owner"]
-            if expected_hosts is not None:
-                assert producer.split(":", 1)[0] in expected_hosts
+
             producer_instances[tag] = producer
             return observed
 
         def settled(identifier, tag, generation):
             def completed():
                 observed = state(identifier)
-                return observed if observed["reservations"][0]["status"] == "COMPLETED" else None
+                if any(row["id"] == generation and row["status"] == "completed" for row in observed["reservations"]):
+                    return observed
 
             observed = wait_for(completed, wait_seconds, "The public run did not settle its reservation")
-            reservation, = observed["reservations"]
-            assert generation == f"execution:{reservation['id']}" and observed["messages"] == [marker(tag)]
+            reservation, = (row for row in observed["reservations"] if row["id"] == generation)
+            assert generation == reservation["id"] and observed["messages"] == [marker(tag)]
             history = conversation_history(web, session["owner"], identifier)
             assistant, = [message for message in history["message"] if message["role"] == "assistant"]
             assert_persisted_answer(web, session["owner"], identifier, assistant["message_id"], tag)
@@ -246,20 +263,23 @@ def exercise_public_admission(web_url, northbound_url, identities, api_keys, age
             fault_before = state(recovery_id)
             assert not fault_before["reservations"] and not fault_before["messages"] and not fault_before["event_ids"]
 
-            def no_fault_side_effects():
-                assert state(recovery_id) == fault_before
+            def after_fault():
+                attempt = state(recovery_id)
+                failed, = attempt["reservations"]
+                assert failed["status"] == "failed"
+                assert {**attempt, "reservations": []} == fault_before
+                assert_unstarted(state(postgres_id))
                 assert state(web_id) == held
                 assert control("probe")["calls_by_tag"] == {"web": 1}
 
-            no_fault_side_effects()
             fault_evidence = exercise_coordination_faults(
-                recovery_id, probe=fault_probe, check_unchanged=no_fault_side_effects, wait_seconds=wait_seconds,
-                reject_redis=lambda: web.post(
-                    RUN_PATH, headers=session["owner"], json=web_payload(recovery_id, "redis-rejected", other_scope=True),
+                recovery_id, postgres_id, probe=fault_probe, check_after_fault=after_fault, wait_seconds=wait_seconds,
+                reject_redis=lambda identifier: web.post(
+                    RUN_PATH, headers=session["owner"], json=web_payload(identifier, "redis-rejected", other_scope=True),
                 ),
-                reject_postgres=lambda: northbound.post(
+                reject_postgres=lambda identifier: northbound.post(
                     NORTHBOUND_RUN, headers=northbound_auth["owner"],
-                    json=northbound_payload(recovery_id, "postgres-rejected", other_scope=True),
+                    json=northbound_payload(identifier, "postgres-rejected", other_scope=True),
                 ),
             )
             assert control("release/web")["released"] is True
@@ -310,7 +330,7 @@ def exercise_public_admission(web_url, northbound_url, identities, api_keys, age
             stream_completion(frames, recovered, "recovered")
         settled(recovery_id, "recovered", recovered)
 
-        for identifier in (web_id, northbound_id, recovery_id):
+        for identifier in (web_id, northbound_id, recovery_id, postgres_id):
             path = f"/api/conversation/{identifier}"
             require_status(web.delete(path, headers=session["owner"]), 200, "Delete the owned conversation")
             assert web.get(path, headers=session["owner"]).json()["data"] == []
@@ -348,7 +368,7 @@ def exercise_local_lane(url_a, url_b, stable_url, identity, agent, token, *, con
             generation_a = stream_prefix(frames_a, "lane-a")
             held, before = state()
             reservation_a, = held["reservations"]
-            assert reservation_a["status"] == "RUNNING" and generation_a == f"execution:{reservation_a['id']}"
+            assert reservation_a["status"] == "running" and generation_a == reservation_a["id"]
             assert not before["reservations"] and not before["messages"] and not before["event_ids"]
             candidate_payload = payload(candidate, "lane-b", "other_agent_id")
             denied = first.post(RUN_PATH, headers=authorization, json=candidate_payload)
@@ -362,11 +382,10 @@ def exercise_local_lane(url_a, url_b, stable_url, identity, agent, token, *, con
                 current, admitted = state()
                 reservation_b, = admitted["reservations"]
                 assert current == held
-                assert reservation_b["status"] == "RUNNING" and generation_b == f"execution:{reservation_b['id']}"
+                assert reservation_b["status"] == "running" and generation_b == reservation_b["id"]
                 assert reservation_b["agent_scope"] != reservation_a["agent_scope"]
                 assert reservation_b["owner"] != reservation_a["owner"]
-                if expected_hosts is not None:
-                    assert tuple(row["owner"].split(":", 1)[0] for row in (reservation_a, reservation_b)) == expected_hosts
+
                 assert control("release/lane-b")["released"] is True
                 stream_completion(frames_b, generation_b, "lane-b")
             assert control("release/lane-a")["released"] is True
@@ -374,12 +393,12 @@ def exercise_local_lane(url_a, url_b, stable_url, identity, agent, token, *, con
 
         def settled():
             observed = state()
-            return observed if all(row["reservations"][0]["status"] == "COMPLETED" for row in observed) else None
+            return observed if all(row["reservations"][0]["status"] == "completed" for row in observed) else None
 
         completed = wait_for(settled, wait_seconds, "The local-lane executions did not settle")
         for identifier, tag, row in zip((original, candidate), ("lane-a", "lane-b"), completed, strict=True):
             reservation, = row["reservations"]
-            assert reservation["status"] == "COMPLETED" and row["messages"] == [f"runtime-stream:{token}:{tag}"]
+            assert reservation["status"] == "completed" and row["messages"] == [f"runtime-stream:{token}:{tag}"]
             path = f"/api/conversation/{identifier}"
             require_status(stable.delete(path, headers=authorization), 200, "Delete the owned conversation")
             assert stable.get(path, headers=authorization).json()["data"] == []
@@ -433,7 +452,7 @@ def exercise_agent_backlog(url_a, url_b, stable_url, identity, agent, token, *, 
                 holder_request = executor.submit(post, first, holder)
                 wait_for(lambda: calls() == {holder: 1}, timeout, "The holder did not reach the controlled model")
                 held, = states()[holder]["reservations"]
-                assert held["status"] == "RUNNING"
+                assert held["status"] == "running"
                 queued_request = executor.submit(post, first, queued)
                 wait_for(lambda: occupancy(capacity("a")) == (1, 1, 0), timeout, "Agent backlog did not fill on A")
                 assert not queued_request.done() and capacity("b") == right
@@ -450,10 +469,9 @@ def exercise_agent_backlog(url_a, url_b, stable_url, identity, agent, token, *, 
                 wait_for(lambda: calls() == {holder: 1, overflow: 1}, timeout, "The peer did not accept the same request")
                 current = states()
                 admitted, = current[overflow]["reservations"]
-                assert admitted["status"] == "RUNNING" and admitted["agent_scope"] != held["agent_scope"]
+                assert admitted["status"] == "running" and admitted["agent_scope"] != held["agent_scope"]
                 assert admitted["owner"] != held["owner"]
-                if expected_hosts is not None:
-                    assert tuple(row["owner"].split(":", 1)[0] for row in (held, admitted)) == expected_hosts
+
                 assert current[queued] == before[queued] and current[holder] == before[holder]
                 assert capacity("a") == saturated and occupancy(capacity("b")) == (1, 0, 1)
                 assert not queued_request.done()
@@ -461,7 +479,7 @@ def exercise_agent_backlog(url_a, url_b, stable_url, identity, agent, token, *, 
                 assert control(f"release/{holder}") == {"released": True}
                 wait_for(lambda: calls() == dict.fromkeys(tags, 1), timeout, "A did not start its own queued request")
                 local, = states()[queued]["reservations"]
-                assert local["status"] == "RUNNING" and local["owner"] == held["owner"]
+                assert local["status"] == "running" and local["owner"] == held["owner"]
                 assert local["agent_scope"] == held["agent_scope"]
             finally:
                 assert control("release") == {"released": True}
@@ -470,12 +488,12 @@ def exercise_agent_backlog(url_a, url_b, stable_url, identity, agent, token, *, 
                                                 (held, local, admitted), strict=True):
                 frames = check_stream(future.result(timeout=timeout), ids[tag])
                 generation = stream_prefix(frames, tag)
-                assert generation == f"execution:{reservation['id']}"
+                assert generation == reservation["id"]
                 stream_completion(frames, generation, tag)
 
         def settled():
             rows = states()
-            return rows if all([record["status"] for record in row["reservations"]] == ["COMPLETED"]
+            return rows if all([record["status"] for record in row["reservations"]] == ["completed"]
                                for row in rows.values()) else None
 
         completed = wait_for(settled, timeout, "The Agent lane executions did not settle")
@@ -497,7 +515,7 @@ def exercise_agent_backlog(url_a, url_b, stable_url, identity, agent, token, *, 
 
 def exercise_agent_preparation_failure(url_a, url_b, stable_url, identity, agent, token, *, control, snapshot,
                                        capacity, fault_probe, fault_kind, wait_seconds, expected_hosts=None):
-    expected_status = {"message-write": 500, "stream-reset": 503}[fault_kind]
+    expected_status = {"message-write": 500, "journal-write": 503}[fault_kind]
     timeout = min(wait_seconds, 60)
     with ExitStack() as stack:
         first, peer, stable = [stack.enter_context(httpx.Client(base_url=url, timeout=httpx.Timeout(15, read=120),
@@ -531,7 +549,7 @@ def exercise_agent_preparation_failure(url_a, url_b, stable_url, identity, agent
             holder_generation = stream_prefix(holder_frames, holder_tag)
             held, unstarted = state()
             original, = held["reservations"]
-            assert original["status"] == "RUNNING" and holder_generation == f"execution:{original['id']}"
+            assert original["status"] == "running" and holder_generation == original["id"]
             assert_unstarted(unstarted)
 
             try:
@@ -540,30 +558,28 @@ def exercise_agent_preparation_failure(url_a, url_b, stable_url, identity, agent
                 with first.stream("POST", RUN_PATH, headers=auth, json=payload(candidate, recovery_tag)) as response:
                     require_status(response, expected_status, f"Agent preparation failure ({fault_kind})")
                     assert response.headers["content-type"].startswith("application/json")
-                    if fault_kind == "stream-reset":
+                    if fault_kind == "journal-write":
                         response.read()
-                        assert_admission_rejection(response, expected_status, "RUNTIME_COORDINATION_UNAVAILABLE")
+                        assert_store_rejection(response, "AGENTOS_EVENT_STORE_UNAVAILABLE")
             finally:
                 removed = fault_probe("remove", candidate)
                 assert removed["installed"] is False
-            if fault_kind == "stream-reset":
-                assert removed["removed_marker"] is True
-                assert removed["wrongtype_errors"] > installed["wrongtype_errors"], (installed, removed)
+            if fault_kind == "journal-write":
+                assert installed["journal_xadd_denied"] and removed["acl_restored"]
 
             def compensated():
                 surviving, attempt = state()
                 assert surviving == held
                 record, = attempt["reservations"]
-                assert record["status"] in {"PREPARING", "FAILED"}, record
-                return attempt if record["status"] == "FAILED" else None
+                assert record["status"] in {"starting", "failed"}, record
+                return attempt if record["status"] == "failed" else None
 
             failed_state = wait_for(compensated, timeout, "Failed preparation did not settle its durable reservation")
             failed, = failed_state["reservations"]
             assert failed["owner"] != original["owner"] and failed["agent_scope"] == original["agent_scope"]
-            if expected_hosts is not None:
-                assert tuple(row["owner"].split(":", 1)[0] for row in (failed, original)) == expected_hosts
+
             assert not failed_state["messages"] and not failed_state["event_ids"]
-            if fault_kind == "stream-reset":
+            if fault_kind == "journal-write":
                 assert not failed_state["stream"]
             assert conversation_history(stable, auth, candidate)["message"] == []
             assert calls() == {holder_tag: 1}
@@ -575,9 +591,9 @@ def exercise_agent_preparation_failure(url_a, url_b, stable_url, identity, agent
             surviving, readmitted = state()
             failure, recovered = readmitted["reservations"]
             assert surviving == held and failure == failed
-            assert recovered["status"] == "RUNNING" and recovered["owner"] == original["owner"]
+            assert recovered["status"] == "running" and recovered["owner"] == original["owner"]
             assert recovered["agent_scope"] == original["agent_scope"] and recovered["id"] != failed["id"]
-            assert readmitted["stream"]["generation"] == retry_generation == f"execution:{recovered['id']}"
+            assert readmitted["stream"]["generation"] == retry_generation == recovered["id"]
         finally:
             assert control("release") == {"released": True}
 
@@ -586,8 +602,8 @@ def exercise_agent_preparation_failure(url_a, url_b, stable_url, identity, agent
 
         def settled():
             completed, retried = state()
-            return ([row["status"] for row in completed["reservations"]] == ["COMPLETED"]
-                    and retried["reservations"] == [failed, {**recovered, "status": "COMPLETED"}])
+            return ([row["status"] for row in completed["reservations"]] == ["completed"]
+                    and retried["reservations"] == [failed, {**recovered, "status": "completed"}])
 
         wait_for(settled, timeout, "The holder and readmitted execution did not settle independently")
         for identifier, tag, row in zip((holder, candidate), (holder_tag, recovery_tag), state(), strict=True):
@@ -607,7 +623,7 @@ def exercise_agent_preparation_failure(url_a, url_b, stable_url, identity, agent
 
 
 def exercise_public_transport_failure(web_url, gateway_url, identity, api_key, agent, token, *,
-                                      transport, control, snapshot, wait_seconds, expected_hosts=None):
+                                      transport, control, snapshot, wait_seconds, origins):
     with ExitStack() as stack:
         web, gateway = [stack.enter_context(httpx.Client(base_url=url, timeout=wait_seconds, trust_env=False))
                         for url in (web_url, gateway_url)]
@@ -615,11 +631,11 @@ def exercise_public_transport_failure(web_url, gateway_url, identity, api_key, a
         identifiers = new_conversations(web, authorization, 2)
         evidence = {}
         calls = {}
-        for index, (client, path, auth, selector, tag, identifier) in enumerate(zip(
+        for client, path, auth, selector, tag, identifier, target, error_status in zip(
             (web, gateway), (RUN_PATH, NORTHBOUND_RUN), (authorization, {"Authorization": f"Bearer {api_key}"}),
             ({"agent_id": agent["agent_id"], "history": []}, {"agent_name": FIXTURE_AGENT_NAME}),
-            ("web-cut", "northbound-cut"), identifiers, strict=True,
-        )):
+            ("web-cut", "northbound-cut"), identifiers, ("producer", "peer"), (503, 502), strict=True,
+        ):
             query = f"runtime-stream:{token}:{tag}"
             payload = {**selector, "model_id": agent["model_id"], "conversation_id": identifier,
                        "query": query, "stream_cursor": True}
@@ -636,13 +652,12 @@ def exercise_public_transport_failure(web_url, gateway_url, identity, api_key, a
                         return receipt if receipt["prefix_observed"] else None
 
                     prefix = wait_for(observed_prefix, wait_seconds, "No real Runtime SSE prefix reached the relay")
-                    assert prefix == {"attempts": 1, "prefix_observed": True, "transport_aborted": False}
+                    assert prefix == {"attempts": 1, "resume_attempts": 1, "prefix_observed": True,
+                                      "transport_aborted": False, "origin": origins[target]}
                     active = state()
                     reservation, = active["reservations"]
-                    assert reservation["status"] == "RUNNING" and active["messages"] == [query] and active["event_ids"]
-                    assert active["stream"]["generation"] == f"execution:{reservation['id']}"
-                    if expected_hosts is not None:
-                        assert reservation["owner"].split(":", 1)[0] == expected_hosts[index]
+                    assert reservation["status"] == "running" and active["messages"] == [query] and active["event_ids"]
+                    assert active["stream"]["generation"] == reservation["id"]
                     assistant = conversation_history(web, authorization, identifier)["streaming_message"]
                     assert assistant["status"] == "streaming"
                     calls[tag] = 1
@@ -651,9 +666,10 @@ def exercise_public_transport_failure(web_url, gateway_url, identity, api_key, a
                     assert transport(f"cut/{tag}") == {"cut_requested": True}
                     response = pending.result(timeout=wait_seconds)
                     receipt = transport("probe")[tag]
-                    assert receipt == {"attempts": 1, "prefix_observed": True, "transport_aborted": True}, receipt
-                    require_status(response, 502, "The proxy reports a lost Runtime connection before headers")
+                    assert receipt == {**prefix, "transport_aborted": True}, receipt
+                    require_status(response, error_status, "The proxy reports a lost Runtime connection before headers")
                     assert state() == active, "A response transport failure changed the still-active execution"
+                    assert transport(f"finish/{tag}") == {"finished": True}
                     assert control(f"release/{tag}")["released"] is True
                 except BaseException:
                     control("release")
@@ -663,7 +679,7 @@ def exercise_public_transport_failure(web_url, gateway_url, identity, api_key, a
                 current = state()
                 row, = current["reservations"]
                 assert row["id"] == reservation["id"] and row["owner"] == reservation["owner"]
-                return current if row["status"] == "COMPLETED" else None
+                return current if row["status"] == "completed" else None
 
             completed = wait_for(settled, wait_seconds, "The original worker did not settle after upstream disconnect")
             assert completed["messages"] == [query]
@@ -674,8 +690,11 @@ def exercise_public_transport_failure(web_url, gateway_url, identity, api_key, a
             evidence[tag] = {**receipt, "status": response.status_code, "execution_id": reservation["id"],
                              "owner": reservation["owner"], "original_answer_persisted": True}
 
-        assert transport("probe") == {tag: {"attempts": 1, "prefix_observed": True, "transport_aborted": True}
-                                        for tag in evidence}
+        assert transport("probe") == {
+            tag: {key: observed[key] for key in ("attempts", "resume_attempts", "prefix_observed",
+                                                 "transport_aborted", "origin")}
+            for tag, observed in evidence.items()
+        }
         model = control("probe")
         assert model["calls_by_tag"] == calls and model["unexpected_calls"] == 0
         for identifier in identifiers:

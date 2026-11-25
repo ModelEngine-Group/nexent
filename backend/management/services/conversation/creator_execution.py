@@ -5,15 +5,17 @@
 import asyncio
 import json
 import logging
+import re
 from contextlib import suppress
 
 from contracts.constants.environment import APP_VERSION, RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
 from contracts.errors.exceptions import AgentRunAlreadyActiveError, ForbiddenError, RuntimeCoordinationUnavailableError
+from infrastructure.rdb.agent_execution import ACTIVE
 from infrastructure.redis.run_state import creator_runtime_state_service as runtime_state_service
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.admission import reserve_agent_scope, uses_durable_agent_admission
-from management.services.agent.control import get_owned_execution
+from management.services.agent.control import get_owned_execution, read_owned_stream
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import (
     create_creation_conversation,
@@ -232,21 +234,26 @@ async def start_creation_turn(
         if conversation_id is None:
             raise ValueError("Resume requires a creator conversation")
         if coordinated:
-            owned = await get_owned_execution(tenant_id, user_id, conversation_id)
+            owned = await get_owned_execution(tenant_id, user_id, conversation_id, agent_scope=scope)
             snapshot = None
             execution_id = None
             if owned is not None:
-                execution_id, status, run_scope = owned
-                if run_scope != scope:
-                    raise ValueError("Conversation execution belongs to another runtime entrypoint")
-                try:
-                    snapshot = await runtime_state_service.read_execution_stream_async(user_id, conversation_id, execution_id)
-                except Exception as exc:
-                    raise RuntimeCoordinationUnavailableError("Creator replay coordination is unavailable") from exc
-                if snapshot is None and status in {"PREPARING", "RUNNING", "FINALIZING"}:
+                execution_id, status, _ = owned
+                snapshot = await read_owned_stream(user_id, conversation_id, execution_id)
+                if snapshot is None and status in ACTIVE:
                     if expected_message_id is not None:
                         return unavailable_replay(), conversation_id
                     raise RuntimeCoordinationUnavailableError("Creator replay is not ready")
+            else:
+                state = await runtime_state_service.get_run_state_async(user_id, conversation_id)
+                generation = state.get("generation", "")
+                if re.fullmatch(r"execution:[1-9][0-9]{0,9}", generation):
+                    legacy_id = int(generation.removeprefix("execution:"))
+                    candidate = await read_owned_stream(user_id, conversation_id, legacy_id)
+                    if candidate and candidate["generation"] == generation and candidate["terminal_status"]:
+                        if await get_owned_execution(tenant_id, user_id, conversation_id, agent_scope=scope) is not None:
+                            raise RuntimeCoordinationUnavailableError("Creator replay changed during lookup")
+                        execution_id, snapshot = legacy_id, candidate
             if snapshot is not None:
                 request.__dict__["_creator_generation"] = snapshot["generation"]
                 message_id = snapshot["message_id"]
@@ -259,11 +266,13 @@ async def start_creation_turn(
                     key=lambda item: item["message_id"], default=None,
                 )
                 message_id = latest["message_id"] if latest else None
-                if await get_owned_execution(tenant_id, user_id, conversation_id) != owned:
+                if await get_owned_execution(tenant_id, user_id, conversation_id, agent_scope=scope) != owned:
                     raise RuntimeCoordinationUnavailableError("Creator replay changed during lookup")
             if expected_message_id is not None and message_id != expected_message_id:
                 return unavailable_replay(), conversation_id
-            subscriber = resume_owned_creator(conversation_id, user_id, tenant_id, execution_id, snapshot, message_id)
+            subscriber = resume_owned_creator(
+                conversation_id, user_id, tenant_id, execution_id, snapshot, message_id, agent_scope=scope,
+            )
             return adapt_nexent_stream(subscriber), conversation_id
         if expected_message_id is not None:
             latest_message_id = max(
@@ -314,8 +323,10 @@ async def start_creation_turn(
 
     async def claim_stream():
         nonlocal reservation
-        options = {"execution_id": durable.execution_id} if durable is not None else {}
+        options = {"execution_id": durable.run_id} if durable is not None else {}
         reservation = await claim_creator(conversation_id, user_id, control.generation, **options)
+        if durable is not None:
+            durable.stream_claimed = True
 
     async def prepare_history(task_name="creator-prepare-history"):
         nonlocal conversation_id
@@ -341,12 +352,15 @@ async def start_creation_turn(
             tenant_id=tenant_id,
             status="streaming",
             streaming_owner="management",
+            **({"execution_identity": durable.identity} if durable is not None else {}),
         )
 
     try:
         if coordinated:
             if conversation_id is not None:
-                durable = await reserve_agent_scope(scope, conversation_id, user_id, tenant_id, control.transport_done)
+                durable = await reserve_agent_scope(
+                    scope, conversation_id, user_id, tenant_id, control.transport_done, run_id=control.generation,
+                )
                 control.bind_reservation(durable)
                 history = await run_blocking(
                     "creator-admitted-history", _read_creator_history, conversation_id, user_id, ref.agent_id,
@@ -367,8 +381,11 @@ async def start_creation_turn(
                 conversation_id = await step(run_blocking(
                     "creator-allocate-conversation", create_creation_conversation, **history_options,
                 ))
-                durable = await reserve_agent_scope(scope, conversation_id, user_id, tenant_id, control.transport_done)
+                durable = await reserve_agent_scope(
+                    scope, conversation_id, user_id, tenant_id, control.transport_done, run_id=control.generation,
+                )
                 control.bind_reservation(durable)
+            effective.__dict__["_creator_run_id"] = durable.run_id
         request.__dict__["_creator_generation"] = control.generation
         effective.__dict__["_creator_control"] = control
         if conversation_id is not None:
@@ -405,7 +422,7 @@ async def start_creation_turn(
             preparation_guard = control.guard_preparation(conversation_id, user_id)
         await step(save_assistant(index))
         if durable is not None and not await step(required_creator_redis(
-            runtime_state_service.bind_execution_message_async, user_id, conversation_id, durable.execution_id, message_id,
+            runtime_state_service.bind_execution_message_async, user_id, conversation_id, durable.run_id, message_id,
         )):
             raise RuntimeCoordinationUnavailableError("Creator no longer owns its replay")
         extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents", "creator_mode": f"nl2{kind}"}

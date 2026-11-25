@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, Integer, String, TIMESTAMP, func, select, text, update
+from sqlalchemy import Boolean, Column, Integer, String, TIMESTAMP, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 
 from contracts.errors.exceptions import AgentRunConcurrencyExceededError
@@ -19,6 +19,7 @@ OWNER_ID = uuid4().hex
 LEASE_INTERVAL = text("interval '60 seconds'")
 ACTIVE = ("starting", "running")
 TERMINAL = ("completed", "failed", "stopped")
+_MANAGEMENT_CREATOR_SCOPES = ("nl2agent_main", "nl2skill_main")
 _live_run_ids: set[str] = set()
 _live_run_lock = Lock()
 
@@ -130,6 +131,28 @@ def active_execution(conversation_id: int, user_id: str, tenant_id: str) -> str 
         ).limit(1))
 
 
+def find_owned_agent_execution(
+    tenant_id: str, user_id: str, conversation_id: int, *, agent_scope: str, active_only: bool = False,
+) -> tuple[str, str, str] | None:
+    """Find the latest authorized execution for the caller's exact Agent scope."""
+    with get_db_session() as session:
+        if not _owned_conversation(session, conversation_id, user_id, tenant_id):
+            raise PermissionError("Conversation is not accessible")
+        query = select(AgentExecution.run_id, AgentExecution.status, AgentExecution.agent_scope).where(
+            AgentExecution.conversation_id == conversation_id,
+            AgentExecution.created_by == user_id,
+            AgentExecution.tenant_id == tenant_id,
+            AgentExecution.agent_scope == agent_scope,
+            AgentExecution.delete_flag == "N",
+        )
+        if active_only:
+            query = query.where(AgentExecution.status.in_(ACTIVE))
+        row = session.execute(
+            query.order_by(AgentExecution.create_time.desc(), AgentExecution.run_id.desc()).limit(1)
+        ).one_or_none()
+        return (row.run_id, row.status, row.agent_scope) if row else None
+
+
 def _snapshot(row):
     return {
         "conversation_id": row.conversation_id,
@@ -171,11 +194,13 @@ def read_terminal_execution_for_message(conversation_id, assistant_message_id, u
 
 def read_execution(run_id, user_id, tenant_id, conversation_id=None, *, request_stop=False,
                    prevent_start=False) -> dict | None:
+    runtime_scope = or_(AgentExecution.agent_scope.is_(None), AgentExecution.agent_scope.not_in(_MANAGEMENT_CREATOR_SCOPES))
     with get_db_session() as session:
         if conversation_id is None:
             conversation_id = session.scalar(select(AgentExecution.conversation_id).where(
                 AgentExecution.run_id == run_id, AgentExecution.created_by == user_id,
                 AgentExecution.tenant_id == tenant_id, AgentExecution.delete_flag == "N",
+                runtime_scope,
             ))
             if conversation_id is None:
                 return None
@@ -183,7 +208,7 @@ def read_execution(run_id, user_id, tenant_id, conversation_id=None, *, request_
         if not _owned_conversation(session, identity.conversation_id, identity.user_id, identity.tenant_id,
                                    lock=request_stop):
             raise PermissionError("Conversation is not accessible")
-        stmt = select(AgentExecution).where(*_scope(identity))
+        stmt = select(AgentExecution).where(*_scope(identity), runtime_scope)
         row = session.scalar(stmt.with_for_update() if request_stop else stmt)
         if row is None and prevent_start:
             _insert_run(session, identity, status="stopped", cancellation_requested=True)
@@ -227,11 +252,11 @@ def bind_assistant_message(session, identity: RunIdentity, message_id: int) -> N
         raise RuntimeError("AgentOS execution no longer owns the assistant projection")
 
 
-def finish_execution(identity: RunIdentity, status: str) -> bool:
+def finish_execution(identity: RunIdentity, status: str, *, repair_journal: bool = True) -> bool:
     try:
         with get_db_session() as session:
             result = session.execute(update(AgentExecution).where(*_scope(identity), *_live_owner()).values(
-                status=status, lease_until=None, journal_repair_pending=True,
+                status=status, lease_until=None, journal_repair_pending=repair_journal,
             ))
             return bool(result.rowcount)
     finally:
@@ -265,7 +290,7 @@ def _recover_row(session, row):
                 message.status = status
     row.status = status
     row.lease_until = None
-    row.journal_repair_pending = True
+    row.journal_repair_pending = row.agent_scope not in _MANAGEMENT_CREATOR_SCOPES
 
 
 def recover_stopped_execution(identity: RunIdentity) -> bool:

@@ -31,6 +31,7 @@ from management.db.conversation.repository import (
     get_message_units,
 )
 from infrastructure.redis.run_state import creator_runtime_state_service as runtime_state_service
+from management.services.agent.admission import shutdown_creator_settlements
 from management.services.agent.control import get_owned_execution
 from management.services.agent.replay import ExecutionReplayUnavailable, follow_execution_replay
 from nexent.core.agents.orchestration.entry import DeferredAgentRun
@@ -113,12 +114,12 @@ class CreatorControl:
 
     def bind_reservation(self, reservation):
         self.durable = reservation
-        self.generation = f"execution:{reservation.execution_id}"
+        self.generation = reservation.run_id
 
     async def is_cancelled(self, conversation_id, user_id):
         if self.durable is not None:
             return await runtime_state_service.is_execution_cancelled_async(
-                user_id, conversation_id, self.durable.execution_id, self.generation,
+                user_id, conversation_id, self.durable.run_id, self.generation,
             )
         return await runtime_state_service.is_cancelled_async(user_id, conversation_id)
 
@@ -224,6 +225,7 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
     )
     channel.generation = control.generation
     channel.is_creator = True
+    channel.durable_replay = control.durable is not None
     info = control.registered_info()
     agent_run_manager.register_agent_run(conversation_id, info, user_id, reservation)
     started = asyncio.Event()
@@ -241,13 +243,6 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
                 )
 
             try:
-                if control.durable is not None:
-                    try:
-                        await control.durable.finalizing()
-                    except Exception:
-                        status = "failed"
-                        control.cancel()
-                        logger.exception("Creator finalizing transition failed run_id=%s", control.generation)
                 try:
                     await stream.aclose()
                 except Exception:
@@ -366,13 +361,15 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
     return channel.subscribe_with_history(0, include_replay_checkpoint=True)
 
 
-async def resume_owned_creator(conversation_id, user_id, tenant_id, execution_id, snapshot, message_id):
+async def resume_owned_creator(conversation_id, user_id, tenant_id, execution_id, snapshot, message_id, *, agent_scope):
     """Replay an owned Creator generation without ever recovering or mutating the producer."""
     last_index = -1
     unavailable = False
 
     async def is_active():
-        current = await get_owned_execution(tenant_id, user_id, conversation_id, active_only=True)
+        current = await get_owned_execution(
+            tenant_id, user_id, conversation_id, agent_scope=agent_scope, active_only=True,
+        )
         return current is not None and current[0] == execution_id and await runtime_state_service.creator_lease_async(
             user_id, conversation_id, snapshot["generation"],
         )
@@ -582,10 +579,12 @@ async def stop_creator(conversation_id, user_id, expected_generation=None):
 
 
 async def shutdown_creator_streams(timeout):
-    """Cancel owned producers before the runtime thread manager shuts down."""
+    """Cancel producers and join settlements before the thread manager shuts down."""
+    deadline = time.monotonic() + max(0, timeout)
     pending = list(_producers)
     for task in pending:
         task.cancel()
     if pending:
-        await asyncio.wait(pending, timeout=max(0, timeout))
-    return sum(not task.done() for task in pending)
+        await asyncio.wait(pending, timeout=max(0, deadline - time.monotonic()))
+    pending_settlements = await shutdown_creator_settlements(deadline - time.monotonic())
+    return pending_settlements + sum(not task.done() for task in pending)

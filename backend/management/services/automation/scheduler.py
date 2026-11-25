@@ -67,13 +67,13 @@ class AgentAutomationLeaseStore:
     """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
     def __init__(self) -> None:
-        self.maintenance_cutoff: datetime | None = None
+        self.fixed_replicas = False
         self._recovery_time: datetime | None = None
         self._projection_cursor = 0
 
     def _uses_scoped_recovery(self):
         return (
-            self.maintenance_cutoff is None
+            not self.fixed_replicas
             and environment.IS_DEPLOYED_BY_KUBERNETES
             and environment.NEXENT_SANDBOX_PROVIDER == "kubernetes"
         )
@@ -85,8 +85,8 @@ class AgentAutomationLeaseStore:
             self._recovery_time = cutoff
 
     async def recover(self) -> None:
-        if self.maintenance_cutoff is not None:
-            self._recovery_time = self.maintenance_cutoff
+        if self.fixed_replicas:
+            self._recovery_time = None
             return
         if self._uses_scoped_recovery():
             await self._refresh_recovery_time()
@@ -262,9 +262,9 @@ class AgentAutomationScheduler:
     def is_running(self) -> bool:
         return self._scheduler.is_running
 
-    async def start(self, *, maintenance_cutoff: datetime | None = None) -> None:
+    async def start(self, *, fixed_replicas: bool = False) -> None:
         if not self._scheduler.is_running:
-            self._store.maintenance_cutoff = maintenance_cutoff
+            self._store.fixed_replicas = fixed_replicas
         if AGENT_AUTOMATION_ENABLED:
             await self._scheduler.start()
         else:
