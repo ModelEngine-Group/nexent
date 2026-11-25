@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Box, Layers3, Puzzle } from "lucide-react";
+import { Bot, Box, Puzzle, Sparkles } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getAgentMonitoringTrends } from "@/services/agentMonitoringService";
@@ -23,8 +23,8 @@ import styles from "./overview.module.css";
 const resources = [
   { kind: "agent", Icon: Bot },
   { kind: "model", Icon: Box },
-  { kind: "mcp", Icon: Layers3 },
-  { kind: "skill", Icon: Puzzle },
+  { kind: "mcp", Icon: Puzzle },
+  { kind: "skill", Icon: Sparkles },
 ] as const;
 
 export function MonitoringOverview({

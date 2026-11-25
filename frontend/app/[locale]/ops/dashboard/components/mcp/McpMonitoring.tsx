@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
 import { Alert } from "antd";
-import { Activity, Layers } from "lucide-react";
+import { Activity, Layers, Puzzle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   getMcpMonitoringSummary,
@@ -86,7 +86,7 @@ export function McpMonitoring({
                     ? "ops.monitoring.mcp.currentServices"
                     : "ops.monitoring.mcp.currentTools"
                 ),
-                Icon: Layers,
+                Icon: allServices ? Puzzle : Layers,
                 value: allServices
                   ? format(registeredServices.count, registeredServices.loading)
                   : format(published?.tool_count ?? null, summaryLoading),

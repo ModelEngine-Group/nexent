@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Empty, Spin, Table } from "antd";
-import { Activity, Puzzle } from "lucide-react";
+import { Activity, Sparkles } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -116,7 +116,7 @@ export function SkillMonitoring({
           ? [
               {
                 title: t("ops.monitoring.skill.current"),
-                Icon: Puzzle,
+                Icon: Sparkles,
                 value: metric(summaryData?.data.current_skill_count ?? null),
               },
             ]
