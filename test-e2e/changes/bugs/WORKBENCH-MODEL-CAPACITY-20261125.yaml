@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: WORKBENCH-MODEL-CAPACITY-20261125
+  change_type: bugfix
+  bug_id: WORKBENCH-MODEL-CAPACITY-20261125
+  title: Explain missing model context capacity before conversation dispatch
+  description: Return a localized configuration error when conversation preparation cannot resolve the selected endpoint's context window.
+  observed_behavior: A custom endpoint can pass connectivity checks yet cause the workbench conversation API to return a generic HTTP 500.
+  expected_behavior: Return HTTP 409 and model_capacity_not_configured for an unknown context window. A configured endpoint retains normal streaming.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Resolver tests cover unknown capacity and the transport Case covers valid runs. The public route lacked an assertion for resolver failure.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT, F-171]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AOS-TRANSPORT-D3-001, CONTEXT-POST-RESPONSE-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - A custom endpoint without a known window returns a localized configuration error and no run ID. An explicit window preserves streaming.
+    test_selectors:
+    - test/backend/app/test_conversation_run_app.py
+    - test/sdk/core/models/test_capacity_resolver.py
+    reason: Use the real capacity resolver in the public route regression. Reuse D3 for signed transport and provider-capacity execution.
+  notes: "Design: context-budget/model-capacity-governance/02 Technical Design.md."

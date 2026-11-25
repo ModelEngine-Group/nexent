@@ -5,7 +5,7 @@ import re
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from contracts.agent import AgentRequest
 from contracts.agentos import (
@@ -20,6 +20,7 @@ from management.services.agent.runtime_client import (
 )
 from management.services.permission.identity.session import get_current_user_id
 from management.utils.request_context import get_user_language
+from nexent.core.models.capacity_resolver import ProviderCapabilityUnknown
 
 router = APIRouter(prefix="/agent")
 
@@ -66,6 +67,14 @@ async def run_conversation(
     except RunModelControlsError as exc:
         status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
         raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+    except ProviderCapabilityUnknown:
+        message = (
+            "The selected model has no context window configured. "
+            "Set it for this endpoint in Model Configuration, then retry."
+            if get_user_language(request) == "en"
+            else "所选模型未配置上下文窗口。请在模型配置中填写该模型端点的上下文窗口后重试。"
+        )
+        return JSONResponse(status_code=409, content={"code": "model_capacity_not_configured", "message": message})
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeServiceTimeoutError as exc:

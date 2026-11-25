@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
 from management.api.agent import conversation_run
+from management.services.model.run_budget import _resolve_input_budget
 
 RUN_ID = "a" * 32
 
@@ -40,6 +41,39 @@ async def test_public_run_relays_signed_request_context_and_existing_sse(app, mo
     assert (user_id, tenant_id) == ("actor", "tenant")
     assert payload.resume is True and payload.language == "en" and payload.timezone == "Asia/Shanghai"
     assert payload.request == {"query": "question", "conversation_id": 42, "model_id": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("locale", "message"),
+    [
+        ("zh", "所选模型未配置上下文窗口。请在模型配置中填写该模型端点的上下文窗口后重试。"),
+        ("en", "The selected model has no context window configured. Set it for this endpoint in Model Configuration, then retry."),
+    ],
+)
+async def test_public_workbench_run_reports_missing_model_capacity(app, mocker, locale, message):
+    model = {"model_factory": "custom", "model_name": "private-provider-alias"}
+
+    async def forward(*_args):
+        _resolve_input_budget(model)
+        return stream()
+
+    mocker.patch.object(conversation_run, "forward_conversation_run", side_effect=forward)
+    body = {"query": "question", "entrypoint": "workbench", "workbench": {"mode": "generic_chat"}}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://management",
+        cookies={"NEXT_LOCALE": locale},
+    ) as client:
+        rejected = await client.post("/agent/run", json=body)
+        assert rejected.status_code == 409
+        assert rejected.json() == {"code": "model_capacity_not_configured", "message": message}
+        assert "X-AgentOS-Run-ID" not in rejected.headers
+
+        model["context_window_tokens"] = 32768
+        accepted = await client.post("/agent/run", json=body)
+        assert accepted.status_code == 200
+        assert accepted.text == "data: done\n\n"
 
 
 @pytest.mark.asyncio
