@@ -23,5 +23,3 @@ Start with the owning API under `backend/management/api/`, `backend/runtime/api/
 - Use domain errors from `backend/contracts/errors/` where applicable. Keep each endpoint's existing mappings and safe error payloads. For streams, distinguish an HTTP error before response headers from an error event in an established stream. Log internal details without exposing them to users.
 - Use a module-level `logging.getLogger(__name__)`; log useful events without sensitive data.
 - Match module async/sync conventions. Await async services directly; do not create new event loops to invoke services.
-
-Verify validation, identity propagation, response shape, and changed exception mappings. For exposure and proxy changes, start with [registry tests](../../../../test/backend/gateway/test_exposure.py) and [HTTP/SSE/WebSocket integration tests](../../../../test/backend/gateway/test_edge_integration.py).

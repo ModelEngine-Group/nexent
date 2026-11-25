@@ -16,7 +16,7 @@ Use for relational schema design, a service's models and repositories, shared pe
 - Name fields for business meaning and specific usage. Include units for measured values, such as `latency_ms` or `amount_usd`. Keep reference-field names consistent with the identifiers they reference.
 - Qualify broad names such as `data`, `info`, or `metadata`; use names such as `provider_metadata` with a defined purpose.
 - Every field needs an English database column comment describing its business meaning and applicable scenario. For example, a credential used only for speech-model authentication must state that limitation.
-- Carry comments into generated DDL/database metadata. Inspect whether the ORM declaration emits a database comment; Python-only documentation is not sufficient evidence that the column is commented.
+- Emit column comments in generated DDL and database metadata.
 
 ## Field types and boundaries
 
@@ -31,7 +31,7 @@ Treat length/type choices as part of the specification and align input validatio
 | Dictionary/variable structured value | `JSONB` | Define purpose, accepted keys/structure, value types, and validation boundaries |
 
 - Avoid unbounded `TEXT`/`VARCHAR` for values with meaningful business limits. Use them for bodies, error stacks, or raw text when no stable upper bound exists.
-- Do not copy an illustrative limit such as 1,000 characters for every message body. Derive limits from the actual contract and verify boundary/rejection behavior.
+- Do not copy an illustrative limit such as 1,000 characters for every message body. Derive limits and rejection behavior from the actual contract.
 
 ## Columns, JSONB, or tables
 
@@ -65,14 +65,14 @@ The new design standard requires all five audit fields on every new table, inclu
 - For versioned resources, distinguish stable entity identity from a version-specific row ID. The supplied example uses `agent_no` across versions and `agent_id` for a concrete version; this is a design example, not authorization to rename existing columns.
 - New business-table designs do not declare database foreign-key constraints or non-primary unique constraints. Do not circumvent this policy with a unique index. Primary-key uniqueness and appropriate structural constraints such as `NOT NULL` remain allowed.
 - Keep logical reference names consistent and implement relationship checks and business uniqueness in the service layer. Document these contracts in field comments and identify the responsible service/write paths.
-- Specify the uniqueness scope, including tenant, version, and active/deleted rows where relevant. Verify missing references, duplicates, and concurrent writes. A check followed by an insert alone is not evidence of race-safe uniqueness; define transaction/serialization or another application-level coordination strategy where required.
+- Specify the uniqueness scope, including tenant, version, and active/deleted rows where relevant. Define behavior for missing references and duplicates. Where concurrent writers can race, use transaction serialization or another application-level coordination strategy to enforce uniqueness.
 - Existing foreign keys and unique constraints/indexes are compatibility concerns. Do not remove them during unrelated work. Any removal needs an explicit migration and replacement integrity behavior, including all writers.
 
 ## Index design
 
 - Design indexes together with tables using actual filtering, joining, ordering, and pagination scenarios. Describe which query each index supports and why its column order/predicate is appropriate.
 - Consider common active-row filtering and query combinations; avoid indexing every field by default. Business indexes remain non-unique under the policy above.
-- Include index DDL in the migration and validate representative query plans when an execution environment is available. Report unverified performance assumptions explicitly.
+- Include index DDL in the migration.
 
 ## Models and CRUD
 
@@ -88,10 +88,10 @@ The new design standard requires all five audit fields on every new table, inclu
 - Use `with get_db_session() as session:` from `infrastructure/rdb/client.py`, or its supported shared-session form for a caller-owned transaction.
 - CRUD functions never call `commit()`, `rollback()`, or `close()`. The session owner handles lifecycle; the current context manager leaves explicitly supplied sessions to their caller.
 - Let exceptions propagate from CRUD modules. Central session management rolls back, logs, re-raises, and closes sessions it owns.
-- Define a shared database exception in `backend/contracts/errors/` if needed and verify its raising boundary. The current client re-raises original exceptions; it does not automatically create `DatabaseOperationError`.
+- Define shared database exceptions in `backend/contracts/errors/` and translate failures at the owning boundary when needed. The session client re-raises original exceptions.
 
 ## SQL
 
 - Every SQL file under `deploy/sql/` already merged into the target branch is immutable, including initialization and Supabase SQL. Do not edit, rename, or delete it.
 - Add a versioned migration under `deploy/sql/migrations/`, following current naming/version conventions. Application version is `APP_VERSION` in `backend/contracts/constants/environment.py`.
-- Verify naming/comments, type limits, JSONB validation, audit maintenance, reference/uniqueness behavior, soft deletion/versioning, query indexes, transaction ownership, and migration compatibility as applicable. External database execution requires authorization for that action. For moved modules and model registration, consult the [API and database layout tests](../../../../test/backend/management/test_api_db_directory_architecture.py).
+- External database execution requires authorization for that action.

@@ -33,5 +33,3 @@ Repository paths below are relative to the root; reference links resolve from th
 | Threads, worker pools, blocking calls, background loops, streaming resource lifetime | [Thread lifecycle](references/thread-lifecycle.md) |
 
 3. Preserve public contracts. Apply conventions to the changed scope; do not refactor unrelated legacy behavior merely to satisfy a rule.
-4. Verify affected success and failure behavior. For Python unit tests, use `nexent-python-tests` linked from root `AGENTS.md`. Unit-test mocks do not establish live-integration acceptance.
-5. Report references consulted, affected contracts, and verification results. Resolve material contract conflicts using concrete evidence; routine implementation choices do not require additional permission.

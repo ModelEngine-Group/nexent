@@ -19,5 +19,3 @@
 - Existing exceptions include `AgentRunException`, `LimitExceededError`, `UnauthorizedError`, `SignatureValidationError`, and `MemoryPreparationException`. Inspect current definitions before use.
 - Import configuration from `contracts.constants.environment` or accept parameters, then pass configuration into SDK calls. Do not read environment variables here.
 - A service explicitly allowed to continue after database failure may catch an appropriate shared exception. Inspect what the database client actually raises; do not assume it wraps failures in a named custom exception.
-
-Verify orchestration, return values, and domain failure propagation independently of HTTP mapping. For moved modules or dependency changes, consult [service layout tests](../../../../test/backend/management/test_service_directory_architecture.py) and [service isolation tests](../../../../test/backend/management/test_agent_runtime_boundaries.py).
