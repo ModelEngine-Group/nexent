@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-RESOURCE-GROUP-20261126
+  change_type: bugfix
+  bug_id: OPS-MONITORING-RESOURCE-GROUP-20261126
+  title: Align monitoring resource group selectors and queries
+  description: Filter Agent, Skill and MCP by current resource assignments while preserving caller group query semantics.
+  observed_behavior: Hidden model group selection and stale Skill and MCP identifiers disagree with the visible selectors. Registered MCP services can be missing from the detail table.
+  expected_behavior: Models ignore the dashboard group selection. Agent, Skill and MCP consistently filter current assigned resources and clear incompatible selections. The registered MCP service list preserves services without calls.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests omit hidden model filters, incompatible resource selections, and directory entries without statistics.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/ops/test_monitoring_group_scope.py
+    - test/backend/ops/test_agent_monitoring_api.py
+    - frontend/tests/component/agentMonitoring.test.tsx
+    behaviors:
+    - Resolve active tenant groups without requiring the operator to belong to them.
+    - Filter published statistics by current resource identifiers and retain legacy caller-group filters.
+    - Preserve registered MCP rows and distinguish missing statistics from zero.
+    reason: Unit tests cover tenant checks, matching, and published-query construction. The existing D4 case proves browser scope and request consistency.

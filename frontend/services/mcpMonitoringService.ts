@@ -51,6 +51,7 @@ function readMcpMonitoring<T>(
   options?: Record<string, string>
 ): Promise<T> {
   const params = dateParams(scope);
+  if (scope.resourceGroup) params.set("resource_group", scope.resourceGroup);
   for (const id of scope.groupIds) params.append("group_ids", String(id));
   if (scope.serviceId !== null)
     params.set("server_id", String(scope.serviceId));
@@ -108,6 +109,7 @@ export function getMcpMonitoringList(
     signal,
     {
       dimension,
+      ...(dimension === "services" ? { include_registered: "true" } : {}),
       page: String(options.page),
       page_size: String(options.pageSize),
       search: options.search,

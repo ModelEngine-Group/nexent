@@ -16,18 +16,18 @@ from permissions.models import CurrentUser
 @pytest.fixture
 def inventory(mocker):
     records = (
-        (AgentInfo, ("agent_id", "name", "version_no", "prompt", "system_key"), [
-            (1, "Agent A", 0, "synthetic prompt", None, "a", "N"),
-            (1, "Published snapshot", 1, "snapshot prompt", None, "a", "N"),
-            (2, "Agent B", 0, "synthetic prompt", None, "b", "N"),
-            (97, "Renamed Workbench", 0, "synthetic prompt", "workbench_main", "a", "N"),
+        (AgentInfo, ("agent_id", "name", "version_no", "prompt", "system_key", "group_ids"), [
+            (1, "Agent A", 0, "synthetic prompt", None, "1,2", "a", "N"),
+            (1, "Published snapshot", 1, "snapshot prompt", None, "1", "a", "N"),
+            (2, "Agent B", 0, "synthetic prompt", None, "", "b", "N"),
+            (97, "Renamed Workbench", 0, "synthetic prompt", "workbench_main", None, "a", "N"),
         ]),
-        (KnowledgeRecord, ("knowledge_id", "knowledge_name", "knowledge_describe"), [
-            (3, "Knowledge A", "synthetic content", "a", "N"),
+        (KnowledgeRecord, ("knowledge_id", "knowledge_name", "knowledge_describe", "group_ids"), [
+            (3, "Knowledge A", "synthetic content", "3", "a", "N"),
         ]),
-        (McpRecord, ("mcp_id", "mcp_name", "authorization_token"), [
-            (4, "MCP A", "synthetic token", "a", "N"),
-            (5, "Deleted MCP", "synthetic token", "a", "Y"),
+        (McpRecord, ("mcp_id", "mcp_name", "authorization_token", "group_ids"), [
+            (4, "MCP A", "synthetic token", "4,5", "a", "N"),
+            (5, "Deleted MCP", "synthetic token", "", "a", "Y"),
         ]),
         (ModelRecord, ("model_id", "model_name", "api_key"), [
             (6, "Model A", "synthetic key", "a", "N"),
@@ -66,7 +66,7 @@ def test_tenant_inventory_lists_only_active_metadata_from_all_resource_kinds(inv
     assert access.resource_inventory(user) == {
         "total": 4, "page": 1, "page_size": 20,
         "items": [
-            {"kind": "agent", "id": 1, "name": "Agent A", "tenant_id": "a"},
+            {"kind": "agent", "id": 1, "name": "Agent A", "tenant_id": "a", "group_ids": [1, 2]},
             {"kind": "knowledge", "id": 3, "name": "Knowledge A", "tenant_id": "a"},
             {"kind": "mcp", "id": 4, "name": "MCP A", "tenant_id": "a"},
             {"kind": "model", "id": 6, "name": "Model A", "tenant_id": "a"},
@@ -79,7 +79,7 @@ def test_platform_inventory_paginates_after_tenant_filter(inventory):
 
     assert access.resource_inventory(user, page=2, page_size=1) == {
         "total": 5, "page": 2, "page_size": 1,
-        "items": [{"kind": "agent", "id": 2, "name": "Agent B", "tenant_id": "b"}],
+        "items": [{"kind": "agent", "id": 2, "name": "Agent B", "tenant_id": "b", "group_ids": []}],
     }
     assert access.resource_inventory(user, "b", page=2, page_size=1) == {
         "total": 1, "page": 2, "page_size": 1, "items": [],

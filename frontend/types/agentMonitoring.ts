@@ -8,6 +8,7 @@ import type {
 export interface AgentMonitoringSelection extends MonitoringDateScope {
   agentId: number | null;
   groupIds: number[];
+  resourceGroup?: string;
 }
 
 export type AgentPublication = MonitoringPublication;

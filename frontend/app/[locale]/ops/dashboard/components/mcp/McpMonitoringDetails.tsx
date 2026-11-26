@@ -62,7 +62,8 @@ export function McpMonitoringDetails({
   });
   const response = details.isError ? undefined : details.data;
   const uncovered = response?.coverage_state === "uncovered";
-  const total = uncovered ? undefined : response?.data.total;
+  const total =
+    uncovered && !response?.data.total ? undefined : response?.data.total;
   const lastPage = Math.max(1, Math.ceil((total ?? 0) / list.pageSize));
   if (listScope === scope && total !== undefined && list.page > lastPage) {
     setList({ ...list, page: lastPage });

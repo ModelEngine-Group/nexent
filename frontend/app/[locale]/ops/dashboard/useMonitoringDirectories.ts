@@ -10,7 +10,7 @@ import {
 } from "@/services/operationsService";
 import { fetchSkillsList } from "@/services/skillService";
 import { getTenant, listTenants, type Tenant } from "@/services/tenantService";
-import type { MonitoringTab } from "./monitoringFilters";
+import { matchesGroupScope, type MonitoringTab } from "./monitoringFilters";
 
 export function resourceKey(tenantId: string, id: number | string): string {
   return JSON.stringify([tenantId, id]);
@@ -28,6 +28,7 @@ export function useMonitoringDirectories({
   canReadInventory,
   tab,
   selectedService,
+  resourceGroup,
   drilledMcpService,
 }: {
   userId: string;
@@ -37,6 +38,7 @@ export function useMonitoringDirectories({
   canReadInventory: boolean;
   tab: MonitoringTab;
   selectedService?: string;
+  resourceGroup: string;
   drilledMcpService?: { tenantId: string; service: McpServiceFilter };
 }) {
   const queryClient = useQueryClient();
@@ -66,7 +68,7 @@ export function useMonitoringDirectories({
   });
   const groups = useQuery({
     queryKey: [...queryKey, "groups", tenant],
-    enabled: tab !== "overview" && Boolean(tenant),
+    enabled: tab !== "overview" && tab !== "model" && Boolean(tenant),
     queryFn: () => listGroups(tenant!),
   });
   const inventory = useQuery({
@@ -95,12 +97,16 @@ export function useMonitoringDirectories({
     inventory.data?.find(
       (item) => item.kind === "mcp" && item.id === service.service_id
     )?.tenant_id;
+  const mcpServices = mcpCatalog.data?.filter((item) =>
+    matchesGroupScope(item.group_ids, resourceGroup)
+  );
   const catalogService =
     tab === "mcp"
-      ? mcpCatalog.data?.find((item) => mcpServiceKey(item) === selectedService)
+      ? mcpServices?.find((item) => mcpServiceKey(item) === selectedService)
       : undefined;
   const historicalService =
     tab === "mcp" &&
+    !resourceGroup &&
     drilledMcpService &&
     drilledMcpService.tenantId === tenant &&
     mcpServiceKey(drilledMcpService.service) === selectedService
@@ -123,7 +129,7 @@ export function useMonitoringDirectories({
   const fetching =
     scope.isFetching ||
     tenants.isFetching ||
-    (tab !== "overview" && groups.isFetching) ||
+    (tab !== "overview" && tab !== "model" && groups.isFetching) ||
     (tab === "skill" ? skills.isFetching : inventory.isFetching) ||
     mcpCatalog.isFetching ||
     (canReadTools && tools.isFetching);
@@ -136,10 +142,11 @@ export function useMonitoringDirectories({
     inventory,
     skills,
     mcpCatalog,
+    mcpServices,
     mcpServiceCount:
       tenant === undefined || mcpCatalog.isError
         ? undefined
-        : mcpCatalog.data?.filter(({ type }) => type !== "builtin").length,
+        : mcpServices?.filter(({ type }) => type !== "builtin").length,
     mcpService: service,
     mcpServiceTenant,
     tools,

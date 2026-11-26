@@ -7413,6 +7413,7 @@
   "ops.monitoring.tab.mcp": "MCP",
   "ops.monitoring.group": "User group",
   "ops.monitoring.allGroups": "All groups",
+  "ops.monitoring.ungrouped": "No user group",
   "ops.monitoring.groupTenantRequired": "Select a tenant first",
   "ops.monitoring.all.agent": "All agents",
   "ops.monitoring.all.model": "All models",

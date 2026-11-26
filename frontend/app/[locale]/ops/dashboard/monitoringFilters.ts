@@ -19,6 +19,21 @@ export type MonitoringRange = [start: string, end: string];
 export const dateFormat = "YYYY-MM-DD";
 export const maxRangeDays = 366;
 
+// Sentinel filter value for resources that carry no group ownership. Group
+// filtering only reads ``group_ids`` and ignores ``ingroup_permission``.
+export const UNGROUPED_GROUP = "ungrouped";
+
+export function matchesGroupScope(
+  groupIds: readonly number[] | null | undefined,
+  group: string
+): boolean {
+  if (group === "") return true;
+  if (groupIds == null) return false;
+  if (group === UNGROUPED_GROUP) return groupIds.length === 0;
+  const id = Number(group);
+  return Number.isInteger(id) && groupIds.includes(id);
+}
+
 export function getMonitoringToday(now = new Date()): string {
   return dayjs.utc(now).format(dateFormat);
 }

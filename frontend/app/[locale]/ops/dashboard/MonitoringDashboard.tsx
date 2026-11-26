@@ -14,7 +14,7 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { RefreshCw } from "lucide-react";
-import { useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { hasRole } from "@/lib/roles";
@@ -45,8 +45,10 @@ import {
   getMonitoringRange,
   getMonitoringToday,
   initialMonitoringFilters,
+  matchesGroupScope,
   maxRangeDays,
   monitoringTabs,
+  UNGROUPED_GROUP,
   updateMonitoringFilters,
   type DatePreset,
   type MonitoringTab,
@@ -139,6 +141,7 @@ function MonitoringScope({
     selectedTenant: filters.tenant,
     tab,
     selectedService: filters.resources.mcp,
+    resourceGroup: tab === "mcp" ? filters.group : "",
     drilledMcpService: mcpDrilldown,
   });
 
@@ -192,6 +195,12 @@ function MonitoringScope({
   const onOverview = tab === "overview";
   const resourceSelection = onOverview ? "" : (filters.resources[tab] ?? "");
   const scopePending = directories.tenant === undefined;
+  const group =
+    tab !== "model" && tab !== "overview" && directories.tenant
+      ? filters.group
+      : "";
+  const inGroupScope = (groupIds: readonly number[] | null | undefined) =>
+    matchesGroupScope(groupIds, group);
   const models =
     tab === "model" && canReadInventory && !scopePending
       ? directories.inventory.data?.filter((item) => item.kind === "model")
@@ -223,7 +232,10 @@ function MonitoringScope({
       ? item.name || String(item.id)
       : `${item.name || item.id} · ${tenantLabel(item.tenant_id)}`,
   });
-  const directorySkill = directories.skills.data?.find(
+  const scopedSkills = directories.skills.data?.filter((skill) =>
+    inGroupScope(skill.source === "official" ? null : skill.group_ids)
+  );
+  const directorySkill = scopedSkills?.find(
     (item) =>
       resourceKey(directories.tenant ?? "", String(item.skill_id)) ===
       resourceSelection
@@ -236,7 +248,8 @@ function MonitoringScope({
             tenant_id: directories.tenant,
             skill_name: directorySkill.name,
           }
-        : skillDrilldown &&
+        : !group &&
+            skillDrilldown &&
             (!directories.tenant ||
               skillDrilldown.tenant_id === directories.tenant) &&
             resourceKey(
@@ -247,9 +260,7 @@ function MonitoringScope({
           : undefined
       : undefined;
   const mcpService = directories.mcpService;
-  const mcpServices: McpServiceFilter[] = [
-    ...(directories.mcpCatalog.data ?? []),
-  ];
+  const mcpServices: McpServiceFilter[] = [...(directories.mcpServices ?? [])];
   if (
     mcpService &&
     !mcpServices.some((service) => mcpServiceKey(service) === resourceSelection)
@@ -258,7 +269,7 @@ function MonitoringScope({
   }
   const directoryChoices =
     tab === "skill"
-      ? directories.skills.data?.map((skill) => ({
+      ? scopedSkills?.map((skill) => ({
           value: resourceKey(directories.tenant ?? "", String(skill.skill_id)),
           label: skill.name || skill.skill_id,
         }))
@@ -275,7 +286,9 @@ function MonitoringScope({
           })
         : canReadInventory
           ? directories.inventory.data
-              ?.filter((item) => item.kind === tab)
+              ?.filter(
+                (item) => item.kind === tab && inGroupScope(item.group_ids)
+              )
               .map(inventoryChoice)
           : undefined;
   const resourceChoices =
@@ -293,20 +306,29 @@ function MonitoringScope({
   const resource = resourceChoices?.find(
     (choice) => choice.value === resourceSelection
   );
+  useEffect(() => {
+    if (
+      tab !== "overview" &&
+      group &&
+      resourceSelection &&
+      resourceQuery.isSuccess &&
+      !resource
+    ) {
+      dispatch({ type: "resource", tab, value: "" });
+    }
+  }, [tab, group, resourceSelection, resourceQuery.isSuccess, resource]);
+
   const allResources = onOverview ? "" : t(`ops.monitoring.all.${tab}`);
   const scopeDisabledText = directories.scope.isError
     ? t("ops.loadError")
     : t("common.loading");
 
   const range = getMonitoringRange(filters.datePreset, filters.customRange);
-  const group = directories.groups.data?.groups.some(
-    (item) => String(item.group_id) === filters.group
-  )
-    ? filters.group
-    : "";
   const agents =
     tab === "agent" && canReadInventory
-      ? directories.inventory.data?.filter((item) => item.kind === "agent")
+      ? directories.inventory.data?.filter(
+          (item) => item.kind === "agent" && inGroupScope(item.group_ids)
+        )
       : undefined;
   const selectedAgent = agents?.find(
     (item) => resourceKey(item.tenant_id, item.id) === resourceSelection
@@ -326,7 +348,7 @@ function MonitoringScope({
       ? {
           tenantId: selectedModel?.tenant_id ?? directories.tenant,
           modelId: selectedModel?.id ?? null,
-          groupIds: group ? [Number(group)] : [],
+          groupIds: [],
           startDate: range[0],
           endDate: range[1],
         }
@@ -342,7 +364,8 @@ function MonitoringScope({
       ? {
           tenantId: selectedSkill?.tenant_id ?? directories.tenant,
           skillId: selectedSkill?.skill_id ?? null,
-          groupIds: group ? [Number(group)] : [],
+          groupIds: [],
+          ...(group ? { resourceGroup: group } : {}),
           startDate: range[0],
           endDate: range[1],
         }
@@ -390,7 +413,8 @@ function MonitoringScope({
     (!resourceSelection || mcpService || directories.mcpCatalog.isSuccess)
       ? {
           tenantId: directories.tenant,
-          groupIds: group ? [Number(group)] : [],
+          groupIds: [],
+          ...(group ? { resourceGroup: group } : {}),
           serviceId: mcpService?.service_id ?? null,
           serverType: mcpService?.service_id === null ? mcpService.type : null,
           toolName: selectedMcpTool ?? null,
@@ -517,7 +541,7 @@ function MonitoringScope({
     directories.scope.isError ||
     directories.tenants.isError ||
     (!onOverview &&
-      (directories.groups.isError ||
+      ((tab !== "model" && directories.groups.isError) ||
         resourceQuery.isError ||
         directories.tools.isError));
 
@@ -528,25 +552,33 @@ function MonitoringScope({
           {tenantSelect}
           {!onOverview && (
             <>
-              <DirectorySelect
-                label={t("ops.monitoring.group")}
-                allLabel={t("ops.monitoring.allGroups")}
-                value={group}
-                choices={directories.groups.data?.groups.map((group) => ({
-                  value: String(group.group_id),
-                  label: group.group_name,
-                }))}
-                disabledText={
-                  scopePending
-                    ? scopeDisabledText
-                    : !directories.tenant
-                      ? t("ops.monitoring.groupTenantRequired")
-                      : undefined
-                }
-                loading={directories.groups.isFetching}
-                failed={directories.groups.isError}
-                onChange={(value) => dispatch({ type: "group", value })}
-              />
+              {tab !== "model" && (
+                <DirectorySelect
+                  label={t("ops.monitoring.group")}
+                  allLabel={t("ops.monitoring.allGroups")}
+                  value={group}
+                  choices={[
+                    ...(directories.groups.data?.groups.map((group) => ({
+                      value: String(group.group_id),
+                      label: group.group_name,
+                    })) ?? []),
+                    {
+                      value: UNGROUPED_GROUP,
+                      label: t("ops.monitoring.ungrouped"),
+                    },
+                  ]}
+                  disabledText={
+                    scopePending
+                      ? scopeDisabledText
+                      : !directories.tenant
+                        ? t("ops.monitoring.groupTenantRequired")
+                        : undefined
+                  }
+                  loading={directories.groups.isFetching}
+                  failed={directories.groups.isError}
+                  onChange={(value) => dispatch({ type: "group", value })}
+                />
+              )}
               <DirectorySelect
                 label={t(`ops.monitoring.tab.${tab}`)}
                 allLabel={allResources}
@@ -568,7 +600,7 @@ function MonitoringScope({
                 failed={resourceQuery.isError}
                 onChange={(value) => dispatch({ type: "resource", tab, value })}
               />
-              {directories.mcpService && (
+              {mcpService && (
                 <DirectorySelect
                   label={t("ops.monitoring.tool")}
                   allLabel={t("ops.monitoring.allTools")}
@@ -725,17 +757,11 @@ function MonitoringScope({
             />
           ) : (
             <McpMonitoring
-              scope={
-                selectedMcpTool
-                  ? "tool"
-                  : directories.mcpService
-                    ? "service"
-                    : "all"
-              }
+              scope={selectedMcpTool ? "tool" : mcpService ? "service" : "all"}
               queryKey={mcpQueryKey}
               viewKey={JSON.stringify([
                 directories.tenant,
-                resourceSelection,
+                mcpService ? mcpServiceKey(mcpService) : "",
                 selectedMcpTool,
               ])}
               onViewStatistics={viewMcpStatistics}

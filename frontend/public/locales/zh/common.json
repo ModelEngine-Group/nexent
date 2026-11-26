@@ -7410,6 +7410,7 @@
   "ops.monitoring.tab.mcp": "MCP",
   "ops.monitoring.group": "用户组",
   "ops.monitoring.allGroups": "全部用户组",
+  "ops.monitoring.ungrouped": "无用户组",
   "ops.monitoring.groupTenantRequired": "请先选择租户",
   "ops.monitoring.all.agent": "全部智能体",
   "ops.monitoring.all.model": "全部模型",

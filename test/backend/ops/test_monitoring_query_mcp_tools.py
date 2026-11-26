@@ -174,10 +174,10 @@ def test_mcp_server_catalog_lists_registered_servers_with_coarse_types(monkeypat
     from ops.monitoring.query import mcp_server_catalog
 
     rows = [
-        {"mcp_id": 3, "mcp_name": "docs", "tenant_id": "tenant-a", "container_id": None, "config_json": None},
-        {"mcp_id": 4, "mcp_name": "boxed", "tenant_id": "tenant-a", "container_id": "abc", "config_json": None},
+        {"mcp_id": 3, "mcp_name": "docs", "tenant_id": "tenant-a", "container_id": None, "group_ids": None, "config_json": None},
+        {"mcp_id": 4, "mcp_name": "boxed", "tenant_id": "tenant-a", "container_id": "abc", "group_ids": None, "config_json": None},
         {"mcp_id": 5, "mcp_name": "openapi", "tenant_id": "tenant-b", "container_id": None,
-         "config_json": {"openapi": "3.0.0"}},
+         "group_ids": None, "config_json": {"openapi": "3.0.0"}},
     ]
     statements = []
     monkeypatch.setattr("ops.monitoring.query.get_db_session", lambda: _fake_db_session(rows, statements))
@@ -185,9 +185,9 @@ def test_mcp_server_catalog_lists_registered_servers_with_coarse_types(monkeypat
 
     catalog = mcp_server_catalog("tenant-a")
     assert {entry["name"]: entry for entry in catalog} == {
-        "docs": {"service_id": 3, "name": "docs", "type": "remote"},
-        "boxed": {"service_id": 4, "name": "boxed", "type": "container"},
-        "openapi": {"service_id": 5, "name": "openapi", "type": "remote"},
+        "docs": {"service_id": 3, "name": "docs", "type": "remote", "group_ids": None},
+        "boxed": {"service_id": 4, "name": "boxed", "type": "container", "group_ids": None},
+        "openapi": {"service_id": 5, "name": "openapi", "type": "remote", "group_ids": None},
     }
     assert statements[0].compile().params["tenant_id_1"] == "tenant-a"
 
@@ -200,15 +200,15 @@ def test_mcp_server_catalog_appends_the_local_endpoint_when_configured(monkeypat
     """The tenant-local endpoint is synthesized without a database record."""
     from ops.monitoring.query import mcp_server_catalog
 
-    rows = [{"mcp_id": 3, "mcp_name": "docs", "tenant_id": "tenant-a", "container_id": None, "config_json": None}]
+    rows = [{"mcp_id": 3, "mcp_name": "docs", "tenant_id": "tenant-a", "container_id": None, "group_ids": None, "config_json": None}]
     statements = []
     monkeypatch.setattr("ops.monitoring.query.get_db_session", lambda: _fake_db_session(rows, statements))
     monkeypatch.setattr("ops.monitoring.query.LOCAL_MCP_SERVER", "http://mcp.internal:8080")
 
     catalog = mcp_server_catalog("tenant-a")
     assert catalog == [
-        {"service_id": 3, "name": "docs", "type": "remote"},
-        {"service_id": None, "name": "outer-apis", "type": "builtin"},
+        {"service_id": 3, "name": "docs", "type": "remote", "group_ids": None},
+        {"service_id": None, "name": "outer-apis", "type": "builtin", "group_ids": None},
     ]
     # One synthesized entry regardless of the tenant scope.
     assert mcp_server_catalog(None) == catalog

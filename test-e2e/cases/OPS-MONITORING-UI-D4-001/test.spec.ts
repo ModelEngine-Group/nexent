@@ -9,11 +9,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     { tenant_id: "b", tenant_name: "研发中心" },
   ];
   const resources = [
-    { tenant_id: "a", kind: "agent", id: 1, name: "智能问答助手" },
+    { tenant_id: "a", kind: "agent", id: 1, name: "智能问答助手", group_ids: [10] },
     { tenant_id: "b", kind: "agent", id: 1, name: "研发助手" },
     { tenant_id: "a", kind: "model", id: 2, name: "文本生成模型" },
-    { tenant_id: "a", kind: "mcp", id: 3, name: "知识库服务" },
-    { tenant_id: "a", kind: "mcp", id: 4, name: "文件服务" },
+    { tenant_id: "a", kind: "mcp", id: 3, name: "知识库服务", group_ids: [] },
+    { tenant_id: "a", kind: "mcp", id: 4, name: "文件服务", group_ids: [10] },
     { tenant_id: "b", kind: "mcp", id: 5, name: "研发服务" },
   ];
   const user = {
@@ -260,6 +260,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         skills: [
           {
             skill_id: 7,
+            group_ids: [10],
             name: tenantId === "b" ? "设计审阅" : "文档摘要",
             source: "local",
           },
@@ -284,8 +285,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           data: [
             ...resources
               .filter((row) => row.kind === "mcp" && (!tenantId || tenantId === row.tenant_id))
-              .map((row) => ({ service_id: row.id, name: row.name, type: "remote" })),
-            { service_id: null, name: "内置服务", type: "builtin" },
+              .map((row) => ({ service_id: row.id, name: row.name, type: "remote", group_ids: row.group_ids })),
+            { service_id: null, name: "内置服务", type: "builtin", group_ids: null },
           ],
         };
       } else {
@@ -353,7 +354,14 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
               ? ["查阅文件"]
               : serviceId === "5" ? ["研发工具"] : [];
           const service = serviceRows.find((row) => String(row.mcp_server_id) === serviceId);
-          const rows = uncovered
+          const onlyUngrouped = view === "list" && dimension === "services" &&
+            searchParams.get("include_registered") === "true" &&
+            searchParams.get("resource_group") === "ungrouped";
+          const rows = onlyUngrouped
+            ? serviceRows.filter((row) => row.mcp_server_id === 3).map((row) => ({
+                ...row, active_tools: null, metrics: { request_count: null, avg_duration_ms: null },
+              }))
+            : uncovered
             ? []
             : dimension === "services"
               ? [...serviceRows].reverse().concat(historical)
@@ -558,9 +566,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     ) {
       modelSummaryReads.push(Object.fromEntries(searchParams));
       const single = searchParams.has("model_id");
-      const grouped = searchParams.has("group_ids");
       const requests =
-        (single ? 3050 : grouped ? 7010 : 8010) +
+        (single ? 3050 : 8010) +
         (searchParams.get("start_date") === "2026-11-17" ? 10 : 0);
       const eligible = single ? 2000 : 5000;
       json = {
@@ -735,7 +742,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         view: pathname.endsWith("/summary") ? "summary" : "trends",
         tenant: tenantId,
         agent: searchParams.get("agent_id"),
-        group: searchParams.get("group_ids"),
+        group: searchParams.get("resource_group"),
         from: searchParams.get("start_date"),
         to: searchParams.get("end_date"),
       };
@@ -1063,7 +1070,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await screenshot("agent");
 
     await tab("模型").click();
-    await expect(page.getByText("一线运营组", { exact: true })).toBeVisible();
+    await expect(select("用户组")).toHaveCount(0);
     await expect(page.getByPlaceholder("请选择开始日期")).toHaveValue(
       "2026-11-07",
     );
@@ -1087,7 +1094,6 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         page: "1",
         search: "文本生成",
         tenant_id: "a",
-        group_ids: "10",
         start_date: "2026-11-07",
         end_date: "2026-11-12",
       });
@@ -1116,7 +1122,6 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       page_size: "10",
       sort_by: "total_tokens",
       tenant_id: "a",
-      group_ids: "10",
       start_date: "2026-11-07",
       end_date: "2026-11-12",
     };
@@ -1168,7 +1173,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       exact: true,
     });
     await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
-    await expect(modelCard("模型请求数").locator("strong")).toHaveText("7,010");
+    await expect(modelCard("模型请求数").locator("strong")).toHaveText("8,010");
     await expect(modelCard("Token 消耗量")).toContainText("9,007.2 万亿");
     await expect(modelErrors).not.toContainText("纳入统计");
     await expect(modelErrors).not.toContainText("区间错误率");
@@ -1187,12 +1192,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await screenshot("model-all-metrics");
 
     await page.getByText("近七天", { exact: true }).click();
-    await expect(modelCard("模型请求数").locator("strong")).toHaveText("7,020");
-    await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
-    await choose("用户组", "全部用户组");
     await expect(modelCard("模型请求数").locator("strong")).toHaveText("8,020");
     await expect(modelCard("当前模型数").locator("strong")).toHaveText("1");
-    await choose("用户组", "一线运营组");
+    expect(modelSummaryReads.at(-1)).not.toHaveProperty("resource_group");
+    expect(modelSummaryReads.at(-1)).not.toHaveProperty("group_ids");
     await page.getByText("自定义", { exact: true }).click();
     await modelDetails.locator(".ant-pagination-item-2").click();
     await modelRows
@@ -1247,7 +1250,6 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const refetch = {
       tenant_id: "a",
       model_id: "2",
-      group_ids: "10",
       start_date: "2026-11-07",
       end_date: "2026-11-12",
     };
@@ -1271,7 +1273,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await screenshot("skill");
     await tab("模型").click();
     await choose("租户", "研发中心");
-    await expect(page.getByText("全部用户组", { exact: true })).toBeVisible();
+    await expect(select("用户组")).toHaveCount(0);
     await expect(page.getByText("全部模型", { exact: true })).toBeVisible();
     await tab("智能体").click();
     await expect(
@@ -1464,10 +1466,22 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const catalogReads = mcpReads.catalog.length;
     await choose("用户组", "一线运营组");
     await expect.poll(() => mcpReads.summary.at(-1)).toEqual({
-      tenant_id: "a", group_ids: "10", server_id: "4", tool_name: "查阅文件",
+      tenant_id: "a", resource_group: "10", server_id: "4", tool_name: "查阅文件",
       start_date: "2026-11-07", end_date: "2026-11-12",
     });
     expect(mcpReads.catalog).toHaveLength(catalogReads);
+    await choose("用户组", "无用户组");
+    await expect.poll(() => mcpReads.summary.at(-1)).toEqual({
+      tenant_id: "a", resource_group: "ungrouped",
+      start_date: "2026-11-07", end_date: "2026-11-12",
+    });
+    await expect(select("工具")).toHaveCount(0);
+    await expect(services.getByText("知识库服务", { exact: true })).toBeVisible();
+    await expect(services.locator("tbody tr[data-row-key]")).toHaveCount(1);
+    await select("MCP").click();
+    await expect(option("知识库服务")).toBeVisible();
+    await expect(option("内置服务")).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await choose("租户", "研发中心");
     await expect(mcp.getByText("全部用户组", { exact: true })).toBeVisible();
     await expect(
@@ -1597,7 +1611,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           start_date: "2026-11-17",
           end_date: "2026-11-23",
           tenant_id: "a",
-          group_ids: "10",
+          resource_group: "10",
         }),
       ]);
     for (const request of stats.slice(beforeRefresh)) {
@@ -1862,7 +1876,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         expect.objectContaining({
           ...tableRequest,
           page: "1",
-          group_ids: "10",
+          resource_group: "10",
         }),
       ]);
     await openDetailSearch();
@@ -1871,7 +1885,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const activeRanking = {
       metric: "total_tokens",
       tenant_id: "a",
-      group_ids: "10",
+      resource_group: "10",
       start_date: "2026-10-25",
     };
     await expect.poll(() => rankingReads.at(-1)).toMatchObject(activeRanking);
@@ -1982,7 +1996,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const statisticsBefore = filtersBeforeRefresh();
     const datesAndGroup = {
       tenant_id: "a",
-      group_ids: "10",
+      resource_group: "10",
       start_date: "2026-11-07",
       end_date: "2026-11-12",
     };
@@ -2071,7 +2085,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         .poll(() => requests.at(-1))
         .toMatchObject({
           skill_id: "7",
-          group_ids: "10",
+          resource_group: "10",
           start_date: "2026-10-25",
           end_date: "2026-11-23",
         });
@@ -2102,6 +2116,12 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       skill.getByRole("heading", { name: "文档摘要 · 运营中心" }),
     ).toBeVisible();
 
+    await choose("用户组", "无用户组");
+    await expect(skill.getByRole("heading", { name: "全部 Skill · 运营中心" })).toBeVisible();
+    await expect.poll(() => skillReads.summary.at(-1)).toEqual({
+      tenant_id: "a", resource_group: "ungrouped",
+      start_date: datesAndGroup.start_date, end_date: datesAndGroup.end_date,
+    });
     await choose("租户", "研发中心");
     await expect(
       skill.getByRole("heading", { name: "全部 Skill · 研发中心" }),
@@ -2274,10 +2294,13 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     const single = expect.objectContaining({
       tenant_id: "a",
       model_id: "2",
-      group_ids: "10",
     });
     expect(modelSummaryReads).toEqual(expect.arrayContaining([single]));
     expect(modelTrendReads).toEqual(expect.arrayContaining([single]));
+    for (const request of [...modelSummaryReads, ...modelTrendReads, ...modelListReads]) {
+      expect(request).not.toHaveProperty("group_ids");
+      expect(request).not.toHaveProperty("resource_group");
+    }
     expect(unexpected).toEqual([]);
   });
   await contract.assertion(modelListNavigation, async () => {

@@ -17,11 +17,12 @@ from pydantic import BaseModel, Field
 
 from contracts.constants.environment import JWT_SECRET
 from infrastructure.monitoring.contracts import McpServerType
+from infrastructure.rdb.account_access import filter_tenant_group_ids
 from management.services.permission.identity.session import authenticate
 from ops.monitoring.agent_tokens import read_agent_tokens
 from ops.monitoring.model import summarize
 from ops.monitoring.mcp_tool import summarize as summarize_mcp_tool
-from ops.monitoring.query import (days_inclusive, mcp_server_catalog, mcp_server_rows,
+from ops.monitoring.query import (ResourceGroup, days_inclusive, mcp_registered_catalog, mcp_server_catalog, mcp_server_rows,
                                   mcp_services_by_tenant, mcp_tool_rows, metric_value, model_rows,
                                   read_agent_views, read_agents, read_mcp_tools, read_models, read_skills,
                                   skill_metric_value, skill_rows)
@@ -34,6 +35,7 @@ ops_router = APIRouter(prefix="/ops/v1/monitoring", tags=["model monitoring"])
 Metric = Literal["request_count", "total_tokens", "error_rate", "avg_duration_ms", "avg_ttft_ms",
                  "avg_generation_rate"]
 PositiveResourceId = Annotated[int, Field(gt=0, le=2**31 - 1)]
+ResourceGroupQuery = Annotated[str | None, Query(pattern=r"^(ungrouped|[1-9][0-9]{0,9})$")]
 AgentMetric = Literal["execution_count", "avg_duration_ms", "avg_ttft_ms", "total_tokens", "success_rate"]
 ToolMetric = Literal["request_count", "error_rate", "avg_duration_ms"]
 
@@ -43,6 +45,7 @@ class MonitoringSelection(BaseModel):
     start_date: date
     end_date: date
     group_ids: list[int]
+    resource_group: str | None = None
 
 
 class Selection(MonitoringSelection):
@@ -63,15 +66,33 @@ def _validate_range(start_date: date, end_date: date, group_ids: list[int] | Non
 
 def selection(start_date: date, end_date: date, tenant_id: str | None = None,
               group_ids: Annotated[list[int] | None, Query(max_length=100)] = None,
+              resource_group: ResourceGroupQuery = None,
               model_id: Annotated[int | None, Query(gt=0)] = None, model_type: str | None = None,
               skill_id: str | None = None, skill_name: str | None = None):
     _validate_range(start_date, end_date, group_ids)
     return Selection(tenant_id=tenant_id, start_date=start_date, end_date=end_date, group_ids=group_ids or [],
-                     model_id=model_id, model_type=model_type, skill_id=skill_id, skill_name=skill_name)
+                     resource_group=resource_group, model_id=model_id, model_type=model_type, skill_id=skill_id,
+                     skill_name=skill_name)
 
 
 def ops_tenant(scope: Annotated[Selection, Depends(selection)], user: Annotated[CurrentUser, Depends(authenticate)]):
     return operations_scope(user, scope.tenant_id)
+
+
+def _resource_group(scope, tenant: str | None) -> ResourceGroup | None:
+    selected = scope.resource_group
+    if selected is None:
+        return None
+    if tenant is None or scope.group_ids:
+        raise HTTPException(422, "Resource group requires a tenant and cannot be combined with caller groups")
+    if selected == "ungrouped":
+        return selected
+    group_id = int(selected)
+    if group_id > 2**31 - 1:
+        raise HTTPException(422, "Invalid resource group")
+    if not filter_tenant_group_ids([group_id], tenant):
+        raise HTTPException(404, "Resource group not found in tenant")
+    return group_id
 
 
 def _read(request, scope, tenant):
@@ -150,12 +171,14 @@ def trends(request: Request, scope: Annotated[Selection, Depends(selection)],
 
 
 def _read_skill(request, scope, tenant):
+    resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
         raise HTTPException(503, "Skill monitoring is unavailable")
     try:
         return read_skills(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
-                           groups=scope.group_ids, skill_id=scope.skill_id, skill_name=scope.skill_name)
+                           groups=scope.group_ids, skill_id=scope.skill_id, skill_name=scope.skill_name,
+                           resource_group=resource_group)
     except Exception as error:
         logger.warning("Skill monitoring query failed error=%s", type(error).__name__)
         raise HTTPException(503, "Skill monitoring is temporarily unavailable") from None
@@ -221,25 +244,27 @@ def agent_selection(
     start_date: date, end_date: date,
     tenant_id: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     group_ids: Annotated[list[PositiveResourceId] | None, Query(max_length=100)] = None,
+    resource_group: ResourceGroupQuery = None,
     agent_id: Annotated[int | None, Query(gt=0, le=2**31 - 1)] = None,
 ):
     _validate_range(start_date, end_date, group_ids)
     return AgentSelection(tenant_id=tenant_id, start_date=start_date, end_date=end_date,
-                          group_ids=group_ids or [], agent_id=agent_id)
+                          group_ids=group_ids or [], resource_group=resource_group, agent_id=agent_id)
 
 
 @ops_router.get("/agents/summary", tags=["agent monitoring"])
 def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
                   user: Annotated[CurrentUser, Depends(authenticate)]):
     tenant = operations_scope(user, scope.tenant_id)
+    resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
         raise HTTPException(503, "Agent monitoring is unavailable")
     try:
         values, status = read_agents(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
-                                     groups=scope.group_ids, agent_id=scope.agent_id)
+                                     groups=scope.group_ids, agent_id=scope.agent_id, resource_group=resource_group)
         token_usage = read_agent_tokens(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
-                                        groups=scope.group_ids, agent_id=scope.agent_id)
+                                        groups=scope.group_ids, agent_id=scope.agent_id, resource_group=resource_group)
     except Exception as error:
         logger.warning("Agent monitoring query failed error=%s", type(error).__name__)
         raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
@@ -248,19 +273,21 @@ def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(age
 
 def _read_agent_views(request, scope, user, *, include_tokens=True):
     tenant = operations_scope(user, scope.tenant_id)
+    resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
         raise HTTPException(503, "Agent monitoring is unavailable")
     try:
         items, current_count, history, status = read_agent_views(
             service, tenant=tenant, start=scope.start_date, end=scope.end_date,
-            groups=scope.group_ids, agent_id=scope.agent_id,
+            groups=scope.group_ids, agent_id=scope.agent_id, resource_group=resource_group,
         )
         if not include_tokens:
             return items, current_count, history, status
         resources = {(item["tenant_id"], item["agent_id"]): dict(item) for item in items}
         token_usage = read_agent_tokens(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
-                                        groups=scope.group_ids, agent_id=scope.agent_id, identities=resources)
+                                        groups=scope.group_ids, agent_id=scope.agent_id, identities=resources,
+                                        resource_group=resource_group)
         for key, usage in token_usage.agents.items():
             resources.setdefault(key, {"tenant_id": key[0], "agent_id": key[1], "is_current": False, "metrics": None})
             resources[key].update(usage)
@@ -477,6 +504,7 @@ class ToolSelection(BaseModel):
     start_date: date
     end_date: date
     group_ids: list[int]
+    resource_group: str | None = None
     server_id: int | None
     # Same normalized values the fact contract carries; an unknown filter value
     # is a client error instead of a silently empty result.
@@ -486,23 +514,25 @@ class ToolSelection(BaseModel):
 
 def tool_selection(start_date: date, end_date: date, tenant_id: str | None = None,
                    group_ids: Annotated[list[int] | None, Query(max_length=100)] = None,
+                   resource_group: ResourceGroupQuery = None,
                    server_id: Annotated[int | None, Query(gt=0)] = None,
                    server_type: McpServerType | None = None,
                    tool_name: Annotated[str | None, Query(max_length=200)] = None):
     if not 0 <= (end_date - start_date).days < 366 or any(group <= 0 for group in group_ids or ()):
         raise HTTPException(422, "Invalid monitoring date range or group ID")
     return ToolSelection(tenant_id=tenant_id, start_date=start_date, end_date=end_date, group_ids=group_ids or [],
-                         server_id=server_id, server_type=server_type, tool_name=tool_name)
+                         resource_group=resource_group, server_id=server_id, server_type=server_type, tool_name=tool_name)
 
 
 def _read_tools(request, scope, tenant):
+    resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
         raise HTTPException(503, "MCP tool monitoring is unavailable")
     try:
         return read_mcp_tools(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
                               groups=scope.group_ids, server_id=scope.server_id, server_type=scope.server_type,
-                              tool_name=scope.tool_name)
+                              tool_name=scope.tool_name, resource_group=resource_group)
     except Exception as error:
         logger.warning("MCP tool monitoring query failed error=%s", type(error).__name__)
         raise HTTPException(503, "MCP tool monitoring is temporarily unavailable") from None
@@ -519,8 +549,8 @@ def _tool_items(rows, status, metric, search="", descending=True):
     return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
 
 
-def _server_items(rows, status, metric, search="", descending=True):
-    items = mcp_server_rows(rows)
+def _server_items(rows, status, metric, search="", descending=True, inventory=()):
+    items = mcp_server_rows(rows, inventory, covered=status["coverage_state"] == "covered")
     items = [item for item in items if search.casefold() in (item.get("mcp_server_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"], item.get("mcp_server_id") or 0))
     if metric == "name":
@@ -536,10 +566,21 @@ def mcp_tools(request: Request, scope: Annotated[ToolSelection, Depends(tool_sel
               dimension: Literal["tools", "services"] = "services",
               page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
               search: Annotated[str, Query(max_length=100)] = "", sort_by: ToolMetric | Literal["name"] = "request_count",
-              descending: bool = True):
+              descending: bool = True, include_registered: bool = False):
     rows, _, status = _read_tools(request, scope, tenant)
-    build = _server_items if dimension == "services" else _tool_items
-    items = build(rows, status, sort_by, search, descending)
+    if dimension == "services":
+        inventory = []
+        if include_registered and not scope.group_ids and not scope.tool_name:
+            selected = scope.resource_group
+            resource_group = selected if selected in (None, "ungrouped") else int(selected)
+            inventory = [
+                item for item in mcp_registered_catalog(tenant, resource_group)
+                if (scope.server_id is None or item["service_id"] == scope.server_id)
+                and (scope.server_type is None or item["type"] == scope.server_type)
+            ]
+        items = _server_items(rows, status, sort_by, search, descending, inventory)
+    else:
+        items = _tool_items(rows, status, sort_by, search, descending)
     start = (page - 1) * page_size
     return {"data": {"items": items[start:start + page_size], "total": len(items)}, **status}
 
