@@ -281,6 +281,17 @@ export class ChatPage {
     return message;
   }
 
+  async waitForDisplayedCompletion(message = this.assistantMessages().last()): Promise<void> {
+    await expect(message.locator('[data-slot="aui_assistant-message-completion-indicator"]')
+      .getByText(/^(已完成|Completed?)$/)).toBeVisible({ timeout: 90_000 });
+  }
+
+  async sendAndWaitForDisplayedCompletion(prompt: string): Promise<Locator> {
+    const message = await this.startMessage(prompt);
+    await this.waitForDisplayedCompletion(message);
+    return message;
+  }
+
   async stopGeneration(): Promise<void> {
     const stop = this.page.locator("button:has(svg.lucide-square)").first();
     await expect(stop).toBeVisible({ timeout: 120_000 });

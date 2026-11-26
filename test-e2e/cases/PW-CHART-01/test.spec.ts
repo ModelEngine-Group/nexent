@@ -34,7 +34,7 @@ journey("PW-CHART-01", async (context) => {
       async () => {
         await chat.startMessage("严格只输出下面代码块，不要解释：\n```mermaid\ngraph LR\n  NX_A[Alpha] --> NX_B[Beta]\n```");
         citationConversationId = chat.registerOwnedConversation("PW-CHART-01");
-        await chat.waitForCompletion();
+        await chat.waitForDisplayedCompletion();
         return "requested a minimal valid Mermaid block and waited for streaming completion";
       },
       async () => {
@@ -43,12 +43,12 @@ journey("PW-CHART-01", async (context) => {
         return "the completed assistant message produced a real Mermaid SVG node";
       },
       async () => {
-        await chat.sendAndWait("严格只输出两个独立代码块，不要解释：\n```mermaid\ngraph LR\n  NX_C[Gamma] --> NX_D[Delta]\n```\n```mermaid\ngraph TD\n  NX_E[Epsilon] --> NX_F[Phi]\n```");
+        await chat.sendAndWaitForDisplayedCompletion("严格只输出两个独立代码块，不要解释：\n```mermaid\ngraph LR\n  NX_C[Gamma] --> NX_D[Delta]\n```\n```mermaid\ngraph TD\n  NX_E[Epsilon] --> NX_F[Phi]\n```");
         await expect(page.locator("[data-slot='mermaid-diagram'] svg")).toHaveCount(validCount + 2, { timeout: 120_000 });
         return "two additional Mermaid blocks rendered as two independent diagram containers";
       },
       async () => {
-        await chat.sendAndWait("严格只输出下面的错误代码块，不要修复、不要解释：\n```mermaid\ngraph LR\n  A -->>><<< B\n```");
+        await chat.sendAndWaitForDisplayedCompletion("严格只输出下面的错误代码块，不要修复、不要解释：\n```mermaid\ngraph LR\n  A -->>><<< B\n```");
         await expect(page.locator("[data-slot='mermaid-fallback']").last()).toBeVisible({ timeout: 120_000 });
         await expect(page.getByText("diagram could not be rendered").last()).toBeVisible();
         return "invalid Mermaid degraded to the scoped source fallback without breaking the page";
@@ -65,7 +65,7 @@ journey("PW-CHART-01", async (context) => {
         return "exercised only the actual Expand/Zoom in/Zoom out/Reset/Close controls exposed by newchat";
       },
       async () => {
-        await chat.sendAndWait("严格原样输出下面内容，不要执行、不要改写：\n```html\n<script>alert('NX_XSS')</script>\n<img src=x onerror=alert('NX_IMG')>\n<a href=\"javascript:alert('NX_LINK')\">NX link</a>\n```");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出下面内容，不要执行、不要改写：\n```html\n<script>alert('NX_XSS')</script>\n<img src=x onerror=alert('NX_IMG')>\n<a href=\"javascript:alert('NX_LINK')\">NX link</a>\n```");
         return "submitted controlled script, onerror, and javascript-URL payloads as Markdown content";
       },
       async () => {
@@ -75,7 +75,7 @@ journey("PW-CHART-01", async (context) => {
         return "no dialog executed and the rendered assistant DOM contains no executable dangerous nodes or attributes";
       },
       async () => {
-        await chat.sendAndWait("严格原样输出，不要解释：~~~~删除线文本~~~~");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出，不要解释：~~~~删除线文本~~~~");
         return "streamed the controlled GFM strikethrough fixture";
       },
       async () => {
@@ -87,7 +87,7 @@ journey("PW-CHART-01", async (context) => {
         return "strikethrough content remained plain span text without del/s or line-through decoration";
       },
       async () => {
-        await chat.sendAndWait("严格原样输出引用正文：第一句内容 [[a1]] 第二句内容 [[1]]");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出引用正文：第一句内容 [[a1]] 第二句内容 [[1]]");
         citationConversationId = chat.currentConversationId();
         // Rendering/restore acceptance does not require the asynchronous
         // title generator. Give only this owned conversation a unique label;
@@ -132,7 +132,7 @@ journey("PW-CHART-01", async (context) => {
         return `citation marker opened SourcesPanel with citekey=${citekey} and sentence-level context`;
       },
       async () => {
-        await chat.sendAndWait("严格原样输出，不要执行：~~~~<img src=x onerror=alert('NX_STRIKE')>~~~~ [[javascript:alert('NX_CITE')]]");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出，不要执行：~~~~<img src=x onerror=alert('NX_STRIKE')>~~~~ [[javascript:alert('NX_CITE')]]");
         const last = chat.assistantMessages().last();
         expect(alertTriggered).toBe(false);
         await expect(last.locator("script, [onerror], a[href^='javascript:']")).toHaveCount(0);
