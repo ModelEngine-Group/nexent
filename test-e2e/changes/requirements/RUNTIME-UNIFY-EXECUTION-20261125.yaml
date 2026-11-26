@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-UNIFY-EXECUTION-20261125
+  change_type: requirement
+  requirement_id: RUNTIME-UNIFY-EXECUTION-20261125
+  title: 统一持久会话执行并精简无业务停机扩缩容
+  description: '固定副本在无在途业务的窗口停启，不依赖维护批次。普通会话与 Creator 共用 agent_execution_t。SPEC: nexent-doc/docs/Developing/runtime-replica-scaling/changes/runtime-unify-agent-execution/proposal.md。'
+  affected_features:
+    existing: []
+    added: []
+    modified: [RUNTIME-REPLICAS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - RUNTIME-ADMISSION-D2-001
+    - RUNTIME-ADMISSION-D3-001
+    - RUNTIME-OFFLINE-DEPLOY-D5-001
+    - RUNTIME-POD-RESTART-D5-001
+    - RUNTIME-SCHEDULER-D3-001
+    - RUNTIME-SHARED-STORAGE-D3-001
+    - RUNTIME-STREAM-CONTROL-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 持久会话准入使用统一执行行，Creator 当前运行及历史回放分别验证运行 ID 与绑定关系。
+    - 会话配额与停机数据库批次解耦，旧所有者晚到的更新不能覆盖现有执行。
+    - 固定副本启动隔离其他进程的状态，异常全停恢复才处理遗留执行。
+    - 副本调整等待旧业务 Pod 退出，保留初始化成功和部署锁作为激活条件。
+    reason: UT 覆盖单服务逻辑、SQL 写入与部署分支。正式用例覆盖真实跨进程竞争、日志关联和 Kubernetes 停启顺序。
+    test_selectors:
+    - test/backend/services/test_execution_coordination.py
+    - test/backend/services/test_creator_durable_admission.py
+    - test/backend/app/test_runtime_application_lifespan.py
+    - test/backend/services/test_agent_automation_scheduler.py
+    - test/backend/services/test_runtime_maintenance.py
+    - test/backend/deploy/test_k8s_bootstrap.py

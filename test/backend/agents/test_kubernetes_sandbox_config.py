@@ -9,6 +9,7 @@ from dataclasses import replace
 import pytest
 from nexent.core.agents.sandbox.execution import SandboxLevel, SandboxScope
 from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
+from runtime.adapters.nexent import sandbox
 from runtime.adapters.nexent.sandbox import resolve_sandbox_config
 
 
@@ -35,6 +36,21 @@ def test_kubernetes_defaults_are_system_and_error_without_mutation(deployment, p
     assert config.owner is deployment['owner']
     assert config.system_profile is deployment['system_profile']
     assert policy == original
+
+
+def test_deployed_sandbox_uses_runtime_identity_and_profile(deployment, mocker):
+    options = {key: deployment[key] for key in ("provider", "owner", "system_profile")}
+    mocker.patch.object(sandbox, "get_runtime_sandbox_options", return_value=options)
+    mocker.patch.object(sandbox, "default_sandbox_policy", return_value={"level": "kubernetes"})
+    mocker.patch.object(sandbox.environment, "NEXENT_SANDBOX_WORKSPACE_MODE", "bind")
+    mocker.patch.object(sandbox.environment, "NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT", "/mnt/nexent/workdir")
+    mocker.patch.object(sandbox.environment, "NEXENT_SANDBOX_FAILURE_POLICY", "error")
+
+    config = sandbox.resolve_deployed_sandbox(None)
+
+    assert config.level == SandboxLevel.KUBERNETES
+    assert config.owner is deployment["owner"]
+    assert config.system_profile is deployment["system_profile"]
 
 
 @pytest.mark.parametrize('level', ['local', 'wasm'])

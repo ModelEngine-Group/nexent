@@ -1,0 +1,22 @@
+schema_version: '1.0'
+case_id: RUNTIME-DIRECT-DEPLOY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-DIRECT-DEPLOY-D5-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-DIRECT-001: [test_direct_upgrade_retains_pods_and_conversations]
+  AC-DIRECT-002: [test_direct_upgrade_retains_pods_and_conversations]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained preparation uses an opted-in isolated Kubernetes profile and
+  an unused dynamic RWX StorageClass. The case owns the namespace, database,
+  volumes, test identity and deterministic model. Wrappers observe the real
+  Helm update and reject an unexpected pause or scale command. The stable
+  Gateway provides the before and after conversation reads and submissions.
+  Cleanup checks ownership by namespace UID and verifies dynamic PV reclamation.

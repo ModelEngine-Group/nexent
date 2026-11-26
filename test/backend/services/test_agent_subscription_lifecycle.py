@@ -112,6 +112,9 @@ async def test_admission_identity_reaches_worker_without_changing_conversation_i
     assert reference.run_id == payload.run_id
     assert reference.conversation_id == payload.conversation_id
     assert reference.run_id != str(reference.conversation_id)
+    identity = RunIdentity(ACTOR.tenant_id, ACTOR.user_id, payload.conversation_id, payload.run_id)
+    assert runtime.begin.call_args.args[0] == identity
+    runtime.finish.assert_called_once_with(identity, "completed")
     runtime.prepare.assert_awaited_once_with(payload, ACTOR, prepared_run.prepare_run_snapshot)
 
 

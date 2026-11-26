@@ -131,7 +131,7 @@ def parallel_delegation_targets(code, collaborator_names):
                 return ()
             keys.add(key[0].value)
         targets.append(name)
-    if len(set(targets)) != len(targets) or (keys and len(keys) != len(targets)):
+    if keys and len(keys) != len(targets):
         return ()
 
     for statement in body[1:]:

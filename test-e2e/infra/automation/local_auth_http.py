@@ -56,12 +56,8 @@ def native_runtime():
         asyncio.run(stop_system_configuration())
         with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
             cursor.execute("CREATE SCHEMA nexent")
-            cursor.execute(
-                (
-                    ROOT
-                    / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
-                ).read_text(encoding="utf-8")
-            )
+            from shared.merged_migrations import merged_migration_sql
+            cursor.execute(merged_migration_sql("v2.9.0_009_system_configuration.sql"))
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )

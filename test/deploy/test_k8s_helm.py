@@ -21,10 +21,8 @@ APPLICATION_DEPLOYMENTS = {
     "nexent-data-process",
     "nexent-mcp",
     "nexent-gateway",
+    "nexent-ops",
     "nexent-runtime",
-    "nexent-supabase-auth",
-    "nexent-supabase-db",
-    "nexent-supabase-kong",
     "nexent-web",
 }
 INFRASTRUCTURE_DEPLOYMENTS = {
@@ -57,7 +55,7 @@ APPLICATION_PVCS = {
     "nexent-memory-plugins",
     "nexent-logs",
     "nexent-project-config",
-    "nexent-supabase-db",
+    "nexent-trajectory",
 }
 INFRASTRUCTURE_PVCS = {
     "nexent-elasticsearch",
@@ -148,6 +146,10 @@ def isolated_k8s_project(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     _write_executable(
         mock_bin / "helm",
         """#!/bin/bash
+if [ "$1" = "template" ] && [ "$2" = "nexent-runtime-values" ]; then
+  printf 'replicaCount: %s\\n' "${MOCK_CHART_RUNTIME_REPLICAS:-1}"
+  exit 0
+fi
 printf 'helm %s\\n' "$*" >> "$MOCK_LOG"
 case "$1" in
   status)
@@ -161,7 +163,11 @@ case "$1" in
     fi
     exit 0
     ;;
-  upgrade|uninstall) exit 0 ;;
+  upgrade)
+    if [ "$2" = "nexent" ] && [ "${MOCK_FAIL_DIRECT_UPGRADE:-false}" = "true" ]; then exit 1; fi
+    exit 0
+    ;;
+  uninstall) exit 0 ;;
 esac
 exit 0
 """,
@@ -170,14 +176,75 @@ exit 0
         mock_bin / "kubectl",
         """#!/bin/bash
 printf 'kubectl %s\\n' "$*" >> "$MOCK_LOG"
+if [[ "$*" == *"deployment/nexent-postgresql"*"migration psql"* ]]; then
+  cat >/dev/null
+  printf '{"legacy":false}\\n'
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then exit 1; fi
+if [ "$1" = "get" ] && [ "$2" = "pvc" ]; then
+  if [ "${MOCK_RUNTIME_STORAGE:-}" = "missing" ]; then exit 1; fi
+  case "${MOCK_RUNTIME_STORAGE:-}" in
+    pending) printf 'Pending::ReadWriteMany,' ;;
+    rwo) printf 'Bound:pv-%s:ReadWriteOnce,' "$3" ;;
+    *) printf 'Bound:pv-%s:ReadWriteMany,' "$3" ;;
+  esac
+  if [[ "$*" == *'.spec.volumeMode'* ]]; then
+    case "${MOCK_RUNTIME_STORAGE:-}" in
+      pvc-block) printf ':Block' ;;
+      omitted-volume-mode) printf ':' ;;
+      *) printf ':Filesystem' ;;
+    esac
+  fi
+  exit 0
+fi
+if [ "$1" = "get" ] && [ "$2" = "pv" ] && [[ "$3" == pv-* ]]; then
+  if [[ "$*" == *'.spec.volumeMode'* ]]; then
+    case "${MOCK_RUNTIME_STORAGE:-}" in
+      pv-block) volume_mode='Block' ;;
+      omitted-volume-mode) volume_mode='' ;;
+      *) volume_mode='Filesystem' ;;
+    esac
+    field=":$volume_mode"
+  else
+    field=''
+  fi
+  if [[ "$*" == *'.spec.hostPath.path'* ]]; then
+    host_path=''
+    if [ "${MOCK_RUNTIME_STORAGE:-}" = "hostpath" ]; then host_path='/var/lib/nexent'; fi
+    field="$field:$host_path"
+  fi
+  case "${MOCK_RUNTIME_STORAGE:-}" in
+    local) printf 'Bound:ReadWriteMany,%s:/var/lib/nexent' "$field" ;;
+    wrong-pv-mode) printf 'Bound:ReadWriteOnce,%s:' "$field" ;;
+    unavailable) exit 1 ;;
+    *) printf 'Bound:ReadWriteMany,%s:' "$field" ;;
+  esac
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "pv" ]; then exit 1; fi
 if [ "$1" = "get" ] && [ "$2" = "deployment" ]; then
+  if [[ "$*" == *observedGeneration* ]]; then
+    printf '2:2:0:'
+    exit 0
+  fi
+  if [ "$3" = "nexent-config" ] && [[ "$*" == *"/release-name"*".spec.replicas"* ]]; then
+    if [ "${MOCK_MISSING_CONFIG:-false}" = "true" ]; then exit 1; fi
+    printf '%s:%s:%s' "${MOCK_CONFIG_OWNER:-nexent}" "${MOCK_CONFIG_NAMESPACE:-nexent}" "${MOCK_CONFIG_REPLICAS:-1}"
+    exit 0
+  fi
   if [ "${MOCK_APP_EXISTS:-false}" = "true" ]; then printf 'deployment/%s\\n' "$3"; fi
   exit 0
 fi
 if [ "$1" = "scale" ] && [ "${MOCK_FAIL_SCALE:-false}" = "true" ]; then exit 1; fi
-if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then printf 'nexent-system-bootstrap-test\\n'; exit 0; fi
+if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then
+  if [[ "$*" == *'app in (nexent-system-bootstrap,nexent-runtime-maintenance)'* ]]; then
+    if [ "${MOCK_FAIL_PREVIOUS_WRITER:-false}" = "true" ]; then printf 'nexent-runtime-maintenance-prior::\\n'; fi
+  else
+    printf 'nexent-system-bootstrap-test\\n'
+  fi
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "job" ]; then
   if [ "${MOCK_FAIL_BOOTSTRAP:-false}" = "true" ]; then printf '1';
   elif [[ "$*" == *succeeded* ]]; then printf '1:'; fi
@@ -207,6 +274,22 @@ if [ "$1" = "rollout" ]; then
   exit 0
 fi
 if [ "$1" = "exec" ]; then
+  if [[ "$*" == *"deployment/nexent-postgresql"*"runtime-deploy-lock psql"* ]]; then
+    IFS= read -r postgres_password || exit 1
+    while IFS= read -r query; do
+      printf 'db %s\\n' "$query" >> "$MOCK_LOG"
+      case "$query" in
+        *pg_try_advisory_lock*)
+          if [ "${MOCK_FAIL_LOCK:-false}" = "true" ]; then printf 'busy\\n'; else printf '123\\n'; fi ;;
+        *pg_locks*)
+          if [ "${MOCK_FAIL_LOCK_LOSS:-false}" = "true" ] && grep -Fq '.status.succeeded' "$MOCK_LOG"; then exit 1; fi
+          if [ "${MOCK_FAIL_DIRECT_LOCK_LOSS:-false}" = "true" ] &&
+              grep -Fq 'kubectl rollout status deployment/nexent-web ' "$MOCK_LOG"; then exit 1; fi
+          printf '123\\n' ;;
+      esac
+    done
+    exit 0
+  fi
   if [[ "$*" == *"sha256sum ./*.zip"* ]]; then
     if [ "${MOCK_FAIL_OFFICIAL_CHECKSUM:-false}" = "true" ]; then
       printf 'invalid-checksum  ./invalid.zip\n'
@@ -322,7 +405,11 @@ def _infrastructure_existing_args() -> list[str]:
 
 
 def _template(chart: Path, release: str, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return _run(["helm", "template", release, str(chart), *args], check=False)
+    baseline = [
+        "--set", "nexent-runtime.replicaCount=1",
+        "--set", "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret",
+    ] if chart.name == "nexent" else []
+    return _run(["helm", "template", release, str(chart), *baseline, *args], check=False)
 
 
 def _documents(rendered: str) -> list[dict]:
@@ -609,7 +696,7 @@ def test_infrastructure_components_cannot_be_scaled(
     assert f"{component} must remain single-replica" in rendered.stderr
 
 
-def test_startup_recovery_deployments_use_single_replica_recreate(
+def test_single_replica_recovery_deployments_use_recreate(
     chart_dirs: dict[str, Path],
 ) -> None:
     rendered = _template(
@@ -630,8 +717,8 @@ def test_startup_recovery_deployments_use_single_replica_recreate(
         assert spec["strategy"] == {"type": "Recreate"}
 
 
-@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS))
-def test_startup_recovery_deployments_cannot_be_scaled(
+@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS - {"nexent-runtime"}))
+def test_other_startup_recovery_deployments_cannot_be_scaled(
     chart_dirs: dict[str, Path],
     component: str,
 ) -> None:
@@ -663,6 +750,41 @@ def test_startup_recovery_deployments_require_recreate(
         f"{component} strategy.type must be Recreate"
         in rendered.stderr
     )
+
+
+@pytest.mark.parametrize("network_verified", [False, True])
+def test_fixed_runtime_replicas_render_with_kubernetes_system_sandbox(
+    chart_dirs: dict[str, Path], network_verified: bool,
+) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        [
+            *_application_dynamic_args(),
+            "--set", "global.sandboxProvider=kubernetes",
+            "--set", f"global.sandboxNetworkPolicyVerified={str(network_verified).lower()}",
+            "--set", "nexent-runtime.replicaCount=3",
+        ],
+    )
+    if not network_verified:
+        assert rendered.returncode != 0
+        assert "requires an enforced NetworkPolicy" in rendered.stderr
+        return
+
+    assert rendered.returncode == 0, rendered.stderr
+    resources = _documents(rendered.stdout)
+    runtime = next(doc for doc in resources if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "nexent-runtime")
+    assert runtime["spec"]["replicas"] == 3
+    assert runtime["spec"]["strategy"] == {"type": "Recreate"}
+    pod = runtime["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "nexent-runtime-sandbox"
+    env = {entry["name"]: entry for entry in pod["containers"][0]["env"]}
+    assert env["NEXENT_SANDBOX_PROVIDER"]["value"] == "kubernetes"
+    assert env["NEXENT_SANDBOX_DEFAULT_LEVEL"]["value"] == "kubernetes"
+    assert env["NEXENT_SANDBOX_DEFAULT_SCOPE"]["value"] == "system"
+    assert env["NEXENT_RECOVERY_MODE"]["value"] == "fixed_replicas"
+    assert env["NEXENT_RUNTIME_POD_UID"]["valueFrom"]["fieldRef"]["fieldPath"] == "metadata.uid"
+    assert any(doc["kind"] == "NetworkPolicy" and doc["metadata"]["name"] == "nexent-sandbox-control" for doc in resources)
 
 
 def test_stateless_web_can_still_be_scaled(chart_dirs: dict[str, Path]) -> None:

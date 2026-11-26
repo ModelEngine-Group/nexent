@@ -123,9 +123,9 @@ def update_model_record(
         return result.rowcount > 0
 
 
-def fail_detecting_models_on_startup() -> int:
+def fail_detecting_models_on_startup(*, db_session=None) -> int:
     """Clear interrupted checks without claiming the model failed a completed probe."""
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         result = session.execute(
             update(ModelRecord)
             .where(

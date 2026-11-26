@@ -1,11 +1,21 @@
-{{- if ne (int .Values.replicaCount) 1 -}}
-{{- fail "nexent-runtime must remain single-replica for startup task recovery" -}}
-{{- end -}}
 {{- if ne .Values.strategy.type "Recreate" -}}
-{{- fail "nexent-runtime strategy.type must be Recreate for startup task recovery" -}}
+{{- fail "nexent-runtime strategy.type must be Recreate for idle deployments" -}}
 {{- end -}}
 {{- $global := default dict .Values.global -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- if gt (int .Values.replicaCount) 1 -}}
+  {{- if not (has $sharedStorage.mode (list "dynamic" "existing")) -}}
+    {{- fail "nexent-runtime multi-replica deployment requires dynamic or existing shared RWX storage" -}}
+  {{- end -}}
+  {{- if eq $sharedStorage.mode "dynamic" -}}
+    {{- if or (not $sharedStorage.storageClassName) (eq $sharedStorage.storageClassName "nexent-local") -}}
+      {{- fail "nexent-runtime multi-replica deployment requires an explicit RWX StorageClass in dynamic mode" -}}
+    {{- end -}}
+    {{- if not (has "ReadWriteMany" (default (list "ReadWriteMany") $sharedStorage.accessModes)) -}}
+      {{- fail "nexent-runtime multi-replica deployment requires ReadWriteMany shared volume access" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
 {{- $memoryPluginsStorage := default dict $sharedStorage.memoryPlugins -}}
@@ -111,6 +121,12 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LOG_DIR
+              value: "/mnt/nexent-data/logs/$(POD_NAME)"
             - name: GATEWAY_AUTH_ENABLED
               value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
@@ -140,6 +156,8 @@ spec:
               value: {{ default false $global.sandboxSingleNodeDevelopment | toString | quote }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
+            - name: NEXENT_RECOVERY_MODE
+              value: "fixed_replicas"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy

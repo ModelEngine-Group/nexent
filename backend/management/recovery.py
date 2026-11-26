@@ -13,6 +13,44 @@ UPLOAD_RECOVERY_GRACE_SECONDS = 30 * 60
 _upload_cleanup_tasks: set[asyncio.Task] = set()
 
 
+def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
+    """Fail work that was owned by the previous runtime process."""
+    from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
+    from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
+    from infrastructure.rdb.conversation_state import fail_streaming_assistant_messages
+    from infrastructure.redis.run_state import runtime_state_service
+
+    transaction = {} if db_session is None else {"db_session": db_session}
+    messages = fail_streaming_assistant_messages(**transaction)
+    for message in messages:
+        user_id = message.get("user_id")
+        if user_id:
+            if db_session is not None:
+                runtime_state_service.mark_interrupted_run(
+                    str(user_id), int(message["conversation_id"]), int(message["message_id"]),
+                )
+                continue
+            runtime_state_service.mark_run_finished(
+                str(user_id), int(message["conversation_id"]), "failed"
+            )
+            runtime_state_service.mark_stream_completed(
+                str(user_id), int(message["conversation_id"]), "failed"
+            )
+
+    evaluations = 0
+    for tenant_id in list_evaluation_tenant_ids():
+        evaluations += reap_stale_runs(tenant_id, timeout_minutes=0, **transaction)
+
+    result = {
+        "conversation_messages": len(messages),
+        "agent_evaluations": evaluations,
+        "automation_runs": recover_orphaned_runs(**transaction),
+        "automation_locks": release_all_task_locks(**transaction),
+    }
+    logger.info("Runtime startup recovery completed: %s", result)
+    return result
+
+
 def recover_config_tasks() -> dict[str, int]:
     """Fail config-owned background work lost during process restart."""
     from management.db.evaluation.runs import (

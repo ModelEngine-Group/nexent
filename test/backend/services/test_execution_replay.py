@@ -73,6 +73,22 @@ async def test_full_replay_survives_trim_and_slow_subscribers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_initial_stream_ids_acknowledge_only_shared_commits(monkeypatch):
+    append = AsyncMock(side_effect=["1-0", None])
+    monkeypatch.setattr("infrastructure.agent_stream_channels.runtime_state_service.append_stream_event_async", append)
+    channel = StreamingChannel("conversation", "owner")
+    channel.generation = "execution:42"
+    await channel.publish(event("final_answer", "a😀", unit_index=0))
+    stream = channel.subscribe_with_history(include_event_ids=True)
+    assert (await anext(stream)).startswith("id: execution:42:1:2\ndata: ")
+
+    await channel.publish(event("final_answer", " uncommitted", unit_index=0))
+    output = "".join([frame async for frame in stream])
+    assert '"replay_unavailable":true' in output and "uncommitted" not in output
+    assert [call.kwargs["replay_update"]["sequence"] for call in append.await_args_list] == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_shared_reader_does_not_apply_the_next_runs_terminal_state():
     service = SimpleNamespace(
         get_stream_status_async=AsyncMock(return_value={"status": "completed"}),

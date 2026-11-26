@@ -29,6 +29,7 @@ def test_backend_bootstrap_routes_agent_model_and_tool_traces(tmp_path, local, r
     root = Path(__file__).resolve().parents[3]
     code = r"""
 import asyncio
+import importlib.abc
 import json
 import socket
 import sys
@@ -37,6 +38,14 @@ from unittest.mock import patch
 from opentelemetry import trace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+
+class BlockManagement(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"management", "backend.management"} or fullname.startswith(("management.", "backend.management.")):
+            raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+
+
+sys.meta_path.insert(0, BlockManagement())
 local, remote, sampled = (value == "true" for value in sys.argv[1:])
 exporter = InMemorySpanExporter()
 exporter_factory = patch("nexent.monitor.monitoring.OTLPSpanExporterHTTP", return_value=exporter).start()
@@ -143,6 +152,7 @@ assert manager.snapshot().active_count == 0
         "MONITORING_INSTRUMENT_REQUESTS": "false",
         "MONITORING_TRACE_MAX_CHARS": "3",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),
+        "TRAJECTORY_STORAGE_MODE": "single_node",
         "TRAJECTORY_READ_ENABLED": "true",
         "TRAJECTORY_CLEANUP_ENABLED": "false",
     }

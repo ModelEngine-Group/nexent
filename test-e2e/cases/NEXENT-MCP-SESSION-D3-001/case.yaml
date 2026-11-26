@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-MCP-SESSION-D3-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-05
+  title: MCP SSE 与 messages 分流仍保持会话和目录版本一致
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 通过真实 MCP SSE/messages 协议证明 session owner 路由和全副本工具目录更新。
+  preconditions:
+  - 产品和本 Case 固定脚本/执行绑定尚未实现，当前阻塞；实施后仅使用本次拥有的独立实例和专属 DB/Redis 数据域。
+  - 至少两个 MCP 实例及 Config，稳定 Service 和内部 owner 地址可用；共享 session 映射/目录版本真实，远端工具可由受控 HTTP 服务提供。
+  - 可指定访问 A/B，另行验证稳定 Service；测试凭据与连接参数在机器本地配置，输出脱敏。
+  test_data:
+    tool: 专属租户两个版本的 OpenAPI 工具目录，一个带副作用计数器的慢工具。
+    session: A 建立 SSE，显式从 B 发 messages POST；对未知/旧 session 与另一租户构造负例。
+    preparation: 现有准备目录没有多应用副本集群工厂；实施时补齐真实 families 或自包含准备依据，当前不虚构支持。
+  steps:
+  - order: 1
+    action: 向 A 建立 SSE，确认 messages 地址公开后从 B 向该 session 发送 initialize/list/call。
+    expected: messages 被有界内部转发至 A owner，响应经原 SSE 返回；无需外部粘滞，同租户鉴权保持。
+  - order: 2
+    action: 通过 Config 更新工具目录为新版本，保留旧会话并在 A/B 新建会话后 list/call。
+    expected: 各实例按权威版本更新；返回当前可用目录，删除工具不可继续调用；一次随机 Service refresh 不是全部更新证据。
+  - order: 3
+    action: 停掉 owner A，向 B 提交旧 session 及未知 session，再建立全新会话。
+    expected: 旧/未知 session 明确要求重连，不静默接管原上下文、不重放工具；新会话正常工作。
+  - order: 4
+    action: 使用其他租户凭证、伪造 owner/多跳路径和不可达内部目标请求。
+    expected: 鉴权与内部地址白名单/转发跳数和截止生效，无跨租户调用、循环转发或任意地址访问；副作用计数不增加。
+  - order: 5
+    action: 关闭全部 SSE 与慢工具，移除本次目录/映射和测试实例。
+    expected: 本次 session/订阅/临时映射与协议连接释放，目录和外部资源不受影响。
+  expected_results:
+  - SSE 与后续 POST 分流仍命中同一 session owner，协议结果完整。
+  - 工具更新在每个实例按权威版本生效，失联要求重连且无副作用重放。
+  - 转发有界且隔离租户，清理无遗留连接。
+  forbidden_side_effects:
+  - 把活动 SSE/context 序列化为可跨进程恢复，或失联自动重放 call。
+  - 随机只测一个副本就宣称全目录刷新，返回混合目录版本。
+  - 转发绕过租户鉴权、任意目标访问/循环转发或删除外部 session。
+  acceptance:
+  - id: AC-APP-005
+    description: MCP SSE/messages 保持同一 session owner；目录更新在各副本可见；失联要求重连，不自动重放工具。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定与隔离准备/清理能力尚未实现。
+    primary_domain: mcp
+    preparation_plan: 测试独占 A/B 实例、DB/Redis 键域与本次身份/对象；受控协议仅替代外部提供者；记录资源 owner 和前置检查。
+    cleanup_plan: finally 停止本次运行/worker/连接，按本次标识回收数据/实例；核对无锁/预约/对象遗留，不清空外部 PVC/共享 Redis。
+  integration_boundary:
+  - 真实 MCP 客户端 SSE/messages→MCP A/B→内部 owner 路由与共享映射→Config/DB 目录版本→受控远端工具 HTTP。
+  observations:
+  - 公开路径/owner/会话映射、SSE 响应序列、逐实例目录版本、工具副作用计数、拒绝与转发跳数/截止、连接清理。
+  cleanup:
+  - 按测试资源标签关闭本次实例、连接与后台任务，回收本次数据及临时文件；保留外部基础设施与卷，并核对未拥有数据校验和。

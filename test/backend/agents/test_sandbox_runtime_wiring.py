@@ -41,8 +41,10 @@ async def test_non_kubernetes_requests_keep_existing_local_contract(monkeypatch)
     assert wiring.configure_runtime_coordination(Mock(), Mock()) is None
 
 
-@pytest.mark.parametrize('provider,in_cluster', [('docker', True), ('kubernetes', False)])
-def test_coordinator_is_disabled_outside_trusted_kubernetes(monkeypatch, provider, in_cluster):
+@pytest.mark.parametrize('provider,in_cluster,enabled', [('docker', True, True), ('kubernetes', False, True),
+                                                        ('kubernetes', True, False)])
+def test_coordinator_requires_enabled_sandbox_in_trusted_kubernetes(monkeypatch, provider, in_cluster, enabled):
+    monkeypatch.setattr(environment, 'NEXENT_SANDBOX_ENABLED', enabled)
     monkeypatch.setattr(environment, 'NEXENT_SANDBOX_PROVIDER', provider)
     monkeypatch.setattr(environment, 'IS_DEPLOYED_BY_KUBERNETES', in_cluster)
     assert wiring.get_coordinator() is None
@@ -115,6 +117,8 @@ def startup(monkeypatch, configured):
     monkeypatch.setattr(environment, 'NEXENT_RUNTIME_CONTAINER_NAME', 'nexent-runtime')
     monkeypatch.setattr(wiring, 'process_identity', lambda *args: {
         'pid': 123, 'start_ticks': '100', 'boot_id': 'boot', 'container_id': 'trusted', 'container_name': 'nexent-runtime'})
+    monkeypatch.setattr(environment, 'NEXENT_SANDBOX_ENABLED', True)
+    monkeypatch.setattr(environment, 'NEXENT_RECOVERY_MODE', 'startup')
     recovery = Mock()
     recovery.recover.return_value = {'restart_confirmed': True}
     recovery_module = importlib.import_module('runtime.sandbox_recovery')
@@ -136,6 +140,17 @@ def test_startup_reconciles_owner_before_publishing_services(startup):
     assert app.state.sandbox_coordinator is coordinator
     assert app.state.sandbox_restart_cutoff is not None
     assert [call.args[0] for call in manager.start_service.call_args_list] == ['renew', 'recover']
+
+
+def test_maintenance_startup_only_reconciles_sandbox_resources(startup, monkeypatch):
+    _coordinator, _api, _pod, recovery, app, manager = startup
+    monkeypatch.setattr(environment, 'NEXENT_RECOVERY_MODE', 'maintenance')
+    wiring.configure_runtime_coordination(manager, app.state)
+    recovery.recover.assert_called_once_with(startup=True)
+    constructor = importlib.import_module('runtime.sandbox_recovery').SandboxRuntimeRecovery
+    assert constructor.call_args.args[3] is None
+    assert constructor.call_args.kwargs['fail_execution'] is None
+    assert app.state.sandbox_restart_cutoff is None
 
 
 @pytest.mark.parametrize('failure', ['redis', 'uid', 'container_timeout'])

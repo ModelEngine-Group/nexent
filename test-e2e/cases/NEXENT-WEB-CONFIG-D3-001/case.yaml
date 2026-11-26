@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-WEB-CONFIG-D3-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-07
+  title: 两个 Web 共享版本发布，启动和并发更新不覆盖品牌配置
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明真实 Web HTTP、共享版本发布服务/文件与登录代理跨实例一致；无新增页面交互。
+  preconditions:
+  - 产品和本 Case 固定脚本/执行绑定尚未实现，当前阻塞；实施后仅使用本次拥有的独立实例和专属 DB/Redis 数据域。
+  - Web A/B 使用相同构建产物/Secret、真实共享项目配置卷与发布协调、Config/Runtime 稳定地址；普通 JWT 会话，不运行 CAS/OAuth 旅程。
+  - 可指定访问 A/B，另行验证稳定 Service；测试凭据与连接参数在机器本地配置，输出脱敏。
+  test_data:
+    versions: 两个 locale 的名称/语言/Logo 与配置校验和版本 v1/v2；两个并发修改均以同一基版本提交。
+    flow: 现有受保护页面/HTTP、SSE 与 WS 代理，协议后端提供可控事件。
+    preparation: 现有准备目录没有多应用副本集群工厂；实施时补齐真实 families 或自包含准备依据，当前不虚构支持。
+  steps:
+  - order: 1
+    action: 在已有项目配置 v1 的卷上启动 A/B，交错读取不同 locale 的配置和 Logo。
+    expected: 模块加载/build-config 不重写 custom.json；所有内容属于完整 v1，启动没有发布副作用。
+  - order: 2
+    action: 经 A 发布 v2，同时连续经 B 和稳定 Service 读取名称/语言/Logo，再重启 B。
+    expected: 读者只见完整 v1 或 v2，不混用文件；提交后新请求读到 v2，重启不回写默认值。
+  - order: 3
+    action: A/B 基于同一版本并发更新，在写多文件途中制造一次失败，然后按返回版本重试。
+    expected: 锁/CAS 使冲突明确或正确合并，不静默丢更新；失败不公开半版本，重试后完整可读。
+  - order: 4
+    action: 在 A 登录后用同一 Cookie/JWT 经 B 访问受保护路径并运行 HTTP/SSE/WS 代理；再测未授权请求。
+    expected: 合法会话与公开返回契约兼容，SSE 顺序与 WS 建连/关闭正常；未授权被拒绝，代理目标保持稳定 Service。
+  - order: 5
+    action: 结束连接并回收本次发布版本、用户和实例。
+    expected: 本次发布锁/临时文件/连接全部释放，初始外部文件及其他项目配置不被删除。
+  expected_results:
+  - 启动只读且跨 Web 看到完整配置版本，发布/重启不会覆盖用户配置。
+  - 并发冲突和中途失败明确，不半写或静默丢更新。
+  - 登录/HTTP/SSE/WS 跨实例兼容，清理完整。
+  forbidden_side_effects:
+  - import/build 时改写用户 custom.json、名称与 Logo 混合版本或失败后留下公开半版本。
+  - 静默覆盖并发更新、泄露凭据/跨租户数据，或把稳定代理改成单 Pod 地址。
+  - 清理删除外部 PVC/初始项目文件，或泄漏发布锁和连接。
+  acceptance:
+  - id: AC-APP-007
+    description: Web 正常登录和代理跨实例兼容；名称/语言/Logo 原子发布同一版本，启动只读，并发更新不半写或静默丢失。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定与隔离准备/清理能力尚未实现。
+    primary_domain: system
+    preparation_plan: 测试独占 A/B 实例、DB/Redis 键域与本次身份/对象；受控协议仅替代外部提供者；记录资源 owner 和前置检查。
+    cleanup_plan: finally 停止本次运行/worker/连接，按本次标识回收数据/实例；核对无锁/预约/对象遗留，不清空外部 PVC/共享 Redis。
+  integration_boundary:
+  - 两个真实 Web server→普通 Cookie/JWT 与稳定 Config/Runtime 代理→发布协调/共享卷→按版本读取名称/locale/Logo。
+  observations:
+  - 配置版本及多文件校验和、启动写入记录、冲突/失败响应、逐 Web 登录与代理事件序列、发布锁/连接清理。
+  cleanup:
+  - 按测试资源标签关闭本次实例、连接与后台任务，回收本次数据及临时文件；保留外部基础设施与卷，并核对未拥有数据校验和。

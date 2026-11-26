@@ -17,9 +17,14 @@ def signal_distributed_cancel(client, *, deployment_id, namespace, tenant_id, us
         local current = leased or indexed
         if not current then return 0 end
         if ARGV[1] ~= '' and current ~= ARGV[1] then
-            if current ~= indexed or redis.call('HGET', KEYS[2], 'automation_generation') ~= ARGV[1] then
-                return 0
+            local generation
+            if leased then
+                generation = redis.call('HGET', KEYS[1], 'automation_generation')
             end
+            if not generation and current == indexed then
+                generation = redis.call('HGET', KEYS[2], 'automation_generation')
+            end
+            if generation ~= ARGV[1] then return 0 end
         end
         local run = ARGV[2] .. ':' .. current
         if not leased then

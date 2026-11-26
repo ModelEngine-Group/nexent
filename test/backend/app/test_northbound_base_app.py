@@ -14,7 +14,7 @@ import sys
 import types
 import unittest
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
@@ -44,11 +44,12 @@ class NorthboundContext:
     authorization: str
     token_id: int = 0
 
-# management.services.northbound - provides only NorthboundContext
+# Stub the Northbound service operations used by the router.
 northbound_service_module = types.ModuleType("management.services.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
+northbound_service_module.resume_streaming_chat = AsyncMock()
 northbound_service_module.start_streaming_chat = MagicMock()
 northbound_service_module.stop_chat = MagicMock()
 northbound_service_module.get_agent_info_list = MagicMock()
@@ -61,8 +62,6 @@ northbound_service_module.upload_files_for_northbound = MagicMock()
 sys.modules['management.services.northbound'] = northbound_service_module
 
 # management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
-from unittest.mock import AsyncMock, MagicMock
-
 a2a_service_module = types.ModuleType("management.services.agent.a2a.service")
 a2a_service_module.EndpointNotFoundError = type("EndpointNotFoundError", (Exception,), {})
 a2a_service_module.AgentNotEnabledError = type("AgentNotEnabledError", (Exception,), {})
@@ -232,6 +231,7 @@ sys.modules["management.thread_management"] = thread_lifecycle_module
 
 runtime_state_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_module.runtime_state_service = MagicMock()
+runtime_state_module.creator_runtime_state_service = MagicMock()
 sys.modules["infrastructure.redis.run_state"] = runtime_state_module
 
 # ---------------------------------------------------------------------------

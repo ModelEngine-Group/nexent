@@ -12,6 +12,7 @@ def isolate_creator_runtime(monkeypatch, execution):
         generation="endpoint-test-generation",
         admit=AsyncMock(),
         cancel=Mock(),
+        close_transport=Mock(),
         guard_preparation=Mock(return_value=None),
     )
     monkeypatch.setattr(execution, "CreatorControl", Mock(return_value=control))

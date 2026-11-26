@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-SHARED-STORAGE-D3-001
+  feature_id: RUNTIME-REPLICAS
+  requirement_ids:
+  - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
+  business_rule_ids:
+  - RUNTIME-REPLICAS-RULE-07
+  title: 两个节点共享运行文件且单实例只清理自身目录
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明实际跨节点文件路径和清理归属，不能以 hostPath 的声明代替真实共享。
+  preconditions:
+  - 固定脚本已绑定隔离部署、跨节点存储探针、两个真实 Agent Run 与单 Pod 重建；完整流程仍需在专用集群执行。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  - 隔离 Kubernetes namespace，Runtime A/B 强制放在至少两个不同工作节点；测试用 RWX PVC 确实由共享文件系统支持。
+  test_data:
+    scope: 为 A/B 创建不同租户、用户和 Agent；真实请求生成独立会话、执行预约和 Run 工作区。
+    model: 受控协议服务分别阻塞 A/B 的首个模型请求；单独放行后实际执行附件上传工具，再输出对应角色的终态文本。
+    preparation: 使用测试私有 profile、独占 namespace、数据库、Redis、MinIO 和动态 RWX StorageClass；用调度约束将两个真实 Runtime Pod 固定到不同 worker 主机。
+  steps:
+  - order: 1
+    action: 在两个工作节点上分别启动 A/B，记录 nodeName、PVC/PV 绑定、Filesystem 卷模式与实际挂载；在 A 写唯一标记，在 B 读并反向写读。
+    expected: 双向内容和版本相同；节点确实不同，卷为可挂载的 RWX 文件系统，不是裸块卷或同节点 hostPath。
+  - order: 2
+    action: 读取相同 Skill/插件配置，在 A/B 分别启动带独立 Run 工作区的任务并生成输出。
+    expected: 副本读取一致配置；每次运行文件归属明确，经现有对象存储下载的结果内容正确。
+  - order: 3
+    action: 结束 A 的任务并重启 A，保持 B 运行；对 B 的目录和非 Run 哨兵文件读取校验。
+    expected: B 的工作区、配置和哨兵完整，A 普通启动没有全卷清理。
+  - order: 4
+    action: 并发写入测试日志，检查进程日志目录或 stdout 与轮转结果；随后回收本次任务和 namespace。
+    expected: 日志不因同名共享文件轮转丢失；自建资源删除，外部提供的 PVC/数据保留。
+  expected_results:
+  - 至少两个节点的实际共享读写、配置和输出路径正确。
+  - 结束自身运行和普通重启均不删除他人 Run；日志目标无跨进程轮转冲突。
+  - 清理只回收本次拥有的资源。
+  forbidden_side_effects:
+  - 把 hostPath 标记 RWX 或同节点读写当作跨节点通过。
+  - 删除其他运行、非 Run 文件、外部共享 PVC 或其数据。
+  acceptance:
+  - id: AC-P1-007
+    description: 真实跨节点共享、目录归属和日志隔离。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  tags:
+  - phase-1
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 缺独立双工作节点、真实 RWX、实际 Pod 重建和集群资源清理证据，固定脚本尚未在专用集群执行。
+    primary_domain: deployment
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  integration_boundary:
+  - Kubernetes 两个工作节点的 Runtime→真实共享文件系统/PVC→Run 工作区与对象存储输出路径。
+  observations:
+  - nodeName、存储驱动与挂载、双向校验和、运行目录树、下载内容与日志目标。
+  cleanup:
+  - 先结束本次运行；仅移除测试拥有的 namespace/PVC/目录；核对外部 PVC、非 Run 哨兵和其他资源完整。
