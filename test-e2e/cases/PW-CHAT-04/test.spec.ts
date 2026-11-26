@@ -67,8 +67,8 @@ journey("PW-CHAT-04", async (context) => {
         }
         return "card names match the two configured collaborators";
       },
-      async () => { await chat.waitForCompletion(420000); await expect(page.getByText("Completed", { exact: true })).toHaveCount(cardCount); await expect(chat.assistantMessages().last()).toContainText(`MULTI-${token}`); return "normal run reached terminal cards and a main answer"; },
-      async () => { const response = await chat.sendAndWait(`让 ${childA} 正常完成；让 ${childB} 调用受控失败工具 always_fail，保留成功和失败详情，最后回复 PARTIAL-${token}。`, 420000); await expect(response).toContainText(`PARTIAL-${token}`); await expect(response.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "controlled partial failure retained both successful and failed details"; },
+      async () => { await chat.waitForDisplayedCompletion(); await expect(page.getByText("Completed", { exact: true })).toHaveCount(cardCount); await expect(chat.assistantMessages().last()).toContainText(`MULTI-${token}`); return "normal run reached terminal cards and a main answer"; },
+      async () => { const response = await chat.sendAndWaitForDisplayedCompletion(`让 ${childA} 正常完成；让 ${childB} 调用受控失败工具 always_fail，保留成功和失败详情，最后回复 PARTIAL-${token}。`); await expect(response).toContainText(`PARTIAL-${token}`); await expect(response.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "controlled partial failure retained both successful and failed details"; },
       async () => {
         const history = (await chat.persistedMessages()).filter(item => item.role === "assistant");
         expect(history).toHaveLength(2);
