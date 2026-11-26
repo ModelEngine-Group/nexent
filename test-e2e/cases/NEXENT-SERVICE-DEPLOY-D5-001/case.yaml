@@ -1,0 +1,132 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-SERVICE-DEPLOY-D5-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-01
+  - NEXENT-SERVICE-REPLICAS-RULE-02
+  - NEXENT-SERVICE-REPLICAS-RULE-08
+  title: 其他 Nexent 应用停机手动 1→3→2，失败不激活且辅助服务可用
+  type: DEPLOYMENT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明各应用独立固定目标数、完整全停维护前提、辅助应用副本契约和共享资源预算；不涉及基础设施原生 HA。
+  preconditions:
+  - 产品、维护编排、固定脚本与多应用准备工厂尚未实现，当前阻塞。
+  - 本次完全拥有隔离 Kubernetes namespace、专属数据库/Redis 数据域和临时共享卷；外部提供的 PVC 不删除。
+  - 执行真实 deploy/k8s/deploy.sh/Helm，预置健康/遗留业务记录、终态与文件哨兵；集群连接与 Secret 仅存本地。
+  - 每个启用服务均有独立 1→3→2 变体，包括 Config/Northbound/MCP/Data Process/Web 及启用的 Nginx/Ops/OpenSSH；禁用验证另列，不算多副本运行证据。
+  test_data:
+    services:
+    - Config
+    - Northbound
+    - MCP
+    - Data Process
+    - Web
+    - Nginx（启用时）
+    - Ops（启用时）
+    - OpenSSH（启用时）
+    counts:
+    - 1
+    - 3
+    - 2
+    maintenance: 同一窗口暂停/恢复使用相同 epoch；不同窗口新 epoch，故障重试沿用原 epoch。
+    budget: 实施前按集群预设记录 CPU/内存、DB/Redis/下游连接与 Celery child 总预算；不在本设计虚构压测达标值。
+    support: Nginx TLS/上游与 SSE/WS；各 Ops 实例健康/日志；OpenSSH 同一 Session owner、重连 host key、目录隔离。
+    preparation: 尚无多应用工厂；实施后声明真实准备 families、逻辑依赖与 cleanup owner，并验证恢复。
+  steps:
+  - order: 1
+    action: 逐服务渲染默认/非法固定数和禁用项，在隔离集群启用该变体并启动固定 1；记录其他服务目标与控制器。
+    expected: 各服务默认 1、仅接受正整数；仅维护暂停为 0；禁用服务不创建，无 HPA/KEDA，改一个服务不会改其他服务固定目标。
+  - order: 2
+    action: 保留一个业务 producer/Config job/Celery child 或 SSH 工具连接，尝试维护；随后执行真实全停流程并等待旧进程退出。
+    expected: 破坏性恢复前拒绝全停前提不满足；正式流程确认全部业务进程/子进程/相关连接退出，不能仅检查 Runtime=0。
+  - order: 3
+    action: 目标改为 3，分别注入迁移/恢复/清理/锁连接丢失故障，再按同 epoch 解除故障重试。
+    expected: 失败不发布完成标记、不激活业务；重试幂等保留终态/哨兵；共同 epoch 完成后各目标副本才 Ready，后台作业无额外有效执行。
+  - order: 4
+    action: 在 3 副本期间按实例验证正常请求、稳定代理和共享文件；逐个重启一个应用 Pod；下一维护窗口手动改为 2。
+    expected: 普通重启只恢复本地资源，不全局恢复或清理健康 owner；第二次全停后固定 2 Ready；真实多节点卷读写一致，日志归属不相互覆盖。
+  - order: 5
+    action: 逐启用的 Nginx/Ops/OpenSSH 实例验证 TLS/上游/SSE/WS、健康和日志、SSH 连接 owner/稳定 host key/临时目录；核对全服务资源总量。
+    expected: 辅助服务满足各自副本契约；新连接分配不会迁移已有 shell；Secret 一致且不泄露，总连接和 child/CPU/内存/下游并发不超过执行前记录的预算。
+  - order: 6
+    action: 先全停后回退所有服务为固定 1，完成维护并结束本次运行；回收本次 namespace/数据/临时卷和权限资源。
+    expected: 回退也遵守维护门槛，外部数据/PVC 与共享基础设施保留；本次无活动 worker、连接、锁、任务或临时资源。
+  expected_results:
+  - 每个启用服务独立固定 1→3→2，禁用保持关闭，运行无自动副本控制器。
+  - 完整全停前提、批次完成、失败保持停止和普通重启隔离在真实部署中成立。
+  - 共享存储/日志/Secret 与启用的辅助应用契约成立，总资源/连接符合预设预算。
+  - 停机回退和归属清理完成，外部资源/终态哨兵无改写。
+  forbidden_side_effects:
+  - 存在业务 producer/worker 时恢复，或维护失败/部署锁丢失后仍激活业务。
+  - 任一 Pod 启动全局恢复、清理健康文件、重复迁移或自动重放外部副作用。
+  - 用基础设施直接加 Pod 冒充 HA、用禁用项冒充已启用多副本验证、或在线 scale 冒充停机维护。
+  - 删除外部 PVC、清空共享 Redis、覆盖他人日志/SSH 目录，或超出总容量预算。
+  acceptance:
+  - id: AC-APP-001
+    description: 各启用应用独立设置正整数固定副本，默认 1；每次手动调整都先全停，禁用应用不被启动，运行时无 HPA/KEDA。
+    steps:
+    - 1
+    - 3
+    - 4
+    - 6
+    expected_results:
+    - 1
+    - 4
+    forbidden_side_effects:
+    - 3
+  - id: AC-APP-002
+    description: Config/Northbound/Data Process 普通启动不执行全局恢复、上传清理或重复迁移；维护失败保持停止，健康 owner 的任务不变。
+    steps:
+    - 2
+    - 3
+    - 4
+    - 6
+    expected_results:
+    - 2
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-APP-008
+    description: Config 配置/权限/Skill 跨实例可见，配额依赖权威事务；共享卷/日志/密钥及启用的辅助服务满足副本契约，总资源不超预算。
+    steps:
+    - 4
+    - 5
+    - 6
+    expected_results:
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 3
+    - 4
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定及隔离多应用准备/恢复能力尚未实现。
+    primary_domain: deployment
+    preparation_plan: 测试独占隔离 namespace、全部应用镜像/身份与 DB/Redis 域；核对启用矩阵、卷归属与预设预算，禁止使用开发者栈。
+    cleanup_plan: finally 全停本次应用/worker/连接，按归属回收 namespace/临时卷/RBAC/业务数据，恢复测试环境；保留外部卷/共享基础设施。
+  risk_type: DEPLOYMENT
+  risk: 只开放 replicaCount 而后台作业、恢复、MCP/worker/文件仍使用单进程假设，导致健康业务中断、重复执行和容量耗尽。
+  condition:
+  - 对每个启用应用执行两个全停窗口、受控失败/重试、单 Pod 重启、逐实例辅助服务与总容量验证；恢复影响的整个数据域独占。
+  metrics:
+  - 暂停/producer退出/维护/完成/Ready 的时间序列，各应用 desired/readyReplicas 和 HPA/KEDA 对象数。
+  - 业务任务/上传/终态和文件哨兵校验和、有效副作用数、逐实例协议/Secret/日志结果。
+  - 全服务连接、Celery children、CPU/内存/下游并发与预设预算，cleanup 前后本次资源差异。
+  thresholds:
+  - 任意破坏性恢复前活动业务 producer/worker/相关 SSH 会话数=0；任意维护失败后新激活业务数=0。
+  - 每个变体 Ready 数分别=1/3/2；自动副本控制器数=0；禁用项 Pod 数=0。
+  - 哨兵/健康 owner 的错误变化数=0，额外有效业务执行数=0，辅助应用逐实例检查全部通过。
+  - 连接/worker/CPU/内存/下游压力各项不超过执行前确定的总预算；本次资源泄漏数=0，外部资源删除数=0。
+  recovery_expectations:
+  - 失败期间保持停机；解除故障后同 epoch 幂等完成，再按配置激活。停机回退固定 1；终于清理只处理本次拥有资源。

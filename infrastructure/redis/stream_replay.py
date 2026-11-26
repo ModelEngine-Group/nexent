@@ -7,6 +7,13 @@ import json
 
 APPEND_COMPACT_REPLAY = """
     if ARGV[1] ~= '' and redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
+    if ARGV[8] ~= '' then
+        local previous = tonumber(redis.call('HGET', KEYS[3], 'sequence') or '0')
+        if previous + 1 ~= tonumber(ARGV[8]) then
+            redis.call('HSET', KEYS[1], 'replay_incomplete', '1')
+            return false
+        end
+    end
     local payload = cjson.decode(ARGV[6])
     local field = 'part:' .. ARGV[5]
     if ARGV[7] == '1' then
@@ -18,6 +25,7 @@ APPEND_COMPACT_REPLAY = """
     local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
     redis.call('HSET', KEYS[3], field, cjson.encode(payload), 'cursor', id,
         'count', tonumber(ARGV[5]) + 1, 'generation', ARGV[1])
+    if ARGV[8] ~= '' then redis.call('HSET', KEYS[3], 'sequence', ARGV[8]) end
     redis.call('EXPIRE', KEYS[2], ARGV[4])
     redis.call('EXPIRE', KEYS[3], ARGV[4])
     return id
@@ -25,7 +33,10 @@ APPEND_COMPACT_REPLAY = """
 
 
 def compact_replay_args(update):
-    return (update["slot"], json.dumps(update["payload"], ensure_ascii=False), "1" if update["append"] else "0")
+    return (
+        update["slot"], json.dumps(update["payload"], ensure_ascii=False),
+        "1" if update["append"] else "0", str(update.get("sequence", "")),
+    )
 
 
 def decode_replay_checkpoint(data):

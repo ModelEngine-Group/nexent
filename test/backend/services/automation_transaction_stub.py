@@ -35,3 +35,6 @@ def stub_runner_transactions(monkeypatch, module):
     monkeypatch.setattr(module.AgentAutomationRunner, "_finish_run", finish)
     monkeypatch.setattr(module.AgentAutomationRunner, "execute_task", execute)
     monkeypatch.setattr(module.agent_automation_db, "task_run_transaction", transaction)
+    monkeypatch.setattr(module.agent_automation_db, "has_started_scheduled_occurrence", lambda *_args: False)
+    monkeypatch.setattr(module.agent_automation_db, "lease_is_unexpired",
+                        lambda _session, lock_until: lock_until > datetime.now(timezone.utc))

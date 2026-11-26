@@ -1,0 +1,28 @@
+schema_version: '1.0'
+case_id: RUNTIME-POD-RESTART-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-POD-RESTART-D5-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-008:
+  - test_restarting_non_owner_preserves_live_chat_evaluation_schedule_and_workspace
+  - test_owner_loss_keeps_reservation_until_full_stop_maintenance
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Each branch stages a disposable release with its own PostgreSQL, Redis and
+  dynamic RWX volumes and requires an opted-in cluster with two eligible workers.
+  The first holds a real chat, evaluation and due automation on the same Runtime;
+  it observes the attachment across the replacement peer and verifies the original
+  Management scheduler renews after peer readiness, then lets all three runs
+  complete. The second interrupts the active owner, waits for natural SQL and
+  Redis expiry, verifies both Runtime Pods reject concurrent execution, then
+  invokes the standalone recovery command with namespace-scoped read permissions
+  while product workloads are stopped. Authenticated Gateway forwards are loopback-only, and teardown waits for
+  its UID-owned namespace and volume reclamation. Formal cluster execution and
+  cleanup are still required for AC-P1-008.

@@ -48,6 +48,10 @@ if #KEYS > 1 then
 end
 return 1
 """
+_BIND_AUTOMATION = _COMPARE + """
+redis.call('HSET', KEYS[1], 'automation_generation', ARGV[5])
+return 1
+"""
 _RELEASE = _COMPARE + "return redis.call('DEL', KEYS[1])"
 _ACTIVATE = _COMPARE + """
 if #KEYS > 1 and redis.call('HGET', KEYS[2], 'token_hash') ~= ARGV[6] then return -1 end
@@ -310,6 +314,19 @@ class SandboxRunCoordinator:
                 record.associations[key] = value
             record.updated_at = time.time()
             self.journal.write_run(record)
+            if "automation_run_id" in associations:
+                # A Config replica may cancel this occurrence before the Agent stream exists.
+                try:
+                    published = self.client.eval(
+                        _BIND_AUTOMATION, 1, self.redis_key(lease.business_key),
+                        *self._args(lease)[:4], str(associations["automation_run_id"]),
+                    )
+                except Exception as exc:
+                    self._mark_unknown_locked(record)
+                    raise SandboxCoordinationUnknown("Redis automation identity could not be confirmed") from exc
+                if published != 1:
+                    self._mark_unknown_locked(record)
+                    raise SandboxCoordinationUnknown("Sandbox execution lease was lost")
 
     def record_workspace(self, run_id, path):
         from runtime.sandbox_workspace import KubernetesWorkspace, _no_symlinks

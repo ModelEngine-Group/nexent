@@ -353,7 +353,7 @@ def test_capture_actual_worker_cancel_preserves_partial_output(runtime):
     assert provider_body['choices'][0]['delta']['content'] == 'partial-before-cancellation'
 
 
-def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(runtime, monkeypatch):
+def _capture_parallel_subagents(runtime, monkeypatch, *, explicit=False):
     from nexent.core.agents.cores.smolagents import agent as module
 
     barrier, calls = threading.Barrier(2), []
@@ -380,8 +380,12 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
 
     def reply(request, number, emit):
         if request['model'] == 'model':
-            answer = ('<code>\nparallel_executor(tasks=[(child, {"task": "left"}), '
-                      '(child, {"task": "right"})])\n</code>') if number == 1 else '<final_answer>root-done</final_answer>'
+            parallel_code = (
+                'results = parallel_executor(tasks=[(child, {"task": "left"}, "left"), '
+                '(child, {"task": "right"}, "right")], max_workers=2)\nprint(results)'
+                if explicit else 'parallel_executor(tasks=[(child, {"task": "left"}), (child, {"task": "right"})])'
+            )
+            answer = f'<code>\n{parallel_code}\n</code>' if number == 1 else '<final_answer>root-done</final_answer>'
         else:
             answer = ('<final_answer>child-done</final_answer>' if 'leaf-result-' in json.dumps(request['messages'])
                       else '<code>\ncapture_leaf(value="executed")\n</code>')
@@ -391,7 +395,8 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
     with runtime.http(reply) as (base, requests):
         models = [ModelConfig(cite_name=alias, model_name=model, url=base, api_key='synthetic')
                   for alias, model in [('model', 'model'), ('child', 'child-model')]]
-        info, _ = runtime.run(base, config=root, models=models)
+        query = 'Please call the subagent for two independent tasks.' if explicit else 'Controlled question'
+        info, _ = runtime.run(base, config=root, models=models, query=query)
         assert info.attempt_outcome == 'completed'
         assert len(requests) == 6
     assert len(calls) == 2
@@ -407,6 +412,20 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         assert attrs(span)['nexent.invocation_id'] == attrs(span)['subagent.invocation_id']
         assert attrs(span)['nexent.parent_invocation_id'] == root_invocation
     assert {call['nexent.local.nexent.invocation_id'] for call in calls} == set(child_invocations.values())
+    return root_invocation, child_invocations
+
+
+def test_capture_explicit_parallel_delegation_executes_both_children(runtime, monkeypatch):
+    _, child_invocations = _capture_parallel_subagents(runtime, monkeypatch, explicit=True)
+    with runtime.client() as client:
+        result = snapshot(runtime, client)
+    assert result['coverage']['complete']
+    children = [node for node in result['nodes'] if node['kind'] == 'agent' and node['parent_id'] is not None]
+    assert {child['id']: child['attributes']['nexent.invocation_id'] for child in children} == child_invocations
+
+
+def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(runtime, monkeypatch):
+    root_invocation, child_invocations = _capture_parallel_subagents(runtime, monkeypatch)
     with runtime.client() as client:
         result = snapshot(runtime, client)
     assert result['coverage']['complete']

@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Credential-free receipts for the fixed deployed fast-path browser journeys."""
 
 import argparse

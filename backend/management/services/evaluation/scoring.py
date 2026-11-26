@@ -3,6 +3,7 @@
 import ast
 import json
 from concurrent.futures import as_completed
+from contextlib import suppress
 from math import isfinite
 from typing import Any
 
@@ -707,29 +708,32 @@ def _score_with_evaluators(
     if not llm_evals:
         return scores, reasons
 
-    futures = {
-        config_thread_manager.submit(
-            "model-tool-io",
-            ManagedTaskSpec(
-                task_name="agent-evaluation-judge",
-                owner="management",
-            ),
-            _call_one_llm_evaluator,
-            eid,
-            ev,
-            judge_system_prompt,
-            tenant_id,
-            query,
-            expected,
-            actual,
-            judge_model_id,
-            runtime_events,
-            context_window,
-            conversation_history,
-            user_id=user_id,
-        ).future: eid
-        for eid, ev in llm_evals.items()
-    }
+    futures = {}
+    try:
+        for evaluator_id, evaluator in llm_evals.items():
+            execution = config_thread_manager.submit(
+                "model-tool-io",
+                ManagedTaskSpec(task_name="agent-evaluation-judge", owner="management"),
+                _call_one_llm_evaluator,
+                evaluator_id,
+                evaluator,
+                judge_system_prompt,
+                tenant_id,
+                query,
+                expected,
+                actual,
+                judge_model_id,
+                runtime_events,
+                context_window,
+                conversation_history,
+                user_id=user_id,
+            )
+            futures[execution.future] = evaluator_id
+    except Exception:
+        for future in futures:
+            with suppress(Exception):
+                future.result()
+        raise
     llm_scores, llm_reasons = _collect_llm_results(futures, llm_evals)
     scores.update(llm_scores)
     reasons.update(llm_reasons)

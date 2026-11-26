@@ -62,6 +62,56 @@ function detail(partial: boolean, completed = false): ApiConversationDetail {
   };
 }
 
+it("refreshes only the originally resumed assistant when replay is lost", async () => {
+  const initial = detail(false);
+  const saved = detail(true, true);
+  saved.message.push({
+    role: "assistant",
+    message_id: 8,
+    message_index: 1,
+    status: "completed",
+    message: [{ type: "final_answer", content: "a different execution" }],
+  });
+  const loadDetail = vi.fn().mockResolvedValueOnce(initial).mockResolvedValueOnce(saved);
+  const invalidateDetail = vi.fn();
+  vi.mocked(remoteChatModelAdapter.run).mockImplementation(async function* (options) {
+    expect(options.runConfig?.custom?.resumeMessageId).toBe(6);
+    const load = options.runConfig?.custom?.loadPersistedReplay as () => Promise<{
+      content: readonly { type: "text"; text: string }[];
+    }>;
+    yield await load();
+  });
+  const runtime = new AssistantRuntimeImpl(
+    new LocalRuntimeCore({ adapters: { chatModel: remoteChatModelAdapter } }, undefined)
+  );
+  const history = new RemoteConversationHistoryAdapter(
+    () => "42", async () => ({ remoteId: "42" }), async () => initial
+  );
+  runtime.thread.import(await history.load());
+  const { unmount } = renderHook(() => useConversationResume({
+    runtime,
+    activeConversationId: "42",
+    activeThreadId: "local-42",
+    ready: true,
+    isThreadRunning: false,
+    selectedAgent: null,
+    chatMode: "execution",
+    resumedConversationIdsRef: { current: new Set<number>() },
+    handleGenerationStopped: vi.fn(),
+    loadDetail,
+    invalidateDetail,
+  }));
+  try {
+    await waitFor(() => expect(runtime.thread.getState().messages.at(-1)?.content).toEqual([
+      expect.objectContaining({ type: "text", text: "answer-6" }),
+    ]));
+    expect(invalidateDetail).toHaveBeenCalledWith("42");
+    expect(loadDetail).toHaveBeenCalledTimes(2);
+  } finally {
+    unmount();
+  }
+});
+
 it.each([
   [false, false],
   [true, false],

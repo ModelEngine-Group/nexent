@@ -58,8 +58,11 @@ class DelegationPolicy(SharedDelegationPolicy):
             self.validate_targets([])
         remaining = self.names - self.completed
         if self.parallel_executor_available:
-            targets = set(parallel_delegation_targets(code, self.collaborator_names))
-            if targets and targets <= remaining and (not self.parallel_required or targets == remaining):
+            targets = parallel_delegation_targets(code, self.collaborator_names)
+            target_names = set(targets)
+            if targets and target_names <= remaining and (
+                not self.parallel_required or (target_names == remaining and len(targets) == len(remaining))
+            ):
                 return False
         if self.parallel_required and len(remaining) != 1:
             raise DelegationError("DELEGATION_REQUIRED")

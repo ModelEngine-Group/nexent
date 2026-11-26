@@ -244,11 +244,11 @@ def test_fail_detecting_models_on_startup(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr(
-        "infrastructure.rdb.model_records.get_db_session", lambda: mock_ctx
-    )
+    get_db_session = MagicMock(return_value=mock_ctx)
+    monkeypatch.setattr("infrastructure.rdb.model_records.get_db_session", get_db_session)
 
-    assert model_mgmt_db.fail_detecting_models_on_startup() == 3
+    assert model_mgmt_db.fail_detecting_models_on_startup(db_session=session) == 3
+    get_db_session.assert_called_once_with(session)
     assert mock_stmt.values.call_args.kwargs["connect_status"] == "not_detected"
     session.execute.assert_called_once_with(mock_stmt)
 

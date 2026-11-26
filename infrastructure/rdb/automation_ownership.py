@@ -85,6 +85,12 @@ class AgentAutomationRun(TableBase):
             postgresql_where=text("delete_flag = 'N'"),
         ),
         Index(
+            "idx_agent_automation_run_started_occurrence",
+            "task_id",
+            "scheduled_fire_at",
+            postgresql_where=text("user_message_id IS NOT NULL"),
+        ),
+        Index(
             "uq_agent_automation_active_occurrence",
             "task_id",
             "scheduled_fire_at",

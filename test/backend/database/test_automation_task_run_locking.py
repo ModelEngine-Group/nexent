@@ -2,6 +2,7 @@
 """Unit proof of task-before-run locking and owner filters, without a database."""
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -49,3 +50,21 @@ def test_task_run_transaction_locks_owned_rows_in_order(monkeypatch, task_presen
         else:
             assert "FROM nexent.agent_automation_run_t" in sql
             assert compiled.params["run_id_1"] == 77
+
+
+@pytest.mark.parametrize("has_prompt", [False, True])
+def test_started_occurrence_query_scopes_durable_prompt_to_exact_scheduled_fire(has_prompt):
+    session = Mock()
+    session.scalar.return_value = has_prompt
+    scheduled = datetime(2030, 1, 2, tzinfo=timezone.utc)
+
+    assert repository.has_started_scheduled_occurrence(session, 2, "tenant", "owner", scheduled) is has_prompt
+
+    compiled = session.scalar.call_args.args[0].compile(dialect=postgresql.dialect())
+    assert compiled.params == {
+        "task_id_1": 2, "tenant_id_1": "tenant", "user_id_1": "owner",
+        "scheduled_fire_at_1": scheduled, "trigger_type_1": "SCHEDULED",
+    }
+    assert "user_message_id IS NOT NULL" in str(compiled)
+    assert "delete_flag" not in str(compiled)
+    assert "status" not in str(compiled)

@@ -63,11 +63,10 @@ class RuntimeThreadManager:
 
 
 @pytest.mark.parametrize("distributed", [False, True])
-def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, distributed):
-    configure_ownership = MagicMock()
-    monkeypatch.setitem(sys.modules, "runtime.identity", _module("runtime.identity", uses_distributed_runtime=lambda: distributed))
-    monkeypatch.setitem(sys.modules, "runtime.sandbox_runtime",
-                        _module("runtime.sandbox_runtime", configure_runtime_coordination=configure_ownership))
+@pytest.mark.parametrize("recovery_mode", ["startup", "fixed_replicas"])
+def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, recovery_mode, distributed):
+    monkeypatch.setitem(sys.modules, "runtime.identity",
+                        _module("runtime.identity", uses_distributed_runtime=lambda: distributed))
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
@@ -82,7 +81,10 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     monkeypatch.setitem(
         sys.modules,
         "contracts.constants.environment",
-        _module("contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1),
+        _module(
+            "contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1,
+            NEXENT_RECOVERY_MODE=recovery_mode,
+        ),
     )
     manager = RuntimeThreadManager()
     shutdown_streams = AsyncMock(return_value=[])
@@ -111,6 +113,11 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
         monkeypatch.setitem(sys.modules, name, _module(name, **{attribute: MagicMock()}))
 
     recover_models = MagicMock()
+    initialize_sandbox = MagicMock(return_value=None)
+    monkeypatch.setitem(
+        sys.modules, "runtime.sandbox_runtime",
+        _module("runtime.sandbox_runtime", configure_runtime_coordination=initialize_sandbox),
+    )
     monkeypatch.setitem(
         sys.modules,
         "infrastructure.rdb.model_records",
@@ -218,12 +225,14 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, 
     )
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
-    recover_models.assert_called_once_with()
-    assert recover.call_count == cleanup.call_count == int(not distributed)
-    if distributed:
-        configure_ownership.assert_called_once_with(manager, application.app.state)
+    initialize_sandbox.assert_called_once_with(manager, application.app.state)
+    if recovery_mode == "fixed_replicas":
+        recover_models.assert_not_called()
+        recover.assert_not_called()
+        cleanup.assert_not_called()
     else:
-        configure_ownership.assert_not_called()
+        recover_models.assert_called_once_with()
+        assert recover.call_count == cleanup.call_count == int(not distributed)
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()

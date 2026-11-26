@@ -23,6 +23,7 @@ from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
 from management.services.evaluation.common import logger
+from management.services.evaluation.dispatch import EvaluationSubmissionError
 from management.clients.model import invoke_chat_messages, invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
@@ -105,7 +106,12 @@ def _make_background_done_callback(
     tenant_id: str, user_id: str, agent_evaluation_id: int, language: str = "zh"
 ):
     def callback(future):
+        if future.cancelled():
+            return
         exc = future.exception()
+        if isinstance(exc, EvaluationSubmissionError):
+            logger.warning("Evaluation %s remains eligible for redispatch", agent_evaluation_id)
+            return
         if exc is not None:
             logger.exception(
                 "Background evaluation run failed (id=%s): %r", agent_evaluation_id, exc
@@ -120,6 +126,7 @@ def _make_background_done_callback(
                     status=EvalRunStatus.FAILED,
                     updated_by=user_id,
                     error_message=friendly_msg,
+                    expected_status=EvalRunStatus.PENDING,
                 )
             except Exception as update_exc:
                 logger.error(
@@ -430,6 +437,8 @@ def _setup_no_set_and_execute(
             user_id=user_id,
             tenant_id=tenant_id,
         )
+    except EvaluationSubmissionError:
+        logger.warning("Evaluation %s remains eligible for redispatch", agent_evaluation_id)
     except RuntimeUpstreamError as exc:
         # Distinguish runtime dispatch failures (auth windows, runtime 5xx)
         # from query-generation failures so the persisted error_message
@@ -442,6 +451,7 @@ def _setup_no_set_and_execute(
             status=EvalRunStatus.FAILED,
             error_message=f"Runtime dispatch failed: {detail}",
             updated_by=user_id,
+            expected_status=EvalRunStatus.PENDING,
         )
     except Exception as exc:
         logger.exception("No-set setup failed for run %d", agent_evaluation_id)
@@ -451,6 +461,7 @@ def _setup_no_set_and_execute(
             status=EvalRunStatus.FAILED,
             error_message=f"Failed to generate test queries: {type(exc).__name__}: {exc}"[:500],
             updated_by=user_id,
+            expected_status=EvalRunStatus.PENDING,
         )
 
 
@@ -526,6 +537,7 @@ def execute_agent_evaluation_run(
             tenant_id=tenant_id,
             status=EvalRunStatus.RUNNING,
             updated_by=user_id,
+            expected_status=EvalRunStatus.RUNNING,
         )
         run = get_agent_evaluation(
             agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
@@ -599,6 +611,7 @@ def execute_agent_evaluation_run(
                     status=EvalRunStatus.RUNNING,
                     updated_by=user_id,
                     progress_done=done_count,
+                    expected_status=EvalRunStatus.RUNNING,
                 )
 
         overall = float(mean(scores)) if scores else 0.0
@@ -617,6 +630,7 @@ def execute_agent_evaluation_run(
             progress_done=done_count,
             pass_count=pass_count,
             fail_count=len(scores) - pass_count,
+            expected_status=EvalRunStatus.RUNNING,
         )
     except Exception as exc:
         logger.exception("Evaluation run failed: %r", exc)
@@ -634,6 +648,7 @@ def execute_agent_evaluation_run(
             status=EvalRunStatus.FAILED,
             updated_by=user_id,
             error_message=friendly_msg,
+            expected_status=EvalRunStatus.RUNNING,
         )
 
 

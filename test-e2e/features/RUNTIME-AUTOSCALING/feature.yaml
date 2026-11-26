@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-SCALING
+  name: Runtime replica scaling
+feature:
+  feature_id: RUNTIME-AUTOSCALING
+  name: Runtime 自动扩缩容
+  status: planned
+  description: 第三阶段在前两阶段固定多副本能力上增加 Runtime 业务指标、HPA、有界在线排空和失联运行收敛；其他应用保持固定副本。
+  business_rules:
+  - rule_id: RUNTIME-AUTOSCALING-RULE-01
+    description: 逐 Pod 周期导出根运行、队列和容量状态，不重复计入子线程，空闲时仍可采集。
+  - rule_id: RUNTIME-AUTOSCALING-RULE-02
+    description: HPA 在上下界、速率和稳定窗口内伸缩；缺失或过期指标禁止缩容，最少一副本。
+  - rule_id: RUNTIME-AUTOSCALING-RULE-03
+    description: 在线排空停止接纳新根执行，保留控制与收尾；有限期限后明确终态和资源释放，不自动重放。
+  - rule_id: RUNTIME-AUTOSCALING-RULE-04
+    description: 只收敛失联 owner，拒绝旧代次写入；维护冻结 HPA，固定/自动模式不争用副本数。
+  required_test_stages:
+  - D3
+  - D5
+  source:
+    requirement_ids:
+    - RUNTIME-AUTOSCALING-20261105
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    notes: 设计交付；尚未实施。项目内 nexent-doc 按用户指示位于 Git 排除目录。

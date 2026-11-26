@@ -1404,7 +1404,7 @@ assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  d
 assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" $'\n    render_runtime_secret_values\n'
 if grep -Fq 'deploy_application_release()' "$SCRIPT_DIR/../k8s/deploy.sh"; then
   assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    if ! deploy_application_release; then'
-  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" '        helm_upgrade_application_release true ||' '        run_system_agent_bootstrap ||'
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" '            helm_upgrade_application_release true ' '            run_system_agent_bootstrap '
 else
   assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
 fi

@@ -131,6 +131,7 @@ domains:
     feature_id_patterns: []
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  NEXENT-SERVICE-REPLICAS: deployment
   AOS-MODEL: model
   AOS-TRANSPORT: runtime
   SI-STORAGE: system
@@ -177,6 +178,8 @@ feature_overrides:
   SYSTEM-CONFIGURATION: system_configuration_alerts
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: resource_management
+  RUNTIME-REPLICAS: runtime
+  RUNTIME-AUTOSCALING: runtime
   KSM-CONFIG: sandbox
   KSM-SYSTEM: sandbox
   SAI-001: collaboration
@@ -292,6 +295,16 @@ feature_overrides:
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
 case_overrides:
+  NEXENT-CONFIG-JOBS-D3-001: system
+  NEXENT-CONFIG-STATE-D3-001: system
+  NEXENT-NORTHBOUND-STATE-D3-001: runtime
+  NEXENT-MCP-SESSION-D3-001: mcp
+  NEXENT-DATA-WORKERS-D3-001: knowledge
+  NEXENT-WEB-CONFIG-D3-001: system
+  RUNTIME-OFFLINE-DEPLOY-D5-001: deployment
+  RUNTIME-SHARED-STORAGE-D3-001: deployment
+  RUNTIME-AUTOSCALE-D5-001: deployment
+  RUNTIME-SCHEDULER-D3-001: task
   # F-111 also covers providers other than AIDP.
   AGT-AUTO-7A2120E630C381C7: aidp
   AIDP-FE-FILES-01: aidp

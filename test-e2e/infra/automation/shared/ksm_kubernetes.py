@@ -236,7 +236,7 @@ def run_owned_runtime_probe(repo, evidence, *, scenario='core', runtime_overlay=
             probe_timeout = 600 if scenario == 'group2' else 240
             core_program = (
                 'import sys, urllib.request; '
-                'from gateway.downstream.identity import IDENTITY_HEADER, sign_identity; '
+                'from gateway.identity.downstream import IDENTITY_HEADER, sign_identity; '
                 'path=sys.argv[1]; '
                 'identity={"user_id":"fixture-user","tenant_id":"fixture-tenant","kind":"session"}; '
                 'header=sign_identity(identity,"runtime","POST",path,b""); '

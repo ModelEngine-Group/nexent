@@ -12,10 +12,12 @@ from textwrap import indent
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def _run_source_check(script):
+def _run_source_check(script, *arguments, environment=None):
     # Resolving a dotted SDK patch initializes its NLP package before the patch takes effect.
     # Isolate external resource preparation before importing any project module.
     bootstrap = """
@@ -25,9 +27,14 @@ with (
     patch("jieba.posseg.lcut", return_value=[]),
 ):
 """ + indent(script, "    ")
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk")),
+        **(environment or {}),
+    }
     return subprocess.run(
-        [sys.executable, "-c", bootstrap], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+        [sys.executable, "-c", bootstrap, *arguments],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
     )
 
 
@@ -348,7 +355,18 @@ def test_runtime_sources_do_not_import_management():
             assert all(module.removeprefix("backend.").split(".")[0] != "management" for module in modules), (path, node.lineno)
 
 
-def test_runtime_app_serves_liveness_without_management_source():
+@pytest.mark.parametrize(
+    ("provider", "telemetry", "historical_reads", "trajectory_enabled"),
+    [
+        ("otlp", "false", "false", False),
+        ("local_file", "true", "true", True),
+        ("otlp", "false", "true", True),
+    ],
+    ids=["otlp", "local-capture", "historical-reads"],
+)
+def test_runtime_app_serves_liveness_without_management_source(
+    tmp_path, provider, telemetry, historical_reads, trajectory_enabled,
+):
     script = """
 import asyncio, importlib.abc, sys
 from unittest.mock import patch
@@ -356,10 +374,11 @@ import httpx
 class BlockManagement(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname in {"management", "backend.management"} or fullname.startswith(("management.", "backend.management.")):
-            raise AssertionError(f"Runtime imported peer source: {fullname}")
+            raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
 sys.meta_path.insert(0, BlockManagement())
 with patch("nexent.core.nlp.stopwords.load_stopwords"):
-    from runtime.api.application import app
+    from runtime.api.application import app, local_trajectory_processor
+assert (local_trajectory_processor is not None) == (sys.argv[1] == "True")
 assert not any("/compat/" in getattr(route, "path", "") for route in app.routes)
 assert not {"/agent/run", "/agent/stop/{run_id}"} & {getattr(route, "path", "") for route in app.routes}
 async def verify():
@@ -368,5 +387,14 @@ async def verify():
         assert result.status_code==200 and result.json()=={"status":"alive"}
 asyncio.run(verify())
 """
-    result = _run_source_check(script)
+    environment = {
+        "MONITORING_PROVIDER": provider,
+        "ENABLE_TELEMETRY": telemetry,
+        "LOCAL_FILE_MONITORING_ENABLED": str(provider == "local_file").lower(),
+        "TRAJECTORY_READ_ENABLED": historical_reads,
+        "TRAJECTORY_STORAGE_MODE": "single_node",
+        "TRAJECTORY_ROOT_DIR": str(tmp_path),
+        "OTEL_EXPORTER_OTLP_METRICS_ENABLED": "false",
+    }
+    result = _run_source_check(script, str(trajectory_enabled), environment=environment)
     assert result.returncode == 0, result.stderr
