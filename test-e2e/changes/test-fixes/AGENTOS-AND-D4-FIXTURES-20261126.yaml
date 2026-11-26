@@ -48,3 +48,4 @@ change:
     Agent. Resource cleanup is through the case callbacks or authenticated asset journal.
     The chart, tool chat, multi-Agent and sharing journeys require the actual successful
     completion indicator. Their rendered output, tool evidence and history assertions remain.
+    Conversation history checks use the active authenticated browser origin.

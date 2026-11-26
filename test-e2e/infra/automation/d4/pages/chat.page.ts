@@ -217,10 +217,18 @@ export class ChatPage {
     return id;
   }
 
+  private async readConversation(conversationId: number) {
+    // Use the active browser origin so the frontend proxy receives the session cookie.
+    return this.page.evaluate(async (id) => {
+      const response = await fetch(`/api/conversation/${id}`);
+      const payload = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, payload };
+    }, conversationId);
+  }
+
   async persistedThreadTitle(conversationId: number): Promise<string> {
-    const response = await this.page.request.get(`/api/conversation/${conversationId}`);
-    expect(response.status()).toBe(200);
-    const payload = await response.json();
+    const { status, payload } = await this.readConversation(conversationId);
+    expect(status).toBe(200);
     expect(payload.code).toBe(0);
     expect(Array.isArray(payload.data)).toBe(true);
     expect(payload.data).toHaveLength(1);
@@ -312,9 +320,8 @@ export class ChatPage {
     // Stop acknowledgement precedes persistence/worker finalization. Wait for
     // the owned stream's terminal history before continuing or reconnecting.
     await expect.poll(async () => {
-      const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
-      if (!response.ok()) return "history_unavailable";
-      const payload = await response.json();
+      const { ok, status, payload } = await this.readConversation(this.currentConversationId());
+      if (!ok) return `history_unavailable_${status}`;
       const history = payload.data?.[0];
       if (history?.streaming_message?.status === "streaming") return "streaming";
       const assistant = history?.message?.filter((item: any) => item.role === "assistant").at(-1);
@@ -323,9 +330,8 @@ export class ChatPage {
   }
 
   async persistedMessages(): Promise<Array<{ role: string; status: string; message: unknown }>> {
-    const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
-    expect(response.ok()).toBe(true);
-    const payload = await response.json();
+    const { status, payload } = await this.readConversation(this.currentConversationId());
+    expect(status).toBe(200);
     expect(payload.code).toBe(0);
     const history = payload.data?.[0];
     expect(history).toBeTruthy();
@@ -335,8 +341,7 @@ export class ChatPage {
   }
 
   async captureConversationState(path: string, marker: string): Promise<void> {
-    const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
-    const payload = await response.json().catch(() => ({}));
+    const { status, payload } = await this.readConversation(this.currentConversationId());
     const history = payload.data?.[0];
     const messages = (history?.message || []).map((item: any) => {
       const parts = Array.isArray(item.message) ? item.message : [];
@@ -346,7 +351,7 @@ export class ChatPage {
         contains_expected_marker:text.includes(marker), final_contains_expected_marker:final.includes(marker),
         final_is_success:final.trim()==="success", final_length:final.length};
     });
-    writeFileSync(path, JSON.stringify({conversation_id:this.currentConversationId(), http_status:response.status(), code:payload.code,
+    writeFileSync(path, JSON.stringify({conversation_id:this.currentConversationId(), http_status:status, code:payload.code,
       streaming_status:history?.streaming_message?.status || null, messages,
       ui_user_count:await this.userMessages().count(), ui_assistant_count:await this.assistantMessages().count()},null,2)+"\n");
   }
