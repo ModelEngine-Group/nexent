@@ -463,6 +463,9 @@ class ToolSelection(BaseModel):
     tenant_id: str | None
     start_date: date
     end_date: date
+    # Group filtering matches MCPs explicitly configured for these groups (the
+    # management access groups); public servers and the tenant-local endpoint
+    # never match an active group filter.
     group_ids: list[int]
     server_id: int | None
     # Same normalized values the fact contract carries; an unknown filter value
@@ -504,8 +507,9 @@ def _tool_items(rows, status, metric, search="", descending=True):
     return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
 
 
-def _server_items(rows, status, metric, search="", descending=True):
-    items = mcp_server_rows(rows)
+def _server_items(rows, inventory, status, metric, search="", descending=True):
+    covered = status["coverage_state"] == "covered"
+    items = mcp_server_rows(rows, inventory, covered=covered)
     items = [item for item in items if search.casefold() in (item.get("mcp_server_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"], item.get("mcp_server_id") or 0))
     present = [item for item in items if metric_value(item, metric) is not None]
@@ -520,9 +524,11 @@ def mcp_tools(request: Request, scope: Annotated[ToolSelection, Depends(tool_sel
               page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
               search: Annotated[str, Query(max_length=100)] = "", sort_by: ToolMetric = "request_count",
               descending: bool = True):
-    rows, _, status = _read_tools(request, scope, tenant)
-    build = _server_items if dimension == "services" else _tool_items
-    items = build(rows, status, sort_by, search, descending)
+    rows, inventory, _, status = _read_tools(request, scope, tenant)
+    if dimension == "services":
+        items = _server_items(rows, inventory, status, sort_by, search, descending)
+    else:
+        items = _tool_items(rows, status, sort_by, search, descending)
     start = (page - 1) * page_size
     return {"data": {"items": items[start:start + page_size], "total": len(items)}, **status}
 
@@ -530,8 +536,9 @@ def mcp_tools(request: Request, scope: Annotated[ToolSelection, Depends(tool_sel
 @ops_router.get("/mcp-tools/summary")
 def mcp_tools_summary(request: Request, scope: Annotated[ToolSelection, Depends(tool_selection)],
                       tenant: Annotated[str | None, Depends(ops_tenant)]):
-    rows, available, status = _read_tools(request, scope, tenant)
-    servers = mcp_server_rows(rows)
+    rows, inventory, available, status = _read_tools(request, scope, tenant)
+    covered = status["coverage_state"] == "covered"
+    servers = mcp_server_rows(rows, inventory, covered=covered)
     tools = mcp_tool_rows(rows)
     if available:
         values = summarize_mcp_tool(rows)
@@ -549,16 +556,18 @@ def mcp_tools_rankings(request: Request, scope: Annotated[ToolSelection, Depends
                        tenant: Annotated[str | None, Depends(ops_tenant)],
                        dimension: Literal["tools", "services"] = "services",
                        metric: ToolMetric = "request_count"):
-    rows, _, status = _read_tools(request, scope, tenant)
-    build = _server_items if dimension == "services" else _tool_items
-    items = build(rows, status, metric)
+    rows, inventory, _, status = _read_tools(request, scope, tenant)
+    if dimension == "services":
+        items = _server_items(rows, inventory, status, metric)
+    else:
+        items = _tool_items(rows, status, metric)
     return {"data": [item for item in items if metric_value(item, metric) is not None][:5], **status}
 
 
 @ops_router.get("/mcp-tools/trends")
 def mcp_tools_trends(request: Request, scope: Annotated[ToolSelection, Depends(tool_selection)],
                      tenant: Annotated[str | None, Depends(ops_tenant)]):
-    rows, available, status = _read_tools(request, scope, tenant)
+    rows, _, available, status = _read_tools(request, scope, tenant)
     by_date = {}
     for row in rows:
         by_date.setdefault(row["statistic_date"], []).append(row)
@@ -648,9 +657,12 @@ def mcp_tool_refresh_status(request: Request, refresh_id: str,
 
 @ops_router.get("/mcp-tools/catalog")
 def mcp_tools_catalog(user: Annotated[CurrentUser, Depends(authenticate)],
-                      tenant_id: Annotated[str | None, Query(max_length=100)] = None):
+                      tenant_id: Annotated[str | None, Query(max_length=100)] = None,
+                      group_ids: Annotated[list[int] | None, Query(max_length=100)] = None):
+    if any(group <= 0 for group in group_ids or ()):
+        raise HTTPException(422, "Invalid monitoring group ID")
     tenant = operations_scope(user, tenant_id)
-    return {"data": mcp_server_catalog(tenant)}
+    return {"data": mcp_server_catalog(tenant, group_ids)}
 
 
 @ops_router.get("/mcp-tools/overview")
@@ -662,7 +674,7 @@ def mcp_tools_overview(request: Request, scope: Annotated[ToolSelection, Depends
     tenant otherwise; the trend carries ``None`` for unpublished days, mirroring
     the trends endpoint.
     """
-    rows, available, status = _read_tools(request, scope, tenant)
+    rows, _, available, status = _read_tools(request, scope, tenant)
     by_date = {}
     for row in rows:
         by_date.setdefault(row["statistic_date"], []).append(row)

@@ -138,6 +138,7 @@ function MonitoringScope({
     selectedTenant: filters.tenant,
     tab,
     selectedService: filters.resources.mcp,
+    selectedGroup: filters.group,
     drilledMcpService: mcpDrilldown,
   });
 

@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-MCP-TOOL-MONITORING-D3-001
   feature_id: OPS-MCP-TOOL-MONITORING
-  requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118]
-  business_rule_ids: [OPS-MCP-TOOL-MONITORING-RULE-01, OPS-MCP-TOOL-MONITORING-RULE-02, OPS-MCP-TOOL-MONITORING-RULE-03, OPS-MCP-TOOL-MONITORING-RULE-04, OPS-MCP-TOOL-MONITORING-RULE-05]
+  requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118, OPS-MCP-TOOL-GROUP-INVENTORY-20261126]
+  business_rule_ids: [OPS-MCP-TOOL-MONITORING-RULE-01, OPS-MCP-TOOL-MONITORING-RULE-02, OPS-MCP-TOOL-MONITORING-RULE-03, OPS-MCP-TOOL-MONITORING-RULE-04, OPS-MCP-TOOL-MONITORING-RULE-05, OPS-MCP-TOOL-MONITORING-RULE-06]
   title: MCP tool calls appear as published tenant-scoped statistics with resolved server types
   type: INTEGRATION
   priority: P1
@@ -16,7 +16,7 @@ case:
   observations: [Tool call facts with caller-observed outcomes, resolved server types, published daily aggregates and API responses]
   cleanup: [Close the stub MCP server and remove only test-owned database and index data]
   preconditions: [An isolated Ops database and Elasticsearch are available with OPS_MONITORING_ENABLED=true, A stub MCP server can serve succeeding and failing tool calls, The product code and fixed script for this case are implemented; until then the case stays blocked]
-  test_data: {workload: One succeeding MCP tool call, one deadline-exceeded call and one protocol-level isError=true call on a catalog-resolved endpoint plus one debug run and one catalog-miss endpoint followed by one batch replay}
+  test_data: {workload: One succeeding MCP tool call, one deadline-exceeded call and one protocol-level isError=true call on a catalog-resolved endpoint plus one debug run and one catalog-miss endpoint followed by one batch replay, Registered inventory rows for the called server and never-called grouped and public servers plus group-filtered queries}
   steps:
   - order: 1
     action: Run an agent against the stub MCP server so one tool call succeeds, one exceeds the deadline and one returns isError=true, with the endpoint resolved by the run catalog.
@@ -39,7 +39,10 @@ case:
   - order: 7
     action: Block Elasticsearch fact writes for one batch, query the affected date, then unblock and publish the pending batch.
     expected: The affected date is stale while blocked, other dates are unaffected, and recovery clears the staleness.
-  expected_results: [Caller-observed outcomes with resolved server types are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery]
+  - order: 8
+    action: Query the monitoring endpoints and the service catalog with a group filter matching the configured access groups and with a non-matching group, using a registered inventory with never-called and public servers.
+    expected: The matching group keeps the called server plus the never-called grouped server with empty metrics and excludes public servers and unresolved endpoints; the tools dimension drops the unresolved endpoint's calls; a non-matching group returns no servers; the service catalog applies the same matching for filter dropdowns.
+  expected_results: [Caller-observed outcomes with resolved server types are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery, Group filtering selects explicitly configured servers with never-called inventory visible and public or unresolved servers excluded]
   forbidden_side_effects:
   - Writing tool arguments or results or credentials or headers into facts
   - Publishing a fact under a different tenant or fact kind
@@ -75,3 +78,8 @@ case:
     steps: [7]
     expected_results: [8]
     forbidden_side_effects: [2, 3]
+  - id: AC-07
+    description: Group filtering matches explicitly configured access groups, keeps registered never-called servers visible with empty metrics, and excludes public or unresolved servers.
+    steps: [2, 8]
+    expected_results: [9]
+    forbidden_side_effects: [1, 2]

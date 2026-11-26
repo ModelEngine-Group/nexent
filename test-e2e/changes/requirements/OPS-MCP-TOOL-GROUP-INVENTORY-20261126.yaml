@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MCP-TOOL-GROUP-INVENTORY-20261126
+  change_type: requirement
+  requirement_id: OPS-MCP-TOOL-GROUP-INVENTORY-20261126
+  title: MCP tool monitoring group filtering by configured access groups with a registered server inventory
+  description: Replace initiator-group Elasticsearch filtering with MCP-configured access-group matching from the registered McpRecord inventory, keep never-called servers visible with empty metrics, and stop splitting daily aggregates by initiator groups.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MCP-TOOL-MONITORING]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MCP-TOOL-MONITORING-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_monitoring.py, test/backend/ops/test_monitoring_query_mcp_tools.py,
+                     test/backend/ops/test_monitoring_api_mcp_tools.py, frontend/tests/component/mcpMonitoring.test.tsx,
+                     frontend/tests/component/monitoringFilters.test.tsx]
+    behaviors:
+    - Parse comma-separated McpRecord access groups (None keeps the public marker, empty and unparsable parts never match) and match requested groups by explicit intersection only.
+    - Constrain the Elasticsearch daily query to group-matching server IDs, keep all server history when no group filter is active, and merge registered never-called servers with covered zero or uncovered null metrics.
+    - Filter the service catalog used by filter dropdowns with the same matching, and pass the selected group from the frontend so the dropdown refreshes when the group changes.
+    - Verify the endpoints thread the inventory into list, summary and ranking responses and that daily aggregation no longer splits rows by initiator groups.
+    reason: Existing tests prove capture, publication and the previous initiator-group filter. The new PostgreSQL inventory join, access-group matching and merge behavior need success, boundary and error assertions at the query and API layers, and the dropdown refresh needs service and reducer coverage.
+  notes: The D3 case controls the registered inventory through the same catalog monkeypatch pattern as OPS-MODEL-MONITORING-D3-001, so the isolated environment keeps covering the real publication pipeline and API. Public records and the tenant-local endpoint intentionally never match an active group filter.
