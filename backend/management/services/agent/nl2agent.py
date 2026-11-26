@@ -242,7 +242,13 @@ def search_installed_mcp_tools_by_query(
     query = _normalize_search_text(query_text)
     scored_tools: list[tuple[float, int, dict[str, Any]]] = []
 
-    for tool in query_all_tools(tenant_id=tenant_id):
+    from management.services.configuration.resource_denylist import load_tool_denylist
+
+    tools = query_all_tools(tenant_id=tenant_id)
+    denylist = load_tool_denylist(tenant_id) if tools else None
+    for tool in tools:
+        if denylist and denylist.blocks(tool.get("name"), tool.get("tool_id")):
+            continue
         if tool.get("source") != ToolSourceEnum.MCP.value:
             continue
         if tool.get("is_available") is not True:
@@ -465,6 +471,9 @@ async def _load_installed_resource_catalog(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    from management.services.configuration.resource_denylist import load_tool_denylist
+
+    skill_policy = load_tool_denylist(tenant_id) if skills else None
     internal_names = {
         *NL2A_MCP_LEGACY_TOOL_NAMES,
         *NL2A_MCP_TOOL_NAMES,
@@ -478,6 +487,7 @@ async def _load_installed_resource_catalog(
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or (source == ToolSourceEnum.MCP.value and tool.get("usage") not in visible_mcp_names)
             or tool.get("is_available") is not True
+            or tool.get("blocked_by_denylist")
             or name in internal_names
             or not _is_nl2agent_recommendable_tool(name)
         ):
@@ -514,6 +524,8 @@ async def _load_installed_resource_catalog(
     for skill in skills:
         skill_id = skill.get("skill_id")
         name = str(skill.get("name") or "")
+        if skill_policy and skill_policy.blocks_skill(name, skill_id):
+            continue
         if not isinstance(skill_id, int) or skill_id <= 0 or not name:
             continue
         catalog.append({
@@ -994,6 +1006,14 @@ async def _load_internal_uninstalled_resource_catalog(
             "installation_options": [option],
             "default_option_id": option.option_id,
         })
+    if catalog:
+        from management.services.configuration.resource_denylist import load_tool_denylist
+
+        policy = load_tool_denylist(tenant_id)
+        catalog = [item for item in catalog if not (
+            item["resource_type"] == "skill" and policy.blocks_skill(item["name"])
+            or item["resource_type"] == "mcp_server" and policy.blocks_mcp(item["name"])
+        )]
     return catalog
 
 

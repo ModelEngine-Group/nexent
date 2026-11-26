@@ -1021,6 +1021,16 @@ class TestUpdateToolInfoImpl:
         mock_create_update.assert_not_called()
 
 
+@pytest.fixture(autouse=True)
+def _empty_tool_denylist(mocker):
+    from management.services.configuration import resource_denylist
+
+    mocker.patch.object(
+        resource_denylist, "load_tool_denylist",
+        return_value=resource_denylist.ToolDenylist(frozenset(), frozenset()),
+    )
+
+
 class TestListAllTools:
     """ test the function of list_all_tools"""
 

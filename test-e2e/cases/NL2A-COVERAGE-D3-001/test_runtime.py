@@ -43,6 +43,225 @@ def assessed_check(state, key, accepted):
     ]}
 
 
+def test_tool_denylist_filters_catalog_and_rejects_stale_card(monkeypatch):
+    from contracts.errors.exceptions import ResourceBindingError
+    from contracts.nl2agent_resources import ResourceCardAction
+    from contracts.resource_denylist import GlobalDenylistUpdate, TenantDenylistUpdate
+    from contracts.tool import ToolInstanceInfoRequest
+    from infrastructure.rdb.mcp_execution_records import ToolInfo
+    from management.db.tool.repository import create_or_update_tool_by_tool_info
+    from management.services.configuration import resource_denylist as denylist
+    from management.services.skill.service import SkillService
+    from services import nl2agent_resource_flow as flow
+
+    monkeypatch.setattr(SkillService, "list_visible_skills", lambda *args, **kwargs: [])
+    monkeypatch.setattr(nl2agent_service, "_load_internal_uninstalled_resource_catalog", AsyncMock(return_value=[]))
+    monkeypatch.setattr(flow.semantic, "resolve_model", AsyncMock(return_value=None))
+
+    with owned_runtime(monkeypatch) as (runtime, redis):
+        storage = runtime.storage
+        tenant, actor = storage["tenant"], storage["owner"]
+        another_tenant = f"{tenant}-other"
+        monkeypatch.setattr(denylist.configuration_database, "session", storage["sessions"])
+        name = "denylist_catalog_search"
+        with storage["sessions"]() as session:
+            tools = [
+                ToolInfo(name=name, source="local", author=owner, is_available=True,
+                         is_user_selectable=True, description=f"Search the denylist catalog. Variant {index}.")
+                for index, owner in enumerate((tenant, tenant, another_tenant))
+            ]
+            session.add_all(tools)
+            session.flush()
+            first, second, other = [tool.tool_id for tool in tools]
+
+            hidden = [
+                ToolInfo(name=tool_name, origin_name=origin, source="local", author=tenant,
+                         is_available=True, is_user_selectable=selectable)
+                for tool_name, origin, selectable in (
+                    ("aidp_search", None, True), ("download_from_s3", None, True),
+                    ("hidden_flag_tool", None, False), ("hidden_alias", "knowledge_base_search", True),
+                )
+            ]
+            session.add_all(hidden)
+            session.flush()
+            hidden_names = {tool.name for tool in hidden}
+            hidden_refs = {f"tool:{tool.tool_id}" for tool in hidden}
+
+        global_editor = denylist.read_denylist()
+        tenant_editor = denylist.read_denylist(tenant)
+        assert not hidden_names & {item["key"] for item in global_editor["items"]}
+        assert not hidden_refs & {item["key"] for item in tenant_editor["items"]}
+        assert name in {item["key"] for item in global_editor["items"]}
+        assert sum(item["key"] == name for item in global_editor["items"]) == 1
+        assert {f"tool:{first}", f"tool:{second}"} <= {item["key"] for item in tenant_editor["items"]}
+        assert f"tool:{first}" in {item["key"] for item in tenant_editor["items"]}
+        with pytest.raises(ValueError, match="unavailable"):
+            denylist.update_denylist(GlobalDenylistUpdate(
+                revision=global_editor["revision"], tool_names=["download_from_s3"],
+            ), actor)
+        with pytest.raises(ValueError, match="unavailable"):
+            denylist.update_denylist(TenantDenylistUpdate(
+                revision=tenant_editor["revision"], resource_refs=sorted(hidden_refs),
+            ), actor, tenant)
+
+        tenant_state = denylist.read_denylist(tenant)
+        first_ref, second_ref = f"tool:{first}", f"tool:{second}"
+        denylist.update_denylist(TenantDenylistUpdate(
+            revision=tenant_state["revision"], resource_refs=[first_ref],
+        ), actor, tenant)
+
+        def catalog(owner):
+            return asyncio.run(nl2agent_service._load_installed_resource_catalog(
+                tenant_id=owner, user_id=actor,
+            ))
+
+        assert {row["candidate_ref"] for row in catalog(tenant) if row["name"] == name} == {second_ref}
+        assert f"tool:{other}" in {row["candidate_ref"] for row in catalog(another_tenant)}
+
+        before = runtime.draft()
+        def verify():
+            state = json.loads(redis.get(_state_key(runtime)))
+            check = assessed_check(state, "r1", [second_ref])
+            assert {item["candidate_ref"] for item in flow._candidates_in_batch(state["requirements"]["r1"])} == {
+                second_ref,
+            }
+            return f"<code>print(nl2a_verify_requirements(verification_batch_id={state['batch']['id']!r}, checks={[check]!r}))</code>"
+
+        requirements = [{"query": "Search the denylist catalog", "search_queries": {
+            "zh": "denylist catalog search", "en": "search the denylist catalog",
+        }}]
+        cid, events = post(runtime, "Find the catalog search tool.", [
+            f"<code>print(nl2a_discover_requirements(requirements={requirements!r}, purpose='generate'))</code>",
+            verify,
+        ])
+        card = get_card(events)
+        assert [item["candidate"]["candidate_ref"] for item in card["resources"]] == [second_ref]
+
+        global_state = denylist.read_denylist()
+        denylist.update_denylist(GlobalDenylistUpdate(
+            revision=global_state["revision"], tool_names=[name],
+        ), actor)
+        assert all(row["name"] != name for owner in (tenant, another_tenant) for row in catalog(owner))
+
+        scope = ResourceScope(tenant, actor, runtime.agent_id, str(cid), "denylist-check")
+        submission = ResourceCardAction(
+            card_id=card["card_id"], state_version=card["state_version"],
+            selected_resource_refs=[second_ref],
+        )
+        with pytest.raises(flow.ResourceStateError, match="resource_evidence_changed"):
+            asyncio.run(flow.apply_card_action(scope, card["subtype"], "continue", submission))
+
+        binding = ToolInstanceInfoRequest(tool_id=second, agent_id=runtime.agent_id, params={}, enabled=True)
+        with pytest.raises(ResourceBindingError, match="resource_blocked"):
+            create_or_update_tool_by_tool_info(binding, tenant, actor)
+        assert runtime.draft() == before
+
+
+def test_mcp_and_skill_denylist_persistence_and_binding(monkeypatch):
+    from contracts.errors.exceptions import ResourceBindingError
+    from contracts.resource_denylist import GlobalDenylistUpdate, TenantDenylistUpdate
+    from contracts.skill import SkillInstanceInfoRequest
+    from contracts.tool import ToolInstanceInfoRequest
+    from infrastructure.rdb.mcp_execution_records import McpRecord, ToolInfo
+    from infrastructure.rdb.skill_execution_records import SkillInfo
+    from management.db.skill.repository import create_or_update_skill_by_skill_info
+    from management.db.tool.repository import create_or_update_tool_by_tool_info
+    from management.services.configuration import resource_denylist as denylist
+    from management.services.skill.service import SkillService
+
+    with owned_runtime(monkeypatch) as (runtime, redis):
+        store = runtime.storage
+        tenant, actor = store["tenant"], store["owner"]
+        other = f"{tenant}-other"
+        monkeypatch.setattr(denylist.configuration_database, "session", store["sessions"])
+        with store["sessions"]() as session:
+            services, skills, tools = [], [], []
+            for owner in (tenant, other):
+                services.append(McpRecord(tenant_id=owner, mcp_name="denylist-service", enabled=True))
+                skills.append(SkillInfo(tenant_id=owner, skill_name="denylist-skill", source="custom"))
+                tools.append(ToolInfo(author=owner, name="denylist_child", source="mcp", usage="denylist-service",
+                                      is_available=True, is_user_selectable=True, params=[]))
+            session.add_all([*services, *skills, *tools])
+            session.flush()
+            service_ids = [item.mcp_id for item in services]
+            skill_ids = [item.skill_id for item in skills]
+            tool_ids = [item.tool_id for item in tools]
+            retained_agent = AgentInfo(name="retained_bindings", tenant_id=other, version_no=0)
+            session.add(retained_agent)
+            session.flush()
+            retained_agent_id = retained_agent.agent_id
+
+        def visible_skills(self, *, tenant_id, **kwargs):
+            with store["sessions"]() as session:
+                return [{"skill_id": row.skill_id, "name": row.skill_name} for row in session.scalars(
+                    select(SkillInfo).where(SkillInfo.tenant_id == tenant_id))]
+        monkeypatch.setattr(SkillService, "list_visible_skills", visible_skills)
+        monkeypatch.setattr(mcp_service, "list_visible_mcp_records", lambda *args, **kwargs: (
+            [{"mcp_name": "denylist-service", "enabled": True}], 1,
+        ))
+        def catalog(owner):
+            return asyncio.run(nl2agent_service._load_installed_resource_catalog(tenant_id=owner, user_id=actor))
+
+        assert f"skill:{skill_ids[0]}" in {row["candidate_ref"] for row in catalog(tenant)}
+        # Existing enabled bindings are retained even when their definitions are excluded.
+        create_or_update_skill_by_skill_info(SkillInstanceInfoRequest(
+            skill_id=skill_ids[1], agent_id=retained_agent_id, enabled=True,
+        ), other, actor)
+        create_or_update_tool_by_tool_info(ToolInstanceInfoRequest(
+            tool_id=tool_ids[1], agent_id=retained_agent_id, params={}, enabled=True,
+        ), other, actor)
+        local = denylist.read_denylist(tenant)
+        refs = [f"mcp:{service_ids[0]}", f"skill:{skill_ids[0]}"]
+        denylist.update_denylist(TenantDenylistUpdate(revision=local["revision"], resource_refs=refs), actor, tenant)
+        assert not {f"tool:{tool_ids[0]}", f"skill:{skill_ids[0]}"} & {row["candidate_ref"] for row in catalog(tenant)}
+        assert {f"tool:{tool_ids[1]}", f"skill:{skill_ids[1]}"} <= {row["candidate_ref"] for row in catalog(other)}
+        with pytest.raises(ValueError):
+            current = denylist.read_denylist(tenant)
+            denylist.update_denylist(TenantDenylistUpdate(
+                revision=current["revision"], resource_refs=[f"skill:{skill_ids[1]}"],
+            ), actor, tenant)
+        with pytest.raises(ResourceBindingError, match="resource_blocked"):
+            create_or_update_skill_by_skill_info(SkillInstanceInfoRequest(
+                skill_id=skill_ids[0], agent_id=runtime.agent_id, enabled=True,
+            ), tenant, actor)
+        with pytest.raises(ResourceBindingError, match="resource_blocked"):
+            create_or_update_tool_by_tool_info(ToolInstanceInfoRequest(
+                tool_id=tool_ids[0], agent_id=runtime.agent_id, params={}, enabled=True,
+            ), tenant, actor)
+
+        platform = denylist.read_denylist()
+        denylist.update_denylist(GlobalDenylistUpdate(revision=platform["revision"],
+            resource_refs=["mcp:denylist-service", "skill:denylist-skill"]), actor)
+        retained_skill = create_or_update_skill_by_skill_info(SkillInstanceInfoRequest(
+            skill_id=skill_ids[1], agent_id=retained_agent_id, enabled=True, config_values={"query": "retained"},
+        ), other, actor)
+        retained_tool = create_or_update_tool_by_tool_info(ToolInstanceInfoRequest(
+            tool_id=tool_ids[1], agent_id=retained_agent_id, params={"query": "retained"}, enabled=True,
+        ), other, actor)
+        assert retained_skill["enabled"] is True and retained_skill["config_values"] == {"query": "retained"}
+        assert retained_tool["enabled"] is True and retained_tool["params"] == {"query": "retained"}
+        from management.db.tool.repository import search_tools_for_sub_agent
+        from management.db.skill.repository import query_enabled_skill_instances
+        assert tool_ids[1] in {item["tool_id"] for item in search_tools_for_sub_agent(retained_agent_id, other)}
+        assert skill_ids[1] in {item["skill_id"] for item in query_enabled_skill_instances(retained_agent_id, other)}
+        create_or_update_skill_by_skill_info(SkillInstanceInfoRequest(
+            skill_id=skill_ids[1], agent_id=retained_agent_id, enabled=False,
+        ), other, actor)
+        with pytest.raises(ResourceBindingError, match="resource_blocked"):
+            create_or_update_skill_by_skill_info(SkillInstanceInfoRequest(
+                skill_id=skill_ids[1], agent_id=retained_agent_id, enabled=True,
+            ), other, actor)
+        assert not {f"tool:{tool_ids[1]}", f"skill:{skill_ids[1]}"} & {row["candidate_ref"] for row in catalog(other)}
+        assert all(item["global_blocked"] for item in denylist.read_denylist(tenant)["items"] if item["key"] in refs)
+        platform = denylist.read_denylist()
+        denylist.update_denylist(GlobalDenylistUpdate(revision=platform["revision"], resource_refs=[]), actor)
+        assert set(denylist.read_denylist(tenant)["selected"]) == set(refs)
+        assert f"skill:{skill_ids[1]}" in {row["candidate_ref"] for row in catalog(other)}
+        local = denylist.read_denylist(tenant)
+        denylist.update_denylist(TenantDenylistUpdate(revision=local["revision"], resource_refs=[]), actor, tenant)
+        assert {f"tool:{tool_ids[0]}", f"skill:{skill_ids[0]}"} <= {row["candidate_ref"] for row in catalog(tenant)}
+
+
 def test_search_alternatives_runtime(monkeypatch):
     from services import nl2agent_resource_flow as flow
 

@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-DENYLIST-RELOAD-20261126
+  change_type: bugfix
+  bug_id: RESOURCE-DENYLIST-RELOAD-20261126
+  title: Discard resource exclusion drafts after successful reload
+  description: Reset the shared editor draft to the latest server snapshot even when its revision is unchanged.
+  observed_behavior: Reload cleared the save error but kept local selections when React reused the drawer with the same revision key.
+  expected_behavior: Successful reload discards unsaved selections and restores the server baseline; failed reload preserves the draft and error.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: The existing component and browser tests covered save failure and retry, without reloading an unchanged revision or changed catalog.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [RESOURCE-CONFIG-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Successful reload resets identical cached snapshots, changed catalogs with unchanged revisions, and updated server selections.
+    - Failed reload retains unsaved choices and the save error without an extra save request.
+    reason: Component tests prove draft state transitions; the existing D4 verifies the deployed global editor using unchanged server revision and persistent baseline selections. Python code, storage, recommendations and binding contracts are unchanged and need no new Python UT or D3 execution.
+    test_selectors:
+    - frontend/tests/component/resourceDenylist.test.tsx
+  notes: Reuse the resource-configuration SPEC under nexent-doc/nexent/nl2agent-resource-recommendation-flow/changes/2026-11-25-resource-configuration and F-045-RULE-12 ownership. The existing save error copy already promises reload discards unsaved changes. D4 uses owned in-memory API fixtures and browser context cleanup, with no persistent business writes. Only the web image is redeployed. Retain unrelated user changes and do not claim branch reconciliation or merge readiness.

@@ -408,6 +408,9 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     else:
         tools_info = query_all_tools(tenant_id)
 
+    from management.services.configuration.resource_denylist import load_tool_denylist
+
+    denylist = load_tool_denylist(tenant_id) if tools_info else None
     updated_by_email_map = get_user_email_map(
         [tool.get("updated_by", "") for tool in tools_info]
     )
@@ -494,6 +497,7 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
+            "blocked_by_denylist": denylist.blocks(tool_name, tool.get("tool_id")) if denylist else False,
             "is_user_selectable": _get_user_selectability(
                 tool_name,
                 tool.get("is_user_selectable", True),

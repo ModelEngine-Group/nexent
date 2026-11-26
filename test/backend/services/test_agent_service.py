@@ -1106,6 +1106,16 @@ async def test_update_agent_info_impl_reraises_agent_quota_error(mock_update_age
     assert exc_info.value is limit_error
 
 
+@pytest.fixture(autouse=True)
+def _empty_tool_denylist(mocker):
+    from management.services.configuration import resource_denylist
+
+    mocker.patch.object(
+        resource_denylist, "load_tool_denylist",
+        return_value=resource_denylist.ToolDenylist(frozenset(), frozenset()),
+    )
+
+
 @patch('management.services.agent.service.query_tools_by_ids')
 @patch('management.services.agent.service.create_or_update_tool_by_tool_info')
 @patch('management.services.agent.service.query_tool_instances_by_agent_id')

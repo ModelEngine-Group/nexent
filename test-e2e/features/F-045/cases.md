@@ -14,4 +14,5 @@
 - D3 [NL2A-INPUT-D3-001](../../cases/NL2A-INPUT-D3-001/case.yaml) · active
 - D4 [NL2A-PROMPT-D4-001](../../cases/NL2A-PROMPT-D4-001/case.yaml) · active
 - D4 [NL2A-WORKFLOW-D4-001](../../cases/NL2A-WORKFLOW-D4-001/case.yaml) · active
+- D4 [RESOURCE-CONFIG-JOURNEY-D4-001](../../cases/RESOURCE-CONFIG-JOURNEY-D4-001/case.yaml) · active
 - D5 [AGENT-PROMPT-D5-001](../../cases/AGENT-PROMPT-D5-001/case.yaml) · active

@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
@@ -99,6 +100,7 @@ export default function ToolManagement({
   addEntry,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
   const { user } = useAuthorizationContext();
   const isReadOnly = useAgentReadOnly();
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
@@ -196,7 +198,7 @@ export default function ToolManagement({
   }, [selectableTools, selectedServices, serverList]);
 
   // --- Group by source → category ---
-  const grouped = groupToolsBySource(visibleSelectedTools);
+  const grouped = groupToolsBySource(selectedRows);
 
   const mergeParams = useMergedToolParams(currentAgentId);
 
@@ -227,10 +229,24 @@ export default function ToolManagement({
 
   const removeTool = useCallback(
     (toolId: string) => {
-      const current = useAgentStore.getState().editedAgent?.tools ?? [];
-      updateTools(current.filter((t) => t.id !== toolId));
+      const agentId = useAgentStore.getState().agentId;
+      const remove = () => {
+        const state = useAgentStore.getState();
+        if (state.agentId !== agentId || state.isReadOnly) return;
+        updateTools(
+          (state.editedAgent?.tools ?? []).filter((tool) => tool.id !== toolId)
+        );
+      };
+      const tool = selectedRows.find((item) => item.id === toolId);
+      if (tool?.blocked_by_denylist) {
+        confirm({
+          title: t("toolPool.remove"),
+          content: t("resourceDenylist.removeWarning"),
+          onOk: remove,
+        });
+      } else remove();
     },
-    [updateTools]
+    [confirm, selectedRows, t, updateTools]
   );
 
   const toggleCat = (cat: string) =>
@@ -254,6 +270,7 @@ export default function ToolManagement({
   if (highFidelity) {
     const renderedServices = new Set<string>();
     const getUnavailableReason = (tool: Tool) => {
+      if (tool.blocked_by_denylist) return "resourceDenylist.existingBinding";
       if (tool.unavailable_reasons?.includes("mcp_model_unavailable")) {
         return "toolPool.mcpModelUnavailableTooltip";
       }
@@ -348,6 +365,11 @@ export default function ToolManagement({
                 icon={<SelectedToolIcon />}
                 metadata={
                   <>
+                    {tool.blocked_by_denylist && (
+                      <SelectedResourceTag>
+                        {t("resourceDenylist.existingBinding")}
+                      </SelectedResourceTag>
+                    )}
                     {labels.slice(0, 2).map((label) => (
                       <SelectedResourceTag key={label} title={label}>
                         {label}
@@ -505,6 +527,11 @@ export default function ToolManagement({
                                   >
                                     {tool.name}
                                   </span>
+                                  {tool.blocked_by_denylist && (
+                                    <SelectedResourceTag>
+                                      {t("resourceDenylist.existingBinding")}
+                                    </SelectedResourceTag>
+                                  )}
                                   {labels.slice(0, 2).map((l) => (
                                     <span
                                       key={l}

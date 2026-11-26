@@ -230,4 +230,80 @@ describe("selected MCP tools", () => {
     ).not.toBeInTheDocument();
     expect(state.updateTools).not.toHaveBeenCalled();
   });
+
+  it("retains blocked MCP bindings and confirms individual removal", async () => {
+    state.catalog = [{ ...line, blocked_by_denylist: true }, pie];
+    renderManagement();
+    const dialog = within(openService());
+    const selected = dialog.getByRole("checkbox", { name: "line" });
+    expect(selected).toBeChecked();
+    expect(
+      dialog.getByRole("button", { name: "toolPool.configure line" })
+    ).toBeEnabled();
+    fireEvent.click(selected);
+    await waitFor(() =>
+      expect(screen.getByText("resourceDenylist.removeWarning")).toBeVisible()
+    );
+    expect(state.updateTools).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("resourceDenylist.removeWarning")
+      ).not.toBeInTheDocument()
+    );
+    expect(selected).toBeChecked();
+    const reopened =
+      screen.queryByRole("dialog", { name: "toolPool.mcpSelectService vis" }) ??
+      openService();
+    fireEvent.click(within(reopened).getByRole("checkbox", { name: "line" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.confirm" })
+    );
+    await waitFor(() =>
+      expect(state.updateTools).toHaveBeenCalledExactlyOnceWith([
+        pie,
+        other,
+        local,
+        unknown,
+      ])
+    );
+  });
+
+  it("confirms bulk removal when the service includes blocked bindings", async () => {
+    state.catalog = [{ ...line, blocked_by_denylist: true }, pie];
+    renderManagement();
+    fireEvent.click(
+      within(openService()).getByRole("button", { name: "common.deselectAll" })
+    );
+    await waitFor(() =>
+      expect(screen.getByText("resourceDenylist.removeWarning")).toBeVisible()
+    );
+    expect(state.updateTools).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() =>
+      expect(state.updateTools).toHaveBeenCalledExactlyOnceWith([
+        other,
+        local,
+        unknown,
+      ])
+    );
+  });
+
+  it("confirms blocked local removal and does not apply it after switching Agents", async () => {
+    state.catalog = [{ ...local, blocked_by_denylist: true }];
+    renderManagement();
+    expect(screen.getByText("resourceDenylist.existingBinding")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "toolPool.remove local" })
+    );
+    await screen.findByText("resourceDenylist.removeWarning");
+    state.agentId = 43;
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("resourceDenylist.removeWarning")
+      ).not.toBeInTheDocument()
+    );
+    expect(state.updateTools).not.toHaveBeenCalled();
+  });
 });
