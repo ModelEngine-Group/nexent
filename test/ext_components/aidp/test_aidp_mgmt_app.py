@@ -806,6 +806,8 @@ class TestListKnowledgeBases:
             "caption_enable": 0,
             "document_count": 8,
             "permission": "EDIT",
+            "bind_lib_id": 0,
+            "bind_lib_type": "none",
         }
         with patch.object(
             aidp_mgmt_app,

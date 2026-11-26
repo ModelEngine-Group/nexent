@@ -68,19 +68,6 @@ def _extract_tasks(
     return items, total, count
 
 
-def _task_sort_key(task: dict[str, Any]) -> tuple[float, int]:
-    try:
-        start = float(task.get("start_time") or 0)
-    except (TypeError, ValueError):
-        start = 0
-    raw_id = str(task.get("task_id") or "")
-    try:
-        task_id = int(raw_id)
-    except ValueError:
-        task_id = 0
-    return start, task_id
-
-
 def list_tasks_impl(
     server_url: str,
     api_key: str,
@@ -90,58 +77,41 @@ def list_tasks_impl(
     task_type: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
-    """Return newest-first tasks.
+    """Return one page of tasks.
 
-    AIDP has no sort parameter and always answers ascending id order. Fetch all
-    pages once, sort locally, then apply the requested page so the first page is
-    actually the latest. The task volume is small (hundreds), so this bounded
-    aggregation is preferable to showing stale tasks first.
+    AIDP has no sort parameter, so the page order is forwarded as-is. Sorting
+    newest-first is an upstream contract gap; the proxy must not fetch every
+    page to emulate it.
     """
-    fetched: list[dict[str, Any]] = []
-    total: int | None = None
-    task_count: int | None = None
-    fetch_page = 1
-    fetch_size = 100
-    while fetch_page <= 100:
-        params: dict[str, Any] = {"page": fetch_page, "page_size": fetch_size}
-        if task_type:
-            params["task_type"] = task_type
-        payload = _ontology_request(
-            server_url,
-            api_key,
-            "GET",
-            _get_tasks_path(tenant_id),
-            operation="list-tasks",
-            params=params,
-        )
-        _log_business_failure(payload, "list-tasks")
-        data = payload.get("data") if isinstance(payload, dict) else None
-        source = (
-            data
-            if isinstance(data, dict)
-            else (payload if isinstance(payload, dict) else {})
-        )
-        items, page_total, page_count = _extract_tasks(source)
-        fetched.extend(items)
-        total = page_total if page_total is not None else total
-        task_count = page_count if page_count is not None else task_count
-        if not items or len(items) < fetch_size:
-            break
-        if total is not None and fetch_page * fetch_size >= total:
-            break
-        fetch_page += 1
-
-    normalized = [_normalize_task(item) for item in fetched]
-    normalized.sort(key=_task_sort_key, reverse=True)
-    total_count = total if total is not None else len(normalized)
-    start = max(page - 1, 0) * page_size
-    end = start + page_size
+    params: dict[str, Any] = {"page": page, "page_size": page_size}
+    if task_type:
+        params["task_type"] = task_type
+    payload = _ontology_request(
+        server_url,
+        api_key,
+        "GET",
+        _get_tasks_path(tenant_id),
+        operation="list-tasks",
+        params=params,
+    )
+    _log_business_failure(payload, "list-tasks")
+    data = payload.get("data") if isinstance(payload, dict) else None
+    source = (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
+    items, total, task_count = _extract_tasks(source)
+    normalized = [_normalize_task(item) for item in items]
+    total_count = (
+        total if total is not None else (page - 1) * page_size + len(normalized)
+    )
     return {
-        "value": normalized[start:end],
+        "value": normalized,
         "total_count": total_count,
         "task_count": task_count,
-        "has_more": end < total_count,
-        "total_reliable": True,
+        "has_more": page * page_size < total_count,
+        "total_reliable": total is not None,
     }
 
 
