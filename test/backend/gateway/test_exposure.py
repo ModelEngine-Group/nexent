@@ -55,7 +55,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     baseline = json.loads((Path(__file__).parents[1] / "management/gateway_route_baseline.json").read_text())
     registry = default_registry()
     public = [row for row in baseline if "internal" not in row[1].split("/")]
-    assert len(public) == 30
+    assert len(public) == 31
     for method, path, _ in public:
         route = registry.match(method, path)
         assert route and route.target == "management", (method, path)  # real owning service, alias retired
