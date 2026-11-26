@@ -1,12 +1,17 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { App } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServer, Tool, ToolParam } from "@/types/agentConfig";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
-import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import { tagManagementApi } from "@/services/tagManagementService";
 
 const state = vi.hoisted(() => ({
@@ -60,12 +65,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 vi.mock("@/hooks/agent/useToolList", () => ({
-  useToolList: () => ({
-    selectableTools: state.tools,
-    isUserSelectable: (tool: Tool) =>
-      !isManagedKnowledgeTool(tool) && tool.is_user_selectable !== false,
-    invalidate: vi.fn(),
-  }),
+  useToolList: () => ({ selectableTools: state.tools, invalidate: vi.fn() }),
 }));
 vi.mock("@/hooks/mcp/useMcpServerList", () => ({
   useMcpServerList: () => ({ serverList: state.servers }),
@@ -570,4 +570,44 @@ describe("ToolDrawer MCP service groups", () => {
     expect(groupCheckbox()).toHaveAttribute("aria-checked", "false");
     expect(state.updateTools).not.toHaveBeenCalled();
   });
+});
+
+it("warns before removing a blocked existing tool chip and keeps the Agent unchanged until confirmation", async () => {
+  const previous = state.editedAgent.tools;
+  state.editedAgent.tools = [
+    {
+      id: "blocked-existing",
+      name: "retained",
+      description: "Existing blocked binding",
+      source: "local",
+      initParams: [],
+      blocked_by_denylist: true,
+    },
+  ];
+  state.confirm.mockClear();
+  state.updateTools.mockClear();
+  try {
+    render(
+      <App>
+        <ToolDrawer open onClose={vi.fn()} />
+      </App>
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "resourcePicker.remove" })
+    );
+    expect(state.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "resourceDenylist.removeWarning" })
+    );
+    expect(
+      screen.getByRole("button", { name: "resourcePicker.remove" })
+    ).toBeVisible();
+    expect(state.updateTools).not.toHaveBeenCalled();
+    act(() => state.confirm.mock.calls[0][0].onOk());
+    expect(
+      screen.queryByRole("button", { name: "resourcePicker.remove" })
+    ).not.toBeInTheDocument();
+    expect(state.updateTools).not.toHaveBeenCalled();
+  } finally {
+    state.editedAgent.tools = previous;
+  }
 });

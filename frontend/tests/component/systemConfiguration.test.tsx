@@ -160,6 +160,7 @@ test("renders the exact catalog as one table without decorative panels", async (
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
     "systemConfig.title",
     "quota.platformOverview",
+    "resourceDenylist.configurationTab",
     "systemConfig.tabs.parameters",
   ]);
   fireEvent.click(screen.getByRole("tab", { name: "quota.platformOverview" }));

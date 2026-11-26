@@ -80,6 +80,22 @@ def test_ut_be_tlm_034_platform_defaults_match_deployment_example():
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [("startup", "startup"), ("fixed_replicas", "fixed_replicas"), ("maintenance", "fixed_replicas")],
+)
+def test_recovery_mode_accepts_existing_deployment_configuration(value, expected):
+    result = subprocess.run(
+        [sys.executable, "-c", "from backend.contracts.constants.environment import NEXENT_RECOVERY_MODE; print(NEXENT_RECOVERY_MODE)"],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "NEXENT_RECOVERY_MODE": value},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == expected
+
+
+@pytest.mark.parametrize(
     ("variable", "value"),
     [
         ("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS", "7"),

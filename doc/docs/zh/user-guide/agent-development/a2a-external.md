@@ -4,7 +4,7 @@ Nexent 支持通过 **A2A（Agent-to-Agent）协议**接入第三方 Agent，让
 
 ## 🤝 协作 Agent 的来源
 
-在 **智能体开发 → 协作 Agent** 中，您可以添加两类协作 Agent：
+在 **智能体配置** 页的「协作 Agent」区域中，您可以添加两类协作 Agent：
 
 - **内部 Agent**：平台已发布的智能体
 - **外部 A2A Agent**：通过 A2A 协议发现的第三方 Agent

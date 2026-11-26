@@ -39,9 +39,9 @@ export function ParamDialog({
   footer,
   children,
   variant,
-  splitLayout = false,
+  layout,
 }: {
-  splitLayout?: boolean;
+  layout?: "split" | "test";
   variant?: "skill" | "tool" | "model" | "publish";
   open: boolean;
   title: ReactNode;
@@ -64,12 +64,13 @@ export function ParamDialog({
   children: ReactNode;
 }) {
   const { t } = useTranslation("common");
+  const width = layout === "split" ? 1040 : layout === "test" ? 584 : 480;
   return (
     <Modal
       open={open}
       onCancel={onClose}
       centered
-      width={splitLayout ? "min(1040px, calc(100vw - 32px))" : 480}
+      width={layout ? `min(${width}px, calc(100vw - 32px))` : width}
       footer={null}
       closable={false}
       zIndex={zIndex}
@@ -87,7 +88,7 @@ export function ParamDialog({
       <div
         className={styles.dialog}
         data-config-variant={variant}
-        data-config-layout={splitLayout ? "split" : undefined}
+        data-config-layout={layout}
       >
         <div
           data-config-part="heading"

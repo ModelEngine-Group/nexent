@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
-from contracts.agent import AgentRequest
-from contracts.agentos import AgentOperation, PreparedEphemeralRun
+from contracts.agentos import AgentOperation, PreparedAgentCreatorRun, PreparedEphemeralRun, PreparedSkillCreatorRun
 from contracts.constants import environment
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from infrastructure.agentos_identity import ServicePrincipal, verify_call
 from management.services.agent import runtime_client as proxy
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +51,56 @@ class TrackingStream(httpx.AsyncByteStream):
 
     async def aclose(self):
         self.closed = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["nl2agent", "nl2skill"])
+@pytest.mark.parametrize("case", [
+    "saved", "no_source", "unbound", "wrong_owner", "wrong_tenant", "wrong_creator", "no_system_agent",
+])
+async def test_creator_forward_signs_only_its_saved_trajectory_scope(monkeypatch, mode, case):
+    creator_type = PreparedAgentCreatorRun if mode == "nl2agent" else PreparedSkillCreatorRun
+    payload = creator_type.model_validate({
+        "mode": mode, "run_id": "a" * 32, "input": {"query": "create"},
+        "model": {"model_id": 11, "alias": "fixture", "revision": "1"},
+        "input_budget": 512, "context_window_tokens": 1024,
+        **({"system_agent": {"agent_id": 77, "version_no": 1}} if case != "no_system_agent" else {}),
+        **({"agent_id": 201, "bound_resources": "Verified bindings"} if mode == "nl2agent" else {}),
+    })
+    received = []
+
+    async def handler(request):
+        token = request.headers["authorization"].removeprefix("Bearer ")
+        assert verify_call(token, AgentOperation.RUN_EPHEMERAL, request.content) == ServicePrincipal("owner", "tenant")
+        received.append(json.loads(request.content))
+        return httpx.Response(200, stream=TrackingStream([b"data: output\n\n"]))
+
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    metadata = AgentRunMetadata(
+        user_id="other" if case == "wrong_owner" else "owner",
+        tenant_id="other" if case == "wrong_tenant" else "tenant",
+        agent_id=201 if case == "wrong_creator" else 77,
+        conversation_id=123, is_debug=False,
+        extra_metadata={
+            **({"creator_mode": mode} if case != "unbound" else {}),
+            **({"trajectory_source_message_id": "10"} if case != "no_source" else {}),
+        },
+    )
+    with agent_monitoring_context(metadata):
+        response = await proxy.forward_creator_run(payload, "owner", "tenant")
+        assert [chunk async for chunk in response.body_iterator] == [b"data: output\n\n"]
+
+    wire, = received
+    if case in {"saved", "no_source"}:
+        assert wire["trajectory"] == {
+            "conversation_id": 123, "source_message_id": 10 if case == "saved" else None,
+        }
+    else:
+        assert "trajectory" not in wire
+    if mode == "nl2agent":
+        assert wire["agent_id"] == 201
 
 
 @pytest.mark.asyncio

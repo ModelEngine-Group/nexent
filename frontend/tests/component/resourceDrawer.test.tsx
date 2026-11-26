@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { ConfigProvider } from "antd";
 import { describe, expect, it, vi } from "vitest";
 import { ResourceDrawer } from "@/components/resource-picker/ResourceDrawer";
 import {
@@ -16,6 +17,32 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("ResourceDrawer", () => {
+  it.each([false, true])(
+    "dismisses from the mask unless confirmation is in progress (%s)",
+    (confirmLoading) => {
+      const close = vi.fn();
+      const confirm = vi.fn();
+      render(
+        <ConfigProvider drawer={{ mask: { closable: false } }}>
+          <ResourceDrawer
+            open
+            title="Resources"
+            onClose={close}
+            onConfirm={confirm}
+            confirmLoading={confirmLoading}
+          >
+            <p>Results</p>
+          </ResourceDrawer>
+        </ConfigProvider>
+      );
+      const mask = document.querySelector(".ant-drawer-mask");
+      expect(mask).toBeInTheDocument();
+      fireEvent.click(mask!);
+      expect(close).toHaveBeenCalledTimes(confirmLoading ? 0 : 1);
+      expect(confirm).not.toHaveBeenCalled();
+    }
+  );
+
   it.each([
     [false, false],
     [true, false],

@@ -2,18 +2,27 @@
 """Unit coverage for shared keys, collection and model statistics."""
 
 import json
-from datetime import date, timedelta
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import Mock, call
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from nexent.monitor.facts import emit_fact, set_fact_sink
 from nexent.monitor.model_fact import AttemptObservation
 from nexent.monitor.monitoring import _MonitoredChatCompletions
 from ops.monitoring.contracts import Fact, MonitoringKind, day_id
+from ops.monitoring.mcp_tool import (
+    MCP_TOOL_MONITORING,
+    McpToolFact,
+    accumulate_mcp_tool,
+    summarize as summarize_mcp_tool,
+)
+from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, summarize
 from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, accumulate_skill, summarize
 from infrastructure.monitoring.runtime import Producer
 from ops.monitoring.search import delete_documents, install_templates
@@ -24,6 +33,15 @@ def fact(**overrides):
     return ModelFact.model_validate({
         "tenant_id": "tenant", "fact_id": "attempt", "call_context_id": "request",
         "model_id": 7, "model_type": "llm", "started_at": "2026-10-31T17:00:00Z",
+        "record_revision": 1, "outcome": "started", **overrides,
+    }).document(ZoneInfo("Asia/Shanghai"))
+
+
+def tool_fact(**overrides):
+    return McpToolFact.model_validate({
+        "tenant_id": "tenant", "fact_id": "invocation", "call_context_id": "run",
+        "tool_name": "search_docs", "mcp_server_type": "unknown",
+        "started_at": "2026-10-31T17:00:00Z",
         "record_revision": 1, "outcome": "started", **overrides,
     }).document(ZoneInfo("Asia/Shanghai"))
 
@@ -244,3 +262,135 @@ def test_legacy_chat_shares_provider_usage_with_ops(mocker, stream):
     assert events[-1]["input_tokens"] == 0
     assert events[-1].get("output_tokens") is None
     assert events[-1]["total_tokens"] == 7
+
+
+def test_mcp_tool_fact_accepts_documented_fields():
+    item = tool_fact(
+        record_revision=2, outcome="failed", duration_ms=120, error_category="TIMEOUT",
+        mcp_server_id=3, mcp_server_name="docs", mcp_server_type="container",
+        agent_id=7, agent_run_id="run-1", root_run_id="root-1",
+        initiator_group_ids=[1, 2], trace_id="a" * 32, span_id="b" * 16,
+    )
+    assert item["fact_kind"] == "mcp_tool"
+    assert item["tool_name"] == "search_docs"
+    assert item["mcp_server_type"] == "container"
+    assert item["error_category"] == "TIMEOUT"
+    assert item["trace_id"] == "a" * 32
+
+
+def test_mcp_tool_fact_rejects_unknown_fields_and_invalid_enums():
+    with pytest.raises(ValidationError):
+        tool_fact(tool_arguments={"q": "secret"})
+    with pytest.raises(ValidationError):
+        tool_fact(mcp_server_type="bogus")
+    with pytest.raises(ValidationError):
+        tool_fact(outcome="started", duration_ms=10)
+    with pytest.raises(ValidationError):
+        tool_fact(error_category="not_upper")
+
+
+def test_mcp_tool_accumulate_groups_by_server_tool_and_agent():
+    common = dict(mcp_server_id=3, mcp_server_name="docs", mcp_server_type="container")
+    rows = [
+        tool_fact(outcome="succeeded", duration_ms=40, agent_id=7, agent_run_id="run-1", **common),
+        tool_fact(outcome="failed", duration_ms=60, error_category="TIMEOUT", agent_id=7, agent_run_id="run-1", **common),
+        tool_fact(outcome="cancelled", duration_ms=200, agent_id=7, agent_run_id="run-1", **common),
+        tool_fact(outcome="started", agent_id=7, agent_run_id="run-1", **common),
+        tool_fact(outcome="succeeded", duration_ms=10, agent_id=8, agent_run_id="run-2", **common),
+        # Initiator groups stay on the fact envelope but no longer split daily rows.
+        tool_fact(outcome="succeeded", duration_ms=5, agent_id=7, agent_run_id="run-1", initiator_group_ids=[9], **common),
+        tool_fact(outcome="succeeded", duration_ms=7, mcp_server_id=4, mcp_server_name="other",
+                  mcp_server_type="remote", agent_id=7, agent_run_id="run-1"),
+        tool_fact(outcome="succeeded", duration_ms=3, **common),
+    ]
+    result = dict(accumulate_mcp_tool(rows))
+    assert len(result) == 4
+    # Rows only carry dimensions present on the group's facts (exclude_none documents).
+    grouped = {
+        (row.get("mcp_server_id"), row.get("agent_id"), row["has_agent_run"],
+         row.get("mcp_server_name"), row.get("mcp_server_type")): row
+        for row in result.values()
+    }
+    main = grouped[(3, 7, True, "docs", "container")]
+    assert main["request_count"] == 5
+    assert main["error_count"] == 1
+    assert main["error_eligible_count"] == 3
+    assert main["duration_ms_sum"] == 105
+    assert main["duration_ms_sample_count"] == 3
+    assert grouped[(3, 8, True, "docs", "container")]["duration_ms_sum"] == 10
+    assert grouped[(4, 7, True, "other", "remote")]["duration_ms_sum"] == 7
+    unattributed = grouped[(3, None, False, "docs", "container")]
+    assert unattributed["request_count"] == 1
+    assert unattributed["duration_ms_sum"] == 3
+    # Daily rows no longer carry the initiator-group dimensions of the old design.
+    assert all("initiator_group_ids" not in row and "group_key" not in row
+               and "group_snapshot_state" not in row for row in result.values())
+
+
+def test_mcp_tool_summarize_excludes_cancellation_from_duration():
+    rows = [
+        tool_fact(outcome="succeeded", duration_ms=40),
+        tool_fact(outcome="failed", duration_ms=60),
+        tool_fact(outcome="cancelled", duration_ms=200),
+    ]
+    result = summarize_mcp_tool(row for _, row in accumulate_mcp_tool(rows))
+    assert result["request_count"] == 3
+    assert result["error_eligible_count"] == 2
+    assert result["error_rate"] == 0.5
+    assert result["avg_duration_ms"] == 50
+
+
+def test_mcp_tool_revision_replay_and_terminal_precedence():
+    started = tool_fact()
+    completed = tool_fact(record_revision=2, outcome="succeeded", duration_ms=50)
+    assert _apply_revision(started, completed)
+    assert not _apply_revision({**completed, "write_version": 3}, completed)
+    assert not _apply_revision(completed, started)
+    with pytest.raises(ValueError, match="Conflicting"):
+        _apply_revision(completed, {**completed, "duration_ms": 999})
+
+
+def test_mcp_tool_templates_merge_alongside_model_fields_without_conflict():
+    es = Mock()
+    es.indices.get.return_value = []
+    install_templates(es, 0, [MODEL_MONITORING, MCP_TOOL_MONITORING])
+    template_calls = [c for c in es.mock_calls if c[0] == "indices.put_index_template"]
+    assert len(template_calls) == 2
+    facts_fields, daily_fields = (
+        c.kwargs["template"]["mappings"]["properties"] for c in template_calls
+    )
+    assert facts_fields["tool_name"]["type"] == "keyword"
+    assert facts_fields["mcp_server_type"]["type"] == "keyword"
+    assert facts_fields["model_type"]["type"] == "keyword"
+    assert facts_fields["error_category"]["type"] == "keyword"
+    assert daily_fields["mcp_server_id"]["type"] == "integer"
+    assert daily_fields["has_agent_run"]["type"] == "boolean"
+    assert daily_fields["duration_ms_sum"]["type"] == "long"
+
+    conflicting = MonitoringKind(McpToolFact, accumulate_mcp_tool, fact_fields={"tool_name": "long"})
+    with pytest.raises(ValueError, match="Incompatible monitoring mapping for tool_name"):
+        install_templates(Mock(), 0, [MODEL_MONITORING, MCP_TOOL_MONITORING, conflicting])
+
+
+def test_producer_drain_groups_mcp_tool_batches_separately_from_model():
+    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), {"model": ModelFact, "mcp_tool": McpToolFact})
+    producer.emit({
+        "tenant_id": "tenant", "fact_kind": "model", "fact_id": "attempt", "call_context_id": "request",
+        "model_type": "llm", "started_at": "2026-10-31T17:00:00Z", "record_revision": 1, "outcome": "started",
+    })
+    producer.emit({
+        "tenant_id": "tenant", "fact_kind": "mcp_tool", "fact_id": "invocation", "call_context_id": "run",
+        "tool_name": "search_docs", "mcp_server_type": "unknown",
+        "started_at": "2026-10-31T17:00:00Z", "record_revision": 1, "outcome": "started",
+    })
+    producer.emit({
+        "tenant_id": "other", "fact_kind": "mcp_tool", "fact_id": "invocation", "call_context_id": "run",
+        "tool_name": "search_docs", "mcp_server_type": "unknown",
+        "started_at": "2026-10-31T17:00:00Z", "record_revision": 1, "outcome": "started",
+    })
+
+    batches = producer.drain()
+    assert {kind for _, _, kind, _, _ in batches} == {"model", "mcp_tool"}
+    grouped = {(tenant, kind): json.loads(payload) for _, tenant, kind, payload, _ in batches}
+    assert [item["fact_kind"] for item in grouped[("tenant", "mcp_tool")]] == ["mcp_tool"]
+    assert [item["fact_kind"] for item in grouped[("tenant", "model")]] == ["model"]

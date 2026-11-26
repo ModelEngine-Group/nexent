@@ -24,14 +24,18 @@ _DATA_LEAK_KEYS = ('value', 'total_count', 'permissions', 'kds_id', 'group_ids')
 
 @pytest_asyncio.fixture
 async def isolated_aidp_users():
-    async with client('config') as api:
-        contract = await api.get('/openapi.json')
-    assert_status(contract, 200)
-    if '/aidp-mgmt/knowledge-bases' not in contract.json().get('paths', {}):
+    # The gateway no longer serves OpenAPI, so probe a registered AIDP route with
+    # an authenticated super admin: 404 means the AIDP management routes are
+    # absent from this deployment.
+    manager = await sign_in('super_admin')
+    async with client('config', token=manager.access_token) as api:
+        probe = await api.get('/aidp-mgmt/knowledge-bases')
+    if probe.status_code == 404:
         raise AssetDependencyError(
             'services', 'aidp_management',
             detail='ENABLE_AIDP_KNOWLEDGE is disabled in this deployment; AIDP management routes are absent',
         )
+    assert_status(probe, 200)
     async with isolated_accounts(('tenant_a_user', 'tenant_a_user2', 'tenant_a_admin')) as users:
         yield users
 

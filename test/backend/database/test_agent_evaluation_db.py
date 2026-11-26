@@ -199,6 +199,27 @@ class TestUpdateAgentEvaluationStatus:
         assert "score_overall" not in updates
         assert "progress_done" not in updates
 
+    def test_terminal_write_checks_expected_status_in_caller_transaction(self, session_factory):
+        from management.db.evaluation import runs as agent_evaluation_db
+
+        session, get_db_session = session_factory
+        query = self._wire_chain(session)
+        agent_evaluation_db.update_agent_evaluation_status(
+            agent_evaluation_id=7, tenant_id="tenant", status="COMPLETED", updated_by="actor",
+            expected_status="RUNNING", db_session=session,
+        )
+
+        get_db_session.assert_called_once_with(session)
+        identities, state = [entry.args for entry in query.filter.call_args_list]
+        assert {condition.left.key: condition.right.value for condition in identities} == {
+            "agent_evaluation_id": 7, "tenant_id": "tenant",
+        }
+        assert {condition.left.key: condition.right.value for condition in state} == {
+            "status": "RUNNING", "delete_flag": "N",
+        }
+        query.update.assert_called_once_with({"status": "COMPLETED", "updated_by": "actor"}, synchronize_session=False)
+        session.commit.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # claim_agent_evaluation_run
@@ -224,7 +245,7 @@ class TestClaimAgentEvaluationRun:
             "status": "RUNNING",
             "updated_by": "u1",
         }
-        session.commit.assert_called_once_with()
+        session.commit.assert_not_called()
 
     def test_returns_false_when_run_was_claimed(self, session_factory):
         from management.db.evaluation import runs as agent_evaluation_db
@@ -233,7 +254,19 @@ class TestClaimAgentEvaluationRun:
         self._wire_chain(session, 0)
 
         assert agent_evaluation_db.claim_agent_evaluation_run(7, "t1") is False
-        session.commit.assert_called_once_with()
+        session.commit.assert_not_called()
+
+    def test_claim_uses_transaction_owned_by_the_caller(self, session_factory):
+        from management.db.evaluation import runs as agent_evaluation_db
+
+        session, open_session = session_factory
+        query = self._wire_chain(session, 1)
+
+        assert agent_evaluation_db.claim_agent_evaluation_run(7, "t1", "u1", db_session=session)
+        open_session.assert_called_once_with(session)
+        filters = [str(condition) for condition in query.filter.call_args.args]
+        assert any("delete_flag" in condition for condition in filters)
+        session.commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1072,6 +1105,8 @@ class TestCleanupAgedEvaluations:
 
         deleted = agent_evaluation_db.cleanup_aged_evaluations("t1", retention_days=30)
         assert deleted == 2
+        _, _, terminal_status = queries[0].filter.call_args.args
+        assert terminal_status.right.value == ["COMPLETED", "FAILED"]
         hard_delete.assert_called_once_with(10, "t1")
         session.commit.assert_called_once()
 
@@ -1116,7 +1151,12 @@ class TestReapStaleRuns:
         assert n == 2
         assert queries[1].update.called
         assert queries[2].update.called
-        session.commit.assert_called_once()
+        tenant, status, stale_before, deleted = queries[0].filter.call_args.args
+        assert tenant.right.value == "t1"
+        assert status.right.value == "RUNNING"
+        assert stale_before.left.name == "update_time"
+        assert deleted.right.value == "N"
+        session.commit.assert_not_called()
 
     def test_no_stale_runs(self, session_factory):
         from management.db.evaluation import runs as agent_evaluation_db

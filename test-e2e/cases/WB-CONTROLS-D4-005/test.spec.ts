@@ -295,12 +295,7 @@ journey("WB-CONTROLS-D4-005", async ({ page, contract }) => {
           .locator('[data-picker-part="footer"]')
           .getByRole("button", { name: "关闭", exact: true })
           .click();
-        await expect(
-          page.getByRole("button", {
-            name: "Agent · Internal Analyst",
-            exact: true,
-          }),
-        ).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体");
         await page.getByRole("button", { name: "智能体", exact: true }).click();
         await expect(
           drawer.getByRole("button", { name: "编辑", exact: true }),
@@ -372,13 +367,8 @@ journey("WB-CONTROLS-D4-005", async ({ page, contract }) => {
         await expect(drawer).toHaveCount(0);
         await expect(
           page.getByRole("button", { name: "智能体", exact: true }),
-        ).toHaveText("智能体");
-        await expect(
-          page.getByRole("button", {
-            name: "Agent · Internal Analyst",
-            exact: true,
-          }),
-        ).toBeVisible();
+        ).toHaveText("智能体1");
+
         await page.getByRole("button", { name: "技能", exact: true }).click();
         await expect(
           drawer.getByRole("option", { name: "Invoice Skill", exact: true }),

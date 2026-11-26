@@ -1243,11 +1243,12 @@ export const conversationService = {
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
+      resume_message_id?: number;
       enable_plan?: boolean;
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
-      entrypoint?: "workbench";
+      entrypoint?: "workbench" | "automation";
       workbench?: import("@/features/workbench").WorkbenchSessionConfig;
       expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
@@ -1363,6 +1364,9 @@ export const conversationService = {
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
         queryParams.append("resume", "true");
+        if (params.resume_message_id !== undefined) {
+          requestParams.resume_message_id = params.resume_message_id;
+        }
       }
       if (queryParams.toString()) {
         url = `${url}?${queryParams.toString()}`;

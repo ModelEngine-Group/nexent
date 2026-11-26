@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Kubernetes container client implementation
 
@@ -306,16 +308,18 @@ class KubernetesContainerClient(ContainerClient):
             ),
         )
 
+        created_pod = None
+        created_service = None
         try:
             logger.info(f"Creating pod {pod_name} with image {image_name}")
-            self.core_v1.create_namespaced_pod(namespace=namespace, body=pod)
+            created_pod = self.core_v1.create_namespaced_pod(namespace=namespace, body=pod)
+            pod = created_pod
 
             if wait_for_ready:
-                # Wait for pod to be ready (returns pod with UID)
                 pod = await self._wait_for_pod_ready(pod_name, namespace)
 
             # Create service for the pod with matching labels
-            service = self._create_pod_service(pod_name, namespace, host_port or self.config.service_port, labels)
+            created_service = self._create_pod_service(pod_name, namespace, host_port or self.config.service_port, labels)
             logger.info(f"Creating service {pod_name} for pod")
 
             service_url = self._get_service_url(pod_name, host_port)
@@ -342,12 +346,38 @@ class KubernetesContainerClient(ContainerClient):
                 "container_name": pod_name,
             }
 
-        except ApiException as e:
-            logger.error(f"Kubernetes API error starting pod: {e}")
-            raise ContainerError(f"Pod startup failed: {e}")
-        except Exception as e:
-            logger.error(f"Failed to start pod: {e}")
-            raise ContainerError(f"Pod startup failed: {e}")
+        except (Exception, asyncio.CancelledError) as exc:
+            self._rollback_failed_start(pod_name, namespace, created_pod, created_service)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            logger.error("Failed to start pod %s: %s", pod_name, exc)
+            raise ContainerError(f"Pod startup failed: {exc}") from exc
+
+    def _rollback_failed_start(
+        self,
+        name: str,
+        namespace: str,
+        pod: client.V1Pod | None,
+        service: client.V1Service | None,
+    ) -> None:
+        """Delete only resources created by this start attempt."""
+        for resource, delete in (
+            (service, self.core_v1.delete_namespaced_service),
+            (pod, self.core_v1.delete_namespaced_pod),
+        ):
+            if resource is None:
+                continue
+            try:
+                delete(
+                    name=name,
+                    namespace=namespace,
+                    body=client.V1DeleteOptions(preconditions=client.V1Preconditions(uid=resource.metadata.uid)),
+                )
+            except ApiException as exc:
+                if exc.status != 404:
+                    logger.warning("Failed to roll back %s %s: %s", resource.kind, name, exc)
+            except Exception as exc:
+                logger.warning("Failed to roll back %s %s: %s", resource.kind, name, exc)
 
     async def _wait_for_pod_ready(self, pod_name: str, namespace: str, timeout: int = 120):
         """Wait for pod to be ready and return the pod object."""

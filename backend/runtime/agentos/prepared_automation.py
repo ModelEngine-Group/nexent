@@ -20,21 +20,38 @@ def materialize_automation_tool(resource, actor: ServicePrincipal, reference: Ag
         raise ValueError("Unsupported prepared automation proposal binding")
 
     def create_proposal(_model_text):
-        operation = ManagementOperation.AUTOMATION_PROPOSAL
-        body = reference.model_dump_json().encode("utf-8")
         try:
-            token = sign_call(operation, body, actor)
+            url, options = _proposal_request(reference, actor)
             with httpx.Client(timeout=_TIMEOUT, trust_env=False, follow_redirects=False) as client:
-                response = client.post(
-                    f"{environment.MANAGEMENT_AGENTOS_URL}/api{operation.value}", content=body,
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-                payload = response.json()
+                return _proposal_response(client.post(url, **options))
         except (httpx.HTTPError, ValueError) as exc:
             raise RuntimeError("Scheduled-task proposal service is unavailable") from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("status"), str):
-            raise RuntimeError("Scheduled-task proposal service returned an invalid result")
-        return payload
 
     return {AUTOMATION_PROPOSAL_TOOL: build_automation_proposal_tool(create_proposal)}
+
+
+def _proposal_request(reference: AgentRunReference, actor: ServicePrincipal):
+    operation = ManagementOperation.AUTOMATION_PROPOSAL
+    body = reference.model_dump_json().encode("utf-8")
+    token = sign_call(operation, body, actor)
+    return f"{environment.MANAGEMENT_AGENTOS_URL}/api{operation.value}", {
+        "content": body,
+        "headers": {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    }
+
+
+def _proposal_response(response: httpx.Response) -> dict:
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("status"), str):
+        raise RuntimeError("Scheduled-task proposal service returned an invalid result")
+    return payload
+
+
+async def request_automation_proposal(reference: AgentRunReference, actor: ServicePrincipal) -> dict:
+    try:
+        url, options = _proposal_request(reference, actor)
+        async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False, follow_redirects=False) as client:
+            return _proposal_response(await client.post(url, **options))
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RuntimeError("Scheduled-task proposal service is unavailable") from exc

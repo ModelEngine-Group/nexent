@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from contracts.authentication import AuthenticatedIdentity
 from contracts.constants.constants import STATUS_SHARED
 from contracts.constants.constants import SYSTEM_TENANT_ID
 from contracts.agent import AgentRepositorySnapshot
@@ -164,18 +165,19 @@ async def import_agent_from_repository_impl(
         raise ValueError("Repository listing has no agent snapshot")
 
     snapshot = AgentRepositorySnapshot.model_validate(agent_info_json)
+    identity = AuthenticatedIdentity(user_id or "repository-import", tenant_id)
     if snapshot.skills:
         result = await import_agent_with_skills_impl(
             snapshot,
             snapshot.skills,
-            authorization,
+            identity,
             skill_resolutions=skill_resolutions,
             resolve_name_conflicts=True,
         )
     else:
         result = await import_agent_impl(
             snapshot,
-            authorization,
+            identity,
             resolve_name_conflicts=True,
         )
 

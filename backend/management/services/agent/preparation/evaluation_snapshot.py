@@ -396,7 +396,7 @@ async def prepare_conversation_snapshot(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
     if request.is_debug or (workbench is None and (
-        request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None
+        request.agent_id is None or request.entrypoint == "workbench" or conversation.get("workbench_config") is not None
     )):
         return None
     if workbench is None and native_knowledge is None and (
@@ -408,8 +408,9 @@ async def prepare_conversation_snapshot(
         )
     from infrastructure.memory_io import memory_deadline, optional_memory_io
 
+    automation_proposal_only = request.entrypoint == "automation"
     memory_query_deadline = memory_deadline()
-    memory_enabled = bool(await optional_memory_io(
+    memory_enabled = not automation_proposal_only and bool(await optional_memory_io(
         "snapshot-memory-policy", get_memory_switch, user_id, deadline=memory_query_deadline,
     ))
     compile_options = {}
@@ -486,6 +487,7 @@ async def prepare_conversation_snapshot(
     scope = PreparedConversationScope(
         **reference.model_dump(),
         memory_enabled=True if memory_enabled else None,
+        automation_proposal_only=True if automation_proposal_only else None,
         historical_context=historical_context,
         workbench_config_version=workbench.version if workbench is not None else None,
         native_knowledge=True if native_knowledge is not None else None,
@@ -513,6 +515,19 @@ async def prepare_conversation_snapshot(
         )
         if transport is not None:
             snapshot = snapshot.model_copy(update={"mcp_header_metadata": transport})
+    if snapshot is not None:
+        from contracts.constants.environment import LOCAL_MCP_SERVER, OPS_MONITORING_ENABLED
+        from management.services.mcp.addressing import get_tenant_local_mcp_server
+        from management.services.agent.monitoring_catalog import prepare_tenant_monitoring_catalog
+
+        if OPS_MONITORING_ENABLED:
+            local_server_url = get_tenant_local_mcp_server(tenant_id) if LOCAL_MCP_SERVER else None
+            catalog = await run_blocking(
+                "snapshot-monitoring-catalog", prepare_tenant_monitoring_catalog,
+                tenant_id, local_server_url, lane="control-io", owner="management",
+            )
+            if catalog is not None:
+                snapshot = snapshot.model_copy(update={"monitoring_mcp_servers": catalog})
     return snapshot
 
 
@@ -613,13 +628,14 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
     metadata = {"agent_id": agent.agent_id, "tenant_id": tenant_id, "version_no": agent.version_no}
     for tool in tools:
         builtin = EvaluationSkillTool(tool.name)
-        expected = {"local_skills_dir": environment.CONTAINER_SKILLS_PATH,
-                    "authorized_skill_names": sorted(configs)}
+        expected = {
+            "local_skills_dir": environment.CONTAINER_SKILLS_PATH,
+            "authorized_skill_names": sorted(configs),
+        }
         actual = dict(tool.params or {})
         if builtin is EvaluationSkillTool.SCRIPT:
             actual.pop("workspace_path", None)
-            expected["isolated_skills_root"] = False
-        elif builtin is EvaluationSkillTool.GUIDE:
+        if builtin in (EvaluationSkillTool.SCRIPT, EvaluationSkillTool.GUIDE):
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs

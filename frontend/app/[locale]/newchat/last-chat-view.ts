@@ -32,7 +32,8 @@ const hasDeepLinkParams = (): boolean => {
   return Boolean(
     params.get("thread_id") ||
     params.get("conversation_id") ||
-    params.get("agent_id")
+    params.get("agent_id") ||
+    params.get("entry") === "automation"
   );
 };
 

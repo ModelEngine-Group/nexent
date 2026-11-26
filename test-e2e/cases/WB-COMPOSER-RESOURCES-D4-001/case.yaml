@@ -1,0 +1,41 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-COMPOSER-RESOURCES-D4-001
+  feature_id: WB-CONTROLS
+  requirement_ids: [COMPOSER-RESOURCE-LABELS-20261126]
+  business_rule_ids: [WB-CONTROLS-RULE-001]
+  title: Display confirmed resources above the shared composer input
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Mount and remove named Agent, knowledge base and Skill resources without losing the Workbench draft.
+  preconditions:
+  - A running local frontend and page-local fixtures supply an authorized Workbench and resource catalogs.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Type an unsent draft and confirm an Agent, a knowledge base and a Skill.
+    expected: Each named label appears above the composer input and its toolbar count reflects the mount.
+  - order: 2
+    action: Remove the three resources from their labels.
+    expected: Each corresponding count clears, the resource row disappears when empty and the draft is preserved.
+  expected_results:
+  - Confirmed resources are visible and removable in the Workbench composer.
+  forbidden_side_effects:
+  - No Agent execution or persistent writes in the unsent conversation.
+  actor: Authorized Workbench user
+  journey: [Type draft, Mount resources, Verify labels, Remove resources]
+  final_business_result:
+  - The user can verify and adjust attached resources before sending.
+  failure_evidence:
+  - Browser trace, assertion evidence and intercepted writes.
+  acceptance:
+  - id: AC-01
+    description: Named composer labels reflect the mounts and removal preserves the draft.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]

@@ -23,6 +23,11 @@ title: 多模态工具
 
 ## 🧾 参数要求与行为
 
+四个工具均支持以下可选运行参数：
+
+- `selected_model_id`：指定本次调用使用的模型 ID；不传时使用平台为该工具配置的默认模型。
+- `validate_url_access`：对资源 URL 执行访问校验（由系统在运行期注入校验逻辑），拦截不可访问或越权的资源地址。
+
 ### analyze_text_file
 - `file_url_list`：文件 URL 列表，支持 `s3://bucket/key`、`/bucket/key`、`http(s)://`。
 - `query`：用户问题/分析需求。

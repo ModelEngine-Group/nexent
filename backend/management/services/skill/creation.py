@@ -19,7 +19,8 @@ def prepare_nl2skill_snapshot(
 ) -> PreparedSkillCreatorRun:
     model_scope = prepare_creator_model(request, tenant_id)
     return PreparedSkillCreatorRun(
-        mode="nl2skill", run_id=uuid4().hex, language="en" if language == "en" else "zh",
+        mode="nl2skill", run_id=getattr(request, "_creator_run_id", None) or uuid4().hex,
+        language="en" if language == "en" else "zh",
         input=build_evaluation_input(
             request.query, request.minio_files,
             [item for item in request.history or [] if item.role in {"user", "assistant"}], user_id, tenant_id,

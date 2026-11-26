@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-METRICS-D3-001
+  feature_id: RUNTIME-AUTOSCALING
+  requirement_ids:
+  - RUNTIME-AUTOSCALING-20261105
+  business_rule_ids:
+  - RUNTIME-AUTOSCALING-RULE-01
+  title: 逐 Pod 周期指标准确区分根运行、队列和释放
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 通过真实采集链路证明指标归属、周期刷新、稳定标签与执行状态一致。
+  preconditions:
+  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  - 指标出口、Prometheus 及 Adapter 已实现；可直接按 Pod 抓取并查询 Adapter，采集/过期周期由本地执行配置明确给出。
+  test_data:
+    scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
+    model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
+    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+  steps:
+  - order: 1
+    action: 在 A/B 空闲状态连续跨越多个采集周期抓取逐 Pod 数据并经 Adapter 查询。
+    expected: 每个 Pod 均有当前样本，空闲计数为 0，不依赖线程事件触发；抓取目标没有经过随机 Service 聚合。
+  - order: 2
+    action: 在两实例分别建立根 Agent、嵌套子 Agent/模型工具任务、Creator、评测及受控语音会话，制造 PREPARING、RUNNING、FINALIZING 与队列状态。
+    expected: 根执行只计一次；独立工作负载维度和 lane/队列值可区分，准备与收尾仍占容量。
+  - order: 3
+    action: 释放部分根运行并制造局部拒绝，再对照 DB 预约、真实 worker 及 Adapter 聚合。
+    expected: 指标与各 Pod 当前事实相符；排队/等待/拒绝与活动运行区分，收尾完成才减少已占容量。
+  - order: 4
+    action: 停止一个采集目标跨越过期窗口，随后恢复；检查标签和清理全部测试负载。
+    expected: 缺失/过期样本被识别而非 0；标签没有 tenant/user/conversation/execution ID，恢复后周期刷新，资源清理完成。
+  expected_results:
+  - 逐 Pod 与 Adapter 的周期值可对照真实状态，空闲仍刷新。
+  - 根/子运行、准备/收尾、队列与多业务维度计数准确。
+  - 过期数据不伪装零值；标签低基数，清理完整。
+  forbidden_side_effects:
+  - 以随机 Service 单次快照当作全副本总量，或重复计入子线程。
+  - 把缺失样本补成 0，标签含用户/会话/执行标识，或抓取导致业务状态改变。
+  acceptance:
+  - id: AC-P2-001
+    description: 逐 Pod 周期采集、状态计数和缺失样本语义。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  tags:
+  - phase-3
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    primary_domain: runtime
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  integration_boundary:
+  - 真实 Runtime 执行/预约/线程→逐 Pod 指标端点→Prometheus→自定义指标 Adapter。
+  observations:
+  - 同一时间窗的 Pod 样本、标签、时间戳、DB 活动根预约、worker/lane 队列和 Adapter 返回。
+  cleanup:
+  - 停止受控负载并核对容量归零；恢复采集目标，仅删除本次拥有的监控实例与测试数据。

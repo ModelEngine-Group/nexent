@@ -148,6 +148,17 @@ def account_data_complete(state):
     return False
 
 
+def merged_migration_section(name):
+    """Read one source section out of the consolidated v2.9.0 migration bundle."""
+    bundle = (ROOT / "deploy/sql/migrations/v2.9.0_merged_migrations.sql").read_text(encoding="utf-8")
+    marker = f"-- Source migration: {name}"
+    start = bundle.index(marker)
+    end = bundle.find("-- Source migration: ", start + len(marker))
+    section = bundle[start:] if end == -1 else bundle[start:end]
+    # Drop the two section header lines; the body matches the historical file.
+    return section.split("\n", 2)[2]
+
+
 def _account_import_sql(source_rows, *, dry_run=False):
     """Build one credential/schema transaction body, shared by host and psql."""
     rows = [map_source_user(row) for row in source_rows]
@@ -158,8 +169,8 @@ def _account_import_sql(source_rows, *, dry_run=False):
         ids.add(row["user_id"])
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
-    schema = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
-    roles_schema = (ROOT / "deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql").read_text(encoding="utf-8")
+    schema = merged_migration_section("v2.9.0_001_local_user_accounts.sql")
+    roles_schema = merged_migration_section("v2.9.0_010_account_and_ops_roles.sql")
     return "SET LOCAL standard_conforming_strings=on;\n" + inspection_sql() + r"""
 SET LOCAL nexent.account_import='on';
 """ + schema + "\n" + roles_schema + "\n" + r"""

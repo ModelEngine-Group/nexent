@@ -50,6 +50,60 @@ async def test_delete_documents_file_id_contract(tenant_a_admin, tenant_b_admin)
         register_owned_http(tenant_a_admin, 'owned_knowledge_bases', index_name,
                             f'/indices/{index_name}')
 
+        # Manual chunk maintenance: create -> list -> update -> delete. The
+        # manual chunk content is what the UI downloads, so the round-trip is
+        # asserted here instead of a separate download endpoint.
+        chunk_content = f"manual chunk content {run_id}"
+        chunk_updated = f"manual chunk updated {run_id}"
+        async with client("config", token=tenant_a_admin.access_token) as api:
+            created_chunk = await api.post(
+                f"/indices/{index_name}/chunk",
+                json={
+                    "content": chunk_content,
+                    "title": f"chunk-{run_id}",
+                    "filename": f"manual_{run_id}.txt",
+                    "path_or_url": f"manual/manual_{run_id}.txt",
+                },
+            )
+        assert_status(created_chunk, 200)
+        chunk_id = (created_chunk.json() or {}).get("chunk_id")
+        assert chunk_id, f"chunk creation returned no id: {created_chunk.text}"
+
+        async def _list_chunks():
+            async with client("config", token=tenant_a_admin.access_token) as api:
+                response = await api.post(
+                    f"/indices/{index_name}/chunks",
+                    params={"page": 1, "page_size": 100},
+                )
+            assert_status(response, 200)
+            return response.json().get("chunks", [])
+
+        listed_chunks = await _list_chunks()
+        listed = next((item for item in listed_chunks if str(item.get("id")) == str(chunk_id)), None)
+        assert listed is not None, "created chunk is missing from the index listing"
+        assert listed.get("content") == chunk_content
+        assert listed.get("title") == f"chunk-{run_id}"
+
+        async with client("config", token=tenant_a_admin.access_token) as api:
+            updated_chunk = await api.put(
+                f"/indices/{index_name}/chunk/{chunk_id}",
+                json={"content": chunk_updated},
+            )
+        assert_status(updated_chunk, 200)
+        updated_listing = await _list_chunks()
+        updated = next((item for item in updated_listing if str(item.get("id")) == str(chunk_id)), None)
+        assert updated is not None, "updated chunk disappeared from the index listing"
+        assert updated.get("content") == chunk_updated
+        assert updated.get("title") == f"chunk-{run_id}"
+
+        async with client("config", token=tenant_a_admin.access_token) as api:
+            deleted_chunk = await api.delete(f"/indices/{index_name}/chunk/{chunk_id}")
+        assert_status(deleted_chunk, 200)
+        remaining = await _list_chunks()
+        assert all(str(item.get("id")) != str(chunk_id) for item in remaining), (
+            "deleted chunk is still listed"
+        )
+
         async with client("config", token=tenant_a_admin.access_token) as api:
             missing = await api.delete(f"/indices/{index_name}/documents")
         assert_status(missing, 400)

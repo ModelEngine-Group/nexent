@@ -156,6 +156,7 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+_concurrency_module.ManagedThreadSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
 _concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
@@ -1104,6 +1105,16 @@ async def test_update_agent_info_impl_reraises_agent_quota_error(mock_update_age
     with pytest.raises(TenantResourceLimitError) as exc_info:
         await update_agent_info_impl(request, identity=AuthenticatedIdentity('test_user', 'test_tenant'))
     assert exc_info.value is limit_error
+
+
+@pytest.fixture(autouse=True)
+def _empty_tool_denylist(mocker):
+    from management.services.configuration import resource_denylist
+
+    mocker.patch.object(
+        resource_denylist, "load_tool_denylist",
+        return_value=resource_denylist.ToolDenylist(frozenset(), frozenset()),
+    )
 
 
 @patch('management.services.agent.service.query_tools_by_ids')

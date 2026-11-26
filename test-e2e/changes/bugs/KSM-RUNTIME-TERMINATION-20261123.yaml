@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-RUNTIME-TERMINATION-20261123
+  change_type: bugfix
+  bug_id: KSM-RUNTIME-TERMINATION-20261123
+  title: Recover previous Runtime processes after Kubernetes overwrites lastState
+  description: Accept a verified successor of the same regular Runtime container as termination evidence for an older PID 1 owner.
+  observed_behavior: Multiple container restarts in the same Pod can overwrite the termination record for an older Runtime owner and block startup recovery.
+  expected_behavior: Verify and persist Runtime process termination from the current container and protected process identities, and require independent proof for any previous SYSTEM execution.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Recovery tests do not exercise a same-Pod successor after the oldest Runtime container has disappeared from Pod status.
+  feature_contract_changed: false
+  affected_features:
+    existing: [KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [KSM-MULTIRUNTIME-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/agents/test_sandbox_owner.py::test_pid1_replacement_requires_a_verified_current_container
+      - test/backend/agents/test_sandbox_recovery.py::test_startup_recovers_replaced_runtime_older_than_last_state
+    behaviors:
+      - Confirm termination using the same Pod UID and regular Runtime container, a private PID namespace, and the recorded PID 1 identities.
+      - Persist termination and recover the stale run once, while keeping a run active if the previous SYSTEM sandbox cannot be proved stopped.
+      - Keep ambiguous or cross-Pod observations unresolved.
+    reason: Exercise both the owner evidence boundary and the startup recovery entry point with a protected journal.

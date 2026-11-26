@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-PATCH-COVERAGE-20261125
+  change_type: test-fix
+  title: Backfill monitoring and creator trajectory unit coverage
+  description: >-
+    Exercise local capture initialization, remote token event routing,
+    metadata filtering, and persisted creator runs without a source message.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    CHAT-TRAJECTORY-CAPTURE-D3-001 already verifies sink coexistence, local
+    attribute filtering, and creator archive attribution at runtime. These
+    tests cover unit-level registration, event routing, and optional metadata.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Local capture initializes a provider when needed and attaches to an existing remote provider once.
+    - Duplicate registration accepts the same processor and rejects a different processor.
+    - Dual capture routes token events to the remote logical span and retains TTFT on the physical attempt.
+    - Remote metadata omits local trajectory identifiers and persisted NL2Agent and NL2Skill runs allow a missing source message ID.
+    reason: >-
+      Prior sink tests checked exporter selection but did not attach local capture
+      after startup. The existing attempt and creator tests covered local-only
+      attempts and saved turns with a source message. PR 4412 was at 89.31 percent
+      patch coverage against a 90 percent target.
+    test_selectors:
+    - test/sdk/monitor/test_monitoring_local_sink.py
+    - test/sdk/core/model_service/test_model_attempt_capture.py
+    - test/backend/app/test_agentos_ephemeral_lifecycle.py
+  notes: >-
+    Tested the working tree at d60a4e82b against PR base fde32ee7e.
+    With pytest-cov branch tracking, 306 targeted unit tests passed across 11
+    test files. The combined local report fully covers 129 of 131 changed Python
+    lines (98.47 percent), counting partial lines as misses. The Codecov check
+    still requires a fresh CI run.

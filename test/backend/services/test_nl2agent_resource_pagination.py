@@ -9,6 +9,10 @@ from management.services.agent import nl2agent as nl2agent_service
 
 @pytest.fixture
 def repository_pages(mocker):
+    from management.services.configuration.resource_denylist import ToolDenylist
+
+    mocker.patch("management.services.configuration.resource_denylist.load_tool_denylist",
+                 return_value=ToolDenylist(frozenset(), frozenset()))
     mocker.patch("management.services.skill.transfer.get_official_skills_with_status", return_value=[])
     skill_pages = mocker.patch("management.services.skill.skill_repository.list_skill_repository_listings_impl")
     mcp_pages = mocker.patch("management.services.repository.mcp.service.list_community_mcp_services")

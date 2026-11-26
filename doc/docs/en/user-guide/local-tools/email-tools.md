@@ -31,6 +31,7 @@ Email tools help agents receive notifications and send results via common mail p
 - `subject`: Email subject.
 - `content`: HTML body.
 - `cc`, `bcc`: Comma-separated CC/BCC, optional.
+- `sender_email`: Optional From address; defaults to the SMTP account username when omitted.
 - Requires SMTP host, port, username, password; optional sender display name and SSL.
 - Returns delivery status, subject, and recipient info.
 

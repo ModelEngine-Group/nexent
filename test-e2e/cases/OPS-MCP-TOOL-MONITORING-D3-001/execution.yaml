@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: OPS-MCP-TOOL-MONITORING-D3-001
+timeout_seconds: 240
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_mcp_tool_call_publication
+acceptance_bindings:
+  AC-01: [test_mcp_tool_call_publication]
+  AC-02: [test_mcp_tool_call_publication]
+  AC-03: [test_mcp_tool_call_publication]
+  AC-04: [test_mcp_tool_call_publication]
+  AC-05: [test_mcp_tool_call_publication]
+  AC-06: [test_mcp_tool_call_publication]
+  AC-07: [test_mcp_tool_call_publication]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The case owns a real MCP streamable-http stub on loopback ports and a unique database plus the monitoring namespace of an explicitly isolated Elasticsearch instance.

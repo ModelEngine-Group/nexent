@@ -23,14 +23,14 @@ from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     import_users,
     read_source_users,
 )
-from infrastructure.security.passwords import verify_password
+from management.utils.account_passwords import verify_password
 from local_auth import disposable_database
+from shared.merged_migrations import merged_migration_sql
 
 
 def availability_sql():
-    directory = ROOT / "deploy/sql/migrations"
-    account_sql = (directory / "v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
-    roles_sql = (directory / "v2.9.0_010_account_and_ops_roles.sql").read_text(encoding="utf-8")
+    account_sql = merged_migration_sql("v2.9.0_001_local_user_accounts.sql")
+    roles_sql = merged_migration_sql("v2.9.0_010_account_and_ops_roles.sql")
     return (
         account_sql + "\nSET LOCAL nexent.account_import = 'on';\n" + roles_sql
         + "\nSET LOCAL nexent.account_import = 'off';\n"
@@ -84,7 +84,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
     from management.db import models
     from infrastructure.rdb.client import db_client
 
-    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    sql = merged_migration_sql("v2.9.0_001_local_user_accounts.sql")
     with disposable_database() as dsn:
         params = parse_dsn(dsn)
         engine = create_engine(URL.create("postgresql+psycopg2", username=params["user"], password=params["password"], host=params["host"], port=int(params["port"]), database=params["dbname"]))
@@ -451,7 +451,7 @@ def test_account_profile_single_sql_upgrade_and_replay():
 
 @pytest.mark.parametrize("role,email", [("SU","same@example.com"),("USER","different@example.com")])
 def test_account_profile_conflict_rolls_back_single_sql(role, email):
-    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    sql = merged_migration_sql("v2.9.0_001_local_user_accounts.sql")
     with disposable_database() as dsn:
         with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
             cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N')")

@@ -1,10 +1,16 @@
 # ModelEngine Data Engineering and Model Engineering Integration Guide
 
-This document provides a detailed guide on how to integrate ModelEngine's Data Engineering (DataMate) and Model Engineering (ModelLite) in the Nexent platform.
+This document describes how to integrate ModelEngine's model engineering (ModelLite) and data engineering (DataMate) in the Nexent platform, and the scope of the related deployment switch.
 
 ## 1. ModelEngine Overview
 
 ModelEngine provides an end-to-end AI toolchain for data processing, knowledge generation, model fine-tuning and deployment, as well as RAG (Retrieval Augmented Generation) application development. It aims to shorten the cycle from data to model, and from data to AI application deployment. ModelEngine offers low-code orchestration, flexible execution scheduling, high-performance data bus and other technologies. Combined with built-in data processing operators, RAG framework and extensive ecosystem capabilities, it provides data development engineers, model development engineers, and application development engineers with an efficient, easy-to-use, open, flexible, out-of-the-box, and lightweight full-process AI development experience.
+
+ModelEngine integration is controlled by the deployment switch `MODEL_ENGINE_ENABLED` (disabled by default; set it to `true` in deployment environment variables). The switch affects:
+
+- Whether the "Sync ModelEngine Models" button appears on the Model Configuration page
+- Whether the "DataMate Configuration" button appears on the Knowledge Base Configuration page, and the DataMate connection test
+- The behavior of the knowledge base "Sync" button (when enabled, both local and DataMate knowledge bases are synced)
 
 ## 2. Integrating Model Engineering (ModelLite)
 
@@ -12,120 +18,120 @@ ModelEngine provides an end-to-end AI toolchain for data processing, knowledge g
 
 ModelLite is a toolchain for model fine-tuning and model inference, hosting and providing access to various AI models. After integrating ModelLite model services in Nexent, you can:
 
-- Sync all models deployed on the ModelEngine platform
-- Use Large Language Models (LLM) for conversation generation
-- Use Embedding models for knowledge base processing
-- Use Vision Language Models (VLM) for image processing
+- Import all models deployed on the ModelEngine platform
+- Use LLMs (Large Language Models) for conversation generation
+- Use embedding models for knowledge base processing
+- Use VLMs (Vision Language Models) to process images
 
-### 2.2 Configuration Steps
+### 2.2 Configuration steps
 
-#### Step 1: Obtain ModelEngine Credentials
+#### Step 1: Obtain ModelEngine access credentials
 
 1. Visit your ModelEngine platform
 2. Create an API Key (for authentication)
-3. Record the ModelEngine host address (format: `https://<host>:<port>`)
+3. Note the ModelEngine service address (format: `https://<host>:<port>`)
 
-> ⚠️ **Note**: Make sure you have deployed the required models on ModelEngine, otherwise you won't see any models after syncing.
+> ⚠️ **Note**: Make sure the required models are already deployed on the ModelEngine platform, otherwise the model list will be empty after import.
 
-#### Step 2: Configure ModelEngine Models in Nexent
+#### Step 2: Batch import ModelEngine models in Nexent
 
-1. Log in to Nexent platform
-2. Go to **Model Management** page
-3. Click **Sync ModelEngine Configuration** button in **Model Settings** (when deploying Nexent, need to change the value of MODEL_ENGINE_ENABLED variable to True in the .env file)
-4. Fill in the following information in the popup:
-   - **Host Address**: ModelEngine service URL (e.g., `https://<host>:<port>`)
-   - **Model Type**: Select the model type to integrate
-   - **API Key**: ModelEngine API Key
-5. After configuration, click **Get Models** button. The system will automatically fetch all available models deployed on ModelEngine. Enable the models as needed.
-6. Successfully synced models will appear in the model list, marked with "ModelEngine" as the source.
+1. Sign in to the Nexent platform and open the Model Configuration page
+2. Select the **Sync ModelEngine Models** button (visible only when `MODEL_ENGINE_ENABLED` is enabled and the account has model management permissions). The Add Model dialog opens on the **Batch Add** tab
+3. Under **Import from provider**, choose the provider **ModelEngine**:
+   - **Base URL**: auto-filled with the ModelEngine service address, editable
+   - **API Key**: the API Key created on the ModelEngine platform
+   - Expand advanced settings to configure SSL verification, timeout, and custom headers if needed
+4. Select **Fetch Model List** to pull all available models deployed on ModelEngine
+5. **Check** the models to import in the returned list:
+   - Each row allows changing the model type (LLM, Embedding, Rerank, STT, TTS, VLM, etc., auto-detected by default)
+   - Optional: run a connectivity check for one row or in batch (not required for submission)
+6. Select **Add N Models** to finish the import
+
+Imported models appear in the model list with the **ModelEngine** source badge.
+
+> 💡 **Note**: You can also import manually via Model Configuration → Add Model → Batch Add by selecting the ModelEngine provider; the result is identical to the sync button.
 
 ---
 
 ## 3. Integrating Data Engineering (DataMate)
 
-### 3.1 What is Datamate
+### 3.1 What is DataMate
 
-DataMate is an enterprise-level data processing platform for model fine-tuning and RAG retrieval. It supports core functions such as data collection, data management, operator marketplace, data cleaning, data synthesis, data annotation, data evaluation, and knowledge generation. By integrating Datamate, you can:
+DataMate is an enterprise data processing platform for model fine-tuning and RAG retrieval, supporting data collection, data management, an operator marketplace, data cleaning, data synthesis, data labeling, data evaluation, knowledge generation, and other core capabilities. By integrating DataMate, you can:
 
-- Reuse existing Datamate knowledge base resources
-- Retrieve Datamate documents in Nexent agents
+- Reuse existing DataMate knowledge base resources
+- Retrieve documents stored in DataMate within Nexent agents
 
-### 3.2 Configuration Steps
+### 3.2 Configuration steps
 
-#### Step 1: Install and Start Datamate Service
+#### Step 1: Install and start the DataMate service
 
-First, you need to deploy the Datamate service. For detailed installation instructions, refer to [Datamate Official Documentation](https://github.com/ModelEngine-Group/DataMate).
+Deploy the DataMate service first. For installation details, refer to the [DataMate documentation](https://github.com/ModelEngine-Group/DataMate).
 
-After startup, record the Datamate service address (e.g., `https://<host>:<port>`).
+After startup, note the DataMate service address (e.g., `https://<host>:<port>`).
 
-#### Step 2: Configure Datamate in Nexent
+#### Step 2: Configure DataMate in Nexent
 
-1. Log in to Nexent platform
-2. Go to **Knowledge Base** page
-3. Click **DataMate Configuration** button
-4. Fill in the Datamate server address:
-   - **Datamate URL**: Datamate service address (e.g., `https://<host>:<port>`)
-5. After configuration, click **Sync** button. The system will automatically fetch all knowledge bases from Datamate
-6. After successful sync, knowledge bases will appear in the knowledge base list, marked with source as "DataMate"
+1. Sign in to the Nexent platform and open the Knowledge Base Configuration page
+2. Select the **DataMate Configuration** button (visible only when `MODEL_ENGINE_ENABLED` is enabled)
+3. Enter the **DataMate URL** in the dialog and save. On save, the system tests the connection and syncs DataMate knowledge bases once, then shows "DataMate configuration saved"
+4. Use the **Sync** button at the top of the page at any time to refresh the list: when the switch is enabled, local and DataMate knowledge bases are shown together
 
-#### Step 3: Create or Edit Knowledge Base Retrieval Agent
+Synced knowledge bases appear in the list with the source label "from datamate".
 
-1. Go to **Agent Development** page
+> ⚠️ **Note**: DataMate knowledge bases are external read-only resources — you cannot edit their name or permissions, upload or delete files, or delete the knowledge base in Nexent; perform such changes on the DataMate platform.
+
+#### Step 3: Create or edit a knowledge retrieval agent
+
+1. Open the Agent Configuration page
 2. Create a new agent or edit an existing one
 
-#### Step 4: Add Tools
+#### Step 4: Add the tool
 
-In the agent configuration page:
+On the agent configuration page:
 
-1. Find the **Tool Configuration** section
-2. Click **Local Tools > Search** button
-3. Select `datamate_search` tool from the tool list: for retrieving Datamate knowledge bases
-4. Configure `datamate_search` tool parameters:
-
-   a) Fill in the Datamate server address (usually auto-filled from your previous configuration)
-
-   b) Click **Select Knowledge Base** button
-
-   c) Select Datamate knowledge bases to retrieve from the knowledge base list (multiple selection supported)
-
-   d) Click **Confirm** to save configuration
+1. Locate the tool management area and add the `datamate_search` tool to the agent
+2. Select **Configure** on the tool row:
+   - **server_url**: the Datamate server address (auto-filled when a DataMate URL has been configured)
+   - Select **Select Knowledge Bases**, choose the Datamate knowledge bases to retrieve (multiple allowed), and confirm
+3. The configuration applies to all calls of this agent
 
 ---
 
-## 4. Comprehensive Usage Example
+## 4. End-to-end example
 
-### Scenario: Creating a Knowledge Base Retrieval Agent
+### Scenario: create a knowledge retrieval agent
 
-1. **Configure ModelEngine Models**
-   - Go to Model Management page
-   - Click ModelEngine Configuration, fill in API Key and host address
-   - After syncing models, select a Large Language Model as the agent's runtime model
+1. **Import ModelEngine models**
+   - Open the Model Configuration page
+   - Select "Sync ModelEngine Models", choose the ModelEngine provider, and enter the API Key
+   - Fetch the model list, check the models to import, and pick an LLM as the agent's runtime model
 
-2. **Integrate Datamate Knowledge Base**
-   - Go to Knowledge Base page
-   - Click DataMate Configuration, fill in Datamate server address
-   - Click Sync DataMate Knowledge Bases to get available knowledge base list
+2. **Integrate DataMate knowledge bases**
+   - Open the Knowledge Base Configuration page
+   - Select "DataMate Configuration" and enter the DataMate server address
+   - Use "Sync" to fetch the available knowledge base list
 
-3. **Create Agent**
-   - Go to Agent Management, create a new agent
-   - Add `datamate_search` tool in tool configuration
-   - Select synced Datamate knowledge bases
-   - Write system prompt, for example: "You are a professional product assistant. You can answer user questions based on documents from the Datamate knowledge base."
+3. **Create the agent**
+   - Open Agent Configuration and create a new agent
+   - Add the `datamate_search` tool and select the synced Datamate knowledge bases
+   - Write a system prompt, e.g.: "You are a professional product assistant that answers user questions based on documents in the Datamate knowledge base."
 
-4. **Test Usage**
-   - Interact with the agent on the chat page
-   - Ask product-related questions, the agent will automatically retrieve relevant content from Datamate knowledge base and respond
-
----
-
-## 5. Related Resources
-
-- [Nexent Official Documentation](https://modelengine-group.github.io/nexent)
-- [ModelEngine Official Documentation](https://support.huawei.com/enterprise/zh/fusioncube/modelengine-pid-261508006)
-- [Datamate Official Documentation](https://github.com/ModelEngine-Group/DataMate)
+4. **Test and use**
+   - Interact with the agent on the Agent Chat page
+   - Ask product-related questions; the agent retrieves relevant content from the Datamate knowledge base and answers
 
 ---
 
-## 6. Technical Support
+## 5. Related resources
 
-If you encounter issues during usage, feel free to ask questions on [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)
+- [Nexent documentation](https://modelengine-group.github.io/nexent)
+- [ModelEngine documentation](https://support.huawei.com/enterprise/zh/fusioncube/modelengine-pid-261508006)
+- [DataMate documentation](https://github.com/ModelEngine-Group/DataMate)
+- [Dify Integration](./dify), [RAGFlow Integration](./ragflow), [iData Integration](./idata), [AIDP Integration](./aidp)
+
+---
+
+## 6. Technical support
+
+If you run into problems, ask in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)

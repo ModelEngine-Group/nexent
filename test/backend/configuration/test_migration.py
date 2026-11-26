@@ -7,18 +7,26 @@ from pathlib import Path
 from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
 ROOT = Path(__file__).resolve().parents[3]
+MERGED = ROOT / "deploy/sql/migrations/v2.9.0_merged_migrations.sql"
+
+
+def _section(name: str) -> str:
+    """Read one historical source section out of the consolidated bundle."""
+    text = MERGED.read_text(encoding="utf-8")
+    marker = f"-- Source migration: {name}"
+    assert marker in text
+    start = text.index(marker)
+    end = text.find("-- Source migration: ", start + len(marker))
+    block = text[start:] if end == -1 else text[start:end]
+    return block.split("\n", 2)[2]
 
 
 def _migration() -> str:
-    path = ROOT / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
-    assert path.is_file()
-    return path.read_text(encoding="utf-8")
+    return _section("v2.9.0_009_system_configuration.sql")
 
 
 def _su_migration() -> str:
-    path = ROOT / "deploy/sql/migrations/v2.9.0_014_su_system_configuration.sql"
-    assert path.is_file()
-    return path.read_text(encoding="utf-8")
+    return _section("v2.9.0_014_su_system_configuration.sql")
 
 
 def test_sql_seed_matches_the_shared_catalog_exactly():

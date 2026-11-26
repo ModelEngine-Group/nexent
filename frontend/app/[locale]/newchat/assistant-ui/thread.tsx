@@ -33,7 +33,7 @@ import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
-import { Composer, type ChatMode } from "./composer";
+import { Composer, type ChatMode, type ComposerInputTools } from "./composer";
 import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { TextSuggestion } from "@/components/agent/agent-suggestion";
 import type { AgentSuggestionItem } from "@/types/agentSuggestion";
@@ -61,10 +61,8 @@ import {
 } from "@assistant-ui/react";
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
-import {
-  ConversationArtifactsToolbarEntry,
-  ConversationArtifactsPanel,
-} from "../ui/artifacts-panel";
+import { ConversationArtifactsPanel } from "../ui/artifacts-panel";
+import { ConversationToolbar } from "./conversation-toolbar";
 import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryRail } from "../ui/question-directory-rail";
 import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
@@ -247,7 +245,7 @@ export interface ThreadProps {
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   showAgentCreationResult?: boolean;
-  composerTools?: ReactNode;
+  inputTools?: ComposerInputTools;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -272,7 +270,6 @@ export interface ThreadProps {
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
-  onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
 }
 
@@ -309,7 +306,7 @@ export const Thread: FC<ThreadProps> = ({
   modelSelectionScope = "agent",
   showConversationTitle = true,
   showAgentCreationResult = true,
-  composerTools,
+  inputTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -331,7 +328,6 @@ export const Thread: FC<ThreadProps> = ({
   interactionContent,
   workbenchPresentation,
   workbenchResources,
-  onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
@@ -586,7 +582,7 @@ export const Thread: FC<ThreadProps> = ({
               showModelSelector={showModelSelector}
               showConversationTitle={showConversationTitle}
               showAgentCreationResult={showAgentCreationResult}
-              composerTools={composerTools}
+              inputTools={inputTools}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}
@@ -610,7 +606,6 @@ export const Thread: FC<ThreadProps> = ({
               interactionContent={interactionContent}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
-              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
               hasMessages={hasMessages}
               displayName={displayName}
@@ -712,7 +707,7 @@ interface ThreadViewProps {
   showModelSelector: boolean;
   showConversationTitle: boolean;
   showAgentCreationResult: boolean;
-  composerTools?: ReactNode;
+  inputTools?: ComposerInputTools;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities: KnowledgeCapabilities | null;
@@ -759,7 +754,6 @@ interface ThreadViewProps {
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
-  onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
 }
 
@@ -777,7 +771,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   showModelSelector,
   showConversationTitle,
   showAgentCreationResult,
-  composerTools,
+  inputTools,
   knowledgeScope,
   knowledgePreview,
   knowledgeCapabilities,
@@ -821,7 +815,6 @@ const ThreadView: FC<ThreadViewProps> = ({
   interactionContent,
   workbenchPresentation,
   workbenchResources,
-  onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
@@ -988,7 +981,16 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
-        <ConversationArtifactsToolbarEntry />
+        <ConversationToolbar
+          conversationId={
+            !configurationLayout &&
+            !debugLayout &&
+            variant !== "embedded" &&
+            !isShareMode
+              ? conversationId
+              : undefined
+          }
+        />
         <QuestionDirectoryRail
           questions={questionDirectory}
           onJump={handleJumpToQuestion}
@@ -1102,6 +1104,17 @@ const ThreadView: FC<ThreadViewProps> = ({
               ))}
             <Composer
               conversationId={conversationId}
+              inputTools={inputTools}
+              knowledgeAgent={
+                onKnowledgeScopeChange &&
+                !workbenchPresentation?.allowsSessionKnowledge
+                  ? {
+                      id: Number(agent.id),
+                      versionNo: agent.current_version_no,
+                      sources: agent.knowledge_sources,
+                    }
+                  : undefined
+              }
               hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
@@ -1123,11 +1136,8 @@ const ThreadView: FC<ThreadViewProps> = ({
               annotations={annotationsEnabled ? messageAnnotations : undefined}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
-              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-            >
-              {composerTools}
-            </Composer>
+            ></Composer>
             {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}

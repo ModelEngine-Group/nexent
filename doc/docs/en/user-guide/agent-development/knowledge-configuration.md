@@ -2,7 +2,7 @@
 
 In the Knowledge Base module, you can create and manage knowledge bases, upload files, monitor processing, maintain chunks, and generate summaries. Administrators and developers can share knowledge bases with user groups, while regular users can create and manage private knowledge bases.
 
-Regular users can view **Personal Knowledge Base Capacity** at the bottom of the knowledge-base list, including current usage and the effective quota. If no limit is configured, the page shows **Unlimited**. When the quota is reached, Nexent blocks new content and file uploads but does not delete existing data.
+Regular users can view **Personal Knowledge Base Capacity** at the bottom of the knowledge-base list, including current usage and the effective quota. If no limit is configured, the page shows **Unlimited**. When the quota is reached, Nexent blocks subsequent file uploads but does not delete existing data.
 
 ## 🔧 Create a Knowledge Base
 
@@ -34,10 +34,12 @@ Regular users can view **Personal Knowledge Base Capacity** at the bottom of the
 4. Track the processing status in the document list
 
 :::tip File Size Limit
-Maximum upload size per file is **20 MB**. Files exceeding this limit cannot be uploaded.
+The default upload limit for a single knowledge-base file is **100 MB**. The actual limit is controlled by the `MAX_KNOWLEDGE_FILE_SIZE_MB` system parameter and can be changed under [System Configuration → System Parameters](../operations/configuration#file-upload). If the deployment gateway or reverse proxy has a lower limit, adjust that component as well.
 :::
 
-Before upload, Nexent also checks the knowledge-base quota, tenant capacity, and personal knowledge-base capacity. If the page reports insufficient capacity, delete files you no longer need or ask an administrator to adjust the relevant quota.
+Before upload, shared knowledge bases are checked against tenant capacity and their own quota. Private knowledge-base uploads also check the uploader's personal knowledge-base capacity. If the page reports insufficient capacity, delete files you no longer need or ask an administrator to adjust the relevant quota.
+
+For management entries, precedence, and warning rules for platform, tenant, personal, and individual knowledge-base quotas, see [Knowledge Base Capacity and Quotas](../resource-management#44-knowledge-base-capacity-and-quotas). Reaching a limit never automatically deletes historical content. Delete files you no longer need to release capacity, or ask an administrator to adjust the quota before the next upload.
 
 ### Document Processing Status
 
@@ -54,7 +56,7 @@ Uploaded files go through multiple stages. There are 6 distinct statuses:
 
 Hover over the status icon to view progress, such as “23/50 chunks processed.” For parsing or ingestion failures, the tooltip also provides a cause and suggested action. Common causes include:
 
-- The file does not exist, exceeds 20 MB, or uses an unsupported type
+- The file does not exist, exceeds the current file-size limit, or uses an unsupported type
 - No valid text can be extracted, or the file contains an unsupported line-break format
 - The embedding model is busy, its dimensions do not match, or the number of chunks exceeds its concurrency limit
 - Elasticsearch, object storage, or the data-processing service is unavailable

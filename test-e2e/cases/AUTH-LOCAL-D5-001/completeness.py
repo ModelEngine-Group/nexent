@@ -22,7 +22,7 @@ def assert_account_coverage(scenario):
             cursor.execute("INSERT INTO nexent.user_tenant_t VALUES (%s,'original-tenant','USER',%s,'N')", (uid,row['email']))
             if existing:
                 # Reproduce standalone SQL having committed before import.
-                cursor.execute((migration.ROOT / 'deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql').read_text(encoding='utf-8'))
+                cursor.execute(migration.merged_migration_section("v2.9.0_001_local_user_accounts.sql"))
                 if scenario == 'existing-partial':
                     cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,delete_flag) VALUES (%s,'retained','N')", (preserved,))
                     cursor.execute("INSERT INTO nexent.user_account_t (user_id,user_email,user_role,password_hash,password_hash_scheme,password_login_enabled,token_version) VALUES (%s,'preserved@example.com','USER',%s,'bcrypt',true,7)", (preserved,local_hash))

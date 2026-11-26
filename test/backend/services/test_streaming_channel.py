@@ -42,6 +42,28 @@ class TestStreamingChannel:
         return StreamingChannel(conversation_id="test-conv-1", user_id="test-user")
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("generation, expected_sequences, expected_count", [
+        ("a" * 32, [None, None], None),
+        ("execution:42", [1, 2], 2),
+    ])
+    async def test_replay_sequence_depends_on_durability(
+        self, channel, monkeypatch, generation, expected_sequences, expected_count,
+    ):
+        channel.generation = generation
+        sequences = []
+
+        async def append(_chunk, replay_update):
+            sequences.append(replay_update.get("sequence"))
+            return "1-0"
+
+        monkeypatch.setattr(channel, "_append_shared", append)
+        await channel.publish("first")
+        await channel.publish("second")
+
+        assert sequences == expected_sequences
+        assert channel.durable_event_count == expected_count
+
+    @pytest.mark.asyncio
     async def test_publish_and_subscribe(self, channel):
         """Test basic publish and subscribe flow."""
         results = []

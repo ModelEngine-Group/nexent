@@ -6,12 +6,18 @@ This module provides a compatibility layer for the existing MCPContainerManager
 interface while using the standardized SDK container management module.
 """
 
-import logging
 import asyncio
+import hashlib
+import json
+import logging
 from typing import Dict, List, Optional, AsyncGenerator
 
-from contracts.errors.exceptions import MCPConnectionError, MCPContainerError
-from contracts.constants.environment import IS_DEPLOYED_BY_KUBERNETES, KUBERNETES_NAMESPACE
+from contracts.constants.environment import (
+    IS_DEPLOYED_BY_KUBERNETES,
+    KUBERNETES_NAMESPACE,
+    NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES,
+)
+from contracts.errors.exceptions import MCPConnectionError, MCPContainerError, McpValidationError
 from nexent.container import (
     DockerContainerConfig,
     KubernetesContainerConfig,
@@ -23,6 +29,32 @@ from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
 from management.thread_management import config_thread_manager
 
 logger = logging.getLogger("mcp_container_service")
+
+
+def _resolve_kubernetes_mcp_image(tar_file_path: str) -> str:
+    """Resolve an uploaded archive to an image approved by the cluster administrator."""
+    config_name = "NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES"
+    try:
+        approved_images = json.loads(NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES)
+    except json.JSONDecodeError as exc:
+        raise McpValidationError(f"{config_name} must be a JSON object mapping archive hashes to images") from exc
+    if not isinstance(approved_images, dict):
+        raise McpValidationError(f"{config_name} must be a JSON object mapping archive hashes to images")
+    if not approved_images:
+        raise McpValidationError(
+            f"Kubernetes MCP image upload requires an administrator to configure {config_name}"
+        )
+
+    with open(tar_file_path, "rb") as archive:
+        archive_hash = hashlib.file_digest(archive, "sha256").hexdigest()
+
+    image = approved_images.get(archive_hash)
+    if not isinstance(image, str) or not image.strip():
+        raise McpValidationError(
+            f"The uploaded archive is not approved for Kubernetes MCP deployment. Ask an administrator to check "
+            f"{config_name} and upload the exact archive they approved."
+        )
+    return image.strip()
 
 
 class MCPContainerManager:
@@ -66,17 +98,26 @@ class MCPContainerManager:
 
     async def load_image_from_tar_file(self, tar_file_path: str) -> str:
         """
-        Load Docker image from tar file
+        Resolve an approved Kubernetes image or load the archive into Docker.
 
         Args:
             tar_file_path: Path to the tar file containing the Docker image
 
         Returns:
-            Image name/tag that was loaded
+            Image reference to start
 
         Raises:
-            MCPContainerError: If image loading fails
+            MCPContainerError: If Docker image loading fails
+            McpValidationError: If the archive is unavailable for Kubernetes deployment
         """
+        if IS_DEPLOYED_BY_KUBERNETES:
+            return await self.thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(task_name="resolve-kubernetes-mcp-image", owner="config"),
+                _resolve_kubernetes_mcp_image,
+                tar_file_path,
+            )
+
         try:
             # Load image from tar file
             with open(tar_file_path, 'rb') as tar_file:
@@ -186,12 +227,9 @@ class MCPContainerManager:
             MCPContainerError: If container startup fails
         """
         try:
-            # Load image from tar file
             image_name = await self.load_image_from_tar_file(tar_file_path)
 
-            # Start container with the loaded image. Keep the default
-            # readiness behavior implicit for compatibility with older
-            # adapters, while still forwarding an explicit opt-out.
+            # Keep the default readiness behavior implicit for older adapters.
             start_kwargs = {
                 "service_name": service_name,
                 "tenant_id": tenant_id,
@@ -208,6 +246,8 @@ class MCPContainerManager:
                 **start_kwargs,
             )
 
+        except McpValidationError:
+            raise
         except Exception as e:
             logger.error(f"Failed to start MCP container from tar file: {e}")
             raise MCPContainerError(

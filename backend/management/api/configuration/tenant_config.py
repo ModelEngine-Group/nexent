@@ -6,11 +6,16 @@ from http import HTTPStatus
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from management.api.configuration.resource_denylist import router as resource_denylist_router
+
 from contracts.constants.environment import APP_VERSION, DEPLOYMENT_VERSION, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, HIDE_HOME_PAGE
 from contracts.constants.environment import NEXENT_AGENT_CORE
 
 logger = logging.getLogger("tenant_config_app")
 router = APIRouter(prefix="/tenant_config")
+
+
+router.include_router(resource_denylist_router)
 
 
 @router.get("/deployment_version")

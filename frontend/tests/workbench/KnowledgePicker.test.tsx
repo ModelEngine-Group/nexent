@@ -399,6 +399,54 @@ it("failed catalog loading cannot be confirmed as an empty replacement", async (
   expect(confirm).not.toHaveBeenCalled();
 });
 
+it.each([true, false])(
+  "waits for capabilities and distinguishes an empty catalog from unsupported access (supported=%s)",
+  async (enabled) => {
+    const catalog = vi.mocked(knowledgeBaseService.getKnowledgeBasesInfo);
+    catalog.mockResolvedValue({ knowledgeBases: [] });
+    const onCatalogLoaded = vi.fn();
+    const props = {
+      open: true,
+      presentation: "drawer" as const,
+      requireEnabledSource: true,
+      value: null,
+      onCatalogLoaded,
+      onCancel: vi.fn(),
+      onConfirm: vi.fn(),
+    };
+    const { rerender } = render(
+      <ConversationKnowledgeScopeModal
+        {...props}
+        capabilities={null}
+        capabilitiesPending
+      />
+    );
+    expect(catalog).not.toHaveBeenCalled();
+    expect(screen.queryByText("chat.knowledgeScope.empty")).toBeNull();
+
+    rerender(
+      <ConversationKnowledgeScopeModal
+        {...props}
+        capabilities={{
+          ...capabilities,
+          sources: {
+            ...capabilities.sources,
+            local: { ...capabilities.sources.local, enabled },
+          },
+        }}
+      />
+    );
+    expect(
+      await screen.findByText(
+        enabled ? "chat.knowledgeScope.empty" : "chat.knowledgeScope.noTool"
+      )
+    ).toBeVisible();
+    expect(catalog).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    if (enabled) expect(onCatalogLoaded).toHaveBeenCalledWith([]);
+    else expect(onCatalogLoaded).not.toHaveBeenCalled();
+  }
+);
+
 it("reopening knowledge selection ignores the unfinished catalog from the previous session", async () => {
   type Result = Awaited<
     ReturnType<typeof knowledgeBaseService.getKnowledgeBasesInfo>

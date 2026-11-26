@@ -7,13 +7,19 @@ import logging
 from contextlib import aclosing
 from typing import Annotated
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field, TypeAdapter, ValidationError
+from redis.exceptions import RedisError
 from starlette.responses import JSONResponse, StreamingResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedAgentCreatorRun, PreparedEphemeralRun, PreparedSkillCreatorRun
+from contracts.agentos import (
+    BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedAgentCreatorRun, PreparedCreatorRun,
+    PreparedEphemeralRun, PreparedSkillCreatorRun,
+)
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from contracts.constants.environment import (
+    APP_VERSION, NEXENT_RECOVERY_MODE, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
+)
 from contracts.errors.exceptions import RuntimeQueueTimeoutError, sampling_configuration_error_payload
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
@@ -25,7 +31,8 @@ from runtime.agentos.prepared_evaluation import discard_prepared_workspace, load
 from runtime.agentos.prepared_agent_creator import prepare_agent_creator_run
 from runtime.agentos.prepared_skill_creator import prepare_skill_creator_run
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
-from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
+from runtime.sandbox_runtime import check_agentos_admission, release_agentos_sandbox, reserve_agentos_sandbox
+from runtime.thread_management import channel_cleanup_tasks, runtime_thread_manager, unregister_after_worker_exit
 
 logger = logging.getLogger(__name__)
 _EPHEMERAL_PAYLOAD = TypeAdapter(Annotated[
@@ -55,9 +62,13 @@ async def _observer_stream(info, execution, deferred, *, creator_mode=None, anno
         )) as events:
             async for chunk in events:
                 event = json.loads(chunk)
-                if isinstance(event, dict) and event.get("type") != "skill_artifact" and not boundary_delivered:
+                if not isinstance(event, dict):
+                    continue
+                kind = event.get("type")
+                if kind != "skill_artifact" and (not boundary_delivered or kind == "run_terminal"):
                     yield _sse(event)
-                    boundary_delivered = creator_mode == "nl2agent" and event.get("type") == "nl2a"
+                    if creator_mode == "nl2agent" and kind == "nl2a":
+                        boundary_delivered = True
         if creator_mode:
             # The SDK drains observer messages and consumes worker exceptions without re-raising.
             execution.future.result()
@@ -92,10 +103,48 @@ def _close_execution(execution, deferred):
         )
 
 
+def _finish_creator_worker(creator_run, execution, info=None):
+    async def settle():
+        try:
+            if execution is not None:
+                await asyncio.gather(asyncio.shield(asyncio.wrap_future(execution.future)), return_exceptions=True)
+            if info is not None:
+                await run_blocking(
+                    "creator-worker-workspace-cleanup", discard_prepared_workspace, info,
+                    lane="control-io", owner="runtime",
+                )
+            await runtime_state_service.creator_worker_state_async(*creator_run, "complete")
+        except Exception:
+            logger.exception("Could not acknowledge Creator worker completion run_id=%s", creator_run[2])
+
+    task = asyncio.create_task(settle(), name=f"creator-worker-finish:{creator_run[2]}")
+    channel_cleanup_tasks.add(task)
+    task.add_done_callback(channel_cleanup_tasks.discard)
+
+
+async def _attach_creator_worker(creator_run):
+    claim = asyncio.create_task(runtime_state_service.creator_worker_state_async(*creator_run, "start"))
+    try:
+        attached = await asyncio.shield(claim)
+    except asyncio.CancelledError:
+        def complete_if_attached(result):
+            channel_cleanup_tasks.discard(result)
+            if not result.cancelled() and result.exception() is None and result.result() == "running":
+                _finish_creator_worker(creator_run, None)
+
+        channel_cleanup_tasks.add(claim)
+        claim.add_done_callback(complete_if_attached)
+        raise
+    except (RedisError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail={"code": "RUNTIME_COORDINATION_UNAVAILABLE"}) from exc
+    if attached != "running":
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"})
+
+
 class _EphemeralResponse(StreamingResponse):
     def __init__(
         self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, creator_mode=None,
-        announce_ready=False,
+        announce_ready=False, ownership=None, creator_run=None,
     ):
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         self.debug_run_id = f"debug-{info.workspace_run_id}" if debug_owner is not None else None
@@ -110,6 +159,8 @@ class _EphemeralResponse(StreamingResponse):
         self.deferred = deferred
         self.metadata = metadata
         self.debug_owner = debug_owner
+        self.ownership = ownership
+        self.creator_run = creator_run
 
     async def stream_response(self, send):
         watcher = None
@@ -151,12 +202,20 @@ class _EphemeralResponse(StreamingResponse):
                                 self.debug_run_id, self.debug_owner, status, self.info, lane="control-io", owner="runtime",
                             )
                     finally:
-                        discard_prepared_workspace(self.info)
+                        if self.creator_run is not None:
+                            _finish_creator_worker(self.creator_run, self.execution, self.info)
+                        else:
+                            discard_prepared_workspace(self.info)
+                        if self.ownership is not None:
+                            await release_agentos_sandbox(self.ownership, self.execution.future)
 
 
 async def _open_ephemeral(payload, actor):
+    check_agentos_admission()
     deferred = DeferredAgentRun()
     creator_mode = None if isinstance(payload, PreparedEphemeralRun) else payload.mode
+    trajectory = payload.trajectory if isinstance(payload, PreparedCreatorRun) else None
+    creator_run = None
     if isinstance(payload, PreparedEphemeralRun):
         agent_id = payload.resource.agent_id
         capacity = agent_run_manager.reserve_agent_capacity(agent_id, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
@@ -165,7 +224,11 @@ async def _open_ephemeral(payload, actor):
         agent_id, capacity, materialize = payload.agent_id, None, prepare_agent_creator_run
     else:
         agent_id, capacity, materialize = None, None, prepare_skill_creator_run
+    if trajectory is not None and NEXENT_RECOVERY_MODE == "fixed_replicas":
+        creator_run = (actor.user_id, trajectory.conversation_id, payload.run_id)
+        await _attach_creator_worker(creator_run)
     execution = None
+    ownership = None
     try:
         execution = runtime_thread_manager.submit(
             "agent-run",
@@ -178,26 +241,43 @@ async def _open_ephemeral(payload, actor):
         if capacity is not None:
             execution.future.add_done_callback(lambda _: agent_run_manager.release_agent_capacity(capacity))
         await runtime_thread_manager.wait_until_started(execution)
-        info = await load_prepared_run(payload, actor, materialize)
+        if isinstance(payload, PreparedEphemeralRun):
+            ownership = await reserve_agentos_sandbox(
+                actor.tenant_id, actor.user_id, f"debug:{payload.run_id}", payload.run_id,
+                kind="DEBUG", cancel=deferred.cancel,
+            )
+        options = {"settle_on_cancel": True} if creator_run is not None else {}
+        info = await load_prepared_run(payload, actor, materialize, **options)
     except BaseException:
         if execution is not None:
             _close_execution(execution, deferred)
         elif capacity is not None:
             agent_run_manager.release_agent_capacity(capacity)
+        if creator_run is not None:
+            _finish_creator_worker(creator_run, execution)
+        if ownership is not None:
+            await release_agentos_sandbox(ownership, execution.future)
         raise
     info.thread_future = execution.future
     info.thread_manager = runtime_thread_manager
     info.thread_execution_id = execution.execution_id
+    extra_metadata = {"agentos_run_id": payload.run_id}
+    if trajectory is not None:
+        agent_id = payload.system_agent.agent_id
+        extra_metadata.update(app_version=APP_VERSION, core_type=info.agent_config.agent_core)
+        if trajectory.source_message_id is not None:
+            extra_metadata["trajectory_source_message_id"] = str(trajectory.source_message_id)
     metadata = AgentRunMetadata(
         user_id=actor.user_id, tenant_id=actor.tenant_id, agent_id=agent_id,
-        query=payload.input.trace_query, language=payload.language, is_debug=True, memory_enabled=False,
+        conversation_id=trajectory.conversation_id if trajectory is not None else None,
+        query=payload.input.trace_query, language=payload.language, is_debug=trajectory is None, memory_enabled=False,
         history_count=len(payload.input.history), minio_files_count=len(payload.input.attachment_refs),
-        extra_metadata={"agentos_run_id": payload.run_id},
+        extra_metadata=extra_metadata,
     )
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug
     return _EphemeralResponse(
         info, execution, deferred, metadata, debug_owner=debug_owner(actor) if debug else None, creator_mode=creator_mode,
-        announce_ready=bool(debug and payload.native_knowledge),
+        announce_ready=bool(debug and payload.native_knowledge), ownership=ownership, creator_run=creator_run,
     )
 
 

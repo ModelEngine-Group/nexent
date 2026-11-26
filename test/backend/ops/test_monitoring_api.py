@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+﻿# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regression tests for reporting model monitoring coverage and refresh status."""
 
 from datetime import date, datetime, timedelta, timezone
@@ -120,8 +120,9 @@ def test_skill_routes_filter_sort_and_report_trend_coverage(monitoring_client, m
         {"tenant_id": "tenant", "skill_id": "2", "skill_name": "Beta", "statistic_date": "2026-11-23",
          "usage_count": 5},
     ]
-    catalog = [{"tenant_id": "tenant", "skill_id": "1", "skill_name": "Alpha"},
-               {"tenant_id": "tenant", "skill_id": "2", "skill_name": "Beta"}]
+    catalog = [{"tenant_id": "tenant", "skill_id": "1", "skill_name": "Alpha", "source": "official"},
+               {"tenant_id": "tenant", "skill_id": "2", "skill_name": "Beta", "source": "custom"},
+               {"tenant_id": "tenant", "skill_id": "3", "skill_name": "Unused", "source": "official"}]
     monkeypatch.setattr(monitoring, "read_skills", lambda *_args, **_kwargs: (rows, catalog, [date(2026, 11, 23)], status))
 
     listing = client.get("/ops/v1/monitoring/skills", params={
@@ -131,11 +132,11 @@ def test_skill_routes_filter_sort_and_report_trend_coverage(monitoring_client, m
     assert listing.json()["data"] == {"items": [{**catalog[1], "metrics": {"usage_count": 5}}], "total": 1}
     assert client.get("/ops/v1/monitoring/skills/summary",
                       params={"start_date": "2026-11-23", "end_date": "2026-11-23"}).json()["data"] == {
-                          "current_skill_count": 2, "usage_count": 7, "skill_count": 2}
+                          "current_skill_count": 3, "usage_count": 7, "skill_count": 3}
     assert [item["skill_id"] for item in client.get(
         "/ops/v1/monitoring/skills/rankings",
         params={"start_date": "2026-11-23", "end_date": "2026-11-23"},
-    ).json()["data"]] == ["2", "1"]
+    ).json()["data"]] == ["2", "1", "3"]
     trend = client.get("/ops/v1/monitoring/skills/trends",
                        params={"start_date": "2026-11-22", "end_date": "2026-11-23"})
     assert trend.json()["data"] == [{"statistic_date": "2026-11-22", "usage_count": None},

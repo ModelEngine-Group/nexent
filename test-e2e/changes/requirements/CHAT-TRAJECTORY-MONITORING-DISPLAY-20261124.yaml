@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-MONITORING-DISPLAY-20261124
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-MONITORING-DISPLAY-20261124
+  title: 独立配置本地轨迹采集并保持模型正文滚动位置
+  description: 部署脚本和监控组件只提供远端目标，本地采集由环境变量控制。模型正文在表格、文本和JSON之间切换时，保持详情滚动偏移。
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001, CHAT-TRAJECTORY-DEPLOYMENT-D5-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - 后端验证本地环境变量、远端开关的各组合和默认值。
+    - 前端验证模型输出表格、文本和JSON内容，及正文缺失和分块边界。
+    reason: 复用现有单测验证配置与正文内容。Shell回归覆盖部署参数与旧配置，真实浏览器覆盖滚动视口，单元测试环境不计算浏览器布局。
+    test_selectors:
+    - test/backend/utils/test_trajectory_deployment_options.py
+    - frontend/tests/component/trajectoryModelResult.test.tsx
+    - frontend/tests/component/trajectoryBodyLoading.test.tsx
+  notes: >-
+    在基于 d231ca114 的工作区验证交互菜单、旧部署配置及 Docker Compose 和 Helm 的开关组合。
+    浏览器专项使用本机前端与独占的受控轨迹数据，在两种窗口高度下验证滚动到底部后切换表格、文本和JSON的偏移。
+    完整 D4 和 D5 用例仍处于阻塞状态。

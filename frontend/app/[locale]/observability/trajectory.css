@@ -518,6 +518,7 @@
   min-width: 0;
   min-height: 0;
   scrollbar-gutter: stable;
+  padding-bottom: var(--trajectory-mode-scroll-padding, 0px);
 }
 .trajectory-node-heading {
   padding: 14px 18px 10px;
@@ -762,7 +763,7 @@
 .trajectory-code-scroll {
   overflow: auto;
 }
-.trajectory-body pre {
+.trajectory-code-scroll > pre {
   display: flex;
   margin: 0;
   padding: 8px 10px 8px 0;
@@ -773,21 +774,21 @@
   background: #fff;
   overflow: auto;
 }
-.trajectory-body pre code {
+.trajectory-code-scroll > pre code {
   font: inherit;
 }
-.trajectory-body pre.is-wrapped {
+.trajectory-code-scroll > pre.is-wrapped {
   display: block;
   padding-left: 10px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.trajectory-body pre.is-wrapped code {
+.trajectory-code-scroll > pre.is-wrapped code {
   display: block;
   white-space: inherit;
   overflow-wrap: inherit;
 }
-.trajectory-body pre.is-wrapped .trajectory-line-numbers {
+.trajectory-code-scroll > pre.is-wrapped .trajectory-line-numbers {
   display: none;
 }
 .trajectory-line-numbers {
@@ -802,6 +803,20 @@
 }
 .trajectory-body-full {
   max-height: 60vh;
+}
+.trajectory-model-nested-table .ant-table {
+  /* Override Ant Design's nested table offsets inside value cells. */
+  margin: 0 !important;
+}
+.markdown-body.trajectory-model-content {
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.trajectory-model-content pre {
+  white-space: pre-wrap;
+}
+.trajectory-model-content > :last-child {
+  margin-bottom: 0;
 }
 .trajectory-segment-navigation {
   display: flex;

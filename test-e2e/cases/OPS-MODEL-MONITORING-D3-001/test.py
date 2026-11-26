@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from shutil import which
 from threading import Thread
 from types import SimpleNamespace
 from typing import Literal
@@ -104,12 +105,23 @@ def ops_store():
     try:
         with admin.cursor() as cursor:
             cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
-        subprocess.run(
-            ["bash", str(project / "deploy/common/run-ops-sql-migrations.sh")], check=True, timeout=30,
-            env={**os.environ, "POSTGRES_HOST": host, "POSTGRES_USER": "postgres", "POSTGRES_PORT": "5432",
-                 "OPS_POSTGRES_DB": database, "POSTGRES_DB": "nexent"},
-            stdout=subprocess.DEVNULL,
-        )
+        migration_env = {**os.environ, "POSTGRES_HOST": host, "POSTGRES_USER": "postgres", "POSTGRES_PORT": "5432",
+                         "OPS_POSTGRES_DB": database, "POSTGRES_DB": "nexent"}
+        if which("psql"):
+            # Host has a PostgreSQL client: run the migration script directly.
+            subprocess.run(["bash", str(project / "deploy/common/run-ops-sql-migrations.sh")], check=True,
+                           timeout=120, env=migration_env, stdout=subprocess.DEVNULL)
+        else:
+            # No host client: run the script inside a throwaway postgres container
+            # (the image already ships psql and bash); the published host port is
+            # reachable from containers as host.docker.internal on Docker Desktop.
+            subprocess.run(
+                ["docker", "run", "--rm", "-v", f"{project}:/repo",
+                 "-e", "POSTGRES_HOST=host.docker.internal", "-e", "POSTGRES_USER=postgres",
+                 "-e", f"OPS_POSTGRES_DB={database}", "-e", "POSTGRES_DB=nexent",
+                 "postgres:16", "bash", "/repo/deploy/common/run-ops-sql-migrations.sh"],
+                check=True, timeout=120, env=migration_env, stdout=subprocess.DEVNULL,
+            )
         kinds = {"model": MODEL_MONITORING}
         install_templates(es, 0, kinds.values())
         yield Monitoring(ControlStore(engine), es, ZoneInfo("UTC"), kinds)

@@ -16,6 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { RefreshCw, Save, Search, X } from "lucide-react";
 
+import { ResourceDenylistPanel } from "@/components/resource-picker/ResourceDenylistPanel";
 import { PlatformQuotaPanel } from "@/components/quota/PlatformQuotaPanel";
 import ProjectConfigTab from "@/components/system-config/ProjectConfigTab";
 import { useSystemConfigurations } from "@/hooks/system/useSystemConfigurations";
@@ -217,6 +218,11 @@ export function SystemConfigPage() {
               key: "platform-quota",
               label: t("quota.platformOverview"),
               children: <PlatformQuotaPanel showTenantAllocations={false} />,
+            },
+            {
+              key: "resource-configuration",
+              label: t("resourceDenylist.configurationTab"),
+              children: <ResourceDenylistPanel scope="global" />,
             },
             {
               key: "parameters",

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "enabled", "kubeconfig", "context", "cluster_uid", "storage_class", "image_source", "app_version", "backend_image_digests"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "enabled": {"type": "boolean"},
+    "kubeconfig": {"type": "string", "minLength": 1},
+    "context": {"type": "string", "minLength": 1},
+    "cluster_uid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "storage_class": {"type": "string", "maxLength": 253, "pattern": "^[a-z0-9]([-.a-z0-9]*[a-z0-9])?$"},
+    "image_source": {"enum": ["general", "mainland", "local-latest"]},
+    "app_version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "backend_image_digests": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    },
+    "image_registry_prefix": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:/-]*[a-z0-9]$"},
+    "wait_seconds": {"type": "integer", "minimum": 30, "maximum": 1800}
+  }
+}

@@ -351,7 +351,10 @@ it("keeps tenant model controls connected while shared suggestions only fill inp
       fixture.controls.onReasoningBudgetTokensChange,
     modelParameterSettings: fixture.controls.modelParameterSettings,
   });
-  expect(props.composerTools).toBeUndefined();
+  expect(props.inputTools).toEqual({
+    attachments: true,
+    dictationConfigured: false,
+  });
   expect(props.onChatModeChange).toBeUndefined();
   expect(props.workbenchResources).toBeUndefined();
   expect(screen.getByText("nl2agent.configuration.title")).toBeInTheDocument();

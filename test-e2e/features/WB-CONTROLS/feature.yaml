@@ -10,8 +10,9 @@ feature:
     Agent chat.
   business_rules:
   - rule_id: WB-CONTROLS-RULE-001
-    description: Direct controls open draft resource drawers with Mine/Repository and structured filtering; cancel never mounts
-      resources.
+    description: Direct controls open draft resource drawers with Mine/Repository and structured filtering.
+      Closing with the close control or mask cancels pending resource mounts. Confirmed resources
+      appear above the composer attachments as removable labels while the controls show counts.
   - rule_id: WB-CONTROLS-RULE-002
     description: Manual creation actions select isolated modes. Ordinary Workbench intent is interpreted by the main AI using
       conversation context, without frontend keyword classification or a separate classification model call. AI asks a versioned
@@ -42,6 +43,9 @@ feature:
       accessible label. Ordinary-chat knowledge actions and editable mounts require the current Agent version's active-source
       retrieval capability; absent, pending, failed or stale capabilities and saved scopes cannot expose the picker. Workbench
       retains its existing independent knowledge entry, and creation modes hide resources.
+      Composer renders actions in a common order from the available runtime operations. Agent, Skill and Knowledge buttons
+      show counts for confirmed selections, and open their drawers to edit or remove selections. Knowledge details and
+      catalogs load when the eligible picker opens. Draft attachment cards show the file type and available file size.
   - rule_id: WB-CONTROLS-RULE-006
     description: Workbench reuses configuration resource controls and knowledge presentation; Agent/Skill tabs remain Mine/Repository,
       AIDP knowledge selectors hide document/chunk counts across configuration, chat and Workbench; local selectors retain
@@ -88,4 +92,5 @@ feature:
     - COMPOSER-HIDE-CHAT-SKILL-20261019
     - COMPOSER-KNOWLEDGE-CAPABILITY-20261020
     - AIDP-PICKER-HIDE-COUNTS-20261020
+    - COMPOSER-RESOURCE-LABELS-20261126
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

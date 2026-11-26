@@ -9,6 +9,7 @@ case:
   - F-045-RULE-07
   - F-045-RULE-09
   - F-045-RULE-10
+  - F-045-RULE-12
   title: NL2Agent uses verified requirements and current cards through the creation run
   type: INTEGRATION
   priority: P1
@@ -102,6 +103,9 @@ case:
       controlled embeddings, compatible and mismatched models, empty and revoked knowledge and stale card versions.
     expected: Only visible selectable knowledge is returned. Repeated requests reuse metadata vectors, text fallback remains
       available, stale versions are rejected and no selection, resource coverage or Agent draft is persisted.
+  - order: 15
+    action: Save tenant tool, MCP service and skill exclusions; add global names after a card is issued, then remove the global exclusions.
+    expected: Tenant references exclude only their own definitions, global names block same-name resources, service rules cover child tools, stale cards cannot continue and removing a global rule retains tenant selections. Existing enabled bindings remain configurable and present in execution binding reads; disabling them prevents re-enabling while blocked.
   expected_results:
   - Coverage is based on complete checked candidate sets and current evidence.
   - Card actions are authorized, versioned and isolated to their Agent and conversation.
@@ -128,6 +132,7 @@ case:
     evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
   - An authorized current-card HTTP request recommends compatible visible knowledge metadata using real ES and controlled
     embeddings, reuses metadata vectors, falls back to text, rejects stale cards and preserves the draft and resource state.
+  - Tool, MCP service and skill exclusions apply to current discovery and earlier cards without adding a binding; tenant isolation and saved tenant rules survive global exclusion removal.
   forbidden_side_effects:
   - Candidate discovery and returning to clarification never create a resource or modify the draft.
   integration_boundary:
@@ -139,6 +144,11 @@ case:
   - Release owned ES indices/client/container, disposable Redis keys or instance, PostgreSQL schema, model provider, MCP listener,
     workspace and workers.
   acceptance:
+  - id: AC-TOOL-DENYLIST
+    description: Tenant and global tool, MCP service and skill rules filter current catalogs, block new bindings and cached card continuation, preserve tenant isolation and retain tenant choices on global removal. Exclusion catalogs omit intrinsically unselectable tools and reject new hidden tool selections. Equivalent global options with different descriptions are merged while tenant identities remain distinct.
+    steps: [15]
+    expected_results: [15]
+    forbidden_side_effects: [1]
   - id: AC-KNOWLEDGE-AUTO
     description: Concrete knowledge recommendations use current authorized model-compatible metadata, cached vectors and text fallback without business writes.
     steps: [14]

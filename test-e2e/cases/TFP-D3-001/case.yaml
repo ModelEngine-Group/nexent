@@ -19,7 +19,7 @@ case:
   preconditions:
   - A disposable Nexent deployment with this implementation and an approved controlled provider profile is available.
   - The current sandbox image has its sandbox user and a reachable kernel service.
-  - The maintained private TFP fixture declares the disposable runtime, enabled test skill, workspace mount and read-only Langfuse credentials.
+  - The TFP deployment provides the verified runtime and workspace, an owned Skill, and private read-only Langfuse credentials.
   - The deployment uses session-scoped Docker and has no concurrent sandbox runs during the scoped Docker event observation.
   test_data:
     profile: mock

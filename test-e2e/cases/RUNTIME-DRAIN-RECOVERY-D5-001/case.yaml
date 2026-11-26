@@ -1,0 +1,95 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-DRAIN-RECOVERY-D5-001
+  feature_id: RUNTIME-AUTOSCALING
+  requirement_ids:
+  - RUNTIME-AUTOSCALING-20261105
+  business_rule_ids:
+  - RUNTIME-AUTOSCALING-RULE-03
+  - RUNTIME-AUTOSCALING-RULE-04
+  title: 缩容排空保留控制与收尾，失联仅收敛所属运行
+  type: RELIABILITY
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明在线自然完成、排空超时与强杀三种路径，以及旧 owner 回归后的写入防护。
+  preconditions:
+  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  - 隔离 Kubernetes 集群中在线排空、preStop/readiness、所有者租约和 HPA 已实现；本地配置登记有限排空预算、终止宽限及失联判定窗口。
+  test_data:
+    runs: 每个候选 Pod 都有受控长运行；分别提供预算内完成、合法停止、超过预算和 owner 强杀场景。
+    timing: 记录实际 preStop、Endpoint 传播、应用排空、Uvicorn 和 Pod 宽限预算，预留终态持久化与资源清理时间。
+  steps:
+  - order: 1
+    action: 从真实多副本运行状态触发缩容，识别被选终止 Pod；在其 draining 后用既有连接和直连再次请求新根执行。
+    expected: readiness 下线且应用接纳层关闭；新请求被拒或到其他 Pod，已运行执行继续，调度器不再领取新任务。
+  - order: 2
+    action: 让预算内运行继续流式输出和持久化，并从其他实例对另一运行发起停止，观察 control-io、模型工具 I/O 和收尾。
+    expected: 排空期间控制和必要 I/O 存活，运行自然完成或合法停止后才释放容量，不立即取消全部线程。
+  - order: 3
+    action: 独立场景让被终止 Pod 的执行超过排空预算，等待完整 terminationGracePeriod。
+    expected: 到期运行明确中断，取消/连接/worker 和本地资源有界释放，未完成的状态由失联收敛补足，无自动业务重放。
+  - order: 4
+    action: 在健康 B 仍有运行时强杀 A，等待失联判定；模拟旧 A 恢复后提交心跳、输出和终态，再在同会话新代次上尝试旧回调。
+    expected: 只收敛 A 所有运行，B 不变；旧 owner/旧代次被拒绝且停止，不改写新代次或释放新预约。
+  - order: 5
+    action: 恢复固定/自动正常运行，结束健康任务并清理测试 namespace、租约和数据域。
+    expected: 合法请求可继续，全部本次资源归零；无需迁移执行栈或重放工具副作用。
+  expected_results:
+  - 实际缩容进入 draining 后不接新根执行，控制与收尾仍可完成。
+  - 超时与强杀有明确终态和有限释放，外部业务不自动重放。
+  - 失联只影响对应 owner，旧代次防护和恢复清理有效。
+  forbidden_side_effects:
+  - 用立即取消所有任务的 ThreadManager.drain 冒充自然排空；在 draining 继续接纳新根执行。
+  - 健康 owner 被误收敛，旧 owner 完成新代次，或 SSE 断开提前释放容量。
+  - 宣称外部副作用恰好一次、迁移 Python 栈，或删除外部测试资源。
+  acceptance:
+  - id: AC-P2-003
+    description: 在线排空保留控制、有限截止和真实资源释放。
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-P2-004
+    description: 失联 owner 定向收敛，旧代次拒绝与恢复。
+    steps:
+    - 4
+    - 5
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 2
+    - 3
+  tags:
+  - phase-3
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    primary_domain: runtime
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  risk_type: RELIABILITY
+  risk: 缩容先关控制/持久化资源导致中断不可收敛；旧 owner 回归污染新运行。
+  condition:
+  - 真实缩容并覆盖有活动运行的终止 Pod；预算内完成、预算外超时、强杀及旧 owner 恢复变体独立执行。
+  metrics:
+  - 接纳时间线、Endpoint/readiness、活动根运行和 Future、控制响应、持久化终态、租约/代次与健康 owner 哨兵。
+  thresholds:
+  - draining 后该实例新接纳根执行数=0；预算内运行终态和尾部完整。
+  - 超时释放不超过登记的终止/失联预算；健康 owner 被误收敛数=0；旧代次成功写入数=0。
+  - 业务自动重放数=0；清理后本次活动任务/连接/租约/资源数=0。
+  recovery_expectations:
+  - 合法实例可继续处理新运行；失联只收敛状态和容量，不接管执行栈或重放原业务。

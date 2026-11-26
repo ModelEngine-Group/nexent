@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: COMPOSER-RESOURCE-LABELS-20261126
+  change_type: requirement
+  requirement_id: COMPOSER-RESOURCE-LABELS-20261126
+  title: Display selected resources above the shared composer
+  description: Use compact icons, names and remove actions for confirmed resources above attachment previews.
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: [WB-RESOURCE-LAZY-D4-001]
+    added: [WB-COMPOSER-RESOURCES-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/workbench/Composer.test.tsx
+    behaviors:
+    - Named labels and type icons appear above attachment previews and input.
+    - Removing a label invokes the matching resource operation without removing other selections.
+    - Ordinary Agent chat displays the selected knowledge scope without loading its catalog.
+    reason: Unit tests prove the shared layout and request boundaries. D4 verifies the Workbench mount and remove journey.
+  notes: The D4 cases use browser-local HTTP fixtures and no persistent resource preparation.

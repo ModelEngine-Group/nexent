@@ -20,6 +20,7 @@ import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import { cn } from "@/lib/utils";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import ToolConfigModal from "@/app/agents/components/capability/tool/ToolConfigModal";
@@ -119,7 +120,7 @@ export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
 
-  const { selectableTools, isUserSelectable } = useToolList({ enabled: open });
+  const { availableTools, selectableTools } = useToolList({ enabled: open });
   const scanTools = useScanToolList();
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
@@ -302,11 +303,13 @@ export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
 
   const selectedChips = useMemo(
     () =>
-      draftTools.filter(isUserSelectable).map((tool) => ({
-        id: String(tool.id),
-        label: tool.name,
-      })),
-    [draftTools, isUserSelectable]
+      draftTools
+        .filter((tool) => !isManagedKnowledgeTool(tool))
+        .map((tool) => ({
+          id: String(tool.id),
+          label: tool.name,
+        })),
+    [draftTools]
   );
 
   const mcpGroups = useMemo(() => {
@@ -550,9 +553,26 @@ export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
     [selectTools]
   );
 
-  const removeTool = useCallback((id: string) => {
-    setDraftTools((prev) => prev.filter((tool) => String(tool.id) !== id));
-  }, []);
+  const removeTool = useCallback(
+    (id: string) => {
+      const epoch = selectionEpoch.current;
+      const remove = () => {
+        if (selectionEpoch.current !== epoch) return;
+        setDraftTools((prev) => prev.filter((tool) => String(tool.id) !== id));
+      };
+      const tool =
+        availableTools?.find((item) => String(item.id) === id) ??
+        draftTools.find((item) => String(item.id) === id);
+      if (tool?.blocked_by_denylist) {
+        confirm({
+          title: t("toolPool.remove"),
+          content: t("resourceDenylist.removeWarning"),
+          onOk: remove,
+        });
+      } else remove();
+    },
+    [availableTools, confirm, draftTools, t]
+  );
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {

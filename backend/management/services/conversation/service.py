@@ -752,25 +752,25 @@ async def delete_conversation_service(conversation_id: int, user_id: str, tenant
         bool: Whether the deletion was successful
     """
     try:
-        try:
-            from management.services.automation.service import agent_automation_facade
-            await agent_automation_facade.on_conversation_deleted(conversation_id, user_id, tenant_id)
-        except Exception as automation_error:
-            logging.warning(
-                "Failed to cleanup automation task for conversation %s: %s",
-                conversation_id,
-                automation_error,
-            )
+        from management.services.automation.service import agent_automation_facade
+        await agent_automation_facade.on_conversation_deleted(conversation_id, user_id, tenant_id)
+    except Exception as automation_error:
+        logging.warning(
+            "Failed to cleanup automation task for conversation %s: %s",
+            conversation_id,
+            automation_error,
+        )
 
-        success = delete_conversation(conversation_id, user_id)
-        if not success:
-            raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+    success = delete_conversation(conversation_id, user_id)
+    if not success:
+        # The repository applies a created_by ownership filter: no row
+        # means not owned or already deleted. Raise the typed domain
+        # exception so the shared northbound registry maps it to 404
+        # instead of collapsing into a generic 500.
+        raise ConversationNotFoundError(f"Conversation {conversation_id} does not exist or has been deleted")
 
-        _request_trajectory_cleanup([conversation_id], user_id)
-        return True
-    except Exception as e:
-        logging.error(f"Failed to delete conversation: {str(e)}")
-        raise Exception(str(e))
+    _request_trajectory_cleanup([conversation_id], user_id)
+    return True
 
 
 async def delete_conversations_batch_service(conversation_ids: List[int], user_id: str, tenant_id: str) -> Dict[str, Any]:

@@ -1,0 +1,127 @@
+.heading {
+  margin: 16px 0 12px;
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 20px 0;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    var(--color-brand-soft),
+    var(--color-bg-3)
+  );
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  min-height: 72px;
+  padding: 6px 20px;
+}
+
+.card + .card {
+  border-inline-start: 1px solid var(--color-border-separator);
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--color-brand);
+}
+
+.card dt,
+.cardStatus,
+.unavailable {
+  color: var(--color-text-secondary);
+}
+
+.card dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.total {
+  color: var(--color-text-primary);
+  font-size: clamp(22px, 2.1vw, 32px);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.trends {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 252px;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-lg);
+}
+
+.panel h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.description {
+  color: var(--color-text-secondary);
+}
+
+.chart {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.chartState {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-height: 160px;
+}
+
+.tooltip {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-base);
+  background: var(--color-bg-3);
+}
+
+@media (max-width: 840px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 0;
+  }
+
+  .card:nth-child(odd) {
+    border-inline-start: 0;
+  }
+
+  .trends {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 460px) {
+  .card {
+    gap: 8px;
+    padding-inline: 10px;
+  }
+}

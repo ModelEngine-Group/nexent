@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-SANDBOX
+  name: Runtime sandbox
+feature:
+  feature_id: KSM-CONFIG
+  name: Kubernetes sandbox configuration and execution identity foundation
+  status: active
+  description: Resolve trusted Kubernetes SYSTEM policy and stable run identity without starting a sandbox or enabling multiple Runtime replicas.
+  business_rules:
+    - rule_id: KSM-CONFIG-R1
+      description: Kubernetes policy defaults to SYSTEM/error, preserves explicit local/wasm and rejects SESSION and conflicting Pod profiles without mutating stored policy; Docker defaults remain unchanged.
+    - rule_id: KSM-CONFIG-R2
+      description: Runtime owner UID/epoch and immutable SYSTEM profile come from trusted deployment configuration, never Agent policy; an unimplemented backend cannot fall back to local execution.
+    - rule_id: KSM-CONFIG-R3
+      description: One server-generated execution ID is reused through request preparation and workspace construction while conversation/debug/automation/evaluation identifiers retain their existing meaning.
+  required_test_stages: []
+  source:
+    requirement_ids: [KSM-R01, KSM-R02, KSM-R09, KSM-R10, KSM-R12]
+    spec_path: docs/Developing/runtime-sandbox-kubernetes-migration/proposal.md
+    notes: T01 foundation only. Isolated configuration/identity proof belongs in traditional UT; no duplicate D1. No running K8s API/protocol/journey claim is made. Required S1 D2-D5 proof remains pending before T02-T07 delivery, not exempted by this feature.

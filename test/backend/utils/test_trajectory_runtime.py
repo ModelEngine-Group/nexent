@@ -27,6 +27,7 @@ from ops.services.trajectory.lifecycle import create_maintenance_processor
 def configuration(root="", **overrides):
     values = {
         "ENABLE_TELEMETRY": False,
+        "LOCAL_FILE_MONITORING_ENABLED": False,
         "MONITORING_PROVIDER": "otlp",
         "TRAJECTORY_ROOT_DIR": str(root),
         "TRAJECTORY_READ_ENABLED": bool(root),
@@ -158,6 +159,7 @@ def test_capture_authorization_requires_active_membership_and_actual_owner(
     membership_query = str(session.scalars.call_args_list[0].args[0].compile(
         compile_kwargs={"literal_binds": True},
     ))
+    assert "user_tenant_t.user_id = 'owner'" in membership_query
     assert "user_tenant_t.tenant_id = 'tenant'" in membership_query
     assert "user_tenant_t.delete_flag = 'N'" in membership_query
     assert session.query.called == (member and effective_tenant == "tenant")

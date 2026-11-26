@@ -109,6 +109,7 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     TrajectoryFileStore.provision(tmp_path, storage_mode="shared_directory")
     values = {
         "ENABLE_TELEMETRY": True,
+        "LOCAL_FILE_MONITORING_ENABLED": True,
         "TRAJECTORY_READ_ENABLED": True,
         "MONITORING_PROVIDER": "local_file",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),

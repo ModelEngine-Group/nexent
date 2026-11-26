@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-SKILL-UI-SHELL-20261124
+  change_type: requirement
+  requirement_id: OPS-SKILL-UI-SHELL-20261124
+  title: Show Skill monitoring layout before statistics are available
+  description: Show all and single Skill layouts using the existing tenant-scoped directory for selection.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/monitoringFilters.test.tsx
+    behaviors:
+    - Selecting or clearing a Skill keeps the tenant, group and date filters.
+    - Changing tenants clears the selected Skill.
+    reason: Frontend unit tests cover the existing filter reducer. The Skill layout and directory refresh are verified in D4. The backend is unchanged.

@@ -5,6 +5,9 @@ x-minio-vars: &minio-vars
   MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
   MINIO_REGION: ${MINIO_REGION}
   MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET}
+  # Optional external authority for presigned URLs handed to callers outside
+  # the container network (e.g. host:9010). Empty keeps the internal endpoint.
+  MINIO_EXTERNAL_ENDPOINT: ${MINIO_EXTERNAL_ENDPOINT:-}
 x-proxy-vars: &proxy-vars
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -223,6 +226,8 @@ services:
       JWT_ISSUER: "${JWT_ISSUER:-nexent}"
       JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"
       GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
+      # Emergency kill switch for northbound capabilities (ids or paths).
+      GATEWAY_NB_EXCLUDED_CAPABILITIES: "${GATEWAY_NB_EXCLUDED_CAPABILITIES:-}"
       DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"

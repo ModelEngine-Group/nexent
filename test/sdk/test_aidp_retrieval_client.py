@@ -124,7 +124,7 @@ def test_wrappers_share_one_error_type_and_complete_parameter_descriptions():
             assert "固定整数" in description and "1–500" in description
         for field in ("hybrid_top_k", "graph_top_k"):
             description = tool.init_param_descriptions[field]["description_zh"]
-            assert "0" in description and "总返回上限" in description
+            assert "1–100" in description and "返回条数上限" in description
         params = inspect.signature(tool.__init__).parameters
         assert "graph_search" in params["search_method"].default.description
         assert "jargon_coverage" in params["reranking_mode"].default.description
