@@ -3,13 +3,14 @@
 {{- end -}}
 {{- $global := default dict .Values.global -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $storageMode := default "dynamic" $sharedStorage.mode -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
-  {{- if not (has $sharedStorage.mode (list "dynamic" "existing")) -}}
+  {{- if not (has $storageMode (list "dynamic" "existing")) -}}
     {{- fail "nexent-runtime multi-replica deployment requires dynamic or existing shared RWX storage" -}}
   {{- end -}}
-  {{- if eq $sharedStorage.mode "dynamic" -}}
-    {{- if or (not $sharedStorage.storageClassName) (eq $sharedStorage.storageClassName "nexent-local") -}}
-      {{- fail "nexent-runtime multi-replica deployment requires an explicit RWX StorageClass in dynamic mode" -}}
+  {{- if eq $storageMode "dynamic" -}}
+    {{- if eq $sharedStorage.storageClassName "nexent-local" -}}
+      {{- fail "nexent-runtime multi-replica deployment requires an RWX StorageClass in dynamic mode. The nexent-local class is for static volumes." -}}
     {{- end -}}
     {{- if not (has "ReadWriteMany" (default (list "ReadWriteMany") $sharedStorage.accessModes)) -}}
       {{- fail "nexent-runtime multi-replica deployment requires ReadWriteMany shared volume access" -}}
@@ -25,7 +26,7 @@
 {{- if and $kubernetesSandbox (not (kindIs "bool" $networkVerified)) -}}
 {{- fail "sandboxNetworkPolicyVerified must be a boolean" -}}
 {{- end -}}
-{{- if and $kubernetesSandbox (eq (default "local" $sharedStorage.mode) "local") (not (default false $global.sandboxSingleNodeDevelopment)) -}}
+{{- if and $kubernetesSandbox (eq $storageMode "local") (not (default false $global.sandboxSingleNodeDevelopment)) -}}
 {{- fail "Kubernetes sandbox requires verified CSI RWX storage; local storage is only allowed with sandboxSingleNodeDevelopment=true" -}}
 {{- end -}}
 {{- if and $kubernetesSandbox (not $networkVerified) -}}

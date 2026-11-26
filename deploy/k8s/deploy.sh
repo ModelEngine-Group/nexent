@@ -61,7 +61,7 @@ IS_MAINLAND=""
 APP_VERSION=""
 DEPLOYMENT_VERSION=""
 VERSION_CHOICE_SAVED=""
-PERSISTENCE_MODE="local"
+PERSISTENCE_MODE="dynamic"
 STORAGE_CLASS_NAME=""
 LOCAL_PATH="/var/lib/nexent-data"
 LOCAL_NODE_NAME=""
@@ -397,8 +397,8 @@ validate_runtime_replica_options() {
             echo "Error: multiple Runtime replicas require dynamic or existing shared RWX storage, not local hostPath." >&2
             return 1
         fi
-        if [ "$PERSISTENCE_MODE" = "dynamic" ] && { [ -z "$STORAGE_CLASS_NAME" ] || [ "$STORAGE_CLASS_NAME" = "nexent-local" ]; }; then
-            echo "Error: multiple Runtime replicas in dynamic mode require an explicit RWX --storage-class." >&2
+        if [ "$PERSISTENCE_MODE" = "dynamic" ] && [ "$STORAGE_CLASS_NAME" = "nexent-local" ]; then
+            echo "Error: multiple Runtime replicas in dynamic mode require an RWX StorageClass. The nexent-local class is for static volumes." >&2
             return 1
         fi
     fi
@@ -1819,7 +1819,7 @@ print_usage() {
         echo "  --version VERSION          指定应用版本（未设置时读取当前仓库 VERSION）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
-        echo "  --persistence-mode MODE    local、dynamic 或 existing"
+        echo "  --persistence-mode MODE    dynamic（默认）、local 或 existing"
         echo "  --runtime-replicas COUNT   设置 Runtime 固定副本数"
         echo "  --direct-upgrade           直接更新现有应用，跳过全局缩零和系统初始化 Job"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
@@ -1855,7 +1855,7 @@ print_usage() {
     echo "  --version VERSION          Specify app version (defaults to the current repository VERSION)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
-    echo "  --persistence-mode MODE    local, dynamic, or existing"
+    echo "  --persistence-mode MODE    dynamic (default), local, or existing"
     echo "  --runtime-replicas COUNT   Set the fixed Runtime replica count"
     echo "  --direct-upgrade           Upgrade an existing application without scaling to zero or running bootstrap"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"

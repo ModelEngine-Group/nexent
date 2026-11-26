@@ -326,15 +326,17 @@ deployment_prompt() {
 }
 
 deployment_start_log() {
-  local log_dir="$1/logs/deploy" arg timestamp
+  local log_dir="$1/logs/deploy" arg timestamp log_file
   shift
   for arg in "$@"; do
     case "$arg" in --help|-h) return 0 ;; esac
   done
   if [ -z "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
-    timestamp=$(date +%Y%m%d-%H%M%S) || return 1
     mkdir -p "$log_dir" || return 1
-    NEXENT_DEPLOY_LOG_FILE=$(mktemp "$log_dir/deploy-$timestamp-XXXXXX") || return 1
+    timestamp=$(date +%Y%m%d-%H%M%S) || return 1
+    log_file="$log_dir/deploy-$timestamp.log"
+    (umask 077; : >> "$log_file") || return 1
+    NEXENT_DEPLOY_LOG_FILE="$log_file"
     export NEXENT_DEPLOY_LOG_FILE
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       deployment_log "部署日志：$NEXENT_DEPLOY_LOG_FILE"

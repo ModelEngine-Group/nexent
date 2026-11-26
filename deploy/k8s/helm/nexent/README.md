@@ -32,8 +32,8 @@ bash deploy.sh k8s
 | `bash uninstall.sh k8s --release-scope nexent` | Uninstall the application release only |
 | `bash uninstall.sh k8s --release-scope infrastructure` | Uninstall infrastructure only when Nexent is absent |
 | `bash uninstall.sh k8s clean` | Clean Helm state only (fixes stuck releases) |
-| `bash uninstall.sh k8s delete` | Uninstall the Helm release and delete the namespace |
-| `bash uninstall.sh k8s delete-all` | Uninstall the Helm release, delete the namespace, and delete local PV data |
+| `bash uninstall.sh k8s delete` | Uninstall the Helm release and request namespace deletion |
+| `bash uninstall.sh k8s delete-all` | Uninstall the Helm release, request namespace deletion, and delete local PV data |
 
 ### Usage Examples
 
@@ -104,7 +104,9 @@ Application Secret values are rendered after credentials are finalized and writt
 
 Ordinary backend configuration is injected through these file Secrets instead of being copied field by field into generated common values. The common ConfigMap and Chart values remain the fallback for omitted keys and direct Helm use. The runtime renderer retains timezone and Web's Northbound URL/upload limit, plus Redis URL and part-processor count because they also supply the runtime-state Redis fallback and derived worker concurrency. Deployment overrides, finalized credentials and infrastructure configuration keep their dedicated rendering paths.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; the chart does not pin these workloads to a node. Use this mode only on a single-node cluster so backend Pods see the same workspace. On multiple nodes, use `dynamic` or `existing` with actual shared RWX storage. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+New deployments default to `dynamic`. The charts create PVCs and let Kubernetes select the default StorageClass when no class is specified. An explicit `--persistence-mode` takes precedence over the saved mode in `deploy/k8s/deploy.options`; without either, the built-in default applies. When using Helm directly to upgrade an existing release with local storage, carry its storage overrides forward.
+
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; the chart does not pin these workloads to a node. Use this mode only on a single-node cluster so backend Pods see the same workspace. On multiple nodes, use `dynamic` or `existing` with actual shared RWX storage. In local mode, shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
@@ -159,7 +161,7 @@ bash deploy.sh k8s --release-scope nexent --defaults --runtime-replicas 3 \
 
 An explicit `--runtime-replicas` takes precedence. Without it, a changed count in `values.yaml` takes precedence over the saved `runtimeReplicas` in `deploy/k8s/deploy.options`. Subsequent deployments reuse the saved count while the chart value is unchanged. For older saved options, the script treats `1` as the previous chart value. Use the release's current persistence settings. To return to a single replica, set the count to `1` and redeploy during an idle window.
 
-More than one Runtime replica requires `dynamic` with an explicit RWX-capable StorageClass, or `existing` with precreated PVCs. The deployment identity needs read access to the Runtime PVCs and their bound PVs. Before starting bootstrap writes, the script requires the workspace, skills, memory-plugin, logs, and trajectory volumes to be `Bound` with `ReadWriteMany` access and `Filesystem` volume mode. PVs with `spec.local` remain unsupported. A `hostPath` PV that meets these checks can be used for single-node deployments. For multi-node deployments, verify cross-node reads and writes on the backing storage. With existing storage, the workspace, skills, and logs claim names honor `--existing-claim-prefix`. The memory-plugin and trajectory claims use `nexent-memory-plugins` and `nexent-trajectory`.
+More than one Runtime replica requires an RWX-capable StorageClass in `dynamic` mode or precreated PVCs in `existing` mode. The deployment identity needs read access to the Runtime PVCs and their bound PVs. Before starting bootstrap writes, the script requires the workspace, skills, memory-plugin, logs, and trajectory volumes to be `Bound` with `ReadWriteMany` access and `Filesystem` volume mode. PVs with `spec.local` remain unsupported. A `hostPath` PV that meets these checks can be used for single-node deployments. For multi-node deployments, verify cross-node reads and writes on the backing storage. With existing storage, the workspace, skills, and logs claim names honor `--existing-claim-prefix`. The memory-plugin and trajectory claims use `nexent-memory-plugins` and `nexent-trajectory`.
 
 Budget threads, database and Redis connections, object storage, and downstream model traffic for the total number of Runtime processes.
 
@@ -179,10 +181,10 @@ Budget threads, database and Redis connections, object storage, and downstream m
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
 | `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
-| `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
+| `--persistence-mode` | Persistent volume mode | `dynamic` (default), `local`, or `existing` |
 | `--runtime-replicas` | Fixed Runtime replica count | Positive integer |
 | `--direct-upgrade` | Upgrade an existing application release without scaling the application to zero or running bootstrap | Off |
-| `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
+| `--storage-class` | StorageClass for PV/PVC binding | Dynamic PVCs use the cluster's default StorageClass if omitted; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
 | `--local-node-name` | Deprecated compatibility option | Ignored; local mode uses hostPath and does not require nodeAffinity |
 | `--existing-claim-prefix` | Prefix for existing PVC names | Renders as `<prefix>-<component>` |
@@ -192,10 +194,11 @@ Budget threads, database and Redis connections, object storage, and downstream m
 | Option | Description | Values |
 |--------|-------------|--------|
 | `--release-scope` | Helm release scope; infrastructure-only removal is dependency protected | `all` (default), `infrastructure`, or `nexent` |
-| `--delete-data` | Compatibility option for Helm-managed PV/PVC cleanup behavior | `true` or `false` |
+| `--delete-data` | Compatibility option for cleanup after Helm uninstall fails | `true` or `false` |
 | `--delete-volumes` | Alias for `--delete-data` | `true` or `false` |
 | `--remove-volumes` | Alias for `--delete-data true` | Flag |
 | `--keep-volumes` | Alias for `--delete-data false` | Flag |
+| `--delete-pvc` | Delete the selected releases' dynamic PVCs after Helm uninstall | `true` or `false` (default) |
 | `--delete-local-data` | Delete local PV data under `/var/lib/nexent` and `/var/lib/nexent-data` after Helm uninstall | `true` or `false` |
 | `--remove-local-data` | Alias for `--delete-local-data true` | Flag |
 | `--keep-local-data` | Alias for `--delete-local-data false` | Flag |
@@ -318,7 +321,9 @@ After successful deployment:
 
 ### Preserved Data
 
-By default, `bash uninstall.sh k8s` removes the Helm release and preserves local PV data. It prompts before deleting the namespace or local PV contents. In non-interactive environments, both are preserved unless explicitly requested.
+By default, `bash uninstall.sh k8s` removes the Helm release and retains dynamic PVCs, their namespace, and local PV data. The interactive prompt for dynamic PVC deletion defaults to keeping them. Use `--delete-pvc false` to keep them without a prompt. Retaining a dynamic PVC also retains its namespace, including when `delete` or `delete-all` requests namespace deletion.
+
+Helm uses the keep policy in the installed release manifest. To retain dynamic PVCs from a release installed with an older chart, first upgrade that release with the current chart so Helm records the policy.
 
 The following local PersistentVolumes can preserve data:
 
@@ -334,7 +339,9 @@ The following local PersistentVolumes can preserve data:
 
 ### Deleted Data
 
-Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, `/var/lib/nexent-data/project-config`, and `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
+To remove dynamic PVCs and keep the namespace, run `bash uninstall.sh k8s --delete-pvc true --keep-namespace`. The script removes only the selected releases' dynamic PVCs. Kubernetes applies the bound PV's reclaim policy to the underlying data.
+
+Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, `/var/lib/nexent-data/project-config`, and `/var/lib/nexent-data/nexent-*`. `delete-all` requests namespace deletion and removes local PV data by default. Use `--keep-local-data` to preserve local volume contents.
 
 ## Services
 

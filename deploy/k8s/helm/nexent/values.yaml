@@ -13,8 +13,9 @@ global:
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
   sharedStorage:
-    mode: "local"
-    storageClassName: "nexent-local"
+    mode: "dynamic"
+    # An empty value lets Kubernetes select the default StorageClass.
+    storageClassName: ""
     accessModes:
       - ReadWriteMany
     workspace:

@@ -3,6 +3,7 @@
 """Deployment milestones, diagnostics and interactive output use their intended destinations."""
 
 import os
+import re
 import shutil
 import subprocess
 
@@ -34,6 +35,7 @@ def test_entrypoint_keeps_offline_and_platform_output_in_one_private_log(tmp_pat
                             capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == status, result.stderr
     log, = (root / "logs/deploy").iterdir()
+    assert re.fullmatch(r"deploy-\d{8}-\d{6}\.log", log.name)
     if os.name != "nt":
         assert log.stat().st_mode & 0o777 == 0o600
     output = result.stdout + result.stderr
