@@ -411,6 +411,8 @@ def resolve_knowledge_scope(
     else:
         agent_tree = deepcopy(runtime_agent_tree)
     desired = scope.model_dump(mode="json")
+    if not scope.aidp.metadata_filter.enabled:
+        desired.get("aidp", {}).pop("metadata_filter", None)
     warnings: List[Dict[str, Any]] = []
 
     local_records: List[Dict[str, Any]] = []

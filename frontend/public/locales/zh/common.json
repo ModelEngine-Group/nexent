@@ -8098,6 +8098,7 @@
   "aidpKnowledge.ontologyEntityPropertyValue": "属性值",
   "aidpKnowledge.ontologyEntityRelationConflict": "同一个实体不能同时设为上位和下位",
   "aidpKnowledge.ontologyEntityRelationPartial": "实体已创建，但下位关系写入失败：{{reason}}",
+  "aidpKnowledge.ontologyEntityRelationWritebackFailed": "关系写入失败，请稍后重试",
   "aidpKnowledge.ontologyEntityRelationScanGap": "上位/下位关系需要分页读取整个本体库的关系后再匹配；AIDP 关系接口不支持按实体过滤，关系很多时加载会变慢。",
   "aidpKnowledge.ontologyEntityRelations": "实体关系",
   "aidpKnowledge.ontologyEntitySearchEmpty": "没有匹配的实体",

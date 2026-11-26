@@ -1037,6 +1037,17 @@
       ]
     },
     {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
+      "route_id": "route-30875f96e524edad",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
       "transport": "http",
@@ -1054,17 +1065,6 @@
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
       "route_id": "route-761345f08587223d",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
-      "route_id": "route-30875f96e524edad",
       "credential_kinds": [
         "session"
       ]
@@ -1213,12 +1213,12 @@
       ]
     },
     {
-      "method": "POST",
+      "method": "DELETE",
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders",
       "transport": "http",
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
-      "route_id": "route-8ffd3295002e1fd4",
+      "route_id": "route-88000ae8b7ffa058",
       "credential_kinds": [
         "session"
       ]
@@ -1235,12 +1235,12 @@
       ]
     },
     {
-      "method": "DELETE",
+      "method": "POST",
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders",
       "transport": "http",
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
-      "route_id": "route-88000ae8b7ffa058",
+      "route_id": "route-8ffd3295002e1fd4",
       "credential_kinds": [
         "session"
       ]
@@ -1301,6 +1301,17 @@
       ]
     },
     {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words/{word_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
+      "route_id": "route-65e5bb104c76a44d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words/{word_id}",
       "transport": "http",
@@ -1318,17 +1329,6 @@
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
       "route_id": "route-e420020a21c016c7",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words/{word_id}",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
-      "route_id": "route-65e5bb104c76a44d",
       "credential_kinds": [
         "session"
       ]
@@ -1411,6 +1411,17 @@
       ]
     },
     {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-07c8b669f11d52c6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}",
       "transport": "http",
@@ -1433,17 +1444,6 @@
       ]
     },
     {
-      "method": "DELETE",
-      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-07c8b669f11d52c6",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
       "method": "GET",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/bindings",
       "transport": "http",
@@ -1455,23 +1455,23 @@
       ]
     },
     {
-      "method": "PUT",
-      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/bindings",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-f00d29b491c26164",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
       "method": "POST",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/bindings",
       "transport": "http",
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
       "route_id": "route-dcc6443b0d1acb9e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/bindings",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-f00d29b491c26164",
       "credential_kinds": [
         "session"
       ]
@@ -1532,6 +1532,17 @@
       ]
     },
     {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/entities/{entity_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-e999694a94698224",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/entities/{entity_id}",
       "transport": "http",
@@ -1549,17 +1560,6 @@
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
       "route_id": "route-0c1a927de568d0a4",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/entities/{entity_id}",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-e999694a94698224",
       "credential_kinds": [
         "session"
       ]
@@ -1620,23 +1620,23 @@
       ]
     },
     {
-      "method": "PATCH",
-      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/metadata-fields/{field_ref}",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-178e87c69ac498f2",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
       "method": "DELETE",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/metadata-fields/{field_ref}",
       "transport": "http",
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
       "route_id": "route-9aca991c60a914b5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/metadata-fields/{field_ref}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-178e87c69ac498f2",
       "credential_kinds": [
         "session"
       ]
@@ -1719,6 +1719,17 @@
       ]
     },
     {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/rules/{rule_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
+      "route_id": "route-c1812490ca3420d5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/rules/{rule_id}",
       "transport": "http",
@@ -1736,17 +1747,6 @@
       "target": "management",
       "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
       "route_id": "route-65b0f273310e13b5",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/rules/{rule_id}",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-c1812490ca3420d5",
       "credential_kinds": [
         "session"
       ]

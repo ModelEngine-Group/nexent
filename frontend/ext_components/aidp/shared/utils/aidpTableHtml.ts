@@ -84,6 +84,10 @@ export const sanitizeAidpTableHtml = (raw: string): AidpTableHtml | null => {
 
   let doc: Document;
   try {
+    // The parsed tree never reaches the DOM as HTML: rebuildElement() below
+    // recreates only table tags, integer spans and text nodes. CodeQL cannot
+    // follow that DOM rebuild, so the query reports the parse call itself.
+    // codeql[js/xss-through-dom]
     doc = new DOMParser().parseFromString(
       trimmed.slice(tableStart),
       "text/html"

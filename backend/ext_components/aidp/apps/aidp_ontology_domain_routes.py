@@ -61,6 +61,10 @@ from ext_components.aidp.services.aidp_ontology_metadata_service import (
 logger = logging.getLogger("aidp_ontology_domain_routes")
 aidp_ontology_domain_router = APIRouter()
 
+# Public reason code for a successful entity create whose relation writeback
+# failed. The exception text stays in the server log.
+ENTITY_RELATION_WRITEBACK_FAILED = "ENTITY_RELATION_WRITEBACK_FAILED"
+
 
 @aidp_ontology_domain_router.get("/domains")
 async def list_ontology_domains(
@@ -385,7 +389,7 @@ async def create_ontology_entity(
                 entity_id,
                 exc,
             )
-            relation_error = str(exc)
+            relation_error = ENTITY_RELATION_WRITEBACK_FAILED
     summary = _entity_summary(
         result,
         entity_id=str(entity_id) if entity_id is not None else None,

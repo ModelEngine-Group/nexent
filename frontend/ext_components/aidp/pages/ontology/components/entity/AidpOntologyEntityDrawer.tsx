@@ -473,10 +473,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             : {}),
         });
         if (created.relation_error) {
+          const reason =
+            created.relation_error === "ENTITY_RELATION_WRITEBACK_FAILED"
+              ? t("aidpKnowledge.ontologyEntityRelationWritebackFailed")
+              : created.relation_error;
           message.warning(
-            t("aidpKnowledge.ontologyEntityRelationPartial", {
-              reason: created.relation_error,
-            })
+            t("aidpKnowledge.ontologyEntityRelationPartial", { reason })
           );
         } else {
           message.success(t("aidpKnowledge.ontologyEntityCreated"));

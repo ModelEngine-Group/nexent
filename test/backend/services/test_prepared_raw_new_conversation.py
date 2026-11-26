@@ -60,7 +60,11 @@ async def test_new_dispatch_uses_claimed_agentos_turn_or_rejects_unprepared_reso
         with pytest.raises(ValidationError, match="could not be prepared"):
             await runtime_client.forward_conversation_run(payload, *ACTOR, northbound=True)
     start.assert_awaited_once()
-    assert start.await_args.kwargs == {"include_journal_controls": False, "metadata_from_northbound": False}
+    assert start.await_args.kwargs == {
+        "include_journal_controls": False,
+        "metadata_from_northbound": False,
+        "northbound_run": True,
+    }
     assert start.await_args.args[0].claimed_run_id == REFERENCE.run_id
     assert start.await_args.args[-1] is client
     assert client.mock_calls == []

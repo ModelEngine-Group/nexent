@@ -36,6 +36,7 @@ def test_update_returns_effective_preview_and_warnings(
         aidp_disabled=True,
         aidp_kds_ids=[],
         aidp_display_names=[],
+        aidp_metadata_filter={"enabled": False},
     )
     mock_update.return_value = True
 

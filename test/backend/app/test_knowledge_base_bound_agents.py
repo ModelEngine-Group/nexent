@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from management.api.knowledge_base import vectordatabase as local_app
 import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
+import ext_components.aidp.apps.aidp_mgmt_common as aidp_common
 import pytest
 from backend.http.server.app_factory import register_exception_handlers
 from contracts.errors.exceptions import TokenExpiredError
@@ -36,7 +37,7 @@ def preview(request, monkeypatch):
     local = request.param == "local"
     module = local_app if local else aidp_app
     auth = MagicMock(return_value=("u1", "t1", "USER") if local else ("u1", "t1"))
-    monkeypatch.setattr(local_app if local else aidp_app.auth_utils_module,
+    monkeypatch.setattr(local_app if local else aidp_common.auth_utils_module,
                         "get_current_user_context" if local else "get_current_user_id", auth)
     permission = MagicMock()
     monkeypatch.setattr(local_app if local else aidp_app.perms,
@@ -157,7 +158,7 @@ async def test_auth_runs_directly_and_binding_query_runs_in_managed_worker(monke
         return EMPTY
 
     module = local_app if local else aidp_app
-    monkeypatch.setattr(local_app if local else aidp_app.auth_utils_module,
+    monkeypatch.setattr(local_app if local else aidp_common.auth_utils_module,
                         "get_current_user_context" if local else "get_current_user_id", auth)
     monkeypatch.setattr(local_app if local else aidp_app.perms,
                         "require_knowledge_base_read_permission" if local else "require_permission", MagicMock())

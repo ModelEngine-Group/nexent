@@ -71,6 +71,11 @@
   ],
   [
     "GET",
+    "/nb/v1/knowledge-bases/{kds_id}/files/{file_uuid}/download",
+    "download_knowledge_base_file"
+  ],
+  [
+    "GET",
     "/nb/v1/knowledge/file/download/{object_name:path}",
     "get_storage_file"
   ],

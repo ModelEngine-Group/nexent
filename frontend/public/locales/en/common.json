@@ -8101,6 +8101,7 @@
   "aidpKnowledge.ontologyEntityPropertyValue": "Property value",
   "aidpKnowledge.ontologyEntityRelationConflict": "The same entity cannot be both a parent and a child",
   "aidpKnowledge.ontologyEntityRelationPartial": "The entity was created, but writing child relations failed: {{reason}}",
+  "aidpKnowledge.ontologyEntityRelationWritebackFailed": "Relations could not be written. Try again later.",
   "aidpKnowledge.ontologyEntityRelationScanGap": "Parent/child relations are matched after paging through all relations in the ontology. AIDP has no per-entity relation filter, so domains with many relations load more slowly.",
   "aidpKnowledge.ontologyEntityRelations": "Entity relations",
   "aidpKnowledge.ontologyEntitySearchEmpty": "No matching entities",
