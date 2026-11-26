@@ -83,7 +83,7 @@ journey("PW-CHAT-01", async (context) => {
         return `Stop terminated the old stream at ${stoppedText.length} visible characters`;
       },
       async () => {
-        const response = await chat.sendAndWait(`上一轮长输出任务已经取消，不要继续它。本轮不调用工具，立即且只返回 <final_answer>CONTINUE-${token}</final_answer>。`);
+        const response = await chat.sendAndWaitForDisplayedCompletion(`上一轮长输出任务已经取消，不要继续它。本轮不调用工具，立即且只返回 <final_answer>CONTINUE-${token}</final_answer>。`);
         const text = (await response.innerText()).trim();
         if (/已有智能体任务正在运行|task.*already.*running/i.test(text)) {
           const error = new Error("Stop API returned success but the next turn was rejected as still running: " + text);
@@ -128,7 +128,7 @@ journey("PW-CHAT-01", async (context) => {
         await chat.selectModelByDisplayName(resolveReadyAsset("models", "d4_chat_model_display_name", "PW-CHAT-01"));
         await chat.startMessage(`只回复：${secondMarker}`);
         ownedConversationIds.add(chat.registerOwnedConversation("PW-CHAT-01"));
-        await chat.waitForCompletion();
+        await chat.waitForDisplayedCompletion();
         await chat.renameActiveThread(secondTitle);
         await titleRequests.settle();
         await expect(chat.threadButton(secondTitle)).toBeVisible();

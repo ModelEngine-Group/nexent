@@ -46,6 +46,7 @@ change:
     journal Body iterators close on completion and on assertion failure. The D4 cases
     retain their declared preparation groups and use the model selected for the owned
     Agent. Resource cleanup is through the case callbacks or authenticated asset journal.
-    The chart, tool chat, multi-Agent, metadata and sharing journeys require the
-    actual successful completion indicator. Their rendered output, tool evidence and history assertions remain.
+    The chart, tool chat, multi-Agent, metadata, sharing and post-Stop turns
+    require the successful completion indicator. Their rendered output, tool evidence
+    and history assertions remain.
     Conversation history checks use the active authenticated browser origin.
