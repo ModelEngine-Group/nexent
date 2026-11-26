@@ -1,11 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Empty, Segmented, Spin, Tooltip } from "antd";
+import { Alert, Empty, Segmented, Spin } from "antd";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getAgentMonitoringRankings } from "@/services/agentMonitoringService";
 import type { AgentMonitoringMetric } from "@/types/agentMonitoring";
-import { PublicationStatus, TokenCoverage } from "./AgentMonitoringStatus";
 import {
   agentMetricLabels,
   formatAgentMetric,
@@ -39,7 +38,6 @@ export function AgentRankings({
   });
   const response = rankings.data;
   const loading = scopeLoading || (selection !== null && rankings.isPending);
-  const isToken = metric === "total_tokens";
   const isRate = metric === "success_rate";
   const rows =
     response?.data.map((row) => ({
@@ -50,7 +48,6 @@ export function AgentRankings({
   const max = isRate
     ? 1
     : Math.max(0, ...rows.map(({ value }) => Number(value)));
-  const publication = isToken ? response?.token_status : response;
   const title = t("ops.monitoring.agent.ranking.title");
   const format = (value: number | string | null, kind = metric) =>
     formatAgentMetric(value, kind, i18n.language);
@@ -100,7 +97,6 @@ export function AgentRankings({
                 row.name ||
                 t("ops.monitoring.agent.details.agentId", { id: row.agent_id });
               const samples = row.metrics?.success_sample_count;
-              const usage = row.tokens?.total_tokens ?? null;
               const width = max ? (100 * Number(value)) / max : 0;
               const valueLabel = format(value);
               return (
@@ -120,13 +116,7 @@ export function AgentRankings({
                     <span style={{ width: `${width}%` }} />
                   </span>
                   <span className={styles.rankValue}>
-                    {isToken ? (
-                      <Tooltip title={<TokenCoverage usage={usage} />}>
-                        <strong tabIndex={0}>{valueLabel}</strong>
-                      </Tooltip>
-                    ) : (
-                      <strong>{valueLabel}</strong>
-                    )}
+                    <strong>{valueLabel}</strong>
                     {isRate && samples !== undefined && (
                       <small>
                         {t("ops.monitoring.agent.successSamples", {
@@ -162,16 +152,6 @@ export function AgentRankings({
           )}
         />
       ) : null}
-      {publication && (
-        <PublicationStatus
-          label={t(
-            isToken
-              ? "ops.monitoring.agent.tokens"
-              : "ops.monitoring.agent.executionStatus"
-          )}
-          publication={publication}
-        />
-      )}
     </section>
   );
 }

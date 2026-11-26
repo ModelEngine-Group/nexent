@@ -11,7 +11,6 @@ import type {
   AgentMonitoringRow,
 } from "@/types/agentMonitoring";
 import type { OperationsResource } from "@/types/operations";
-import { PublicationStatus, TokenCoverage } from "./AgentMonitoringStatus";
 import {
   formatAgentMetric,
   getAgentSuccessRate,
@@ -156,32 +155,15 @@ export function AgentMonitoringDetails({
     },
     {
       ...sortColumn("total_tokens", t("ops.monitoring.agent.tokenCard")),
-      render: (_, row) => {
-        const usage = row.tokens.total_tokens;
-        return (
-          <Tooltip
-            color="var(--color-bg-3)"
-            title={
-              <>
-                <TokenCoverage usage={usage} />
-                <PublicationStatus
-                  label={t("ops.monitoring.agent.tokens")}
-                  publication={row.token_status}
-                />
-              </>
-            }
-            styles={{ container: { color: "var(--color-text-primary)" } }}
-          >
-            <span className={styles.tokenValue} tabIndex={0}>
-              {formatAgentMetric(
-                usage?.value ?? null,
-                "total_tokens",
-                i18n.language
-              )}
-            </span>
-          </Tooltip>
-        );
-      },
+      render: (_, row) => (
+        <span className={styles.tokenValue}>
+          {formatAgentMetric(
+            row.tokens.total_tokens?.value ?? null,
+            "total_tokens",
+            i18n.language
+          )}
+        </span>
+      ),
     },
     {
       ...sortColumn("avg_duration_ms", label("duration")),
@@ -247,18 +229,6 @@ export function AgentMonitoringDetails({
       </h2>
       {details.isError && (
         <Alert type="error" showIcon title={label("failed")} />
-      )}
-      {response && (
-        <div className={styles.statusList}>
-          <PublicationStatus
-            label={t("ops.monitoring.agent.executionStatus")}
-            publication={response}
-          />
-          <PublicationStatus
-            label={t("ops.monitoring.agent.tokens")}
-            publication={response.token_status}
-          />
-        </div>
       )}
       <Table<AgentMonitoringRow>
         columns={columns}
