@@ -432,9 +432,16 @@ def is_async_task_payload(payload: Any) -> bool:
 
 def async_task_summary(payload: Any) -> dict[str, Any]:
     data = unwrap_payload(payload)
+    task_id = data.get("task_id")
+    if task_id is None and "taskId" in data:
+        logger.warning(
+            "AIDP async acknowledgement used taskId instead of the confirmed task_id "
+            "key; response keys=%s",
+            sorted(data),
+        )
     return {
         "accepted": True,
-        "task_id": data.get("task_id") or data.get("taskId"),
+        "task_id": task_id,
         "status": data.get("status"),
     }
 
@@ -504,13 +511,27 @@ def normalize_import_errors(payload: Any) -> list[dict[str, Any]]:
 def normalize_import_result(payload: Any) -> dict[str, Any]:
     """Normalize a synchronous import response into per-item counters."""
     data = _import_result_data(payload)
+    counters = (
+        "imported_count",
+        "skipped_count",
+        "failed_count",
+        "relation_imported",
+        "relation_failed",
+    )
+    missing = [key for key in counters if key not in data]
+    if missing:
+        logger.warning(
+            "AIDP import response is missing confirmed counter keys %s; response keys=%s",
+            missing,
+            sorted(data),
+        )
     return {
         "accepted": False,
-        "imported_count": int(data.get("imported_count") or 0),
-        "skipped_count": int(data.get("skipped_count") or 0),
-        "failed_count": int(data.get("failed_count") or 0),
-        "relation_imported": int(data.get("relation_imported") or 0),
-        "relation_failed": int(data.get("relation_failed") or 0),
+        "imported_count": int(data.get("imported_count", 0) or 0),
+        "skipped_count": int(data.get("skipped_count", 0) or 0),
+        "failed_count": int(data.get("failed_count", 0) or 0),
+        "relation_imported": int(data.get("relation_imported", 0) or 0),
+        "relation_failed": int(data.get("relation_failed", 0) or 0),
         "first_error": data.get("first_error"),
         "errors": normalize_import_errors(payload),
     }
@@ -531,7 +552,10 @@ def normalize_export_result(payload: Any) -> dict[str, Any]:
         return async_task_summary(payload)
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, dict):
-        # Some deployments answer with the grouped document at the top level.
+        logger.warning(
+            "AIDP export response has no data object; falling back to the payload keys=%s",
+            sorted(payload) if isinstance(payload, dict) else type(payload).__name__,
+        )
         data = unwrap_payload(payload)
     domain_name = next(iter(data), None) if isinstance(data, dict) else None
     if not isinstance(domain_name, str):

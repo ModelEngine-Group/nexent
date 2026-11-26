@@ -42,8 +42,11 @@ import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/k
 import {
   AIDP_UNKNOWN_VALUE,
   formatAidpCreator,
-  formatAidpDateTime,
 } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import {
+  formatAidpDate,
+  formatAidpDateTime,
+} from "@/ext_components/aidp/shared/utils/aidpTime";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
@@ -67,9 +70,7 @@ import {
 
 /** Keep the compact card date in the UCD year-month-day format. */
 function formatCardDate(value: unknown): string {
-  if (formatAidpDateTime(value) === AIDP_UNKNOWN_VALUE)
-    return AIDP_UNKNOWN_VALUE;
-  return new Date(value as string).toLocaleDateString("sv-SE");
+  return formatAidpDate(value as string | number | null | undefined);
 }
 
 interface AidpKnowledgeListProps {
