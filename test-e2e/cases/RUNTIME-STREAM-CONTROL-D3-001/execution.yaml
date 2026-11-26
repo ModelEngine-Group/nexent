@@ -1,0 +1,38 @@
+schema_version: '1.0'
+case_id: RUNTIME-STREAM-CONTROL-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-STREAM-CONTROL-D3-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-005:
+  - test_cross_pod_agent_replay_and_stop
+  - test_public_web_and_northbound_replay_and_stop
+  AC-P1-009:
+  - test_cross_pod_agent_replay_and_stop
+  - test_public_web_and_northbound_replay_and_stop
+  - test_cross_pod_attachment_run_keeps_access_scoped
+  - test_public_voice_websocket_reconnects_as_new_runtime_session
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained preparation requires an opted-in isolated
+  Kubernetes cluster and owned namespace, dynamic volumes, two workers, test
+  identities, a controlled streaming provider, and either directed Gateway
+  routes or a scoped Runtime Service relay for the stable Web/Northbound paths.
+  The attachment selector uses the real object store and the peer Runtime's
+  Agent workspace, then deletes only the test input, output and conversation.
+  The relay sends marked starts to one Pod and replay/stop to the peer,
+  records actual upstream origins, and restores the original Service endpoints.
+  The voice selector proxies actual WebSocket upgrades to the two owned Pods
+  and verifies framed STT/TTS traffic with an in-cluster protocol double,
+  socket peer addresses, unique provider sessions and normal closure.
+  Cleanup verifies namespace ownership and volume reclamation. The selectors
+  cover replay and stop, unread tails after terminal commit, expired history
+  fallback, owner-scoped controls, and delayed producer writes. The expiry probe
+  shortens only the case-owned terminal generation's Redis replay TTLs.
+  Isolated component runs do not establish Kubernetes D3 acceptance.

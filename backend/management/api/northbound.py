@@ -94,6 +94,7 @@ from management.services.northbound import (
     get_conversation_history,
     list_configured_models,
     list_conversations,
+    resume_streaming_chat,
     start_streaming_chat,
     stop_chat,
     update_conversation_title,
@@ -425,10 +426,15 @@ async def run_chat(
         description="Final answer delivery: complete returns one full root answer (default); "
                     "delta preserves incremental final_answer events and their completion phase.",
     ),
+    stream_cursor: bool = Body(False, embed=True, description="Include SSE event IDs for reconnectable runs."),
+    replay_cursor: Optional[str] = Body(None, embed=True, max_length=64,
+                                        description="Resume from a previously processed SSE event ID without starting a run."),
 ):
     try:
         reject_legacy_agent_fields(await request.json())
         ctx: NorthboundContext = await _get_northbound_context(request)
+        if replay_cursor is not None:
+            return await resume_streaming_chat(ctx, conversation_id, replay_cursor)
         return await start_streaming_chat(
             ctx=ctx,
             conversation_id=conversation_id,
@@ -441,6 +447,7 @@ async def run_chat(
             model_id=model_id,
             idempotency_key=idempotency_key,
             final_answer_mode=final_answer_mode,
+            **({"stream_cursor": True} if stream_cursor else {}),
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)

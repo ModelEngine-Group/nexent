@@ -166,6 +166,7 @@ def isolated_monitoring(monkeypatch):
     tenant = f"agent-sample-{uuid4().hex}"
     store = runtime.control_store()
     catalog_tables = []
+    from infrastructure.rdb import agent_monitoring
     from management.db.agent.models import AgentInfo
     from management.db.model.models import ModelRecord
     from ops.monitoring import query
@@ -178,6 +179,7 @@ def isolated_monitoring(monkeypatch):
                 model.__table__.create(connection)
                 catalog_tables.append(model.__table__)
         monkeypatch.setattr(query, "get_db_session", lambda: Session(store.engine))
+        monkeypatch.setattr(agent_monitoring, "get_db_session", lambda: Session(store.engine))
         with Elasticsearch(es_host, request_timeout=10) as es:
             assert not es.indices.get(index="monitoring-*", allow_no_indices=True)
             assert not es.options(ignore_status=404).indices.get_index_template(

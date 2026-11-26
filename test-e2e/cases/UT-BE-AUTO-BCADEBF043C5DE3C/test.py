@@ -10,6 +10,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
 from management.db.skill import repository as skill_db
 
 
@@ -88,6 +89,9 @@ def test_skill_description_truncated_to_1000_and_write_ok(monkeypatch, caplog):
     over_long = "b" * 5000
     assert skill_db._normalize_skill_description(over_long) == over_long[:MAX_LENGTH]
     assert len(skill_db._normalize_skill_description(over_long)) == MAX_LENGTH
+
+    snapshot = DEFAULT_CATALOG.build_snapshot(DEFAULT_CATALOG.defaults)
+    monkeypatch.setattr(skill_db, "get_config_snapshot", lambda: snapshot)
 
     store = []
     _patch_get_db_session(monkeypatch, store)

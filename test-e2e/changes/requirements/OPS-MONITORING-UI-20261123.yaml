@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-UI-20261123
+  change_type: requirement
+  requirement_id: OPS-MONITORING-UI-20261123
+  title: Add the shared monitoring dashboard shell and filters
+  description: Implement current directory selection and calendar date scope for five tabs with explicit unavailable statistics.
+  affected_features:
+    existing: []
+    added: [OPS-MONITORING-UI]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [OPS-MONITORING-UI-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/monitoringFilters.test.tsx
+    behaviors:
+    - Verify calendar ranges across UTC day boundaries, with inclusive presets and custom dates.
+    - Verify dependent filter resets and no-op scope updates.
+    reason: Authorization regressions cover entry access. This increment adds frontend state and date logic with no changed Python behavior. Browser acceptance covers actual popovers, scoped requests and placeholder controls independently.
+  notes: Base 095bcf8477984c660759c474b15bc76cf96efe30. Existing monitoring statistics and system configuration remain outside the increment.

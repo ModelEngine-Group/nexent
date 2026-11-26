@@ -9,7 +9,14 @@ import {
 
 journey("AGENT-EDITOR-D4-004", async ({ page, contract, expect }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
-  const fixture = await installEditor(page);
+  await page.context().addCookies([
+    {
+      name: "nexent_token_expires_at",
+      value: String(Math.floor(Date.now() / 1000) + 3600),
+      url: baseUrl,
+    },
+  ]);
+  const fixture = await installEditor(page, "EDIT", "ADMIN");
   const steps = contract.expectedIds("steps");
   const assertions = contract.expectedIds("assertions");
   await contract.precondition(
@@ -51,10 +58,9 @@ journey("AGENT-EDITOR-D4-004", async ({ page, contract, expect }) => {
         await expect(secondModel).toBeChecked();
         expect(fixture.updates).toEqual([]);
       }
-      await dialog
-        .getByRole("button", { name: /关闭|Close/ })
-        .last()
-        .click();
+      await page.locator(".ant-drawer-mask:visible").click({
+        position: { x: 10, y: 10 },
+      });
       await expect(dialog).toHaveCount(0);
       await expect(page.locator(".ant-drawer-mask:visible")).toHaveCount(0);
     }

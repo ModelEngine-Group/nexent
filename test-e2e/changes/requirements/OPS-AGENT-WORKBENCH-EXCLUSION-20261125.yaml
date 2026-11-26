@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-WORKBENCH-EXCLUSION-20261125
+  change_type: requirement
+  requirement_id: OPS-AGENT-WORKBENCH-EXCLUSION-20261125
+  title: Exclude the Workbench scheduler from Agent monitoring
+  description: Apply stable system-key eligibility to current inventory and published execution and Token projections without deleting runtime records or excluding dispatched business Agents.
+  affected_features:
+    existing: [OPS-MONITORING-UI, OPS-MODEL-MONITORING]
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: [OPS-MONITORING-UI-D4-001]
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/ops/test_workbench_monitoring_exclusion.py
+    - test/backend/ops/test_resource_inventory.py
+    - test/backend/ops/test_agent_tokens.py
+    - test/backend/ops/test_agent_monitoring_api.py
+    - test/backend/ops/test_agent_monitoring_views.py
+    - test/backend/ops/test_agent_token_api.py
+    behaviors:
+    - Resolve workbench_main across owners, releases and soft-deleted metadata without relying on names or ID 50.
+    - Exclude scheduler execution and Token totals before summarizing and ranking, preserving dispatched business Agents and raw records.
+    - Exercise actual catalog SQL and in-memory ASGI summaries, lists, trends and three rankings with controlled published rows.
+    - Preserve existing tenant authorization, pagination and nullable metric contracts.
+    reason: SQLite and controlled publication reads prove the new eligibility rule; existing API regressions cover request and authorization behavior. Formal D3 and D4 remain distinct deployment verification and are not claimed by these unit results.
+  notes: The existing D3 fixture routes scheduler eligibility lookups to its disposable catalog database. See nexent-doc/docs/Developing/ops-agent-workbench-exclusion/ for verification evidence.

@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from contracts.constants import environment
-from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
 from nexent.core.concurrency import ThreadManager
 from shared.http import assert_status, client
 

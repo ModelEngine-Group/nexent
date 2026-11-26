@@ -17,6 +17,7 @@ def test_config_chart_launches_the_package_module(paused):
     result = subprocess.run(
         [helm, "template", "launcher-test", str(root / "deploy/k8s/helm/nexent"),
          "--set", f"global.businessPaused={str(paused).lower()}",
+         "--set", "nexent-runtime.replicaCount=1",
          "--set", "nexent-common.secrets.jwtSecret=isolated-launcher-fixture"],
         capture_output=True, text=True, timeout=20,
     )
@@ -45,6 +46,7 @@ def test_data_process_chart_skips_ops_initialization_with_shared_monitoring_enab
     root = Path(__file__).resolve().parents[3]
     result = subprocess.run(
         [helm, "template", "launcher-test", str(root / "deploy/k8s/helm/nexent"),
+         "--set", "nexent-runtime.replicaCount=1",
          "--set", "nexent-common.secrets.jwtSecret=isolated-launcher-fixture"],
         capture_output=True, text=True, timeout=20,
     )

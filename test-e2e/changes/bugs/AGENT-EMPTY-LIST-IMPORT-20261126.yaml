@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-EMPTY-LIST-IMPORT-20261126
+  change_type: bugfix
+  bug_id: AGENT-EMPTY-LIST-IMPORT-20261126
+  title: Keep Agent file import available in empty lists
+  description: Reuse the existing file picker and wizard on Agent configuration and Agent Repository.
+  observed_behavior: Empty Agent configuration only offered creation. Agent Repository had no file import entry.
+  expected_behavior: Authorized users can choose an export file and open the existing import wizard from both empty surfaces.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing Agent list tests verified the empty presentation and toolbar actions independently.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [AGENT-LIST-VIEWS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AGENT-LIST-EMPTY-IMPORT-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/useAgentFileImport.test.tsx
+    - frontend/tests/component/agentImportPrompt.test.tsx
+    behaviors:
+    - The picker opens the wizard only when it returns parsed data.
+    - Cancelling the wizard or file chooser leaves no open import state.
+    reason: Unit tests cover import state and parsing. D4 verifies both route entry points and file chooser wiring.
+  notes: The D4 journey uses a synthetic file and page-local HTTP fixtures without persisting resources.

@@ -440,6 +440,7 @@ export const fetchPublishedAgentList = async () => {
       is_new: agent.is_new || false,
       permission: agent.permission,
       current_version_no: agent.current_version_no,
+      knowledge_sources: agent.knowledge_sources,
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],

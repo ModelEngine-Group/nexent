@@ -28,7 +28,7 @@ def render(*options):
     ('docker', 'lightweight', 'docker'), ('kubernetes', 'lightweight', 'kubernetes'),
     ('kubernetes', 'disabled', 'local'),
 ])
-def test_provider_identity_and_existing_single_replica_guard(provider, mode, level):
+def test_provider_identity_and_default_runtime_replicas(provider, mode, level):
     result = render('--set', f'global.sandboxProvider={provider}', '--set', f'global.sandboxMode={mode}',
                     '--set', 'global.sharedStorage.mode=existing')
     assert result.returncode == 0, result.stderr
@@ -48,7 +48,7 @@ def test_provider_identity_and_existing_single_replica_guard(provider, mode, lev
 
 
 @pytest.mark.parametrize('override,error', [
-    ('nexent-runtime.replicaCount=2', 'single-replica'),
+    ('nexent-runtime.replicaCount=2', 'requires dynamic or existing shared RWX storage'),
     ('nexent-runtime.strategy.type=RollingUpdate', 'Recreate'),
     ('global.sandboxProvider=invalid', 'sandboxProvider'),
 ])

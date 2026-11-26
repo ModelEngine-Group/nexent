@@ -241,7 +241,7 @@ async def forward_conversation_run(
             if saved_user is not None:
                 presentation_options["saved_user"] = saved_user
             response = await prepared_turn.start_turn(
-                claimed, request, owner, tenant, client, include_journal_controls=not northbound,
+                claimed, request, owner, tenant, client, include_journal_controls=not northbound or request.stream_cursor,
                 metadata_from_northbound=northbound and request.metadata is not None,
                 northbound_run=northbound,
                 **presentation_options,

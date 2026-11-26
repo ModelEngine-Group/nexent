@@ -46,6 +46,7 @@ import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSe
 import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
 import { RESOURCE_PAGE_SIZE } from "@/features/workbench/components/ResourcePagination";
 import { RestoreDefaultsButton } from "@/features/workbench/components/RestoreDefaultsButton";
+import type { ComposerKnowledgeBase } from "@/hooks/chat/useComposerResources";
 
 interface ConversationKnowledgeScopeModalProps {
   open: boolean;
@@ -56,6 +57,8 @@ interface ConversationKnowledgeScopeModalProps {
   onRetryCapabilities?: () => void;
   capabilitiesPending?: boolean;
   capabilitiesUnavailable?: boolean;
+  requireEnabledSource?: boolean;
+  onCatalogLoaded?: (bases: ComposerKnowledgeBase[]) => void;
   onCancel: () => void;
   onConfirm: (
     scope: ConversationKnowledgeScope,
@@ -130,6 +133,8 @@ export const ConversationKnowledgeScopeModal: FC<
   onRetryCapabilities,
   capabilitiesPending = false,
   capabilitiesUnavailable = false,
+  requireEnabledSource = false,
+  onCatalogLoaded,
   onCancel,
   onConfirm,
   presentation = "modal",
@@ -152,11 +157,13 @@ export const ConversationKnowledgeScopeModal: FC<
       ),
     [groupListData]
   );
-  const configuredSource: "local" | "aidp" | null = !isDeploymentReady
-    ? null
-    : enableAidpKnowledge
-      ? "aidp"
-      : "local";
+  const deploymentSource = enableAidpKnowledge ? "aidp" : "local";
+  const configuredSource: "local" | "aidp" | null =
+    !isDeploymentReady ||
+    (requireEnabledSource &&
+      capabilities?.sources[deploymentSource].enabled === false)
+      ? null
+      : deploymentSource;
   const [draft, setDraft] = useState<ConversationKnowledgeScope>(() =>
     normalizeScopeForSource(value, configuredSource)
   );
@@ -179,7 +186,11 @@ export const ConversationKnowledgeScopeModal: FC<
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(RESOURCE_PAGE_SIZE);
   const tags = useResourceTags(
-    open && presentation === "drawer" && configuredSource === "local",
+    open &&
+      presentation === "drawer" &&
+      configuredSource === "local" &&
+      !capabilitiesPending &&
+      !capabilitiesUnavailable,
     "knowledge_base",
     localKnowledgeBases.map((kb) => String(kb.id))
   );
@@ -275,6 +286,16 @@ export const ConversationKnowledgeScopeModal: FC<
           );
         setLocalKnowledgeBases(localItems);
         setAidpKnowledgeBases(aidpItems);
+        onCatalogLoaded?.(
+          (configuredSource === "local" ? localItems : aidpItems).map((kb) => ({
+            id: String(configuredSource === "local" ? kb.knowledge_id : kb.id),
+            name: kb.display_name || kb.name,
+            description: kb.description || "",
+            embeddingModel: String(
+              kb.embeddingModelId ?? kb.embeddingModel ?? ""
+            ),
+          }))
+        );
         if (initializedCatalogRequest.current === catalogRequest) return;
         initializedCatalogRequest.current = catalogRequest;
         const availableIds = new Set(
@@ -346,7 +367,13 @@ export const ConversationKnowledgeScopeModal: FC<
     return () => {
       cancelled = true;
     };
-  }, [open, catalogLoadRequest, capabilitiesPending, capabilitiesUnavailable]);
+  }, [
+    open,
+    catalogLoadRequest,
+    capabilitiesPending,
+    capabilitiesUnavailable,
+    onCatalogLoaded,
+  ]);
 
   const localOptions = useMemo(
     () =>
@@ -1078,10 +1105,14 @@ export const ConversationKnowledgeScopeModal: FC<
       }}
       listContent={
         <Spin spinning={loading || !isDeploymentReady}>
-          {source ? (
+          {(loading || resourceError) && !drawerKnowledge.length ? (
+            <div className="min-h-32" />
+          ) : !source ? (
+            <Empty description={t("chat.knowledgeScope.noTool")} />
+          ) : drawerSelection?.knowledgeBases.length ? (
             renderSource(source, "list")
           ) : (
-            <Empty description={t("chat.knowledgeScope.noTool")} />
+            <Empty description={t("chat.knowledgeScope.empty")} />
           )}
         </Spin>
       }

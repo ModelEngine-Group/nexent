@@ -29,9 +29,9 @@ case:
     action: Open an editable draft and capture its original resources.
     expected: The existing model and knowledge association are displayed.
   - order: 2
-    action: Open and close model, knowledge, skill, tool and child-Agent drawers without
-      selecting resources.
-    expected: Each drawer is reachable and cancellation removes its overlay.
+    action: Open the model, knowledge, skill, tool and child-Agent drawers. Stage a
+      model selection and dismiss each drawer by clicking its mask.
+    expected: The mask click closes each drawer and discards pending selections.
   - order: 3
     action: Reload the editor and inspect resource associations.
     expected: Original resources remain selected and no update request has been sent.
@@ -44,8 +44,7 @@ case:
   actor: Authorized Agent development user
   journey:
   - Open an editable draft and capture its original resources.
-  - Open and close model, knowledge, skill, tool and child-Agent drawers without selecting
-    resources.
+  - Open each resource drawer and cancel with a mask click, including after staging a model.
   - Reload the editor and inspect resource associations.
   final_business_result:
   - Cancelling all five resource drawers preserves original associations and leaves
@@ -54,7 +53,7 @@ case:
   - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
   acceptance:
   - id: AC-01
-    description: Cancelling all five resource drawers preserves original associations
+    description: Clicking the mask for all five resource drawers preserves original associations
       and leaves no blocking overlay or business mutation.
     steps:
     - 1

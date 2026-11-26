@@ -5,7 +5,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -16,6 +15,7 @@ from sqlalchemy import create_engine, delete, event, insert, select, text, updat
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+from shared.merged_migrations import merged_migration_sql
 from shared.postgres import apply_product_postgres_env, postgres_url
 
 apply_product_postgres_env()
@@ -113,9 +113,8 @@ def assert_creator_identity(engine, agent_id):
 
 
 def run_migration_sql(engine, filename):
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations" / filename
     schema = engine.get_execution_options()["schema_translate_map"]["nexent"]
-    sql = migration.read_text(encoding="utf-8").replace("nexent.", schema + ".").replace("'nexent'", "'" + schema + "'")
+    sql = merged_migration_sql(filename).replace("nexent.", schema + ".").replace("'nexent'", "'" + schema + "'")
     with engine.begin() as connection:
         with connection.connection.driver_connection.cursor() as cursor:
             cursor.execute(sql)
@@ -438,8 +437,7 @@ def test_private_resources_abort_sql_migration_atomically(release_database, priv
 def test_creator_history_migration_preserves_targets(release_database):
     engine = release_database
     schema = engine.get_execution_options()["schema_translate_map"]["nexent"]
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_003_creator_conversation_targets.sql"
-    sql = migration.read_text(encoding="utf-8").replace("nexent.", schema + ".")
+    sql = merged_migration_sql("v2.9.0_003_creator_conversation_targets.sql").replace("nexent.", schema + ".")
     with engine.begin() as connection:
         connection.execute(insert(AgentInfo).values(agent_id=201, version_no=0, tenant_id="tenant-a", name="draft", agent_origin="USER"))
         for conversation_id, mode, deleted in ((1, "agent_create", "N"), (2, "skill_create", "N"), (3, "agent_create", "Y"), (4, "generic_chat", "N")):

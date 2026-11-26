@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-UI-METRICS-20261123
+  change_type: requirement
+  requirement_id: OPS-AGENT-UI-METRICS-20261123
+  title: Connect the Agent dashboard cards and daily trend
+  description: Connect the existing Agent summary and trend reads while keeping the current inventory independent of statistics filters.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/agentMonitoring.test.tsx
+    behaviors:
+    - Verify scoped request parameters and suppress requests without a complete scope.
+    - Verify exact large Token formatting, missing values, true zero and success-rate sample handling.
+    reason: Existing backend cases prove aggregation and existing frontend tests prove filter reset and dates. The new proofs cover the UI request adapter, value projection and actual browser behavior.
+  notes: Base abe680af4. This increment covers Agent cards and trends. The browser uses controlled API responses. Backend routes and statistics semantics are reused.

@@ -16,12 +16,14 @@ import { Button, Tooltip } from "antd";
 import {
   Bell,
   Activity,
+  Archive,
   BookOpen,
   Blocks,
   Bot,
   Boxes,
   Building2,
   CalendarClock,
+  ClipboardCheck,
   Code,
   Database,
   Globe,
@@ -155,7 +157,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/evaluation",
-    Icon: LineChart,
+    Icon: ClipboardCheck,
     labelKey: "sidebar.agentEvaluation",
     order: 8,
     parentKey: "/agent-dev",
@@ -170,7 +172,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/agent-space",
-    Icon: Bot,
+    Icon: Archive,
     labelKey: "sidebar.agentSpace",
     order: 10,
     parentKey: "/resource-space",

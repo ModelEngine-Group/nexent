@@ -397,6 +397,22 @@ def test_run_chat_success():
         assert resp.status_code == 200
 
 
+def test_run_chat_replay_cursor_uses_read_only_route():
+    cursor = "execution:41:2:3"
+    context = MagicMock()
+    with patch("management.api.northbound._get_northbound_context", AsyncMock(return_value=context)), \
+            patch("management.api.northbound.start_streaming_chat", new_callable=AsyncMock) as start, \
+            patch("management.api.northbound.resume_streaming_chat", new_callable=AsyncMock) as resume:
+        resume.return_value = {"status": "resumed"}
+        response = client.post("/nb/v1/chat/run", json={
+            "agent_name": "general-assistant", "query": "ignored", "conversation_id": 123, "replay_cursor": cursor,
+        }, headers=_build_headers())
+
+    assert response.status_code == 200
+    resume.assert_awaited_once_with(context, 123, cursor)
+    start.assert_not_awaited()
+
+
 def test_run_chat_limit_exceeded():
     """Test run chat returns 429 when limit exceeded."""
     with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \

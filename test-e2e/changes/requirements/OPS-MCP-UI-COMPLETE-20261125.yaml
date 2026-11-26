@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MCP-UI-COMPLETE-20261125
+  change_type: requirement
+  requirement_id: OPS-MCP-UI-COMPLETE-20261125
+  title: Connect MCP rankings, details and platform overview
+  description: Read ranked and paged scoped MCP statistics, drill by tenant and resource identity, and show MCP inventory and calls in the platform overview.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/mcpMonitoring.test.tsx
+    - frontend/tests/component/monitoringOverview.test.tsx
+    - test/backend/ops/test_monitoring_api_mcp_tools.py
+    - test/backend/gateway/test_exposure.py
+    behaviors:
+    - Send scoped server-side ranking, paging, search and sorting parameters.
+    - Keep overview calendar queries separate from the registered service catalog.
+    - Drill only when a row's service identity can be addressed by the backend.
+    reason: Extend existing frontend service and selection unit coverage. Reuse the existing Ops and Gateway contract tests and strengthen the browser journey for the visible interaction.

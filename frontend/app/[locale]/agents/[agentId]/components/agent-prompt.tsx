@@ -65,7 +65,6 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ExpandEditModal from "@/components/common/ExpandEditModal";
 import {
   reorderModelIds,
   resolveModelSelection,
@@ -74,8 +73,6 @@ import HighFidelityTextArea from "./HighFidelityTextArea";
 import HighFidelityPromptEditModal from "./HighFidelityPromptEditModal";
 
 const { TextArea } = Input;
-
-type PromptField = "prompt";
 
 type SortableModelItemProps = {
   disabled: boolean;
@@ -427,9 +424,9 @@ export default function AgentPrompt({
     );
   };
 
-  const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(
-    null
-  );
+  const [expandedPromptAgentId, setExpandedPromptAgentId] = useState<
+    number | null
+  >(null);
   const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const [isModelSelectionOpen, setIsModelSelectionOpen] = useState(false);
   useEffect(() => {
@@ -736,15 +733,7 @@ export default function AgentPrompt({
     [selectedModelIds, updateModelSelection]
   );
 
-  const expandedPromptConfig = {
-    prompt: {
-      title: t("agent.field.prompt"),
-      content: editedAgent.prompt ?? "",
-      save: (content: string) => updateDraft({ prompt: content }),
-    },
-  };
-
-  const renderExpandButton = (prompt: PromptField) => (
+  const renderExpandButton = () => (
     <Tooltip title={t("systemPrompt.button.expand")}>
       <Button
         type="text"
@@ -752,7 +741,7 @@ export default function AgentPrompt({
         icon={<Maximize2 size={15} />}
         aria-label={t("systemPrompt.button.expand")}
         disabled={isReadOnly}
-        onClick={() => setExpandedPrompt(prompt)}
+        onClick={() => setExpandedPromptAgentId(agentId)}
       />
     </Tooltip>
   );
@@ -948,7 +937,7 @@ export default function AgentPrompt({
             />
           )}
           <div className="absolute right-1 top-2 z-10">
-            {renderExpandButton("prompt")}
+            {renderExpandButton()}
           </div>
         </div>
       </Form.Item>
@@ -1068,7 +1057,7 @@ export default function AgentPrompt({
                   }
                 />
                 <div className="absolute right-1 top-2 z-10">
-                  {renderExpandButton("prompt")}
+                  {renderExpandButton()}
                 </div>
               </div>
             )}
@@ -1094,31 +1083,18 @@ export default function AgentPrompt({
       )}
 
       {!promptsHidden &&
-        expandedPrompt &&
-        (highFidelity && expandedPrompt === "prompt" ? (
+        expandedPromptAgentId !== null &&
+        expandedPromptAgentId === agentId && (
           <HighFidelityPromptEditModal
-            key={`${agentId}-${expandedPrompt}`}
-            title={expandedPromptConfig[expandedPrompt].title}
-            content={expandedPromptConfig[expandedPrompt].content}
+            title={t("agent.field.prompt")}
+            content={editedAgent.prompt ?? ""}
             readOnly={isReadOnly}
-            onClose={() => setExpandedPrompt(null)}
-            onSave={(content) => {
-              if (!isReadOnly)
-                expandedPromptConfig[expandedPrompt].save(content);
+            onClose={() => setExpandedPromptAgentId(null)}
+            onChange={(prompt) => {
+              if (!isReadOnly) updateDraft({ prompt });
             }}
           />
-        ) : (
-          <ExpandEditModal
-            open
-            title={expandedPromptConfig[expandedPrompt].title}
-            content={expandedPromptConfig[expandedPrompt].content}
-            onClose={() => setExpandedPrompt(null)}
-            onSave={(content) => {
-              if (!isReadOnly)
-                expandedPromptConfig[expandedPrompt].save(content);
-            }}
-          />
-        ))}
+        )}
 
       {/* Per-model parameter override popup */}
       {configuringModel?.profileSchemaVersion ? (

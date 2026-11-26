@@ -131,7 +131,7 @@ async def test_existing_workbench_returns_the_confirmed_config_and_metadata_vers
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_id", [11, None])
-async def test_workbench_send_stages_automation_with_request_model(existing_workbench, mocker, model_id):
+async def test_workbench_send_stages_automation_with_resolved_model(existing_workbench, mocker, model_id):
     state = existing_workbench
     snapshot = state.compile_snapshot.return_value
     snapshot.resource.tools = [SimpleNamespace(tool_id=AUTOMATION_PROPOSAL_TOOL)]
@@ -160,7 +160,7 @@ async def test_workbench_send_stages_automation_with_request_model(existing_work
     assert response.status_code == 200
     assert state.operations == ["stage", "start", "confirm"]
     assert prepared_turn.store.stage_turn.call_args.args[5]["automation"] == {
-        "agent_id": 7, "agent_version_no": 2, "model_id": model_id, "tool_params": None, "has_attachments": False,
+        "agent_id": 7, "agent_version_no": 2, "model_id": 22, "tool_params": None, "has_attachments": False,
     }
     state.client.start_prepared_run.assert_awaited_once_with(snapshot, *ACTOR)
     state.reject.assert_not_awaited()

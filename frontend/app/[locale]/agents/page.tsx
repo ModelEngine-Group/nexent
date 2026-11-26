@@ -32,11 +32,8 @@ import CreateAgentModal from "@/components/agent/CreateAgentModal";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { useGuidePreference } from "@/hooks/useGuidePreference";
 import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useAgentFileImport } from "@/hooks/agent/useAgentFileImport";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
-import {
-  openImportWizardWithFile,
-  type ImportAgentData,
-} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { searchAgentInfo } from "@/services/agentConfigService";
@@ -72,8 +69,7 @@ export default function AgentsPage() {
   );
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [importData, setImportData] = useState<ImportAgentData | null>(null);
-  const [isImportOpen, setIsImportOpen] = useState(false);
+  const { importData, openImport, closeImport } = useAgentFileImport();
   const { dismissed, ready, dismiss, reset } = useGuidePreference(
     "agent-configuration"
   );
@@ -185,24 +181,17 @@ export default function AgentsPage() {
     router.push(`${pathname}/${agentId}?onboarding=1`);
   };
 
-  const handleImport = async () => {
-    await openImportWizardWithFile({
-      onSuccess: (data) => {
-        setImportData(data);
-        setIsImportOpen(true);
-      },
-      message,
-      t,
-      log,
-    });
-  };
-
   const handleImportComplete = (agentId: number) => {
-    setIsImportOpen(false);
-    setImportData(null);
+    closeImport();
     void refetch();
     updateUrl(agentId);
   };
+
+  const importButton = (
+    <Button icon={<FileInput className="size-4" />} onClick={openImport}>
+      {t("agentConfig.button.import")}
+    </Button>
+  );
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
@@ -266,9 +255,12 @@ export default function AgentsPage() {
                   </span>
                 }
               >
-                <Button type="primary" onClick={() => setIsCreateOpen(true)}>
-                  {t("agent.action.create")}
-                </Button>
+                <Space wrap>
+                  {importButton}
+                  <Button type="primary" onClick={() => setIsCreateOpen(true)}>
+                    {t("agent.action.create")}
+                  </Button>
+                </Space>
               </Empty>
             </div>
           ) : (
@@ -297,12 +289,7 @@ export default function AgentsPage() {
                   buttonClassName="!h-8 shrink-0"
                 />
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <Button
-                    icon={<FileInput className="size-4" />}
-                    onClick={handleImport}
-                  >
-                    {t("agentConfig.button.import")}
-                  </Button>
+                  {importButton}
                   <Button type="primary" onClick={() => setIsCreateOpen(true)}>
                     {t("agentConfig.list.new")}
                   </Button>
@@ -468,12 +455,9 @@ export default function AgentsPage() {
         onCreated={handleCreate}
       />
       <AgentImportWizard
-        visible={isImportOpen}
+        visible={importData !== null}
         initialData={importData}
-        onCancel={() => {
-          setIsImportOpen(false);
-          setImportData(null);
-        }}
+        onCancel={closeImport}
         onImportComplete={handleImportComplete}
       />
     </div>

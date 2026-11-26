@@ -17,14 +17,16 @@ from test_k8s_helm import (
     chart_dirs as _chart_dirs,
 )
 
-BUSINESS = {"nexent-config", "nexent-runtime", "nexent-mcp", "nexent-northbound", "nexent-web", "nexent-data-process"}
+BUSINESS = {"nexent-config", "nexent-runtime", "nexent-mcp", "nexent-gateway", "nexent-web", "nexent-data-process"}
+BOOTSTRAP_RUN_ID = "3134807a-85c2-46e4-b75e-063c0eeee25b"
+AUTH_ARGS = ["--set", "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret"]
 chart_dirs = _chart_dirs
 
 
 @pytest.mark.parametrize("storage", ["local", "dynamic", "existing"])
 def test_paused_release_creates_isolated_job_with_shared_environment_and_storage(chart_dirs, storage):
     args = _application_dynamic_args() if storage == "dynamic" else _application_existing_args() if storage == "existing" else []
-    result = _template(chart_dirs["application"], "nexent", [*args, "--set", "global.businessPaused=true",
+    result = _template(chart_dirs["application"], "nexent", [*args, *AUTH_ARGS, "--set", "global.businessPaused=true",
         "--set", "nexent-config.images.backend.tag=review-new"])
     assert result.returncode == 0, result.stderr
     docs = _documents(result.stdout)
@@ -58,6 +60,78 @@ def test_active_release_restores_declared_replicas_and_removes_bootstrap_job(cha
     for doc in docs:
         if doc.get("kind") == "Deployment" and doc["metadata"]["name"] in BUSINESS:
             assert doc["spec"]["replicas"] == (3 if doc["metadata"]["name"] == "nexent-web" else 1)
+
+
+@pytest.mark.parametrize("storage", ["dynamic", "existing"])
+@pytest.mark.parametrize("replicas,paused", [(3, False), (2, False), (3, True)])
+def test_runtime_fixed_replicas_render_with_the_same_shared_claims(chart_dirs, storage, replicas, paused):
+    storage_args = _application_dynamic_args() if storage == "dynamic" else _application_existing_args()
+    rendered = _template(chart_dirs["application"], "nexent", [*storage_args, *AUTH_ARGS,
+        "--set", f"global.businessPaused={str(paused).lower()}",
+        "--set", f"nexent-runtime.replicaCount={replicas}"])
+    assert rendered.returncode == 0, rendered.stderr
+    documents = _documents(rendered.stdout)
+    deployments = {item["metadata"]["name"]: item["spec"] for item in documents if item["kind"] == "Deployment"}
+    runtime = deployments["nexent-runtime"]
+    assert runtime["replicas"] == (0 if paused else replicas)
+    assert runtime["strategy"] == {"type": "Recreate"}
+    assert deployments["nexent-config"]["replicas"] == (0 if paused else 1)
+    assert not {item["kind"] for item in documents} & {"HorizontalPodAutoscaler", "ScaledObject"}
+    runtime_volumes = runtime["template"]["spec"]["volumes"]
+    config_volumes = deployments["nexent-config"]["template"]["spec"]["volumes"]
+    claims = {volume["name"]: volume["persistentVolumeClaim"]["claimName"]
+              for volume in runtime_volumes if "persistentVolumeClaim" in volume}
+    assert set(claims) == {"nexent-workspace", "nexent-skills", "nexent-logs", "nexent-memory-plugins", "nexent-trajectory"}
+    assert claims == {volume["name"]: volume["persistentVolumeClaim"]["claimName"]
+                      for volume in config_volumes if volume["name"] in claims}
+
+
+@pytest.mark.parametrize("replicas", ["0", "-1", "1.5", "true", "2147483648"])
+def test_invalid_runtime_target_is_rejected_even_while_paused(chart_dirs, replicas):
+    rendered = _template(chart_dirs["application"], "nexent", [*_application_dynamic_args(),
+        "--set", "global.businessPaused=true", "--set", f"nexent-runtime.replicaCount={replicas}"])
+    assert rendered.returncode != 0
+    assert "replicaCount" in rendered.stderr
+
+
+@pytest.mark.parametrize("overrides,error", [
+    (["--set", "global.sharedStorage.mode=local"], "requires dynamic or existing shared RWX storage"),
+    (["--set", "global.sharedStorage.storageClassName="], "requires an explicit RWX StorageClass"),
+    (["--set", "global.sharedStorage.storageClassName=nexent-local"], "requires an explicit RWX StorageClass"),
+    (["--set", "global.sharedStorage.accessModes={ReadWriteOnce}"], "requires ReadWriteMany"),
+])
+def test_runtime_chart_rejects_unqualified_multi_replica_configuration(chart_dirs, overrides, error):
+    rendered = _template(chart_dirs["application"], "nexent", [*_application_dynamic_args(),
+        "--set", "nexent-runtime.replicaCount=2", *overrides])
+    assert rendered.returncode != 0
+    assert error in rendered.stderr
+
+
+def test_bootstrap_job_identity_is_scoped_to_paused_helm_release(chart_dirs):
+    chart = chart_dirs["application"]
+    args = [*_application_existing_args(), *AUTH_ARGS]
+    paused = _template(chart, "example", [*args, "--set", "global.businessPaused=true",
+        "--set-string", f"global.bootstrapRunId={BOOTSTRAP_RUN_ID}"])
+    active = _template(chart, "example", args)
+    assert paused.returncode == active.returncode == 0, paused.stderr + active.stderr
+    paused_docs, active_docs = _documents(paused.stdout), _documents(active.stdout)
+    bootstrap, = [doc for doc in paused_docs if doc["kind"] == "Job"]
+    assert bootstrap["metadata"]["labels"]["nexent.io/bootstrap-run-id"] == BOOTSTRAP_RUN_ID
+    assert not any(doc["kind"] == "Job" for doc in active_docs)
+    for docs, count in ((paused_docs, 0), (active_docs, 1)):
+        assert not any(doc["metadata"]["name"] == "nexent-runtime-maintenance" for doc in docs)
+        for name in ("nexent-runtime", "nexent-config"):
+            deployment, = [doc for doc in docs if doc["kind"] == "Deployment" and doc["metadata"]["name"] == name]
+            annotations = deployment["metadata"].get("annotations", {})
+            assert "nexent.io/maintenance-epoch" not in annotations
+            assert "nexent.io/bootstrap-run-id" not in annotations
+            assert deployment["spec"]["replicas"] == count
+            container = deployment["spec"]["template"]["spec"]["containers"][0]
+            environment = {entry["name"]: entry.get("value") for entry in container["env"]}
+            assert environment["NEXENT_RECOVERY_MODE"] == "fixed_replicas"
+            assert "NEXENT_MAINTENANCE_EPOCH" not in environment
+            if name == "nexent-runtime":
+                assert environment["LOG_DIR"] == "/mnt/nexent-data/logs/$(POD_NAME)"
 
 
 @pytest.mark.parametrize("failure", ["", "sql", "initialize", "release"])

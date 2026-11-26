@@ -1,0 +1,103 @@
+schema_version: '1.0'
+stage: D2
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-ADMISSION-D2-001
+  feature_id: RUNTIME-REPLICAS
+  requirement_ids:
+  - RUNTIME-FIXED-REPLICAS-20261105
+  - RUNTIME-UNIFY-EXECUTION-20261125
+  business_rule_ids:
+  - RUNTIME-REPLICAS-RULE-03
+  - RUNTIME-REPLICAS-RULE-04
+  - RUNTIME-REPLICAS-RULE-09
+  title: 多副本接纳保留冲突与容量契约，协调故障无执行副作用
+  type: API-IT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明公开接纳响应、头部、鉴权和拒绝语义；真实跨进程防重另由 D3 证明。
+  preconditions:
+  - 使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 至少两个 Runtime 进程以固定副本模式就绪；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  test_data:
+    scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
+    model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
+    preparation: 用例自备隔离集群 release、Web/Gateway 入口和同租户及跨租户测试身份、API key 与受控模型。
+  steps:
+  - order: 1
+    action: 经 Web 代理和 Northbound 稳定 Service 各发起正常请求，记录已有响应字段、会话/运行标识及 SSE 事件。
+    expected: 成功响应与基线契约兼容，任务可以执行并持久化。
+  - order: 2
+    action: 在已有会话运行期间再次发起同会话请求，比较请求前后的消息、流头及模型调用标记。
+    expected: 'HTTP 200，X-Stream-Status: conflict，SSE error；不产生本次用户消息、流重置或下游执行。'
+  - order: 3
+    action: 分别用 Agent 全局配额满和本地 lane 容量满的输入发起新请求。
+    expected: HTTP 429 / RUNTIME_CAPACITY_FULL，保留 retryable 与 Retry-After；没有超额接纳。
+  - order: 4
+    action: 在请求接纳前分别阻断协调数据库和必要 Redis，发起新请求。
+    expected: HTTP 503 / RUNTIME_COORDINATION_UNAVAILABLE，可重试；没有消息、预约泄漏或模型调用。
+  - order: 5
+    action: 使用其他租户、未授权用户及缺少鉴权的请求访问运行和控制接口。
+    expected: 沿用原拒绝状态，不返回他人运行内容，不发送取消信号。
+  - order: 6
+    action: 恢复协调依赖并验证合法请求。另在 Web、Northbound 的标记请求获 Runtime 签名 RUN 202 后，缓冲首次签名 RESUME 的 SSE 并在转发响应头前断开连接，直接计数这两个上游请求；清理本 Case 的身份、会话和实例。
+    expected: 恢复后合法请求成功；断流时 Web 返回 503、Northbound 返回 502，RUN 和首次 RESUME 都只转发一次，原执行和 assistant 正常持久化，清理无遗留。
+  expected_results:
+  - 成功响应、路由、头部及 SSE 兼容；未授权访问被拒。
+  - 冲突与容量错误保持既有契约；协调故障按新增 503 在接纳前拒绝。
+  - 拒绝请求没有流重置、消息、模型工具调用或残留预约。
+  forbidden_side_effects:
+  - 泄露或停止其他租户/用户的运行。
+  - 把冲突改为不兼容的 HTTP 状态；依赖故障退回本地保护继续执行。
+  - 重复发送已经被接纳的 POST；影响非测试数据。
+  acceptance:
+  - id: AC-P1-003
+    description: 冲突在副作用前拒绝。
+    steps:
+    - 2
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 3
+  - id: AC-P1-004
+    description: 容量与协调错误的状态、头部和副作用边界明确。
+    steps:
+    - 3
+    - 4
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 2
+  - id: AC-P1-009
+    description: 实际代理的成功与鉴权兼容；断流后不重发已接纳请求，并恢复清理。
+    steps:
+    - 1
+    - 5
+    - 6
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 3
+  tags:
+  - phase-1
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 缺少获准的独占双工作节点集群；固定脚本含本地 lane、协调故障和代理断流，仍欠实际集群执行、Service 目标还原与资源回收证据。
+    primary_domain: runtime
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；仅在独占 release 内将 Runtime Service 暂时指向可计数并断流的中继。
+    cleanup_plan: finally 还原 Service 的原 selector 并核对原 Runtime Pod，释放端口转发并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  contract:
+    protocol: HTTP + SSE
+    method: POST / GET
+    request_expectations:
+    - 使用现有公开请求与身份字段，不允许客户端指定内部 owner/execution_id。
+    - 主接纳路径为 /api/agent/run；其他入口使用当前实际路由，实施时记录准确选择器。
+    response_expectations:
+    - 成功响应及会话/运行标识兼容。
+    - '冲突 HTTP 200 + SSE error + X-Stream-Status: conflict；容量 HTTP 429 + RUNTIME_CAPACITY_FULL + retryable + Retry-After。'
+    - 协调依赖故障返回 HTTP 503，分别携带 AGENTOS_EXECUTION_STORE_UNAVAILABLE 或 AGENTOS_EVENT_STORE_UNAVAILABLE；鉴权失败不泄露共享状态。

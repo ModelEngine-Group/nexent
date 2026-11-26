@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MODEL-UI-NAVIGATION-20261124
+  change_type: requirement
+  requirement_id: OPS-MODEL-UI-NAVIGATION-20261124
+  title: Sort Model monitoring rows and open Model statistics
+  description: Add server metric sorting and tenant-qualified row navigation with the active date range.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/modelMonitoring.test.tsx
+    - test/backend/ops/test_monitoring_api.py
+    behaviors:
+    - Serialize Model list sort direction and metric alongside pagination, search and monitoring scope.
+    - Preserve list errors and omit cleared filters.
+    reason: Frontend service tests cover changed request serialization. Existing Python tests cover the unchanged monitoring API and D4 proves browser state, server order and navigation.

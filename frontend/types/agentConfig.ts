@@ -114,6 +114,7 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
 
 export interface PublishedAgent {
   id: string;
+  knowledge_sources?: Agent["knowledge_sources"];
   agent_id: number;
   name: string;
   display_name?: string;
@@ -188,6 +189,8 @@ export interface Agent {
   is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
+  /** Configuration-only retrieval flags for the published version, including worker and Skill tools. */
+  knowledge_sources?: { local: boolean; aidp: boolean };
   skills?: Skill[]; // Skills configured for this agent
   prompt?: string;
   business_description?: string;

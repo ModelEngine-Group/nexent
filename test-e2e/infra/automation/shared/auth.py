@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ def configured_user(identity_id: str, *, home: Path | None = None) -> tuple[dict
     if not record:
         raise RuntimeError(f"config/users.yaml has no user id={identity_id!r}")
     password_key = str(record.get("password_env_key") or "")
-    password = load_secret_env(home=home).get(password_key, "")
+    password = os.environ.get(password_key) or load_secret_env(home=home).get(password_key, "")
     if not password:
         raise RuntimeError(f"config/secrets.env has no value for {password_key}")
     return record, password

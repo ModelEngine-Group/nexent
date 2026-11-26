@@ -8,13 +8,15 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
-from contracts.agentos import AgentRunReference, PreparedAgentRun
+from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentRunReference, PreparedAgentRun
+from contracts.errors.exceptions import AgentRunConcurrencyExceededError
 from contracts.constants.constants import MAX_RUNTIME_METADATA_BYTES
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import ActiveExecutionError
+from nexent.core.concurrency import LanePolicy, ThreadCapacityExceeded, ThreadManager, ThreadQueueTimedOut
 from runtime.agentos import prepared_run
 
 ACTOR = ServicePrincipal("actor", "tenant")
@@ -74,10 +76,11 @@ def payload():
 
 @pytest.fixture
 def runtime(monkeypatch):
-    async def control_io(_task, callback, *args, **kwargs):
-        return callback(*args)
+    async def run_blocking(_task, callback, *args, lane, owner, **kwargs):
+        assert (lane, owner) == ("control-io", "runtime")
+        return callback(*args, **kwargs)
 
-    monkeypatch.setattr(prepared_run, "_control_io", control_io)
+    monkeypatch.setattr(prepared_run, "run_blocking", run_blocking)
     monkeypatch.setattr(prepared_run, "runtime_state_service", SimpleNamespace(enabled=True))
     info = SimpleNamespace(
         attempt_outcome="completed", thread_future=None, workspace_path=None,
@@ -96,6 +99,75 @@ def runtime(monkeypatch):
     }.items():
         monkeypatch.setattr(prepared_run, name, value)
     return io
+
+
+@pytest.fixture
+async def worker_start(mocker):
+    manager = ThreadManager("prepared-test", {"agent-run": LanePolicy("agent-run", 1, 0)})
+    manager.start()
+    mocker.patch.object(prepared_run, "runtime_thread_manager", manager)
+    started = mocker.patch.object(manager, "wait_until_started", wraps=manager.wait_until_started)
+    try:
+        yield started
+    finally:
+        await manager.shutdown(timeout=2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("version", "scope"), [(None, "agent:7"), (4, "workbench_main")])
+async def test_fixed_replicas_apply_tenant_quota_before_publishing(
+    monkeypatch, payload, runtime, worker_start, version, scope,
+):
+    monkeypatch.setattr(prepared_run, "NEXENT_RECOVERY_MODE", "fixed_replicas")
+    ownership = Mock()
+    monkeypatch.setattr(prepared_run, "reserve_agentos_sandbox", AsyncMock(return_value=ownership))
+
+    def over_quota(_identity, **_kwargs):
+        execution, = worker_start.await_args.args
+        assert execution.started_event.is_set() and not execution.future.done()
+        assert execution.spec.run_id == RUN_ID
+        raise AgentRunConcurrencyExceededError
+
+    async def release_after_worker(_ownership, worker):
+        await asyncio.wait_for(asyncio.wrap_future(worker), timeout=2)
+
+    release = AsyncMock(side_effect=release_after_worker)
+    monkeypatch.setattr(prepared_run, "release_agentos_sandbox", release)
+    runtime.begin.side_effect = over_quota
+    with pytest.raises(AgentRunConcurrencyExceededError):
+        await prepared_run.start_prepared_run(payload.model_copy(update={"workbench_config_version": version}), ACTOR)
+
+    assert runtime.begin.call_args.args[0].tenant_id == ACTOR.tenant_id
+    assert runtime.begin.call_args.kwargs == {
+        "agent_scope": scope, "agent_limit": prepared_run.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
+    }
+    runtime.journal.assert_not_called()
+    runtime.prepare.assert_not_awaited()
+    execution, = worker_start.await_args.args
+    release.assert_awaited_once_with(ownership, execution.future)
+    assert execution.future.done()
+    runtime.registry.release_agent_capacity.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    ThreadCapacityExceeded("agent-run", capacity=1, queued=0),
+    ThreadQueueTimedOut("agent-run", timeout_seconds=1),
+])
+async def test_prepared_worker_capacity_errors_are_retryable(monkeypatch, payload, error):
+    start = AsyncMock(side_effect=error)
+    monkeypatch.setattr(prepared_run, "start_prepared_run", start)
+    route, = prepared_run.create_prepared_run_router().routes
+    request = Request({"type": "http", PRINCIPAL_KEY: ACTOR, BODY_KEY: payload.model_dump_json().encode()})
+
+    response = await route.endpoint(request)
+
+    start.assert_awaited_once_with(payload, ACTOR)
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "1"
+    assert json.loads(response.body) == {
+        "code": "RUNTIME_CAPACITY_FULL", "message": "Agent runtime is at capacity.", "retryable": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -121,11 +193,22 @@ async def test_log_failure_releases_admission(payload, runtime):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("workbench_version", [None, 4])
-async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch, payload, runtime, workbench_version):
+@pytest.mark.parametrize(
+    ("workbench_version", "recovery_mode"),
+    [(None, "startup"), (4, "startup"), (None, "fixed_replicas")],
+)
+async def test_run_journals_events_and_finishes_under_exact_identity(
+    monkeypatch, payload, runtime, worker_start, workbench_version, recovery_mode,
+):
     payload = payload.model_copy(update={"workbench_config_version": workbench_version})
-    async def runner(info, **_kwargs):
+    monkeypatch.setattr(prepared_run, "NEXENT_RECOVERY_MODE", recovery_mode)
+
+    async def runner(info, **kwargs):
         assert info is runtime.info
+        if recovery_mode == "fixed_replicas":
+            execution, = worker_start.await_args.args
+            assert kwargs["execution"] is execution
+            assert not kwargs["deferred_run"].is_bound
         yield '{"type":"thought","content":"step"}'
         yield '{"type":"final_answer","content":"answer"}'
 
@@ -147,6 +230,9 @@ async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch
     })
     runtime.finish.assert_called_once_with(identity, "completed")
     runtime.release.assert_called_once_with(runtime.info, 42, "actor", "completed")
+    if recovery_mode == "fixed_replicas":
+        assert worker_start.await_args.args[0].future.done()
+        assert runtime.prepare.await_args.kwargs == {"settle_on_cancel": True}
 
 
 # Captured first model response from PW-TASK-01 (conversation 3305), with the test marker normalized.

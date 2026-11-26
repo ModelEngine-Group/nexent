@@ -1,10 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from management.api.northbound_application import northbound_lifespan
-from management.api.northbound import router as northbound_router, a2a_router
-from management.api.identity.gateway_identity import router as gateway_identity_router
+
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from management.api.northbound_application import northbound_lifespan
+from management.api.northbound import router as northbound_router, a2a_router
+from management.api.identity.gateway_identity import router as gateway_identity_router
 from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
 from management.api.agent.conversation_run import router as conversation_run_router
@@ -68,6 +72,7 @@ from management.api.knowledge_base.quota import tenant_quota_router, platform_qu
 from contracts.constants.environment import (
     AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
 )
+from infrastructure.rdb.agent_execution import renew_execution_leases
 from nexent.core.concurrency import (
     ManagedTaskSpec,
 )
@@ -119,22 +124,40 @@ async def stop_dreaming_scheduler():
 
 @asynccontextmanager
 async def automation_lifespan():
+    from contracts.constants.environment import NEXENT_RECOVERY_MODE
     from management.services.automation.scheduler import agent_automation_scheduler, recover_automation_runs
 
-    await config_thread_manager.run(
-        "control-io",
-        ManagedTaskSpec(task_name="recover-automation-runs", owner="management.api.application"),
-        recover_automation_runs,
-    )
-    await agent_automation_scheduler.start()
+    if NEXENT_RECOVERY_MODE == "fixed_replicas":
+        await agent_automation_scheduler.start(fixed_replicas=True)
+    else:
+        await config_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(task_name="recover-automation-runs", owner="management.api.application"),
+            recover_automation_runs,
+        )
+        await agent_automation_scheduler.start()
     try:
         yield
     finally:
         await agent_automation_scheduler.stop()
 
 
+async def _watch_creator_execution_leases():
+    while True:
+        try:
+            await config_thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(task_name="renew-creator-execution-leases", owner="management.api.application"),
+                renew_execution_leases,
+            )
+        except (RuntimeError, SQLAlchemyError):
+            logger.exception("Creator execution lease renewal failed")
+        await asyncio.sleep(5)
+
+
 @asynccontextmanager
 async def config_lifespan(_app):
+    from contracts.constants.environment import NEXENT_RECOVERY_MODE
     from management.services.agent.prepared_turn import prepared_turn_lifespan
     from management.services.conversation.creator_runtime import shutdown_creator_streams
 
@@ -142,6 +165,7 @@ async def config_lifespan(_app):
     async with northbound_lifespan(_app):
         maintenance_started = False
         dreaming_started = False
+        lease_watcher = None
         try:
             migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
             logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
@@ -151,12 +175,19 @@ async def config_lifespan(_app):
             dreaming_started = True
             await start_dreaming_scheduler()
             async with automation_lifespan(), prepared_turn_lifespan():
+                if NEXENT_RECOVERY_MODE == "fixed_replicas":
+                    lease_watcher = asyncio.create_task(_watch_creator_execution_leases())
                 yield
         finally:
             try:
                 await shutdown_creator_streams(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
             finally:
-                await _stop_config_maintenance(dreaming_started, maintenance_started)
+                try:
+                    if lease_watcher is not None:
+                        lease_watcher.cancel()
+                        await asyncio.gather(lease_watcher, return_exceptions=True)
+                finally:
+                    await _stop_config_maintenance(dreaming_started, maintenance_started)
 
 
 async def _stop_config_maintenance(dreaming_started, maintenance_started):

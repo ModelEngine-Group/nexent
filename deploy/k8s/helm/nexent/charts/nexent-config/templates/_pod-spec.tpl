@@ -35,6 +35,8 @@ containers:
 {{ include "nexent.backendPlatformEnv" . | indent 6 }}
       - name: NEXENT_SQL_STARTUP_MODE
         value: "migrate"
+      - name: NEXENT_RECOVERY_MODE
+        value: "fixed_replicas"
       - name: DEPLOYMENT_VERSION
         value: {{ .Values.global.deploymentVersion | quote }}
       - name: skip_proxy

@@ -23,6 +23,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
 import { compositeAttachmentAdapter } from "../adapter/attachment-adapter";
 import { useConfig } from "@/hooks/useConfig";
+import { isDictationConfigured } from "@/lib/dictationConfig";
 import { ServerDictationAdapter } from "../adapter/server-dictation-adapter";
 import {
   remoteChatModelAdapter,
@@ -377,6 +378,10 @@ export const Nl2AgentChatPanel = forwardRef<
               {...modelControls}
               modelSelectionScope="tenant"
               showModelSelector
+              inputTools={{
+                attachments: true,
+                dictationConfigured: isDictationConfigured(modelConfig?.stt),
+              }}
               showConversationTitle={false}
               showAgentCreationResult={false}
               readOnly={
