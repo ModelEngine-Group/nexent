@@ -41,7 +41,9 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
             json=await create_payload(tenant_a_admin, 'aidp-d2-%s-noauth' % run_tag),
         )
     assert response.status_code == 401
-    assert 'Missing Authorization header' in response_message(response)
+    # The gateway now authenticates before routing, so the 401 text belongs to
+    # the gateway rather than the AIDP app; only the contract (401 + a message) is stable.
+    assert response_message(response).strip()
 
     # Invalid bearer token -> 401.
     async with client('config', token='invalid-token-value') as api:
@@ -90,6 +92,21 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     assert created is not None
     assert created.get('ingroup_permission') == 'PRIVATE'
     assert not created.get('group_ids')
+
+    # Duplicate name: AIDP rejects the create with HTTP 500 + business code
+    # 1022 (not a 4xx). The proxy must keep that business code and surface a
+    # clear message instead of collapsing it into a generic upstream outage.
+    async with client('config', token=tenant_a_user.access_token) as api:
+        duplicate = await api.post(
+            '/aidp-mgmt/knowledge-bases',
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-user' % run_tag),
+        )
+    assert duplicate.status_code == 502, duplicate.text
+    duplicate_body = duplicate.json()
+    assert str(duplicate_body.get('message') or '').strip()
+    duplicate_details = duplicate_body.get('details') or {}
+    assert duplicate_details.get('upstream_code') == 1022
+    assert duplicate_details.get('upstream_status') == 500
 
     # Non-USER with EDIT/READ_ONLY but no group_ids -> 400.
     async with client('config', token=tenant_a_admin.access_token) as api:

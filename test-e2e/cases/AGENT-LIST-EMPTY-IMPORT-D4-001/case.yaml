@@ -1,0 +1,41 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-LIST
+case:
+  case_id: AGENT-LIST-EMPTY-IMPORT-D4-001
+  feature_id: AGENT-LIST-VIEWS
+  requirement_ids: [AGENT-EMPTY-LIST-IMPORT-20261126]
+  business_rule_ids: [AGENT-LIST-RULE-013]
+  title: Import is available with no Agents
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Reach the file import wizard from both empty Agent surfaces.
+  preconditions:
+  - A local frontend and page-local HTTP fixtures provide authorized empty Agent lists.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open empty Agent configuration and choose a valid JSON file using Import.
+    expected: Create and Import are available and selecting the file opens the existing wizard.
+  - order: 2
+    action: Open the empty Agent Repository and choose the same file using Import.
+    expected: The repository opens the same wizard without creating a listing.
+  expected_results:
+  - Both empty surfaces offer file import.
+  forbidden_side_effects:
+  - No import, Agent update or external execution before confirmation.
+  actor: Authorized Agent editor
+  journey: [Open empty Agent configuration, Select import file, Cancel, Open Agent Repository, Select import file, Cancel]
+  final_business_result:
+  - The user can begin with a file rather than needing an existing Agent.
+  failure_evidence:
+  - Browser assertions and a terminal audit of import and update requests.
+  acceptance:
+  - id: AC-01
+    description: Both empty Agent surfaces open the import wizard and cancellation performs no writes.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]

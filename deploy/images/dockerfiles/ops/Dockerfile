@@ -22,7 +22,9 @@ RUN --mount=type=bind,from=uv,source=/uv,target=/usr/local/bin/uv \
 
 RUN --mount=type=cache,id=nexent-ops-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-ops-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bind9-dnsutils curl file iproute2 jq less lsof netcat-openbsd \
+        postgresql-client procps redis-tools unzip
 
 COPY backend/contracts /opt/backend/contracts
 COPY backend/gateway/identity /opt/backend/gateway/identity
@@ -49,6 +51,7 @@ COPY \
 COPY \
     backend/management/db/configuration/__init__.py \
     backend/management/db/configuration/models.py \
+    backend/management/db/configuration/resource_denylist.py \
     /opt/backend/management/db/configuration/
 COPY \
     backend/management/db/conversation/__init__.py \
@@ -78,6 +81,9 @@ COPY \
 COPY backend/management/db/mcp/__init__.py backend/management/db/mcp/models.py /opt/backend/management/db/mcp/
 COPY backend/management/db/model/__init__.py backend/management/db/model/models.py /opt/backend/management/db/model/
 COPY backend/management/services/__init__.py /opt/backend/management/services/
+COPY backend/management/services/configuration/__init__.py \
+    backend/management/services/configuration/resource_denylist.py \
+    /opt/backend/management/services/configuration/
 COPY \
     backend/management/services/permission/__init__.py \
     backend/management/services/permission/ops_access.py \

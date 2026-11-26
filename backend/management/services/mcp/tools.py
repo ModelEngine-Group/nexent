@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
+
 from contracts.errors.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
 from management.db.mcp.market import get_mcp_market_record_by_source_mcp_id, update_mcp_market_record
 from management.db.mcp.remote import get_mcp_record_by_id_and_tenant, update_mcp_record_registry_json_by_id
@@ -116,13 +118,22 @@ async def refresh_mcp_service_tool_count(
 
     from management.services.tool.discovery import get_tool_from_remote_mcp_server
 
-    tools_info = await get_tool_from_remote_mcp_server(
-        mcp_server_name=service_name,
-        remote_mcp_server=server_url,
-        tenant_id=tenant_id,
-        authorization_token=authorization_token,
-        custom_headers=custom_headers,
-    )
+    # A newly restarted endpoint can terminate its first discovery session.
+    # Retry only the domain connection error; persistent failures still surface.
+    for attempt in range(3):
+        try:
+            tools_info = await get_tool_from_remote_mcp_server(
+                mcp_server_name=service_name,
+                remote_mcp_server=server_url,
+                tenant_id=tenant_id,
+                authorization_token=authorization_token,
+                custom_headers=custom_headers,
+            )
+            break
+        except MCPConnectionError:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(0.2 * (attempt + 1))
     tool_snapshot = [
         {"name": tool.name, "description": tool.description or ""}
         for tool in tools_info

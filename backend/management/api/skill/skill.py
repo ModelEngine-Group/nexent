@@ -100,6 +100,12 @@ def list_skills(
             include_content=include_content,
             **list_options,
         )
+        if view == "mount" and skills:
+            from management.services.configuration.resource_denylist import load_tool_denylist
+
+            policy = load_tool_denylist(effective_tenant_id)
+            for skill in skills:
+                skill["blocked_by_denylist"] = policy.blocks_skill(skill.get("name"), skill.get("skill_id"))
         return JSONResponse(content={"skills": skills})
     except HTTPException:
         raise

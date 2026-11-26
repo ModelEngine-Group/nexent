@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-EXPANDED-PROMPT-AUTOSAVE-20261126
+  change_type: bugfix
+  bug_id: AGENT-EXPANDED-PROMPT-AUTOSAVE-20261126
+  title: Autosave edits from the expanded Agent prompt
+  description: Use the existing Agent draft autosave queue for expanded prompt input.
+  observed_behavior: Expanded prompt changes were discarded on dismissal unless confirmed.
+  expected_behavior: Expanded prompt changes autosave during editing and remain visible after dismissal and reload.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: The editor autosave journey covered description and greeting but never edited the expanded prompt.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - AGENT-EDITOR-WORKFLOWS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - AGENT-EDITOR-D4-003
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Send expanded prompt changes to the draft queue as the user types, including empty and multiline input.
+    - Keep the latest draft after dismissal and block editing in read-only configuration.
+    reason: Component tests exercise both layouts and dismissal, and the existing browser case proves autosave and reload across the HTTP boundary.
+    test_selectors:
+    - frontend/tests/component/agentSinglePrompt.test.tsx
+    - frontend/tests/component/standardModalEscape.test.tsx
+    - frontend/tests/component/agentEditorDraft.test.tsx
+  notes: Reuse the Agent configuration design and AGENT-EDITOR-RULE-003.
+    AGENT-EDITOR-D4-003 uses a page-local HTTP fixture with no shared preparation or persistent test assets.

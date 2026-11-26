@@ -34,7 +34,6 @@ def test_no_group_scope_short_circuits_to_none(scope_rows):
 
     scope_rows([])
     assert group_scope_ids("tenant", "agent", None) is None
-    assert group_scope_ids("tenant", "mcp", None) is None
     assert group_scope_ids("tenant", "skill", None) is None
 
 
@@ -69,12 +68,36 @@ def test_skill_ids_are_stringified_to_match_facts(scope_rows):
     assert group_scope_ids("tenant", "skill", "ungrouped") == set()
 
 
-def test_mcp_ids_remain_integers(scope_rows):
-    from ops.monitoring.query import group_scope_ids
+def test_mcp_resource_group_filters_registered_integer_ids(monkeypatch):
+    from ops.monitoring import query
 
-    scope_rows([(7, "1"), (8, ""), (9, None)])
-    assert group_scope_ids("tenant", "mcp", 1) == {7}
-    assert group_scope_ids("tenant", "mcp", "ungrouped") == {8}
+    day = date(2026, 11, 23)
+    records = [
+        {"tenant_id": "tenant", "mcp_server_id": 7, "group_ids": (1,)},
+        {"tenant_id": "tenant", "mcp_server_id": 8, "group_ids": ()},
+        {"tenant_id": "tenant", "mcp_server_id": 9, "group_ids": None},
+    ]
+    monkeypatch.setattr(query, "mcp_server_inventory", lambda tenant: records)
+    monkeypatch.setattr(query, "_publication_status", lambda *args, **kwargs: {})
+    states = [{"tenant_id": "tenant", "statistic_date": day, "publish_id": "ready"}]
+    point = Mock()
+    point.documents.return_value = []
+
+    @contextmanager
+    def snapshot(*_args):
+        yield states, point
+
+    service = SimpleNamespace(publication_snapshot=snapshot, store=Mock())
+    scope = dict(tenant="tenant", start=day, end=day, groups=[], server_id=None, server_type=None, tool_name=None)
+    for group, expected_id in ((1, 7), ("ungrouped", 8)):
+        _, inventory, _, _ = query.read_mcp_tools(service, **scope, resource_group=group)
+        assert [entry["mcp_server_id"] for entry in inventory] == [expected_id]
+        assert {"terms": {"mcp_server_id": [expected_id]}} in point.documents.call_args.args[0]["bool"]["filter"]
+    point.reset_mock()
+    _, inventory, _, _ = query.read_mcp_tools(service, **scope, resource_group=2)
+    assert not inventory
+    point.documents.assert_not_called()
+
 
 def test_published_query_pushes_resource_ids_into_es_and_skips_empty_scope():
     from ops.monitoring.query import _read_published_rows
@@ -105,7 +128,7 @@ def test_mcp_service_list_keeps_registered_services_without_calls(covered, expec
     from ops.monitoring.query import mcp_server_rows
 
     items = mcp_server_rows([], [
-        {"tenant_id": "tenant", "service_id": 8, "name": "No calls", "type": "remote"},
+        {"tenant_id": "tenant", "mcp_server_id": 8, "mcp_server_name": "No calls", "mcp_server_type": "remote"},
     ], covered=covered)
     assert len(items) == 1
     assert items[0]["mcp_server_id"] == 8

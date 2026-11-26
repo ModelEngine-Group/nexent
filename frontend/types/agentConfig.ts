@@ -114,6 +114,7 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
 
 export interface PublishedAgent {
   id: string;
+  knowledge_sources?: Agent["knowledge_sources"];
   agent_id: number;
   name: string;
   display_name?: string;
@@ -188,6 +189,8 @@ export interface Agent {
   is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
+  /** Configuration-only retrieval flags for the published version, including worker and Skill tools. */
+  knowledge_sources?: { local: boolean; aidp: boolean };
   skills?: Skill[]; // Skills configured for this agent
   prompt?: string;
   business_description?: string;
@@ -232,6 +235,7 @@ export interface Tool {
   initParams: ToolParam[];
   is_available?: boolean;
   is_user_selectable?: boolean;
+  blocked_by_denylist?: boolean;
   create_time?: string;
   usage?: string;
   inputs?: string;
@@ -345,6 +349,7 @@ export interface ToolSubGroup {
 
 // Skill interface for skill management
 export interface Skill {
+  blocked_by_denylist?: boolean;
   skill_id: number;
   tenant_id?: string;
   name: string;

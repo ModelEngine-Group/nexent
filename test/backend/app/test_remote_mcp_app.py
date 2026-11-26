@@ -12,6 +12,8 @@ import types
 import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock
 
+import pytest
+
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 boto3_module = types.ModuleType("boto3")
@@ -457,6 +459,26 @@ class TestAddFromConfig:
         assert '"status": "error"' in resp.text
         assert '"detail": "MCP service name already exists"' in resp.text
 
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.upload_and_start_mcp_image')
+    def test_upload_image_returns_archive_validation_error(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        mock_upload.side_effect = McpValidationError("The uploaded archive is not approved")
+        upload_args = {
+            "files": {"file": ("test.tar", b"tar-data", "application/x-tar")},
+            "data": {"port": "8080", "service_name": "svc"},
+            "headers": AUTH_HEADER,
+        }
+
+        streaming_response = client.post("/mcp/upload-image/stream", **upload_args)
+        json_response = client.post("/mcp/upload-image", **upload_args)
+
+        assert streaming_response.status_code == HTTPStatus.OK
+        assert '"status": "error"' in streaming_response.text
+        assert '"detail": "The uploaded archive is not approved"' in streaming_response.text
+        assert json_response.status_code == HTTPStatus.BAD_REQUEST
+        assert json_response.json()["detail"] == "The uploaded archive is not approved"
+
 
 # ============================================================================
 # PUT /mcp/update
@@ -473,6 +495,22 @@ class TestUpdateMcpService:
             "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
+
+    @pytest.mark.parametrize("url_field", [{}, {"server_url": None}, {"server_url": ""}])
+    @pytest.mark.parametrize("container_id", ["pod-uid", None])
+    @patch('management.api.mcp.remote_mcp.get_current_user_info', return_value=("uid", "tid", "en"))
+    @patch('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_update_with_blank_url(self, mock_get, mock_update, mock_auth, url_field, container_id):
+        existing_url = "http://mcp-echo:8080/mcp"
+        mock_get.return_value = {"mcp_name": "echo", "container_id": container_id, "mcp_server": existing_url}
+
+        resp = client.put("/mcp/update", json={"mcp_id": 1, "name": "echo", **url_field}, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert mock_update.call_args.kwargs["server_url"] == (
+            existing_url if container_id else url_field.get("server_url")
+        )
 
     @patch('management.api.mcp.remote_mcp.get_current_user_info')
     @patch('management.api.mcp.remote_mcp.update_mcp_service')

@@ -52,7 +52,7 @@ from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
-from contracts.errors.exceptions import AgentDraftEditError
+from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import (
     prepare_creation_history,
@@ -264,6 +264,8 @@ async def update_agent_info_api(
             "agent_update", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
         )
         return result or {}
+    except ResourceBindingError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"code": exc.code}) from exc
     except ParameterValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                             detail={"code": exc.category, "field": exc.path}) from None

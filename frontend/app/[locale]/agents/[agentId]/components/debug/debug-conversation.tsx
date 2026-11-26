@@ -3,10 +3,6 @@
 "use client";
 
 import { useAui, useAuiState } from "@assistant-ui/react";
-import {
-  ComposerAttachment,
-  ComposerDictation,
-} from "@/app/newchat/assistant-ui/composer-tools";
 import { Thread } from "@/app/newchat/assistant-ui/thread";
 import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
 import type { Agent } from "@/types/agentConfig";
@@ -53,12 +49,7 @@ export function DebugConversation({
       debugLayout
       onSourcesPanelOpen={onSourcesPanelOpen}
       sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
-      composerTools={
-        <>
-          <ComposerAttachment />
-          <ComposerDictation configured={dictationConfigured} />
-        </>
-      }
+      inputTools={{ attachments: true, dictationConfigured: dictationConfigured }}
       welcomeContent={
         <AgentDebugWelcome
           agent={agent}

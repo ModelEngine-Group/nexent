@@ -322,6 +322,7 @@ DISABLE_CELERY_FLOWER = os.getenv('DISABLE_CELERY_FLOWER', 'false').lower() == '
 DOCKER_ENVIRONMENT = os.getenv('DOCKER_ENVIRONMENT', 'false').lower() == 'true'
 NEXENT_MCP_DOCKER_IMAGE = os.getenv('NEXENT_MCP_DOCKER_IMAGE', 'nexent/nexent-mcp:latest')
 ENABLE_UPLOAD_IMAGE = os.getenv('ENABLE_UPLOAD_IMAGE', 'false').lower() == 'true'
+NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES = os.getenv('NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES', '{}')
 ENABLE_JIUWEN_SDK = os.getenv('NEXENT_ENABLE_JIUWEN_SDK', 'true').lower() == 'true'
 
 # Celery Configuration

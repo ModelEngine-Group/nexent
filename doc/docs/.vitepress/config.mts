@@ -170,15 +170,15 @@ export default defineConfig({
                 "collapsed": false,
                 "items": [
                   {
-                    "text": "Agent Repository",
+                    "text": "Agent Space",
                     "link": "/en/user-guide/resource-repository/agent-repository"
                   },
                   {
-                    "text": "MCP Repository",
+                    "text": "MCP Space",
                     "link": "/en/user-guide/resource-repository/mcp-repository"
                   },
                   {
-                    "text": "Skill Repository",
+                    "text": "Skill Space",
                     "link": "/en/user-guide/resource-repository/skill-repository",
                     "collapsed": false,
                     "items": [
@@ -195,10 +195,6 @@ export default defineConfig({
                         "link": "/en/user-guide/resource-repository/custom-file-generation-skill"
                       }
                     ]
-                  },
-                  {
-                    "text": "Agent Market (Review Pending)",
-                    "link": "/en/user-guide/agent-market"
                   }
                 ]
               },
@@ -263,6 +259,26 @@ export default defineConfig({
                   {
                     "text": "ModelEngine Integration",
                     "link": "/en/user-guide/modelengine"
+                  },
+                  {
+                    "text": "Dify Integration",
+                    "link": "/en/user-guide/dify"
+                  },
+                  {
+                    "text": "RAGFlow Integration",
+                    "link": "/en/user-guide/ragflow"
+                  },
+                  {
+                    "text": "Haotian Integration",
+                    "link": "/en/user-guide/haotian"
+                  },
+                  {
+                    "text": "iData Integration",
+                    "link": "/en/user-guide/idata"
+                  },
+                  {
+                    "text": "AIDP Integration",
+                    "link": "/en/user-guide/aidp"
                   }
                 ]
               }
@@ -593,7 +609,7 @@ export default defineConfig({
                 "collapsed": false,
                 "items": [
                   {
-                    "text": "智能体仓库",
+                    "text": "Agent 仓库",
                     "link": "/zh/user-guide/resource-repository/agent-repository"
                   },
                   {
@@ -618,10 +634,6 @@ export default defineConfig({
                         "link": "/zh/user-guide/resource-repository/custom-file-generation-skill"
                       }
                     ]
-                  },
-                  {
-                    "text": "智能体市场（待核对）",
-                    "link": "/zh/user-guide/agent-market"
                   }
                 ]
               },
@@ -686,6 +698,26 @@ export default defineConfig({
                   {
                     "text": "ModelEngine 对接",
                     "link": "/zh/user-guide/modelengine"
+                  },
+                  {
+                    "text": "Dify 知识库对接",
+                    "link": "/zh/user-guide/dify"
+                  },
+                  {
+                    "text": "RAGFlow 知识库对接",
+                    "link": "/zh/user-guide/ragflow"
+                  },
+                  {
+                    "text": "昊天 Haotian 知识库对接",
+                    "link": "/zh/user-guide/haotian"
+                  },
+                  {
+                    "text": "iData 知识库对接",
+                    "link": "/zh/user-guide/idata"
+                  },
+                  {
+                    "text": "AIDP 知识库对接",
+                    "link": "/zh/user-guide/aidp"
                   }
                 ]
               }

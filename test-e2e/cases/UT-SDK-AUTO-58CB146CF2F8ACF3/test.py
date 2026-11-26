@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import pytest
@@ -8,6 +9,7 @@ from nexent.core.tools.ind_aidp_search_tool import (
     _parse_kds_list,
     _validate_base_url,
 )
+from nexent.core.ext_components.aidp.retrieval_config import ALL_CHANNELS
 from nexent.utils.http_client_manager import http_client_manager
 
 pytestmark = [
@@ -70,7 +72,7 @@ def test_ind_aidp_search_tool_contract():
         tool = IndependentAidpSearchTool(
             server_url=SERVER_URL, api_key=API_KEY, kds_list=["kb-1", "kb-2"]
         )
-        assert tool.search_method == "hybrid_search"
+        assert tool.search_method == ALL_CHANNELS
         assert tool.reranking_enable is True
         assert tool.reranking_mode == "performance"
         assert tool.rewrite_enable is False

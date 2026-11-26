@@ -103,6 +103,18 @@ describe("monitoring filter dependencies", () => {
     });
   });
 
+  it("keeps candidate resources until the destination group is checked", () => {
+    expect(
+      updateMonitoringFilters(selected, { type: "group", value: "8" })
+    ).toEqual(selected);
+    expect(
+      updateMonitoringFilters(selected, { type: "group", value: "9" })
+    ).toEqual({
+      ...selected,
+      group: "9",
+    });
+  });
+
   it("only clears the tool on a different MCP service selection", () => {
     expect(
       updateMonitoringFilters(selected, {

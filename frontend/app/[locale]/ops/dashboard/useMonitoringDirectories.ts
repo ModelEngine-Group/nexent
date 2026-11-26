@@ -87,9 +87,10 @@ export function useMonitoringDirectories({
   });
 
   const mcpCatalog = useQuery({
-    queryKey: [...queryKey, "mcpCatalog", { tenant }],
+    queryKey: [...queryKey, "mcpCatalog", tenant],
     enabled: (tab === "mcp" || tab === "overview") && tenant !== undefined,
-    queryFn: ({ signal }) => getMcpMonitoringCatalog(tenant ?? null, signal),
+    queryFn: ({ signal }) =>
+      getMcpMonitoringCatalog(tenant ?? null, [], signal),
   });
   // MCP catalog IDs are global; inventory supplies tenant labels for a platform scope.
   const mcpServiceTenant = (service: McpServiceFilter) =>

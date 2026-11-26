@@ -9,7 +9,7 @@ from infrastructure.system_configuration.catalog import (
     ConfigValue,
     SystemConfigurationSnapshot,
 )
-from infrastructure.system_configuration.models import SystemConfiguration
+from infrastructure.system_configuration.models import RESOURCE_DENYLIST_KEY, SystemConfiguration
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
@@ -29,7 +29,10 @@ class SystemConfigurationRepository:
         if read_only:
             session.execute(text(f"SET LOCAL ROLE {CONFIGURATION_READER_ROLE}"))
         rows = session.scalars(
-            select(SystemConfiguration).where(SystemConfiguration.delete_flag == "N")
+            select(SystemConfiguration).where(
+                SystemConfiguration.delete_flag == "N",
+                SystemConfiguration.configuration_key != RESOURCE_DENYLIST_KEY,
+            )
         ).all()
         counts = Counter(row.configuration_key for row in rows)
         duplicates = sorted(key for key, count in counts.items() if count > 1)

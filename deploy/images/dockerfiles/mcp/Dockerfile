@@ -55,14 +55,14 @@ RUN --mount=type=cache,id=nexent-mcp-nodejs-${TARGETARCH},target=/var/cache/node
 
 # Optional package mirror is passed directly to uv.
 
-ARG MCP_PROXY_VERSION
+ARG MCP_PROXY_VERSION=0.13.0
 
 WORKDIR /opt
 
-# Install mcp-proxy from PyPI (optionally pinned)
+# Verify the installed proxy can start with its resolved MCP SDK.
 RUN --mount=type=cache,id=nexent-mcp-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     if [ -n "$MCP_PROXY_VERSION" ]; then \
         uv pip install --system --link-mode copy "mcp-proxy==$MCP_PROXY_VERSION" $(test -n "$MIRROR" && echo "--default-index $MIRROR"); \
     else \
         uv pip install --system --link-mode copy mcp-proxy $(test -n "$MIRROR" && echo "--default-index $MIRROR"); \
-    fi
+    fi && python -m mcp_proxy --help >/dev/null

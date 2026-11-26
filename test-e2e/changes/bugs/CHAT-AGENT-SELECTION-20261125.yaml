@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-AGENT-SELECTION-20261125
+  change_type: bugfix
+  bug_id: CHAT-AGENT-SELECTION-20261125
+  title: Preserve the explicit Agent choice while opening a new conversation
+  description: Give unsent Agent threads unique local identities and preserve the new Agent during manual thread switches.
+  observed_behavior: Drafts with an identical empty remote identifier can reconcile into one runtime thread, and old metadata can overwrite the new selection.
+  expected_behavior: The new card has an independent draft and remains selected while the runtime switches threads. Opening saved history restores its own Agent.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing restore tests did not keep the previous thread's metadata visible during a delayed card selection or open successive drafts with the real runtime.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Select an Agent, return to discovery, then select another while the runtime still reports the previous thread.
+    - The new Agent stays visible before and after its thread binding arrives.
+    - Successive unsent drafts receive distinct runtime and adapter identities without backend history reads or writes.
+    test_selectors:
+    - frontend/tests/component/agentChatRefreshRestore.test.tsx
+    - frontend/tests/component/agentChatPageDeepLink.test.tsx
+    - frontend/tests/workbench/AgentChatDetailRequests.test.tsx
+    - frontend/tests/workbench/WorkbenchThreadAdapter.test.ts
+    reason: Controlled page timing covers the stale metadata path. The real assistant-ui runtime and local browser cover reconciliation, and the adapter test covers the draft identity contract.
+  notes: 'See chat-agent-history-detail/design.md. CHAT-DETAIL-D4-001 owns saved-history loading and request deduplication. Existing formal cases and bindings are preserved.'

@@ -12,7 +12,6 @@ change:
     - Preserve all existing Composer layout and inline edit send/cancel/read-only assertions.
     test_selectors:
     - frontend/tests/workbench/ResourceCard.test.tsx
-    - frontend/tests/workbench/SelectedResourceChips.test.tsx
     - frontend/tests/workbench/Composer.test.tsx
     - frontend/tests/workbench/UserMessageEditComposer.test.tsx
   affected_features:

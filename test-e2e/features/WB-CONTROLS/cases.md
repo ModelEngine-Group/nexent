@@ -6,6 +6,7 @@
 - D2 [WB-CREATION-CONFIRM-D2-001](../../cases/WB-CREATION-CONFIRM-D2-001/case.yaml) · active
 - D2 [WB-SKILL-SUMMARY-D2-001](../../cases/WB-SKILL-SUMMARY-D2-001/case.yaml) · active
 - D3 [WB-CONTROLS-D3-001](../../cases/WB-CONTROLS-D3-001/case.yaml) · active
+- D4 [WB-COMPOSER-RESOURCES-D4-001](../../cases/WB-COMPOSER-RESOURCES-D4-001/case.yaml) · active
 - D4 [WB-CONTROLS-D4-001](../../cases/WB-CONTROLS-D4-001/case.yaml) · active
 - D4 [WB-CONTROLS-D4-002](../../cases/WB-CONTROLS-D4-002/case.yaml) · active
 - D4 [WB-CONTROLS-D4-003](../../cases/WB-CONTROLS-D4-003/case.yaml) · active

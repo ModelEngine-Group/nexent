@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D4
+module: RESOURCE-CONFIG
+case:
+  case_id: RESOURCE-CONFIG-JOURNEY-D4-001
+  feature_id: F-045
+  requirement_ids: [NL2AGENT-TOOL-DENYLIST-20261125]
+  business_rule_ids: [F-045-RULE-12]
+  title: Resource configuration table opens a shared resource selector and preserves edits on failure
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the real configuration page and drawer with controlled API responses.
+  preconditions: [A reachable frontend and Chromium are available.]
+  test_data:
+    resources: MCP service with a child tool and a skill, all held in browser route fixtures
+  steps:
+  - order: 1
+    action: Open resource configuration and use the sole View details operation to inspect the shared Agent resource drawer.
+    expected: The updated setting description is visible without an Add exclusions button; the plain resource exclusion title has a top-right close button, separate Local tools, MCP and Skill categories, and no All or Agent category. Local tools are selected by default and never mix with MCP tools.
+  - order: 2
+    action: Expand an MCP service, select a child tool and the whole service, remove the service choice, search a skill description, then cancel.
+    expected: The service uses an independent expand button with tool count and indented child tools shared with Agent configuration. Expansion changes no selection. Service selection locks child tools without losing individual tool choices; search finds the skill and cancelling causes no write.
+  - order: 3
+    action: Open details, select a tool and skill, submit against a conflict response, retry, then make an unsaved edit and reload after another rejection with an unchanged server revision; inspect the English drawer.
+    expected: One merged summary groups MCP tools and skills by resource type without global/tenant sections and qualifies tools by service name. Failure preserves selections; retry submits distinct tool and skill references. Reload discards the unsaved edit, retains the server-selected skill and disables confirmation without an extra write. Success updates the table and localized drawer.
+  - order: 4
+    action: Inspect an existing Agent with blocked tool and skill bindings, cancel removal for both, then confirm their removal.
+    expected: Existing bindings remain visible with a retained-binding label and no initialization write. Both removal actions show the administrator blocking warning; cancellation preserves bindings and only confirmation removes them.
+  expected_results:
+  - The resource setting has one table row and a drawer with resource categories and no Agent category.
+  - Service inheritance, individual selection and description search work without a cancellation write.
+  - Conflicts retain the draft, successful retry updates the baseline, reload restores that baseline even with unchanged revision, and English labels are localized.
+  - Blocked existing bindings remain visible; removal warns that they cannot be added again, cancellation preserves them and confirmation removes them.
+  forbidden_side_effects:
+  - No persistent application data is modified; all mocked selections are released with the browser context.
+  actor: Platform administrator with configuration read and update permissions
+  journey: [Open resource configuration, select resources, cancel, reopen details, fail and retry save, inspect English labels]
+  final_business_result: [Saved resource selections appear in the configuration table and a reopened drawer.]
+  failure_evidence: [Playwright screenshots and step assertions]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-TABLE
+    description: The configuration table opens the categorized resource drawer.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-SELECTION
+    description: Service and tool selection, search and cancellation preserve intended state.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-SAVE
+    description: Failure preserves draft selections, retry saves the expected references, and successful reload discards unsaved edits even with unchanged revision, without another save.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-EXISTING-BINDINGS
+    description: Existing blocked tool and skill bindings require warning confirmation before removal and survive cancellation.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]

@@ -355,7 +355,6 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
               : serviceId === "5" ? ["研发工具"] : [];
           const service = serviceRows.find((row) => String(row.mcp_server_id) === serviceId);
           const onlyUngrouped = view === "list" && dimension === "services" &&
-            searchParams.get("include_registered") === "true" &&
             searchParams.get("resource_group") === "ungrouped";
           const rows = onlyUngrouped
             ? serviceRows.filter((row) => row.mcp_server_id === 3).map((row) => ({

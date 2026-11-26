@@ -50,8 +50,6 @@ def test_monitoring_list_orders_names_before_pagination(
     # Tool rows have a distinct name even when a service ID identifies the assertion.
     status = {"coverage_state": "covered"}
     result = (rows, 4, [], status) if build is None else ([], [], [], status)
-    if dimension:
-        result = ([], [], status)
     monkeypatch.setattr(monitoring, read, Mock(return_value=result))
     if build:
         monkeypatch.setattr(monitoring, build, Mock(return_value=rows.copy()))

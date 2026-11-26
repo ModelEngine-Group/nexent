@@ -2937,9 +2937,13 @@ async def test_import_agent_from_repository_increments_downloads():
             agent_repository_id=42,
             tenant_id="tenant_a",
             authorization="Bearer token",
+            user_id="user_a",
         )
 
     mock_increment.assert_called_once_with(42)
+    identity = mock_import.call_args.args[1]
+    assert identity.user_id == "user_a"
+    assert identity.tenant_id == "tenant_a"
     assert mock_import.call_args.kwargs["resolve_name_conflicts"] is True
     assert result == {1: 100}
 
@@ -3026,9 +3030,13 @@ async def test_import_agent_from_repository_passes_skill_resolutions():
             tenant_id="tenant_a",
             authorization="Bearer token",
             skill_resolutions=skill_resolutions,
+            user_id="user_a",
         )
 
     mock_import.assert_called_once()
+    identity = mock_import.call_args.args[2]
+    assert identity.user_id == "user_a"
+    assert identity.tenant_id == "tenant_a"
     call_kwargs = mock_import.call_args[1]
     assert call_kwargs["skill_resolutions"] == skill_resolutions
     assert call_kwargs["resolve_name_conflicts"] is True

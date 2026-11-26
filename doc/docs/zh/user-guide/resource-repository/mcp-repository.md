@@ -11,7 +11,7 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 | **开发者** | 仓库、我的MCP | 浏览共享仓库、安装 MCP 服务、添加 MCP 服务、管理自己的服务并申请上架 |
 | **管理员** | 仓库、我的MCP、审核中心 | 在开发者能力基础上，还可审核上架申请，并从仓库中直接下架服务          |
 
-> 提示：审核中心页签仅对管理员可见；开发者通过「我的MCP」中MCP卡片右上角的「查看审核进度」跟踪自己的申请结果。
+> 提示：审核中心页签仅对管理员与超级管理员可见（含同时持有相应角色的多角色用户）；开发者通过「我的MCP」中MCP卡片右上角的「查看审核进度」跟踪自己的申请结果。
 
 **开发者视角**（仓库 / 我的MCP）：
 
@@ -34,7 +34,8 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 ### 浏览与搜索
 
 - 以卡片形式展示已上架 MCP 服务
-- 支持按**名称或标签**搜索
+- 支持按**名称或标签**搜索，并可按标签库进行结构化筛选
+- 支持按 **默认排序 / 最新更新** 切换列表排序
 - 每张卡片展示：名称、描述、标签与安装量
 
 <div style="display: flex; justify-content: left;">
@@ -92,6 +93,20 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 > 本地上传镜像需管理员在部署中开启「上传镜像」功能后才会显示。
 
+#### 在 Kubernetes 中上传镜像
+
+1. 管理员将 MCP 镜像发布到集群节点可访问的镜像仓库，或以相同的镜像引用预加载到所有可能调度 MCP Pod 的节点。
+2. 对将要上传的原始 `.tar` 文件运行 `sha256sum image.tar`。在 Nexent 部署的 `.env` 中配置对应关系，并更新部署，使 Config 服务读取新配置。
+
+   ```dotenv
+   ENABLE_UPLOAD_IMAGE=true
+   NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES='{"<tar 文件的 64 位小写 SHA-256>":"registry.example.com/mcp/echo:1.0"}'
+   ```
+
+3. 在「本地上传镜像」中选择同一份 `.tar` 文件并提交。Nexent 按文件摘要查找管理员配置的镜像引用，并用它创建 Pod。重新导出的文件如果摘要不同，需要在部署配置中重新登记。
+
+直接通过 Helm 配置 `nexent-common.envFiles.rootData` 时，按 Helm 的环境文件约定传入 Base64 编码后的 JSON 值。镜像引用可使用仓库镜像摘要，以固定实际运行的镜像版本。
+
 #### 端口说明
 
 端口行为根据 Nexent 自身的部署方式自动区分：
@@ -128,6 +143,7 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 - **编辑**：修改名称、描述、URL、Authorization Token 与标签等内容
 - **启用 / 已启用**：通过开关控制服务状态
+- **连通性校验**：点击卡片上的内联按钮发起连接测试（仅限自己拥有的服务），验证 MCP 服务连接状态
 - **查看工具列表**：查看该服务提供的所有工具
 - **容器管理**：查看容器日志与创建时的配置 JSON（容器化服务）
 
@@ -137,7 +153,6 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 - **更多操作**：
   - **申请上架**：将服务提交到仓库审核
-  - **连通性校验**：发起连接测试，测试 MCP 服务连接状态
   - **查看审核进度**：查看申请状态，并可取消申请或下架
   - **删除**：删除服务，容器化服务会同步清理容器资源
 
@@ -174,6 +189,8 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 - **取消申请上架**：撤销待审核或已驳回的申请
 - **下架**：将已上架的服务从仓库撤回
+
+审核结果（通过 / 驳回）会通过**站内通知**推送给申请人，点击通知可直达该服务的审核状态弹窗。
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/mcp-space/mymcp-mcp-review.png" style="width: 40%; height: auto;" alt="MCP 详情" />
@@ -212,8 +229,8 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 在 MCP 仓库中完成管理后，您可以：
 
-1. 在 **[智能体开发](../agent-development)** 中为智能体配置 MCP 工具
-2. 在 **[开始问答](../start-chat)** 中体验智能体调用 MCP 工具的效果
-3. 继续浏览 **[技能仓库](./skill-repository)** 了解技能与 MCP 的协作
+1. 在 **[智能体配置](../agent-development/agent-configuration)** 中为智能体配置 MCP 工具
+2. 在 **[智能体对话](../start-chat)** 中体验智能体调用 MCP 工具的效果
+3. 继续浏览 **[Skill 仓库](./skill-repository)** 了解技能与 MCP 的协作
 
 如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

@@ -56,17 +56,17 @@ export interface WorkbenchBootstrap {
 }
 
 export interface WorkbenchResourceControls {
-  agentName?: string;
-  agents?: Array<{ id: number; name: string; remove: () => void }>;
+  agents: Array<{ id: number; name: string }>;
   skills: Array<{ id: number; name: string }>;
   onSelectAgent: () => void;
-  onRemoveAgent: () => void;
-  creationActions?: import("react").ReactNode;
+  onRemoveAgent: (id: number) => Promise<void>;
+  onRemoveSkill: (id: number) => Promise<void>;
 }
 
 export interface WorkbenchComposerPresentation {
   mode: WorkbenchMode;
   onExitCreation: () => void;
+  allowsSessionKnowledge?: boolean;
   onKnowledgeOpenChange?: (open: boolean) => void;
   onKnowledgeRetry?: () => void;
   knowledgePending?: boolean;

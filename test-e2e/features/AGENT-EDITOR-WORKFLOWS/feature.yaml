@@ -18,11 +18,12 @@ feature:
       one persisted Agent, with exactly two requested attempts and no automatic extra
       creation.
   - rule_id: AGENT-EDITOR-RULE-003
-    description: Description and greeting persist through the real editor/autosave
-      chain and reload, while Agent identity and resource associations are retained.
+    description: Description, greeting and manual prompt edits autosave and survive
+      reload while preserving Agent identity and resource associations. Changes in the
+      expanded prompt editor autosave while the dialog remains open.
   - rule_id: AGENT-EDITOR-RULE-004
-    description: Cancelling all five resource drawers preserves original associations
-      and leaves no blocking overlay or business mutation.
+    description: Closing any resource drawer with its close control or mask preserves
+      original associations and leaves no blocking overlay or business mutation.
   - rule_id: AGENT-EDITOR-RULE-005
     description: Read-only configuration remains protected before and after debug
       navigation and reload, while switching modes never writes or runs an Agent.
@@ -39,6 +40,10 @@ feature:
       fullscreen and comparison transitions without writing Agent configuration.
       NL2Agent resizing reserves at least 800px for configuration when space permits,
       keeping the publication action on the same row as the workflow controls.
+  - rule_id: AGENT-EDITOR-RULE-009
+    description: Test retrieval from the knowledge section using the current bound sources
+      and settings. Only explicit execution queries the tool and no configuration is saved.
+      A valid JSON scope replaces the visible test selection when returning to the form.
   required_test_stages:
   - D4
   source:
@@ -51,4 +56,5 @@ feature:
     - AGENT-EDITOR-REQ-006
     - AGENT-EDITOR-REQ-007
     - AGENT-PANEL-RESIZE-20261111
+    - AGENT-KNOWLEDGE-RETRIEVAL-TEST-20261126
     spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Locator, type Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 
@@ -104,7 +106,7 @@ export class SkillPage {
     const review = this.page.getByRole("menuitem", { name: "查看审批进度", exact: true });
     if (!(await review.count())) return;
     await review.click();
-    const statusDialog = this.page.getByRole("dialog").filter({ hasText: name });
+    const statusDialog = this.page.getByRole("dialog", { name: "审核状态", exact: true }).filter({ hasText: name });
     await expect(statusDialog).toBeVisible();
     const action = statusDialog.getByRole("button", { name: /下\s*架|取消申请/ });
     if (!(await action.count())) {
@@ -112,13 +114,16 @@ export class SkillPage {
       return;
     }
     await action.click();
-    const confirm = this.page.getByRole("dialog").last();
+    const confirm = this.page.locator(".ant-modal-confirm:visible");
+    await expect(confirm).toHaveCount(1);
     const response = this.page.waitForResponse(
       (r) => ["POST", "PATCH"].includes(r.request().method()) && /repository.*skill|skill.*repository/i.test(r.url()),
+      { timeout: 120_000 },
     );
     await confirm.getByRole("button", { name: /下\s*架|取消申请/ }).click();
     if (!(await response).ok()) throw new Error("skill unpublish/withdraw failed");
-    await expect(statusDialog).toBeHidden();
+    await expect(confirm).toBeHidden({ timeout: 120_000 });
+    await expect(statusDialog).toBeHidden({ timeout: 120_000 });
   }
 
   async delete(name: string): Promise<void> {

@@ -4,7 +4,7 @@ Nexent supports integrating third-party Agents through the **A2A (Agent-to-Agent
 
 ## 🤝 Sources of Collaborative Agents
 
-In **Agent Development → Collaborative Agents**, you can add two kinds of collaborative agents:
+In the **Collaborative Agents** area of the **Agent Configuration** page, you can add two kinds of collaborative agents:
 
 - **Internal Agents**: agents published on the platform
 - **External A2A Agents**: third-party agents discovered through the A2A protocol

@@ -138,19 +138,27 @@ journey("WB-RESOURCE-LAZY-D4-001", async ({ page, contract }) => {
     expect(
       requests.some((path) => path.endsWith("knowledge-capabilities")),
     ).toBe(true);
-    await drawer
-      .getByRole("button", { name: "关闭", exact: true })
-      .last()
-      .click();
+    const knowledge = drawer.getByRole("option", {
+      name: "Company Docs",
+      exact: true,
+    });
+    await knowledge.click();
+    await expect(knowledge).toHaveAttribute("aria-selected", "true");
+    await page.locator(".ant-drawer-mask:visible").click({
+      position: { x: 10, y: 10 },
+    });
     await expect(drawer).toHaveCount(0);
+    await expect(page.locator(".ant-drawer-mask:visible")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "知识库", exact: true }),
+    ).toHaveText("知识库");
     await retainDraft();
   });
   for (const id of contract.expectedIds("assertions"))
     await contract.assertion(id, async () => {
       await retainDraft();
       expect(state.writes).toEqual([]);
-      await expect(
-        page.getByRole("button", { name: /Agent ·|Skill ·/ }),
-      ).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体");
+      await expect(page.getByRole("button", { name: "技能", exact: true })).toHaveText("技能");
     });
 });

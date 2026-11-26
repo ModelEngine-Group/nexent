@@ -4,9 +4,15 @@ An evaluation set is a collection of test cases used to drive an evaluation. Eve
 
 ## Import an Excel file
 
-1. In **Agent Development > Agent Evaluation**, open the **Evaluation Sets** tab.
-2. Select **Upload**, enter a set name and optional description.
-3. Upload an `.xlsx` or `.xls` file. You can also select **Download Template** before filling in the data.
+1. In **Agent Evaluation**, open the **Sets** tab.
+2. Select **Upload**, and fill in the set name (up to 64 characters) and an optional description (up to 200 characters) in the drawer.
+3. Choose an `.xlsx` or `.xls` file in the drag-and-drop area and upload it (the file must contain "Question" and "Answer" columns). You can also select **Download Template** first and fill in the data with it.
+
+Example of the upload dialog:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/05-upload-set.png" style="width: 75%; height: auto;" alt="Upload evaluation set dialog" />
+</div>
 
 The following column names are supported. Chinese and English headers are accepted:
 
@@ -21,33 +27,45 @@ Leave session fields empty for single-turn cases. For multi-turn cases, keep tur
 
 ## Generate a set with AI
 
-1. In the **Evaluation Sets** tab, select **AI Generate Evaluation Set**.
-2. Enter a scene description and select a generation model.
-3. Choose whether to append cases to an existing set or enter a name for a new set.
-4. Set the generation count (1–200) and start generation.
+1. In the **Sets** tab, select **AI Generate Evaluation Set**.
+2. Under **Target evaluation set**, select an existing set to append cases to (its name and description become locked), or leave it empty and fill in a name and description to create a new set.
+3. Enter a scene description (required, up to 1,000 characters) and select a generation model.
+4. Add optional context as needed.
+5. Set the generation count (1–200, 10 by default) and select **Generate**.
+
+Example of the AI generation dialog:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/04-ai-generate-set.png" style="width: 75%; height: auto;" alt="AI generate evaluation set dialog" />
+</div>
 
 Optional context includes:
 
-- a knowledge base, so the system can retrieve relevant content first;
-- an agent, whose configuration, tools, skills, and sub-agents provide context;
-- one `.docx` reference document.
+- **Linked knowledge bases**: select up to 5 knowledge bases, so the system can retrieve relevant content first;
+- **Linked agent**: select one agent whose configuration, tools, skills, and sub-agents provide context.
 
-Generation runs asynchronously. The set shows **Generating**, **Ready**, or **Failed**. Open the set after generation to review and edit the cases.
+Generation runs asynchronously. The set shows **Generating** (with a progress percentage), **Ready**, or **Failed**. Open the set after generation to review and edit the cases.
 
 > Review AI-generated questions and reference answers before using them as a formal benchmark.
 
 ## Review and maintain cases
 
-Open **View** for a set to search by question, add a case, edit its question, answer, session ID, or turn order, delete individual or selected cases, and export the set as Excel.
+Open **View** for a set to open the case drawer, where you can:
 
-The system restricts changes that could invalidate a set while it is referenced by an active evaluation task. Copy or export the set before maintaining a long-lived benchmark if necessary.
+- search cases by question;
+- add a case with **Add Case** in the top-right corner;
+- edit the question, answer, session ID, or turn order inline in the table;
+- delete selected cases in bulk, or delete a single case;
+- export the set as Excel.
+
+The system restricts changes that could invalidate a set while it is referenced by an active evaluation task. Export the set as Excel before maintaining a long-lived benchmark if necessary.
 
 ## Data limits
 
 | Area | Current limit |
 |------|---------------|
 | File format | `.xlsx` and `.xls` only |
-| Upload size | 20 MB per file |
+| Upload size | 20 MB per file by default; the exact limit is deployment-configured |
 | Evaluation sets | 50 per tenant |
 | Cases | 2,000 per set |
 | Question length | 2,000 characters |

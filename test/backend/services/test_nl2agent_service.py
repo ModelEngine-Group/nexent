@@ -61,6 +61,16 @@ from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
 
 
+@pytest.fixture(autouse=True)
+def _empty_tool_denylist(mocker):
+    from management.services.configuration import resource_denylist
+
+    mocker.patch.object(
+        resource_denylist, "load_tool_denylist",
+        return_value=resource_denylist.ToolDenylist(frozenset(), frozenset()),
+    )
+
+
 @pytest.fixture
 def skill_repository(monkeypatch):
     """Provide the listing boundary without initializing repository mutations."""

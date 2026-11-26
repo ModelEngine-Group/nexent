@@ -1,8 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for k8s_client.py
 Tests the KubernetesContainerClient class with comprehensive coverage
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from kubernetes.client.exceptions import ApiException
@@ -863,6 +866,59 @@ class TestStartContainer:
                     user_id="user12345",
                     full_command=["npx", "-y", "test-mcp"],
                 )
+        k8s_container_client.core_v1.delete_namespaced_pod.assert_not_called()
+        k8s_container_client.core_v1.delete_namespaced_service.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure_stage", ["pod-readiness", "service-create", "after-service-create"])
+    async def test_failed_start_rolls_back_created_resources(self, k8s_container_client, mock_pod, failure_stage):
+        api = k8s_container_client.core_v1
+        api.read_namespaced_pod.side_effect = ApiException(status=404)
+        api.create_namespaced_pod.return_value = mock_pod
+        api.create_namespaced_service.return_value.metadata.uid = "service-uid"
+        failure = ContainerError("startup did not complete")
+        with (
+            patch.object(k8s_container_client, "_wait_for_pod_ready", AsyncMock(return_value=mock_pod)) as wait_pod,
+            patch.object(k8s_container_client, "_wait_for_service_ready", AsyncMock()) as wait_service,
+        ):
+            if failure_stage == "pod-readiness":
+                wait_pod.side_effect = failure
+            elif failure_stage == "service-create":
+                failure = ApiException(status=409, reason="Service already exists")
+                api.create_namespaced_service.side_effect = failure
+            else:
+                wait_service.side_effect = failure
+                api.delete_namespaced_service.side_effect = ApiException(status=503)
+
+            with pytest.raises(ContainerError, match="Pod startup failed") as error:
+                await k8s_container_client.start_container(
+                    "test-service", "tenant123", "user12345", host_port=5020,
+                )
+
+        api.delete_namespaced_pod.assert_called_once()
+        assert api.delete_namespaced_pod.call_args.kwargs["body"].preconditions.uid == mock_pod.metadata.uid
+        pod_name = api.create_namespaced_pod.call_args.kwargs["body"].metadata.name
+        assert api.delete_namespaced_pod.call_args.kwargs["name"] == pod_name
+        if failure_stage == "after-service-create":
+            api.delete_namespaced_service.assert_called_once()
+            assert api.delete_namespaced_service.call_args.kwargs["body"].preconditions.uid == "service-uid"
+        else:
+            api.delete_namespaced_service.assert_not_called()
+        assert error.value.__cause__ is failure
+
+    @pytest.mark.asyncio
+    async def test_cancelled_start_rolls_back_created_pod(self, k8s_container_client, mock_pod):
+        api = k8s_container_client.core_v1
+        api.read_namespaced_pod.side_effect = ApiException(status=404)
+        api.create_namespaced_pod.return_value = mock_pod
+        with patch.object(k8s_container_client, "_wait_for_pod_ready", side_effect=asyncio.CancelledError):
+            with pytest.raises(asyncio.CancelledError):
+                await k8s_container_client.start_container(
+                    "test-service", "tenant123", "user12345", host_port=5020,
+                )
+
+        api.delete_namespaced_pod.assert_called_once()
+        api.delete_namespaced_service.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_start_container_generic_exception_on_create(self, k8s_container_client):
@@ -933,9 +989,10 @@ class TestStartContainer:
             assert call_kwargs["authorization_token"] == "test-token-123"
 
     @pytest.mark.asyncio
-    async def test_start_container_without_readiness_wait(self, k8s_container_client):
+    async def test_start_container_without_readiness_wait(self, k8s_container_client, mock_pod):
         """Skipping readiness creates the service without polling pod/service state."""
         k8s_container_client.core_v1.read_namespaced_pod.side_effect = ApiException(status=404)
+        k8s_container_client.core_v1.create_namespaced_pod.return_value = mock_pod
         with patch.object(k8s_container_client, "_find_free_port", return_value=5020), \
              patch.object(k8s_container_client, "_create_pod_service", return_value=MagicMock()), \
              patch.object(k8s_container_client, "_wait_for_pod_ready", new_callable=AsyncMock) as mock_pod_wait, \
@@ -946,6 +1003,7 @@ class TestStartContainer:
             )
 
         assert result["status"] == "started"
+        assert result["container_id"] == mock_pod.metadata.uid
         mock_pod_wait.assert_not_awaited()
         mock_service_wait.assert_not_awaited()
 

@@ -40,6 +40,7 @@ def test_health_follows_application_lifetime(monkeypatch):
         assert client.get('/health/ready').json() == {'status': 'ready'}
         assert set(client.get('/openapi.json').json()['paths']) == {
             '/system_configurations', '/system_configurations/recommendations',
+            '/system_configurations/resource_denylist',
             '/ops/authorization', '/ops/resources', '/ops/scope',
             '/trajectory/imports', '/trajectory/imports/{import_id}',
         }

@@ -126,6 +126,14 @@ feature:
       failure. Unified cards stay in coverage until every retained requirement has
       verified installed coverage; partial bindability does not advance the header.
       New gaps roll back the step, including history replay.
+  - rule_id: F-045-RULE-12
+    description: Resource configuration tabs in system and tenant resource management contain a configuration table and
+      expose only intrinsically selectable tools for new exclusion choices; historical hidden selections remain removable. They provide
+      a shared drawer for MCP services, individual tools and skills, without an Agent category. Global names apply across
+      tenants and tenant references apply only to the selected tenant. Filter denied resources before recommendation,
+      validate current rules before continuing a card or adding a binding, preserve existing bindings and tenant selections.
+      Existing enabled bindings remain usable and configurable; removing blocked resources requires a warning confirmation.
+      Global tool options are unique by name, source and MCP service, regardless of tenant description differences.
   required_test_stages:
   - D4
   - D1

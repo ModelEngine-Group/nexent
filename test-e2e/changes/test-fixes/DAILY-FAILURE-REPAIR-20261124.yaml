@@ -1,0 +1,82 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-FAILURE-REPAIR-20261124
+  change_type: test-fix
+  title: Repair Daily fixtures and current browser paths
+  description: >-
+    Restore deterministic browser authentication and complete system-configuration
+    snapshots. Keep tag-statistics Agent display names while generating valid Python
+    internal names. Derive the Skill-list batch from the per-case result directory
+    when TEST_BATCH is absent. Follow the current configuration-list Agent listing
+    action, verify selected MCP tools through the current service popover, allow the
+    container deployment response to use the established deployment window, and
+    scope Skill take-down cleanup to the visible confirmation modal. No product
+    acceptance result is weakened. Separate bounded backend corrections cover
+    repository import identities, Skill tool configuration parity and transient
+    MCP discovery after a restart, each with traditional unit and runtime proof.
+  affected_features:
+    existing:
+    - AGENT-LIST-VIEWS
+    - AGENT-REPO-SORT-MAIN-TAG
+    - F-069
+    - F-079
+    - F-072
+    - V5-PW-MARKET-AGENT-01
+    - V5-PW-MCP-API-01
+    - V5-PW-MCP-CONTAINER-01
+    - V5-PW-MCP-REMOTE-01
+    - V5-PW-SKILL-02
+    - F-071
+    - V5-PW-SKILL-01
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-074
+    - PW-SKILL-01
+    added: []
+    modified:
+    - AGENT-LIST-D4-002
+    - AGENT-REPO-SORT-MAIN-TAG-D4-001
+    - AGT-AUTO-BCDD880DF58AECED
+    - UT-BE-AUTO-BCADEBF043C5DE3C
+    - API-AUTO-13ACE833D2DCAA16
+    - SKILL-LIST-CONTENT-D2-001
+    - PW-MARKET-AGENT-01
+    - PW-MCP-API-01
+    - PW-MCP-CONTAINER-01
+    - PW-MCP-REMOTE-01
+    - PW-SKILL-02
+    retired: []
+  traditional_ut:
+    decision: add
+    reason: >-
+      Runtime retesting exposed three product contract defects in addition to the
+      test maintenance. Focused unit regressions prove repository import identity
+      propagation, authorized Skill configuration parity, transient MCP discovery
+      retry behavior and process-environment credential overrides.
+    behaviors:
+    - Pass AuthenticatedIdentity with user_id and tenant_id through ordinary,
+      Skill-bearing and official repository import paths.
+    - Accept the exact builtin run_skill_script, read_skill_md and
+      read_skill_config configuration emitted by the Agent compiler.
+    - Retry only MCPConnectionError during tool discovery with a bounded backoff,
+      preserving persistent failures and complete tool snapshots.
+    test_selectors:
+    - test/backend/services/test_agent_repository_service.py::test_import_agent_from_repository_increments_downloads
+    - test/backend/services/test_agent_repository_service.py::test_import_agent_from_repository_passes_skill_resolutions
+    - test/backend/services/test_official_agent_service.py::test_install_bundle_with_skills
+    - test/backend/services/test_official_agent_service.py::test_install_bundle_without_skills
+    - test/backend/services/test_official_agent_service.py::test_install_bundle_creates_kb_and_remaps_refs
+    - test/backend/services/test_remote_mcp_service.py::TestRefreshMcpServiceToolCount::test_retries_transient_session_failure
+    - test/backend/services/test_snapshot_export_boundaries.py::test_snapshot_accepts_builtin_authorized_skill_configuration
+  notes: >-
+    The original API-074 and PW-SKILL-01 runtime HTTP 500 failures are not hidden
+    by this test repair and remain in the local retest selection. Shared AgentPage
+    tool binding keeps the existing persistence assertion and adds a real selected
+    checkbox assertion. PW-SKILL-02 retains every business step and assertion;
+    only its cleanup implementation changes. Local execution results stay outside
+    the repository. The process credential override regression is maintained at
+    test-e2e/infra/tools/tests/test_auth_config.py as suite infrastructure proof,
+    separately from traditional backend UT selectors.

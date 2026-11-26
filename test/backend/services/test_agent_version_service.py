@@ -3925,6 +3925,7 @@ def test_list_published_agents_impl_model_not_found(monkeypatch):
 def batch_list_collaborators(monkeypatch):
     """Keep legacy service assertions isolated from the new repository batch API."""
     svc = agent_version_service_module
+    monkeypatch.setattr(svc, "_published_knowledge_sources", lambda *_: {"local": False, "aidp": False})
     monkeypatch.setattr(svc, "query_version_lists", lambda ids, tenant: {
         aid: svc.query_version_list(agent_id=aid, tenant_id=tenant) for aid in ids
     })

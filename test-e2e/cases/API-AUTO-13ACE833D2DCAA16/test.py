@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D2 API-IT for the marketplace agent-repository tag statistics endpoint.
 
 Case: API-AUTO-13ACE833D2DCAA16
@@ -82,7 +84,7 @@ async def _create_agent(identity: TestIdentity, name: str) -> int:
         response = await api.post(
             "/agent/update",
             json={
-                "name": name,
+                "name": name.replace("-", "_"),
                 "display_name": name,
                 "description": "API-IT tag stats fixture",
                 "business_description": "Repository tag statistics fixture",

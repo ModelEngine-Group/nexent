@@ -119,10 +119,18 @@ it("unsent Workbench drafts have distinct local identities without backend creat
   expect(requests).not.toHaveBeenCalled();
 });
 
-it("ordinary Agent conversation initialization retains its existing contract", async () => {
-  expect(
-    await createConversationThreadListAdapter("agent_chat").initialize("draft")
-  ).toEqual({ remoteId: "", externalId: "" });
+it("ordinary Agent drafts have distinct local identities without backend creation", async () => {
+  const requests = vi.spyOn(globalThis, "fetch");
+  const adapter = createConversationThreadListAdapter("agent_chat");
+  expect(await adapter.initialize("draft-a")).toEqual({
+    remoteId: "agent-draft:draft-a",
+    externalId: "",
+  });
+  expect(await adapter.initialize("draft-b")).toEqual({
+    remoteId: "agent-draft:draft-b",
+    externalId: "",
+  });
+  expect(requests).not.toHaveBeenCalled();
 });
 
 it("uses an injected refreshed pin snapshot when reloading history and deduplicates the next page", async () => {
