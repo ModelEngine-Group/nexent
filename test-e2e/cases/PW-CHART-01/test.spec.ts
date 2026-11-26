@@ -92,15 +92,20 @@ journey("PW-CHART-01", async (context) => {
         // Rendering/restore acceptance does not require the asynchronous
         // title generator. Give only this owned conversation a unique label;
         // never reopen an arbitrary shared "New Chat" history item.
-        const renamed = await page.request.post("/api/conversation/rename", {
-          data: { conversation_id: citationConversationId, name: title },
-        });
-        expect(renamed.ok()).toBe(true);
-        expect((await renamed.json()).code).toBe(0);
+        const rename = await page.evaluate(async ({ conversationId, title }) => {
+          const response = await fetch("/api/conversation/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversation_id: conversationId, name: title }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          return { status: response.status, code: payload.code };
+        }, { conversationId: citationConversationId, title });
+        expect(rename.status).toBe(200);
+        expect(rename.code).toBe(0);
         expect(await chat.persistedThreadTitle(citationConversationId)).toBe(title);
-        const historyResponse = await page.request.get(`/api/conversation/${citationConversationId}`);
-        expect(historyResponse.ok()).toBe(true);
-        const history = await historyResponse.json();
+        const { status, payload: history } = await chat.readConversation(citationConversationId);
+        expect(status).toBe(200);
         const conversations = Array.isArray(history?.data) ? history.data : [];
         const currentConversation = conversations.find(
           (item: { conversation_id?: number }) => Number(item.conversation_id) === Number(citationConversationId),

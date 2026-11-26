@@ -217,7 +217,7 @@ export class ChatPage {
     return id;
   }
 
-  private async readConversation(conversationId: number) {
+  async readConversation(conversationId: number) {
     // Use the active browser origin so the frontend proxy receives the session cookie.
     return this.page.evaluate(async (id) => {
       const response = await fetch(`/api/conversation/${id}`);
