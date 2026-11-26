@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -310,6 +311,10 @@ reuse_deployment_files() {
   done
 }
 
+if DEPLOYMENT_TARGET="$(detect_deployment_target)"; then
+  deployment_start_log "$SCRIPT_DIR" "${FORWARD_ARGS[@]}"
+fi
+
 if [ -n "$REUSE_FROM" ]; then
   if [ "$DEPLOYMENT_OFFLINE" != "true" ]; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -351,7 +356,8 @@ if [ "$LOAD_IMAGES" = "true" ] && [ "$PUSH_IMAGES" != "true" ]; then
     echo "Error: --load-images requires a docker or k8s deployment target." >&2
     exit 1
   fi
-  bash "$LOAD_SCRIPT" "$DEPLOYMENT_TARGET"
+  deployment_log "Loading offline images for $DEPLOYMENT_TARGET..."
+  deployment_run_logged bash "$LOAD_SCRIPT" "$DEPLOYMENT_TARGET"
 fi
 
 if [ "$PUSH_IMAGES" = "true" ]; then
@@ -366,7 +372,8 @@ if [ "$PUSH_IMAGES" = "true" ]; then
   fi
 
   require_image_registry_prefix
-  bash "$PUSH_SCRIPT" --image-registry-prefix "$IMAGE_REGISTRY_PREFIX" --load-images
+  deployment_log "Loading and pushing offline images..."
+  deployment_run_logged bash "$PUSH_SCRIPT" --image-registry-prefix "$IMAGE_REGISTRY_PREFIX" --load-images
 fi
 
 if [ -n "$IMAGE_REGISTRY_PREFIX" ]; then

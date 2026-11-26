@@ -46,7 +46,9 @@ cd nexent
 bash deploy.sh docker
 ```
 
-根目录 `deploy.sh` 只负责转发到目标部署脚本；Docker 真实实现为 `bash deploy/docker/deploy.sh`。Docker 和 Kubernetes 使用同一套部署配置模型；交互式运行会通过 Bash TUI 选择组件、端口策略和镜像源。`infrastructure` 必选，`application`、`data-process` 默认选中，也可以取消以部署更小的组合。使用 `--defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。非交互部署也可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
+根目录 `deploy.sh` 完成部署准备后转发到目标脚本。Docker 真实实现为 `bash deploy/docker/deploy.sh`。Docker 和 Kubernetes 使用同一套部署配置模型；交互式运行会通过 Bash TUI 选择组件、端口策略和镜像源。`infrastructure` 必选，`application`、`data-process` 默认选中，也可以取消以部署更小的组合。使用 `--defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。非交互部署也可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
+
+每次 Docker 或 Kubernetes 部署都会在仓库或离线包根目录的 `logs/deploy/` 下创建 `deploy-YYYYMMDD-HHMMSS.log`，启动时会显示完整路径。终端显示部署阶段、交互提示和失败摘要，SQL 迁移、Python 初始化等命令的详细输出写入该文件。
 
 历史账号升级和故障恢复统一参见[迁移与排障手册](deploy/sql/tools/supabase_to_postgres/README.md)。
 
@@ -70,7 +72,11 @@ bash deploy.sh k8s
 
 Kubernetes 真实实现为 `bash deploy/k8s/deploy.sh`。它会先安装仅包含 Elasticsearch、PostgreSQL、Redis、MinIO 的 `nexent-infrastructure` Helm release，在基础组件和 Elasticsearch API Key 就绪后，再安装应用侧 `nexent` release。可通过 `--release-scope all|infrastructure|nexent` 部署两侧或单独一侧。脚本会读取同一个 `deploy/env/.env` 并渲染 Helm ConfigMap 和 Secret 覆盖值；PVC 可通过 `--persistence-mode local|dynamic|existing`、`--storage-class`/`--sc`、`--local-path`、`--local-node-name`、`--existing-claim-prefix` 控制。
 
+Kubernetes 新部署默认使用动态 PVC。省略 `--storage-class` 时由 Kubernetes 选择集群的默认 StorageClass。共享数据需要该存储类支持 ReadWriteMany。部署脚本会沿用先前保存的存储配置。
+
 根目录卸载入口为 `bash uninstall.sh docker ...` 或 `bash uninstall.sh k8s ...`。Kubernetes 默认先卸载 `nexent`、再卸载 `nexent-infrastructure`；也可使用相同的 `--release-scope` 单独卸载，并对基础 release 执行依赖保护。
+
+Kubernetes 卸载默认保留动态 PVC 和所在命名空间。交互式运行会询问是否删除所选 release 的动态 PVC，默认选否。也可显式指定 `--delete-pvc true` 删除或 `--delete-pvc false` 保留。
 
 Kubernetes 离线包使用同一个构建脚本，传入 `--target k8s` 或 `--target all`。部署前需要在每个需要运行 Pod 的节点上执行 `load-images.sh`，或使用 `--push-images --image-registry-prefix registry.example.com/nexent` 将镜像推送到集群可访问的内部镜像仓库，再使用与打包时一致的版本、镜像源和镜像仓库前缀部署。
 

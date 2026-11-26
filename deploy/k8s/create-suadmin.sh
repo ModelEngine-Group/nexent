@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/common.sh"
 status=0
 display_password="${2:-true}"
-kubectl exec -i -n "${NAMESPACE:-nexent}" deploy/nexent-config -- python -m management.cli.account bootstrap-su --check >/dev/null || status=$?
+deployment_run_logged kubectl exec -i -n "${NAMESPACE:-nexent}" deploy/nexent-config -- python -m management.cli.account bootstrap-su --check >/dev/null || status=$?
 case "$status" in
   0) exit 0 ;;
   3) ;;
@@ -22,7 +22,8 @@ if deployment_should_prompt_super_admin_password; then
 else
   password="${1:-$(deployment_super_admin_password)}"
 fi
-result="$(printf '%s\n' "$password" | kubectl exec -i -n "${NAMESPACE:-nexent}" deploy/nexent-config -- python -m management.cli.account bootstrap-su)"
+result="$(printf '%s\n' "$password" | kubectl exec -i -n "${NAMESPACE:-nexent}" deploy/nexent-config -- python -m management.cli.account bootstrap-su \
+  2>>"${NEXENT_DEPLOY_LOG_FILE:-/dev/stderr}")"
 deployment_report_super_admin_creation "$result" "$password" "$display_password"
 unset result
 unset password

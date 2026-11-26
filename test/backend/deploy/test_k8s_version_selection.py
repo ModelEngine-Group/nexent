@@ -72,7 +72,7 @@ def test_explicit_version_wins_over_saved_and_repository_versions(tmp_path, argu
 
 
 @pytest.mark.parametrize("exists", [False, True])
-def test_missing_or_empty_saved_options_use_current_repository_version(tmp_path, exists):
+def test_missing_or_empty_saved_options_use_current_version_and_dynamic_storage(tmp_path, exists):
     options = tmp_path / "deploy.options"
     if exists:
         options.write_text("")
@@ -81,6 +81,23 @@ def test_missing_or_empty_saved_options_use_current_repository_version(tmp_path,
 
     assert actual["app_version"] == CURRENT_VERSION
     assert actual["shared_version"] == CURRENT_VERSION
+    assert actual["persistence_mode"] == "dynamic"
+    assert actual["storage_class"] is None
+
+
+@pytest.mark.parametrize("saved,explicit,expected", [
+    ("local", (), "local"),
+    ("existing", (), "existing"),
+    ("local", ("--persistence-mode", "dynamic"), "dynamic"),
+    ("dynamic", ("--persistence-mode", "local"), "local"),
+])
+def test_explicit_and_saved_persistence_modes_override_the_default(tmp_path, saved, explicit, expected):
+    options = tmp_path / "deploy.options"
+    options.write_text(f'k8s:\n  persistenceMode: "{saved}"\n')
+
+    actual = resolve_options(options, "--runtime-replicas", "1", *explicit)
+
+    assert actual["persistence_mode"] == expected
 
 
 def test_persisted_options_do_not_pin_an_application_version(tmp_path):
@@ -110,5 +127,5 @@ persist_deploy_options
     persisted = yaml.safe_load(options.read_text())
     assert "appVersion" not in persisted
     assert "appVersion" not in persisted["k8s"]
-    assert persisted["k8s"]["persistenceMode"] == "local"
+    assert persisted["k8s"]["persistenceMode"] == "dynamic"
     assert persisted["components"] == ["infrastructure", "application"]

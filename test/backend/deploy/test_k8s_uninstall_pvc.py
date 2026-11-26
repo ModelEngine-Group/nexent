@@ -1,0 +1,173 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Check PVC retention and targeted removal through the uninstall entry point."""
+
+import os
+import select
+import shutil
+import subprocess
+
+import pytest
+
+from .test_workbench_publication import BASH, REPO
+
+
+@pytest.fixture
+def uninstall(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    script = root / "deploy/k8s/uninstall.sh"
+    script.parent.mkdir(parents=True)
+    common = root / "deploy/common"
+    common.mkdir()
+    shutil.copyfile(REPO / "deploy/k8s/uninstall.sh", script)
+    shutil.copyfile(REPO / "deploy/common/common.sh", common / "common.sh")
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    claims = tmp_path / "claims"
+    calls = tmp_path / "calls"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("DEPLOYMENT_LANG", "en")
+    monkeypatch.setenv("FIXTURE_MANIFESTS", manifests.as_posix())
+    monkeypatch.setenv("FIXTURE_CLAIMS", claims.as_posix())
+    monkeypatch.setenv("FIXTURE_CALLS", calls.as_posix())
+    for binary, code in {
+        "helm": r'''
+printf 'helm %s\n' "$*" >> "$FIXTURE_CALLS"
+case "$1:$2" in
+  get:manifest) [ -f "$FIXTURE_MANIFESTS/$3" ] && cat "$FIXTURE_MANIFESTS/$3" || { echo 'Error: release: not found' >&2; exit 1; } ;;
+  status:*) [ -f "$FIXTURE_MANIFESTS/$2" ] ;;
+  uninstall:*) [ "${FIXTURE_UNINSTALL_ERROR:-0}" = 0 ] ;;
+  *) exit 9 ;;
+esac
+''',
+        "kubectl": r'''
+printf 'kubectl %s\n' "$*" >> "$FIXTURE_CALLS"
+case "$1:$2" in
+  get:pvc) cat "$FIXTURE_CLAIMS" ;;
+  get:namespace) echo 'namespace/test-ns' ;;
+  delete:--raw)
+    cat >> "$FIXTURE_CALLS"
+    [ "${FIXTURE_PVC_MISSING:-0}" = 0 ] || { echo 'Error from server (NotFound): the claim is absent' >&2; exit 1; }
+    [ "${FIXTURE_UID_CONFLICT:-0}" = 0 ] || { echo 'Error from server (Conflict): the UID was replaced' >&2; exit 1; }
+    ;;
+  delete:*) ;;
+  *) exit 9 ;;
+esac
+''',
+    }.items():
+        mock = bin_dir / binary
+        mock.write_text(f"#!/usr/bin/env bash\n{code}", encoding="utf-8")
+        mock.chmod(0o700)
+
+    def run(*arguments, legacy=False, released=False, answer=None):
+        claims.write_text(
+            f"nexent-workspace|uid-workspace|nexent|test-ns|{'dynamic' if not legacy else ''}\n"
+            "nexent-redis|uid-redis|nexent-infrastructure|test-ns|dynamic\n"
+            "nexent-skills|uid-local|nexent|test-ns|\n"
+            "other|uid-other|other-release|test-ns|dynamic\n"
+            "wrong-namespace|uid-wrong|nexent|other-ns|dynamic\n",
+            encoding="utf-8",
+        )
+        if not released:
+            (manifests / "nexent").write_text(
+                "---\nkind: PersistentVolumeClaim\nmetadata:\n  name: nexent-workspace\n"
+                + ("" if legacy else '  annotations:\n    helm.sh/resource-policy: "keep"\n')
+                + "spec:\n  accessModes: []\n---\nkind: PersistentVolumeClaim\nmetadata:\n  name: nexent-skills\n"
+                "spec:\n  volumeName: nexent-skills-pv\n",
+                encoding="utf-8",
+            )
+            (manifests / "nexent-infrastructure").write_text(
+                "---\nkind: PersistentVolumeClaim\nmetadata:\n  name: nexent-redis\n"
+                "  annotations:\n    helm.sh/resource-policy: keep\nspec:\n  accessModes: []\n",
+                encoding="utf-8",
+            )
+        command = [BASH, script.as_posix(), "--namespace", "test-ns", "--keep-local-data", *arguments]
+        if answer is None:
+            result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                    check=False, timeout=20)
+        else:
+            import pty
+
+            master, slave = pty.openpty()
+            with subprocess.Popen(command, stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True) as process:
+                os.close(slave)
+                try:
+                    ready, _, _ = select.select([process.stderr], [], [], 10)
+                    assert ready, "The PVC prompt was not shown"
+                    prompt = os.read(process.stderr.fileno(), 4096).decode()
+                    assert "Delete dynamic PVCs" in prompt and "[y/N]" in prompt
+                    os.write(master, f"{answer}\n".encode())
+                    output, error = process.communicate(timeout=20)
+                    result = subprocess.CompletedProcess(command, process.returncode, output, prompt + error)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    os.close(master)
+        return result, calls.read_text(encoding="utf-8")
+
+    return run
+
+
+@pytest.mark.parametrize("arguments", [(), ("delete-all",), ("--delete-pvc", "false", "--remove-namespace")])
+def test_preserving_claims_also_preserves_the_namespace(uninstall, arguments):
+    result, calls = uninstall(*arguments)
+    assert result.returncode == 0, result.stderr
+    assert "Preserved dynamic PVCs: nexent-workspace nexent-redis" in result.stdout
+    assert "helm uninstall nexent --namespace test-ns" in calls
+    assert "helm uninstall nexent-infrastructure --namespace test-ns" in calls
+    assert "kubectl delete --raw" not in calls
+    assert "kubectl delete namespace" not in calls
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The fixture requires a POSIX pseudo-terminal")
+@pytest.mark.parametrize("answer,deleted", [("", False), ("y", True)])
+def test_prompt_defaults_to_retention_and_accepts_explicit_yes(uninstall, answer, deleted):
+    result, calls = uninstall("--keep-namespace", answer=answer)
+    assert result.returncode == 0, result.stderr
+    assert ("kubectl delete --raw" in calls) == deleted
+
+
+@pytest.mark.parametrize("released", [False, True])
+def test_explicit_delete_is_scoped_and_uses_the_discovered_uid(uninstall, released):
+    result, calls = uninstall("--release-scope", "nexent", "--delete-pvc", "true", released=released)
+    assert result.returncode == 0, result.stderr
+    assert calls.index("helm uninstall nexent --namespace test-ns") < calls.index("kubectl delete --raw")
+    deletions = [call for call in calls.splitlines() if call.startswith("kubectl delete --raw")]
+    assert deletions == ["kubectl delete --raw /api/v1/namespaces/test-ns/persistentvolumeclaims/nexent-workspace -f -"]
+    assert '"preconditions":{"uid":"uid-workspace"}' in calls
+    assert "helm uninstall nexent-infrastructure" not in calls
+
+
+def test_legacy_dynamic_claims_without_keep_policy_stop_before_helm_uninstall(uninstall):
+    result, calls = uninstall(legacy=True)
+    assert result.returncode != 0
+    assert "nexent/nexent-workspace" in result.stderr
+    assert "helm uninstall" not in calls
+    assert "kubectl delete" not in calls
+
+
+def test_explicit_legacy_removal_accepts_claims_already_deleted_by_helm(uninstall, monkeypatch):
+    monkeypatch.setenv("FIXTURE_PVC_MISSING", "1")
+    result, calls = uninstall("--release-scope", "nexent", "--delete-pvc", "true", legacy=True)
+    assert result.returncode == 0, result.stderr
+    assert "helm uninstall nexent --namespace test-ns" in calls
+    assert "persistentvolumeclaims/nexent-workspace" in calls
+
+
+def test_failed_helm_uninstall_leaves_pvcs_and_namespace_alone(uninstall, monkeypatch):
+    monkeypatch.setenv("FIXTURE_UNINSTALL_ERROR", "1")
+    result, calls = uninstall("--delete-pvc", "true", "--remove-namespace")
+    assert result.returncode != 0
+    assert "kubectl delete --raw" not in calls
+    assert "kubectl delete namespace" not in calls
+
+
+def test_replaced_pvc_prevents_namespace_deletion(uninstall, monkeypatch):
+    monkeypatch.setenv("FIXTURE_UID_CONFLICT", "1")
+    result, calls = uninstall("--delete-pvc", "true", "--remove-namespace")
+    assert result.returncode != 0
+    assert "the UID was replaced" in result.stderr
+    assert "kubectl delete namespace" not in calls
