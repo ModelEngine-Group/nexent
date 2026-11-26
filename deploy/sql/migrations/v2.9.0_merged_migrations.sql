@@ -1812,3 +1812,24 @@ CREATE INDEX IF NOT EXISTS idx_agent_execution_active_scope
 CREATE INDEX IF NOT EXISTS idx_agent_execution_conversation_history
     ON nexent.agent_execution_t (conversation_id, agent_scope, create_time DESC, run_id DESC)
     WHERE delete_flag = 'N';
+
+-- Source migration: v2.9.0_resource_denylist.sql
+-- Source SHA-256: 2a76b9f1522846cd6895fb9eb704453cc9f8a9bd1be987513e43fc447cfe75f0
+
+ALTER TABLE nexent.sys_configuration_t
+    DROP CONSTRAINT IF EXISTS ck_sys_configuration_scalar,
+    DROP CONSTRAINT IF EXISTS ck_sys_configuration_value_type;
+
+-- Preserve tool selections stored by earlier local denylist implementations.
+UPDATE nexent.sys_configuration_t
+SET configuration_value = jsonb_build_object('tool_names', configuration_value)
+WHERE configuration_key = 'NL2AGENT_RESOURCE_DENYLIST'
+    AND jsonb_typeof(configuration_value) = 'array';
+
+ALTER TABLE nexent.sys_configuration_t ADD CONSTRAINT ck_sys_configuration_value_type CHECK (
+    (configuration_key = 'NL2AGENT_RESOURCE_DENYLIST' AND jsonb_typeof(configuration_value) = 'object')
+    OR (configuration_key <> 'NL2AGENT_RESOURCE_DENYLIST' AND jsonb_typeof(configuration_value) IN ('number', 'boolean'))
+);
+
+COMMENT ON COLUMN nexent.sys_configuration_t.configuration_value IS
+    'Validated configuration value, including structured resource denylist settings';

@@ -11,10 +11,15 @@ from contracts.resource_denylist import GlobalDenylistUpdate, TenantDenylistUpda
 from management.services.configuration import resource_denylist as denylist
 
 
-def test_resource_denylist_migration_follows_system_configuration_baseline():
+def test_release_bundle_embeds_denylist_once_after_system_configuration_baseline():
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
-    names = sorted(path.name for path in migrations.glob("v2.9.0*.sql"))
-    assert names.index("v2.9.0_merged_migrations.sql") < names.index("v2.9.0_resource_denylist.sql")
+    sql = (migrations / "v2.9.0_merged_migrations.sql").read_text(encoding="utf-8")
+    marker = "-- Source migration: v2.9.0_resource_denylist.sql"
+    assert sql.count(marker) == 1
+    assert sql.index("CREATE TABLE IF NOT EXISTS nexent.sys_configuration_t") < sql.index(marker)
+    assert sql.index("-- Source migration: v2.9.0_018_runtime_fixed_replicas.sql") < sql.index(marker)
+    assert "ADD CONSTRAINT ck_sys_configuration_value_type" in sql.split(marker)[1]
+    assert not (migrations / "v2.9.0_resource_denylist.sql").exists()
 
 
 def test_empty_uninstalled_catalog_does_not_load_policy(mocker):
