@@ -6,7 +6,6 @@ import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
-import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 
 journey("PW-CHAT-03", async (context) => {
@@ -20,8 +19,7 @@ journey("PW-CHAT-03", async (context) => {
 
   contract.deferCleanup(async () => {
     if (conversationId) {
-      try { await chat.captureConversationState(join(contract.caseDir,"conversation-state.json"), `EXEC-${token}`); }
-      finally { await chat.deleteConversationById(conversationId); }
+      await chat.captureConversationState(join(contract.caseDir,"conversation-state.json"), `EXEC-${token}`);
     }
   });
 
@@ -29,8 +27,7 @@ journey("PW-CHAT-03", async (context) => {
     preconditions: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
-        agentDisplay = resolveReadyAsset("agents", "d4_chat_display_name", "PW-CHAT-03");
-        await chat.openAgent(agentDisplay);
+        agentDisplay = await chat.openPreparedAgent("d4_chat", "PW-CHAT-03");
         return `selected planning-capable published Agent ${agentDisplay}`;
       },
       async () => `prepared fixed multi-step task PLAN-${token}`,
@@ -43,7 +40,7 @@ journey("PW-CHAT-03", async (context) => {
       },
       async () => {
         await chat.startMessage(`这是规划模式测试，请先调用 create_plan 创建结构化执行计划，不能只在正文列出步骤。计划至少包含 6 项软件发布检查；每完成一项必须调用 update_plan_step 更新状态，再逐项详细说明检查方式。最终输出标记 PLAN-${token}。`);
-        conversationId = chat.currentConversationId();
+        conversationId = chat.registerOwnedConversation("PW-CHAT-03");
         return "submitted the deterministic multi-step task through Planning mode";
       },
       async () => {

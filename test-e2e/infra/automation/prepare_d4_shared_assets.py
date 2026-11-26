@@ -432,9 +432,21 @@ async def prepare_stt(identity) -> dict:
     }
 
 
+async def _prepare_llm_name(identity, role: str) -> int:
+    model = await model_id("llm", identity)
+    rows, _, _ = await load_model_catalog(identity)
+    name = next((row.get("display_name") for row in rows
+                 if str(row.get("model_id") or row.get("id")) == str(model)), None)
+    if not name:
+        raise AssertionError(f"The configured {role} model has no visible catalog name")
+    register_asset("models", f"{role}_model_display_name", name, owner_case_id="D4-PREP")
+    return model
+
+
 async def prepare_chat(identity) -> dict:
+    model = await _prepare_llm_name(identity, "d4_chat")
     chat_agent_id, chat_agent, _ = await _create_agent(
-        identity, prefix="D4 Chat Agent", model_type="llm"
+        identity, prefix="D4 Chat Agent", model_type="llm", model_id_override=model,
     )
     _register_agent("d4_chat", chat_agent_id, chat_agent)
 
@@ -443,8 +455,10 @@ async def prepare_chat(identity) -> dict:
 
 async def prepare_tool_chat(identity) -> dict:
     get_test_code_id = await _controlled_tool_id(identity, "get_test_code")
+    model = await _prepare_llm_name(identity, "d4_tool_chat")
     tool_chat_id, tool_chat_name, _ = await _create_agent(
         identity, prefix="D4 Tool Chat Agent", model_type="llm",
+        model_id_override=model,
         enabled_tool_ids=[get_test_code_id],
         prompt=(
             "When the user explicitly requests get_test_code, call that exact tool and "
@@ -477,15 +491,7 @@ async def prepare_file_chat(identity) -> dict:
 
 async def prepare_multi(identity) -> dict:
     always_fail_id = await _controlled_tool_id(identity, "always_fail")
-    parent_model_id = await model_id("llm", identity)
-    models, _, _ = await load_model_catalog(identity)
-    parent_model_name = next(
-        (row.get("display_name") for row in models
-         if str(row.get("model_id") or row.get("id")) == str(parent_model_id)),
-        None,
-    )
-    if not parent_model_name:
-        raise AssertionError("The prepared parent model has no visible catalog name")
+    parent_model_id = await _prepare_llm_name(identity, "d4_multi")
     child_a_id, child_a_name, _ = await _create_agent(
         identity, prefix="D4 Multi Child A", model_type="llm",
         prompt="Complete every delegated task and include CHILD_A_OK in the result.",
@@ -513,12 +519,12 @@ async def prepare_multi(identity) -> dict:
         ),
     )
     _register_agent("d4_multi", multi_id, multi_name)
-    register_asset("models", "d4_multi_parent_display_name", parent_model_name, owner_case_id="D4-PREP")
     return {"NEXENT_TEST_MULTI_AGENT": multi_name, "NEXENT_TEST_MULTI_CHILD_A": child_a_name, "NEXENT_TEST_MULTI_CHILD_B": child_b_name}
 
 
 async def prepare_scope(identity) -> dict:
     require_metadata_id = await _controlled_tool_id(identity, "require_metadata")
+    model = await _prepare_llm_name(identity, "d4_scope")
     async with client("config", token=identity.access_token) as api:
         response = await api.get("/tool/list")
     assert_status(response, 200)
@@ -530,6 +536,7 @@ async def prepare_scope(identity) -> dict:
     retrieval_id = int(matches[0].get("tool_id") or matches[0]["id"])
     scope_id, scope_name, _ = await _create_agent(
         identity, prefix="D4 Scope Agent", model_type="llm",
+        model_id_override=model,
         enabled_tool_ids=[require_metadata_id, retrieval_id], allow_chat_metadata=True,
     )
     async with client("config", token=identity.access_token) as api:

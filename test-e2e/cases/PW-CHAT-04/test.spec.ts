@@ -9,7 +9,7 @@ import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 
 journey("PW-CHAT-04", async (context) => {
-  const { page, expect, contract } = context;
+  const { page, expect } = context;
   const chat = new ChatPage(page);
   const token = runToken("PW-CHAT-04");
   let title = "";
@@ -17,19 +17,17 @@ journey("PW-CHAT-04", async (context) => {
   let parentModelName = "";
   let childA = "";
   let childB = "";
-  let conversationId = 0;
   let cardCount = 0;
   let cardTexts: string[] = [];
   let persistedCardCount = 0;
   let summaryCount = 0;
-  contract.deferCleanup(async () => { if (conversationId > 0) await chat.deleteConversationById(conversationId); });
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
         agent = resolveReadyAsset("agents", "d4_multi_display_name", "PW-CHAT-04");
         childA = resolveReadyAsset("agents", "d4_multi_child_a_display_name", "PW-CHAT-04");
         childB = resolveReadyAsset("agents", "d4_multi_child_b_display_name", "PW-CHAT-04");
-        parentModelName = resolveReadyAsset("models", "d4_multi_parent_display_name", "PW-CHAT-04");
+        parentModelName = resolveReadyAsset("models", "d4_multi_model_display_name", "PW-CHAT-04");
         expect(parentModelName).toBeTruthy();
         expect(childA).not.toBe(childB);
         return `main Agent ${agent} has a configured model and two explicitly named collaborators`;
@@ -44,7 +42,11 @@ journey("PW-CHAT-04", async (context) => {
         await chat.selectMode("执行");
         return `selected multi-Agent ${agent} and its bound model`;
       },
-      async () => { await chat.startMessage(`请完成以下两个已明确的独立子任务：必须委派 ${childA} 执行任务A，只返回 CHILD_A_OK；必须委派 ${childB} 执行任务B，只返回 CHILD_B_OK。两个任务均不需要额外输入，不要自行代替协作者回答。等待两个协作者返回后汇总它们的结果，并原样包含 MULTI-${token}。`); conversationId = chat.currentConversationId(); return "submitted two concrete collaborator tasks and registered the server conversation ID for cleanup"; },
+      async () => {
+        await chat.startMessage(`请完成以下两个已明确的独立子任务：必须委派 ${childA} 执行任务A，只返回 CHILD_A_OK；必须委派 ${childB} 执行任务B，只返回 CHILD_B_OK。两个任务均不需要额外输入，不要自行代替协作者回答。等待两个协作者返回后汇总它们的结果，并原样包含 MULTI-${token}。`);
+        chat.registerOwnedConversation("PW-CHAT-04");
+        return "submitted two concrete collaborator tasks and registered the server conversation ID for cleanup";
+      },
       async () => {
         try {
           await expect(page.locator("[data-subagent-id]")).toHaveCount(2, { timeout: 240000 });

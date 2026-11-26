@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: AGENTOS-AND-D4-FIXTURES-20261126
+  change_type: test-fix
+  title: Restore attempt-journal and browser fixture execution
+  description: Drive the current public SSE presentation and assistant persistence replay with
+    the same controlled attempt events. Verify live publication, rollback isolation and
+    accepted answers at the real projection boundary. Carry the actual prepared Agent
+    model into the affected browser journeys and explicitly select it before sending.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: The affected implementations are formal tests and their preparation helpers.
+  affected_features:
+    existing:
+    - CMSR-005
+    - FAF-001
+    - V5-PW-CHART-01
+    - V5-PW-CHAT-01
+    - V5-PW-CHAT-02
+    - V5-PW-CHAT-03
+    - V5-PW-CHAT-04
+    - V5-PW-CHAT-05
+    - V5-PW-SHARE-01
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D2-001
+    - FAF-D2-001
+    - FAF-D4-001
+    - FAF-D5-001
+    - PW-CHART-01
+    - PW-CHAT-01
+    - PW-CHAT-02
+    - PW-CHAT-03
+    - PW-CHAT-04
+    - PW-CHAT-05
+    - PW-SHARE-01
+    modified: []
+    added: []
+    retired: []
+  no_case_change_reason: The changes restore execution of the existing test contracts.
+  notes: The D2 and D5 journal cases create no external assets or subprocesses. Their
+    journal Body iterators close on completion and on assertion failure. The D4 cases
+    retain their declared preparation groups and use the model selected for the owned
+    Agent. Resource cleanup is through the case callbacks or authenticated asset journal.

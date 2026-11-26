@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """FAF-D5-001: repeated rollback and sibling isolation at the SSE boundary."""
 
 import pytest
-from importlib import import_module
 
-_capture_events = import_module("test-e2e.cases.FAF-D2-001.test")._capture_events
+from shared.attempt_journal import capture_attempt_journal
 
 pytestmark = [pytest.mark.case_id("FAF-D5-001"), pytest.mark.stage("D5")]
 
@@ -31,8 +32,8 @@ async def test_faf_d5_001(monkeypatch, iteration):
             {"type": "final_answer", "content": "", "answer_phase": "complete",
              "step_id": invocation, "invocation_id": invocation},
         ])
-    payloads, batches = await _capture_events(monkeypatch, events)
-    units = batches[0]["message_units"]
+    payloads, batch = await capture_attempt_journal(monkeypatch, events)
+    units = batch["message_units"]
     answers = [unit for unit in units if unit["type"] == "final_answer"]
     assert sorted((unit["invocation_id"], unit["content"]) for unit in answers) == [
         ("left", "left-accepted"), ("right", "right-accepted")]

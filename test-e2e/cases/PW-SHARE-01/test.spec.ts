@@ -14,7 +14,6 @@ import {
 } from "../../infra/automation/d4/runner/sessions";
 import {
   registerReadyAsset,
-  resolveReadyAsset,
 } from "../../infra/automation/d4/runner/assets";
 import { AgentPage } from "../../infra/automation/d4/pages/agent.page";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
@@ -44,7 +43,6 @@ journey("PW-SHARE-01", async (context) => {
   let conversationId = 0;
   contract.deferCleanup(async () => {
     await publicContext?.close();
-    if (conversationId > 0) await chat.deleteConversationById(conversationId);
   });
   await executeFixedScenario(context, {
     preconditions: [
@@ -57,14 +55,13 @@ journey("PW-SHARE-01", async (context) => {
     steps: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
-        await chat.openAgent(
-          resolveReadyAsset("agents", "d4_chat_display_name", "PW-SHARE-01"),
-        );
+        await chat.openPreparedAgent("d4_chat", "PW-SHARE-01");
         const chooser = page.waitForEvent("filechooser");
         await page.getByRole("button", { name: /上传文件|附件/ }).click();
         await (await chooser).setFiles(pdf);
-        await chat.sendAndWait(`请确认快照标记 ${marker}`);
-        conversationId = chat.currentConversationId();
+        await chat.startMessage(`请确认快照标记 ${marker}`);
+        conversationId = chat.registerOwnedConversation("PW-SHARE-01");
+        await chat.waitForCompletion();
         await chat.sendAndWait(`不分享的第二轮 ${late}`);
         await chat
           .assistantMessages()

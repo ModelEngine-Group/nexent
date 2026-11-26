@@ -5,8 +5,8 @@ import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
-import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { watchTitleRequests } from "../../infra/automation/d4/runner/title-requests";
 
 journey("PW-CHAT-01", async (context) => {
@@ -36,19 +36,14 @@ journey("PW-CHAT-01", async (context) => {
   };
 
   contract.deferCleanup(async () => {
-    try {
-      if (ownedConversationIds.size) await chat.captureConversationState(join(contract.caseDir,"conversation-state.json"), `CONTINUE-${token}`);
-    } finally {
-      for (const id of ownedConversationIds) await chat.deleteConversationById(id);
-    }
+    if (ownedConversationIds.size) await chat.captureConversationState(join(contract.caseDir,"conversation-state.json"), `CONTINUE-${token}`);
   });
 
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
-        agentDisplay = resolveReadyAsset("agents", "d4_chat_display_name", "PW-CHAT-01");
-        await chat.openAgent(agentDisplay);
+        agentDisplay = await chat.openPreparedAgent("d4_chat", "PW-CHAT-01");
         return `selected published real-LLM Agent ${agentDisplay}`;
       },
       async () => "prepared deterministic long-output and continuation prompts with run-scoped markers",
@@ -61,8 +56,8 @@ journey("PW-CHAT-01", async (context) => {
       },
       async () => {
         const message = await chat.startMessage(`先原样输出标记 ${firstMarker}，再逐项详细列出 1 到 1200，每项写一句不同的说明。必须逐项输出，不能使用代码、循环或省略号代替；这个长输出用于验证用户中途停止，不要提前总结。`);
-        ownedConversationIds.add(chat.currentConversationId());
-        firstConversationId = chat.currentConversationId();
+        firstConversationId = chat.registerOwnedConversation("PW-CHAT-01");
+        ownedConversationIds.add(firstConversationId);
         await expect.poll(async () => (await streamText(message)).length, { timeout: 120_000 }).toBeGreaterThan(0);
         const initial = await streamText(message);
         await expect.poll(async () => (await streamText(message)).length, { timeout: 120_000 }).toBeGreaterThan(initial.length);
@@ -130,8 +125,9 @@ journey("PW-CHAT-01", async (context) => {
       async () => {
         await chat.renameActiveThread(firstTitle);
         await chat.newConversation(agentDisplay);
+        await chat.selectModelByDisplayName(resolveReadyAsset("models", "d4_chat_model_display_name", "PW-CHAT-01"));
         await chat.startMessage(`只回复：${secondMarker}`);
-        ownedConversationIds.add(chat.currentConversationId());
+        ownedConversationIds.add(chat.registerOwnedConversation("PW-CHAT-01"));
         await chat.waitForCompletion();
         await chat.renameActiveThread(secondTitle);
         await titleRequests.settle();

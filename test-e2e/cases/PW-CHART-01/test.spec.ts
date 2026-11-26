@@ -1,14 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
-import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 
 journey("PW-CHART-01", async (context) => {
-  const { page, expect, contract } = context;
+  const { page, expect } = context;
   const chat = new ChatPage(page);
   const title = `chart-${runToken("PW-CHART-01")}`;
   let agentDisplay = "";
@@ -20,16 +21,11 @@ journey("PW-CHART-01", async (context) => {
     alertTriggered = true;
     await dialog.dismiss();
   });
-  contract.deferCleanup(async () => {
-    if (citationConversationId) await chat.deleteConversationById(citationConversationId);
-  });
-
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
-        agentDisplay = resolveReadyAsset("agents", "d4_chat_display_name", "PW-CHART-01");
-        await chat.openAgent(agentDisplay);
+        agentDisplay = await chat.openPreparedAgent("d4_chat", "PW-CHART-01");
         return `selected real-LLM Agent ${agentDisplay} for controlled Markdown output`;
       },
       async () => "using inline deterministic Mermaid and XSS fixtures; no external service is required",
@@ -37,7 +33,7 @@ journey("PW-CHART-01", async (context) => {
     steps: [
       async () => {
         await chat.startMessage("严格只输出下面代码块，不要解释：\n```mermaid\ngraph LR\n  NX_A[Alpha] --> NX_B[Beta]\n```");
-        citationConversationId = chat.currentConversationId();
+        citationConversationId = chat.registerOwnedConversation("PW-CHART-01");
         await chat.waitForCompletion();
         return "requested a minimal valid Mermaid block and waited for streaming completion";
       },

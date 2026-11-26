@@ -22,4 +22,4 @@ change:
     retired: []
   no_case_change_reason: The test now selects its existing prepared model under the same contract.
   notes: The multi preparation group supplies the parent model and owns the three Agents and
-    controlled MCP. The browser journey retains its conversation cleanup.
+    controlled MCP. The browser registers the server conversation ID for authenticated batch cleanup.

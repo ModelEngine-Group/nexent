@@ -4,6 +4,7 @@ import { expect, type FileChooser, type Locator, type Page, type Response } from
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appPath } from "../runner/runtime-config";
+import { registerReadyAsset, resolveReadyAsset } from "../runner/assets";
 
 /** A path or a full setFiles payload (name/mimeType/buffer). */
 type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
@@ -61,6 +62,14 @@ export class ChatPage {
     await expect(search.or(discovery)).toBeVisible();
     if (!(await search.isVisible())) await discovery.click();
     await this.selectAgent(displayName);
+  }
+
+  async openPreparedAgent(role: string, caseId: string): Promise<string> {
+    const name = resolveReadyAsset("agents", `${role}_display_name`, caseId);
+    const model = resolveReadyAsset("models", `${role}_model_display_name`, caseId);
+    await this.openAgent(name);
+    await this.selectModelByDisplayName(model);
+    return name;
   }
 
   async selectAgent(displayName: string): Promise<void> {
@@ -194,6 +203,18 @@ export class ChatPage {
       throw new Error("agent/run did not expose a valid conversation_id response header");
     }
     return this.lastServerConversationId;
+  }
+
+  registerOwnedConversation(caseId: string): number {
+    const id = this.currentConversationId();
+    registerReadyAsset("owned_conversations", String(id), String(id), caseId, {
+      service: "config",
+      identity: "tenant_a_admin",
+      method: "DELETE",
+      path: `/conversation/${id}`,
+      allowed_statuses: [200, 404],
+    });
+    return id;
   }
 
   async persistedThreadTitle(conversationId: number): Promise<string> {
