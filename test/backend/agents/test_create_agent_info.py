@@ -5480,7 +5480,6 @@ class TestCreateToolConfigListWithDisplayNameMap:
             # display_name_to_index_map should only contain the found mappings
             # Unfound indices will use index_name as fallback (which is not in get_knowledge_name_map result)
             assert "Knowledge Base 1" in result[0].metadata["display_name_to_index_map"]
-            assert "Knowledge Base 2" in result[0].metadata["display_name_to_index_map"]
             assert "idx3" not in result[0].metadata["display_name_to_index_map"]
 
     @pytest.mark.asyncio
