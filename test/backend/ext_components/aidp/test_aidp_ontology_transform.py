@@ -307,3 +307,44 @@ def test_import_message_and_export_fallback():
     assert transform.normalize_export_result({"Demo": {}})["domain_name"] == "Demo"
     with pytest.raises(ValueError):
         transform.normalize_export_result([])
+
+
+def test_flat_document_property_defaults_and_explicit_kinds():
+    from ext_components.aidp.services import aidp_ontology_transform as transform
+
+    flat = {
+        "types": [{"api_name": "Category"}],
+        "entities": [
+            {
+                "api_name": "Phone",
+                "properties": [{"api_name": "price", "value": None}],
+            }
+        ],
+        "relations": [
+            {
+                "api_name": "r",
+                "source_api_name": "Phone",
+                "source_kind": "entity",
+                "object_api_name": "Category",
+                "object_kind": "type",
+            }
+        ],
+    }
+    body, counts = transform.build_import_request(flat, "Demo")
+    assert counts == {"type_count": 1, "entity_count": 1, "relation_count": 1}
+    assert body["Demo"]["entities"][0]["properties"][0]["value"] == ""
+
+    with pytest.raises(Exception):
+        transform.build_import_request(
+            _document(
+                entities=[
+                    {"api_name": "Phone", "properties": [{"api_name": 1}]}
+                ],
+                relations=[],
+            ),
+            "Demo",
+        )
+    with pytest.raises(Exception):
+        transform.build_import_request(
+            _document(relations=[{"api_name": 1}]), "Demo"
+        )

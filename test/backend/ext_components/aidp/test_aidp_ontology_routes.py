@@ -1124,3 +1124,31 @@ def test_metadata_unbind_and_duplicate_rename(monkeypatch):
         headers=_bearer(),
         json={"new_field_name": "g"},
     ).status_code == 400
+
+
+def test_empty_domain_list_and_missing_metadata_id(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_domain_routes as domains
+    from ext_components.aidp.apps import aidp_ontology_metadata_routes as metadata
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(
+        domains,
+        "list_ontology_domains_impl",
+        lambda *a, **kw: {"value": [], "total_count": 0},
+    )
+    assert _client().get(
+        "/aidp-mgmt/ontology/domains", headers=_bearer()
+    ).json()["value"] == []
+
+    async def no_id_fields(*_a, **_kw):
+        return [{"id": None, "field_name": "f", "field_type": "string"}]
+
+    monkeypatch.setattr(metadata, "_load_metadata_fields", no_id_fields)
+    monkeypatch.setattr(
+        metadata, "_find_metadata_field", lambda fields, ref: fields[0]
+    )
+    assert _client().patch(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/1",
+        headers=_bearer(),
+        json={"new_field_name": "g"},
+    ).status_code == 400
