@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useEffect, useRef, useState } from "react";
-import { Tag } from "antd";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Alert, Tag } from "antd";
 import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BodyCache, formatMetric } from "@/lib/trajectory";
@@ -35,7 +35,8 @@ export function TrajectoryNodeDetail({
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
   const [info, setInfo] = useState(true);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    container.current?.style.removeProperty("--trajectory-mode-scroll-padding");
     container.current?.scrollTo?.(0, 0);
   }, [node.id]);
   const metrics = [
@@ -67,7 +68,22 @@ export function TrajectoryNodeDetail({
   const input = node.usage?.input ?? known?.input;
   const output = node.usage?.output ?? known?.output;
   return (
-    <div className="trajectory-node-detail" ref={container}>
+    <div
+      className="trajectory-node-detail"
+      ref={container}
+      onScroll={({ currentTarget: detail }) => {
+        const padding = parseFloat(
+          detail.style.getPropertyValue("--trajectory-mode-scroll-padding")
+        );
+        if (
+          padding &&
+          detail.scrollTop <=
+            Math.max(0, detail.scrollHeight - detail.clientHeight - padding)
+        ) {
+          detail.style.removeProperty("--trajectory-mode-scroll-padding");
+        }
+      }}
+    >
       <header className="trajectory-node-heading">
         <div className="trajectory-node-title">
           <NodeIcon kind={node.kind} name={node.name} large />
@@ -153,6 +169,21 @@ export function TrajectoryNodeDetail({
             </div>
           )}
       </section>
+      {(node.kind === "tool" || node.kind === "model") &&
+        (node.status === "failed" || node.status === "error") && (
+          <div className="mx-[18px] mt-3">
+            <Alert
+              type="error"
+              showIcon
+              title={t("trajectory.failureReason")}
+              description={
+                <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {node.failure_reason || t("trajectory.failureReasonMissing")}
+                </div>
+              }
+            />
+          </div>
+        )}
       <section className="trajectory-execution-info">
         <button
           className="trajectory-section-title"
@@ -212,6 +243,7 @@ export function TrajectoryNodeDetail({
             key={`${node.id}:${slot}`}
             reference={node[slot]}
             slot={slot}
+            model={node.kind === "model"}
             conversationId={conversationId}
             nodeId={node.id}
             cache={cache}

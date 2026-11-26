@@ -45,6 +45,8 @@ def test_actual_local_function_default_survives_history_and_source_restore(adapt
     from nexent.core.agents.cores.jiuwen.adapter import _tool_schema
     from test_context_message_format import history, render
 
+    manager, exporter = spans
+    manager._config = SimpleNamespace(capture_local_traces=True)
     card = register(adapter, _tool_schema(ReadSkillMdTool.inputs), "read_skill_md")
     provider_args = {"skill_name": "fixture_skill"}
     original = pending(adapter, [provider_args], "read_skill_md")[0]
@@ -81,10 +83,12 @@ def test_actual_local_function_default_survives_history_and_source_restore(adapt
     result_record = next(record for record in records if record['record_type'] == 'tool_result')
     reference = f"message:{history(records).content['assistant_message_id']}/unit-index:{result_record['unit_index']}"
     assert json.loads(store.read('owner', reference))['text'] == 'EXACT_SKILL_SOURCE'
-    tool_spans = [span for span in spans[1].get_finished_spans()
+    tool_spans = [span for span in exporter.get_finished_spans()
                   if span.attributes.get("openinference.span.kind") == "TOOL"]
     assert len(tool_spans) == 1
     assert tool_spans[0].attributes["nexent.tool.provider_call_id"] == original.provider_call_id
+    assert json.loads(tool_spans[0].attributes["nexent.local.input.value"]) == received[0]
+    assert tool_spans[0].attributes["nexent.local.output.value"] == "EXACT_SKILL_SOURCE"
 
 
 @pytest.mark.parametrize("default", [None, False, 0, "default", [], {"a": 1}])

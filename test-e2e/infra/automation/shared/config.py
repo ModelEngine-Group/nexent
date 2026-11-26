@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import os
@@ -26,23 +28,23 @@ def repo_root() -> Path:
     return root
 
 
-def load_yaml(name: str) -> dict[str, Any]:
-    value = yaml.safe_load((test_root() / "config" / name).read_text(encoding="utf-8")) or {}
+def load_yaml(name: str, *, home: Path | None = None) -> dict[str, Any]:
+    value = yaml.safe_load(((home or test_root()) / "config" / name).read_text(encoding="utf-8")) or {}
     if not isinstance(value, dict):
         raise ValueError(f"config/{name} must contain a mapping")
     return value
 
 
-def load_secret_env() -> dict[str, str]:
-    return load_config_env('secrets.env')
+def load_secret_env(*, home: Path | None = None) -> dict[str, str]:
+    return load_config_env('secrets.env', home=home)
 
 
-def load_config_env(name: str, *, optional: bool = False) -> dict[str, str]:
+def load_config_env(name: str, *, optional: bool = False, home: Path | None = None) -> dict[str, str]:
     """Read a registered machine-local env file, without shell evaluation."""
     result: dict[str, str] = {}
     if name not in {'secrets.env', 'memory-mock.env'}:
         raise ValueError('Unsupported test configuration env file')
-    path = test_root() / 'config' / name
+    path = (home or test_root()) / 'config' / name
     if optional and not path.is_file():
         return result
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -66,8 +68,8 @@ def service_url(name: str) -> str:
         "data_process": "NEXENT_DATA_PROCESS_URL",
     }
     defaults = {
-        "config": "http://localhost:5010",
-        "runtime": "http://localhost:5014",
+        "config": "http://localhost:5013/api",
+        "runtime": "http://localhost:5013/api",
         "northbound": "http://localhost:5013",
         "data_process": "http://localhost:5012",
     }
@@ -75,6 +77,16 @@ def service_url(name: str) -> str:
         raise KeyError(name)
     configured = env.get("services", {}).get(name, {}).get("url") if isinstance(env.get("services"), dict) else None
     return str(os.environ.get(explicit[name]) or configured or defaults[name]).rstrip("/")
+
+
+def readiness_url(name: str) -> str:
+    """Probe each downstream service directly for deployment fault recovery."""
+    defaults = {
+        "config": "http://localhost:5010/health/ready",
+        "runtime": "http://localhost:5014/health/ready",
+    }
+    settings = load_yaml("environment.yaml").get("services") or {}
+    return str(settings.get(name, {}).get("readiness_url") or defaults[name])
 
 
 def controlled_asset_url(path: str = "") -> str:

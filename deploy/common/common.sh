@@ -40,7 +40,7 @@ deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
 deployment_sandbox_mode_list="disabled lightweight full"
 deployment_registry_profile_list="general mainland"
-deployment_monitoring_provider_list="local_file otlp phoenix langfuse langsmith"
+deployment_monitoring_provider_list="otlp phoenix langfuse langsmith"
 
 deployment_locale_value_is_zh() {
   local value="$1"
@@ -152,7 +152,6 @@ deployment_i18n_format() {
       tui.monitoring.subtitle) printf '仅在选择 monitoring 组件时使用。' ;;
       tui.monitoring.description) printf 'Provider 决定 OpenTelemetry traces 的存储和查看位置。' ;;
       tui.radio.help) printf '使用 Up/Down 或 j/k 移动，Enter 确认，b/Backspace 返回，q 退出。' ;;
-      tui.monitoring.local_file) printf '本地轨迹文件及内置查看页面' ;;
       tui.monitoring.otlp) printf '仅 Collector；用于转发到外部 OTLP 后端' ;;
       tui.monitoring.phoenix) printf '本地 Phoenix UI，用于查看 LLM traces 和 span' ;;
       tui.monitoring.langfuse) printf '本地自托管 Langfuse；生产环境请替换默认密钥' ;;
@@ -245,7 +244,6 @@ deployment_i18n_format() {
       tui.monitoring.subtitle) printf 'This is used only when the monitoring component is selected.' ;;
       tui.monitoring.description) printf 'Provider controls where OpenTelemetry traces are stored and viewed.' ;;
       tui.radio.help) printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.' ;;
-      tui.monitoring.local_file) printf 'local trajectory files and built-in viewer' ;;
       tui.monitoring.otlp) printf 'collector only; use this when forwarding to an external OTLP backend' ;;
       tui.monitoring.phoenix) printf 'local Phoenix UI for LLM traces and span inspection' ;;
       tui.monitoring.langfuse) printf 'local self-hosted Langfuse stack; replace default secrets for production' ;;
@@ -757,9 +755,6 @@ deployment_monitoring_collector_config_file() {
     langsmith)
       config_name="otel-collector-langsmith-config.yml"
       ;;
-    local_file)
-      config_name=""
-      ;;
     otlp|*)
       config_name="otel-collector-config.yml"
       ;;
@@ -786,6 +781,7 @@ deployment_prepare_monitoring_env() {
   local example_file
   local legacy_file
   local telemetry_enabled
+  local local_capture_enabled
   local dashboard_url
   local existing_dashboard_url
   local provider
@@ -799,6 +795,7 @@ deployment_prepare_monitoring_env() {
   env_file="$(deployment_monitoring_env_file)"
   example_file="$(deployment_monitoring_env_example_file)"
   legacy_file="$(deployment_legacy_monitoring_env_file)"
+  local_capture_enabled="$(deployment_local_file_monitoring_enabled)"
 
   if [ ! -f "$env_file" ] && [ -f "$legacy_file" ]; then
     mkdir -p "$(dirname "$env_file")"
@@ -809,14 +806,14 @@ deployment_prepare_monitoring_env() {
   deployment_sync_env_defaults "$example_file" "$env_file" || return 1
   deployment_source_env_file "$env_file"
 
+  provider="$(deployment_effective_monitoring_provider)"
   telemetry_enabled="$(deployment_monitoring_enabled)"
-  provider="$DEPLOYMENT_MONITORING_PROVIDER"
 
   deployment_update_monitoring_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
   deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
-  if [ "$provider" = "local_file" ]; then
+  deployment_update_monitoring_env_var "LOCAL_FILE_MONITORING_ENABLED" "$local_capture_enabled"
+  if [ "$local_capture_enabled" = "true" ]; then
     deployment_update_monitoring_env_var "TRAJECTORY_READ_ENABLED" "true"
-    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" ""
   fi
 
   deployment_source_env_file "$env_file"
@@ -857,7 +854,6 @@ deployment_prepare_monitoring_env() {
   fi
 
   deployment_source_env_file "$env_file"
-  DEPLOYMENT_MONITORING_PROVIDER="${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}"
   export DEPLOYMENT_MONITORING_PROVIDER
 }
 
@@ -1113,6 +1109,18 @@ deployment_load_config_file() {
       esac
     fi
   done < "$config_file"
+
+  if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "local_file" ]; then
+    # Older profiles selected monitoring to enable local capture alone.
+    DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
+    if deployment_csv_contains "$components" "monitoring"; then
+      components=",${components},"
+      components="${components/,monitoring,/,}"
+      components="${components#,}"
+      components="${components%,}"
+      components="${components:-infrastructure}"
+    fi
+  fi
 
   if [ -n "$components" ]; then
     DEPLOYMENT_COMPONENTS="$components"
@@ -1525,9 +1533,8 @@ deployment_tui_select_monitoring_provider() {
   [ -n "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && return 0
   [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
 
-  local providers=(local_file otlp phoenix langfuse langsmith)
+  local providers=($deployment_monitoring_provider_list)
   local details=(
-    "$(deployment_i18n tui.monitoring.local_file)"
     "$(deployment_i18n tui.monitoring.otlp)"
     "$(deployment_i18n tui.monitoring.phoenix)"
     "$(deployment_i18n tui.monitoring.langfuse)"
@@ -2138,7 +2145,6 @@ deployment_compute_docker_ports() {
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
-      local_file) ;;
       phoenix) ports+=(6006) ;;
       langfuse) ports+=(30011) ;;
       otlp|langsmith|*) ports+=(4318) ;;
@@ -2283,6 +2289,24 @@ deployment_apply_image_source() {
 
 deployment_monitoring_enabled() {
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+deployment_effective_monitoring_provider() {
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    printf '%s' "$DEPLOYMENT_MONITORING_PROVIDER"
+  else
+    printf '%s' "$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
+  fi
+}
+
+deployment_local_file_monitoring_enabled() {
+  local enabled
+  enabled="$(deployment_trim "${LOCAL_FILE_MONITORING_ENABLED:-true}" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  if [ "$enabled" = "true" ]; then
     printf 'true'
   else
     printf 'false'
@@ -2539,12 +2563,15 @@ deployment_yaml_quote() {
 }
 
 deployment_render_helm_monitoring_global_values() {
-  local enabled
-  enabled="$(deployment_monitoring_enabled)"
+  local provider
+  local local_capture_enabled
+  provider="$(deployment_monitoring_env_value MONITORING_PROVIDER "$(deployment_effective_monitoring_provider)")"
+  local_capture_enabled="$(deployment_monitoring_env_value LOCAL_FILE_MONITORING_ENABLED "$(deployment_local_file_monitoring_enabled)")"
 
   printf '  monitoring:\n'
-  printf '    enabled: %s\n' "$enabled"
-  printf '    provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '    enabled: %s\n' "$(deployment_monitoring_enabled)"
+  printf '    localFileEnabled: %s\n' "$local_capture_enabled"
+  printf '    provider: %s\n' "$(deployment_yaml_quote "$provider")"
   printf '    dashboardUrl: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_URL "$(deployment_monitoring_dashboard_url k8s)")")"
   printf '    dashboardAllowedRoles: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_ALLOWED_ROLES "SU,SPEED")")"
   printf '    projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROJECT_NAME "nexent")")"

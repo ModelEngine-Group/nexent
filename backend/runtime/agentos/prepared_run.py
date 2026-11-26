@@ -17,7 +17,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse
 
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentRunReference, PreparedAgentRun
-from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from contracts.constants.environment import (
+    NEXENT_RECOVERY_MODE, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
+)
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import (
     ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
@@ -25,16 +27,18 @@ from infrastructure.rdb.agent_execution import (
 from infrastructure.rdb.conversation_state import load_execution_result_record
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
-from nexent.core.concurrency import run_blocking
+from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
 from nexent.core.agents.context.execution_history import ExecutionHistory
 from nexent.core.agents.context.native_history import decode_history_event
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
-from runtime.adapters.nexent.runner import agent_run
+from runtime.adapters.nexent.runner import DeferredAgentRun, agent_run
+from runtime.agentos.prepared_automation import request_automation_proposal
 from runtime.agentos.prepared_evaluation import (
     discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
 )
 from runtime.agentos.history_sources import discover_summary_sources
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
+from runtime.sandbox_runtime import OwnedSandboxRun, release_agentos_sandbox, reserve_agentos_sandbox
 from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
 
 logger = logging.getLogger(__name__)
@@ -46,7 +50,28 @@ class _AdmissionSlot:
 
     token: str
     worker: Future | None = None
+    execution: object = None
+    deferred: DeferredAgentRun | None = None
+    ownership: OwnedSandboxRun | None = None
+    lease_lost: asyncio.Event | None = None
     cleanup: Callable[[], None] | None = None
+
+    async def start_worker(self, run_id):
+        self.deferred = DeferredAgentRun()
+        self.execution = runtime_thread_manager.submit(
+            "agent-run",
+            ManagedTaskSpec(
+                task_name="agentos-prepared-run", owner="runtime", run_id=run_id,
+                close_hook=self.deferred.cancel, pass_cancel_event=True,
+            ),
+            self.deferred.run,
+        )
+        self.worker = self.execution.future
+        await runtime_thread_manager.wait_until_started(self.execution)
+
+    def cancel_worker(self):
+        if self.deferred is not None and (self.worker is None or not self.worker.done()):
+            self.deferred.cancel()
 
     def release(self, _completed=None):
         if self.worker is not None and not self.worker.done():
@@ -55,19 +80,29 @@ class _AdmissionSlot:
         agent_run_manager.release_agent_capacity(self.token)
 
 
-async def _control_io(task, function, *args):
-    return await run_blocking(task, function, *args, lane="control-io", owner="runtime")
+async def _control_io(task, function, *args, **kwargs):
+    return await run_blocking(task, function, *args, lane="control-io", owner="runtime", **kwargs)
 
 
-async def _wait_for_stop(identity):
+async def _wait_for_stop(identity, lease_lost=None):
     while not await _control_io("agentos-prepared-stop", stop_requested, identity):
-        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+        if lease_lost is None:
+            await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+        else:
+            try:
+                await asyncio.wait_for(lease_lost.wait(), timeout=RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+            except TimeoutError:
+                continue
+            return
 
 
-async def _snapshot_chunks(info):
+async def _snapshot_chunks(info, slot=None):
     for event in info.agent_config.pre_run_tool_events:
         yield json.dumps(event, ensure_ascii=False)
-    async with aclosing(agent_run(info, thread_manager=runtime_thread_manager)) as chunks:
+    options = {} if slot is None or slot.execution is None else {
+        "execution": slot.execution, "deferred_run": slot.deferred,
+    }
+    async with aclosing(agent_run(info, thread_manager=runtime_thread_manager, **options)) as chunks:
         async for chunk in chunks:
             yield chunk
 
@@ -83,6 +118,34 @@ def _read_execution_result(user_id, tenant_id, conversation_id, message_id, unit
     if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
         raise ValueError("Invalid persisted execution content")
     return payload["content"]
+
+
+async def _automation_proposal_chunks(info, payload, actor):
+    reference = AgentRunReference(conversation_id=payload.conversation_id, run_id=payload.run_id)
+    try:
+        result = await request_automation_proposal(reference, actor)
+        message = result.get("user_message")
+        if not isinstance(message, str) or not message:
+            raise RuntimeError("Scheduled-task proposal response is missing its message")
+        if result["status"] == "proposal_ready":
+            proposal = result.get("proposal")
+            if not isinstance(proposal, dict) or not proposal.get("proposal_id"):
+                raise RuntimeError("Scheduled-task proposal response is missing its proposal")
+            yield json.dumps({
+                "type": "automation_proposal",
+                "content": json.dumps(proposal, ensure_ascii=False),
+            }, ensure_ascii=False)
+        elif result["status"] == "error":
+            info.attempt_outcome = "failed"
+    except RuntimeError:
+        logger.warning("Scheduled-task proposal request failed for run %s", reference.run_id)
+        info.attempt_outcome = "failed"
+        message = (
+            "暂时无法生成定时任务提案，请稍后重试。"
+            if payload.language == "zh"
+            else "The scheduled-task proposal could not be generated. Try again shortly."
+        )
+    yield json.dumps({"type": "final_answer", "content": message}, ensure_ascii=False)
 
 
 def _execution_record(history, event):
@@ -102,7 +165,8 @@ async def _append_event(journal, sequence, kind, payload):
 
 
 async def _run_snapshot(payload, actor, identity, journal, slot=None):
-    info = await load_prepared_run(payload, actor, prepare_run_snapshot)
+    options = {"settle_on_cancel": True} if NEXENT_RECOVERY_MODE == "fixed_replicas" else {}
+    info = await load_prepared_run(payload, actor, prepare_run_snapshot, **options)
     try:
         agent_run_manager.register_agent_run(identity.conversation_id, info, identity.user_id)
     except BaseException:
@@ -146,10 +210,12 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             checkpoint.unit_id, checkpoint.covered_through_message_id,
         ) if checkpoint is not None else None))
         info.observer.execution_history = history
-        facts = {}
-        index = 0
         with agent_monitoring_context(metadata):
-            async with aclosing(_snapshot_chunks(info)) as chunks:
+            stream = (
+                _automation_proposal_chunks(info, payload, actor)
+                if payload.automation_proposal_only else _snapshot_chunks(info, slot)
+            )
+            async with aclosing(stream) as chunks:
                 async for chunk in chunks:
                     # Re-encode JSON to keep each payload within one SSE data line.
                     observer_event = json.loads(chunk)
@@ -192,32 +258,40 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             if slot is None:
                 release_prepared_run(info, identity.conversation_id, identity.user_id, status)
             else:
-                slot.worker = info.thread_future
+                if slot.execution is None:
+                    slot.worker = info.thread_future
                 slot.cleanup = partial(release_prepared_run, info, identity.conversation_id, identity.user_id, status)
 
 
-async def _finish_producer(runner, monitor, identity, journal, status, slot):
+async def _finish_producer(runner, monitor, identity, journal, status, slot=None):
     for task in (runner, monitor):
         if not task.done():
             task.cancel()
     await asyncio.gather(runner, monitor, return_exceptions=True)
-    if slot is not None and slot.cleanup is not None:
-        # Keep the persisted conversation reservation until local cleanup finishes.
-        if slot.worker is not None:
+    if slot is not None:
+        slot.cancel_worker()
+        if slot.worker is not None and not slot.worker.done():
             await asyncio.gather(asyncio.wrap_future(slot.worker), return_exceptions=True)
-        slot.cleanup()
+        if slot.cleanup is not None:
+            slot.cleanup()
     try:
         finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
-        if finished:
-            await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
-    except (RedisError, SQLAlchemyError, RuntimeError):
+    except (SQLAlchemyError, RuntimeError):
         logger.exception("Prepared AgentOS terminal will be reconciled run_id=%s", identity.run_id)
+        return False
+    if finished:
+        try:
+            await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
+        except (RedisError, RuntimeError):
+            logger.exception("Prepared AgentOS journal will be reconciled run_id=%s", identity.run_id)
+    return finished
 
 
 async def _produce(payload, actor, identity, journal, slot=None):
     status = "failed"
     runner = asyncio.create_task(_run_snapshot(payload, actor, identity, journal, slot))
-    monitor = asyncio.create_task(_wait_for_stop(identity))
+    lease_lost = slot.lease_lost if slot is not None else None
+    monitor = asyncio.create_task(_wait_for_stop(identity, lease_lost) if lease_lost is not None else _wait_for_stop(identity))
     try:
         done, _ = await asyncio.wait((runner, monitor), return_when=asyncio.FIRST_COMPLETED)
         if runner in done:
@@ -232,7 +306,17 @@ async def _produce(payload, actor, identity, journal, slot=None):
         logger.exception("Prepared AgentOS run failed run_id=%s", identity.run_id)
     finally:
         # Keep joining the owned worker and terminal write during repeated shutdown cancellation.
-        cleanup = asyncio.create_task(_finish_producer(runner, monitor, identity, journal, status, slot))
+        async def finalize():
+            settled = False
+            try:
+                settled = await _finish_producer(runner, monitor, identity, journal, status, slot)
+            finally:
+                if slot is not None and slot.ownership is not None and not settled:
+                    slot.ownership.coordinator.signal_lost()
+            if settled and slot is not None and slot.ownership is not None:
+                await release_agentos_sandbox(slot.ownership, slot.worker)
+
+        cleanup = asyncio.create_task(finalize())
         cancelled = False
         while not cleanup.done():
             try:
@@ -244,9 +328,10 @@ async def _produce(payload, actor, identity, journal, slot=None):
             raise asyncio.CancelledError
 
 
-async def _start_journal(identity):
+async def _start_journal(identity, *, agent_scope=None):
     try:
-        await _control_io("agentos-prepared-begin", begin_execution, identity)
+        quota = {"agent_scope": agent_scope, "agent_limit": RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS} if agent_scope else {}
+        await _control_io("agentos-prepared-begin", begin_execution, identity, **quota)
     except PermissionError as exc:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
     except ActiveExecutionError as exc:
@@ -276,10 +361,27 @@ async def _admit(payload, actor):
         key = f"{actor.tenant_id}:workbench_main"
     slot = _AdmissionSlot(agent_run_manager.reserve_agent_capacity(key, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS))
     try:
-        journal = await _start_journal(identity)
+        options = {}
+        if NEXENT_RECOVERY_MODE == "fixed_replicas":
+            await slot.start_worker(identity.run_id)
+            options["agent_scope"] = "workbench_main" if payload.workbench_config_version is not None else f"agent:{key}"
+        loop = asyncio.get_running_loop()
+        lost = asyncio.Event()
+        slot.ownership = await reserve_agentos_sandbox(
+            identity.tenant_id, identity.user_id, identity.conversation_id, identity.run_id, kind="CHAT",
+            cancel=lambda: loop.call_soon_threadsafe(lost.set),
+        )
+        if slot.ownership is not None:
+            slot.lease_lost = lost
+        journal = await _start_journal(identity, **options)
         producer = asyncio.create_task(_produce(payload, actor, identity, journal, slot), name=f"agentos-run:{identity.run_id}")
     except BaseException:
-        slot.release()
+        slot.cancel_worker()
+        try:
+            if slot.ownership is not None:
+                await release_agentos_sandbox(slot.ownership, slot.worker)
+        finally:
+            slot.release()
         raise
     producer.add_done_callback(slot.release)
     agent_stream_producer_tasks.add(producer)
@@ -314,7 +416,7 @@ def create_prepared_run_router() -> APIRouter:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         try:
             return await start_prepared_run(payload, actor)
-        except AgentRunConcurrencyExceededError:
+        except (AgentRunConcurrencyExceededError, ThreadCapacityExceeded, ThreadQueueTimedOut):
             return JSONResponse({
                 "code": "RUNTIME_CAPACITY_FULL", "message": "Agent runtime is at capacity.", "retryable": True,
             }, status_code=429, headers={"Retry-After": "1"})

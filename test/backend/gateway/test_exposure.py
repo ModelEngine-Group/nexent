@@ -58,7 +58,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     assert len(public) == 30
     for method, path, _ in public:
         route = registry.match(method, path)
-        assert route and route.target == "northbound", (method, path)
+        assert route and route.target == "management", (method, path)  # real owning service, alias retired
 
 
 @pytest.mark.parametrize("method,path,target", [
@@ -81,7 +81,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     ("POST", "/api/agent/automations/runs/42/cancel", "management"),
     ("GET", "/api/conversation/42/automation", "management"),
     ("POST", "/api/file/storage", "management"), ("GET", "/api/file/storage", "management"),
-    ("POST", "/nb/v1/chat/run", "northbound"), ("GET", "/nb/v1/chat/run", None),
+    ("POST", "/nb/v1/chat/run", "management"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])
 def test_regular_backend_and_northbound_have_explicit_targets(method, path, target):
@@ -100,6 +100,42 @@ def test_conversation_share_and_pins_are_mounted_by_management():
             and node.func.attr == "include_router" and node.args and isinstance(node.args[0], ast.Name)
         }
         assert mounted & owners == expected
+
+
+def test_conversation_snapshot_target_matches_the_mounting_service():
+    """Every conversation row must point at the service that mounts its router.
+
+    The conversation router is mounted by exactly one service. Rows generated
+    from its source file previously straddled both upstreams: the subset marked
+    ``management`` 404'd while its siblings answered 200, which broke the model
+    preference panel and turned clarification cards read-only. Keep the snapshot
+    target and the real mount point tied together so a router move cannot leave
+    a subset of rows behind.
+    """
+    root = Path(__file__).resolve().parents[3] / "backend"
+    mount_owner = {}
+    for service in ("management", "runtime", "ops"):
+        tree = ast.parse((root / service / "api/application.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "include_router" and node.args):
+                continue
+            argument = node.args[0]
+            names = [argument.id] if isinstance(argument, ast.Name) else []
+            names += [keyword.value.id for keyword in node.keywords
+                      if isinstance(keyword.value, ast.Name) and getattr(keyword, "arg", None) is None]
+            for name in names:
+                if "conversation" in name.lower():
+                    mount_owner[name] = service
+
+    snapshot = json.loads(
+        (Path(__file__).resolve().parents[3] / "backend/gateway/exposure/registry.json").read_text(encoding="utf-8"))
+    conversation_rows = [row for row in snapshot["routes"]
+                         if row.get("source", "").endswith("conversation/conversation_management.py")]
+    assert conversation_rows
+    assert {row["target"] for row in conversation_rows} == {"management"}, sorted(
+        {row["target"] for row in conversation_rows})
+    assert "management" in mount_owner.values()
 
 
 @pytest.mark.parametrize("method,path", [
@@ -180,6 +216,30 @@ async def test_web_creator_operations_reject_anonymous_before_upstream(method, t
     ("DELETE", "/api/trajectory/imports/123"),
 ])
 def test_trajectory_archives_are_routed_to_ops_only_for_sessions(method, path):
+    match = default_registry().match(method, path)
+    assert match is not None
+    assert match.target == "ops"
+    assert match.credential_kinds == ("session",)
+    assert default_registry().match("PATCH", path) is None
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/ops/v1/monitoring/models"),
+    ("GET", "/api/ops/v1/monitoring/models/summary"),
+    ("GET", "/api/ops/v1/monitoring/models/trends"),
+    ("GET", "/api/ops/v1/monitoring/models/rankings"),
+    ("POST", "/api/ops/v1/monitoring/models/refresh"),
+    ("GET", "/api/ops/v1/monitoring/models/refreshes/r-1"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/summary"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/rankings"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/trends"),
+    ("POST", "/api/ops/v1/monitoring/mcp-tools/refresh"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/refreshes/r-1"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/catalog"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/overview"),
+])
+def test_ops_monitoring_routes_reach_ops_only_for_sessions(method, path):
     match = default_registry().match(method, path)
     assert match is not None
     assert match.target == "ops"

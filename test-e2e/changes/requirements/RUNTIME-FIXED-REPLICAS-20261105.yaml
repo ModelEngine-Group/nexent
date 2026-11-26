@@ -1,0 +1,93 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-FIXED-REPLICAS-20261105
+  change_type: requirement
+  requirement_id: RUNTIME-FIXED-REPLICAS-20261105
+  title: Runtime 第一阶段：固定多副本与停机手动扩缩容
+  description: '仅 Kubernetes，每次手动扩缩容先全部业务停止，再配置固定 Runtime 副本；不实施动态伸缩或失联自动接管。SPEC: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md。'
+  affected_features:
+    existing: []
+    added:
+    - RUNTIME-REPLICAS
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - REL-AUTO-58D118DDC12E94CA
+    - REL-AUTO-1FAFCA5A681580F5
+    added:
+    - RUNTIME-ADMISSION-D2-001
+    - RUNTIME-ADMISSION-D3-001
+    - RUNTIME-STREAM-CONTROL-D3-001
+    - RUNTIME-SCHEDULER-D3-001
+    - RUNTIME-SHARED-STORAGE-D3-001
+    - RUNTIME-OFFLINE-DEPLOY-D5-001
+    - RUNTIME-POD-RESTART-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 普通 Kubernetes Pod 启动不全局恢复；维护前提、幂等、批次校验与失败保持停止。
+    - 未终态旧 bootstrap/维护 Job 或 Pod 阻止新批次；同步官方 Skill 前和放行 bootstrap SQL 前验证部署锁。
+    - 即使暂时没有 Pod，也不将未确认的缩零配置或仍报告副本的 Deployment 视为全停；维护 Job 独立核验 Runtime 状态。
+    - 全停维护失败时调度运行和租约随其他 PostgreSQL 遗留状态回滚；同批次成功才提交，单 Runtime 启动行为不变。
+    - 维护回收遗留 streaming 消息时，Redis 终态写入绑定该消息，不覆盖同会话已完成的后续执行。
+    - 同会话预约、租户/Agent 全局配额、稳定锁键和锁序、真实收尾后释放、依赖故障及准备/提交失败补偿。
+    - 北向用户消息在 Runtime 接纳后由 control-io 写入；拒绝不追加消息，取消时保留预约直到写入退出，A2A 请求保持原转发行为。
+    - 评测由已启动的 worker 原子认领 PENDING 和持久化预约；失败回滚、真实收尾才释放，普通清理不处理仍由 Runtime 持有的工作。
+    - NL2Agent/NL2Skill 在写消息、重置流和构建执行器前取得会话预约；Redis 使用预约代次，取消等待在途写入和真实 worker 收尾；NL2Skill 的容量不足与排队超时保留 429 响应体并提供 Retry-After。
+    - NL2Agent 接纳后的真实执行可通过 MCP 的 Gateway 委托校验；MCP 绑定已发布的 Gateway 服务地址和共享签名配置，不降级为非委托鉴权。
+    - Redis 轮次、可重放 SSE 游标、Unicode 文本后缀、丢帧和尾部读取、截断回退、未授权控制和断开订阅不取消执行。
+    - 固定 Runtime 副本数边界、暂停时为零、共享存储预检、失败不激活与停机回退。
+    - 支持满足绑定、RWX 和文件系统条件的 hostPath 卷用于单节点部署，继续拒绝 spec.local。
+    - 多调度器启动不误恢复、租约与失租、忙碌/misfire；工作区路径/归属及非 Run 保留。
+    - 调度执行接纳与收尾使用 PostgreSQL 时钟核对租约，过期 owner 在新实例领取前后均不能提交结果。
+    - 调度续租与错过周期写入在获得任务行锁后使用 PostgreSQL 实时时钟；等待行锁期间过期时不得写入。
+    - 重领按任务、身份和准确触发时间查找已原子提交的自动化 prompt；已开始的周期跳过，未开始及下一周期仍可执行，查找失败不执行。
+    reason: 维护和协调器 UT 覆盖启动隔离、锁序、失败和容量边界；不替代实际跨进程业务接纳和分布式流的正式证明。
+    test_selectors:
+    - test/backend/app/test_agentos_prepared_run.py::test_fixed_replicas_apply_tenant_quota_before_publishing
+    - test/backend/app/test_runtime_application_lifespan.py
+    - test/backend/deploy/test_k8s_bootstrap.py
+    - test/backend/services/test_runtime_maintenance.py
+    - test/backend/services/test_execution_coordination.py
+    - test/backend/services/test_agent_durable_admission.py
+    - test/backend/services/test_creator_durable_admission.py
+    - test/backend/services/test_creator_generation_guards.py
+    - test/backend/services/test_creator_worker_ownership.py
+    - test/backend/gateway/test_mcp_delegation.py
+    - test/backend/services/test_agent_run_workbench_coverage.py
+    - test/backend/services/test_agent_run_workbench_state_coverage.py
+    - test/backend/services/test_agent_automation_runner.py
+    - test/backend/services/test_automation_lease_commit.py
+    - test/backend/services/test_automation_terminal_boundaries.py
+    - test/backend/database/test_automation_task_run_locking.py
+    - test/backend/database/test_agent_automation_message_binding.py
+    - test/backend/database/test_agent_automation_db.py::test_lease_recovery_helpers_cover_empty_and_success_paths
+    - test/backend/database/test_agent_automation_db.py::test_automation_recovery_uses_existing_transaction
+    - test/backend/database/test_agent_automation_db.py::test_lease_writes_check_database_clock_after_lock
+    - test/backend/services/test_northbound_service.py
+    - test/backend/services/test_runtime_proxy_service.py
+    - test/backend/app/test_agent_evaluation_runtime_app.py
+    - test/backend/database/test_agent_evaluation_db.py
+    - test/backend/services/test_evaluation_dispatch.py
+    - test/backend/services/test_agent_evaluation_service.py
+    - test/backend/services/test_evaluation_maintenance.py
+    - test/backend/services/test_a2a_server_service_message.py
+    - test/backend/app/test_agent_app.py::test_northbound_agent_run_api_uses_internal_identity
+    - test/backend/app/test_agent_app.py::test_northbound_agent_run_api_maps_unexpected_error
+    - test/backend/services/test_startup_recovery_service.py
+    - test/backend/services/test_workspace_cleanup_service.py
+    - test/backend/services/test_runtime_state_service.py
+    - test/backend/services/test_runtime_execution_control.py
+    - test/backend/services/test_execution_replay.py
+    - test/backend/services/test_shared_execution_replay.py
+    - test/backend/app/test_northbound_app.py::test_run_chat_replay_cursor_uses_read_only_route
+    - test/backend/services/test_agent_automation_scheduler.py
+    - test/backend/database/test_conversation_db.py
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    - frontend/tests/workbench/UnifiedOutputStream.test.ts
+  notes: 已接入停机批次、维护 Job、固定副本数和共享存储预检；Agent、Workbench、自动任务、北向、持久化评测、NL2Agent 和 NL2Skill 已接入预约。停止和共享回放已验证组件行为；Agent/Workbench 和北向支持显式游标，Web 恢复固定原 assistant 分支。Feature 保持 planned，Case 保持 blocked；尚无真实 Kubernetes 部署、跨节点共享、指定 Pod 或稳定代理的正式验收证据。
+    test/deploy 下的命令回归覆盖动态/已有 hostPath 卷、默认/显式 Filesystem 放行、已有裸块卷不暂停、动态卷预检失败不写入或激活。跨节点共享仍由 RUNTIME-SHARED-STORAGE-D3-001 验证真实读写。
+    默认责任 runtime；停机部署、共享存储、HPA Case 归 deployment，调度 Case 归 task。未增加 D1；D4 无新增用户流程。

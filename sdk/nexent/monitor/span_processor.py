@@ -10,6 +10,7 @@ from opentelemetry import trace
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import Event, ReadableSpan, Span, SpanProcessor
+from opentelemetry.sdk.trace.sampling import Sampler
 from opentelemetry.sdk.util import BoundedList
 from opentelemetry.trace import Link, SpanKind
 
@@ -24,6 +25,19 @@ from .trace_name import (
     inherited_trace_name,
     remember_server_span,
 )
+
+
+class MonitoringSampler(Sampler):
+    """Allow Runtime startup to enable local recording for existing tracers."""
+
+    def __init__(self, delegate: Sampler):
+        self.delegate = delegate
+
+    def should_sample(self, *args, **kwargs):
+        return self.delegate.should_sample(*args, **kwargs)
+
+    def get_description(self) -> str:
+        return self.delegate.get_description()
 
 
 class MonitoringSpanProcessor(SpanProcessor):

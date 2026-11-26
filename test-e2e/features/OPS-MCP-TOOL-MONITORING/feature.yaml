@@ -1,0 +1,24 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-MCP-TOOL-MONITORING
+  name: MCP tool call monitoring on the shared operations data plane
+  status: planned
+  description: Capture MCP tool call attempts with run attribution and a normalized MCP service type, aggregate and publish them through the shared monitoring pipeline, and expose tenant-scoped statistics.
+  business_rules:
+  - rule_id: OPS-MCP-TOOL-MONITORING-RULE-01
+    description: Every MCP tool invocation through the managed collection produces exactly one monitoring fact with the caller-observed terminal outcome and duration.
+  - rule_id: OPS-MCP-TOOL-MONITORING-RULE-02
+    description: Facts carry tenant, agent, run and initiator-group attribution; debug and validation contexts emit nothing; capture failures never interrupt the agent run.
+  - rule_id: OPS-MCP-TOOL-MONITORING-RULE-03
+    description: MCP service identity and the normalized deployment type (container, remote, api_convert, builtin, unknown) are resolved in the backend before the run and stored on each fact.
+  - rule_id: OPS-MCP-TOOL-MONITORING-RULE-04
+    description: Daily aggregation counts requests and errors and averages duration per tenant, service, tool, agent and group dimension without inflating replayed events.
+  - rule_id: OPS-MCP-TOOL-MONITORING-RULE-05
+    description: The monitoring API serves tenant-scoped MCP tool statistics with coverage and staleness consistent with the shared day-state model.
+  required_test_stages: [D3]
+  source:
+    requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118]
+    notes: Extends the shared monitoring data plane designed by OPS-MODEL-MONITORING-20261116; SPEC document set lives in the document repository under ops-mcp-tool-monitoring.

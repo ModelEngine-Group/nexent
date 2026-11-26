@@ -155,7 +155,7 @@ def read_legacy_resume_state(conversation_id: int, user_id: str, tenant_id: str)
         return bool(conversation.workbench_config), tuple(assistant) if assistant is not None else None
 
 
-def fail_streaming_assistant_messages() -> list[dict]:
+def fail_streaming_assistant_messages(*, db_session=None) -> list[dict]:
     """Mark assistant messages left streaming by a stopped runtime as failed.
 
     Returns the affected runtime identities so the caller can finish the
@@ -164,7 +164,7 @@ def fail_streaming_assistant_messages() -> list[dict]:
     """
     from infrastructure.rdb.agent_execution import AgentExecution
 
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         tracked_message = select(AgentExecution.run_id).where(
             AgentExecution.assistant_message_id == ConversationMessage.message_id,
             AgentExecution.delete_flag == "N",

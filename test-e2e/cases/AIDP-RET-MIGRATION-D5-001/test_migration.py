@@ -3,6 +3,7 @@
 
 import json
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -12,7 +13,10 @@ import pytest
 pytestmark = [pytest.mark.case_id("AIDP-RET-MIGRATION-D5-001"), pytest.mark.stage("D5")]
 
 ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.8.0_aidp_fixed_retrieval_policy.sql"
+sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
+from shared.merged_migrations import merged_migration_sql
+
+MIGRATION_SQL = merged_migration_sql("v2.8.0_aidp_fixed_retrieval_policy.sql")
 NEW_KEYS = {
     "vector_candidates", "full_text_candidates", "hybrid_top_k", "graph_top_k",
     "vector_score_threshold", "full_text_score_threshold", "graph_score_threshold",
@@ -80,7 +84,7 @@ class Postgres:
         ).stdout.strip()
 
     def migrate(self):
-        return self.sql(MIGRATION.read_text(encoding="utf-8"))
+        return self.sql(MIGRATION_SQL)
 
     def instances(self):
         return json.loads(self.sql("""

@@ -19,8 +19,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, get_current_thread_manager
 from nexent.core.agent_names import allocate_external_agent_names
+from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, get_current_thread_manager
 
 
 # Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
@@ -88,31 +88,44 @@ class A2AAgentInfo:
         """
         return self.protocol_type
 
+    def request_headers(self) -> Dict[str, str]:
+        """Resolve stored authentication for an outgoing A2A request."""
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "A2A-Version": "1.0",
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.custom_headers:
+            headers.update(self.custom_headers)
+        return headers
+
     def get_skills_description(self) -> str:
         """Generate a description with capabilities from raw_card."""
         skills = []
         if self.raw_card:
             skills = self.raw_card.get("skills", [])
-        
+
         if not skills:
             return f"External A2A agent: {self.name}"
-        
+
         # Build capability description
         capability_names = [skill.get("name", "") for skill in skills if skill.get("name")]
         capability_str = "、".join(capability_names) if capability_names else ""
-        
+
         # Build examples
         examples_lines = []
         for skill in skills:
             examples = skill.get("examples", [])
             if examples:
                 examples_lines.extend(examples[:2])
-        
+
         examples_section = ""
         if examples_lines:
             examples_str = ', '.join(f'"{ex}"' for ex in examples_lines[:6])
             examples_section = f"\n调用示例: {examples_str}"
-        
+
         return f"External A2A agent: {self.name} [Capabilities: {capability_str}]{examples_section}"
 
 
@@ -219,16 +232,7 @@ class ExternalA2AAgentProxy:
 
     def _build_headers(self) -> Dict[str, str]:
         """Build HTTP headers for A2A requests."""
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "A2A-Version": "1.0",
-        }
-        if self.agent_info.api_key:
-            headers["Authorization"] = f"Bearer {self.agent_info.api_key}"
-        if self.agent_info.custom_headers:
-            headers.update(self.agent_info.custom_headers)
-        return headers
+        return self.agent_info.request_headers()
 
     def _build_message_payload(
         self,

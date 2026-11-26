@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-JIUWEN-TRAJECTORY-IO-20261125
+  change_type: bugfix
+  bug_id: CHAT-JIUWEN-TRAJECTORY-IO-20261125
+  title: Preserve Jiuwen Agent answers and tool bodies in local trajectories
+  description: Capture the final public answer on the root Agent and the actual arguments and returned value on each executed tool.
+  observed_behavior: A successful Jiuwen run returned its answer in chat, but a cold Ops snapshot showed an empty root output and empty input and output on both ordinary and delegation tools.
+  expected_behavior: Local snapshots and content reads expose the redacted final answer and actual tool bodies on the corresponding nodes. Missing answers and calls without a return value have no fabricated output. Remote telemetry retains its existing disclosure policy.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: The trajectory capture Case uses smolagents. The Jiuwen Ops facts Case inspects archived Agent identity and timing, and the SDK tool tests assert fingerprints without checking locally archived bodies.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-AGENT-FACTS-D3-001]
+    added: [CHAT-TRAJECTORY-JIUWEN-IO-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Verify final answer capture on successful Jiuwen runs and absence of a fabricated answer on other terminal paths.
+    - Verify local per-call input and output, redaction, serialization failures and isolation from external telemetry.
+    reason: Existing SDK tests check call identity, duration, failure classification and fingerprints. They do not detect missing local body fields.
+    test_selectors:
+    - test/sdk/core/agents/observability/test_local_capture.py
+    - test/sdk/core/agents/test_jiuwen_tool_spans.py
+    - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
+    - test/sdk/core/model_service/test_local_content_dto.py
+  notes: >
+    CHAT-TRAJECTORY rule TRJ-RULE-001 owns local node content; TRJ-RULE-007 owns local/remote separation.
+    The observability domain owns the D3 Case. It uses a private provider, temporary archive and cold Ops reader
+    with controlled identity. OPS-AGENT-FACTS-D3-001 shares the model peer and keeps its existing assertions.
+    Legacy archive data and deployment settings do not require migration.

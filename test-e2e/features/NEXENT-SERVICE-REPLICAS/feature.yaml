@@ -1,0 +1,34 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-SCALING
+  name: Nexent application replica scaling
+feature:
+  feature_id: NEXENT-SERVICE-REPLICAS
+  name: 其他 Nexent 应用固定多副本与停机手动扩缩容
+  status: planned
+  description: 第二阶段支持 Config、Northbound、MCP、Data Process、Web 及启用的 Nginx/Ops/OpenSSH 独立固定副本；维护窗口手动变更，不涉及基础设施原生 HA。
+  business_rules:
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-01
+    description: 各启用应用独立设置正整数固定副本，默认 1；每次手动调整都先全停，禁用应用不被启动，运行时无 HPA/KEDA。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-02
+    description: Config/Northbound/Data Process 普通启动不执行全局恢复、上传清理或重复迁移；维护失败保持停止，健康 owner 的任务不变。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-03
+    description: 模型检测、评测准备/生成/维护和 Dreaming 按业务键认领；旧 owner 不覆盖新结果，启动不回收健康租约。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-04
+    description: Northbound 全局幂等和租户限流不随副本数增加，不退回本地保护；A2A 跨实例查询/取消实际控制同一 Runtime 运行。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-05
+    description: MCP SSE/messages 保持同一 session owner；目录更新在各副本可见；失联要求重连，不自动重放工具。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-06
+    description: Data Process 多 worker 共享队列但预热只指向本实例；file/version/attempt 条件提交，取消/删除与摘要只产生唯一有效结果。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-07
+    description: Web 正常登录和代理跨实例兼容；名称/语言/Logo 原子发布同一版本，启动只读，并发更新不半写或静默丢失。
+  - rule_id: NEXENT-SERVICE-REPLICAS-RULE-08
+    description: Config 配置/权限/Skill 跨实例可见，配额依赖权威事务；共享卷/日志/密钥及启用的辅助服务满足副本契约，总资源不超预算。
+  required_test_stages:
+  - D3
+  - D5
+  source:
+    requirement_ids:
+    - NEXENT-FIXED-REPLICAS-20261106
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    notes: 设计交付，产品/脚本尚未实现；默认 deployment，跨业务 Case 按主要证明边界分别归 system/runtime/mcp/knowledge。

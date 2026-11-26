@@ -2,35 +2,31 @@
 """Backend adapter for the SDK's durable lease scheduler."""
 
 import asyncio
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Hashable
 
-from contracts.constants.environment import AGENT_AUTOMATION_ENABLED, AGENT_AUTOMATION_LEASE_SECONDS, AGENT_AUTOMATION_MAX_CONCURRENT_RUNS, AGENT_AUTOMATION_POLL_INTERVAL_SECONDS, AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS
-from management.db.automation import repository as agent_automation_db
-from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
-from nexent.core.concurrency import run_blocking
-
 from contracts.automation import ScheduleTrigger
+from contracts.constants import environment
+from contracts.constants.environment import (
+    AGENT_AUTOMATION_ENABLED,
+    AGENT_AUTOMATION_LEASE_SECONDS,
+    AGENT_AUTOMATION_MAX_CONCURRENT_RUNS,
+    AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
+    AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS,
+)
+from management.db.automation import repository as agent_automation_db
+from management.services.agent.runtime_client import _agentos_client
 from management.services.automation.runner import agent_automation_runner
-
-
-
-logger = logging.getLogger("agent_automation.scheduler")
-_MISFIRE_POLICY_SKIP = "SKIP"
-
-
-
-from datetime import datetime
-
+from nexent.core.concurrency import run_blocking
+from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig, ScheduleSpec
 from nexent.scheduler import (
-    ScheduleSpec,
     compute_next_fire_at as compute_sdk_next_fire_at,
     is_valid_cron_expression as validate_sdk_cron_expression,
 )
 
-from contracts.automation import ScheduleTrigger
+logger = logging.getLogger("agent_automation.scheduler")
+_MISFIRE_POLICY_SKIP = "SKIP"
 
 
 def is_valid_cron_expression(expression: str) -> bool:
@@ -71,10 +67,30 @@ class AgentAutomationLeaseStore:
     """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
     def __init__(self) -> None:
+        self.fixed_replicas = False
         self._recovery_time: datetime | None = None
         self._projection_cursor = 0
 
+    def _uses_scoped_recovery(self):
+        return (
+            not self.fixed_replicas
+            and environment.IS_DEPLOYED_BY_KUBERNETES
+            and environment.NEXENT_SANDBOX_PROVIDER == "kubernetes"
+        )
+
+    async def _refresh_recovery_time(self):
+        status = await _agentos_client().recovery_status()
+        cutoff = status.restart_cutoff
+        if cutoff is not None and (self._recovery_time is None or cutoff > self._recovery_time):
+            self._recovery_time = cutoff
+
     async def recover(self) -> None:
+        if self.fixed_replicas:
+            self._recovery_time = None
+            return
+        if self._uses_scoped_recovery():
+            await self._refresh_recovery_time()
+            return
         recovery_time = _utcnow()
         await run_blocking(
             "automation-recover-runs",
@@ -96,6 +112,8 @@ class AgentAutomationLeaseStore:
         limit: int,
         lease_seconds: float,
     ) -> list[ClaimedJob[Dict[str, Any]]]:
+        if self._uses_scoped_recovery():
+            await self._refresh_recovery_time()
         tasks = await run_blocking(
             "automation-claim-due",
             agent_automation_db.claim_due_tasks,
@@ -244,7 +262,9 @@ class AgentAutomationScheduler:
     def is_running(self) -> bool:
         return self._scheduler.is_running
 
-    async def start(self) -> None:
+    async def start(self, *, fixed_replicas: bool = False) -> None:
+        if not self._scheduler.is_running:
+            self._store.fixed_replicas = fixed_replicas
         if AGENT_AUTOMATION_ENABLED:
             await self._scheduler.start()
         else:

@@ -92,7 +92,8 @@ async def prepare_nl2agent_snapshot(
         actor.user_id, actor.tenant_id, lane="control-io", owner="management",
     )
     return PreparedAgentCreatorRun(
-        mode="nl2agent", run_id=uuid4().hex, agent_id=request.agent_id, input=run_input,
+        mode="nl2agent", run_id=getattr(request, "_creator_run_id", None) or uuid4().hex,
+        agent_id=request.agent_id, input=run_input,
         bound_resources=context.content["text"], language="en" if language == "en" else "zh", **model_scope,
     )
 
@@ -187,9 +188,12 @@ async def create_nl2agent_stream(payload: PreparedAgentCreatorRun, actor: Servic
                     if not boundary_delivered:
                         yield frame.split(b"\n", 1)[1].decode() + "\n\n"
                     return
-                if frame.startswith(b"data: ") and not boundary_delivered:
-                    yield frame.decode() + "\n\n"
-                    boundary_delivered = json.loads(frame[6:]).get("type") == "nl2a"
+                if frame.startswith(b"data: "):
+                    kind = json.loads(frame[6:]).get("type")
+                    if not boundary_delivered or kind == "run_terminal":
+                        yield frame.decode() + "\n\n"
+                        if kind == "nl2a":
+                            boundary_delivered = True
             if not boundary_delivered:
                 raise RuntimeError("NL2Agent stream ended before the Runtime terminal")
     except Exception:

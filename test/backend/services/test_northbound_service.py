@@ -207,7 +207,7 @@ sys.modules["management.services.agent.management"] = agent_service_mod
 # Mock runtime forwarding service
 runtime_proxy_mod = types.ModuleType("management.services.agent.runtime_client")
 runtime_proxy_mod.forward_northbound_run = AsyncMock()
-
+runtime_proxy_mod.forward_conversation_resume = AsyncMock()
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["management.services.agent.runtime_client"] = runtime_proxy_mod
 

@@ -256,8 +256,9 @@ def _system_config_snapshot(**changes):
     return system_config_snapshot(**changes)
 
 
+@pytest.mark.parametrize("use_maintenance_transaction", [False, True])
 def test_fail_streaming_assistant_messages_returns_runtime_identities(
-    monkeypatch, mock_session_ctx
+    monkeypatch, mock_session_ctx, use_maintenance_transaction,
 ):
     """Startup recovery fails only the rows it locked as streaming."""
     from types import SimpleNamespace
@@ -272,10 +273,13 @@ def test_fail_streaming_assistant_messages_returns_runtime_identities(
     ]
     query.update.return_value = 2
     session.query.return_value = query
-    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda: ctx)
+    transaction = session if use_maintenance_transaction else None
+    get_session = MagicMock(return_value=ctx)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", get_session)
 
-    rows = fail_streaming_assistant_messages()
+    rows = fail_streaming_assistant_messages(db_session=transaction)
 
+    get_session.assert_called_once_with(transaction)
     assert rows == [
         {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
         {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
@@ -294,7 +298,7 @@ def test_fail_streaming_assistant_messages_returns_empty_without_rows(
     query.with_for_update.return_value = query
     query.all.return_value = []
     session.query.return_value = query
-    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda: ctx)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda db_session: ctx)
 
     assert fail_streaming_assistant_messages() == []
     query.update.assert_not_called()
@@ -527,11 +531,11 @@ def test_delete_conversation_success(monkeypatch, mock_session_ctx):
 
 
 def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
-    """delete_conversation returns False when no conversation row affected."""
+    """delete_conversation returns False when no owned conversation row is affected."""
     session, ctx = mock_session_ctx
     conversation_result = MagicMock()
     conversation_result.rowcount = 0
-    session.execute.side_effect = [conversation_result, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    session.execute.side_effect = [conversation_result]
 
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
@@ -2097,7 +2101,7 @@ def test_update_conversation_chat_mode_rejects_invalid_mode(monkeypatch, mock_se
     """Reject invalid chat modes before opening a database session."""
     _, ctx = mock_session_ctx
     get_session = MagicMock(return_value=ctx)
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", get_session)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", get_session)
 
     with pytest.raises(ValueError, match="Invalid chat_mode 'invalid'"):
         update_conversation_chat_mode(123, "invalid")

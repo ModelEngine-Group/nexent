@@ -1,4 +1,13 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { ApiError } from "@/services/api";
+
+/**
+ * AIDP reports a duplicate resource name as business code 1022. The BFF
+ * forwards that code verbatim in the error details.
+ */
+export const isAidpDuplicateError = (error: unknown): boolean =>
+  error instanceof ApiError && error.details?.upstream_code === 1022;
 
 /** Resolve errors for a caller-owned inline state or notification. */
 export const getAidpErrorMessage = (

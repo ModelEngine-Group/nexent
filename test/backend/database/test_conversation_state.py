@@ -14,7 +14,11 @@ from infrastructure.rdb.conversation_state import fail_streaming_assistant_messa
 @pytest.fixture
 def mock_session_ctx(monkeypatch):
     session = MagicMock()
-    monkeypatch.setattr(conversation_state, "get_db_session", lambda: nullcontext(session))
+
+    def get_db_session(db_session=None):
+        return nullcontext(session if db_session is None else db_session)
+
+    monkeypatch.setattr(conversation_state, "get_db_session", get_db_session)
     return session
 
 
@@ -57,7 +61,7 @@ def test_fail_streaming_assistant_messages_returns_runtime_identities(
     query.update.return_value = 2
     session.query.return_value = query
 
-    rows = fail_streaming_assistant_messages()
+    rows = fail_streaming_assistant_messages(db_session=session)
 
     assert rows == [
         {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},

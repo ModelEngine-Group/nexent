@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
@@ -25,6 +27,10 @@ journey("PW-TASK-01", async (context) => {
   let exists = false;
   let taskTitle = "";
   let taskId = 0;
+  let confirmationRequests = 0;
+  const isConfirmation = (request: import("playwright/test").Request) => request.method() === "POST"
+    && /\/agent\/automations\/proposals\/[^/]+\/confirm$/.test(new URL(request.url()).pathname);
+  page.on("request", (request) => { if (isConfirmation(request)) confirmationRequests += 1; });
   const taskRow = () => page.getByRole("row").filter({ hasText: agent })
     .filter({ has: page.getByText(taskTitle, { exact: true }) });
   contract.deferCleanup(async () => {
@@ -42,7 +48,13 @@ journey("PW-TASK-01", async (context) => {
     steps: [
       async () => { await page.goto(appPath("/agent-tasks")); await expect(page.getByRole("button", { name: /通过会话创建|Create in Chat/ })).toBeVisible(); return "opened Agent Tasks"; },
       async () => { await page.getByRole("button", { name: /通过会话创建|Create in Chat/ }).click(); await expect(page).toHaveURL(/newchat.*entry=automation/); await chat.selectAgent(agent); return `Create through conversation selected configured Agent ${agent} at the automation entry`; },
-      async () => { await chat.startMessage(`每60分钟告诉我 TASK-${token}`); return "submitted an ordinary recurring-task user requirement; first-fire timing belongs to the dedicated API/reliability cases"; },
+      async () => {
+        const request = page.waitForRequest((candidate) => candidate.method() === "POST"
+          && new URL(candidate.url()).pathname.endsWith("/agent/run"));
+        await chat.startMessage(`每60分钟告诉我 TASK-${token}`);
+        expect((await request).postDataJSON()).toMatchObject({ entrypoint: "automation" });
+        return "submitted the recurring-task requirement through the dedicated automation entrypoint";
+      },
       async () => {
         const answer = chat.assistantMessages().last();
         const confirm = answer.getByRole("button", { name: /确认创建|创建任务/ });
@@ -56,11 +68,12 @@ journey("PW-TASK-01", async (context) => {
         taskTitle = (await title.innerText()).trim();
         await expect(card).toContainText(`TASK-${token}`);
         await expect(card).toContainText(/60\s*分钟|1\s*小时/);
-        const created = page.waitForResponse((response) => response.request().method() === "POST"
-          && /\/agent\/automations\/proposals\/[^/]+\/confirm$/.test(new URL(response.url()).pathname));
+        expect(confirmationRequests).toBe(0);
+        const created = page.waitForResponse((response) => isConfirmation(response.request()));
         await confirm.click();
         const response = await created;
         expect(response.ok()).toBe(true);
+        expect(confirmationRequests).toBe(1);
         exists = true;
         const task = (await response.json()).data;
         taskId = Number(task.task_id);

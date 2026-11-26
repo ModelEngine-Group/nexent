@@ -89,8 +89,13 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
     file_id = uuid.uuid4().hex
     deleted_file_id = uuid.uuid4().hex
 
+    from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+    from management.db.knowledge_base import repository as knowledge_db
     from management.db.knowledge_base.repository import create_knowledge_record, delete_knowledge_record
     from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record
+
+    config = DEFAULT_CATALOG.build_snapshot(DEFAULT_CATALOG.defaults)
+    monkeypatch.setattr(knowledge_db, "get_config_snapshot", lambda: config)
 
     redis_service = _redis_service()
     task_id = None

@@ -13,6 +13,5 @@ COPY infrastructure/rdb/__init__.py infrastructure/rdb/identity.py /opt/infrastr
 COPY backend/__init__.py /opt/backend/__init__.py
 COPY backend/http/gateway_service.py /opt/backend/http/gateway_service.py
 ENV PYTHONPATH=/opt:/opt/backend
-USER 65532:65532
 EXPOSE 5013
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -m gateway.healthcheck

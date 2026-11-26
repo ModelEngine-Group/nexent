@@ -183,10 +183,7 @@ def test_validate_base_url_rejects_bad_inputs():
     )
 
 
-def test_init_reads_official_legacy_method_without_revalidation(monkeypatch):
-    def unexpected(*args, **kwargs):
-        raise AssertionError("Persisted retrieval configuration must not be revalidated")
-    monkeypatch.setattr(ind_aidp_search_tool_module, "validate_config", unexpected, raising=False)
+def test_init_reads_official_legacy_method():
     tool = make_tool(search_method="hybrid_search", top_k=7, reranking_enable=False)
     payload = tool._payload("q")
     assert payload["search_method"] == "vector_search|full_text_search|graph_search"

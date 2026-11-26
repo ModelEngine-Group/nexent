@@ -236,6 +236,7 @@ def test_ops_dockerfile_includes_dependencies_without_other_launchers():
         files.update(path.relative_to(ROOT).as_posix() for path in paths)
     assert "backend/contracts/constants/environment.py" in files
     assert "infrastructure/rdb/client.py" in files
+    assert "infrastructure/rdb/agent_monitoring.py" in files
     assert "backend/http/config_service.py" not in files
     assert "backend/http/runtime_service.py" not in files
     assert not any(path.startswith("backend/data_process/") for path in files)
@@ -244,6 +245,11 @@ def test_ops_dockerfile_includes_dependencies_without_other_launchers():
     assert "backend/ops/services/trajectory/lifecycle.py" in files
     assert "backend/http/mcp_service.py" not in files
     assert "backend/management/db/models/__init__.py" not in files
+    # exception_handlers imports get_request_id from the shared request_context
+    # module; the ops image copies handlers file-by-file, so it must carry that
+    # dependency too or the service fails at import (ModuleNotFoundError).
+    assert "backend/http/server/exception_handlers.py" in files
+    assert "backend/http/server/request_context.py" in files
 
 
 def test_management_image_packages_mcp_sources_without_runtime():

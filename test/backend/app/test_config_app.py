@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import sys
 import types
+from contextlib import asynccontextmanager
 import warnings
 
 import pytest
@@ -86,7 +87,8 @@ class TestConfigAppIntegration:
 class TestConfigAppRouterConfiguration:
     """Test class for router configuration patterns."""
 
-    def test_config_app_registers_api_key_routes(self, monkeypatch):
+    @pytest.mark.parametrize("recovery_mode", ["startup", "fixed_replicas"])
+    def test_config_app_registers_api_key_routes(self, monkeypatch, recovery_mode):
         class RecordingApp:
             def __init__(self, lifespan=None):
                 self.included_routers = []
@@ -162,6 +164,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
+            "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.identity.api_key": {"router": api_key_router},
             "management.api.identity.invitation": {"router": APIRouter()},
             "management.api.notification.notification": {"router": APIRouter()},
@@ -175,6 +178,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.evaluation.evaluator": {"router": APIRouter()},
             "management.api.evaluation.evaluation_annotation": {"router": APIRouter()},
             "management.api.identity.cas": {"router": APIRouter()},
+            "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.memory.memory_config": {"router": APIRouter()},
             "management.api.memory.memory_record": {"router": APIRouter()},
             "management.api.memory.memory_long_term": {"router": APIRouter()},
@@ -198,6 +202,23 @@ class TestConfigAppRouterConfiguration:
         retired_module.router = retired_router
         monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
 
+        # The northbound capability gates import real conversation/automation
+        # services; stub the gate package so the stubbed application module
+        # does not pull the database layer.
+        gates_pkg = types.ModuleType("management.api.northbound_gates")
+        gates_pkg.__path__ = []
+        gates_pkg.nb_capability_routers = lambda: ()
+        monkeypatch.setitem(sys.modules, "management.api.northbound_gates", gates_pkg)
+
+        component = types.ModuleType("management.api.northbound_application")
+
+        @asynccontextmanager
+        async def _northbound_lifespan(_app):
+            yield
+
+        component.northbound_lifespan = _northbound_lifespan
+        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
+
         const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
         const_module.AIDP_SERVER_URL = ""
@@ -205,6 +226,7 @@ class TestConfigAppRouterConfiguration:
         const_module.ENABLE_AGENT_WORKBENCH = False
         const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
+        const_module.NEXENT_RECOVERY_MODE = recovery_mode
         monkeypatch.setitem(sys.modules, "contracts.constants.environment", const_module)
         manager_state = types.SimpleNamespace(CREATED="created")
 
@@ -263,7 +285,8 @@ class TestConfigAppRouterConfiguration:
 
         runtime_state = MagicMock()
         monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
-                            types.SimpleNamespace(runtime_state_service=runtime_state))
+                            types.SimpleNamespace(runtime_state_service=runtime_state,
+                                                  creator_runtime_state_service=MagicMock()))
         component_path = Path(backend_dir) / "management/api/northbound_application.py"
         component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
         component = importlib.util.module_from_spec(component_spec)
@@ -317,7 +340,10 @@ class TestConfigAppRouterConfiguration:
             agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
         ))
 
-        from contextlib import asynccontextmanager
+        # The function-wide local binding from a mid-function import would
+        # shadow the module-level `from contextlib import asynccontextmanager`
+        # and turn the earlier decorator use at the `_northbound_lifespan`
+        # definition into an UnboundLocalError. Rely on the top-level import.
         prepared_events = []
 
         @asynccontextmanager
@@ -334,6 +360,10 @@ class TestConfigAppRouterConfiguration:
         shutdown_creators = AsyncMock()
         monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
             shutdown_creator_streams=shutdown_creators,
+        ))
+        renew_leases = MagicMock()
+        monkeypatch.setitem(sys.modules, "infrastructure.rdb.agent_execution", types.SimpleNamespace(
+            renew_execution_leases=renew_leases,
         ))
 
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
@@ -371,7 +401,7 @@ class TestConfigAppRouterConfiguration:
 
         async def exercise_lifespan():
             async with config_app.config_lifespan(None):
-                pass
+                await asyncio.sleep(0)
 
         with patch.object(
             config_app,
@@ -396,8 +426,14 @@ class TestConfigAppRouterConfiguration:
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
-        automation_recover.assert_called_once_with()
-        automation_scheduler.start.assert_awaited_once_with()
+        if recovery_mode == "fixed_replicas":
+            automation_recover.assert_not_called()
+            automation_scheduler.start.assert_awaited_once_with(fixed_replicas=True)
+            renew_leases.assert_called_once_with()
+        else:
+            automation_recover.assert_called_once_with()
+            automation_scheduler.start.assert_awaited_once_with()
+            renew_leases.assert_not_called()
         automation_scheduler.stop.assert_awaited_once_with()
         for router in router_modules["management.api.automation.agent_automation"].values():
             assert router in config_app.app.included_routers

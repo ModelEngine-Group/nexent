@@ -13,9 +13,7 @@ def authorize_capture(identity):
 
 def create_local_processor(config, metadata_provider, *, repository=None):
     """Keep environment reads in the backend configuration module."""
-    capturing = config.ENABLE_TELEMETRY and config.MONITORING_PROVIDER == "local_file"
-    maintaining = config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
-    if not capturing and not maintaining:
+    if not trajectory_storage_enabled(config):
         return None
     from infrastructure.rdb.trajectory.repository import ExecutionRepository
 
@@ -44,6 +42,14 @@ def create_local_processor(config, metadata_provider, *, repository=None):
     )
 
 
+def trajectory_storage_enabled(config):
+    return (
+        config.LOCAL_FILE_MONITORING_ENABLED
+        or config.TRAJECTORY_READ_ENABLED
+        or config.MONITORING_PROVIDER == "local_file"
+    )
+
+
 def capture_sources(identity, upper=None):
     """Read only scalar IDs from the same currently authorized conversation."""
     from infrastructure.rdb.trajectory.capture import CaptureCatalog
@@ -64,7 +70,7 @@ def request_conversation_cleanup(conversation_ids, owner_user_id):
     """Submit confirmed deletions without doing filesystem work on the HTTP loop."""
     from contracts.constants import environment as config
 
-    if config.MONITORING_PROVIDER != "local_file" and not config.TRAJECTORY_READ_ENABLED:
+    if not trajectory_storage_enabled(config):
         return True
     from .bootstrap import local_trajectory_processor
 

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func, insert, select, text, update
@@ -158,6 +158,26 @@ def update_task(task_id: int, tenant_id: str, user_id: str, values: Dict[str, An
         return as_dict(task) if task else None
 
 
+def _update_unexpired_task(task_id: int, lock_owner: str, *conditions):
+    """Apply the time fence only to rows produced after acquiring their locks."""
+    locked_task = (
+        select(AgentAutomationTask.task_id, AgentAutomationTask.lock_until)
+        .where(
+            AgentAutomationTask.task_id == task_id,
+            AgentAutomationTask.lock_owner == lock_owner,
+            AgentAutomationTask.delete_flag == "N",
+            *conditions,
+        )
+        .with_for_update()
+        .cte("locked_task")
+        .prefix_with("MATERIALIZED", dialect="postgresql")
+    )
+    return update(AgentAutomationTask).where(
+        AgentAutomationTask.task_id == locked_task.c.task_id,
+        locked_task.c.lock_until > func.clock_timestamp(),
+    )
+
+
 def update_task_if_lock_owner(
     task_id: int,
     tenant_id: str,
@@ -175,14 +195,11 @@ def update_task_if_lock_owner(
     )
     with get_db_session() as session:
         task = session.execute(
-            update(AgentAutomationTask)
-            .where(
-                AgentAutomationTask.task_id == task_id,
+            _update_unexpired_task(
+                task_id,
+                lock_owner,
                 AgentAutomationTask.tenant_id == tenant_id,
                 AgentAutomationTask.user_id == user_id,
-                AgentAutomationTask.lock_owner == lock_owner,
-                AgentAutomationTask.lock_until > func.now(),
-                AgentAutomationTask.delete_flag == "N",
             )
             .values(**data)
             .returning(AgentAutomationTask)
@@ -522,6 +539,26 @@ def task_run_transaction(task_id: int, tenant_id: str, user_id: str, run_id=None
         yield session, as_dict(task) if task else None, as_dict(run) if run else None
 
 
+def lease_is_unexpired(session, lock_until: datetime) -> bool:
+    """Check the database clock after the caller has acquired the task locks."""
+    return session.scalar(select(func.clock_timestamp() < lock_until)) is True
+
+
+def has_started_scheduled_occurrence(
+    session, task_id: int, tenant_id: str, user_id: str, scheduled_fire_at: datetime,
+) -> bool:
+    """Check the committed prompt marker, even when the run was hidden from history."""
+    occurrence = select(AgentAutomationRun.run_id).where(
+        AgentAutomationRun.task_id == task_id,
+        AgentAutomationRun.tenant_id == tenant_id,
+        AgentAutomationRun.user_id == user_id,
+        AgentAutomationRun.scheduled_fire_at == scheduled_fire_at,
+        AgentAutomationRun.trigger_type == "SCHEDULED",
+        AgentAutomationRun.user_message_id.is_not(None),
+    )
+    return session.scalar(select(occurrence.exists())) is True
+
+
 def _run_history_order():
     return (
         func.coalesce(AgentAutomationRun.actual_fire_at, AgentAutomationRun.started_at,
@@ -760,34 +797,24 @@ def release_task_lock(task_id: int, lock_owner: Optional[str] = None) -> bool:
 
 
 def renew_task_lock(task_id: int, lock_owner: str, lease_seconds: float) -> bool:
-    sql = text("""
-        UPDATE nexent.agent_automation_task_t
-        SET lock_until = now() + (:lease_seconds * interval '1 second'),
-            update_time = now()
-        WHERE task_id = :task_id
-          AND lock_owner = :lock_owner
-          AND lock_until > now()
-          AND delete_flag = 'N'
-          AND status = 'ACTIVE'
-        RETURNING task_id
-    """)
     with get_db_session() as session:
         renewed_task_id = session.execute(
-            sql,
-            {
-                "task_id": task_id,
-                "lock_owner": lock_owner,
-                "lease_seconds": lease_seconds,
-            },
+            _update_unexpired_task(task_id, lock_owner, AgentAutomationTask.status == "ACTIVE")
+            .values(
+                lock_until=func.clock_timestamp() + timedelta(seconds=lease_seconds),
+                update_time=func.clock_timestamp(),
+            )
+            .returning(AgentAutomationTask.task_id)
         ).scalar_one_or_none()
         return renewed_task_id is not None
 
 
-def recover_orphaned_runs() -> int:
-    """Finish runs that were executing when the single scheduler stopped.
+def recover_orphaned_runs(*, db_session=None) -> int:
+    """Finish executing runs after their Runtime processes have stopped.
 
-    Preserve queued work and prepared runs that still need AgentOS reconciliation.
-    This startup cleanup runs before the deployment's single scheduler starts.
+    Queued runs are intentionally preserved so the existing scheduler can
+    consume work that never began. Once every Runtime has stopped, persisted
+    RUNNING rows are orphaned even when their leases have not expired yet.
     """
     sql = text("""
         UPDATE nexent.agent_automation_run_t
@@ -800,14 +827,14 @@ def recover_orphaned_runs() -> int:
           AND status = 'RUNNING'
           AND projection_message_index IS NULL
     """)
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         result = session.execute(sql)
         return result.rowcount or 0
 
 
-def release_all_task_locks() -> int:
-    """Release scheduler leases owned by the previous scheduler."""
-    with get_db_session() as session:
+def release_all_task_locks(*, db_session=None) -> int:
+    """Release scheduler leases after every Runtime in the data domain has stopped."""
+    with get_db_session(db_session) as session:
         result = session.execute(
             update(AgentAutomationTask)
             .where(

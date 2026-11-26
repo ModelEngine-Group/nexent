@@ -20,8 +20,9 @@ from contracts.agentos import (
     WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
-    NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE,
+    NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED, OPS_MONITORING_ENABLED,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from contracts.errors.exceptions import RunModelControlsError, ValidationError as AgentValidationError
 from infrastructure.a2a_execution import (
@@ -70,6 +71,11 @@ from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
+from runtime.identity import uses_distributed_runtime
+from runtime.sandbox_runtime import get_coordinator, release_agentos_sandbox, reserve_agentos_sandbox
+from runtime.sandbox_services import bind_runtime_sandbox
+from runtime.sandbox_workspace import KubernetesWorkspace
+from contracts.constants import environment
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
@@ -348,8 +354,25 @@ def _restore_conversation_history(history, actor):
     }
 
 
+def _build_run_monitoring_catalog(payload, mcp: PreparedMCP, debug: bool):
+    """Per-run MCP server identity catalog for monitoring facts (design D-003).
+
+    Management attaches the tenant catalog to the prepared payload; Runtime
+    projects it onto the URLs this run materialized. Omitted when monitoring
+    is off, for debug runs, or when no MCP tools were materialized; filtering
+    failures must never interrupt the business run.
+    """
+    from infrastructure.monitoring.catalog import filter_prepared_catalog
+
+    return filter_prepared_catalog(
+        getattr(payload, "monitoring_mcp_servers", None), mcp.used_urls,
+        enabled=OPS_MONITORING_ENABLED, is_debug=debug,
+    )
+
+
 def prepare_run_snapshot(
     payload: PreparedEvaluationRun | PreparedAgentRun | PreparedEphemeralRun, actor: ServicePrincipal,
+    *, sandbox_run_id: str | None = None,
 ) -> AgentRunInfo:
     if any((
         payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
@@ -385,12 +408,26 @@ def prepare_run_snapshot(
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
-    workspace_run_id = payload.run_id if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)) else uuid4().hex
-    workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=AGENT_WORKSPACE_ROOT)
+    workspace_run_id = payload.run_id if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)) else sandbox_run_id or uuid4().hex
+    workspace_root = AGENT_WORKSPACE_ROOT
+    coordinator = get_coordinator()
+    if coordinator is not None:
+        workspace = KubernetesWorkspace(workspace_root, coordinator.owner, execution_gid=environment.NEXENT_SANDBOX_EXECUTION_GID)
+        lifecycle = coordinator.lifecycle(workspace_run_id)
+        workspace_path = str(workspace.run_path(actor.tenant_id, actor.user_id, workspace_run_id))
+        coordinator.record_workspace(workspace_run_id, workspace_path)
+        workspace.prepare_run(actor.tenant_id, actor.user_id, workspace_run_id)
+        workspace_root = workspace.owner_root
+    else:
+        lifecycle = None
+        workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=workspace_root)
     with ExitStack() as cleanup:
         cleanup.callback(_remove_skill_files, workspace_path)
         try:
             sandbox_config = resolve_deployed_sandbox(payload.resource.sandbox_policy)
+
+            if sandbox_config is not None and sandbox_config.level is SandboxLevel.KUBERNETES:
+                bind_runtime_sandbox(sandbox_config, execution_run_id=workspace_run_id)
             sandbox_enabled = sandbox_config is not None and sandbox_config.level is not SandboxLevel.LOCAL
             if len(aliases) != len(bindings):
                 raise ValueError("Duplicate evaluation model binding")
@@ -421,13 +458,16 @@ def prepare_run_snapshot(
                 list(mcp.hosts.values()), header_metadata, passthrough_allowed=header_metadata is not None,
                 agent_id=payload.resource.agent_id, run_id=workspace_run_id,
             )
+            monitoring_mcp_servers = _build_run_monitoring_catalog(payload, mcp, debug)
+        else:
+            monitoring_mcp_servers = None
         user_context = None
         if mcp.hosts or payload.tool_caller is not None:
             user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
             user_context.update(user_id=actor.user_id, tenant_id=actor.tenant_id)
         info = materialize_run(
             sandbox_config=sandbox_config,
-            workspace_root=AGENT_WORKSPACE_ROOT,
+            workspace_root=workspace_root,
             mcp_host=list(mcp.hosts.values()) or None,
             mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
             mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
@@ -449,26 +489,31 @@ def prepare_run_snapshot(
             user_id=actor.user_id,
             tenant_id=actor.tenant_id,
             redis_client=get_redis_client() if agent_config.enable_planning and not debug else None,
+            **({"monitoring_mcp_servers": monitoring_mcp_servers} if monitoring_mcp_servers else {}),
         )
         if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
             info.runtime_metadata = strip_reserved_runtime_metadata_fields(payload.runtime_metadata)
         if isinstance(payload, PreparedAgentRun):
             info.runtime_metadata_version = payload.runtime_metadata_version
+        if lifecycle is not None:
+            info.__dict__["_runtime_run_lifecycle"] = lifecycle
         info.context_input = build_authorized_context_input(info, historical_context)
         cleanup.pop_all()
     return info
 
 
-def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
-    return prepare_run_snapshot(payload, actor)
+def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal, *, sandbox_run_id=None) -> AgentRunInfo:
+    if sandbox_run_id is None:
+        return prepare_run_snapshot(payload, actor)
+    return prepare_run_snapshot(payload, actor, sandbox_run_id=sandbox_run_id)
 
 
 def _remove_abandoned_skill_files(preparation: asyncio.Task) -> None:
     if not preparation.cancelled() and preparation.exception() is None:
-        _remove_skill_files(preparation.result().workspace_path)
+        discard_prepared_workspace(preparation.result())
 
 
-async def load_prepared_run(payload, actor, materialize) -> AgentRunInfo:
+async def load_prepared_run(payload, actor, materialize, *, settle_on_cancel=False) -> AgentRunInfo:
     preparation = asyncio.create_task(run_blocking(
         "agentos-materialize-run", materialize, payload, actor,
         lane="control-io", owner="runtime",
@@ -476,7 +521,16 @@ async def load_prepared_run(payload, actor, materialize) -> AgentRunInfo:
     try:
         return await asyncio.shield(preparation)
     except asyncio.CancelledError:
-        preparation.add_done_callback(_remove_abandoned_skill_files)
+        if settle_on_cancel or uses_distributed_runtime():
+            settled = asyncio.gather(preparation, return_exceptions=True)
+            while not settled.done():
+                try:
+                    await asyncio.shield(settled)
+                except asyncio.CancelledError:
+                    continue
+            _remove_abandoned_skill_files(preparation)
+        else:
+            preparation.add_done_callback(_remove_abandoned_skill_files)
         raise
 
 
@@ -496,22 +550,35 @@ def release_prepared_run(info: AgentRunInfo, conversation_id: int, user_id: str,
 
 
 async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> EvaluationAgentResult:
-    info = await load_prepared_run(payload, actor, prepare_evaluation_run)
+    run_id = uuid4().hex
+    root = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    ownership = await reserve_agentos_sandbox(
+        actor.tenant_id, actor.user_id, f"evaluation:{payload.conversation_id or run_id}", run_id, kind="EVALUATION",
+        cancel=lambda: loop.call_soon_threadsafe(root.cancel),
+    )
+    materialize = partial(prepare_evaluation_run, sandbox_run_id=run_id) if ownership is not None else prepare_evaluation_run
+    info = None
     try:
-        agent_run_manager.register_agent_run(payload.conversation_id, info, actor.user_id)
-    except Exception as exc:
-        _remove_skill_files(info.workspace_path)
-        if isinstance(exc, AgentRunAlreadyActiveError):
-            raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"}) from exc
-        raise
+        info = await load_prepared_run(payload, actor, materialize)
+        try:
+            agent_run_manager.register_agent_run(payload.conversation_id, info, actor.user_id)
+        except Exception as exc:
+            _remove_skill_files(info.workspace_path)
+            if isinstance(exc, AgentRunAlreadyActiveError):
+                raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"}) from exc
+            raise
 
-    status = "failed"
-    try:
-        result = await collect_observer_output(info, agent_run, runtime_thread_manager)
-        status = info.attempt_outcome or "completed"
-        return result
-    except asyncio.CancelledError:
-        status = "stopped"
-        raise
+        status = "failed"
+        try:
+            result = await collect_observer_output(info, agent_run, runtime_thread_manager)
+            status = info.attempt_outcome or "completed"
+            return result
+        except asyncio.CancelledError:
+            status = "stopped"
+            raise
+        finally:
+            release_prepared_run(info, payload.conversation_id, actor.user_id, status)
     finally:
-        release_prepared_run(info, payload.conversation_id, actor.user_id, status)
+        if ownership is not None:
+            await release_agentos_sandbox(ownership, info.thread_future if info is not None else None)

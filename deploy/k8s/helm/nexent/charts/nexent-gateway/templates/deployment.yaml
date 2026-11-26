@@ -8,7 +8,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "20"
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ ternary 0 .Values.replicaCount (default false .Values.global.businessPaused) }}
   strategy:
 {{ toYaml .Values.strategy | indent 4 }}
   selector:
@@ -32,8 +32,6 @@ spec:
             - containerPort: 5013
               name: http
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 65532
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
@@ -97,6 +95,10 @@ spec:
               value: "http://nexent-runtime:5014"
             - name: GATEWAY_NORTHBOUND_URL
               value: "http://nexent-config:5010"
+            # Emergency kill switch: comma-separated capability ids/paths
+            # removed from the exposure registry at gateway startup.
+            - name: GATEWAY_NB_EXCLUDED_CAPABILITIES
+              value: {{ .Values.nbExcludedCapabilities | default "" | quote }}
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
           startupProbe:

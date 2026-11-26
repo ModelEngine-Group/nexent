@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-RUNTIME-REPLICA-VALUES-20261123
+  change_type: bugfix
+  bug_id: K8S-RUNTIME-REPLICA-VALUES-20261123
+  title: Apply edited Runtime replica counts from local Helm values
+  description: Resolve the Runtime target from explicit arguments, local chart edits and saved deployment options before offline maintenance.
+  observed_behavior: The deployment script always overrides the local Helm replica count with the saved or default count, so editing values.yaml does not change the deployed target.
+  expected_behavior: An explicit CLI count takes precedence. Without it, a changed chart count takes effect and an unchanged chart leaves the saved count in effect.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing offline deployment coverage changes the target through explicit arguments and does not exercise local values precedence.
+  feature_contract_changed: false
+  affected_features:
+    existing: [RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Resolve edited chart values, unchanged chart values, saved legacy settings and explicit CLI overrides before maintenance.
+      - Reject invalid resolved values before stopping workloads.
+    reason: Configuration precedence is verified through the deployment script and its resolver. The existing D5 retains the live offline maintenance and rollback contract.
+    test_selectors:
+      - test/backend/deploy/test_k8s_bootstrap.py::test_resolve_runtime_replicas_from_chart_and_saved_options
+  notes: Reuses AC-P1-001 in nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md. Command-level tests in test/deploy also verify the same target is passed to Helm during pause and activation.

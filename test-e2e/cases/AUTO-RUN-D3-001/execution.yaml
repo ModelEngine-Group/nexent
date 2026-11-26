@@ -5,6 +5,7 @@ implementations:
   file: test_outcomes.py
   selector: test_
 timeout_seconds: 120
+notes: The case owns a disposable PostgreSQL schema and per-run Redis journals and removes both in fixture teardown.
 acceptance_bindings:
   AC-01:
   - test_stream_result_and_own_message_identity
@@ -16,7 +17,7 @@ acceptance_bindings:
   - test_next_turn_clears_old_cancel_but_rejects_delayed_stop
   - test_user_cancel_returns_http_result_and_preparation_cancel_survives
   - test_actual_caller_cancellation_still_propagates
-  - test_regression_detects_missing_background_reset
+  - test_regression_detects_reuse_of_a_canceled_run
 preparation:
   families: []
   anchors: false

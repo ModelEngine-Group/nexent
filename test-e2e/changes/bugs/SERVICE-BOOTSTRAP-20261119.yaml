@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: SERVICE-BOOTSTRAP-20261119
+  change_type: bugfix
+  bug_id: SERVICE-BOOTSTRAP-20261119
+  title: Restore Runtime and Ops startup after entry-point relocation
+  description: Restore the Runtime application factory wiring and launch Ops as a Python module in Docker and Kubernetes.
+  observed_behavior: Runtime exits on an unexpected factory argument; Ops exits when script-path invocation shadows standard-library logging.
+  expected_behavior: Runtime starts with its existing identity policy, and Ops starts through the same module command in Docker and Kubernetes.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The existing protocol cases attach middleware directly and the Ops startup case executes the module without checking the deployed command.
+  feature_contract_changed: false
+  affected_features:
+    existing: [GW-AUTH, OPS-BOOTSTRAP]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [GW-AUTH-D3-001, OPS-BOOTSTRAP-D5-001]
+    added: []
+    modified: [OPS-BOOTSTRAP-D1-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - The application factory passes the Runtime route classifier to Gateway identity middleware without changing Management or middleware-free callers.
+      - Docker and Helm launch Ops as a module, not as a script on the import path.
+    reason: Factory and deployment command checks detect both regressions without duplicating protocol authentication or process readiness Cases.
+    test_selectors:
+      - test/backend/app/test_app_factory.py::TestCreateApp::test_create_app_wires_gateway_identity_middleware
+      - test/backend/deploy/test_ops_chart.py
+  notes: >-
+    Reuse the independent Gateway design and the OPS-BOOTSTRAP deployment and readiness contracts without changing their requirements.
+    D3 covers the existing Runtime identity boundary; D1 checks the rendered Kubernetes launch command and D5 covers isolated process readiness.
+    Data-process image replacement and live redeployment are outside this fix.

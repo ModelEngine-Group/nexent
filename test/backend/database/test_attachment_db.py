@@ -459,8 +459,21 @@ class TestGetFileUrl:
         assert result['object_name'] == 'attachments/test.txt'
         assert result['expires_in'] == 7200
         assert 'error' not in result
+        # Default callers keep the internal signing authority (external=False).
         minio_client_mock.get_file_url.assert_called_once_with(
-            'attachments/test.txt', 'bucket', 7200
+            'attachments/test.txt', 'bucket', 7200, external=False
+        )
+
+    def test_get_file_url_forwards_external_opt_in(self):
+        """Partner direct-link callers opt into the external signing authority."""
+        minio_client_mock.get_file_url.reset_mock()
+        minio_client_mock.get_file_url.return_value = (True, 'https://files.example.com/presigned-url')
+
+        result = get_file_url('attachments/test.txt', 'bucket', 7200, external=True)
+
+        assert result['success'] is True
+        minio_client_mock.get_file_url.assert_called_once_with(
+            'attachments/test.txt', 'bucket', 7200, external=True
         )
 
     def test_get_file_url_failure(self):

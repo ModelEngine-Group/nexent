@@ -147,6 +147,7 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[0]["message"][0]["content"] == "每周五上午9点发一个周报"
     assert messages[1]["message"][0]["type"] == "automation_proposal"
+    assert tasks == {}
 
     task = await service.confirm_proposal(
         proposal["proposal_id"],
