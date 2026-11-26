@@ -41,8 +41,12 @@ all migrations applied after the v2.5.1 release, through v2.6.0),
 the v2.6.1 release, through v2.7.0), `v2.8.0_merged_migrations.sql`
 (which merges every migration file still loose after the v2.7.0 release), and
 `v2.9.0_merged_migrations.sql` (which merges every migration file still loose
-after the v2.8.5 release, through `v2.9.0_018_runtime_fixed_replicas.sql`, in
-`sort -V` deployment order).
+after the v2.8.5 release, through `v2.9.0_018_runtime_fixed_replicas.sql`, plus
+the released `v2.8.0_001_a2a_ssl_verify.sql` and
+`v2.8.3_001_fix_agent_ingroup_permission.sql` hotfixes, in `sort -V` deployment
+order). Environments that already applied those two hotfixes replay their
+idempotent sections once inside the bundle; the statements are guarded and
+safe to re-run.
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
