@@ -74,3 +74,22 @@ def test_chunk_image_returns_bytes(chunk, monkeypatch):
     monkeypatch.setattr(module, "_get_view_image_path", lambda *a, **kw: "/image")
     monkeypatch.setattr(module, "_aidp_headers", lambda *a, **kw: {})
     assert module.get_aidp_image_impl("s", "k", "kb", "file") == b"png"
+
+
+def test_chunk_id_normalization(chunk):
+    module, _ = chunk
+    assert module._normalize_chunk_id(True) is True
+    assert module._normalize_chunk_id("12") == 12
+    assert module._normalize_chunk_id("x") == "x"
+
+
+def test_chunk_image_error_path(chunk, monkeypatch):
+    module, _ = chunk
+    client = MagicMock()
+    client.get.side_effect = httpx.ConnectError("down")
+    monkeypatch.setattr(module.aidp_client.http_client_manager, "get_sync_client", MagicMock(return_value=client))
+    monkeypatch.setattr(module, "_validate_params", lambda *a: "http://aidp.example")
+    monkeypatch.setattr(module, "_get_view_image_path", lambda *a, **kw: "/image")
+    monkeypatch.setattr(module, "_aidp_headers", lambda *a, **kw: {})
+    with pytest.raises(module.AppException):
+        module.get_aidp_image_impl("s", "k", "kb", "file")

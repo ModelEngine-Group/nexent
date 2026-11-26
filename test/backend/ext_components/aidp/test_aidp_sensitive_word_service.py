@@ -75,3 +75,18 @@ def test_sensitive_word_rejects_malformed_list(service, monkeypatch):
     monkeypatch.setattr(module, "_request", lambda *a, **kw: _response({"data": {}}))
     with pytest.raises(module.AppException):
         module.list_sensitive_words_impl("s", "k", "kb", 1, 20)
+
+
+def test_sensitive_normalization_branches(service):
+    module, _ = service
+    assert module._normalize_mode("black") == "BLACK"
+    assert module._normalize_mode("bad") == ""
+    assert module._normalize_item({"word_id": 3, "word": "w"})["id"] == "3"
+    assert module._normalize_item({"id": None, "word": ""}) is None
+    assert module._normalize_item("bad") is None
+
+
+def test_sensitive_response_shape_failure(service):
+    module, _ = service
+    with pytest.raises(module.AppException):
+        module._response_json(_response(["bad"]))

@@ -266,3 +266,44 @@ def test_async_import_and_export_normalization():
     assert transform.normalize_export_result({"data": {"task_id": "1"}})["accepted"] is True
     with pytest.raises(ValueError):
         transform.normalize_export_result({"data": {}})
+
+
+def test_more_shape_and_relation_errors():
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(
+            _document(entities=[{"api_name": 1}], relations=[]), "Demo"
+        )
+    assert ("api_name", "api_name_required") in _reasons(error.value)
+
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(_document(relations=["bad"]), "Demo")
+    assert ("$", "item_not_object") in _reasons(error.value)
+
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(
+            {"Demo": {"types": [], "entities": [], "relations": "bad"}}, "Demo"
+        )
+    assert ("relations", "field_array_required") in _reasons(error.value)
+
+    body, _ = build_import_request(
+        _document(
+            entities=[{"api_name": "Phone", "primary_properties": ["p"]}],
+            relations=[],
+        ),
+        "Demo",
+    )
+    assert body["Demo"]["entities"][0]["primary_properties"] == ["p"]
+
+
+def test_import_message_and_export_fallback():
+    from ext_components.aidp.services import aidp_ontology_transform as transform
+
+    assert transform._extract_error_message({"reason_zh": "原因"}) == "原因"
+    assert transform._extract_error_message({}) == "Import failed"
+    assert transform.normalize_import_result({})["imported_count"] == 0
+    assert transform.normalize_import_errors(
+        {"data": {"result": {"errors": ["bad", {"index": 1, "api_name": "x"}]}}}
+    )[0]["api_name"] == "x"
+    assert transform.normalize_export_result({"Demo": {}})["domain_name"] == "Demo"
+    with pytest.raises(ValueError):
+        transform.normalize_export_result([])

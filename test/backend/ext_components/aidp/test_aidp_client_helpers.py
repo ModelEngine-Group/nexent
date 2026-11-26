@@ -128,3 +128,24 @@ def test_http_error_mapping(client, status):
     error = httpx.HTTPStatusError("bad", request=response.request, response=response)
     with pytest.raises(module.AppException):
         module._raise_aidp_http_error(error, "op")
+
+
+def test_remaining_path_and_extraction_branches(client):
+    module, _ = client
+    assert module._extract_upstream_code(_response(200, json_body=["bad"])) is None
+    assert module._get_folders_path("kb", "t1").endswith("/Tenants/t1/KnowledgeBases/kb/Folders")
+    assert module._get_view_image_path("kb", "f", "t1").endswith("/ViewImage/f")
+    assert module._join_folder_path("/a/", "b") == "/a/b"
+    assert module._build_list_query(1, 20) == "?page=1&page_size=20"
+
+
+def test_resolve_folder_id_matches_segments(client, monkeypatch):
+    module, _ = client
+    levels = iter(
+        [
+            {"folders": [{"folder_name": "a", "folder_id": 2}]},
+            {"folders": [{"folder_name": "b", "folder_id": 3}]},
+        ]
+    )
+    monkeypatch.setattr(module, "_get_aidp_folder_level", lambda *a, **kw: next(levels))
+    assert module._resolve_aidp_folder_id("s", "k", "kb", "/a/b/") == 3
