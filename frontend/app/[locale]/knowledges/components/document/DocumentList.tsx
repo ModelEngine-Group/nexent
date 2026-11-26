@@ -385,13 +385,17 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     ]);
 
     // Sort documents by create_time (latest first)
-    const sortedDocuments = [...documents].sort((a, b) => {
-      const aTime = new Date(a.create_time).getTime();
-      const bTime = new Date(b.create_time).getTime();
-      const safeA = Number.isNaN(aTime) ? 0 : aTime;
-      const safeB = Number.isNaN(bTime) ? 0 : bTime;
-      return safeB - safeA;
-    });
+    const sortedDocuments = React.useMemo(
+      () =>
+        [...documents].sort((a, b) => {
+          const aTime = new Date(a.create_time).getTime();
+          const bTime = new Date(b.create_time).getTime();
+          const safeA = Number.isNaN(aTime) ? 0 : aTime;
+          const safeB = Number.isNaN(bTime) ? 0 : bTime;
+          return safeB - safeA;
+        }),
+      [documents]
+    );
 
     // Get file icon
     const getFileIcon = (type: string): string => {
@@ -1098,7 +1102,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 <DocumentChunk
                   knowledgeBaseName={knowledgeBaseName}
                   knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
-                  documents={documents}
+                  documents={sortedDocuments}
                   getFileIcon={getFileIcon}
                   onChunkCountChange={onChunkCountChange}
                   permission={permission}
