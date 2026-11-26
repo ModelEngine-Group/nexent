@@ -651,3 +651,71 @@ def test_utf8_byte_validator():
     with pytest.raises(ValueError):
         validate("中文")
 
+
+
+def test_ontology_write_requires_manager(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_validation as validation
+
+    monkeypatch.setattr(
+        validation, "get_user_role_by_tenant", lambda *_a, **_kw: ["DEV"]
+    )
+    response = _client().post(
+        "/aidp-mgmt/ontology/domains",
+        headers=_bearer(),
+        json={"name": "Demo"},
+    )
+    assert response.status_code == 403
+
+
+def test_domain_path_and_metadata_errors(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_metadata_routes as routes
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(routes.perms, "require_permission", lambda *a, **kw: None)
+
+    async def load_fields(*_a, **_kw):
+        return [{"id": 2, "field_name": "f", "field_type": "string"}]
+
+    monkeypatch.setattr(routes, "_load_metadata_fields", load_fields)
+    monkeypatch.setattr(
+        routes,
+        "_find_metadata_field",
+        lambda _fields, ref: None,
+    )
+    client = _client()
+    assert client.get(
+        "/aidp-mgmt/ontology/domains/not-a-number", headers=_bearer()
+    ).status_code == 422
+    assert client.post(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields",
+        headers=_bearer(),
+        json={"field_name": "f", "field_type": "string"},
+    ).status_code == 400
+    assert client.delete(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/f", headers=_bearer()
+    ).status_code == 400
+
+
+def test_batch_async_and_invalid_import(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_batch_routes as routes
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(
+        routes,
+        "export_ontology_impl",
+        lambda *a, **kw: {"data": {"task_id": "1", "status": "pending"}},
+    )
+    monkeypatch.setattr(
+        routes, "get_ontology_domain_impl", lambda *a, **kw: {"name": "Demo"}
+    )
+    client = _client()
+    assert client.post(
+        "/aidp-mgmt/ontology/domains/1/export",
+        headers=_bearer(),
+        json={"include_properties": True, "include_relations": True},
+    ).status_code == 200
+    assert client.post(
+        "/aidp-mgmt/ontology/domains/1/import",
+        headers=_bearer(),
+        json={"file_name": "bad.json", "document": {"Demo": {"types": "bad"}}},
+    ).status_code == 400
