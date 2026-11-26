@@ -40,6 +40,14 @@ async def test_private_mcp_tools_are_user_scoped_before_retrieval(sources):
     assert {r["candidate_ref"] for r in b} == {"tool:1", "tool:3"}
 
 
+async def test_denylist_excludes_visible_tool_before_retrieval(sources):
+    from management.services.tool import configuration
+
+    configuration.list_all_tools.return_value[0]["blocked_by_denylist"] = True
+    a = await service._load_installed_resource_catalog(tenant_id="tenant", user_id="a")
+    assert {row["candidate_ref"] for row in a} == {"tool:2"}
+
+
 async def test_permission_lookup_failure_never_uses_tenant_catalog(sources):
     sources.side_effect = RuntimeError("permissions unavailable")
     with pytest.raises(RuntimeError, match="permissions unavailable"):

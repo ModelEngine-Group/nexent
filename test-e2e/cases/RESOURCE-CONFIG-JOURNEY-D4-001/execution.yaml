@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: RESOURCE-CONFIG-JOURNEY-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: RESOURCE-CONFIG-JOURNEY-D4-001
+timeout_seconds: 180
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-TABLE: [RESOURCE-CONFIG-JOURNEY-D4-001]
+  AC-SELECTION: [RESOURCE-CONFIG-JOURNEY-D4-001]
+  AC-SAVE: [RESOURCE-CONFIG-JOURNEY-D4-001]
+  AC-EXISTING-BINDINGS: [RESOURCE-CONFIG-JOURNEY-D4-001]
+notes: Self-contained browser proof with in-memory API outcomes. The frontend is read-only and the browser context releases all route fixtures and selections. No shared data, model or backend resource requires restoration.

@@ -1,12 +1,23 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { SkillDrawer } from "@/components/resource-picker/SkillDrawer";
 import type { Skill, SkillGroup } from "@/types/agentConfig";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type { TagAssignment } from "@/types/tagManagement";
+
+const removalConfirmation = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/useConfirmModal", () => ({
+  useConfirmModal: () => ({ confirm: removalConfirmation }),
+}));
 
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: {
@@ -223,4 +234,32 @@ describe("SkillDrawer external selection", () => {
     expect(confirm.mock.calls[1][0]).toEqual(confirm.mock.calls[0][0]);
     expect(confirm.mock.calls[1][0][0].skill_id).toBe(1);
   });
+});
+
+it("warns before removing a blocked existing skill chip without committing the draft", () => {
+  const save = vi.fn();
+  render(
+    <SkillDrawer
+      open
+      selectedSkills={[{ ...skill, blocked_by_denylist: true }]}
+      groups={[]}
+      onConfirm={save}
+      onClose={vi.fn()}
+    />
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "resourcePicker.remove" })
+  );
+  expect(removalConfirmation).toHaveBeenCalledWith(
+    expect.objectContaining({ content: "resourceDenylist.removeWarning" })
+  );
+  expect(
+    screen.getByRole("button", { name: "resourcePicker.remove" })
+  ).toBeVisible();
+  expect(save).not.toHaveBeenCalled();
+  act(() => removalConfirmation.mock.calls.at(-1)?.[0].onOk());
+  expect(
+    screen.queryByRole("button", { name: "resourcePicker.remove" })
+  ).not.toBeInTheDocument();
+  expect(save).not.toHaveBeenCalled();
 });

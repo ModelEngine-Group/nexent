@@ -8,7 +8,7 @@ import logging
 import re
 from typing import Dict, List, Optional, Sequence, Set
 
-from sqlalchemy import cast, or_
+from sqlalchemy import cast, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -88,6 +88,16 @@ def create_or_update_tool_by_tool_info(
             ToolInstance.version_no == version_no,
         )
         tool_instance = query.first()
+        if not allow_system and version_no == 0 and tool_info_dict.get("enabled", True) and (
+            tool_instance is None or not tool_instance.enabled
+        ):
+            from management.services.configuration.resource_denylist import require_tool_allowed
+
+            tool_name = session.scalar(select(ToolInfo.name).where(
+                ToolInfo.tool_id == tool_info.tool_id,
+                ToolInfo.delete_flag != "Y",
+            ))
+            require_tool_allowed(tenant_id, tool_name, tool_info.tool_id, session=session)
         if tool_instance:
             # Update the existing ToolInstance
             for key, value in tool_info_dict.items():

@@ -90,6 +90,7 @@ MIGRATED_MODULES = {
     'automation/scheduler.py',
     'automation/service.py',
     'configuration/platform/capacity.py',
+    'configuration/resource_denylist.py',
     'configuration/tenant/quotas.py',
     'configuration/tenant/service.py',
     'configuration/tenant/settings.py',

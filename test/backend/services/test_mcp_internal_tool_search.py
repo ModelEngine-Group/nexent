@@ -69,6 +69,10 @@ def _unwrap_nl2a(result: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
+    from management.services.configuration.resource_denylist import ToolDenylist
+
+    mocker.patch("management.services.configuration.resource_denylist.load_tool_denylist",
+                 return_value=ToolDenylist(frozenset(), frozenset()))
     mocker.patch.object(
         nl2agent_mcp_tools_module,
         "get_http_request",

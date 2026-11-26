@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-DENYLIST-DEDUP-20261126
+  change_type: bugfix
+  bug_id: RESOURCE-DENYLIST-DEDUP-20261126
+  title: Deduplicate global tools independently of description
+  description: Group global exclusion options by tool name, source and MCP service, while retaining tenant tool identities.
+  observed_behavior: Distinct descriptions on equivalent definitions across tenants produce duplicate global rows.
+  expected_behavior: One row per name/source/service; choose a stable nonempty description. Different names, sources and services stay distinct. Local usage categories do not create MCP service identities.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The existing catalog regression used identical descriptions across tenants and could not detect duplicate rows caused by metadata variation.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Merge equivalent global options across tenants with different, empty or missing descriptions.
+    - Keep distinct sources and MCP services, normalize local service identity, and preserve tenant IDs.
+    reason: SQLite query assertions reproduce the actual duplicate behavior and the existing PostgreSQL D3 verifies real catalog composition. No interface, screen interaction, policy matching or storage change needs a new Case.
+    test_selectors:
+    - test/backend/services/test_resource_denylist_catalog.py
+    - test/backend/services/test_resource_denylist.py
+  notes: Baseline SPEC is nexent-doc/docs/Developing/chat-nl2agent-resource-denylist/design.md and its resource-configuration change. F-045-RULE-12 remains the owner. The existing D3 owns and releases PostgreSQL schema, Redis, ES and its model endpoint. D4 presentation and authorization are unchanged. Previous review P2 on reloading drafts remains outside this request. Preserve the user worktree without branch merging or merge-readiness claims.

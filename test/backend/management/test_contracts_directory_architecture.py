@@ -75,6 +75,7 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "model_names",
         "model_administration",
         "runtime_metadata",
+        "resource_denylist",
         "authentication",
         "automation",
         "clarification",
