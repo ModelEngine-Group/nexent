@@ -136,3 +136,133 @@ def test_duplicate_api_name_is_rejected():
         )
 
     assert _reasons(error.value) == [("api_name", "duplicate_api_name")]
+
+
+def _reasons(exc):
+    return [(issue["field"], issue["reason"]) for issue in exc.errors]
+
+
+def test_document_shape_errors():
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request([], "Demo")
+    assert _reasons(error.value) == [("$", "json_root_object")]
+
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request({"other": {}}, "Demo")
+    assert _reasons(error.value) == [("$", "group_missing")]
+
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(
+            {"Demo": {"types": "bad", "entities": [], "relations": []}}, "Demo"
+        )
+    assert ("types", "field_array_required") in _reasons(error.value)
+
+
+def test_kind_mismatch_and_property_shape():
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(
+            _document(
+                types=[{"api_name": "Category", "kind": "entity"}], relations=[]
+            ),
+            "Demo",
+        )
+    assert ("kind", "kind_mismatch") in _reasons(error.value)
+
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(
+            _document(
+                entities=[{"api_name": "Phone", "properties": ["bad"]}],
+                relations=[],
+            ),
+            "Demo",
+        )
+    assert _reasons(error.value) == [
+        ("properties[0].api_name", "property_api_name_required")
+    ]
+
+
+def test_relation_endpoint_errors():
+    cases = [
+        (
+            {"api_name": "r", "source_api_name": "", "object_api_name": "Category"},
+            ("source_api_name", "relation_field_required"),
+        ),
+        (
+            {
+                "api_name": "r",
+                "source_api_name": "Phone",
+                "source_kind": "bad",
+                "object_api_name": "Category",
+            },
+            ("source_kind", "relation_kind_invalid"),
+        ),
+        (
+            {
+                "api_name": "r",
+                "source_api_name": "Phone",
+                "source_kind": "type",
+                "object_api_name": "Category",
+            },
+            ("source_kind", "relation_kind_mismatch"),
+        ),
+        (
+            {
+                "api_name": "r",
+                "source_api_name": "Missing",
+                "source_kind": "entity",
+                "object_api_name": "Category",
+            },
+            ("source_api_name", "relation_endpoint_missing"),
+        ),
+    ]
+    for relation, expected in cases:
+        with pytest.raises(OntologyImportValidationError) as error:
+            build_import_request(_document(relations=[relation]), "Demo")
+        assert expected in _reasons(error.value)
+
+
+def test_relation_endpoint_ambiguity():
+    document = _document(
+        types=[{"api_name": "Same"}],
+        entities=[{"api_name": "Same"}],
+        relations=[
+            {
+                "api_name": "r",
+                "source_api_name": "Same",
+                "object_api_name": "Category",
+            }
+        ],
+    )
+    with pytest.raises(OntologyImportValidationError) as error:
+        build_import_request(document, "Demo")
+    assert ("source_kind", "relation_kind_ambiguous") in _reasons(error.value)
+
+
+def test_async_import_and_export_normalization():
+    from ext_components.aidp.services import aidp_ontology_transform as transform
+
+    assert transform.unwrap_payload([]) == {}
+    assert transform.is_async_task_payload({"data": {"task_id": "1"}}) is True
+    assert transform.is_async_task_payload({"data": {"imported_count": 1}}) is False
+    assert transform.async_task_summary({"data": {"taskId": "1", "status": "ok"}}) == {
+        "accepted": True,
+        "task_id": None,
+        "status": "ok",
+    }
+    assert transform.normalize_import_result(
+        {
+            "data": {
+                "result": {
+                    "imported_count": 2,
+                    "failed_count": 1,
+                    "first_error": {"message": "bad"},
+                    "errors": [{"message": "bad"}, {"index": 1, "api_name": "x"}],
+                }
+            }
+        }
+    )["imported_count"] == 2
+    assert transform.sanitize_export_filename("a/b:c", "fallback") == "a_b_c.json"
+    assert transform.normalize_export_result({"data": {"Demo": {}}})["domain_name"] == "Demo"
+    assert transform.normalize_export_result({"data": {"task_id": "1"}})["accepted"] is True
+    with pytest.raises(ValueError):
+        transform.normalize_export_result({"data": {}})
