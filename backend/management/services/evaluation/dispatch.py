@@ -19,6 +19,10 @@ from management.thread_management import config_thread_manager
 logger = logging.getLogger(__name__)
 
 
+class EvaluationSubmissionError(HTTPException):
+    """The Management worker could not be scheduled."""
+
+
 def dispatch_agent_evaluation_run(agent_evaluation_id: int, user_id: str, tenant_id: str) -> dict:
     try:
         run = get_agent_evaluation(
@@ -104,7 +108,7 @@ def dispatch_agent_evaluation_run(agent_evaluation_id: int, user_id: str, tenant
             release_agent_evaluation_claim(agent_evaluation_id, tenant_id, user_id)
         except Exception:
             logger.exception("Failed to release evaluation claim: run_id=%s", agent_evaluation_id)
-        raise HTTPException(
+        raise EvaluationSubmissionError(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to submit agent evaluation run",
         ) from exc

@@ -361,6 +361,10 @@ class TestConfigAppRouterConfiguration:
         monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
             shutdown_creator_streams=shutdown_creators,
         ))
+        renew_leases = MagicMock()
+        monkeypatch.setitem(sys.modules, "infrastructure.rdb.agent_execution", types.SimpleNamespace(
+            renew_execution_leases=renew_leases,
+        ))
 
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
@@ -394,8 +398,6 @@ class TestConfigAppRouterConfiguration:
                 asyncio.run(config_app.validate_external_service_configuration())
 
         validate_external = AsyncMock()
-        renew_leases = MagicMock()
-        monkeypatch.setattr(config_app, "renew_execution_leases", renew_leases)
 
         async def exercise_lifespan():
             async with config_app.config_lifespan(None):

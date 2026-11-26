@@ -100,35 +100,6 @@ async def test_lost_ack_during_runtime_admission_settles_one_owned_run(payload, 
     runtime.finish.assert_called_once_with(runtime.begin.call_args_list[0].args[0], "completed")
 
 
-@pytest.mark.parametrize('debug', [False, True])
-@pytest.mark.asyncio
-async def test_admission_identity_reaches_worker_without_changing_response_ids(lifecycle, debug):
-    env = lifecycle
-    env.request.is_debug = debug
-    seen = []
-
-    async def source(request, **_kwargs):
-        seen.append(request.__dict__['_runtime_execution_run_id'])
-        env.channel.complete()
-        env.future.set_result(None)
-        yield 'data: done\n\n'
-
-    response = await env.start(source)
-    run_id = env.request.__dict__['_runtime_execution_run_id']
-    spec = env.service.runtime_thread_manager.submit.call_args.args[1]
-    assert spec.run_id == run_id
-    assert len(run_id) == 32
-    assert run_id != str(env.request.conversation_id)
-    if debug:
-        assert response.headers['run_id'].startswith('debug-')
-        assert response.headers['run_id'] != run_id
-    else:
-        assert response.headers['conversation_id'] == '123'
-        await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
-    _ = [chunk async for chunk in response.body_iterator]
-    assert seen == [run_id]
-
-
 @pytest.mark.asyncio
 async def test_admission_identity_reaches_worker_without_changing_conversation_id(payload, runtime, mocker):
     async def source(info, **_kwargs):
@@ -141,6 +112,9 @@ async def test_admission_identity_reaches_worker_without_changing_conversation_i
     assert reference.run_id == payload.run_id
     assert reference.conversation_id == payload.conversation_id
     assert reference.run_id != str(reference.conversation_id)
+    identity = RunIdentity(ACTOR.tenant_id, ACTOR.user_id, payload.conversation_id, payload.run_id)
+    assert runtime.begin.call_args.args[0] == identity
+    runtime.finish.assert_called_once_with(identity, "completed")
     runtime.prepare.assert_awaited_once_with(payload, ACTOR, prepared_run.prepare_run_snapshot)
 
 

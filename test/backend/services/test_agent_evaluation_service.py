@@ -11,6 +11,7 @@ import sys
 import types
 import importlib
 import json
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1218,14 +1219,25 @@ def test_make_background_done_callback_update_failure_is_logged(service_module):
     callback(future)
 
 
-def test_runtime_dispatch_timeout_does_not_fail_a_persisted_evaluation(service_module):
-    from contracts.errors.exceptions import RuntimeServiceTimeoutError
+def test_worker_submission_failure_keeps_a_persisted_evaluation_pending(service_module):
+    from management.services.evaluation.dispatch import EvaluationSubmissionError
 
     update = MagicMock()
     bind_import_attribute(service_module, "update_agent_evaluation_status", update)
     future = MagicMock()
     future.cancelled.return_value = False
-    future.exception.return_value = RuntimeServiceTimeoutError("response lost after dispatch")
+    future.exception.return_value = EvaluationSubmissionError(500, "Failed to submit agent evaluation run")
+
+    service_module._make_background_done_callback("t1", "u1", 99)(future)
+
+    update.assert_not_called()
+
+
+def test_cancelled_background_dispatch_keeps_a_persisted_evaluation_pending(service_module):
+    update = MagicMock()
+    bind_import_attribute(service_module, "update_agent_evaluation_status", update)
+    future = Future()
+    assert future.cancel()
 
     service_module._make_background_done_callback("t1", "u1", 99)(future)
 
@@ -1390,19 +1402,19 @@ def test_execute_agent_evaluation_run_completes_with_overall_score(service_modul
     assert completed_calls[0].kwargs["score_overall"] == 1.0
 
 
-def test_owned_evaluation_finalizes_before_persisting_its_terminal_status(service_module):
+def test_owned_evaluation_persists_its_terminal_status_after_case_completion(service_module):
     _wire_executor_dependencies(service_module, [_make_exec_case(1)])
     writes = service_module.update_agent_evaluation_status
+    case_writes = service_module.update_agent_evaluation_case_result
 
-    def begin_finalizing():
-        assert [record.kwargs["status"] for record in writes.call_args_list] == ["RUNNING"]
+    def check_case_completion(*, status, **_):
+        if status == "COMPLETED":
+            assert case_writes.call_args.kwargs["status"] == "COMPLETED"
 
-    finalizing = MagicMock(side_effect=begin_finalizing)
-    result = service_module.execute_agent_evaluation_run("t1", "u1", 50, 99, before_finalize=finalizing)
+    writes.side_effect = check_case_completion
+    service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
 
-    assert result == "COMPLETED"
-    finalizing.assert_called_once_with()
-    assert writes.call_args.kwargs["status"] == "COMPLETED"
+    assert [record.kwargs["status"] for record in writes.call_args_list] == ["RUNNING", "RUNNING", "COMPLETED"]
     assert all(record.kwargs["expected_status"] == "RUNNING" for record in writes.call_args_list)
 
 
@@ -2042,22 +2054,30 @@ class TestScoreWithEvaluators:
         )
         assert scores == {"n1": 0.9, "c1": 1.0}
         executor.submit.assert_called_once()
-        assert executor.submit.call_args.args[0] == "evaluation-judge"
+        assert executor.submit.call_args.args[0] == "model-tool-io"
+        assert executor.submit.call_args.args[1].task_name == "agent-evaluation-judge"
 
-    def test_partial_judge_submission_waits_for_accepted_children(self, service_module, monkeypatch):
+    @pytest.mark.parametrize("cancelled", [False, True])
+    def test_partial_judge_submission_waits_for_accepted_children(self, service_module, monkeypatch, cancelled):
         executor = MagicMock()
-        first_future = MagicMock()
+        first_future = Future()
+        if cancelled:
+            first_future.cancel()
+        else:
+            first_future.set_exception(RuntimeError("first judge failed"))
+        read_result = MagicMock(wraps=first_future.result)
+        monkeypatch.setattr(first_future, "result", read_result)
         executor.submit.side_effect = [
             types.SimpleNamespace(future=first_future),
             RuntimeError("judge capacity full"),
         ]
-        set_import_attribute(monkeypatch, service_module, "runtime_thread_manager", executor)
+        set_import_attribute(monkeypatch, service_module, "config_thread_manager", executor)
         evaluators = {1: {"evaluator_type": "llm"}, 2: {"evaluator_type": "llm"}}
 
         with pytest.raises(RuntimeError, match="judge capacity full"):
-            service_module._score_with_evaluators(evaluators, "sys", "t1", "q", "e", "a", 99)
+            service_module._score_with_evaluators(evaluators, "sys", "t1", "q", "e", "a", 99, user_id="u1")
 
-        first_future.result.assert_called_once_with()
+        read_result.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -2649,6 +2669,19 @@ class TestSetupNoSetAndExecute:
         assert kw["error_message"].startswith("Failed to generate test queries")
         assert "RuntimeError" in kw["error_message"]
         assert "llm down" in kw["error_message"]
+
+    def test_submission_failure_keeps_generated_cases_available_for_redispatch(self, service_module):
+        from management.services.evaluation.dispatch import EvaluationSubmissionError
+
+        self._wire(service_module, models=[_make_eval_model(99, "llm")])
+        service_module._dispatch_agent_evaluation_run.side_effect = EvaluationSubmissionError(500)
+        update = MagicMock()
+        bind_import_attribute(service_module, "update_agent_evaluation_status", update)
+
+        service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
+
+        service_module.create_agent_evaluation_cases.assert_called_once()
+        update.assert_not_called()
 
     def test_runtime_upstream_failure_reports_dispatch_detail(self, service_module, monkeypatch):
         from contracts.errors.exceptions import RuntimeUpstreamError

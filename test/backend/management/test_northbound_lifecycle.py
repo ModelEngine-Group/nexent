@@ -28,11 +28,14 @@ def lifecycle(monkeypatch):
         set_default_thread_manager=MagicMock(), clear_default_thread_manager=MagicMock(),
     )
     state = MagicMock()
+    creator_state = MagicMock()
     recovery = SimpleNamespace(recover_northbound_tasks=MagicMock(),
                                schedule_interrupted_upload_cleanup=AsyncMock())
     monkeypatch.setitem(sys.modules, "management.thread_management", SimpleNamespace(config_thread_manager=manager))
     monkeypatch.setitem(sys.modules, "nexent.core.concurrency", concurrency)
-    monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state", SimpleNamespace(runtime_state_service=state))
+    monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state", SimpleNamespace(
+        runtime_state_service=state, creator_runtime_state_service=creator_state,
+    ))
     monkeypatch.setitem(sys.modules, "management.api.northbound", SimpleNamespace(router=APIRouter(), a2a_router=APIRouter()))
     monkeypatch.setitem(sys.modules, "backend.http.server.app_factory", SimpleNamespace(create_app=lambda **kw: FastAPI()))
     monkeypatch.setitem(sys.modules, "management.recovery", recovery)
@@ -73,6 +76,7 @@ async def test_management_owns_recovery_and_releases_cleanup_tasks(lifecycle):
         assert refresh.args[1].task_name == "system-configuration-refresh"
         assert recover.args[1].owner == "management.api.northbound_application"
         state.set_thread_manager.assert_called_once_with(manager)
+        module.creator_runtime_state_service.set_thread_manager.assert_called_once_with(manager)
         recovery.recover_northbound_tasks.assert_called_once_with()
         assert [call.args[0] for call in recovery.schedule_interrupted_upload_cleanup.await_args_list] == [
             "nexent-config", "nexent-northbound"]

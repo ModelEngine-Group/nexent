@@ -61,7 +61,8 @@ def runtime(mocker):
 
 
 async def test_debug_response_registers_run_and_cleans_up_after_last_frame(payload, runtime, mocker):
-    async def events(*args, **kwargs):
+    async def events(info, **_kwargs):
+        assert info.workspace_run_id == payload.run_id
         yield json.dumps({"type": "skill_artifact", "content": "internal"})
         yield json.dumps({"type": "text", "content": "answer"})
         runtime.execution.future.set_result(None)
@@ -73,6 +74,8 @@ async def test_debug_response_registers_run_and_cleans_up_after_last_frame(paylo
 
     await response({"type": "http", "asgi": {"spec_version": "2.4"}}, AsyncMock(), send)
 
+    runtime.materialize.assert_awaited_once_with(payload, ACTOR, ephemeral.prepare_run_snapshot)
+    assert runtime.manager.submit.call_args.args[1].run_id == payload.run_id
     assert response.headers["run_id"] == f"debug-{RUN_ID}"
     assert [call.args[0]["body"] for call in send.await_args_list[1:]] == [
         b": agentos-ready\n\n", b'data: {"type":"text","content":"answer"}\n\n', b"",
