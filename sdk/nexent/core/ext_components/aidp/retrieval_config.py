@@ -17,8 +17,11 @@ DEFAULTS = {
     "ontology_enhance_enable": False, "rule_enable": False,
 }
 CONFIG_KEYS = frozenset(DEFAULTS)
+# Hybrid/graph caps accept the legacy 0 so old tool instances can still be
+# saved; resolve_config normalizes 0 to the positive default before the wire
+# payload is built. AIDP itself only accepts 1-100 when a cap is present.
 INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
-                  "full_text_candidates": (1, 500), "hybrid_top_k": (1, 100), "graph_top_k": (1, 100)}
+                  "full_text_candidates": (1, 500), "hybrid_top_k": (0, 100), "graph_top_k": (0, 100)}
 FIELD_CHANNELS = {
     "hybrid_top_k": ("vector_search", "full_text_search"),
     "graph_top_k": ("graph_search",),
@@ -156,6 +159,11 @@ def prepare_config(config, inherited):
         raw["search_method"] = effective["search_method"]
     if raw.get("reranking_enable") is False and "graph_reranking_enable" not in raw:
         raw["graph_reranking_enable"] = False
+    # Persist the normalized positive caps instead of the legacy zero, so a
+    # later tool update does not keep an invalid value in the instance.
+    for key in ("hybrid_top_k", "graph_top_k"):
+        if raw.get(key) == 0:
+            raw[key] = effective[key]
     return raw
 
 

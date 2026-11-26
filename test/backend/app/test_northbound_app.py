@@ -1865,6 +1865,7 @@ class _FakeAidpStream:
 
 class TestAidpFileDownload:
     FILE_UUID = "11111111-2222-4333-8444-555555555555"
+    FILE_UUID_HEX = "11111111222243338444555555555555"
     PATH = f"/nb/v1/knowledge-bases/kb-42/files/{FILE_UUID}/download"
 
     def _patch(self, *, permission_error=None, upstream=None):
@@ -1894,7 +1895,7 @@ class TestAidpFileDownload:
         assert response.headers["content-type"] == "application/pdf"
         assert "manual.pdf" in response.headers["content-disposition"]
         assert response.headers["x-file-size"] == "14"
-        upstream.assert_awaited_once_with("https://aidp.internal", "aidp-secret", "kb-42", self.FILE_UUID)
+        upstream.assert_awaited_once_with("https://aidp.internal", "aidp-secret", "kb-42", self.FILE_UUID_HEX)
 
     @pytest.mark.parametrize("error,expected", [
         (AidpKbPermissionDeniedError(kb_id="kb-42", user_id="user-1", required="READ"), 403),

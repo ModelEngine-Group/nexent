@@ -68,7 +68,6 @@ def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
 @pytest.mark.parametrize("config,field", [
     ({"top_k":0},"top_k"), ({"top_k":True},"top_k"), ({"top_k":1.5},"top_k"),
     ({"vector_candidates":0},"vector_candidates"), ({"vector_candidates":501},"vector_candidates"),
-    ({"hybrid_top_k":0},"hybrid_top_k"), ({"graph_top_k":0},"graph_top_k"),
     ({"hybrid_top_k":101},"hybrid_top_k"), ({"graph_top_k":101},"graph_top_k"),
     ({"full_text_candidates":"7"},"full_text_candidates"), ({"score_threshold":math.nan},"score_threshold"),
     ({"graph_score_threshold":math.inf},"graph_score_threshold"), ({"score_threshold":True},"score_threshold"),
@@ -84,6 +83,15 @@ def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
 def test_strict_validation(config, field):
     with pytest.raises(ValueError, match=field):
         validate_config(config)
+
+
+def test_legacy_zero_caps_are_accepted_and_normalized_on_save():
+    effective = validate_config({"hybrid_top_k": 0, "graph_top_k": 0})
+    assert effective["hybrid_top_k"] == 5
+    assert effective["graph_top_k"] == 5
+    prepared = prepare_config({"hybrid_top_k": 0, "graph_top_k": 0}, {})
+    assert prepared["hybrid_top_k"] == 5
+    assert prepared["graph_top_k"] == 5
 
 
 @pytest.mark.parametrize("k", [10, 100])

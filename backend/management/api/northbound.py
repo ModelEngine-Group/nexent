@@ -644,7 +644,7 @@ async def download_knowledge_base_file(
             server_url,
             api_key,
             kds_id,
-            str(file_uuid),
+            file_uuid.hex,
         )
     except AppException as exc:
         # AIDP's KB-scoped download endpoint rejects a file that does not
