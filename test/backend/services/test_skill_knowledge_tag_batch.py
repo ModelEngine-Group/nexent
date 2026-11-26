@@ -81,7 +81,7 @@ def test_knowledge_batch_uses_real_access_rules_with_one_context_read(monkeypatc
 
 
 @pytest.mark.parametrize("user_id,roles,expected", [
-    ("tenant-a", ["USER"], None),
+    ("tenant-a", ["USER"], "READ_ONLY"),
     ("reader", ["ADMIN", "OPS"], "EDIT"),
 ])
 def test_knowledge_batch_uses_account_roles_for_admin_access(monkeypatch, user_id, roles, expected):
