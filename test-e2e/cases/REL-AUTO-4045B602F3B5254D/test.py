@@ -13,6 +13,7 @@ from contracts.constants.constants import CONFIG_SERVICE_NAME
 def test_interrupted_upload_delete_failure_degrades_to_recovery(monkeypatch):
     from management.db.file import attachment as attachment_db
     from infrastructure.rdb import client as client_db
+    from infrastructure.object_storage.client import minio_client
     from management.db.knowledge_base import file_lifecycle as lifecycle_db
     from management.db.models import KnowledgeFileLifecycle
     from management.recovery import (
@@ -62,7 +63,7 @@ def test_interrupted_upload_delete_failure_degrades_to_recovery(monkeypatch):
 
     monkeypatch.setattr(lifecycle_db, 'transition_file_record', spy_transition)
     monkeypatch.setattr(attachment_db, 'delete_file', fake_delete_file)
-    monkeypatch.setattr(client_db.minio_client, 'file_exists', fake_file_exists)
+    monkeypatch.setattr(minio_client, 'file_exists', fake_file_exists)
 
     cutoff = datetime.utcnow() - timedelta(seconds=UPLOAD_RECOVERY_GRACE_SECONDS)
 
