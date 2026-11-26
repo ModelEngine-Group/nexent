@@ -114,8 +114,19 @@ mock_botocore_crt.CRT_SUPPORTED_AUTH_TYPES = []
 
 
 class _MockMessageObserver:
+    def __init__(self):
+        self.messages = []
+        self._citation_indexes = {}
+
     def add_message(self, *args, **kwargs):
+        self.messages.append({"args": args, "kwargs": kwargs})
         return None
+
+    def reserve_citations(self, tool_sign, count):
+        """Mirror the real observer's per-tool-sign citation counter."""
+        start = self._citation_indexes.get(tool_sign, 1)
+        self._citation_indexes[tool_sign] = start + count
+        return start
 
 
 class _MockProcessType:
@@ -125,6 +136,8 @@ class _MockProcessType:
     WARNING = "warning"
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
+    SEARCH_CONTENT = "search_content"
+    PICTURE_WEB = "picture_web"
 
 
 @dataclass
@@ -259,10 +272,25 @@ class _MockToolSign:
     FILE_OPERATION = _EnumStub("f")
     TERMINAL_OPERATION = _EnumStub("t")
     MULTIMODAL_OPERATION = _EnumStub("m")
+    MCP_SEARCH = _EnumStub("q")
+
+
+class _MockSearchResultTextMessage:
+    # Mirror the keyword-only constructor of the real SearchResultTextMessage
+    # so that mcp_citation imports and annotation code work against the stub.
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def to_dict(self):
+        return dict(self.__dict__)
+
+    def to_model_dict(self):
+        return dict(self.__dict__)
 
 
 mock_tools_common_message_module.ToolCategory = _MockToolCategory
 mock_tools_common_message_module.ToolSign = _MockToolSign
+mock_tools_common_message_module.SearchResultTextMessage = _MockSearchResultTextMessage
 
 mock_nexent_core_utils_module.observer = mock_nexent_core_utils_observer_module
 mock_nexent_core_utils_module.prompt_template_utils = mock_prompt_template_utils_module
