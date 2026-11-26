@@ -35,6 +35,57 @@ journey("WB-CONTROLS-D4-004", async ({ page, contract }) => {
   });
   const editor = await installEditor(page);
   editor.draft.tools = [tool];
+  // The agent editor now always renders the global login prompt when the page
+  // has no authenticated identity (the retired speed layout used to suppress
+  // it). Install a controlled identity so the stubbed editor page renders
+  // instead of the login prompt.
+  const controlledUser = {
+    user_id: "wb-controls-fixture",
+    tenant_id: "wb-controls-tenant",
+    user_email: "fixture@nexent.test",
+    username: "wb-controls-fixture",
+    user_role: "ADMIN",
+    roles: ["ADMIN"],
+    auth_provider: "local",
+    group_ids: [],
+    permissions: ["agent:create", "skill:create"],
+    accessiblePages: [
+      "/",
+      "/agents",
+      "/workbench",
+      "/newchat",
+      "/skill-space",
+      "/knowledge",
+    ],
+  };
+  const installControlledIdentity = async () => {
+    await page.context().addCookies([
+      {
+        name: "nexent_token_expires_at",
+        value: String(Math.floor(Date.now() / 1000) + 3600),
+        url: process.env.NEXENT_BASE_URL ?? "http://localhost:3000",
+      },
+    ]);
+    await page.addInitScript(() =>
+      localStorage.setItem(
+        "user_info",
+        JSON.stringify({
+          id: controlledUser.user_id,
+          tenantId: controlledUser.tenant_id,
+          email: controlledUser.user_email,
+          role: controlledUser.user_role,
+        }),
+      ),
+    );
+    // The workbench fixture still returns the pre-#4400 user payload shape
+    // (accessibleRoutes), which now fails authService and never initializes
+    // authorization. This route must stay registered after that fixture and is
+    // therefore installed again for the Workbench half of the journey.
+    await page.route("**/api/user/current_user_info", (route) =>
+      route.fulfill({ json: { data: { user: controlledUser } } }),
+    );
+  };
+  await installControlledIdentity();
   const installAidpRoutes = async () => {
     await page.route("**/api/tenant_config/deployment_version", (route) =>
       route.fulfill({
@@ -129,6 +180,12 @@ journey("WB-CONTROLS-D4-004", async ({ page, contract }) => {
   await contract.step(contract.expectedIds("steps")[1], async () => {
     await page.unrouteAll({ behavior: "wait" });
     await prepareWorkbench(page);
+    await installControlledIdentity();
+    // The agent page's creator-history hook reads `items` unconditionally from
+    // the response, so the generic fixture body (no items) must not be used.
+    await page.route("**/api/conversation/creator_histories**", (route) =>
+      route.fulfill({ json: { items: [], total: 0 } }),
+    );
     await installAidpRoutes();
     await page.reload();
     await page.route("**/api/agent/run", async (route) => {
