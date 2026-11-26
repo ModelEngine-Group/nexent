@@ -206,14 +206,14 @@ API keys are sensitive credentials. Do not place real values in screenshots, doc
 
 ### 4.4 Knowledge Base Capacity and Quotas
 
-Nexent supports capacity controls at the platform, tenant, user, and individual knowledge-base levels. Platform capacity constrains the tenant quota pool, but does not replace upload-time enforcement.
+Nexent supports capacity controls at the platform, tenant, user, and individual knowledge-base levels. SU and ADMIN users manage platform, tenant, and personal quotas, while users with knowledge-base create or edit permissions set individual knowledge-base quotas. Platform capacity constrains the tenant quota pool, but does not replace upload-time enforcement.
 
 | Level | Management entry | Scope |
 | --- | --- | --- |
 | **Platform capacity** | **System Configuration → Platform Quota Overview** | Declared platform storage, allocated capacity, actual usage, and remaining allocatable capacity across tenants |
 | **Tenant quota** | **Tenant Resources → Knowledge Base → Shared Knowledge Bases** | Combined storage usage of knowledge bases in a tenant |
 | **Personal quota** | **Tenant Resources → Knowledge Base → Personal Knowledge Bases** | Combined storage usage of all private knowledge bases owned by a user |
-| **Knowledge-base quota** | **Storage Quota** when creating a knowledge base | Storage usage of that individual knowledge base |
+| **Knowledge-base quota** | **Storage Quota** when creating or editing a knowledge base | Storage usage of that individual knowledge base |
 
 #### Platform Capacity
 
@@ -225,18 +225,19 @@ Super administrators can open [Platform Quota Overview in System Configuration](
 
 #### Tenant Quotas and Warnings
 
-Under **Tenant Resources → Knowledge Base → Shared Knowledge Bases**, super administrators click **Allocate Storage**, while tenant administrators click **Quota Management**:
+Super administrators first select the target tenant under **Tenant Resources**, then open **Knowledge Base → Shared Knowledge Bases** and click **Allocate Storage**. Tenant administrators click **Quota Management** on the same page for their current tenant:
 
 - Both GB and MB are supported. Clear the quota field and save to delete the limit and restore **Unlimited**.
 - A quota cannot be lower than the tenant's current usage. When platform capacity is configured, total tenant allocations cannot exceed that capacity.
 - A tenant quota set by a super administrator becomes SU-managed and read-only for tenant administrators. After the super administrator clears it, tenant administrators can manage it again.
 - Capacity warnings appear at **80%** usage by default and become critical at **95%**. Tenant administrators can enable or disable warnings and adjust these thresholds in Quota Management. The warning threshold must remain below the critical threshold.
+- The sum of individual knowledge-base quotas can exceed the tenant hard quota, creating **oversubscription**. The page displays a warning, but actual available capacity remains constrained by the tenant hard quota.
 
 ![Tenant quota management](./assets/resource-management/tenant-quota-allocation.png)
 
 #### Personal Knowledge Base Quotas
 
-Super administrators and tenant administrators can switch between **Shared Knowledge Bases** and **Personal Knowledge Bases**. The personal view provides:
+After selecting a target tenant, super administrators can switch between **Shared Knowledge Bases** and **Personal Knowledge Bases** in the same way as tenant administrators. Tenant administrators work within their current tenant. The personal view provides:
 
 - The number of users with personal knowledge bases, total knowledge-base count, total usage, and total allocated quota
 - Search by username or email, sorting by usage or quota, and pagination
@@ -249,7 +250,7 @@ A user-specific quota takes precedence over the tenant default. Users without a 
 
 #### Usage and Quota Enforcement
 
-Quota checks use the persistent source-file storage ledger. Elasticsearch physical index size is displayed as independent observability data. Once a limit is reached, subsequent uploads are rejected, but existing knowledge bases and files are not deleted as a result. Lowering a quota also does not automatically remove historical data. To continue uploading, delete files that are no longer needed to release capacity, or ask an administrator to adjust the applicable quota.
+Quota checks use the persistent source-file storage ledger. Elasticsearch physical index size is displayed as independent observability data. Shared knowledge bases are checked against tenant and individual knowledge-base quotas; private knowledge-base uploads also check the uploader's effective personal quota. Once a limit is reached, subsequent uploads are rejected, but existing knowledge bases and files are not deleted as a result. Lowering a quota also does not automatically remove historical data. To continue uploading, delete files that are no longer needed to release capacity, or ask an administrator to adjust the applicable quota.
 
 ### 4.5 Filter and Locate Resources
 

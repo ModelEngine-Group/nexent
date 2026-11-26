@@ -37,7 +37,7 @@ Regular users can view **Personal Knowledge Base Capacity** at the bottom of the
 The default upload limit for a single knowledge-base file is **100 MB**. The actual limit is controlled by the `MAX_KNOWLEDGE_FILE_SIZE_MB` system parameter and can be changed under [System Configuration → System Parameters](../operations/configuration#file-upload). If the deployment gateway or reverse proxy has a lower limit, adjust that component as well.
 :::
 
-Before upload, Nexent also checks the knowledge-base quota, tenant capacity, and personal knowledge-base capacity. If the page reports insufficient capacity, delete files you no longer need or ask an administrator to adjust the relevant quota.
+Before upload, shared knowledge bases are checked against tenant capacity and their own quota. Private knowledge-base uploads also check the uploader's personal knowledge-base capacity. If the page reports insufficient capacity, delete files you no longer need or ask an administrator to adjust the relevant quota.
 
 For management entries, precedence, and warning rules for platform, tenant, personal, and individual knowledge-base quotas, see [Knowledge Base Capacity and Quotas](../resource-management#44-knowledge-base-capacity-and-quotas). Reaching a limit never automatically deletes historical content. Delete files you no longer need to release capacity, or ask an administrator to adjust the quota before the next upload.
 
