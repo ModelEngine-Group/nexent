@@ -16,7 +16,7 @@ import {
 } from "antd";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
+import { aidpKnowledgeTypographyTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
@@ -31,6 +31,7 @@ import {
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
+import AidpOntologyDomainFields from "@/ext_components/aidp/pages/ontology/components/common/AidpOntologyDomainFields";
 import styles from "./AidpOntologyCreatePage.module.css";
 
 interface CreateFormValues {
@@ -91,7 +92,7 @@ const AidpOntologyCreatePage: React.FC = () => {
 
   if (!isAuthzReady) {
     return (
-      <ConfigProvider theme={aidpKnowledgeVisualTheme}>
+      <ConfigProvider theme={aidpKnowledgeTypographyTheme}>
         <div className={`${typography.page} ${styles.page}`}>
           <Skeleton active paragraph={{ rows: 4 }} />
         </div>
@@ -101,7 +102,7 @@ const AidpOntologyCreatePage: React.FC = () => {
 
   if (!canManage) {
     return (
-      <ConfigProvider theme={aidpKnowledgeVisualTheme}>
+      <ConfigProvider theme={aidpKnowledgeTypographyTheme}>
         <div className={`${typography.page} ${styles.page}`}>
           <Alert
             type="error"
@@ -119,7 +120,7 @@ const AidpOntologyCreatePage: React.FC = () => {
   }
 
   return (
-    <ConfigProvider theme={aidpKnowledgeVisualTheme}>
+    <ConfigProvider theme={aidpKnowledgeTypographyTheme}>
       <div
         className={`${typography.page} relative flex h-full min-h-0 w-full flex-col`}
       >
@@ -148,80 +149,38 @@ const AidpOntologyCreatePage: React.FC = () => {
           />
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
-          <section className={styles.panel}>
-            <Form
+          <Form
               form={form}
               layout="vertical"
               requiredMark
               className={drawerStyles.form}
             >
-              <Form.Item
-                name="name"
-                required
-                label={
-                  <AidpOntologyFieldLabel
-                    label={t("aidpKnowledge.ontologyDomainName")}
-                    help={t("aidpKnowledge.ontologyDomainNameHint")}
-                  />
-                }
-                extra={byteCountText(
-                  nameValue,
-                  ONTOLOGY_NAME_MAX_BYTES,
-                  t("aidpKnowledge.ontologyBytesUnit")
-                )}
-                rules={[
-                  {
-                    validator: async (_rule, value: string) => {
-                      const error = validateOntologyName(value ?? "", t);
-                      if (error) throw new Error(error);
-                    },
-                  },
-                ]}
-              >
-                <Input maxLength={ONTOLOGY_NAME_MAX_CHARS} />
-              </Form.Item>
-              <Form.Item
-                name="description"
-                label={
-                  <AidpOntologyFieldLabel
-                    label={t("aidpKnowledge.ontologyDomainDescription")}
-                    help={t("aidpKnowledge.ontologyDomainDescriptionHint")}
-                  />
-                }
-                extra={byteCountText(
-                  descriptionValue,
-                  ONTOLOGY_DESCRIPTION_MAX_BYTES,
-                  t("aidpKnowledge.ontologyBytesUnit")
-                )}
-                rules={[
-                  {
-                    validator: async (_rule, value: string) => {
-                      const error = validateOntologyDescription(value ?? "", t);
-                      if (error) throw new Error(error);
-                    },
-                  },
-                ]}
-              >
-                <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} />
-              </Form.Item>
+              <AidpOntologyDomainFields
+                nameValue={nameValue}
+                descriptionValue={descriptionValue}
+                descriptionMinRows={4}
+                descriptionMaxRows={8}
+              />
             </Form>
-            {errorMessage && (
-              <div className={drawerStyles.error} role="alert">
-                {errorMessage}
-              </div>
-            )}
-            <div className={styles.footer}>
-              <Button onClick={backToList}>{t("common.cancel")}</Button>
-              <Button
-                type="primary"
-                loading={saving}
-                onClick={() => void handleCreate()}
-              >
-                {t("aidpKnowledge.ontologyCreateSubmit")}
-              </Button>
+          {errorMessage && (
+            <div className={drawerStyles.error} role="alert">
+              {errorMessage}
             </div>
-          </section>
+          )}
         </div>
+        <footer className={styles.footer}>
+          <div />
+          <div className="flex items-center gap-2">
+            <Button onClick={backToList}>{t("common.cancel")}</Button>
+            <Button
+              type="primary"
+              loading={saving}
+              onClick={() => void handleCreate()}
+            >
+              {t("aidpKnowledge.ontologyCreateSubmit")}
+            </Button>
+          </div>
+        </footer>
       </div>
     </ConfigProvider>
   );

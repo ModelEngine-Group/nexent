@@ -51,6 +51,7 @@ import AidpOntologyDomainDrawer from "./components/common/AidpOntologyDomainDraw
 import AidpOntologyDeleteModal from "./components/common/AidpOntologyDeleteModal";
 import AidpOntologyGuide from "./components/common/AidpOntologyGuide";
 import styles from "./AidpOntologyListPage.module.css";
+import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 const DEFAULT_PAGE_SIZE = 12;
@@ -448,11 +449,11 @@ const AidpOntologyListPage: React.FC = () => {
       return <div className={styles.cardGrid}>{domains.map(renderCard)}</div>;
     }
     return (
-      <div className={styles.tableArea} ref={tableContainer}>
+      <div className={tableStyles.tableArea} ref={tableContainer}>
         <Table<AidpOntologyDomain>
           rowKey="domain_id"
           size="middle"
-          className={styles.table}
+          className={tableStyles.table}
           columns={columns}
           dataSource={domains}
           pagination={false}
@@ -539,7 +540,7 @@ const AidpOntologyListPage: React.FC = () => {
               />
             </div>
           </div>
-          <div className={styles.tableArea}>{renderBody()}</div>
+          <div className={tableStyles.tableArea}>{renderBody()}</div>
           {domains.length > 0 && (
             <div className={styles.paginationRow}>
               <AidpPagination

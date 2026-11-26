@@ -4,6 +4,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useQuery } from "@tanstack/react-query";
 
 import { App, Form, Modal, Select, Skeleton, Switch, Tooltip } from "antd";
@@ -136,7 +137,8 @@ const AidpKnowledgeInformationTab: React.FC<
   onRefreshDetail,
 }) => {
   const { t } = useTranslation();
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
   const canEdit = detail.permission === "EDIT";
   const graphConfig = useMemo(() => graphConfigOf(detail), [detail]);
   const graphLlmModelName =
@@ -489,7 +491,7 @@ const AidpKnowledgeInformationTab: React.FC<
     // modal.confirm returns a thenable without .catch; consume it so a failed
     // confirmation stays in the dialog instead of an unhandled rejection.
     void Promise.resolve(
-      modal.confirm({
+      confirm({
         title: t("aidpKnowledge.detailGraphDisableTitle"),
         content: (
           <div className="whitespace-pre-wrap">

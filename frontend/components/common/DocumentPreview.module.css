@@ -58,6 +58,20 @@
 .controls button:focus-visible {
   outline: 2px solid #0067d1;
 }
+.controlsDivider {
+  width: 1px;
+  height: 20px;
+  background: #e5e5e5;
+  margin: 0 2px;
+}
+.pageInput {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pageInput :global(.ant-input-number) {
+  width: 52px;
+}
 .controls span {
   min-width: 48px;
   text-align: center;

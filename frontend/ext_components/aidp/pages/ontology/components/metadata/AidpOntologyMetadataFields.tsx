@@ -3,28 +3,23 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   App,
   Button,
   Checkbox,
-  Descriptions,
-  Drawer,
   Dropdown,
   Empty,
   Form,
   Input,
-  Segmented,
-  Select,
+  Tooltip,
   Skeleton,
   Table,
-  Tooltip,
   type TableColumnsType,
 } from "antd";
 import {
-  DeleteOutlined,
-  EditOutlined,
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
@@ -61,6 +56,12 @@ import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOnt
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 import styles from "./AidpOntologyMetadataFields.module.css";
+import {
+  AidpMetadataCreateDrawer,
+  AidpMetadataEditDrawer,
+  AidpMetadataDetailDrawer,
+  type MetadataFieldFormValues,
+} from "./AidpOntologyMetadataDrawers";
 
 interface AidpOntologyMetadataFieldsProps {
   domainId: string;
@@ -68,28 +69,19 @@ interface AidpOntologyMetadataFieldsProps {
   autoOpenCreate?: boolean;
 }
 
-interface FieldFormValues {
-  field_name: string;
-  field_type: AidpMetadataFieldType;
-}
-
-interface CreateFormValues {
-  field_name: string;
-  field_type: AidpMetadataFieldType;
-}
-
 const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   domainId,
   autoOpenCreate = false,
 }) => {
   const { t } = useTranslation();
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const { user, isAuthzReady } = useAuthorizationContext();
   const canManage = !!user && AIDP_ONTOLOGY_MANAGER_ROLES.has(user.role) && isAuthzReady;
-  const [editForm] = Form.useForm<FieldFormValues>();
-  const [createForm] = Form.useForm<CreateFormValues>();
+  const [editForm] = Form.useForm<MetadataFieldFormValues>();
+  const [createForm] = Form.useForm<MetadataFieldFormValues>();
   const [createOpen, setCreateOpen] = useState(autoOpenCreate);
   const [editing, setEditing] = useState<AidpOntologyMetadataField | null>(
     null
@@ -189,7 +181,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   };
 
   const handleCreate = async () => {
-    let values: CreateFormValues;
+    let values: MetadataFieldFormValues;
     try {
       values = await createForm.validateFields();
     } catch {
@@ -221,7 +213,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
 
   const handleEdit = async () => {
     if (!editing) return;
-    let values: FieldFormValues;
+    let values: MetadataFieldFormValues;
     try {
       values = await editForm.validateFields();
     } catch {
@@ -264,7 +256,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   };
 
   const handleDelete = (field: AidpOntologyMetadataField) => {
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyMetadataDeleteConfirmTitle", {
         name: field.field_name,
       }),
@@ -321,7 +313,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       message.warning(t("aidpKnowledge.ontologyMetadataSelectDeleteRequired"));
       return;
     }
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyMetadataBatchUnbindTitle"),
       width: 520,
       content: (
@@ -372,7 +364,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       message.warning(t("aidpKnowledge.ontologyMetadataSelectDeleteRequired"));
       return;
     }
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyMetadataBatchDeleteTitle", {
         count: selectedFields.length,
       }),
@@ -756,225 +748,31 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         </div>
       )}
 
-      <Drawer
-        rootClassName={drawerStyles.drawer}
+      <AidpMetadataCreateDrawer
         open={createOpen}
-        width={560}
-        title={t("aidpKnowledge.ontologyMetadataCreateModalTitle")}
+        form={createForm}
+        saving={saving}
+        errorMessage={createError}
         onClose={() => setCreateOpen(false)}
-        destroyOnHidden
-        footer={
-          <div className={drawerStyles.footer}>
-            <Button onClick={() => setCreateOpen(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="primary"
-              loading={saving}
-              onClick={() => void handleCreate()}
-            >
-              {t("common.confirm")}
-            </Button>
-          </div>
-        }
-      >
-        <Form
-          form={createForm}
-          layout="vertical"
-          className={drawerStyles.form}
-          initialValues={{ field_type: "string" }}
-        >
-          <Form.Item
-            name="field_name"
-            label={
-              <AidpOntologyFieldLabel
-                label={t("aidpKnowledge.ontologyMetadataFieldName")}
-                help={t("aidpKnowledge.ontologyMetadataFieldNameHelp")}
-              />
-            }
-            required
-            rules={[
-              {
-                validator: async (_rule, value: string) => {
-                  if (!(value ?? "").trim()) {
-                    throw new Error(
-                      t("aidpKnowledge.ontologyMetadataNameRequired")
-                    );
-                  }
-                  const error = validateFieldName(value ?? "", t);
-                  if (error) throw new Error(error);
-                },
-              },
-            ]}
-          >
-            <Input maxLength={63} showCount />
-          </Form.Item>
-          <Form.Item
-            name="field_type"
-            label={
-              <AidpOntologyFieldLabel
-                label={t("aidpKnowledge.ontologyMetadataValueType")}
-                help={t("aidpKnowledge.ontologyMetadataFieldTypeHelp")}
-              />
-            }
-            required
-            rules={[{ required: true }]}
-          >
-            <Segmented<AidpMetadataFieldType>
-              block
-              className={styles.typeSegmented}
-              options={[
-                { value: "string", label: typeLabel("string") },
-                { value: "number", label: typeLabel("number") },
-                { value: "date", label: typeLabel("date") },
-              ]}
-            />
-          </Form.Item>
-          {createError && (
-            <div className={drawerStyles.error} role="alert">
-              {createError}
-            </div>
-          )}
-        </Form>
-      </Drawer>
+        onCreate={() => void handleCreate()}
+      />
 
-      <Drawer
-        rootClassName={drawerStyles.drawer}
-        open={!!editing}
-        width={560}
+      <AidpMetadataEditDrawer
+        field={editing}
+        form={editForm}
+        saving={saving}
+        errorMessage={errorMessage}
         onClose={closeEdit}
-        destroyOnHidden
-        title={t("aidpKnowledge.ontologyMetadataEditTitle")}
-        footer={
-          <div className={drawerStyles.footer}>
-            <Button onClick={closeEdit}>{t("common.cancel")}</Button>
-            <Button
-              type="primary"
-              loading={saving}
-              onClick={() => void handleEdit()}
-            >
-              {t("aidpKnowledge.ontologyMetadataSave")}
-            </Button>
-          </div>
-        }
-      >
-        <Form
-          key={editing ? `edit-${editing.id ?? editing.field_name}` : "closed"}
-          form={editForm}
-          layout="vertical"
-          className={drawerStyles.form}
-          initialValues={{
-            field_name: editing?.field_name ?? "",
-            field_type: editing?.field_type ?? "string",
-          }}
-        >
-          <Form.Item
-            name="field_name"
-            label={
-              <AidpOntologyFieldLabel
-                label={t("aidpKnowledge.ontologyMetadataFieldName")}
-                help={t("aidpKnowledge.ontologyMetadataFieldNameHelp")}
-              />
-            }
-            rules={[
-              {
-                validator: async (_rule, value: string) => {
-                  if (!(value ?? "").trim()) {
-                    throw new Error(
-                      t("aidpKnowledge.ontologyMetadataNameRequired")
-                    );
-                  }
-                  const error = validateFieldName(value ?? "", t);
-                  if (error) throw new Error(error);
-                },
-              },
-            ]}
-          >
-            <Input maxLength={63} />
-          </Form.Item>
-          <Form.Item
-            name="field_type"
-            label={
-              <AidpOntologyFieldLabel
-                label={t("aidpKnowledge.ontologyMetadataFieldType")}
-                help={t("aidpKnowledge.ontologyMetadataFieldTypeHelp")}
-              />
-            }
-            rules={[{ required: true }]}
-          >
-            <Select
-              disabled
-              options={[
-                { value: "string", label: typeLabel("string") },
-                { value: "number", label: typeLabel("number") },
-                { value: "date", label: typeLabel("date") },
-              ]}
-            />
-          </Form.Item>
+        onSave={() => void handleEdit()}
+      />
 
-          {errorMessage && (
-            <div className={drawerStyles.error} role="alert">
-              {errorMessage}
-            </div>
-          )}
-        </Form>
-      </Drawer>
-
-      <Drawer
-        rootClassName={drawerStyles.drawer}
-        open={!!detailField}
-        width={560}
-        mask={false}
+      <AidpMetadataDetailDrawer
+        field={detailField}
+        items={detailItems}
         onClose={() => setDetailField(null)}
-        destroyOnHidden
-        title={
-          detailField?.field_name ??
-          t("aidpKnowledge.ontologyMetadataDetailTitle")
-        }
-        extra={
-          detailField ? (
-            <div className={styles.headerActions}>
-              <Tooltip title={t("aidpKnowledge.ontologyMetadataEdit")}>
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={t("aidpKnowledge.ontologyMetadataEdit")}
-                  icon={<EditOutlined />}
-                  onClick={() => {
-                    const target = detailField;
-                    setDetailField(null);
-                    openEdit(target);
-                  }}
-                />
-              </Tooltip>
-              <Tooltip title={t("aidpKnowledge.ontologyMetadataDelete")}>
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={t("aidpKnowledge.ontologyMetadataDelete")}
-                  icon={<DeleteOutlined />}
-                  onClick={() => {
-                    const target = detailField;
-                    setDetailField(null);
-                    handleDelete(target);
-                  }}
-                />
-              </Tooltip>
-            </div>
-          ) : null
-        }
-      >
-        {detailField && (
-          <div className={styles.detailBody}>
-            <Descriptions
-              size="small"
-              column={1}
-              bordered
-              items={detailItems}
-            />
-          </div>
-        )}
-      </Drawer>
+        onEdit={openEdit}
+        onDelete={handleDelete}
+      />
     </div>
   );
 };

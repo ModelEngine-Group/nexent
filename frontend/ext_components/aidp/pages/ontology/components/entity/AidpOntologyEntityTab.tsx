@@ -4,6 +4,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   App,
@@ -59,7 +60,8 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   autoOpenCreate = false,
 }) => {
   const { t } = useTranslation();
-  const { modal, message } = App.useApp();
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const { user, isAuthzReady } = useAuthorizationContext();
@@ -181,7 +183,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       message.warning(t("aidpKnowledge.ontologyEntityMissingIdAction"));
       return;
     }
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyEntityDeleteTitleFixed"),
       content: (
         <div className={entityStyles.confirmBody}>
@@ -268,7 +270,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       message.warning(t("aidpKnowledge.ontologyEntitySelectDeleteRequired"));
       return;
     }
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyEntityBatchDeleteTitle", {
         count: selectedEntities.length,
       }),

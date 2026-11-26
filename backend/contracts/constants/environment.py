@@ -228,8 +228,6 @@ HIDE_HOME_PAGE = os.getenv('HIDE_HOME_PAGE', 'true').lower() in ('true', '1', 'y
 AIDP_SERVER_URL = os.getenv('AIDP_SERVER_URL', '')
 AIDP_API_KEY = os.getenv('AIDP_API_KEY', '')
 AIDP_TENANT_ID = os.getenv('AIDP_TENANT_ID', 'aidp')
-# Fallback AIDP language when a request carries no Accept-Language header.
-AIDP_ACCEPT_LANGUAGE = os.getenv('AIDP_ACCEPT_LANGUAGE', 'zh-CN')
 
 # Minio Configuration
 MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT')

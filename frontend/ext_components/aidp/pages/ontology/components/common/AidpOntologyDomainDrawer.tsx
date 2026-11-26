@@ -19,6 +19,7 @@ import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/onto
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import styles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
+import AidpOntologyDomainFields from "./AidpOntologyDomainFields";
 
 interface AidpOntologyDomainDrawerProps {
   open: boolean;
@@ -137,55 +138,10 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
           description: domain?.description ?? "",
         }}
       >
-        <Form.Item
-          name="name"
-          required
-          label={
-            <AidpOntologyFieldLabel
-              label={t("aidpKnowledge.ontologyDomainName")}
-              help={t("aidpKnowledge.ontologyDomainNameHint")}
-            />
-          }
-          extra={byteCountText(
-            nameValue,
-            ONTOLOGY_NAME_MAX_BYTES,
-            t("aidpKnowledge.ontologyBytesUnit")
-          )}
-          rules={[
-            {
-              validator: async (_rule, value: string) => {
-                const error = validateOntologyName(value ?? "", t);
-                if (error) throw new Error(error);
-              },
-            },
-          ]}
-        >
-          <Input maxLength={ONTOLOGY_NAME_MAX_CHARS} />
-        </Form.Item>
-        <Form.Item
-          name="description"
-          label={
-            <AidpOntologyFieldLabel
-              label={t("aidpKnowledge.ontologyDomainDescription")}
-              help={t("aidpKnowledge.ontologyDomainDescriptionHint")}
-            />
-          }
-          extra={byteCountText(
-            descriptionValue,
-            ONTOLOGY_DESCRIPTION_MAX_BYTES,
-            t("aidpKnowledge.ontologyBytesUnit")
-          )}
-          rules={[
-            {
-              validator: async (_rule, value: string) => {
-                const error = validateOntologyDescription(value ?? "", t);
-                if (error) throw new Error(error);
-              },
-            },
-          ]}
-        >
-          <Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} />
-        </Form.Item>
+        <AidpOntologyDomainFields
+          nameValue={nameValue}
+          descriptionValue={descriptionValue}
+        />
         {errorMessage && (
           <div className={styles.error} role="alert">
             {errorMessage}

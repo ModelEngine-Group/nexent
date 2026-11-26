@@ -6,23 +6,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Document, Page, pdfjs } from 'react-pdf';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { InputNumber } from 'antd';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  Minus,
-  Minimize2,
-  Maximize2,
-  Menu,
-  PanelLeft,
-  X
-} from 'lucide-react';
+import { X } from 'lucide-react';
 import { OutlineItem, PdfViewerProps, ScaleMode, ViewportAnchor } from '@/types/file';
 import { ignoreAbortError, getPageWrapperStyle } from '@/lib/filePreviewUtils';
 import { PDF_DOCUMENT_OPTIONS } from '@/lib/pdfPreviewOptions.mjs';
 import log from '@/lib/logger';
 import PdfThumbnailRail from './PdfThumbnailRail';
+import PreviewControls from './PreviewControls';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -389,57 +379,6 @@ export function PdfViewer({
     if (numPages > 0) handleScrollRef.current();
   }, [numPages]);
 
-  const [toolbarVisible, setToolbarVisible] = useState(true);
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const resetIdleTimer = useCallback(() => {
-    setToolbarVisible(true);
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = setTimeout(() => setToolbarVisible(false), 3000);
-  }, []);
-
-  useEffect(() => {
-    resetIdleTimer();
-    return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
-  }, [resetIdleTimer]);
-
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    container.addEventListener('mousemove', resetIdleTimer, { passive: true });
-    container.addEventListener('pointerdown', resetIdleTimer, { passive: true });
-
-    return () => {
-      container.removeEventListener('mousemove', resetIdleTimer);
-      container.removeEventListener('pointerdown', resetIdleTimer);
-    };
-  }, [resetIdleTimer]);
-
-  useEffect(() => {
-    const toolbar = toolbarRef.current;
-    if (!toolbar) {
-      return;
-    }
-
-    const handlePointerEnter = () => {
-      if (idleTimerRef.current) {
-        clearTimeout(idleTimerRef.current);
-      }
-      setToolbarVisible(true);
-    };
-
-    toolbar.addEventListener('mouseenter', handlePointerEnter);
-    toolbar.addEventListener('mouseleave', resetIdleTimer);
-
-    return () => {
-      toolbar.removeEventListener('mouseenter', handlePointerEnter);
-      toolbar.removeEventListener('mouseleave', resetIdleTimer);
-    };
-  }, [resetIdleTimer]);
-
   // Keep the current viewport center stable after zoom changes.
   useEffect(() => {
     const anchor = pendingViewportAnchorRef.current;
@@ -561,113 +500,53 @@ export function PdfViewer({
           </Document>
         </div>
 
-        <div
-          ref={toolbarRef}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 transition-opacity duration-300"
-          style={{ opacity: toolbarVisible ? 1 : 0.15 }}
-        >
-          <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
-            {enableThumbnails && (
-              <>
-                <button
-                  onClick={() => {
-                    setShowThumbnails(value => !value);
-                    setShowOutline(false);
-                  }}
-                  className={`p-1.5 rounded-lg transition-colors text-sm flex items-center gap-1 ${showThumbnails ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'}`}
-                  aria-label={t('filePreview.pdf.thumbnails')}
-                  aria-expanded={showThumbnails}
-                  title={t('filePreview.pdf.thumbnails')}
-                >
-                  <PanelLeft size={16} />
-                </button>
-                <div className="w-px h-5 bg-gray-200 mx-1" />
-              </>
-            )}
-            {outline && outline.length > 0 && (
-              <>
-                <button
-                  onClick={() => {
-                    setShowOutline(v => !v);
-                    setShowThumbnails(false);
-                  }}
-                  className={`p-1.5 rounded-lg transition-colors text-sm flex items-center gap-1 ${showOutline ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'}`}
-                  title={showOutline ? t('filePreview.pdf.hideOutline') : t('filePreview.pdf.showOutline')}
-                >
-                  <Menu size={16} />
-                </button>
-                <div className="w-px h-5 bg-gray-200 mx-1" />
-              </>
-            )}
-
-            <button
-              onClick={previousPage}
-              disabled={pageNumber <= 1}
-              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
-              title={t('filePreview.pdf.previousPage')}
-            >
-              <ChevronLeft size={16} />
-            </button>
-
-            <div className="flex items-center gap-1.5 px-1">
-              <InputNumber
-                size="small"
-                min={1}
-                max={numPages}
-                value={pageNumber}
-                onChange={(value) => {
-                  if (value) {
-                    goToPage(value);
-                  }
-                }}
-                className="w-12"
-                controls={false}
-                title={t('filePreview.pdf.goToPage')}
-              />
-              <span className="text-sm text-gray-500 select-none">/ {numPages}</span>
-            </div>
-
-            <button
-              onClick={nextPage}
-              disabled={pageNumber >= numPages}
-              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
-              title={t('filePreview.pdf.nextPage')}
-            >
-              <ChevronRight size={16} />
-            </button>
-
-            <div className="w-px h-5 bg-gray-200 mx-1" />
-
-            <button
-              onClick={zoomOut}
-              disabled={scaleMode === 'custom' && customScale <= 0.5}
-              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
-              title={t('filePreview.zoomOut')}
-            >
-              <Minus size={16} />
-            </button>
-
-            <button
-              onClick={() => {
-                captureViewportCenterAnchor();
-                setScaleMode(prev => prev === 'fit-page' ? 'fit-width' : 'fit-page');
-              }}
-              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
-              title={scaleMode === 'fit-page' ? t('filePreview.pdf.fitWidth') : t('filePreview.pdf.fitPage')}
-            >
-              {scaleMode === 'fit-page' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
-            </button>
-
-            <button
-              onClick={zoomIn}
-              disabled={scaleMode === 'custom' && customScale >= 3}
-              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
-              title={t('filePreview.zoomIn')}
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-        </div>
+        <PreviewControls
+          zoom={pageScale}
+          onZoom={(next) => {
+            captureViewportCenterAnchor();
+            setCustomScale(next);
+            setScaleMode('custom');
+          }}
+          page={pageNumber}
+          pages={numPages}
+          onPage={goToPage}
+          pageInput={{ value: pageNumber, onChange: goToPage }}
+          onToggleThumbnails={
+            enableThumbnails
+              ? () => {
+                  setShowThumbnails((value) => !value);
+                  setShowOutline(false);
+                }
+              : undefined
+          }
+          thumbnailsOpen={showThumbnails}
+          onToggleOutline={
+            outline && outline.length > 0
+              ? () => {
+                  setShowOutline((value) => !value);
+                  setShowThumbnails(false);
+                }
+              : undefined
+          }
+          outlineOpen={showOutline}
+          zoomStep={0.25}
+          minZoom={0.3}
+          maxZoom={3}
+          showActualSize={false}
+          fitToggle={{
+            active: scaleMode === 'fit-page',
+            label:
+              scaleMode === 'fit-page'
+                ? t('filePreview.pdf.fitWidth')
+                : t('filePreview.pdf.fitPage'),
+            onToggle: () => {
+              captureViewportCenterAnchor();
+              setScaleMode((prev) =>
+                prev === 'fit-page' ? 'fit-width' : 'fit-page'
+              );
+            },
+          }}
+        />
       </div>
     </div>
   );

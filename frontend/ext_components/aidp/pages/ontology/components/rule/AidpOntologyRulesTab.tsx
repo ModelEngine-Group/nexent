@@ -3,6 +3,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -66,7 +67,8 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   domainId,
 }) => {
   const { t } = useTranslation();
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const { user, isAuthzReady } = useAuthorizationContext();
@@ -171,7 +173,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   };
 
   const handleDelete = (rule: AidpOntologyRule) => {
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyRulesDeleteTitleFixed"),
       content: (
         <div className={ruleStyles.confirmBody}>
@@ -211,7 +213,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       message.warning(t("aidpKnowledge.ontologyRulesSelectRequired"));
       return;
     }
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyRulesBatchDeleteTitle", {
         count: selectedRules.length,
       }),

@@ -62,6 +62,10 @@
   overflow: auto;
 }
 
+.table :global(.ant-table) {
+  min-width: 0;
+}
+
 .table :global(.ant-table-thead > tr > th) {
   height: 40px;
   padding: 8px !important;

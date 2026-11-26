@@ -3,6 +3,7 @@
 "use client";
 
 import React, { useCallback } from "react";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useMutation } from "@tanstack/react-query";
 
 import type { AidpFolderFileItem } from "@/ext_components/aidp/shared/types/management";
@@ -128,6 +129,8 @@ export const useAidpFileActions = (
     selectedDeletableUuids,
     selectedMovableUuids,
   } = state;
+
+  const confirm = useConfirmModal();
 
   const moveFilesMutation = useMutation({
     mutationFn: ({
@@ -492,7 +495,7 @@ export const useAidpFileActions = (
       if (!file.file_uuid) return;
       setDeleteConfirmOpen(true);
       void Promise.resolve(
-        modal.confirm({
+        confirm({
           title: t("aidpKnowledge.deleteFileTitle"),
           centered: true,
           okText: t("common.delete"),
@@ -580,7 +583,7 @@ export const useAidpFileActions = (
     }
     setDeleteConfirmOpen(true);
     void Promise.resolve(
-      modal.confirm({
+      confirm({
         title: t("aidpKnowledge.deleteFilesTitle"),
         centered: true,
         okText: t("common.delete"),
@@ -681,7 +684,7 @@ export const useAidpFileActions = (
       }
       setDeleteConfirmOpen(true);
       void Promise.resolve(
-        modal.confirm({
+        confirm({
           title: t("aidpKnowledge.folderDeleteTitle"),
           centered: true,
           okText: t("common.delete"),
@@ -840,7 +843,7 @@ export const useAidpFileActions = (
         await runMove(false);
       } catch (error) {
         if (isAidpNameConflictError(error)) {
-          modal.confirm({
+          confirm({
             title: t("aidpKnowledge.folderMergeTitle"),
             content: t("aidpKnowledge.folderMergeContent", {
               name: target.name,

@@ -32,6 +32,7 @@ import {
   isAidpDuplicateError,
 } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
+import { scrollToFirstAidpFormError } from "@/ext_components/aidp/shared/utils/aidpFormErrors";
 import {
   useAidpModels,
   useAidpGraphTemplate,
@@ -247,15 +248,7 @@ const AidpCreateKbPage: React.FC = () => {
       try {
         await form.validateFields(["name", "description"]);
       } catch (error) {
-        if (
-          typeof error === "object" &&
-          error !== null &&
-          "errorFields" in error
-        ) {
-          const field = (error as { errorFields: { name: string[] }[] })
-            .errorFields[0];
-          if (field) form.scrollToField(field.name, { focus: true });
-        }
+        scrollToFirstAidpFormError(form, error);
         return;
       }
     }
@@ -342,18 +335,10 @@ const AidpCreateKbPage: React.FC = () => {
       }
       if (createdId) openCreatedKb(createdId);
     } catch (error) {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "errorFields" in error
-      ) {
-        const fields = (error as { errorFields: { name: string[] }[] })
+      if (scrollToFirstAidpFormError(form, error, { defer: true })) {
+        const fields = (error as { errorFields: { name: (string | number)[] }[] })
           .errorFields;
-        const names = fields.map((field) => field.name[0]);
-        setInvalidFields(names);
-        window.requestAnimationFrame(() => {
-          if (fields[0]) form.scrollToField(fields[0].name, { focus: true });
-        });
+        setInvalidFields(fields.map((field) => String(field.name[0])));
         return;
       }
       handleError(error, {

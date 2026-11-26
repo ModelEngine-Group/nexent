@@ -3,6 +3,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useTranslation } from "react-i18next";
 
 import { App, Button, ConfigProvider, Popover, Tag, Tooltip } from "antd";
@@ -11,7 +12,6 @@ import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 
 import log from "@/lib/logger";
-import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import { getAidpPlainMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import type {
@@ -19,6 +19,7 @@ import type {
   AidpSensitiveWordMode,
 } from "@/ext_components/aidp/shared/types/sensitiveWord";
 import { useAidpKnowledgeDetail } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpKnowledgeDetail";
+import { useAidpGuardrailSettings } from "@/ext_components/aidp/pages/sensitive-words/hooks/useAidpGuardrailSettings";
 import AidpSensitiveWordDrawer from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordDrawer";
 import AidpSensitiveWordsTable from "@/ext_components/aidp/pages/sensitive-words/components/AidpSensitiveWordsTable";
 import AidpSensitiveWordsToolbar from "@/ext_components/aidp/pages/sensitive-words/components/AidpSensitiveWordsToolbar";
@@ -50,6 +51,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const { message, modal } = App.useApp();
+  const confirm = useConfirmModal();
 
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -63,9 +65,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
     editing: AidpSensitiveWordItem | null;
   }>({ open: false, editing: null });
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [guardrailOpen, setGuardrailOpen] = useState(false);
-  const [guardrailEnabled, setGuardrailEnabled] = useState(false);
-  const [savingGuardrail, setSavingGuardrail] = useState(false);
 
   const listQuery = useAidpSensitiveWordList(
     knowledgeBaseId,
@@ -75,6 +74,15 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
     mode
   );
   const detailQuery = useAidpKnowledgeDetail(knowledgeBaseId);
+  const {
+    open: guardrailOpen,
+    setOpen: setGuardrailOpen,
+    enabled: guardrailEnabled,
+    setEnabled: setGuardrailEnabled,
+    saving: savingGuardrail,
+    openModal: openGuardrailModal,
+    save: handleSaveGuardrail,
+  } = useAidpGuardrailSettings(knowledgeBaseId, detailQuery);
   const deleteMutation = useDeleteAidpSensitiveWords(knowledgeBaseId);
   const rows = useMemo(() => listQuery.data?.value ?? [], [listQuery.data]);
   const total = listQuery.data?.total_count ?? rows.length;
@@ -156,7 +164,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
   };
 
   const confirmDelete = (item: AidpSensitiveWordItem) => {
-    modal.confirm({
+    confirm({
       title: t("aidpSensitiveWords.deleteConfirmTitle"),
       content: t("aidpSensitiveWords.deleteConfirmContent", {
         word: item.word,
@@ -169,47 +177,10 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
     });
   };
 
-  const openGuardrailModal = async () => {
-    setGuardrailEnabled(detailQuery.data?.sensitive_intercept_enable === 1);
-    setGuardrailOpen(true);
-    try {
-      // Read the latest KB detail so a stale cache cannot flip the switch the
-      // wrong way. The shared query key also refreshes the parent detail view.
-      const result = await detailQuery.refetch();
-      if (result.data) {
-        setGuardrailEnabled(result.data.sensitive_intercept_enable === 1);
-      }
-    } catch {
-      // Keep the cached value; save errors are reported separately.
-    }
-  };
-
-  const handleSaveGuardrail = async () => {
-    setSavingGuardrail(true);
-    try {
-      await aidpKnowledgeService.updateKb(knowledgeBaseId, {
-        sensitive_intercept_enable: guardrailEnabled ? 1 : 0,
-      });
-      message.success(t("aidpSensitiveWords.guardrailSaveSuccess"));
-      setGuardrailOpen(false);
-      await detailQuery.refetch();
-    } catch (error) {
-      log.error("Failed to update AIDP sensitive word guardrails:", {
-        id: knowledgeBaseId,
-        error,
-      });
-      message.error(
-        getAidpPlainMessage(error, t("aidpSensitiveWords.guardrailSaveFailed"))
-      );
-    } finally {
-      setSavingGuardrail(false);
-    }
-  };
-
   const handleBatchDelete = () => {
     const targets = selectedRows;
     if (targets.length === 0) return;
-    modal.confirm({
+    confirm({
       title: t("aidpSensitiveWords.batchDeleteConfirmTitle"),
       content: t("aidpSensitiveWords.batchDeleteConfirmContent", {
         count: targets.length,

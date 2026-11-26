@@ -4,6 +4,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   App,
@@ -45,7 +46,8 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
   onChanged,
 }) => {
   const { t } = useTranslation();
-  const { modal, message } = App.useApp();
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -145,7 +147,7 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
   };
 
   const openCancelConfirm = (rows: AidpOntologyBinding[]) => {
-    modal.confirm({
+    confirm({
       title: t("aidpKnowledge.ontologyBindingCancelTitle"),
       content: (
         <div className={bindingStyles.confirmBody}>

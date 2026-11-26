@@ -13,7 +13,7 @@ from urllib.parse import quote, urljoin
 import httpx
 from nexent.utils.http_client_manager import http_client_manager
 
-from contracts.constants.environment import AIDP_ACCEPT_LANGUAGE, AIDP_TENANT_ID
+from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 
@@ -36,8 +36,9 @@ _AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _AIDP_READ_TIMEOUT_SECONDS = 30.0
 _AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
-# Per-request language from the frontend. AIDP_ACCEPT_LANGUAGE is only the
-# fallback for requests without an Accept-Language header.
+# Per-request language from the frontend. Calls without a frontend request
+# (background jobs, server-side evaluation) fall back to Chinese.
+_DEFAULT_AIDP_LANGUAGE = "zh-CN"
 _aidp_accept_language: ContextVar[str | None] = ContextVar(
     "aidp_accept_language", default=None
 )
@@ -50,7 +51,7 @@ def set_aidp_accept_language(value: str | None) -> None:
 
 
 def _current_aidp_accept_language() -> str:
-    return _aidp_accept_language.get() or AIDP_ACCEPT_LANGUAGE
+    return _aidp_accept_language.get() or _DEFAULT_AIDP_LANGUAGE
 
 
 def _aidp_headers(api_key: str, *, content_type: bool = True) -> dict[str, str]:

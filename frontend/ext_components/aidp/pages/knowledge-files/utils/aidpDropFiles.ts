@@ -49,6 +49,30 @@ const readDirectoryEntries = (
     readBatch();
   });
 
+const DROP_TRAVERSAL_CONCURRENCY = 8;
+
+/** Map entries with a fixed worker count so a deep tree cannot flood the browser. */
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  mapper: (item: T) => Promise<R>,
+  limit = DROP_TRAVERSAL_CONCURRENCY
+): Promise<R[]> => {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index]);
+      }
+    }
+  );
+  await Promise.all(workers);
+  return results;
+};
+
 const walkEntry = async (
   entry: LegacyFileSystemEntry,
   parentPath: string
@@ -63,8 +87,8 @@ const walkEntry = async (
   if (entry.isDirectory && entry.createReader) {
     const reader = entry.createReader();
     const children = await readDirectoryEntries(reader);
-    const nested = await Promise.all(
-      children.map((child) => walkEntry(child, entryPath))
+    const nested = await mapWithConcurrency(children, (child) =>
+      walkEntry(child, entryPath)
     );
     return nested.flat();
   }
@@ -89,7 +113,7 @@ export const collectDroppedFiles = async (
 
   if (entries.length > 0) {
     const collected = (
-      await Promise.all(entries.map((entry) => walkEntry(entry, "")))
+      await mapWithConcurrency(entries, (entry) => walkEntry(entry, ""))
     ).flat();
     if (collected.length > 0) return collected;
   }
