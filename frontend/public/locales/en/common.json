@@ -6402,6 +6402,7 @@
   "aidpKnowledge.chunkModeSmart": "Smart chunking",
   "aidpKnowledge.deleteDocsLimit": "You can delete up to {{max}} files at a time. Please reduce your selection.",
   "aidpKnowledge.deleteDocsPartial": "Delete task submitted for {{success}} file(s), {{failed}} failed",
+  "aidpKnowledge.deleteFilesResultTitle": "Delete finished: {{success}} succeeded, {{failed}} failed",
   "aidpKnowledge.folderCreate": "New folder",
   "aidpKnowledge.folderRename": "Rename",
   "aidpKnowledge.folderMove": "Move to",

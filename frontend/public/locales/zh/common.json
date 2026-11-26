@@ -6339,6 +6339,7 @@
   "aidpKnowledge.chunkModeSmart": "智能分片",
   "aidpKnowledge.deleteDocsLimit": "单次最多删除 {{max}} 个文件，请减少选择数量",
   "aidpKnowledge.deleteDocsPartial": "已下发 {{success}} 个删除任务，{{failed}} 个失败",
+  "aidpKnowledge.deleteFilesResultTitle": "删除完成：成功 {{success}} 个，失败 {{failed}} 个",
   "aidpKnowledge.folderCreate": "新建文件夹",
   "aidpKnowledge.folderRename": "重命名",
   "aidpKnowledge.folderMove": "移动到",

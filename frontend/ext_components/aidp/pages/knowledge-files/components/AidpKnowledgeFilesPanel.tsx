@@ -127,6 +127,31 @@ interface FileMoveFailure {
   items: FileMoveFailureItem[];
 }
 
+interface FileDeleteFailure {
+  successCount: number;
+  failedCount: number;
+  items: FileMoveFailureItem[];
+}
+
+const localizedFailureReason = (
+  item:
+    | {
+        reason_zh?: string;
+        reason_en?: string;
+        message?: string;
+        reason?: string;
+      }
+    | undefined,
+  language: string,
+  fallback: string
+): string =>
+  (language.startsWith("zh")
+    ? item?.reason_zh || item?.reason_en
+    : item?.reason_en || item?.reason_zh) ||
+  item?.message ||
+  item?.reason ||
+  fallback;
+
 const FILE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   file_name: 140,
   file_type: 55,
@@ -189,6 +214,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [folderNameDialog, setFolderNameDialog] =
     useState<FolderNameDialog | null>(null);
   const [folderNameSaving, setFolderNameSaving] = useState(false);
+  const [folderNameError, setFolderNameError] = useState<string | null>(null);
   const [folderMoveTarget, setFolderMoveTarget] =
     useState<AidpFolderNodeTarget | null>(null);
   const [fileMoveRequest, setFileMoveRequest] =
@@ -211,6 +237,8 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [moveFailures, setMoveFailures] = useState<FileMoveFailure | null>(
     null
   );
+  const [deleteFailures, setDeleteFailures] =
+    useState<FileDeleteFailure | null>(null);
   const [movingFileUuids, setMovingFileUuids] = useState<string[]>([]);
   const [dragOverFolderKey, setDragOverFolderKey] = useState<string | null>(
     null
@@ -350,9 +378,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const refreshAll = useCallback(() => {
     setTreeReloadToken((current) => current + 1);
     void treeQuery.refetch();
-    void searchQuery.refetch();
+    if (globalSearchActive) void searchQuery.refetch();
     onFilesChanged?.();
-  }, [onFilesChanged, searchQuery, treeQuery]);
+  }, [globalSearchActive, onFilesChanged, searchQuery, treeQuery]);
 
   const openFolder = useCallback((path: string) => {
     setCurrentPath(path);
@@ -458,7 +486,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const performFileMove = useCallback(
     async (fileUuids: string[], targetFolder: string) => {
       if (fileUuids.length === 0) return;
-      if (targetFolder === currentPath) {
+      if (!globalSearchActive && targetFolder === currentPath) {
         message.info(t("aidpKnowledge.fileMoveSameFolder"));
         return;
       }
@@ -471,12 +499,11 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           targetFolder
         );
         const failedItems = (result.failed_list ?? []).map((item) => {
-          const reason =
-            (i18n.language.startsWith("zh")
-              ? item.reason_zh || item.reason_en
-              : item.reason_en || item.reason_zh) ||
-            item.message ||
-            t("aidpKnowledge.fileMoveFailed");
+          const reason = localizedFailureReason(
+            item,
+            i18n.language,
+            t("aidpKnowledge.fileMoveFailed")
+          );
           return {
             fileUuid: item.file_uuid,
             fileName: fileNameByUuid.get(item.file_uuid) || item.file_uuid,
@@ -545,6 +572,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     [
       currentPath,
       fileNameByUuid,
+      globalSearchActive,
       i18n.language,
       knowledgeBase.kds_id,
       message,
@@ -719,6 +747,22 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     [knowledgeBase.kds_id, message, t]
   );
 
+  const stepBackIfPageEmptied = useCallback(
+    (deletedCount: number) => {
+      if (deletedCount <= 0 || deletedCount < displayedFiles.length) return;
+      if (globalSearchActive) {
+        setSearchPageParams((current) =>
+          current.page > 1 ? { ...current, page: current.page - 1 } : current
+        );
+      } else {
+        setPageParams((current) =>
+          current.page > 1 ? { ...current, page: current.page - 1 } : current
+        );
+      }
+    },
+    [displayedFiles.length, globalSearchActive]
+  );
+
   const handleDeleteFile = useCallback(
     (file: AidpFolderFileItem) => {
       if (!file.file_uuid) return;
@@ -750,17 +794,19 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                   (item) => item.file_uuid === file.file_uuid
                 )
               ) {
-                const reason =
-                  (i18n.language.startsWith("zh")
-                    ? failed?.reason_zh || failed?.reason_en
-                    : failed?.reason_en || failed?.reason_zh) ||
-                  failed?.message ||
-                  failed?.reason ||
-                  t("aidpKnowledge.deleteDocFailed");
+                const reason = localizedFailureReason(
+                  failed,
+                  i18n.language,
+                  t("aidpKnowledge.deleteDocFailed")
+                );
                 const code = failed?.error_code ?? failed?.code;
                 throw code ? new ApiError(code, reason) : new Error(reason);
               }
               message.success(t("aidpKnowledge.deleteDocSuccess"));
+              setSelectedFileKeys((current) =>
+                current.filter((key) => key !== `file:${file.file_uuid}`)
+              );
+              stepBackIfPageEmptied(1);
               refreshAll();
             } catch (error) {
               log.error("Failed to delete AIDP file:", {
@@ -781,7 +827,15 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         })
       ).catch(() => undefined);
     },
-    [i18n.language, knowledgeBase.kds_id, message, modal, refreshAll, t]
+    [
+      i18n.language,
+      knowledgeBase.kds_id,
+      message,
+      modal,
+      refreshAll,
+      stepBackIfPageEmptied,
+      t,
+    ]
   );
 
   const handleBatchDeleteFiles = useCallback(() => {
@@ -820,25 +874,33 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               fileUuids
             );
             const { success, failed } = result.summary;
+            const failedItems = (result.failed_list ?? []).map((item) => {
+              const reason = localizedFailureReason(
+                item,
+                i18n.language,
+                t("aidpKnowledge.deleteDocFailed")
+              );
+              return {
+                fileUuid: item.file_uuid,
+                fileName: fileNameByUuid.get(item.file_uuid) || item.file_uuid,
+                reason,
+              };
+            });
             if (failed === 0) {
               message.success(t("aidpKnowledge.deleteDocSuccess"));
-            } else if (success === 0) {
-              const first = result.failed_list[0];
-              const reason =
-                (i18n.language.startsWith("zh")
-                  ? first?.reason_zh || first?.reason_en
-                  : first?.reason_en || first?.reason_zh) ||
-                first?.message ||
-                first?.reason ||
-                t("aidpKnowledge.deleteDocFailed");
-              const code = first?.error_code ?? first?.code;
-              throw code ? new ApiError(code, reason) : new Error(reason);
+              setSelectedFileKeys([]);
+              setDeleteFailures(null);
             } else {
-              message.warning(
-                t("aidpKnowledge.deleteDocsPartial", { success, failed })
+              setDeleteFailures({
+                successCount: success,
+                failedCount: failed,
+                items: failedItems,
+              });
+              setSelectedFileKeys(
+                failedItems.map((item) => `file:${item.fileUuid}`)
               );
             }
-            setSelectedFileKeys([]);
+            stepBackIfPageEmptied(success);
             refreshAll();
           } catch (error) {
             log.error("Failed to batch delete AIDP files:", {
@@ -855,6 +917,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       })
     ).catch(() => undefined);
   }, [
+    fileNameByUuid,
     i18n.language,
     knowledgeBase.kds_id,
     message,
@@ -862,6 +925,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     refreshAll,
     selectedDeletableUuids,
     selectedFileUuids,
+    stepBackIfPageEmptied,
     t,
   ]);
 
@@ -954,6 +1018,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     async (name: string) => {
       if (!folderNameDialog) return;
       setFolderNameSaving(true);
+      setFolderNameError(null);
       try {
         if (folderNameDialog.mode === "create") {
           await aidpKnowledgeService.createFolder(
@@ -983,6 +1048,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           }
         }
         setFolderNameDialog(null);
+        setFolderNameError(null);
         refreshAll();
       } catch (error) {
         log.error("Failed to save AIDP folder name:", {
@@ -990,9 +1056,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           dialog: folderNameDialog,
           error,
         });
-        message.error(
-          getAidpErrorMessage(error, t, t("aidpKnowledge.folderSaveFailed"))
+        const errorText = getAidpErrorMessage(
+          error,
+          t,
+          t("aidpKnowledge.folderSaveFailed")
         );
+        if (isAidpNameConflictError(error)) {
+          setFolderNameError(errorText);
+          return;
+        }
+        message.error(errorText);
       } finally {
         setFolderNameSaving(false);
       }
@@ -1200,13 +1273,11 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         );
         if (result.summary.failed > 0) {
           const first = result.failed_list[0];
-          const reason =
-            (i18n.language.startsWith("zh")
-              ? first?.reason_zh || first?.reason_en
-              : first?.reason_en || first?.reason_zh) ||
-            first?.message ||
-            first?.reason ||
-            t("aidpKnowledge.retryTaskFailed");
+          const reason = localizedFailureReason(
+            first,
+            i18n.language,
+            t("aidpKnowledge.retryTaskFailed")
+          );
           throw new Error(reason);
         }
         message.success(t("aidpKnowledge.retryTaskSuccess"));
@@ -1636,6 +1707,31 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         />
       )}
 
+      {deleteFailures && (
+        <Alert
+          type={deleteFailures.successCount > 0 ? "warning" : "error"}
+          showIcon
+          closable
+          onClose={() => setDeleteFailures(null)}
+          className="mb-4"
+          title={t("aidpKnowledge.deleteFilesResultTitle", {
+            success: deleteFailures.successCount,
+            failed: deleteFailures.failedCount,
+          })}
+          description={
+            <ul className="max-h-40 overflow-auto">
+              {deleteFailures.items.map((item) => (
+                <li key={item.fileUuid}>
+                  <span className="font-medium">{item.fileName}</span>
+                  {"："}
+                  {item.reason}
+                </li>
+              ))}
+            </ul>
+          }
+        />
+      )}
+
       <div className="flex min-h-0 flex-auto gap-4 border-b border-gray-200">
         <aside
           className={`min-h-[240px] w-[240px] min-w-[200px] shrink-0 overflow-auto border-r border-gray-200 pr-2 ${panelStyles.folderRail}`}
@@ -1851,7 +1947,11 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         }
         placeholder={t("aidpKnowledge.folderNameLabel")}
         confirmLoading={folderNameSaving}
-        onCancel={() => setFolderNameDialog(null)}
+        errorMessage={folderNameError}
+        onCancel={() => {
+          setFolderNameDialog(null);
+          setFolderNameError(null);
+        }}
         onSubmit={(name) => void submitFolderName(name)}
       />
 

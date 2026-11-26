@@ -16,6 +16,8 @@ interface AidpFolderNameModalProps {
   /** Fixed, read-only text shown after the editable value (e.g. ".pdf"). */
   suffix?: string;
   confirmLoading?: boolean;
+  /** Server-side validation error, e.g. a duplicate folder name. */
+  errorMessage?: string | null;
   onCancel: () => void;
   onSubmit: (name: string) => void;
 }
@@ -29,12 +31,14 @@ const AidpFolderNameModal: React.FC<AidpFolderNameModalProps> = ({
   placeholder,
   suffix,
   confirmLoading = false,
+  errorMessage,
   onCancel,
   onSubmit,
 }) => {
   const { t } = useTranslation();
   const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | null>(null);
+  const displayedError = error || errorMessage;
 
   useEffect(() => {
     if (open) {
@@ -85,14 +89,16 @@ const AidpFolderNameModal: React.FC<AidpFolderNameModalProps> = ({
           suffix={
             suffix ? <span className="text-gray-400">{suffix}</span> : undefined
           }
-          status={error ? "error" : undefined}
+          status={displayedError ? "error" : undefined}
           onChange={(event) => {
             setValue(event.target.value);
             if (error) setError(null);
           }}
           onPressEnter={submit}
         />
-        {error && <div className="text-xs text-red-500">{error}</div>}
+        {displayedError && (
+          <div className="text-xs text-red-500">{displayedError}</div>
+        )}
       </div>
     </Modal>
   );

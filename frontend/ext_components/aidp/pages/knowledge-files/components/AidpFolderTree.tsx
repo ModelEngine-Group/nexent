@@ -30,6 +30,7 @@ import {
   folderAncestorPaths,
   isPathEqualOrInside,
   joinFolderPath,
+  parentFolderPath,
 } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
 import {
   collectDroppedFiles,
@@ -96,6 +97,7 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
   const [dropPath, setDropPath] = useState<string | null>(null);
 
   const childrenMapRef = useRef<Record<string, AidpFolderItem[]>>({});
+  const failedPathsRef = useRef<Set<string>>(new Set());
   const expandedKeysRef = useRef<React.Key[]>(["/"]);
   const loadingRef = useRef(new Set<string>());
   const controllersRef = useRef(new Map<string, AbortController>());
@@ -128,9 +130,11 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
           [path]: result.folders,
         };
         setChildrenMap(childrenMapRef.current);
+        failedPathsRef.current.delete(path);
         setError(null);
       } catch (requestError) {
         if (controller.signal.aborted) return;
+        failedPathsRef.current.add(path);
         log.error("Failed to load AIDP folder children:", {
           id: knowledgeBaseId,
           path,
@@ -164,6 +168,7 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
     controllersRef.current.forEach((controller) => controller.abort());
     controllersRef.current.clear();
     loadingRef.current.clear();
+    failedPathsRef.current.clear();
     childrenMapRef.current = {};
     setChildrenMap({});
     setError(null);
@@ -177,6 +182,22 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
       setRootLoading(false);
       for (const path of expanded) {
         if (requestId !== requestIdRef.current) return;
+        const parent = parentFolderPath(String(path));
+        const siblings = childrenMapRef.current[parent];
+        if (!siblings) continue;
+        if (
+          !siblings.some(
+            (folder) => joinFolderPath(parent, folder.folder_name) === path
+          )
+        ) {
+          // Rename/move/delete removed this branch; drop the stale expansion
+          // instead of requesting a path that no longer exists.
+          expandedKeysRef.current = expandedKeysRef.current.filter(
+            (key) => key !== path
+          );
+          setExpandedKeys(expandedKeysRef.current);
+          continue;
+        }
         await fetchChildren(String(path));
       }
     })();
@@ -423,9 +444,13 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
             size="small"
             type="link"
             onClick={() => {
+              const failed = new Set(failedPathsRef.current);
+              if (failed.size === 0) failed.add("/");
               setError(null);
-              setRootLoading(true);
-              void fetchChildren("/").finally(() => setRootLoading(false));
+              setRootLoading(failed.has("/"));
+              void Promise.all(
+                [...failed].map((path) => fetchChildren(path))
+              ).finally(() => setRootLoading(false));
             }}
           >
             {t("aidpKnowledge.retry")}
