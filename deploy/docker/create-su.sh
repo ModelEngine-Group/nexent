@@ -5,14 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/common.sh"
 status=0
 display_password="${2:-true}"
-docker exec -i nexent-config python -m management.cli.account bootstrap-su --check >/dev/null || status=$?
+deployment_run_logged docker exec -i nexent-config python -m management.cli.account bootstrap-su --check >/dev/null || status=$?
 case "$status" in
   0) exit 0 ;;
   3) ;;
   *) echo "Super administrator check failed. Inspect the command output above before retrying." >&2; exit "$status" ;;
 esac
 password="${1:-$(deployment_super_admin_password)}"
-result="$(printf '%s\n' "$password" | docker exec -i nexent-config python -m management.cli.account bootstrap-su)"
+result="$(printf '%s\n' "$password" | docker exec -i nexent-config python -m management.cli.account bootstrap-su \
+  2>>"${NEXENT_DEPLOY_LOG_FILE:-/dev/stderr}")"
 deployment_report_super_admin_creation "$result" "$password" "$display_password"
 unset result
 unset password

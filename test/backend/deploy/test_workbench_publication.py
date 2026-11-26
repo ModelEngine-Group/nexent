@@ -24,7 +24,10 @@ def shell_function(platform, name):
 
 
 def run_shell(script, env=None):
-    return subprocess.run([BASH, "-c", script], env=env, capture_output=True, text=True, check=False)
+    prelude = 'source "$1" || exit\nshift\n'
+    common = (REPO / "deploy/common/common.sh").as_posix()
+    return subprocess.run([BASH, "-c", prelude + script, "deploy-test", common], env=env,
+                          capture_output=True, text=True, check=False, timeout=20)
 
 
 @pytest.mark.parametrize("failure", [False, True])

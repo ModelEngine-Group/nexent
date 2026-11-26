@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 # Script to initialize Elasticsearch API key for Nexent
 
 NAMESPACE=nexent
@@ -126,6 +127,5 @@ if [ -n "$ENCODED_KEY" ] && [ "$ENCODED_KEY" != "$API_KEY_JSON" ]; then
   echo "ELASTICSEARCH_API_KEY generated for the Nexent application release."
 else
   echo "Failed to extract API key from response"
-  echo "Full response: $API_KEY_JSON"
   exit 1
 fi

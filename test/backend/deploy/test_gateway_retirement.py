@@ -10,6 +10,8 @@ import subprocess
 import pytest
 import yaml
 
+from .test_workbench_publication import run_shell
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -51,7 +53,6 @@ def test_old_container_is_retired_before_gateway_startup():
 
 
 def test_invalid_composition_does_not_stop_the_legacy_service():
-    executable = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
     script = """docker() { printf 'unexpected docker mutation\n' >&2; return 1; }
     mock_compose() { printf 'compose:%s\n' "$*" >&2; return 9; }
     DEPLOYMENT_SELECTED_DOCKER_SERVICES=nexent-gateway
@@ -61,7 +62,7 @@ def test_invalid_composition_does_not_stop_the_legacy_service():
     COMPOSE_FILE_SUFFIX=.yml
     """ + function("retire_legacy_northbound_container") + "\n" + function("deploy_core_services") + "\ndeploy_core_services"
     script = function("prepare_core_service_deployment") + "\n" + script
-    result = subprocess.run([executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=10)
+    result = run_shell(script)
     assert result.returncode == 1 and "config --quiet" in result.stderr
     assert "unexpected docker mutation" not in result.stderr
     assert "existing business services remain running" in result.stderr

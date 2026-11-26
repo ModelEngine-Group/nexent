@@ -46,7 +46,9 @@ cd nexent
 bash deploy.sh docker
 ```
 
-根目录 `deploy.sh` 只负责转发到目标部署脚本；Docker 真实实现为 `bash deploy/docker/deploy.sh`。Docker 和 Kubernetes 使用同一套部署配置模型；交互式运行会通过 Bash TUI 选择组件、端口策略和镜像源。`infrastructure` 必选，`application`、`data-process` 默认选中，也可以取消以部署更小的组合。使用 `--defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。非交互部署也可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
+根目录 `deploy.sh` 完成部署准备后转发到目标脚本。Docker 真实实现为 `bash deploy/docker/deploy.sh`。Docker 和 Kubernetes 使用同一套部署配置模型；交互式运行会通过 Bash TUI 选择组件、端口策略和镜像源。`infrastructure` 必选，`application`、`data-process` 默认选中，也可以取消以部署更小的组合。使用 `--defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。非交互部署也可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
+
+每次 Docker 或 Kubernetes 部署都会在仓库或离线包根目录的 `logs/deploy/` 下创建一个日志文件，启动时会显示完整路径。终端显示部署阶段、交互提示和失败摘要，SQL 迁移、Python 初始化等命令的详细输出写入该文件。
 
 历史账号升级和故障恢复统一参见[迁移与排障手册](deploy/sql/tools/supabase_to_postgres/README.md)。
 

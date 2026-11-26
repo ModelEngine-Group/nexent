@@ -95,7 +95,8 @@ get_source() {
   fi
   source_user="${source_user:-postgres}"; source_db="${source_db:-supabase}"; source_port="${source_port:-${source_name:+5432}}"; source_port="${source_port:-5436}"
   if [ -z "$source_password" ] && [ -t 0 ]; then
-    read -r -s -p 'Supabase PostgreSQL password: ' source_password; printf '\n' >&2
+    read -r -s -p 'Supabase PostgreSQL password: ' source_password 2>&"${NEXENT_DEPLOY_PROMPT_FD:-2}"
+    printf '\n' >&"${NEXENT_DEPLOY_PROMPT_FD:-2}"
   fi
   [ -n "$source_password" ] || fail "Set SUPABASE_POSTGRES_PASSWORD to the original source password"
 }

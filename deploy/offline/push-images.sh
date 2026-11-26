@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -e
 
@@ -141,7 +142,7 @@ fi
 if [ -z "$REGISTRY_USERNAME" ]; then
   if [ -t 0 ]; then
     if [ "$PROMPT_FOR_MISSING" = "true" ]; then
-      read -r -p "Registry username: " REGISTRY_USERNAME
+      read -r -p "Registry username: " REGISTRY_USERNAME 2>&"${NEXENT_DEPLOY_PROMPT_FD:-2}"
     else
       echo "Error: --registry-username is required when pushing images." >&2
       exit 1
@@ -160,8 +161,8 @@ fi
 if [ -z "$REGISTRY_PASSWORD" ]; then
   if [ -t 0 ]; then
     if [ "$PROMPT_FOR_MISSING" = "true" ]; then
-      read -r -s -p "Registry password: " REGISTRY_PASSWORD
-      echo ""
+      read -r -s -p "Registry password: " REGISTRY_PASSWORD 2>&"${NEXENT_DEPLOY_PROMPT_FD:-2}"
+      printf '\n' >&"${NEXENT_DEPLOY_PROMPT_FD:-1}"
     else
       echo "Error: registry password is required when pushing images." >&2
       exit 1

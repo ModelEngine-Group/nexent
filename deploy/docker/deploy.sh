@@ -48,6 +48,7 @@ APP_VERSION=""
 
 cd "$SCRIPT_DIR"
 
+deployment_start_log "$PROJECT_ROOT" "$@" || exit 1
 deployment_source_root_env "$PROJECT_ROOT" "$PROJECT_ROOT/docker" || exit 1
 
 # Parse arg
@@ -599,14 +600,14 @@ generate_elasticsearch_api_key() {
   fi
 
   # Generate API key
-  echo "🔑 Generating ELASTICSEARCH_API_KEY..."
+  deployment_run_logged printf '%s\n' 'Generating ELASTICSEARCH_API_KEY...'
   API_KEY_JSON=$(docker exec nexent-elasticsearch curl -s -u "elastic:${ELASTIC_PASSWORD:-nexent@2025}" "http://localhost:9200/_security/api_key" -H "Content-Type: application/json" -d '{"name":"my_api_key","role_descriptors":{"my_role":{"cluster":["all"],"index":[{"names":["*"],"privileges":["all"]}]}}}')
 
   # Extract API key and add to .env
   ELASTICSEARCH_API_KEY=$(echo "$API_KEY_JSON" | grep -o '"encoded":"[^"]*"' | awk -F'"' '{print $4}')
-  echo "✅ ELASTICSEARCH_API_KEY Generated: $ELASTICSEARCH_API_KEY"
   if [ -n "$ELASTICSEARCH_API_KEY" ]; then
     update_env_var "ELASTICSEARCH_API_KEY" "$ELASTICSEARCH_API_KEY"
+    deployment_log "Elasticsearch API key saved to deploy/env/.env."
   fi
 }
 
@@ -627,7 +628,7 @@ generate_env_for_infrastructure() {
   # Export DEPLOYMENT_VERSION to ensure generate_env.sh can access it
   export DEPLOYMENT_VERSION
 
-  if DEPLOYMENT_ROOT_ENV="$ROOT_ENV_FILE" bash "$SCRIPT_DIR/generate_env.sh"; then
+  if DEPLOYMENT_ROOT_ENV="$ROOT_ENV_FILE" deployment_run_logged bash "$SCRIPT_DIR/generate_env.sh"; then
       echo "   ✅ deploy/env/.env updated successfully for infrastructure mode!"
       if [ -f "$ROOT_ENV_FILE" ]; then
           set -a
@@ -731,7 +732,7 @@ stop_monitoring_services() {
   docker_monitoring_containers_exist || return 0
 
   echo "🔭 Stopping monitoring services..."
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" down --remove-orphans; then
+  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" down --remove-orphans; then
     echo "   ❌ ERROR Failed to stop monitoring services"
     return 1
   fi
@@ -755,7 +756,7 @@ cleanup_stale_monitoring_services() {
 
   echo "   🧹 Removing stale monitoring provider services..."
   ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" stop "${stale_services[@]}" >/dev/null 2>&1 || true
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" rm -f "${stale_services[@]}"; then
+  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" rm -f "${stale_services[@]}"; then
     echo "   ❌ ERROR Failed to remove stale monitoring services"
     return 1
   fi
@@ -786,7 +787,7 @@ pull_mcp_image() {
     echo "   💡 Skipping pull, using existing image"
   else
     echo "   📥 MCP image not found locally, pulling..."
-    if docker pull "${MCP_IMAGE_NAME}"; then
+    if deployment_run_logged docker pull "${MCP_IMAGE_NAME}"; then
       echo "   ✅ MCP image pulled successfully"
       echo "   💡 The image will be available when you need to start MCP services"
     else
@@ -827,7 +828,7 @@ pull_sandbox_image() {
     echo "   💡 Skipping pull, using existing image"
   else
     echo "   📥 Sandbox image not found locally, pulling..."
-    if docker pull "${SANDBOX_IMAGE_NAME}"; then
+    if deployment_run_logged docker pull "${SANDBOX_IMAGE_NAME}"; then
       echo "   ✅ Sandbox image pulled successfully"
       echo "   💡 The image will be available when agent sandbox runs are executed"
     else
@@ -957,9 +958,9 @@ update_env_var() {
   local value="$2"
   deployment_update_env_var_file "$ROOT_ENV_FILE" "$key" "$value"
   if [ "${DEPLOYMENT_LAST_ENV_WRITE_CHANGED:-false}" = "true" ]; then
-    echo "   📝 .env updated: $key"
+    deployment_run_logged printf '.env updated: %s\n' "$key"
   else
-    echo "   ↺ .env unchanged: $key"
+    deployment_run_logged printf '.env unchanged: %s\n' "$key"
   fi
 }
 
@@ -1145,7 +1146,7 @@ retire_legacy_northbound_container() {
 prepare_core_service_deployment() {
   local service image
   local prepared_images=" "
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
     echo "Error: invalid Compose configuration; existing business services remain running." >&2
     return 1
   fi
@@ -1170,7 +1171,7 @@ prepare_core_service_deployment() {
         echo "Error: local image $image is missing; build it before deploying." >&2
         return 1
       fi
-      docker pull "$image" || return 1
+      deployment_run_logged docker pull "$image" || return 1
     fi
     prepared_images="$prepared_images$image "
   done
@@ -1179,7 +1180,7 @@ prepare_core_service_deployment() {
     *" nexent-config "*)
       # Override the SQL entrypoint: this preflight must not modify the database.
       if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
-        ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+        deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
         run --rm --no-deps --workdir /opt/backend --entrypoint sh nexent-config \
         -c 'test -r management/services/agent/system_initialize.py && test -r management/services/agent/system_release.py'; then
         echo "Error: the backend image cannot initialize/publish Workbench; rebuild the image before deploying." >&2
@@ -1247,15 +1248,15 @@ publish_shared_workbench() {
     *) return 0 ;;
   esac
 
-  echo "Initializing and publishing shared Workbench..."
+  deployment_log "Applying database migrations and publishing shared Workbench..."
   # Keep container paths literal in Git Bash while retaining host-path conversion.
   if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
-    ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
-    run --rm --no-deps --workdir /opt/backend \
+    deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+    run --rm --no-deps --workdir /opt/backend -T \
     --env NEXENT_SQL_SKIP_IF_CURRENT=false \
     --entrypoint /opt/nexent/scripts/start-backend.sh nexent-config \
     sh -c 'python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
-    echo "Error: shared Workbench initialization or publication failed." >&2
+    deployment_error "Shared Workbench initialization or publication failed."
     return 1
   fi
 }
@@ -1294,16 +1295,16 @@ deploy_core_services() {
   esac
   publish_shared_workbench || return 1
 
-  echo "👀 Starting core services: ${core_services[*]}"
+  deployment_log "Starting core services: ${core_services[*]}"
   if [[ " ${core_services[*]} " == *" nexent-gateway "* ]]; then
     # Validate required secrets and the full composition before retiring a live entry.
-    if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+    if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
       echo "ERROR: Invalid Gateway deployment configuration; the legacy container was left unchanged."
       return 1
     fi
     retire_legacy_northbound_container || return 1
   fi
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
+  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
   fi
@@ -1326,8 +1327,8 @@ deploy_https_nginx() {
 
   deployment_https_prepare || return 1
 
-  echo "🔒 Starting Nginx HTTPS reverse proxy (nexent-nginx)..."
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
+  deployment_log "Starting Nginx HTTPS reverse proxy..."
+  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
     echo "   ❌ ERROR Failed to start nexent-nginx"
     return 1
   fi
@@ -1347,7 +1348,7 @@ stop_unselected_data_process_service() {
 
 deploy_infrastructure() {
   # Start infrastructure services (basic services only)
-  echo "🔧 Starting infrastructure services..."
+  deployment_log "Starting infrastructure services..."
   INFRA_SERVICES=""
 
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
@@ -1361,7 +1362,7 @@ deploy_infrastructure() {
   fi
 
   if [ -n "$INFRA_SERVICES" ]; then
-    if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
+    if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
       echo "   ❌ ERROR Failed to start infrastructure services"
       return 1
     fi
@@ -1400,9 +1401,9 @@ deploy_monitoring() {
       ;;
   esac
 
-  echo "🔭 Starting monitoring services..."
+  deployment_log "Starting monitoring services..."
   cleanup_stale_monitoring_services || return 1
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
+  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
     echo "   ❌ ERROR Failed to start monitoring services"
     return 1
   fi
@@ -1539,17 +1540,16 @@ wait_for_elasticsearch_healthy() {
   local retries=0
   local max_retries=${1:-60}  # Default 10 minutes, can be overridden
   while ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" ps nexent-elasticsearch | grep -q "healthy" && [ $retries -lt $max_retries ]; do
-      echo "⏳ Waiting for Elasticsearch to become healthy... (attempt $((retries + 1))/$max_retries)"
+      deployment_run_logged printf 'Waiting for Elasticsearch (attempt %s/%s)\n' "$((retries + 1))" "$max_retries"
       sleep 10
       retries=$((retries + 1))
   done
 
   if [ $retries -eq $max_retries ]; then
-      echo "   ⚠️  Warning: Elasticsearch did not become healthy within expected time"
-      echo "     You may need to check the container logs and try again"
+      deployment_warn "Elasticsearch did not become healthy within the expected time."
       return 0
   else
-      echo "   ✅ Elasticsearch is now healthy!"
+      deployment_run_logged printf '%s\n' 'Elasticsearch is healthy.'
       return 0
   fi
 }
@@ -1660,7 +1660,7 @@ select_terminal_tool() {
 }
 
 check_super_admin_user_exists() {
-  docker exec nexent-config python -m management.cli.account bootstrap-su --check >/dev/null
+  deployment_run_logged docker exec nexent-config python -m management.cli.account bootstrap-su --check >/dev/null
 }
 
 prompt_super_admin_password() {
@@ -1826,9 +1826,9 @@ main_deploy() {
     exit 1
   fi
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "🌐 应用版本：$APP_VERSION"
+    deployment_log "应用版本：$APP_VERSION"
   else
-    echo "🌐 App version: $APP_VERSION"
+    deployment_log "Application version: $APP_VERSION"
   fi
 
   # Select deployment components, port policy, image source, and Sandbox mode via shared config.
@@ -1858,44 +1858,23 @@ main_deploy() {
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
     update_env_var "NEXENT_MCP_DOCKER_IMAGE" "${NEXENT_MCP_DOCKER_IMAGE}"
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "🔧 NEXENT_MCP_DOCKER_IMAGE 已设置为：${NEXENT_MCP_DOCKER_IMAGE}"
-    else
-      echo "🔧 NEXENT_MCP_DOCKER_IMAGE set to: ${NEXENT_MCP_DOCKER_IMAGE}"
-    fi
   else
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "⚠️  环境中未找到 NEXENT_MCP_DOCKER_IMAGE，将使用代码默认值"
-    else
-      echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
-    fi
+    deployment_run_logged printf '%s\n' 'NEXENT_MCP_DOCKER_IMAGE is unset. Using the default image.'
   fi
 
   # Set NEXENT_SANDBOX_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_SANDBOX_IMAGE:-}" ]; then
     update_env_var "NEXENT_SANDBOX_DOCKER_IMAGE" "${NEXENT_SANDBOX_IMAGE}"
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "🔧 NEXENT_SANDBOX_DOCKER_IMAGE 已设置为：${NEXENT_SANDBOX_IMAGE}"
-    else
-      echo "🔧 NEXENT_SANDBOX_DOCKER_IMAGE set to: ${NEXENT_SANDBOX_IMAGE}"
-    fi
   else
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "⚠️  环境中未找到 NEXENT_SANDBOX_IMAGE，将使用代码默认值"
-    else
-      echo "⚠️  NEXENT_SANDBOX_IMAGE not found in environment, will use default from code"
-    fi
+    deployment_run_logged printf '%s\n' 'NEXENT_SANDBOX_IMAGE is unset. Using the default image.'
   fi
 
   update_env_var "NEXENT_SANDBOX_DEFAULT_LEVEL" "${NEXENT_SANDBOX_DEFAULT_LEVEL}"
-  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "🔧 沙箱模式已设置为：${DEPLOYMENT_SANDBOX_MODE}（执行级别：${NEXENT_SANDBOX_DEFAULT_LEVEL}）"
-  else
-    echo "🔧 Sandbox mode set to: ${DEPLOYMENT_SANDBOX_MODE} (execution level: ${NEXENT_SANDBOX_DEFAULT_LEVEL})"
-  fi
+  deployment_run_logged printf 'Sandbox execution level: %s\n' "$NEXENT_SANDBOX_DEFAULT_LEVEL"
 
   # Add permission
-  prepare_directory_and_data || {
+  deployment_log "Preparing deployment directories and data..."
+  deployment_run_logged prepare_directory_and_data || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "❌ 权限设置失败"
     else
@@ -1955,6 +1934,7 @@ main_deploy() {
   stop_unselected_data_process_service
 
   # Generate Elasticsearch API key
+  deployment_log "Checking Elasticsearch and its API key..."
   generate_elasticsearch_api_key || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "❌ Elasticsearch API key 生成失败"
@@ -1984,12 +1964,12 @@ main_deploy() {
 
 
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "🎉 基础设施部署完成！"
+      deployment_log "基础设施部署完成。"
       echo "     现在可以使用 dev containers 手动启动核心服务"
       echo "     环境变量文件：$ROOT_ENV_FILE"
       echo "💡 在项目根目录执行 'source deploy/env/.env' 可加载环境变量"
     else
-      echo "🎉 Infrastructure deployment completed successfully!"
+      deployment_log "Infrastructure deployment completed successfully."
       echo "     You can now start the core services manually using dev containers"
       echo "     Environment file available at: $ROOT_ENV_FILE"
       echo "💡 Use 'source deploy/env/.env' from the project root to load environment variables"
@@ -2008,7 +1988,8 @@ main_deploy() {
 
   # Complete historical import before application startup can create its marker table.
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-    deployment_upgrade_local_accounts docker || exit 1
+    deployment_log "Checking for historical accounts to migrate..."
+    deployment_run_logged deployment_upgrade_local_accounts docker || exit 1
   fi
 
   # Configure HTTPS state before core services start so nexent-web is created
@@ -2048,6 +2029,7 @@ main_deploy() {
 
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+    deployment_log "Initializing the super administrator..."
     create_default_super_admin_user || {
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "❌ 默认超级管理员创建失败"
@@ -2068,11 +2050,9 @@ main_deploy() {
   pull_sandbox_image
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "🎉  部署完成！"
-    echo "🌐  现在可以访问应用：http://localhost:${NEXENT_WEB_PORT:-3000}"
+    deployment_log "部署完成。应用地址：http://localhost:${NEXENT_WEB_PORT:-3000}"
   else
-    echo "🎉  Deployment completed successfully!"
-    echo "🌐  You can now access the application at http://localhost:${NEXENT_WEB_PORT:-3000}"
+    deployment_log "Deployment completed. Application URL: http://localhost:${NEXENT_WEB_PORT:-3000}"
   fi
 }
 

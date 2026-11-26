@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: DEPLOY-LOG-FILE-20261126
+  change_type: requirement
+  requirement_id: DEPLOY-LOG-FILE-20261126
+  title: Keep detailed deployment output in one log per run
+  description: Docker and Kubernetes deployment surfaces milestones, prompts and failure summaries while storing command diagnostics in one private per-run file.
+  affected_features:
+    existing: [V5-DEP-01, RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DEP-01]
+    added: []
+    modified: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - The root and native deploy entry points share a private log with offline actions and preserve command exit codes.
+    - Verbose output and bootstrap Job logs go to the file, while stage messages, prompts and initial administrator credentials stay available in the terminal.
+    reason: Use isolated CLI fixtures for routing and legacy error paths. Reuse the real Kubernetes bootstrap boundary to check the captured SQL log before activation.
+    test_selectors:
+    - test/backend/deploy/test_deployment_logging.py
+    - test/backend/deploy/test_workbench_publication.py
+    - test/backend/deploy/test_k8s_bootstrap.py
+  notes: The sibling Nexent documentation checkout is absent. Existing deployment documentation is in the product READMEs. The isolated Kubernetes case owns bootstrap, workload observation and cleanup, and supplements the local Shell and CLI-fixture tests.

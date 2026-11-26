@@ -325,16 +325,60 @@ deployment_prompt() {
   printf "$format" "$@"
 }
 
+deployment_start_log() {
+  local log_dir="$1/logs/deploy" arg timestamp
+  shift
+  for arg in "$@"; do
+    case "$arg" in --help|-h) return 0 ;; esac
+  done
+  if [ -z "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+    timestamp=$(date +%Y%m%d-%H%M%S) || return 1
+    mkdir -p "$log_dir" || return 1
+    NEXENT_DEPLOY_LOG_FILE=$(mktemp "$log_dir/deploy-$timestamp-XXXXXX") || return 1
+    export NEXENT_DEPLOY_LOG_FILE
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      deployment_log "部署日志：$NEXENT_DEPLOY_LOG_FILE"
+    else
+      deployment_log "Deployment log: $NEXENT_DEPLOY_LOG_FILE"
+    fi
+  fi
+  trap 'deployment_finish_log "$?"' EXIT
+}
+
+deployment_finish_log() {
+  local status="$1"
+  printf 'Deployment exit status: %s\n' "$status" >> "$NEXENT_DEPLOY_LOG_FILE" || true
+  if [ "$status" -ne 0 ]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      printf '部署失败（退出码 %s），请查看 %s\n' "$status" "$NEXENT_DEPLOY_LOG_FILE" >&2
+    else
+      printf 'Deployment failed (exit %s). See %s\n' "$status" "$NEXENT_DEPLOY_LOG_FILE" >&2
+    fi
+  fi
+}
+
+deployment_run_logged() {
+  if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+    # A wrapped script can send interactive prompts to the original stderr.
+    NEXENT_DEPLOY_PROMPT_FD=3 "$@" 3>&"${NEXENT_DEPLOY_PROMPT_FD:-2}" >> "$NEXENT_DEPLOY_LOG_FILE" 2>&1
+  else
+    "$@"
+  fi
+}
+
 deployment_log() {
   printf '%s\n' "$*"
+  if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ] && [ -z "${NEXENT_DEPLOY_PROMPT_FD:-}" ]; then
+    printf '%s\n' "$*" >> "$NEXENT_DEPLOY_LOG_FILE"
+  fi
 }
 
 deployment_warn() {
-  printf '⚠️  %s\n' "$*" >&2
+  deployment_log "⚠️  $*" >&2
 }
 
 deployment_error() {
-  printf '❌ %s\n' "$*" >&2
+  deployment_log "❌ $*" >&2
 }
 
 deployment_validate_nodeport_range() {
@@ -402,7 +446,10 @@ deployment_report_super_admin_creation() {
   local result="$1"
   local password="$2"
   local display_password="${3:-true}"
-  printf '%s\n' "$result"
+  deployment_run_logged printf '%s\n' "$result"
+  if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+    deployment_log "Super administrator initialized."
+  fi
   # Only the process that created the account may disclose its initial password.
   if [ "$display_password" = "true" ] && printf '%s' "$result" | grep -Eq '"created"[[:space:]]*:[[:space:]]*true'; then
     printf 'Super administrator email: %s\n' 'suadmin@nexent.com'

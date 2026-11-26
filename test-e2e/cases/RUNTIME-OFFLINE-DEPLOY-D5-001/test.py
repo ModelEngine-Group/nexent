@@ -158,7 +158,9 @@ def test_offline_replica_sequence(isolated_release):
         history = conversation_history(gateway, sign_in(gateway, identity), conversation)
     calls = cluster.runtime_model_control("probe")["calls_by_tag"]
     receipts = []
+    log_dir = script.parents[2] / "logs/deploy"
     for count in (3, 2, 1):
+        previous_logs = set(log_dir.glob("deploy-*"))
         with TemporaryDirectory(prefix="idle-activation-", dir=cluster.scratch) as temporary:
             gate = Path(temporary)
             install_gate(gate, "helm", "hold-activation.sh")
@@ -171,10 +173,15 @@ def test_offline_replica_sequence(isolated_release):
                     paused = observe_release(cluster)
                     assert_paused(paused)
                     bootstrap = cluster.bootstrap_image_receipts()
+                    deployment_log, = set(log_dir.glob("deploy-*")) - previous_logs
+                    assert "[sql-migrations] apply __init.sql" in deployment_log.read_text(encoding="utf-8")
                     decision = "allow"
                 finally:
                     write_decision(gate, "decision", decision)
-                assert deployment.result().returncode == 0
+                deployed = deployment.result()
+                assert deployed.returncode == 0, deployed.stderr
+                assert deployment_log.name in deployed.stdout
+                assert "[sql-migrations] apply __init.sql" not in deployed.stdout + deployed.stderr
         ready = observe_release(cluster)
         assert_ready(cluster, ready, count)
         assert not (previous["pods"].keys() & ready["pods"].keys())
