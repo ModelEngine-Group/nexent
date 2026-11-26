@@ -18,8 +18,6 @@ title: create-docx 官方技能
 
 ![在资源管理中安装 create-docx](../assets/resource-repository/install-create-docx-skills.png)
 
-<!-- TODO(截图): 资源管理 → Skills 页签的「安装官方技能」弹窗 -->
-
 ### 2. 在 Agent 配置中启用技能
 
 1. 打开需要使用文档生成能力的 Agent 配置。

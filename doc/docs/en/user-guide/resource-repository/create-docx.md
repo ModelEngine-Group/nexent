@@ -18,8 +18,6 @@ Before using `create-docx`, install the official skill in Resource Management, t
 
 ![Install create-docx in Resource Management](../assets/resource-repository/install-create-docx-skills.png)
 
-<!-- TODO(screenshot): Install official skills dialog on the Resource Management → Skills tab -->
-
 ### 2. Enable the skill in the agent configuration
 
 1. Open the configuration of the agent that needs document generation.
