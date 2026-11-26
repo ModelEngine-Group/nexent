@@ -103,6 +103,7 @@ COPY \
     infrastructure/rdb/account_record.py \
     infrastructure/rdb/agent_admission.py \
     infrastructure/rdb/agent_execution.py \
+    infrastructure/rdb/agent_monitoring.py \
     infrastructure/rdb/audit_fields.py \
     infrastructure/rdb/base.py \
     infrastructure/rdb/client.py \

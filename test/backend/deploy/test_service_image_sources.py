@@ -236,6 +236,7 @@ def test_ops_dockerfile_includes_dependencies_without_other_launchers():
         files.update(path.relative_to(ROOT).as_posix() for path in paths)
     assert "backend/contracts/constants/environment.py" in files
     assert "infrastructure/rdb/client.py" in files
+    assert "infrastructure/rdb/agent_monitoring.py" in files
     assert "backend/http/config_service.py" not in files
     assert "backend/http/runtime_service.py" not in files
     assert not any(path.startswith("backend/data_process/") for path in files)

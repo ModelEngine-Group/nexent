@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-SKILL-UI-METRICS-20261125
+  change_type: requirement
+  requirement_id: OPS-SKILL-UI-METRICS-20261125
+  title: Connect Skill monitoring views
+  description: Read scoped Skill totals, daily usage, Top 5 and details from the monitoring API.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/skillMonitoring.test.tsx
+    - frontend/tests/component/monitoringOverview.test.tsx
+    - test/backend/ops/test_monitoring_api.py
+    - test/backend/ops/test_monitoring_search.py
+    - test/backend/gateway/test_model_monitoring.py
+    behaviors:
+    - Serialize the tenant, group, Skill identity and dates on monitoring reads, with list search, sorting and pagination.
+    - Include installed Skill source metadata and exclude global templates from the installed catalog and coverage.
+    - Show the overview count error after a failed refetch even when the query has a cached count.
+    - Distinguish a real zero from unavailable summary usage without changing the catalog count.
+    - Propagate read failures and preserve null and zero in daily responses.
+    reason: Frontend unit tests cover the new client and values. Existing Ops and Gateway tests cover the backend contracts. D4 covers the visible views and filter flow.

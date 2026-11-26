@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MCP-UI-METRICS-20261125
+  change_type: requirement
+  requirement_id: OPS-MCP-UI-METRICS-20261125
+  title: Connect MCP monitoring cards and daily trend
+  description: Read the authorized service catalog and scoped published MCP summary and daily calls.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/mcpMonitoring.test.tsx
+    - test/backend/ops/test_monitoring_api_mcp_tools.py
+    - test/backend/gateway/test_exposure.py
+    behaviors:
+    - Serialize only the selected tenant, dates, groups, service identity and tool.
+    - Preserve unpublished values and propagate read failures while retaining a reported zero.
+    reason: Frontend service tests cover request and value boundaries. Existing Ops and Gateway tests cover the server contract. The existing D4 journey covers filter transitions and visible outcomes.

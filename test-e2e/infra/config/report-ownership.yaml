@@ -173,6 +173,7 @@ feature_overrides:
   OPS-MCP-TOOL-MONITORING: ops_dashboard
   OPS-AGENT-FACTS: ops_dashboard
   OPS-MODEL-MONITORING: ops_dashboard
+  OPS-MONITORING-UI: ops_dashboard
   SYSTEM-CONFIGURATION: system_configuration_alerts
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: resource_management

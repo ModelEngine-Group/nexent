@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import func, select
 
 from contracts.constants.environment import LOCAL_MCP_SERVER
+from infrastructure.rdb.agent_monitoring import excluded_monitoring_agent_ids, monitored_agent_predicate
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
@@ -32,7 +33,7 @@ def model_catalog(tenant: str | None) -> list[dict]:
         return [dict(row) for row in session.execute(statement).mappings()]
 
 
-def _read_published_rows(service, *, tenant, kind, start, end, **criteria):
+def _read_published_rows(service, *, tenant, kind, start, end, exclude_system_agents=False, **criteria):
     rows = []
     with service.publication_snapshot(tenant, kind, start, end) as (states, point):
         published = [row for row in states if row["publish_id"]]
@@ -46,6 +47,9 @@ def _read_published_rows(service, *, tenant, kind, start, end, **criteria):
                 constraints = filters(fact_kind=kind, **{name: value for name, value in criteria.items() if value})
                 constraints["bool"]["filter"].append(selection)
                 rows.extend(point.documents(constraints))
+    if exclude_system_agents and rows:
+        excluded = excluded_monitoring_agent_ids()
+        rows = [row for row in rows if row.get("agent_id") not in excluded]
     return rows, states, published
 
 
@@ -92,7 +96,7 @@ def read_models(service, *, tenant, start: date, end: date, groups, model_id, mo
 def agent_catalog_tenants(agent_id: int | None) -> set[str]:
     """Find current Agent tenants when checking global coverage."""
     statement = select(AgentInfo.tenant_id).where(
-        AgentInfo.delete_flag == "N", AgentInfo.tenant_id.is_not(None),
+        AgentInfo.delete_flag == "N", AgentInfo.tenant_id.is_not(None), monitored_agent_predicate(),
     ).distinct()
     if agent_id is not None:
         statement = statement.where(AgentInfo.agent_id == agent_id)
@@ -104,7 +108,7 @@ def read_agents(service, *, tenant, start: date, end: date, groups, agent_id):
     write_failed = service.store.has_failed_batches(tenant, "agent", start, end)
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="agent", start=start, end=end,
-        initiator_group_ids=groups, agent_id=agent_id,
+        initiator_group_ids=groups, agent_id=agent_id, exclude_system_agents=True,
     )
     if tenant is not None:
         tenants = {tenant}
@@ -126,6 +130,7 @@ def agent_catalog(tenant: str | None, agent_id: int | None) -> list[dict]:
                AgentInfo.model_ids, AgentInfo.group_ids, AgentInfo.current_version_no)
     statement = select(*columns).where(
         AgentInfo.delete_flag == "N", AgentInfo.version_no == 0, AgentInfo.tenant_id.is_not(None),
+        monitored_agent_predicate(),
     )
     if tenant is not None:
         statement = statement.where(AgentInfo.tenant_id == tenant)
@@ -144,7 +149,7 @@ def read_agent_views(service, *, tenant, start: date, end: date, groups, agent_i
     write_failed = service.store.has_failed_batches(tenant, "agent", start, end)
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="agent", start=start, end=end,
-        initiator_group_ids=groups, agent_id=agent_id,
+        initiator_group_ids=groups, agent_id=agent_id, exclude_system_agents=True,
     )
     tenants = {item["tenant_id"] for item in inventory} | {state["tenant_id"] for state in states}
     if tenant is not None:
@@ -332,8 +337,8 @@ def mcp_services_by_tenant(tenant: str | None) -> list[dict]:
         return [dict(row) for row in session.execute(statement).mappings()]
 
 def skill_catalog(tenant: str | None) -> list[dict]:
-    columns = (SkillInfo.tenant_id, SkillInfo.skill_id, SkillInfo.skill_name)
-    statement = select(*columns).where(SkillInfo.delete_flag != "Y")
+    columns = (SkillInfo.tenant_id, SkillInfo.skill_id, SkillInfo.skill_name, SkillInfo.source)
+    statement = select(*columns).where(SkillInfo.delete_flag != "Y", SkillInfo.tenant_id.is_not(None))
     if tenant is not None:
         statement = statement.where(SkillInfo.tenant_id == tenant)
     with get_db_session() as session:
