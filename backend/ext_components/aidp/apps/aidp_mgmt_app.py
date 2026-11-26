@@ -772,7 +772,11 @@ async def list_knowledge_bases(
     detail_semaphore = asyncio.Semaphore(5)
 
     async def resolve_detail(row: dict) -> tuple[dict, str]:
-        if _has_kb_card_metadata(row):
+        if (
+            _has_kb_card_metadata(row)
+            and "bind_lib_type" in row
+            and "bind_lib_id" in row
+        ):
             return {}, "ACTIVE"
         kb_id = row["kb_id"]
         async with detail_semaphore:
@@ -824,9 +828,13 @@ async def list_knowledge_bases(
                 else row.get("sensitive_intercept_enable"),
                 0,
             ),
-            "bind_lib_id": detail.get("bind_lib_id"),
-            "bind_lib_type": detail.get("bind_lib_type"),
-            "bind_lib_name": detail.get("bind_lib_name"),
+            "bind_lib_id": detail.get("bind_lib_id", row.get("bind_lib_id")),
+            "bind_lib_type": detail.get(
+                "bind_lib_type", row.get("bind_lib_type")
+            ),
+            "bind_lib_name": detail.get(
+                "bind_lib_name", row.get("bind_lib_name")
+            ),
             "created_at": _timestamp_to_iso(row.get("create_time")),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),

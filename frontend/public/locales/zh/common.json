@@ -6193,7 +6193,7 @@
   "aidpKnowledge.fileStatusIngested": "已入库",
   "aidpKnowledge.fileStatusExtracting": "提取、等待中",
   "aidpKnowledge.fileStatusFailed": "提取失败",
-  "aidpKnowledge.fileStatusUploading": "上传中",
+  "aidpKnowledge.fileStatusQueued": "排队中",
   "aidpKnowledge.fileStatusGraphFailed": "图谱失败",
   "aidpKnowledge.fileStatusRemoving": "删除中",
   "aidpKnowledge.fileStatusRemoveFailed": "删除失败",

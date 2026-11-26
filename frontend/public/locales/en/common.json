@@ -6256,7 +6256,7 @@
   "aidpKnowledge.fileStatusIngested": "Ingested",
   "aidpKnowledge.fileStatusExtracting": "Extracting / waiting",
   "aidpKnowledge.fileStatusFailed": "Extraction failed",
-  "aidpKnowledge.fileStatusUploading": "Uploading",
+  "aidpKnowledge.fileStatusQueued": "Queued",
   "aidpKnowledge.fileStatusGraphFailed": "Graph failed",
   "aidpKnowledge.fileStatusRemoving": "Removing",
   "aidpKnowledge.fileStatusRemoveFailed": "Remove failed",

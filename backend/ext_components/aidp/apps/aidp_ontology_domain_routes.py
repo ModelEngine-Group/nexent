@@ -309,6 +309,7 @@ async def create_ontology_entity(
         "properties": [
             {
                 "api_name": item.api_name,
+                "display_name": item.display_name or item.api_name,
                 "data_type": item.data_type or "string",
                 "value": item.value if item.value is not None else "",
                 **({"range": item.range} if item.range else {}),
@@ -415,6 +416,7 @@ async def update_ontology_entity(
         payload["properties"] = [
             {
                 "api_name": item.get("api_name"),
+                "display_name": item.get("display_name") or item.get("api_name"),
                 "data_type": item.get("data_type") or "string",
                 "value": item.get("value") if item.get("value") is not None else "",
                 **({"range": item.get("range")} if item.get("range") else {}),

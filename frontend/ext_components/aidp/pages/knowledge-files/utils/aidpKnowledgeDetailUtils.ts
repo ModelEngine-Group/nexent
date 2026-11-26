@@ -141,12 +141,17 @@ const DOCUMENT_STATUS_META: Record<
   number,
   { labelKey: string; dotClass: string }
 > = {
-  1: { labelKey: "aidpKnowledge.taskSuccess", dotClass: "bg-green-500" },
-  2: { labelKey: "aidpKnowledge.taskExtracting", dotClass: "bg-blue-500" },
-  3: { labelKey: "aidpKnowledge.taskFailed", dotClass: "bg-red-500" },
-  4: { labelKey: "aidpKnowledge.taskQueued", dotClass: "bg-gray-400" },
-  5: { labelKey: "aidpKnowledge.taskGraphFailed", dotClass: "bg-red-500" },
-  6: {
+  0: { labelKey: "aidpKnowledge.fileStatusNothingToDo", dotClass: "bg-gray-400" },
+  1: { labelKey: "aidpKnowledge.fileStatusIngested", dotClass: "bg-green-500" },
+  2: { labelKey: "aidpKnowledge.fileStatusExtracting", dotClass: "bg-blue-500" },
+  3: { labelKey: "aidpKnowledge.fileStatusFailed", dotClass: "bg-red-500" },
+  4: { labelKey: "aidpKnowledge.fileStatusQueued", dotClass: "bg-gray-400" },
+  5: {
+    labelKey: "aidpKnowledge.fileStatusGraphFailed",
+    dotClass: "bg-orange-500",
+  },
+  6: { labelKey: "aidpKnowledge.fileStatusRemoving", dotClass: "bg-gray-400" },
+  7: {
     labelKey: "aidpKnowledge.fileStatusRemoveFailed",
     dotClass: "bg-red-500",
   },
@@ -167,9 +172,8 @@ export const documentStatusMeta = (
  * Folder/Files status contract (new AIDP API).
  *
  * Folder/Files reports AIDP's HistoryStatus as 0–7: nothing to do (0),
- * completed (1), extracting (2), failed (3), uploading (4), graph failed (5),
- * removing (6) and remove failed (7). This is deliberately separate from the
- * upload-task history vocabulary, where 4 still means queued.
+ * completed (1), extracting (2), failed (3), queued (4), graph failed (5),
+ * removing (6) and remove failed (7). The upload-task list uses the same set.
  */
 export interface AidpFolderTreeStatusPermissions {
   canRename: boolean;
@@ -250,8 +254,8 @@ const FOLDER_TREE_STATUS_META: Record<
     },
   },
   4: {
-    labelKey: "aidpKnowledge.fileStatusUploading",
-    dotClass: "bg-blue-500",
+    labelKey: "aidpKnowledge.fileStatusQueued",
+    dotClass: "bg-gray-400",
     permissions: { ...NONE_PERMISSIONS },
   },
   5: {

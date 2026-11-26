@@ -779,6 +779,13 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                   <div key={field.key} className={styles.propertyRow}>
                     <Form.Item
                       {...field}
+                      name={[field.name, "api_name"]}
+                      hidden
+                    >
+                      <Input />
+                    </Form.Item>
+                    <Form.Item
+                      {...field}
                       name={[field.name, "name"]}
                       rules={[
                         {
