@@ -200,12 +200,13 @@ class SandboxRuntimeRecovery:
             if record is None or record.phase == 'TERMINAL':
                 return False
             owner = SandboxOwner(**record.owner)
-            associations = {key: value for key, value in record.associations.items() if key != 'user_message_id'}
-            self.fail_work(tenant_id=record.tenant_id, user_id=record.user_id,
-                           conversation_id=record.conversation_id, **associations,
-                           evaluation_batch=(record.kind == 'EVALUATION'
-                               and record.associations['evaluation_id'] is not None
-                               and record.associations['evaluation_case_id'] is None))
+            if self.fail_work is not None:
+                associations = {key: value for key, value in record.associations.items() if key != 'user_message_id'}
+                self.fail_work(tenant_id=record.tenant_id, user_id=record.user_id,
+                               conversation_id=record.conversation_id, **associations,
+                               evaluation_batch=(record.kind == 'EVALUATION'
+                                   and record.associations['evaluation_id'] is not None
+                                   and record.associations['evaluation_case_id'] is None))
             if self.fail_execution is not None and type(record.conversation_id) is int and record.conversation_id > 0:
                 self.fail_execution(record.tenant_id, record.user_id, record.conversation_id, record.run_id)
             # Compare every ownership field; a newer pointer/lease is untouched.

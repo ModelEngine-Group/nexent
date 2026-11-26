@@ -15,6 +15,9 @@ metadata:
   labels:
     app: nexent-system-bootstrap
     app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    {{- with .Values.global.bootstrapRunId }}
+    nexent.io/bootstrap-run-id: {{ . | quote }}
+    {{- end }}
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: {{ default 1800 .Values.global.systemBootstrapTimeoutSeconds }}

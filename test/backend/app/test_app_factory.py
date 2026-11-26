@@ -9,6 +9,8 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
+import httpx
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -163,6 +165,29 @@ class TestCreateApp:
         ]
         assert len(identity_middleware) == 1
         assert identity_middleware[0].kwargs["internal_runtime_request"] is None
+
+    @pytest.mark.asyncio
+    async def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+
+        async def ok():
+            return {"ok": True}
+
+        app.add_api_route("/service", ok, methods=["POST"])
+        app.add_api_route("/ordinary", ok, methods=["POST"])
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
+            assert (await client.post("/service")).json() == {"ok": True}
+            assert (await client.post("/ordinary")).status_code == 401
 
 
 class TestRegisterExceptionHandlers:
@@ -951,9 +976,7 @@ class TestGenericHandlerAppExceptionDelegation:
         # Create a request-like object and an AppException
         exc = AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Delegated error")
 
-        response = asyncio.get_event_loop().run_until_complete(
-            generic_handler(None, exc)
-        )
+        response = asyncio.run(generic_handler(None, exc))
 
         assert response.status_code == 400
         body = __import__("json").loads(response.body)

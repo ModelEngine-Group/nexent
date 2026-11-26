@@ -4,15 +4,15 @@
 
 import asyncio
 import time
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
 from fastapi import HTTPException
 from redis.exceptions import RedisError
 
-from runtime.identity import PROCESS_EPOCH
+from runtime.identity import PROCESS_EPOCH, uses_distributed_runtime
 from runtime.sandbox_coordination import SandboxRunBusy, SandboxRunCoordinator, SandboxRunLease
 from runtime.sandbox_journal import SandboxCoordinationUnknown, SandboxRunJournal
 from runtime.sandbox_owner import SandboxOwnerFacts, process_identity
@@ -89,7 +89,7 @@ def _coordinator(owner, root, workspace_root, redis_client):
 def get_coordinator():
     from contracts.constants import environment as settings
 
-    if settings.NEXENT_SANDBOX_PROVIDER != 'kubernetes' or not settings.IS_DEPLOYED_BY_KUBERNETES:
+    if not uses_distributed_runtime():
         return None
     from infrastructure.redis.run_state import runtime_state_service
 
@@ -106,6 +106,8 @@ def configure_runtime_coordination(manager, state):
     """Call during lifespan startup before recovery or business admission."""
     from contracts.constants import environment as settings
 
+    if not settings.NEXENT_SANDBOX_ENABLED:
+        return None
     coordinator = get_coordinator()
     if coordinator is None:
         return None
@@ -138,19 +140,22 @@ def configure_runtime_coordination(manager, state):
     from runtime.sandbox_owner import SandboxOwnerObserver
     from runtime.sandbox_recovery import SandboxRuntimeRecovery
 
+    recover_business = settings.NEXENT_RECOVERY_MODE == 'startup'
     coordinator.recovery = SandboxRuntimeRecovery(
         coordinator, kubernetes_api,
         SandboxOwnerObserver(kubernetes_api, coordinator.owner, facts.read(coordinator.owner.epoch)['process']),
-        fail_exact_owned_work, workspace_root=settings.AGENT_WORKSPACE_ROOT,
-        fail_execution=lambda *identity: recover_stopped_execution(RunIdentity(*identity)),
+        fail_exact_owned_work if recover_business else None, workspace_root=settings.AGENT_WORKSPACE_ROOT,
+        fail_execution=(lambda *identity: recover_stopped_execution(RunIdentity(*identity))) if recover_business else None,
     )
     coordinator.recovery.recover(startup=True)
     coordinator.recovery.verify_current_owner_resources_absent(time.monotonic() + 10)
     coordinator.claim_owner()
-    state.sandbox_coordinator = coordinator
-    # A repeated scan of retained owner facts must never move the scheduler cutoff forward.
-    recovered = coordinator.recovery.recover()
-    state.sandbox_restart_cutoff = boot_time if recovered["restart_confirmed"] else None
+    if state is not None:
+        state.sandbox_coordinator = coordinator
+        state.sandbox_restart_cutoff = None
+        if recover_business and coordinator.recovery.recover()["restart_confirmed"]:
+            # A repeated scan must never move the scheduler cutoff forward.
+            state.sandbox_restart_cutoff = boot_time
 
     service = manager.register_service(
         ManagedThreadSpec(task_name='sandbox-run-renewal', owner='runtime', lane='background-service',

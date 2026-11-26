@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: NEXENT-FIXED-REPLICAS-20261106
+  change_type: requirement
+  requirement_id: NEXENT-FIXED-REPLICAS-20261106
+  title: Nexent 第二阶段：应用固定多副本与停机手动扩缩容
+  description: '依赖 Runtime 第一阶段；各应用 1→3→2 先全停维护，再固定数启动。本次仅设计；SPEC: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md。'
+  affected_features:
+    existing: []
+    added:
+    - NEXENT-SERVICE-REPLICAS
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - NEXENT-CONFIG-JOBS-D3-001
+    - NEXENT-CONFIG-STATE-D3-001
+    - NEXENT-NORTHBOUND-STATE-D3-001
+    - NEXENT-MCP-SESSION-D3-001
+    - NEXENT-DATA-WORKERS-D3-001
+    - NEXENT-WEB-CONFIG-D3-001
+    - NEXENT-SERVICE-DEPLOY-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 各启用应用独立设置正整数固定副本，默认 1；每次手动调整都先全停，禁用应用不被启动，运行时无 HPA/KEDA。
+    - Config/Northbound/Data Process 普通启动不执行全局恢复、上传清理或重复迁移；维护失败保持停止，健康 owner 的任务不变。
+    - 模型检测、评测准备/生成/维护和 Dreaming 按业务键认领；旧 owner 不覆盖新结果，启动不回收健康租约。
+    - Northbound 全局幂等和租户限流不随副本数增加，不退回本地保护；A2A 跨实例查询/取消实际控制同一 Runtime 运行。
+    - MCP SSE/messages 保持同一 session owner；目录更新在各副本可见；失联要求重连，不自动重放工具。
+    - Data Process 多 worker 共享队列但预热只指向本实例；file/version/attempt 条件提交，取消/删除与摘要只产生唯一有效结果。
+    - Web 正常登录和代理跨实例兼容；名称/语言/Logo 原子发布同一版本，启动只读，并发更新不半写或静默丢失。
+    - Config 配置/权限/Skill 跨实例可见，配额依赖权威事务；共享卷/日志/密钥及启用的辅助服务满足副本契约，总资源不超预算。
+    reason: 已阅读 Dreaming recover_stale(True)、评测维护、本地摘要 _in_flight、MCP 本地缓存、Northbound 回退、Celery 预热和文件生命周期相关现有 UT
+      输入/断言；现有测试未证明跨进程竞争，需要加强 owner/代次/事务/失败补偿并新增版本发布 UT。具体选择器在实施后确认，不伪造运行结果。
+  notes: 本次仅计划合同：Feature planned、七个 Case blocked，无脚本或 execution.yaml。无新增 D1，保留全部历史 D1。默认 deployment；Config jobs/state/Web
+    Case system，Northbound runtime，MCP mcp，Data Process knowledge，部署 D5 继承 deployment。缺少准备工厂不是 UT 或运行验收豁免。

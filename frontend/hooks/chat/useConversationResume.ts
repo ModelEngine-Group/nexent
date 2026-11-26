@@ -159,8 +159,27 @@ export function useConversationResume({
                 ? { agentVersionNo: selectedAgent.current_version_no }
                 : {}),
               onGenerationStopped: handleGenerationStopped,
+              loadPersistedReplay: async () => {
+                invalidateDetail?.(remoteId);
+                const persistedHistory = new RemoteConversationHistoryAdapter(
+                  () => remoteId,
+                  async () => ({ remoteId }),
+                  () => loadDetail(remoteId)
+                );
+                const saved = (await persistedHistory.load()).messages.find(
+                  (entry) => entry.message.id === streamingId
+                )?.message;
+                if (saved?.role === "assistant") {
+                  return {
+                    content: saved.content,
+                    metadata: saved.metadata,
+                    status: saved.status,
+                  };
+                }
+              },
               enablePlan: chatMode === "planning",
               resume: true,
+              resumeMessageId: conversation.streaming_message.message_id,
             },
           },
           stream: async function* (options) {

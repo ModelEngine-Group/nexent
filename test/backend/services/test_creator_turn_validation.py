@@ -152,6 +152,7 @@ async def test_failure_after_message_creation_keeps_the_request_fence_and_marks_
     turn.update.assert_called_once_with(101, "failed", "owner")
     turn.stream.aclose.assert_awaited_once()
     turn.control.cancel.assert_called_once()
+    turn.control.close_transport.assert_called_once_with()
     turn.release.assert_called_once_with(91, "owner", "reservation")
     execution.release_request.assert_not_awaited()
 
@@ -167,4 +168,5 @@ async def test_failed_preparation_releases_the_request_fence_and_its_heartbeat(t
     assert guard.cancelled()
     execution.release_request.assert_awaited_once_with("creator-request:tenant:owner:request")
     turn.stream.aclose.assert_awaited_once()
+    turn.control.close_transport.assert_called_once_with()
     turn.save.assert_not_called()

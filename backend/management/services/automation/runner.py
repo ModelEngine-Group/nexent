@@ -12,7 +12,9 @@ from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop
 from contracts.automation import AutomationRunStatus, ScheduleTrigger
 from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
 from contracts.conversation import MessageSource
-from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.exceptions import (
+    AgentRunAlreadyActiveError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
+)
 from management.db.automation import repository as agent_automation_db
 from management.db.conversation.repository import get_prepared_projection_receipt
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
@@ -68,13 +70,18 @@ class AgentAutomationRunner:
             "trigger_type": trigger_type, "status": AutomationRunStatus.RUNNING.value,
             "started_at": _utcnow(), "runtime_run_id": uuid4().hex,
         }
+        occurrence_started = False
         if trigger_type == "SCHEDULED" and lease_owner:
             with agent_automation_db.task_run_transaction(
                 task["task_id"], task["tenant_id"], task["user_id"],
             ) as (session, current, _):
-                if not self._owns_occurrence(current, scheduled, lease_owner):
+                if not self._owns_occurrence(session, current, scheduled, lease_owner):
                     return {}
                 task = current
+                if not busy:
+                    occurrence_started = agent_automation_db.has_started_scheduled_occurrence(
+                        session, task["task_id"], task["tenant_id"], task["user_id"], scheduled,
+                    )
                 run = agent_automation_db.create_run(values, task["user_id"], db_session=session)
         else:
             run = agent_automation_db.create_run(values, task["user_id"])
@@ -84,6 +91,11 @@ class AgentAutomationRunner:
             return self._finish_run(run, task, AutomationRunStatus.SKIPPED.value, {
                 "error_code": "AUTOMATION_RUN_ALREADY_ACTIVE",
                 "error_message": "Conversation already has an active automation run.",
+            })
+        if occurrence_started:
+            return self._finish_run(run, task, AutomationRunStatus.SKIPPED.value, {
+                "error_code": "AUTOMATION_OCCURRENCE_ALREADY_STARTED",
+                "error_message": "This scheduled occurrence already started before its lease was lost.",
             })
 
         if inspection_error is not None:
@@ -96,6 +108,11 @@ class AgentAutomationRunner:
                 self._execute_active_run(run, task),
                 timeout=max(1, timeout_seconds),
             )
+        except AgentRunAlreadyActiveError:
+            return self._finish_run(run, task, AutomationRunStatus.SKIPPED.value, {
+                "error_code": "AUTOMATION_RUN_ALREADY_ACTIVE",
+                "error_message": "Conversation already has an active run.",
+            })
         except asyncio.TimeoutError:
             await self.cancel_runtime_run(run.get("runtime_run_id"), task["conversation_id"], task["user_id"], task["tenant_id"])
             return self._finish_run(run, task, AutomationRunStatus.TIMEOUT.value, {
@@ -166,9 +183,10 @@ class AgentAutomationRunner:
             ),
         }
         if source_id is None:
+            lease_owner = run.get("_lease_owner")
             turn = automation_conversation_adapter.append_run_prompt(
                 task["conversation_id"], generated_prompt, task["user_id"], task["tenant_id"],
-                run_id=run["run_id"],
+                run_id=run["run_id"], **({"lease_owner": lease_owner} if lease_owner is not None else {}),
             )
         else:
             turn = await run_blocking(
@@ -361,13 +379,13 @@ class AgentAutomationRunner:
             logger.warning("Unable to stop automation run_id=%s", run_id)
 
     @staticmethod
-    def _owns_occurrence(task, scheduled, lease_owner, require_active=True):
+    def _owns_occurrence(session, task, scheduled, lease_owner, require_active=True):
         return bool(task and (not require_active or task.get("status") == "ACTIVE")
                     and task.get("next_fire_at") is not None
                     and _parse_dt(task["next_fire_at"]) == _parse_dt(scheduled)
                     and task.get("lock_owner") == lease_owner
                     and task.get("lock_until") is not None
-                    and _parse_dt(task["lock_until"]) > _utcnow())
+                    and agent_automation_db.lease_is_unexpired(session, _parse_dt(task["lock_until"])))
 
     def cancel_run_by_user(self, run, task):
         transitioned = []
@@ -409,9 +427,10 @@ class AgentAutomationRunner:
                 return current_run
             scheduled = current_run.get("trigger_type") == "SCHEDULED"
             owner = run.get("_lease_owner")
-            owns_lease = not owner or self._owns_occurrence(
-                current_task, current_run["scheduled_fire_at"], owner, require_active=False,
-            )
+            if scheduled and owner and not user_cancel and not self._owns_occurrence(
+                session, current_task, current_run["scheduled_fire_at"], owner, require_active=False,
+            ):
+                return current_run
             now = _utcnow()
             updated = agent_automation_db.update_run(run["run_id"], {
                 **extra, "status": status, "finished_at": now,
@@ -419,9 +438,6 @@ class AgentAutomationRunner:
             }, task["user_id"], expected_statuses=["QUEUED", "RUNNING"], db_session=session)
             if not updated:
                 return current_run
-            if scheduled and not owns_lease and not user_cancel:
-                # Losing a lease cannot rewrite a reclaimed or edited task.
-                return updated
             values = {"last_fire_at": now, "last_run_status": status,
                       "last_error": extra.get("error_message")}
             # An edited/reclaimed schedule must not be advanced by an old run.

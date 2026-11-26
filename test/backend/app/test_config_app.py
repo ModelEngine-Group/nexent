@@ -87,7 +87,8 @@ class TestConfigAppIntegration:
 class TestConfigAppRouterConfiguration:
     """Test class for router configuration patterns."""
 
-    def test_config_app_registers_api_key_routes(self, monkeypatch):
+    @pytest.mark.parametrize("recovery_mode", ["startup", "fixed_replicas"])
+    def test_config_app_registers_api_key_routes(self, monkeypatch, recovery_mode):
         class RecordingApp:
             def __init__(self, lifespan=None):
                 self.included_routers = []
@@ -225,6 +226,7 @@ class TestConfigAppRouterConfiguration:
         const_module.ENABLE_AGENT_WORKBENCH = False
         const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
+        const_module.NEXENT_RECOVERY_MODE = recovery_mode
         monkeypatch.setitem(sys.modules, "contracts.constants.environment", const_module)
         manager_state = types.SimpleNamespace(CREATED="created")
 
@@ -283,7 +285,8 @@ class TestConfigAppRouterConfiguration:
 
         runtime_state = MagicMock()
         monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
-                            types.SimpleNamespace(runtime_state_service=runtime_state))
+                            types.SimpleNamespace(runtime_state_service=runtime_state,
+                                                  creator_runtime_state_service=MagicMock()))
         component_path = Path(backend_dir) / "management/api/northbound_application.py"
         component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
         component = importlib.util.module_from_spec(component_spec)
@@ -358,6 +361,10 @@ class TestConfigAppRouterConfiguration:
         monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
             shutdown_creator_streams=shutdown_creators,
         ))
+        renew_leases = MagicMock()
+        monkeypatch.setitem(sys.modules, "infrastructure.rdb.agent_execution", types.SimpleNamespace(
+            renew_execution_leases=renew_leases,
+        ))
 
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
@@ -394,7 +401,7 @@ class TestConfigAppRouterConfiguration:
 
         async def exercise_lifespan():
             async with config_app.config_lifespan(None):
-                pass
+                await asyncio.sleep(0)
 
         with patch.object(
             config_app,
@@ -419,8 +426,14 @@ class TestConfigAppRouterConfiguration:
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
-        automation_recover.assert_called_once_with()
-        automation_scheduler.start.assert_awaited_once_with()
+        if recovery_mode == "fixed_replicas":
+            automation_recover.assert_not_called()
+            automation_scheduler.start.assert_awaited_once_with(fixed_replicas=True)
+            renew_leases.assert_called_once_with()
+        else:
+            automation_recover.assert_called_once_with()
+            automation_scheduler.start.assert_awaited_once_with()
+            renew_leases.assert_not_called()
         automation_scheduler.stop.assert_awaited_once_with()
         for router in router_modules["management.api.automation.agent_automation"].values():
             assert router in config_app.app.included_routers

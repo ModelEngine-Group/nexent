@@ -54,15 +54,13 @@ def test_losing_terminal_compare_and_set_leaves_task_unchanged(terminal):
     fixture.update_task.assert_not_called()
 
 
-def test_reclaimed_schedule_can_finish_run_but_cannot_rewrite_task(terminal):
+def test_reclaimed_schedule_cannot_finish_run_or_rewrite_task(terminal):
     fixture = terminal
     result = fixture.runner._finish_run({**fixture.run, "_lease_owner": "old-scheduler"},
                                          fixture.task, "FAILED", {})
-    assert result["status"] == "FAILED" and result["assistant_message_id"] == 102
+    assert result == fixture.run
+    fixture.update_run.assert_not_called()
     fixture.update_task.assert_not_called()
-    assert fixture.update_run.call_args.kwargs == {
-        "expected_statuses": ["QUEUED", "RUNNING"], "db_session": fixture.session,
-    }
 
 
 def test_user_cancel_returns_winner_and_preserves_bound_messages(terminal):

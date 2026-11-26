@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-CONFIG-LAUNCH-20261123
+  change_type: bugfix
+  bug_id: K8S-CONFIG-LAUNCH-20261123
+  title: Restore the Kubernetes Config service launch command
+  description: Use the same package module entry point as Docker Compose in the Config Deployment.
+  observed_behavior: A successful bootstrap can be followed by a Config rollout failure because script-path execution shadows the Python standard-library logging package.
+  expected_behavior: With the required images available, the Config Deployment starts through the shared bootstrap wrapper and reaches readiness.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The chart tests covered Config Pod configuration and bootstrap ordering without asserting the Config Deployment command.
+  feature_contract_changed: false
+  affected_features:
+    existing: [RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - The rendered Config Deployment invokes its launcher as a Python package module after the shared startup wrapper.
+    reason: The rendered command reproduces the deployment-only entry point mismatch without requiring a live cluster.
+    test_selectors:
+      - test/backend/deploy/test_k8s_bootstrap.py::test_config_deployment_launches_as_python_module
+  notes: >-
+    Reuse the launch compatibility contract in nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/contracts-business-layout/task.md
+    and the existing offline deployment Case for live rollout readiness. Image availability is a deployment prerequisite.

@@ -54,6 +54,22 @@ def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
     assert not state.cancel_creator_run("user", 91, expected_generation="new")
 
 
+def test_durable_creator_owner_replaces_obsolete_lease_without_waiting_for_redis_expiry(monkeypatch):
+    monkeypatch.setattr("infrastructure.redis.run_state.RUNTIME_STATE_REDIS_URL", "redis://controlled-fixture")
+    state = RuntimeStateService()
+    state._client = fakeredis.FakeRedis(decode_responses=True)
+
+    assert state.claim_creator_run("user", 91, "old")
+    assert state.append_stream_event("user", 91, "old-event", generation="old")
+    assert not state.claim_creator_run("user", 91, "execution:42")
+    assert state.claim_creator_run("user", 91, "execution:42", execution_id=42)
+    assert not state.creator_lease("user", 91, "old", renew=True)
+    assert state.creator_lease("user", 91, "execution:42", renew=True)
+    assert state.get_run_state("user", 91)["generation"] == "execution:42"
+    assert state.get_run_state("user", 91)["execution_id"] == "42"
+    assert state.read_stream_events("user", 91) == []
+
+
 @pytest.mark.asyncio
 async def test_local_creator_stop_keeps_the_current_generation(monkeypatch):
     manager = Mock()
