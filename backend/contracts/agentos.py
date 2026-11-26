@@ -571,6 +571,9 @@ class AgentRunSpec(RunSpecModel):
     # Tenant MCP server identity catalog for monitoring facts; Management
     # attaches it, Runtime filters it to the URLs the run materializes.
     monitoring_mcp_servers: list[dict[str, JsonValue]] | None = Field(default=None, repr=False)
+    # Initiator user group IDs for monitoring attribution; Management resolves
+    # them at preparation time, Runtime passes them into the run metadata.
+    initiator_group_ids: list[int] | None = Field(default=None, repr=False)
 
 
 class HistoryCheckpointCandidate(RunSpecModel):
@@ -737,6 +740,9 @@ class PreparedCreatorRun(RunSpecModel):
     context_budget_snapshot: dict[str, JsonValue] | None = None
     system_agent: AgentVersionReference | None = None
     trajectory: CreatorTrajectoryScope | None = None
+    # Initiator user group IDs for monitoring attribution; Management resolves
+    # them at preparation time, Runtime passes them into the run metadata.
+    initiator_group_ids: list[int] | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_trajectory_scope(self):

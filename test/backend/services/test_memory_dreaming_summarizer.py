@@ -89,6 +89,30 @@ def monitoring_email(monkeypatch):
                         lambda user, tenant: "person@example.com", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def monitoring_groups(monkeypatch):
+    """Keep the initiator group lookup deterministic without a database."""
+    monkeypatch.setattr("management.services.agent.context.OPS_MONITORING_ENABLED", True)
+    monkeypatch.setattr(
+        "management.db.identity.group.query_group_ids_by_user_in_tenant", lambda *_args: []
+    )
+
+
+def test_monitoring_metadata_carries_initiator_groups(monkeypatch):
+    monkeypatch.setattr(
+        "management.db.identity.group.query_group_ids_by_user_in_tenant", lambda *_args: [4, 2]
+    )
+
+    class Model:
+        def __call__(self, _messages):
+            from nexent.monitor import get_agent_monitoring_context
+            assert get_agent_monitoring_context().monitoring_group_ids == (4, 2)
+            return SimpleNamespace(content="<summary>## Work Preferences\n\n- old</summary>")
+
+    result = _summarizer(Model())(_request([DreamingMemoryUnit(unit_id="u1", content="new", is_new=True)]))
+    assert result.metadata["mode"] == "single"
+
+
 def test_ac057_under_limit_uses_exactly_one_model_call():
     class Model:
         def __init__(self): self.calls = []

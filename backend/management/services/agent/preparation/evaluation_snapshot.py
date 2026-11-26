@@ -913,6 +913,7 @@ def compile_snapshot(
     allow_debug_planning=False, workbench_knowledge_tools=None, catalog_model_versions=None,
     model_parameter_preferences=None,
 ):
+    from management.services.agent.context import resolve_initiator_group_ids
     from management.services.agent.tool_identity import resolve_tool_user_context
 
     stage = "resource"
@@ -943,6 +944,9 @@ def compile_snapshot(
         tool_caller = ToolCallerContext(**{
             key: identity[key] for key in ToolCallerContext.model_fields if key in identity
         }) if identity is not None else None
+        initiator_groups = (
+            resolve_initiator_group_ids(user_id, tenant_id) if user_id is not None else None
+        )
         stage = "input"
         fields = dict(
             mode="nexent", language=language, resource=resource, tool_caller=tool_caller,
@@ -950,6 +954,7 @@ def compile_snapshot(
             input=run_input or RunInput(
                 query=query, history=[RunHistoryMessage(role=item.role, content=item.content) for item in (history or [])],
             ),
+            initiator_group_ids=list(initiator_groups) if initiator_groups is not None else None,
         )
         if prepared_conversation is not None:
             conversation = prepared_conversation.model_dump()

@@ -20,10 +20,10 @@ case:
   steps:
   - order: 1
     action: Run an agent against the stub MCP server so one tool call succeeds, one exceeds the deadline and one returns isError=true, with the endpoint resolved by the run catalog.
-    expected: Three fact identities are stored with succeeded and failed outcomes (timeout and protocol tool error), caller-observed durations, the resolved server identity and the normalized type container or remote as resolved by the catalog. The isError call still returns its rendered content to the Agent.
+    expected: Three fact identities are stored with succeeded and failed outcomes (timeout and protocol tool error), caller-observed durations, the resolved server identity, the normalized type container or remote as resolved by the catalog and the initiator's group snapshot (known state with the bound group IDs). The isError call still returns its rendered content to the Agent.
   - order: 2
-    action: Query the MCP tool monitoring endpoints for the affected tenant and date.
-    expected: Request count, error count and duration aggregates match the stored facts; another tenant sees nothing.
+    action: Query the MCP tool monitoring endpoints for the affected tenant and date, including initiator-group filtered reads.
+    expected: Request count, error count and duration aggregates match the stored facts; another tenant sees nothing; reads filtered by the initiator's group return the same aggregates while another group sees nothing.
   - order: 3
     action: Replay the confirmed batch from the control store.
     expected: Stored facts and published daily results remain unchanged.
@@ -39,7 +39,7 @@ case:
   - order: 7
     action: Block Elasticsearch fact writes for one batch, query the affected date, then unblock and publish the pending batch.
     expected: The affected date is stale while blocked, other dates are unaffected, and recovery clears the staleness.
-  expected_results: [Caller-observed outcomes with resolved server types are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery]
+  expected_results: [Caller-observed outcomes with resolved server types and initiator-group attribution are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts and group-filtered reads separate matched from unmatched groups, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery]
   forbidden_side_effects:
   - Writing tool arguments or results or credentials or headers into facts
   - Publishing a fact under a different tenant or fact kind
@@ -51,7 +51,7 @@ case:
     expected_results: [1, 2, 4]
     forbidden_side_effects: [1, 2]
   - id: AC-02
-    description: Facts carry run attribution and debug runs stay silent.
+    description: Facts carry run and initiator-group attribution and debug runs stay silent.
     steps: [1, 4]
     expected_results: [1, 5]
     forbidden_side_effects: [2]

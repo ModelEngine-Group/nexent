@@ -1,0 +1,65 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-INITIATOR-GROUPS-20261126
+  change_type: bugfix
+  bug_id: BUG-OPS-INITIATOR-GROUP-ATTRIBUTION
+  title: Monitoring dashboards return empty data for every user-group filter
+  description: >-
+    Attach the initiating user's tenant groups to monitoring run metadata. Management resolves the groups at run
+    preparation and carries them through the AgentOS prepared-run contract; Runtime binds them into AgentRunMetadata,
+    so mcp_tool, model, agent and skill facts record initiator_group_ids and group-filtered monitoring reads return
+    data.
+  observed_behavior: >-
+    Selecting any user group on the operations monitoring dashboard returns an empty result with a 200 response for
+    all monitoring kinds. Published Elasticsearch daily documents carry empty initiator_group_ids and
+    group_snapshot_state=unknown because no production path ever populated AgentRunMetadata.monitoring_group_ids.
+  expected_behavior: >-
+    Runs prepared by Management carry the initiator's group IDs; facts and daily documents record a known group
+    snapshot; group-filtered summary, trends, rankings and list reads return the attributed calls and unrelated
+    groups observe nothing.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      OPS-MCP-TOOL-MONITORING-D3-001 asserted run attribution but never asserted initiator-group attribution or a
+      group-filtered read, and no formal case exercised the Management prepare to Runtime metadata binding seam.
+      SDK-side unit coverage set monitoring_group_ids by hand, which is why the production gap stayed invisible.
+  feature_contract_changed: false
+  affected_features:
+    existing: [OPS-MCP-TOOL-MONITORING]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [OPS-MCP-TOOL-MONITORING-D3-002]
+    modified: [OPS-MCP-TOOL-MONITORING-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Resolver returns the user's tenant groups, keeps groupless users known-empty, skips the database when
+        monitoring is disabled and degrades lookup failure to unknown.
+      - Management preparation attaches the resolved groups to NL2Skill, NL2Agent, conversation and debug snapshot
+        payloads through the strict AgentOS contract.
+      - Runtime binds payload groups into AgentRunMetadata for prepared runs, ephemeral creator runs, the nl2agent
+        creation stream and the dreaming summarizer.
+    test_selectors:
+      - test/backend/services/test_monitoring_group_attribution.py
+      - test/backend/app/test_agentos_prepared_run.py::test_run_binds_initiator_groups_to_monitoring_metadata
+      - test/backend/app/test_agentos_ephemeral_lifecycle.py::test_metadata_carries_initiator_groups_from_the_signed_payload
+      - test/backend/services/test_agent_trajectory_user_query.py::test_stream_captures_query_before_runtime_time
+      - test/backend/services/test_creator_trajectory_capture.py::test_saved_creation_identity_and_receipt_reach_runtime
+      - test/backend/services/test_memory_dreaming_summarizer.py::test_monitoring_metadata_carries_initiator_groups
+    reason: >-
+      The regression needs to fail before the fix at each production construction site; the strengthened existing
+      suites already exercise the chat, debug, creator and dreaming flows end to end with the resolver isolated.
+  notes: >-
+    Root cause: the only group resolver (build_agent_run_context in management/services/agent/context.py) had no
+    production callers after the AgentOS refactor, while all four AgentRunMetadata construction sites omitted
+    monitoring_group_ids. Fix adds initiator_group_ids to AgentRunSpec and PreparedCreatorRun contracts, a shared
+    resolve_initiator_group_ids helper, payload attachment in compile_snapshot and the creator payload builders, and
+    direct metadata passing in creator_execution and the dreaming summarizer. Historical published documents are not
+    backfilled; group filters only see runs executed after the fix. Identity group membership data is stubbed at the
+    data boundary in the new D3 case; admission and journal boundaries are stubbed so the real metadata binding stays
+    in scope.

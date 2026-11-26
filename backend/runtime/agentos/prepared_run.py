@@ -201,6 +201,9 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
             agent_id=payload.resource.agent_id, query=payload.input.trace_query, language=payload.language,
             is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
             minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
+            monitoring_group_ids=(
+                tuple(payload.initiator_group_ids) if payload.initiator_group_ids is not None else None
+            ),
         )
         checkpoint = payload.historical_context.history_summary if payload.historical_context is not None else None
         history = ExecutionHistory(read_conversation_result=partial(

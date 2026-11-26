@@ -429,9 +429,12 @@ async def start_creation_turn(
         source_id = message_receipt.get("message_id")
         if type(source_id) is int and 0 < source_id <= 2147483647:
             extra_metadata["trajectory_source_message_id"] = str(source_id)
+        from management.services.agent.context import resolve_initiator_group_ids
+
         stream = _CreationStream(stream, AgentRunMetadata(
             tenant_id=tenant_id, user_id=user_id, agent_id=ref.agent_id,
             conversation_id=conversation_id, query=request.query, is_debug=False,
+            monitoring_group_ids=resolve_initiator_group_ids(user_id, tenant_id),
             extra_metadata=extra_metadata,
         ))
         persisted = checkpoint_creator_stream(

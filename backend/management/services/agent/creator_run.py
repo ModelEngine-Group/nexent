@@ -91,10 +91,14 @@ async def prepare_nl2agent_snapshot(
         [item for item in request.history or [] if item.role in {"user", "assistant"}],
         actor.user_id, actor.tenant_id, lane="control-io", owner="management",
     )
+    from management.services.agent.context import resolve_initiator_group_ids
+
+    initiator_groups = resolve_initiator_group_ids(actor.user_id, actor.tenant_id)
     return PreparedAgentCreatorRun(
         mode="nl2agent", run_id=getattr(request, "_creator_run_id", None) or uuid4().hex,
         agent_id=request.agent_id, input=run_input,
         bound_resources=context.content["text"], language="en" if language == "en" else "zh", **model_scope,
+        initiator_group_ids=list(initiator_groups) if initiator_groups is not None else None,
     )
 
 

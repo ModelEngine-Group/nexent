@@ -26,6 +26,8 @@ def creator(mocker):
         side_effect=lambda tenant, key: SystemAgentRef("shared", key, 77, 0),
     )
     mocker.patch.object(execution, "authorize_target", side_effect=lambda target, *_: target)
+    mocker.patch("management.services.agent.context.OPS_MONITORING_ENABLED", True)
+    mocker.patch("management.db.identity.group.query_group_ids_by_user_in_tenant", return_value=[7, 3])
     mocker.patch.object(creation_history, "create_new_conversation", return_value={"conversation_id": 9})
     save = mocker.patch.object(creation_history, "save_message", side_effect=range(10, 50))
     mocker.patch.object(execution, "save_message", save)
@@ -107,6 +109,7 @@ async def test_saved_creation_identity_and_receipt_reach_runtime(
         "tenant", "owner", conversation_id, 77,
     )
     assert conversation_id == 9 and metadata.query == "build"
+    assert metadata.monitoring_group_ids == (7, 3)
     assert metadata.extra_metadata["trajectory_source_message_id"] == source_id
     assert metadata.extra_metadata["app_version"] == APP_VERSION
     assert metadata.extra_metadata["core_type"] == "smolagents"

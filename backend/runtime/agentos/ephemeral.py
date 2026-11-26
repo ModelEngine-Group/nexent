@@ -272,6 +272,9 @@ async def _open_ephemeral(payload, actor):
         conversation_id=trajectory.conversation_id if trajectory is not None else None,
         query=payload.input.trace_query, language=payload.language, is_debug=trajectory is None, memory_enabled=False,
         history_count=len(payload.input.history), minio_files_count=len(payload.input.attachment_refs),
+        monitoring_group_ids=(
+            tuple(payload.initiator_group_ids) if payload.initiator_group_ids is not None else None
+        ),
         extra_metadata=extra_metadata,
     )
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug

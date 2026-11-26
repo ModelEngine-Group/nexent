@@ -76,10 +76,13 @@ class TenantDreamingSummarizer:
         )
 
     def __call__(self, request: DreamingSummarizationRequest) -> DreamingSummarizationOutput:
+        from management.services.agent.context import resolve_initiator_group_ids
+
         metadata = AgentRunMetadata(
             tenant_id=self.tenant_id, user_id=self.user_id,
             user_email=resolve_monitoring_user_email(self.user_id, self.tenant_id),
             agent_id=int(request.agent_id) if request.agent_id and request.agent_id.isdigit() else None,
+            monitoring_group_ids=resolve_initiator_group_ids(self.user_id, self.tenant_id),
             extra_metadata={"dreaming_run_id": request.run_id, "dreaming_attempt": request.attempt},
         )
         started = time.monotonic()

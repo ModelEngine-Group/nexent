@@ -21,6 +21,8 @@ from ..app.test_agentos_prepared_run import ACTOR, runtime
 from .model_profile_helpers import stub_resolved_model_catalog
 from .test_core_service_slimming import dependency, load_source
 
+GROUP_QUERY = "management.db.identity.group.query_group_ids_by_user_in_tenant"
+
 
 @pytest.fixture
 def run_context(monkeypatch):
@@ -51,6 +53,8 @@ def run_context(monkeypatch):
     ("用户提供的日期\n\n[当前时间: 2026-01-01 00:00:00]", "Asia/Shanghai", "zh", None),
 ])
 async def test_stream_captures_query_before_runtime_time(mocker, runtime, query, zone, language, marker, debug):
+    mocker.patch("management.services.agent.context.OPS_MONITORING_ENABLED", True)
+    mocker.patch(GROUP_QUERY, return_value=[7, 3])
     row = model_record(tenant_id=ACTOR.tenant_id)
     model = create_model_config_from_record(row)
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
@@ -86,6 +90,9 @@ async def test_stream_captures_query_before_runtime_time(mocker, runtime, query,
     else:
         assert snapshot.input.query == query
         assert "user_query" not in snapshot.input.model_dump()
+    # Management attaches the initiator's groups to the signed payload in both
+    # the conversation and debug snapshot flows; Runtime re-binds them below.
+    assert snapshot.initiator_group_ids == [7, 3]
 
     if debug:
         manager = mocker.patch.object(ephemeral, "runtime_thread_manager")
@@ -114,6 +121,7 @@ async def test_stream_captures_query_before_runtime_time(mocker, runtime, query,
     assert metadata.query == query
     assert metadata.language == language
     assert metadata.is_debug is debug
+    assert metadata.monitoring_group_ids == (7, 3)
 
 
 @pytest.mark.parametrize("options,expected", [

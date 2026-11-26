@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: OPS-MCP-TOOL-MONITORING-D3-002
+timeout_seconds: 240
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_initiator_group_attribution_publication
+acceptance_bindings:
+  AC-01: [test_initiator_group_attribution_publication]
+  AC-02: [test_initiator_group_attribution_publication]
+  AC-03: [test_initiator_group_attribution_publication]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The case owns a real MCP streamable-http stub on a loopback port and a unique database plus the monitoring namespace of an explicitly isolated Elasticsearch instance. The identity group store is stubbed at the data boundary; admission and journal boundaries are stubbed so the real metadata binding stays in scope.

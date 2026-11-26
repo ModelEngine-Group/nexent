@@ -17,6 +17,7 @@ from contracts.constants.constants import MAX_RUNTIME_METADATA_BYTES
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import ActiveExecutionError
 from nexent.core.concurrency import LanePolicy, ThreadCapacityExceeded, ThreadManager, ThreadQueueTimedOut
+from nexent.monitor import get_agent_monitoring_context
 from runtime.agentos import prepared_run
 
 ACTOR = ServicePrincipal("actor", "tenant")
@@ -168,6 +169,23 @@ async def test_prepared_worker_capacity_errors_are_retryable(monkeypatch, payloa
     assert json.loads(response.body) == {
         "code": "RUNTIME_CAPACITY_FULL", "message": "Agent runtime is at capacity.", "retryable": True,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("groups", "expected"), [([2, 3], (2, 3)), ([], ()), (None, None)],
+                         ids=["groups", "groupless-user", "unresolved"])
+async def test_run_binds_initiator_groups_to_monitoring_metadata(monkeypatch, payload, runtime, groups, expected):
+    prepared = PreparedAgentRun.model_validate({**payload.model_dump(), "initiator_group_ids": groups})
+    seen = []
+
+    async def runner(info, **_kwargs):
+        seen.append(get_agent_monitoring_context())
+        yield '{"type":"final_answer","content":"answer"}'
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(prepared, ACTOR)
+    await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+    assert [metadata.monitoring_group_ids for metadata in seen] == [expected]
 
 
 @pytest.mark.asyncio

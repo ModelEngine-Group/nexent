@@ -91,6 +91,17 @@ async def test_debug_response_registers_run_and_cleans_up_after_last_frame(paylo
     runtime.manager.cancel.assert_not_called()
 
 
+@pytest.mark.parametrize("groups, expected", [
+    ([7, 3], (7, 3)),
+    ([], ()),
+    (None, None),
+], ids=["groups", "groupless-user", "unresolved"])
+async def test_metadata_carries_initiator_groups_from_the_signed_payload(runtime, groups, expected):
+    creator = creator_payload("nl2agent", initiator_group_ids=groups)
+    response = await ephemeral._open_ephemeral(creator, ACTOR)
+    assert response.metadata.monitoring_group_ids == expected
+
+
 @pytest.mark.parametrize("before_submission", [False, True])
 async def test_failed_ephemeral_open_releases_capacity_at_worker_exit(payload, runtime, before_submission):
     failure = ThreadCapacityExceeded("agent-run", 1, 0)

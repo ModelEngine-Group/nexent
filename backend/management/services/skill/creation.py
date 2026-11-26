@@ -17,7 +17,10 @@ from management.services.skill.nl2skill import _extract_target_files, _normalize
 def prepare_nl2skill_snapshot(
     request: NL2SkillRunRequest, user_id: str, tenant_id: str, language: str,
 ) -> PreparedSkillCreatorRun:
+    from management.services.agent.context import resolve_initiator_group_ids
+
     model_scope = prepare_creator_model(request, tenant_id)
+    initiator_groups = resolve_initiator_group_ids(user_id, tenant_id)
     return PreparedSkillCreatorRun(
         mode="nl2skill", run_id=getattr(request, "_creator_run_id", None) or uuid4().hex,
         language="en" if language == "en" else "zh",
@@ -27,6 +30,7 @@ def prepare_nl2skill_snapshot(
         ),
         draft=_normalize_draft_snapshot(request.draft_snapshot),
         target_files=_extract_target_files(request.query, request.draft_snapshot),
+        initiator_group_ids=list(initiator_groups) if initiator_groups is not None else None,
         **model_scope,
     )
 

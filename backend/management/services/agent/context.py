@@ -122,6 +122,23 @@ def trajectory_source_message_id(request, user_id, tenant_id):
     return None
 
 
+def resolve_initiator_group_ids(user_id: str, tenant_id: str) -> Optional[tuple]:
+    """Resolve the initiator's user groups for monitoring fact attribution.
+
+    Returns ``None`` when monitoring is disabled or the lookup fails so the
+    facts fall back to the ``unknown`` group snapshot state instead of failing
+    the run; an empty tuple means the user belongs to no group.
+    """
+    if not OPS_MONITORING_ENABLED:
+        return None
+    from management.db.identity.group import query_group_ids_by_user_in_tenant
+
+    try:
+        return tuple(query_group_ids_by_user_in_tenant(user_id, tenant_id))
+    except Exception:
+        return None
+
+
 def build_agent_run_context(
     request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict,
     user_query: str | None = None,
@@ -131,14 +148,9 @@ def build_agent_run_context(
     from management.services.monitor.identity import resolve_monitoring_user_email
     from nexent.monitor.local_content import local_capture_enabled
 
-    monitoring_groups = None
-    if OPS_MONITORING_ENABLED and not request.is_debug:
-        from management.db.identity.group import query_group_ids_by_user_in_tenant
-
-        try:
-            monitoring_groups = tuple(query_group_ids_by_user_in_tenant(user_id, tenant_id))
-        except Exception:
-            monitoring_groups = None
+    monitoring_groups = (
+        None if request.is_debug else resolve_initiator_group_ids(user_id, tenant_id)
+    )
 
     extra_metadata = {**extra_metadata}
     extra_metadata.pop("trajectory_source_message_id", None)

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D3
+module: OPS-PLATFORM
+case:
+  case_id: OPS-MCP-TOOL-MONITORING-D3-002
+  feature_id: OPS-MCP-TOOL-MONITORING
+  requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118]
+  business_rule_ids: [OPS-MCP-TOOL-MONITORING-RULE-02, OPS-MCP-TOOL-MONITORING-RULE-04, OPS-MCP-TOOL-MONITORING-RULE-05]
+  title: Management-resolved initiator groups survive the AgentOS payload into published group-filtered MCP statistics
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify that Management resolves the initiating user's groups at run preparation, that the AgentOS prepared-run contract carries them into the Runtime-bound run metadata, and that published MCP tool facts answer group-filtered monitoring reads.
+  integration_boundary: [Real Management preparation with the identity group store stubbed at the data boundary, Real Runtime run-metadata binding and context propagation, Actual SDK MCP transport with a stub MCP server, Ops PostgreSQL replay state and Elasticsearch publication]
+  observations: [Prepared payloads with initiator group IDs, Runtime-bound AgentRunMetadata monitoring group IDs, Tool call facts carrying initiator groups, Group-filtered API responses]
+  cleanup: [Close the stub MCP server and remove only test-owned database and index data]
+  preconditions: [An isolated Ops database and Elasticsearch are available with OPS_MONITORING_ENABLED=true, A stub MCP server can serve a succeeding tool call, The product code and fixed script for this case are implemented]
+  test_data: {workload: One NL2Skill preparation for a user belonging to group 5 and one prepared conversation run whose bound metadata drives one succeeding MCP tool call}
+  steps:
+  - order: 1
+    action: Run the real NL2Skill preparation for a user whose tenant group membership resolves to group 5.
+    expected: The prepared payload carries initiator_group_ids=[5] and the strict AgentOS contract round-trips the field through serialization.
+  - order: 2
+    action: Execute a prepared conversation run carrying the same initiator groups through the Runtime run binding with a stubbed admission and journal boundary, where the agent stream performs one real MCP tool call inside the bound context.
+    expected: The bound AgentRunMetadata reports monitoring_group_ids=(5,) and the emitted tool call fact carries initiator_group_ids=[5] with a known group snapshot state.
+  - order: 3
+    action: Publish the captured facts and query the MCP tool monitoring endpoints filtered by group 5 and by an unrelated group.
+    expected: The group 5 read returns the published call; the unrelated group read returns an empty aggregate; the unfiltered read is unchanged.
+  expected_results: [Management preparation attaches the resolved initiator groups to the AgentOS payload, Runtime binds the payload groups into the run metadata that facts read, Published MCP tool statistics answer initiator-group filtered queries, Unrelated groups observe nothing without disturbing the unfiltered aggregate]
+  forbidden_side_effects:
+  - Writing tool arguments or results or credentials or headers into facts
+  - Publishing a fact under a different tenant or fact kind
+  - Deleting source facts or documents of unrelated kinds or dates
+  acceptance:
+  - id: AC-01
+    description: Management preparation resolves the initiator's user groups and attaches them to the prepared payload contract.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: The Runtime binds the payload's initiator groups into the run metadata that monitoring facts read.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Published MCP tool statistics answer initiator-group filtered queries and unrelated groups observe nothing.
+    steps: [3]
+    expected_results: [3, 4]
+    forbidden_side_effects: [2, 3]

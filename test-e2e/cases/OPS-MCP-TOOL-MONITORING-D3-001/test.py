@@ -255,6 +255,7 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         assert terminal["error_tool"]["error_category"] == "TOOL_ERROR"
         assert all(fact["mcp_server_id"] == 3 and fact["mcp_server_name"] == "stub"
                    and fact["mcp_server_type"] == "container" for fact in terminal.values())
+        assert all(fact["initiator_group_ids"] == (5,) for fact in terminal.values())
         assert all(fact["duration_ms"] >= 0 for fact in terminal.values())
         assert all("probe-payload" not in json.dumps(fact) and "echo:" not in json.dumps(fact)
                    for fact in observations)
@@ -287,6 +288,12 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
                 **interval, "dimension": "services"}).json()["data"]["items"]
             assert tools_list[0]["mcp_server_name"] == "stub"
             assert tools_list[0]["active_tools"] == 3
+            # Initiator-group attribution: the same window filtered by the
+            # initiator's group returns the calls and other groups see nothing.
+            grouped = client.get(route, params={**interval, "group_ids": 5}).json()["data"]
+            assert grouped["request_count"] == 3 and grouped["tool_count"] == 3
+            missed = client.get(route, params={**interval, "group_ids": 99}).json()["data"]
+            assert missed["request_count"] == 0 and missed["tool_count"] == 0
 
         # -- Case step 3: replaying the confirmed batch does not inflate anything.
         replay = json.dumps([event for event in observations], separators=(",", ":"))
