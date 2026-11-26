@@ -61,8 +61,8 @@ journey("PW-SHARE-01", async (context) => {
         await (await chooser).setFiles(pdf);
         await chat.startMessage(`请确认快照标记 ${marker}`);
         conversationId = chat.registerOwnedConversation("PW-SHARE-01");
-        await chat.waitForCompletion();
-        await chat.sendAndWait(`不分享的第二轮 ${late}`);
+        await chat.waitForDisplayedCompletion();
+        await chat.sendAndWaitForDisplayedCompletion(`不分享的第二轮 ${late}`);
         await chat
           .assistantMessages()
           .first()
@@ -156,7 +156,7 @@ journey("PW-SHARE-01", async (context) => {
         await expect(
           page.getByRole("button", { name: "创建公开链接", exact: true }),
         ).toHaveCount(0);
-        await chat.sendAndWait(`新增未分享消息 ${late}`);
+        await chat.sendAndWaitForDisplayedCompletion(`新增未分享消息 ${late}`);
         return "owner appended a post-snapshot message";
       },
       async () => {
