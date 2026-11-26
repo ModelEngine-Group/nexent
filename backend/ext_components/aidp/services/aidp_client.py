@@ -5,15 +5,15 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, NoReturn
 from urllib.parse import quote, urljoin
 
 import httpx
 from nexent.utils.http_client_manager import http_client_manager
 
-from contracts.constants.environment import AIDP_TENANT_ID
+from contracts.constants.environment import AIDP_ACCEPT_LANGUAGE, AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 
@@ -36,16 +36,28 @@ _AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _AIDP_READ_TIMEOUT_SECONDS = 30.0
 _AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
-# Default language for AIDP-returned error messages. AIDP falls back to
-# English when the header is missing; override via AIDP_ACCEPT_LANGUAGE.
-_AIDP_ACCEPT_LANGUAGE = os.getenv("AIDP_ACCEPT_LANGUAGE", "zh-CN")
+# Per-request language from the frontend. AIDP_ACCEPT_LANGUAGE is only the
+# fallback for requests without an Accept-Language header.
+_aidp_accept_language: ContextVar[str | None] = ContextVar(
+    "aidp_accept_language", default=None
+)
+
+
+def set_aidp_accept_language(value: str | None) -> None:
+    """Store the current request's language for downstream AIDP calls."""
+    if value and value.strip():
+        _aidp_accept_language.set(value.strip())
+
+
+def _current_aidp_accept_language() -> str:
+    return _aidp_accept_language.get() or AIDP_ACCEPT_LANGUAGE
 
 
 def _aidp_headers(api_key: str, *, content_type: bool = True) -> dict[str, str]:
     """Build the common headers for an outbound AIDP request."""
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Accept-Language": _AIDP_ACCEPT_LANGUAGE,
+        "Accept-Language": _current_aidp_accept_language(),
     }
     if content_type:
         headers["Content-Type"] = "application/json"
@@ -74,11 +86,19 @@ def _normalize_upstream_error(value: Any) -> str | None:
 
 
 def _extract_upstream_error(response: httpx.Response) -> str | None:
-    """Read a bounded error reason from an AIDP HTTP response."""
+    """Read a bounded error reason from AIDP's fixed error envelope."""
     try:
-        reason = _normalize_upstream_error(response.json())
+        payload = response.json()
     except (TypeError, ValueError):
-        reason = None
+        payload = None
+
+    reason = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str):
+                reason = _normalize_upstream_error(message)
 
     if not reason:
         content_type = response.headers.get("content-type", "").lower()
@@ -91,36 +111,20 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
 
 
 def _extract_upstream_code(response: httpx.Response) -> int | None:
-    """Read an AIDP business error code from a structured HTTP error body.
-
-    AIDP usually reports the business code as ``{"detail": {"code": 1089,
-    "message": ...}}``; some deployments put it at the top level or under
-    ``error``/``message``. Keeping the code separate from the human-readable
-    reason lets callers translate known codes such as 1089 (name conflict)
-    without parsing localized text.
-    """
+    """Read AIDP's business code from ``{"error": {"code": <int>}}``."""
     try:
         payload = response.json()
     except (TypeError, ValueError):
         return None
-
-    def find(value: Any) -> int | None:
-        if isinstance(value, dict):
-            for key in ("code", "error_code", "errorCode"):
-                candidate = value.get(key)
-                if isinstance(candidate, bool):
-                    continue
-                if isinstance(candidate, int):
-                    return candidate
-                if isinstance(candidate, str) and candidate.strip().isdigit():
-                    return int(candidate.strip())
-            for key in ("detail", "message", "error"):
-                found = find(value.get(key))
-                if found is not None:
-                    return found
+    if not isinstance(payload, dict):
         return None
-
-    return find(payload)
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    if isinstance(code, bool) or not isinstance(code, int):
+        return None
+    return code
 
 
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
@@ -302,30 +306,21 @@ def _resolve_aidp_folder_id(
             page=1,
             page_size=200,
         )
-        folders = level.get("folders")
+        # AIDP's folder-tree response is fixed. Resolving a deep path is
+        # deliberately one upstream request per segment; the public route
+        # still addresses folders by path, so this cost is accepted.
+        folders = level["folders"]
         match = next(
-            (
-                folder
-                for folder in folders
-                if isinstance(folder, dict)
-                and str(folder.get("folder_name")) == segment
-            ),
+            (folder for folder in folders if folder["folder_name"] == segment),
             None,
-        ) if isinstance(folders, list) else None
+        )
         if match is None:
             raise AppException(
                 ErrorCode.AIDP_SERVICE_ERROR,
                 f"AIDP folder not found: {folder_path}",
                 details={"folder_path": folder_path, "segment": segment},
             )
-        try:
-            current_id = int(match.get("folder_id"))
-        except (TypeError, ValueError) as exc:
-            raise AppException(
-                ErrorCode.AIDP_RESPONSE_ERROR,
-                f"AIDP folder has no numeric folder_id: {folder_path}",
-                details={"folder_path": folder_path},
-            ) from exc
+        current_id = int(match["folder_id"])
         current_path = _join_folder_path(current_path, segment)
     return current_id
 
@@ -569,17 +564,12 @@ def _request_aidp_json(
             )
         return result
     except httpx.RequestError as e:
-        logger.exception("AIDP request failed: %s", e)
+        logger.exception("AIDP request failed: context=%s error=%s", context, e)
         raise AppException(
             ErrorCode.AIDP_CONNECTION_ERROR,
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        logger.exception(
-            "AIDP API HTTP error: %s, status_code: %s",
-            e,
-            e.response.status_code,
-        )
         _raise_aidp_http_error(e, context)
     except ValueError as e:
         logger.exception("Failed to parse AIDP response: %s", e)

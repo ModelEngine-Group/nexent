@@ -61,38 +61,4 @@ def get_aidp_file_summary_impl(
 
 # ==================== Knowledge-file history (all-status listing) ====================
 
-# Channel entries are read through alias lists because AIDP deployments spell
-# these fields differently. Only the forms actually observed are listed; adding
-# a new spelling here is enough to support another deployment.
-_CHANNEL_FS_ID_KEYS = (
-    "fs_id",
-    "fsId",
-    "fsid",
-    "file_system_id",
-    "fileSystemId",
-    "file_sys_id",
-    "filesystem_id",
-)
-_CHANNEL_SRC_DIR_KEYS = (
-    "src_dir",
-    "srcDir",
-    "source_dir",
-    "sourceDir",
-    "source_path",
-    "sourcePath",
-    "dir_path",
-    "dirPath",
-    "input_dir",
-    "inputDir",
-)
-_CHANNEL_KB_ID_KEYS = (
-    "kds_id",
-    "kdsId",
-    "knowledge_base_id",
-    "knowledgeBaseId",
-    "kb_id",
-    "kbId",
-    "knowledge_base_ids",
-    "knowledgeBaseIds",
-)
 

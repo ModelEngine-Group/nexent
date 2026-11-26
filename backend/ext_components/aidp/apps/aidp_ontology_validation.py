@@ -83,6 +83,30 @@ NumericId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=20, pattern=r"^\d+$"),
 ]
+MetadataKey = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64),
+    AfterValidator(_utf8_max_bytes(64)),
+]
+MetadataValue = Annotated[
+    str,
+    StringConstraints(max_length=256),
+    AfterValidator(_utf8_max_bytes(256)),
+]
+
+
+def _validate_metadata_json(value: dict[str, str]) -> dict[str, str]:
+    if not value:
+        raise ValueError("metadata_json must not be empty")
+    if len(value) > 20:
+        raise ValueError("metadata_json must not exceed 20 fields")
+    return value
+
+
+MetadataJson = Annotated[
+    dict[MetadataKey, MetadataValue],
+    AfterValidator(_validate_metadata_json),
+]
 
 
 def _bad_request(

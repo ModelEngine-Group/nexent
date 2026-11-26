@@ -64,6 +64,22 @@ def aidp_service_module():
     register_module(
         "nexent.core.ext_components.aidp.retrieval_config", retrieval_config_mod
     )
+    metadata_filter_name = "nexent.core.ext_components.aidp.metadata_filter"
+    metadata_filter_mod = ModuleType(metadata_filter_name)
+    metadata_filter_spec = importlib.util.spec_from_file_location(
+        metadata_filter_name,
+        os.path.join(
+            PROJECT_ROOT,
+            "sdk",
+            "nexent",
+            "core",
+            "ext_components",
+            "aidp",
+            "metadata_filter.py",
+        ),
+    )
+    metadata_filter_spec.loader.exec_module(metadata_filter_mod)
+    register_module(metadata_filter_name, metadata_filter_mod)
 
     backend_pkg = ModuleType("backend")
     backend_pkg.__path__ = [os.path.join(PROJECT_ROOT, "backend")]
@@ -90,6 +106,7 @@ def aidp_service_module():
             "nexent.utils.http_client_manager",
             "nexent.utils",
             "nexent.core.ext_components.aidp.retrieval_config",
+            "nexent.core.ext_components.aidp.metadata_filter",
             "nexent.core.ext_components.aidp",
             "nexent.core.ext_components",
             "nexent.core",
@@ -2184,7 +2201,7 @@ class TestUploadAidpDocsImpl:
             409,
             request=request,
             json={
-                "detail": {
+                "error": {
                     "code": 1089,
                     "message": "folder name already exists",
                 }

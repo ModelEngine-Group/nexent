@@ -746,6 +746,23 @@ class AidpGraphConfigUpdate(BaseModel):
         return self
 
 
+def _graph_validation_error(error: ValidationError) -> AppException:
+    return AppException(
+        ErrorCode.COMMON_PARAMETER_INVALID,
+        "Invalid graph configuration",
+        details={
+            "errors": [
+                {
+                    "loc": list(item.get("loc") or ()),
+                    "msg": item.get("msg", ""),
+                    "type": item.get("type", ""),
+                }
+                for item in error.errors()
+            ]
+        },
+    )
+
+
 def _serialize_graph_config(config: Dict[str, Any]) -> str:
     """Validate a structured graph configuration and serialize it for AIDP.
 
@@ -759,7 +776,7 @@ def _serialize_graph_config(config: Dict[str, Any]) -> str:
     try:
         validated = AidpGraphConfig.model_validate(config)
     except ValidationError as error:
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, str(error)) from error
+        raise _graph_validation_error(error) from error
     return validated.model_dump_json()
 
 
@@ -779,7 +796,7 @@ def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) 
     try:
         validated = AidpGraphConfigUpdate.model_validate(updates)
     except ValidationError as error:
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, str(error)) from error
+        raise _graph_validation_error(error) from error
 
     edited = validated.model_dump(exclude_unset=True)
     result: Dict[str, str] = {}
@@ -1165,6 +1182,17 @@ def upload_aidp_docs_impl(
             }
 
         upstream_reason = _extract_upstream_error(e.response)
+        if upstream_reason is None:
+            # Upload keeps AIDP's bilingual `detail.reason_zh/reason_en`
+            # contract instead of the generic `error` envelope.
+            try:
+                upload_error = e.response.json()
+            except (TypeError, ValueError):
+                upload_error = None
+            if isinstance(upload_error, dict):
+                upstream_reason = _normalize_upstream_error(
+                    upload_error.get("detail")
+                )
         logger.exception(
             "AIDP API HTTP error: %s, status_code: %s, upstream_reason=%s",
             e,

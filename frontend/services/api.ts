@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import i18n from "i18next";
+
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { withBasePath } from "@/lib/basePath";
@@ -1055,7 +1057,11 @@ export const fetchWithErrorHandling = async (
   options: RequestInit = {}
 ) => {
   try {
-    const response = await fetch(url, options);
+    const headers = new Headers(options.headers);
+    if (!headers.has("Accept-Language")) {
+      headers.set("Accept-Language", i18n.language || "zh-CN");
+    }
+    const response = await fetch(url, { ...options, headers });
 
     // Handle HTTP errors
     if (!response.ok) {

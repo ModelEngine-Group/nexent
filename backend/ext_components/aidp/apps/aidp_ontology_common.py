@@ -98,8 +98,8 @@ def _enrich_bindings_sync(
                 detail = get_aidp_kb_impl(server_url, api_key, row["kds_id"]) or {}
                 kds_name = detail.get("kds_name") or detail.get("name")
             except Exception as error:  # noqa: BLE001 - name lookup is best effort
-                logger.debug(
-                    "AIDP binding KB name unavailable for %s: %s",
+                logger.warning(
+                    "AIDP binding KB name unavailable: kds_id=%s error=%s",
                     row["kds_id"],
                     error,
                 )
@@ -334,12 +334,24 @@ async def _enrich_entity_rows(
                     lane="control-io",
                     owner="config",
                 )
-            except AppException:
+            except AppException as error:
+                logger.warning(
+                    "AIDP entity detail unavailable: domain_id=%s entity_id=%s "
+                    "error=%s",
+                    domain_id,
+                    entity_id,
+                    error,
+                )
                 return None
         # A business error may still be a dict; only accept a real entity row.
         if not isinstance(detail, dict) or not (
             detail.get("api_name") is not None or "properties" in detail
         ):
+            logger.warning(
+                "AIDP entity detail has unexpected shape: domain_id=%s entity_id=%s",
+                domain_id,
+                entity_id,
+            )
             return None
         return detail
 

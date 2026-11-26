@@ -15,6 +15,9 @@ from typing import Any, Dict, List
 from urllib.parse import urljoin
 
 import httpx
+from nexent.core.ext_components.aidp.metadata_filter import (
+    build_metadata_condition,
+)
 from nexent.core.ext_components.aidp.retrieval_config import (
     build_payload,
     resolve_config,
@@ -224,8 +227,7 @@ def get_aidp_image_impl(
         )
     except httpx.HTTPStatusError as e:
         _raise_aidp_http_error(e, "view-image")
-    content_type = response.headers.get("Content-Type") or "image/png"
-    return response.content, content_type.split(";")[0].strip()
+    return response.content
 
 
 def search_aidp_chunks_impl(
@@ -265,18 +267,15 @@ def search_aidp_chunks_impl(
         "multi_modal": True,
     })
     body = build_payload(config, normalized_query, [str(kds_id)])
-    body["metadata_condition"] = {
-        "logical_operator": "or",
-        "conditions": [
-            {
-                "name": "original_file_name",
-                # Real AIDP (verified 2026-11-18) rejects "=" on string fields
-                # with 400 code 1002; "contains" is the allowed file-name filter.
-                "comparison_operator": "contains",
-                "value": normalized_file_name,
-            }
-        ],
-    }
+    body["metadata_condition"] = build_metadata_condition(
+        {
+            "enabled": True,
+            "match": "any",
+            "conditions": [
+                {"operator": "contains", "value": normalized_file_name}
+            ],
+        }
+    )
 
     result = _request_aidp_json(
         server_url,

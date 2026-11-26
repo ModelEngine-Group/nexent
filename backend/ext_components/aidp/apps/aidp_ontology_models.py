@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ext_components.aidp.apps.aidp_ontology_validation import (
     DomainDescription,
@@ -16,6 +16,7 @@ from ext_components.aidp.apps.aidp_ontology_validation import (
     EntityDescription,
     EntityName,
     MetadataFieldName,
+    MetadataJson,
     NumericId,
     RuleDescription,
     RuleName,
@@ -111,22 +112,13 @@ class OntologyEntityUpdateRequest(BaseModel):
 class OntologyBindingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kb_id: str | None = Field(
-        default=None, min_length=1, description="Target AIDP knowledge base ID"
+    kb_id: str = Field(
+        ..., min_length=1, description="Target AIDP knowledge base ID"
     )
-    kds_id: str | None = Field(
-        default=None, min_length=1, description="Legacy spelling for kb_id"
-    )
-
-    @model_validator(mode="after")
-    def require_kb_id(self):
-        if not (self.kb_id or self.kds_id):
-            raise ValueError("kb_id is required")
-        return self
 
     @property
     def target_kb_id(self) -> str:
-        return (self.kb_id or self.kds_id or "").strip()
+        return self.kb_id.strip()
 
 
 class OntologyMetadataFieldRequest(BaseModel):
@@ -205,22 +197,10 @@ class ChunkMetadataImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kds_id: int = Field(..., ge=0, description="Knowledge base that owns the chunks")
-    metadata_json: dict = Field(..., description="At least one field/value pair")
+    metadata_json: MetadataJson = Field(
+        ..., description="At least one field/value pair"
+    )
     chunk_id_list: list[int] = Field(..., min_length=1, description="Chunk ids")
-
-    @field_validator("metadata_json")
-    @classmethod
-    def validate_metadata_json(cls, value: dict) -> dict:
-        if not value:
-            raise ValueError("metadata_json must not be empty")
-        if len(value) > 20:
-            raise ValueError("metadata_json must not exceed 20 fields")
-        for key, item in value.items():
-            if not isinstance(key, str) or len(key.encode("utf-8")) > 64:
-                raise ValueError("metadata_json keys must be at most 64 bytes")
-            if not isinstance(item, str) or len(item.encode("utf-8")) > 256:
-                raise ValueError("metadata_json values must be at most 256 bytes")
-        return value
 
 
 class OntologyMetadataBatchUnbindSyncRequest(BaseModel):

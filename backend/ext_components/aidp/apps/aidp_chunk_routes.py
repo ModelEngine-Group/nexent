@@ -26,6 +26,7 @@ from ext_components.aidp.apps.aidp_mgmt_common import (
     _auth,
     _credentials,
 )
+from ext_components.aidp.apps.aidp_ontology_validation import MetadataJson
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_chunk_service import (
     AIDP_CHUNK_REMOVE_MAX_IDS,
@@ -117,7 +118,9 @@ class BatchChunkMetadataRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     od_id: int = Field(..., ge=0, description="Ontology domain that owns the fields")
-    metadata_json: dict = Field(..., description="At least one field/value pair")
+    metadata_json: MetadataJson = Field(
+        ..., description="At least one field/value pair"
+    )
     tag: List[str] | None = Field(
         default=None,
         description="Entity tags chosen from the bound ontology domain",
@@ -133,17 +136,6 @@ class BatchChunkMetadataRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope(self):
-        if not self.metadata_json:
-            raise ValueError("metadata_json must not be empty")
-        if len(self.metadata_json) > 20:
-            raise ValueError("metadata_json must not exceed 20 fields")
-        for key, value in self.metadata_json.items():
-            if not isinstance(key, str) or len(key.encode("utf-8")) > 64:
-                raise ValueError("metadata_json keys must be strings of at most 64 bytes")
-            if not isinstance(value, str) or len(value.encode("utf-8")) > 256:
-                raise ValueError(
-                    "metadata_json values must be strings of at most 256 bytes"
-                )
         if self.tag is not None:
             cleaned: list[str] = []
             for item in self.tag:
@@ -278,13 +270,13 @@ async def view_chunk_image(
     The ``file_id`` is derived on the page from the chunk's ``file_url``
     (``{kds_id}/{file_ino_no}/{image_uuid}.png`` → ``{file_ino_no}_
     {image_uuid}.png``). The upstream answer is binary, so the proxy returns
-    the bytes with AIDP's content type instead of a JSON body.
+    the bytes as PNG instead of a JSON body.
     """
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
 
     server_url, api_key = _credentials()
-    content, content_type = await run_blocking(
+    content = await run_blocking(
         "aidp-view-image",
         get_aidp_image_impl,
         server_url,
@@ -294,7 +286,11 @@ async def view_chunk_image(
         lane="control-io",
         owner="config",
     )
-    return Response(content=content, media_type=content_type)
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @aidp_chunk_router.post("/knowledge-bases/{kds_id}/chunks")

@@ -658,6 +658,16 @@ async def download_knowledge_base_file(
         # belong to the requested knowledge base. Keep that boundary explicit
         # and never forward AIDP credentials or upstream bodies to the caller.
         upstream_status = (exc.details or {}).get("upstream_status")
+        upstream_code = (exc.details or {}).get("upstream_code")
+        logger.warning(
+            "Northbound AIDP file download failed: kds_id=%s file_uuid=%s "
+            "user_id=%s upstream_status=%s upstream_code=%s",
+            kds_id,
+            file_uuid,
+            ctx.user_id,
+            upstream_status,
+            upstream_code,
+        )
         if upstream_status == HTTPStatus.NOT_FOUND:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
@@ -667,8 +677,14 @@ async def download_knowledge_base_file(
             status_code=exc.http_status,
             detail="Failed to fetch the original file from AIDP",
         ) from exc
-    except Exception as exc:
-        logger.exception("Northbound AIDP file download failed")
+    except Exception:
+        logger.exception(
+            "Northbound AIDP file download failed: kds_id=%s file_uuid=%s "
+            "user_id=%s",
+            kds_id,
+            file_uuid,
+            ctx.user_id,
+        )
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail="Failed to fetch the original file from AIDP",

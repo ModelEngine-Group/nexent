@@ -3978,7 +3978,7 @@ class TestChunkImageEndpoint:
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
              patch.object(aidp_chunk_routes, "get_aidp_image_impl",
-                          return_value=(self.PNG_BYTES, "image/png")) as view_image:
+                          return_value=self.PNG_BYTES) as view_image:
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/images/{self.FILE_ID}",
                 headers=_bearer(),
