@@ -8,6 +8,7 @@ import {
   aidpDefaults,
   aidpErrors,
   mergeAidpConfig,
+  resolveAidpConfig,
 } from "@/lib/aidpRetrievalConfig";
 
 export function AidpRetrievalDialog({
@@ -22,7 +23,9 @@ export function AidpRetrievalDialog({
   onConfirm: (config: Record<string, unknown>) => void;
 }) {
   const { t } = useTranslation("common");
-  const [draft, setDraft] = useState(() => mergeAidpConfig(values));
+  const [draft, setDraft] = useState(() =>
+    resolveAidpConfig(mergeAidpConfig(values))
+  );
   const invalid = Object.keys(aidpErrors(draft)).length > 0;
   return (
     <ParamDialog

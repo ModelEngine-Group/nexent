@@ -67,6 +67,15 @@ import {
 } from "@/lib/utils";
 import { ModelOption, ModelType } from "@/types/modelConfig";
 
+function normalizeAidpParams(params: ToolParam[]): ToolParam[] {
+  const resolved = resolveAidpConfig(
+    Object.fromEntries(params.map((param) => [param.name, param.value]))
+  );
+  return params.map((param) =>
+    param.name in resolved ? { ...param, value: resolved[param.name] } : param
+  );
+}
+
 export interface ToolConfigModalProps {
   isOpen: boolean;
   onCancel: () => void;
@@ -1554,19 +1563,19 @@ export default function ToolConfigModal({
           }
         });
       }
-      const paramsObj = syncedParams.reduce(
-        (acc, param) => {
-          acc[param.name] = param.value;
-          return acc;
-        },
-        {} as Record<string, any>
-      );
+      // Persist the same effective AIDP values the form displayed and validated.
+      // Legacy caps stored as 0 are normalized to their positive defaults here
+      // instead of being sent back to the backend unchanged.
+      const saveParams = isAidpTool(toolToSave.name)
+        ? normalizeAidpParams(syncedParams)
+        : syncedParams;
+      setCurrentParams(saveParams);
 
       // Update local state: Add tool to selected tools with updated params and display_names
       // Include display_names for knowledge base tools to pass to prompt generation
       const updatedTool: typeof toolToSave = {
         ...toolToSave,
-        initParams: syncedParams,
+        initParams: saveParams,
         // Store knowledge base display names for prompt generation
         ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
           ? { display_names: selectedKbDisplayNames }
@@ -1598,7 +1607,7 @@ export default function ToolConfigModal({
 
       // Call original onSave if provided
       if (onSave) {
-        onSave(syncedParams);
+        onSave(saveParams);
       }
 
       // Call onSaveTool with the full tool (including display_names) when
