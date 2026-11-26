@@ -42,7 +42,9 @@ def test_business_associations_are_exact_nullable_and_immutable(coordinator):
     lease = coordinator.reserve('tenant', 'user', 1, 'a' * 32)
     initial = coordinator.journal.read_current(lease.business_key)
     assert all(value is None for value in initial.associations.values())
-    coordinator.associate(lease, assistant_message_id=23, automation_run_id=42)
+    coordinator.associate(lease, assistant_message_id=23)
+    assert coordinator.client.eval.call_count == 1
+    coordinator.associate(lease, automation_run_id=42)
     record = coordinator.journal.read_current(lease.business_key)
     assert record.associations['assistant_message_id'] == 23
     assert record.associations['automation_run_id'] == 42
@@ -55,6 +57,26 @@ def test_business_associations_are_exact_nullable_and_immutable(coordinator):
         coordinator.associate(lease, assistant_message_id=24)
     with pytest.raises(ValueError):
         coordinator.associate(lease, model_output='forbidden')
+
+
+@pytest.mark.parametrize(('publication', 'message'), [
+    (0, 'execution lease was lost'),
+    (OSError('Redis unavailable'), 'automation identity could not be confirmed'),
+])
+def test_unconfirmed_automation_association_persists_uncertain_ownership(coordinator, publication, message):
+    lease = coordinator.reserve('tenant', 'user', 1, 'a' * 32)
+    coordinator.client.eval.side_effect = [publication]
+
+    with pytest.raises(SandboxCoordinationUnknown, match=message):
+        coordinator.associate(lease, automation_run_id=42)
+
+    record = coordinator.journal.read_current(lease.business_key)
+    assert record.phase == 'UNKNOWN'
+    assert record.associations['automation_run_id'] == 42
+    assert coordinator.lost_coordination.is_set()
+    with pytest.raises(SandboxCoordinationUnknown, match='closed'):
+        coordinator.reserve('tenant', 'user', 2, 'b' * 32)
+    assert coordinator.client.eval.call_count == 2
 
 
 def test_redis_admission_error_is_not_a_local_fallback(coordinator):

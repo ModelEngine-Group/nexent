@@ -224,8 +224,46 @@ async def test_fixed_creator_requires_worker_claim_before_submission(runtime, mo
     runtime.materialize.assert_not_called()
 
 
-async def test_cancellation_during_creator_attach_acknowledges_late_claim(runtime, mocker):
+@pytest.mark.parametrize("submission_fails", [True, False])
+async def test_fixed_creator_failed_open_releases_claim_after_worker_exits(runtime, mocker, caplog, submission_fails):
     mocker.patch.object(ephemeral, "NEXENT_RECOVERY_MODE", "fixed_replicas")
+    cleanup = set()
+    mocker.patch.object(ephemeral, "channel_cleanup_tasks", cleanup)
+    acknowledge = AsyncMock(side_effect=["running", RedisError("completion unavailable")])
+    ephemeral.runtime_state_service.creator_worker_state_async = acknowledge
+    payload = creator_payload(
+        "nl2agent", system_agent={"agent_id": 77, "version_no": 1}, trajectory={"conversation_id": 9},
+    )
+    failure = RuntimeError("open failed")
+    if submission_fails:
+        runtime.manager.submit.side_effect = failure
+    else:
+        runtime.materialize.side_effect = failure
+
+    with pytest.raises(RuntimeError, match="open failed"):
+        await ephemeral._open_ephemeral(payload, ACTOR)
+
+    settle, = cleanup
+    if submission_fails:
+        runtime.manager.cancel.assert_not_called()
+    else:
+        await asyncio.sleep(0)
+        acknowledge.assert_awaited_once_with(ACTOR.user_id, 9, RUN_ID, "start")
+        runtime.manager.cancel.assert_called_once()
+        runtime.execution.future.set_result(None)
+    await asyncio.wait_for(settle, timeout=2)
+
+    assert [entry.args[-1] for entry in acknowledge.await_args_list] == ["start", "complete"]
+    assert "Could not acknowledge Creator worker completion" in caplog.text
+    assert not cleanup
+    runtime.discard.assert_not_called()
+
+
+@pytest.mark.parametrize("claim_result", ["running", "missing"])
+async def test_cancellation_during_creator_attach_only_acknowledges_owned_claim(runtime, mocker, claim_result):
+    mocker.patch.object(ephemeral, "NEXENT_RECOVERY_MODE", "fixed_replicas")
+    cleanup = set()
+    mocker.patch.object(ephemeral, "channel_cleanup_tasks", cleanup)
     claiming = asyncio.Event()
     allow_claim = asyncio.Event()
     acknowledged = asyncio.Event()
@@ -234,7 +272,7 @@ async def test_cancellation_during_creator_attach_acknowledges_late_claim(runtim
         if action == "start":
             claiming.set()
             await allow_claim.wait()
-            return "running"
+            return claim_result
         assert action == "complete"
         acknowledged.set()
         return "closed"
@@ -248,8 +286,13 @@ async def test_cancellation_during_creator_attach_acknowledges_late_claim(runtim
     opening.cancel()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(opening, timeout=2)
+    claim, = cleanup
     allow_claim.set()
-    await asyncio.wait_for(acknowledged.wait(), timeout=2)
+    await asyncio.wait_for(claim, timeout=2)
+    if claim_result == "running":
+        await asyncio.wait_for(acknowledged.wait(), timeout=2)
+    else:
+        assert not acknowledged.is_set() and not cleanup
 
     runtime.manager.submit.assert_not_called()
     runtime.materialize.assert_not_awaited()

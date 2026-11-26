@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from contracts.errors.exceptions import (
     AgentRunAlreadyActiveError, AgentRunConcurrencyExceededError, ForbiddenError,
@@ -33,6 +34,13 @@ def coordination(monkeypatch):
     monkeypatch.setattr(admission, "untrack_execution", Mock())
     monkeypatch.setattr(admission.config_thread_manager, "run", managed)
     return SimpleNamespace(database=database, running=running, finish=finish, redis=redis_state)
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("startup", False), ("fixed_replicas", True)])
+def test_creator_durable_admission_matches_recovery_mode(monkeypatch, mode, expected):
+    monkeypatch.setattr(admission, "NEXENT_RECOVERY_MODE", mode)
+
+    assert admission.uses_durable_agent_admission() is expected
 
 
 @pytest.mark.asyncio
@@ -63,6 +71,7 @@ async def test_durable_admission_uses_tenant_business_key_and_waits_for_worker(c
     (ActiveExecutionError, AgentRunAlreadyActiveError),
     (AgentRunConcurrencyExceededError, RuntimeCapacityExceededError),
     (RuntimeCoordinationUnavailableError, RuntimeCoordinationUnavailableError),
+    (SQLAlchemyError, RuntimeCoordinationUnavailableError),
     (PermissionError, ForbiddenError),
 ])
 async def test_durable_admission_preserves_domain_rejections(coordination, error, public_error):
@@ -73,11 +82,67 @@ async def test_durable_admission_preserves_domain_rejections(coordination, error
 
 
 @pytest.mark.asyncio
-async def test_durable_admission_does_not_fall_back_when_redis_is_unavailable(coordination):
-    coordination.redis.client.ping.side_effect = OSError("test connection loss")
-    with pytest.raises(RuntimeCoordinationUnavailableError):
+@pytest.mark.parametrize("failure", [None, OSError("test connection loss")], ids=["ping-rejected", "connection-lost"])
+async def test_durable_admission_does_not_fall_back_when_redis_is_unavailable(coordination, failure):
+    coordination.redis.client.ping.return_value = False
+    coordination.redis.client.ping.side_effect = failure
+    with pytest.raises(RuntimeCoordinationUnavailableError, match="Runtime stream coordination is unavailable"):
         await admission.reserve_agent_scope("nl2agent_main", 8, "owner", "tenant", Future())
     coordination.database.assert_not_called()
+    admission.track_execution.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "message"), [
+    (SQLAlchemyError("write failed"), "Creator execution state is unavailable"),
+    (None, "Creator execution no longer owns the reservation"),
+])
+async def test_creator_cannot_mark_running_without_confirmed_ownership(coordination, failure, message):
+    coordination.running.return_value = False
+    coordination.running.side_effect = failure
+    reservation = await admission.reserve_agent_scope("nl2agent_main", "8", "owner", "tenant", Future(), run_id="a" * 32)
+
+    with pytest.raises(RuntimeCoordinationUnavailableError, match=message) as error:
+        await reservation.running()
+
+    assert error.value.__cause__ is failure
+    assert reservation.identity == RunIdentity("tenant", "owner", 8, "a" * 32)
+    coordination.running.assert_called_once_with(reservation.identity, {})
+    coordination.finish.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True], ids=["worker-error", "worker-cancelled"])
+async def test_creator_worker_failure_overrides_completed_producer(coordination, cancelled):
+    worker = Future()
+    reservation = await admission.reserve_agent_scope("nl2agent_main", 8, "owner", "tenant", worker)
+    reservation.outcome = "completed"
+    if cancelled:
+        worker.cancel()
+    else:
+        worker.set_exception(RuntimeError("worker failed after publishing output"))
+
+    reservation.close()
+    assert await admission.shutdown_creator_settlements(timeout=1) == 0
+    assert await admission.shutdown_creator_settlements(timeout=0) == 0
+
+    coordination.finish.assert_called_once_with(reservation.identity, "failed", repair_journal=False)
+    admission.untrack_execution.assert_called_once_with(reservation.identity)
+
+
+@pytest.mark.asyncio
+async def test_closed_creator_loop_leaves_reservation_for_recovery(coordination, caplog, mocker):
+    worker = Future()
+    reservation = await admission.reserve_agent_scope("nl2agent_main", 8, "owner", "tenant", worker)
+    callback = mocker.Mock(side_effect=RuntimeError("event loop closed"))
+    mocker.patch.object(reservation, "_loop", SimpleNamespace(call_soon_threadsafe=callback))
+
+    reservation.close()
+    worker.set_result(None)
+
+    callback.assert_called_once()
+    coordination.finish.assert_not_called()
+    assert f"Creator loop closed before settling execution {reservation.run_id}" in caplog.text
 
 
 @pytest.mark.asyncio

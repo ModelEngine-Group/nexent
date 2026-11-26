@@ -199,6 +199,27 @@ class TestUpdateAgentEvaluationStatus:
         assert "score_overall" not in updates
         assert "progress_done" not in updates
 
+    def test_terminal_write_checks_expected_status_in_caller_transaction(self, session_factory):
+        from management.db.evaluation import runs as agent_evaluation_db
+
+        session, get_db_session = session_factory
+        query = self._wire_chain(session)
+        agent_evaluation_db.update_agent_evaluation_status(
+            agent_evaluation_id=7, tenant_id="tenant", status="COMPLETED", updated_by="actor",
+            expected_status="RUNNING", db_session=session,
+        )
+
+        get_db_session.assert_called_once_with(session)
+        identities, state = [entry.args for entry in query.filter.call_args_list]
+        assert {condition.left.key: condition.right.value for condition in identities} == {
+            "agent_evaluation_id": 7, "tenant_id": "tenant",
+        }
+        assert {condition.left.key: condition.right.value for condition in state} == {
+            "status": "RUNNING", "delete_flag": "N",
+        }
+        query.update.assert_called_once_with({"status": "COMPLETED", "updated_by": "actor"}, synchronize_session=False)
+        session.commit.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # claim_agent_evaluation_run

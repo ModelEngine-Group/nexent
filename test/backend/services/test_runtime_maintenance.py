@@ -1,5 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import io
+import json
+import runpy
+import sys
 from unittest.mock import ANY, call
 from urllib.parse import parse_qs, urlsplit
 
@@ -198,3 +202,76 @@ def test_kubernetes_guard_rejects_invalid_namespace_without_request(mocker):
         maintenance.require_paused_kubernetes_runtime(read, "scratch/other", "nexent")
 
     read.assert_not_called()
+
+
+def test_maintenance_cli_verifies_pause_with_authenticated_requests(
+    maintenance_calls, monkeypatch, mocker, tmp_path, capsys,
+):
+    calls = maintenance_calls
+    monkeypatch.setattr(maintenance, "SERVICE_ACCOUNT_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["maintenance", "--namespace", "scratch", "--release", "test-release"])
+    token_path = tmp_path / "token"
+    token_path.write_text("initial-token\n", encoding="utf-8")
+    context = object()
+    ssl_context = mocker.patch.object(maintenance.ssl, "create_default_context", return_value=context)
+    https_handler = mocker.patch.object(maintenance, "HTTPSHandler", wraps=maintenance.HTTPSHandler)
+    paths = []
+    authorizations = []
+
+    def open_resource(request, *, timeout):
+        assert timeout == 10
+        assert request.full_url.startswith("https://kubernetes.default.svc/")
+        path = urlsplit(request.full_url).path
+        paths.append(path)
+        authorizations.append(request.get_header("Authorization"))
+        if path.endswith("/deployments"):
+            token_path.write_text("rotated-token\n", encoding="utf-8")
+            document = {"items": [_paused_deployment(release="test-release")]}
+        else:
+            document = {"items": []}
+        return io.BytesIO(json.dumps(document).encode("utf-8"))
+
+    opener = mocker.Mock()
+    opener.open.side_effect = open_resource
+    build_opener = mocker.patch.object(maintenance, "build_opener", return_value=opener)
+
+    assert maintenance.main() == 0
+
+    ssl_context.assert_called_once_with(cafile=str(tmp_path / "ca.crt"))
+    https_handler.assert_called_once_with(context=context)
+    assert build_opener.call_args.args[0].proxies == {}
+    assert paths == [
+        "/apis/apps/v1/namespaces/scratch/deployments",
+        "/api/v1/namespaces/scratch/pods",
+    ] * 3
+    assert authorizations == ["Bearer initial-token"] + ["Bearer rotated-token"] * 5
+    calls.session.commit.assert_called_once_with()
+    assert capsys.readouterr().out == "Runtime maintenance completed\n"
+
+
+def test_maintenance_cli_fails_closed_when_kubernetes_returns_invalid_json(
+    maintenance_calls, monkeypatch, mocker, tmp_path, caplog, capsys,
+):
+    monkeypatch.setattr(maintenance, "SERVICE_ACCOUNT_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["maintenance", "--namespace", "scratch", "--release", "nexent"])
+    (tmp_path / "token").write_text("test-token\n", encoding="utf-8")
+    mocker.patch.object(maintenance.ssl, "create_default_context")
+    opener = mocker.patch.object(maintenance, "build_opener").return_value
+    opener.open.return_value = io.BytesIO(b"upstream returned an invalid JSON response")
+
+    assert maintenance.main() == 1
+
+    maintenance_calls.open_session.assert_not_called()
+    maintenance_calls.recover.assert_not_called()
+    assert capsys.readouterr().out == ""
+    assert "keep the release paused (JSONDecodeError)" in caplog.text
+
+
+def test_maintenance_module_requires_explicit_namespace_and_release(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["maintenance"])
+
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(maintenance.__file__, run_name="__main__")
+
+    assert error.value.code == 2
+    assert "the following arguments are required: --namespace, --release" in capsys.readouterr().err

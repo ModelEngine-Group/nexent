@@ -51,6 +51,32 @@ async def test_fixed_replica_store_starts_without_recovering_other_pods(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_start_pins_replica_mode_before_store_recovery(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", True)
+    application = scheduler_module.AgentAutomationScheduler()
+    recover = AsyncMock()
+    monkeypatch.setattr(scheduler_module, "run_blocking", recover)
+
+    async def start():
+        if not scheduler.is_running:
+            await application._store.recover()
+            scheduler.is_running = True
+
+    scheduler = types.SimpleNamespace(start=AsyncMock(side_effect=start), stop=AsyncMock(), is_running=False)
+    monkeypatch.setattr(application, "_scheduler", scheduler)
+    monkeypatch.setattr(application, "_recover_projections", AsyncMock())
+
+    try:
+        await application.start(fixed_replicas=True)
+        await application.start()
+        assert application._store.fixed_replicas is True
+        recover.assert_not_awaited()
+    finally:
+        await application.stop()
+
+
+@pytest.mark.asyncio
 async def test_store_recovers_orphans_before_releasing_all_locks(monkeypatch):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     calls = []

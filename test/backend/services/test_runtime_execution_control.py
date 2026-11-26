@@ -5,12 +5,63 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from contracts.agent import NL2SkillRunRequest, SystemAgentRef
-from contracts.errors.exceptions import ForbiddenError
+from contracts.errors.exceptions import ForbiddenError, RuntimeCoordinationUnavailableError
+from management.services.agent import control
 from management.services.conversation import creator_execution, creator_runtime
+from nexent.core.concurrency import ManagedTaskSpec, ThreadManagerNotRunning
 
 RUN_ID = "a" * 32
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("active_only", "row"), [(True, None), (False, (RUN_ID, "completed", "nl2skill_main"))])
+async def test_owned_execution_lookup_preserves_identity_and_activity_filter(mocker, active_only, row):
+    run = mocker.patch.object(control.config_thread_manager, "run", return_value=row)
+
+    owned = await control.get_owned_execution(
+        "tenant", "owner", 91, agent_scope="nl2skill_main", active_only=active_only,
+    )
+
+    assert owned == row
+    run.assert_awaited_once_with(
+        "control-io", ManagedTaskSpec(task_name="runtime-read-owned-execution", owner=control.__name__),
+        control.find_owned_agent_execution, "tenant", "owner", 91,
+        agent_scope="nl2skill_main", active_only=active_only,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [SQLAlchemyError("database unavailable"), ThreadManagerNotRunning()])
+async def test_execution_lookup_surfaces_coordination_failure_instead_of_missing_owner(mocker, failure):
+    mocker.patch.object(control.config_thread_manager, "run", side_effect=failure)
+
+    with pytest.raises(RuntimeCoordinationUnavailableError, match="Runtime execution state") as error:
+        await control.get_owned_execution("tenant", "owner", 91, agent_scope="nl2skill_main")
+
+    assert error.value.__cause__ is failure
+
+
+@pytest.mark.asyncio
+async def test_owned_replay_reads_the_requested_generation(mocker):
+    snapshot = stream_snapshot()
+    read = mocker.patch.object(control.runtime_state_service, "read_execution_stream_async", return_value=snapshot)
+
+    assert await control.read_owned_stream("owner", 91, RUN_ID) == snapshot
+    read.assert_awaited_once_with("owner", 91, RUN_ID)
+
+
+@pytest.mark.asyncio
+async def test_owned_replay_reports_redis_failure_without_falling_back(mocker):
+    failure = ConnectionError("redis unavailable")
+    mocker.patch.object(control.runtime_state_service, "read_execution_stream_async", side_effect=failure)
+
+    with pytest.raises(RuntimeCoordinationUnavailableError, match="Runtime replay coordination") as error:
+        await control.read_owned_stream("owner", 91, RUN_ID)
+
+    assert error.value.__cause__ is failure
 
 
 def stream_snapshot(*entries):

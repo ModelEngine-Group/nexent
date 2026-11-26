@@ -20,6 +20,7 @@ from infrastructure.rdb.agent_execution import ActiveExecutionError, RunIdentity
 from management.services.agent import admission, control
 from management.services.conversation import creator_execution as execution
 from management.services.conversation import creator_runtime as runtime
+from nexent.core.concurrency.errors import ThreadManagerDraining
 
 
 @pytest.fixture
@@ -242,6 +243,65 @@ async def test_redis_fault_does_not_open_a_local_run(creator, failure):
         assert creator.order[-1] == "failed"
     else:
         creator.reserve.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["preparation", "message_binding", "handoff"])
+async def test_creator_does_not_launch_after_losing_its_reservation(creator, stage):
+    cancellation = creator.state.is_execution_cancelled_async
+    if stage == "preparation":
+        cancellation.return_value = True
+    elif stage == "handoff":
+        cancellation.side_effect = [False, True]
+    else:
+        creator.state.bind_execution_message_async.return_value = False
+
+    stream = SimpleNamespace(aclose=AsyncMock())
+    factory = AsyncMock(return_value=stream)
+    request = request_for("agent", request_id="request")
+    creator.remote_done.set()
+
+    if stage == "message_binding":
+        with pytest.raises(RuntimeCoordinationUnavailableError, match="no longer owns its replay"):
+            await start("agent", request, factory)
+    else:
+        with pytest.raises(asyncio.CancelledError):
+            await start("agent", request, factory)
+
+    await asyncio.wait_for(creator.terminal.wait(), timeout=2)
+    outcome = "failed" if stage == "message_binding" else "stopped"
+    identity = RunIdentity("tenant", "owner", 91, request._creator_generation)
+    creator.transitions.assert_called_once_with(identity, outcome, repair_journal=False)
+    assert "running" not in creator.order
+    assert creator.channel.generation is None
+    creator.channel.publish.assert_not_awaited()
+    if stage == "preparation":
+        factory.assert_not_awaited()
+        creator.save.assert_not_called()
+        creator.state.release_idempotency_async.assert_awaited_once_with("creator-request:tenant:owner:request")
+    else:
+        creator.status.assert_called_once_with(101, "failed", "owner")
+        stream.aclose.assert_awaited_once_with()
+        creator.state.release_idempotency_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_creator_reports_drained_worker_even_when_redis_cleanup_fails(creator, caplog):
+    drain = ThreadManagerDraining("worker draining")
+    creator.state.mark_run_finished.side_effect = RedisError("cleanup unavailable")
+    creator.remote_done.set()
+    request = request_for("skill")
+
+    with pytest.raises(RuntimeCoordinationUnavailableError, match="Creator execution worker is unavailable") as exc:
+        await start("skill", request, AsyncMock(side_effect=drain))
+
+    assert exc.value.__cause__ is drain
+    await asyncio.wait_for(creator.terminal.wait(), timeout=2)
+    identity = RunIdentity("tenant", "owner", 91, request._creator_generation)
+    creator.transitions.assert_called_once_with(identity, "failed", repair_journal=False)
+    assert "Creator failed to clean up preparation" in caplog.text
+    creator.prepare.assert_not_called()
+    creator.save.assert_not_called()
 
 
 @pytest.mark.asyncio
