@@ -457,6 +457,26 @@ class TestAddFromConfig:
         assert '"status": "error"' in resp.text
         assert '"detail": "MCP service name already exists"' in resp.text
 
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.upload_and_start_mcp_image')
+    def test_upload_image_returns_archive_validation_error(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        mock_upload.side_effect = McpValidationError("The uploaded archive is not approved")
+        upload_args = {
+            "files": {"file": ("test.tar", b"tar-data", "application/x-tar")},
+            "data": {"port": "8080", "service_name": "svc"},
+            "headers": AUTH_HEADER,
+        }
+
+        streaming_response = client.post("/mcp/upload-image/stream", **upload_args)
+        json_response = client.post("/mcp/upload-image", **upload_args)
+
+        assert streaming_response.status_code == HTTPStatus.OK
+        assert '"status": "error"' in streaming_response.text
+        assert '"detail": "The uploaded archive is not approved"' in streaming_response.text
+        assert json_response.status_code == HTTPStatus.BAD_REQUEST
+        assert json_response.json()["detail"] == "The uploaded archive is not approved"
+
 
 # ============================================================================
 # PUT /mcp/update

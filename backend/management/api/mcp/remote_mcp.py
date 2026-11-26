@@ -947,8 +947,8 @@ if ENABLE_UPLOAD_IMAGE:
                     },
                 )
                 yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
-            except MCPNameIllegal as exc:
-                logger.warning(f"MCP service name conflict during image upload: {exc}")
+            except (MCPNameIllegal, McpValidationError) as exc:
+                logger.warning(f"MCP image upload validation failed: {exc}")
                 yield f"data: {json.dumps({'status': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
             except Exception:
                 # Keep internal exception details out of the externally visible SSE
@@ -1013,7 +1013,7 @@ if ENABLE_UPLOAD_IMAGE:
 
             return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
-        except ValueError as e:
+        except (ValueError, McpValidationError) as e:
             logger.error(f"Validation error: {e}")
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
         except MCPNameIllegal as e:

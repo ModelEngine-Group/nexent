@@ -182,6 +182,9 @@ def update_mcp_service(
     if not current_record:
         raise McpNotFoundError("MCP record not found")
 
+    if not server_url.strip() and _is_container_record(current_record):
+        server_url = current_record.get("mcp_server") or server_url
+
     # Check name uniqueness (exclude the current record itself)
     if new_name != current_record.get("mcp_name"):
         if check_mcp_name_exists(mcp_name=new_name, tenant_id=tenant_id):

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for k8s_client.py
 Tests the KubernetesContainerClient class with comprehensive coverage
@@ -933,9 +935,10 @@ class TestStartContainer:
             assert call_kwargs["authorization_token"] == "test-token-123"
 
     @pytest.mark.asyncio
-    async def test_start_container_without_readiness_wait(self, k8s_container_client):
+    async def test_start_container_without_readiness_wait(self, k8s_container_client, mock_pod):
         """Skipping readiness creates the service without polling pod/service state."""
         k8s_container_client.core_v1.read_namespaced_pod.side_effect = ApiException(status=404)
+        k8s_container_client.core_v1.create_namespaced_pod.return_value = mock_pod
         with patch.object(k8s_container_client, "_find_free_port", return_value=5020), \
              patch.object(k8s_container_client, "_create_pod_service", return_value=MagicMock()), \
              patch.object(k8s_container_client, "_wait_for_pod_ready", new_callable=AsyncMock) as mock_pod_wait, \
@@ -946,6 +949,7 @@ class TestStartContainer:
             )
 
         assert result["status"] == "started"
+        assert result["container_id"] == mock_pod.metadata.uid
         mock_pod_wait.assert_not_awaited()
         mock_service_wait.assert_not_awaited()
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Kubernetes container client implementation
 
@@ -308,10 +310,9 @@ class KubernetesContainerClient(ContainerClient):
 
         try:
             logger.info(f"Creating pod {pod_name} with image {image_name}")
-            self.core_v1.create_namespaced_pod(namespace=namespace, body=pod)
+            pod = self.core_v1.create_namespaced_pod(namespace=namespace, body=pod)
 
             if wait_for_ready:
-                # Wait for pod to be ready (returns pod with UID)
                 pod = await self._wait_for_pod_ready(pod_name, namespace)
 
             # Create service for the pod with matching labels

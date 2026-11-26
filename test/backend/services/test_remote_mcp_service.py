@@ -1040,6 +1040,24 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
     """Test update_mcp_service with custom_headers parameter."""
 
     @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_update_preserves_container_url_when_form_sends_blank(self, mock_get, mock_update):
+        generated_url = "http://mcp-echo-svc.test.svc.cluster.local:8080/mcp"
+        mock_get.return_value = {
+            "mcp_name": "echo",
+            "container_id": "pod-uid",
+            "mcp_server": generated_url,
+        }
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1, new_name='echo', description='desc',
+            server_url='', authorization_token=None, custom_headers=None,
+            config_json=None, tags=None, market_id=None,
+        )
+
+        self.assertEqual(mock_update.call_args.kwargs["server_url"], generated_url)
+
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
     @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_update_with_custom_headers(self, mock_get, mock_check, mock_update):
@@ -2979,10 +2997,10 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
     @patch_import_context('management.services.mcp.service.mcp_server_health')
     @patch_import_context('management.services.mcp.service.MCPContainerManager')
     @patch_import_context('management.services.mcp.service.check_mcp_name_exists', return_value=False)
-    async def test_upload_raises_after_readiness_retries(
+    async def test_upload_cleans_up_after_readiness_retries(
         self, mock_check_name, mock_mgr_cls, mock_health, mock_sleep,
     ):
-        self._mock_container_manager(mock_mgr_cls)
+        mock_mgr = self._mock_container_manager(mock_mgr_cls)
         mock_health.side_effect = MCPConnectionError("not ready")
 
         with self.assertRaises(MCPConnectionError):
@@ -2993,3 +3011,4 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
 
         assert mock_health.await_count == 30
         assert mock_sleep.await_count == 30
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("image-cid")
