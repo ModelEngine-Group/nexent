@@ -14,13 +14,19 @@ ROOT = Path(__file__).resolve().parents[3]
 CHART = ROOT / "deploy/k8s/helm/nexent"
 
 
+def dockerfile_instructions(image):
+    source = (ROOT / "deploy/images/dockerfiles" / image / "Dockerfile").read_text(encoding="utf-8")
+    return {line.strip().split(maxsplit=1)[0].upper() for line in source.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")}
+
+
 def test_gateway_image_delegates_the_application_command_like_main():
     for image in ("gateway", "main"):
-        source = (ROOT / "deploy/images/dockerfiles" / image / "Dockerfile").read_text(encoding="utf-8")
-        instructions = [line.strip().split(maxsplit=1)[0].upper() for line in source.splitlines()
-                        if line.strip() and not line.lstrip().startswith("#")]
-        assert "ENTRYPOINT" not in instructions
-        assert "CMD" not in instructions
+        assert {"ENTRYPOINT", "CMD"}.isdisjoint(dockerfile_instructions(image))
+
+
+def test_gateway_image_inherits_the_base_image_user():
+    assert "USER" not in dockerfile_instructions("gateway")
 
 
 def bash_run(script):
@@ -121,7 +127,10 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     container = pod["containers"][0]
     assert container["image"] == "nexent/nexent-gateway:latest"
     assert container["command"] == ["python", "-m", "backend.http.gateway_service"]
-    assert container["securityContext"]["runAsNonRoot"] is True
+    security = container["securityContext"]
+    assert {"runAsNonRoot", "runAsUser"}.isdisjoint(security)
+    assert security["allowPrivilegeEscalation"] is False
+    assert security["capabilities"]["drop"] == ["ALL"]
     assert not {"envFrom", "volumeMounts"} & container.keys()
     assert "volumes" not in pod
     env = {item["name"]: item for item in container["env"]}

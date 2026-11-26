@@ -2,7 +2,7 @@
 
 The default Compose and Helm service `nexent-northbound:5013` now runs `nexent/nexent-gateway`. Gateway handles external session/API-key authentication, authoritative identity lookup, signed downstream identity, fixed HTTP/SSE routing and WebSocket relay. Management owns Northbound/A2A business, recovery and resource authorization. Runtime owns execution. Management and Runtime still use the shared `nexent/nexent` backend image.
 
-The standalone image listens on 5016. Default deployments override its command and healthcheck/probes to 5013. It runs as UID 65532 and contains no Management/Runtime source, Nexent SDK or ORM. It needs no SQL files, storage mounts or Docker socket. Health endpoints report local process readiness; upstream availability needs separate acceptance checks.
+The standalone image listens on 5016. Default deployments override its command and healthcheck/probes to 5013. Gateway inherits the Python base image's default runtime user (root) unless the deployment overrides it. Helm still disables privilege escalation and drops all Linux capabilities. The image contains no Management/Runtime source, Nexent SDK or ORM. It needs no SQL files, storage mounts or Docker socket. Health endpoints report local process readiness; upstream availability needs separate acceptance checks.
 
 ## 1. Build matching revisions
 
