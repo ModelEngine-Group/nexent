@@ -36,6 +36,8 @@ _PROTOCOL_MESSAGES = {
     "JIUWEN_FINAL_OUTPUT_INVALID": ("智能体最终输出格式无效。", "The agent's final output format is invalid."),
     "JIUWEN_DELEGATION_REQUIRED": ("模型未按要求调用子智能体。", "The model did not perform the required delegation."),
     "INVALID_TOOL_ARGUMENTS": ("模型生成的工具参数不符合工具定义。", "The model generated invalid tool arguments."),
+    "JIUWEN_INVALID_CLARIFICATION": ("模型生成的澄清请求无效，请重新发送请求。",
+                                     "The model generated an invalid clarification request. Please try again."),
     "JIUWEN_CONFIGURATION_INVALID": (
         "Jiuwen 智能体配置无效或尚不支持，请检查配置。",
         "The Jiuwen agent configuration is invalid or unsupported. Check its settings.",
@@ -49,6 +51,40 @@ _PROTOCOL_MESSAGES = {
         "智能体运行失败，请根据请求标识检查运行日志。",
         "Agent execution failed. Check the runtime logs using the request ID.",
     ),
+}
+_PROTOCOL_REASONS = {
+    "arguments_invalid_json": ("模型生成的工具参数不是有效的 JSON。", "The model returned malformed JSON for a tool call."),
+    "arguments_not_object": ("模型生成的工具参数必须是 JSON 对象。", "The tool call requires a JSON object for its arguments."),
+    "arguments_duplicate_key": ("模型生成的工具参数包含重复字段。", "The model repeated a field in the tool arguments."),
+    "arguments_required": ("模型调用工具时缺少必填参数。", "The model omitted a required tool argument."),
+    "arguments_wrong_type": ("模型提供的工具参数类型不正确。", "The model provided a tool argument of the wrong type."),
+    "arguments_extra_fields": ("模型提供了工具未定义的参数。", "The model supplied an argument the tool does not accept."),
+    "arguments_unsupported_value": ("模型提供的工具参数值不在允许范围内。",
+                                    "The model supplied a value that the tool does not allow."),
+    "clarification_form_invalid": ("模型生成的澄清问题或选项不符合表单要求。",
+                                   "The model generated invalid clarification questions or options."),
+    "clarification_question_count": ("模型生成的澄清请求必须包含 1 到 5 个问题。",
+                                     "The clarification request must contain one to five questions."),
+    "clarification_too_few_choices": ("模型生成的澄清选择题至少需要两个选项。",
+                                      "A clarification choice question needs at least two options."),
+    "clarification_duplicate_ids": ("模型生成的澄清问题或选项包含重复编号。",
+                                    "The clarification form contains duplicate question or option IDs."),
+    "clarification_mode_mismatch": ("模型使用了当前执行模式不支持的澄清方式。",
+                                     "The model used a clarification method unavailable in this execution mode."),
+    "clarification_mixed_actions": ("模型同时请求澄清和其他操作。澄清必须单独发起。",
+                                     "The model combined a clarification request with another action. It must ask separately."),
+    "clarification_call_invalid": ("模型生成的澄清调用格式无效。",
+                                   "The model generated a clarification call in an invalid format."),
+    "runner_error_result": ("智能体执行引擎返回了失败结果。", "The agent runner returned a failure result."),
+    "runner_invalid_answer": ("智能体执行引擎返回了格式无效的最终结果。",
+                              "The agent runner returned a final result in an invalid format."),
+    "runner_empty_answer": ("智能体执行引擎返回了空的最终回答。", "The agent runner returned an empty final answer."),
+    "runner_round_limit": ("智能体达到执行轮数上限，未能完成任务。", "The agent reached its execution round limit before completing the task."),
+    "runner_no_progress": ("智能体多次未能继续推进任务，执行已结束。", "The agent stopped after repeatedly making no progress."),
+    "runner_completion_timeout": ("智能体等待任务完成超时。", "The agent timed out while waiting for the task to complete."),
+    "runner_task_loop_unavailable": ("智能体执行引擎未能启动任务调度。", "The agent runner could not start task scheduling."),
+    "execution_result_missing": ("智能体运行失败，执行引擎未提供具体原因。",
+                                 "The agent run failed without a detailed reason from the runner."),
 }
 _MODEL_MESSAGES = {
     "MODEL_STREAM_INCOMPLETE": ("模型响应流在完整输出前结束。", "The model response stream ended before completion."),
@@ -76,6 +112,14 @@ def _chain(error):
             pending.append(cause)
 
 
+class JiuwenExecutionError(RuntimeError):
+    """Describe a native execution failure without carrying its raw payload."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def public_error(error, lang):
     """Render model diagnostics at the output boundary without mutating their source."""
     if error.category.startswith("MODEL_"):
@@ -85,13 +129,13 @@ def public_error(error, lang):
             update={"safe_message": specific[0 if chinese else 1] if specific else model_error_message(error, lang)}
         )
     if error.safe_message == error.category:
-        return protocol_error(error.category, request_id=error.request_id, lang=lang)
+        return protocol_error(error.category, request_id=error.request_id, lang=lang, reason=error.diagnostic_code)
     return error
 
 
-def protocol_error(category, *, request_id, lang):
+def protocol_error(category, *, request_id, lang, reason=None):
     chinese = lang.lower().split("-")[0].split("_")[0] == "zh"
-    messages = _PROTOCOL_MESSAGES.get(category)
+    messages = _PROTOCOL_REASONS.get(reason) or _PROTOCOL_MESSAGES.get(category)
     if messages is None:
         messages = (
             "无法处理模型生成的执行协议，请检查模型输出格式。",
@@ -99,6 +143,7 @@ def protocol_error(category, *, request_id, lang):
         )
     return ModelError(
         category=category,
+        diagnostic_code=reason,
         scope="protocol",
         retryable=False,
         safe_message=messages[0 if chinese else 1],
@@ -136,7 +181,9 @@ def failure_error(error, *, request_id, lang="en", source="agent", name=None, ph
             "preparation": "JIUWEN_PREPARATION_FAILED",
             "cleanup": "JIUWEN_CLEANUP_FAILED",
         }.get(phase, "JIUWEN_EXECUTION_FAILED")
-        return protocol_error(category, request_id=request_id, lang=lang)
+        native_failure = next((item for item in chain if isinstance(item, JiuwenExecutionError)), None)
+        reason = native_failure.reason if native_failure and category == "JIUWEN_EXECUTION_FAILED" else None
+        return protocol_error(category, request_id=request_id, lang=lang, reason=reason)
     chinese = lang.lower().split("-")[0].split("_")[0] == "zh"
     label = _SOURCES[source][0 if chinese else 1]
     if name:

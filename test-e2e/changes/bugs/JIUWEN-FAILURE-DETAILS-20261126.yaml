@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-FAILURE-DETAILS-20261126
+  change_type: bugfix
+  bug_id: JIUWEN-FAILURE-DETAILS-20261126
+  title: Explain Jiuwen validation and terminal failures
+  description: Log safe rejection details at the owning boundary and show an actionable reason in conversation output.
+  observed_behavior: Four common errors hide the validation rule, native execution outcome, or missing stream boundary.
+  expected_behavior: Keep the four stable codes and show the localized reason and available correlation ID in live and restored conversations.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing runtime and browser regressions do not check these specific diagnostic details.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified: [JIUWEN-OUTPUT]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-OUTPUT-D5-001]
+    modified: [JIUWEN-OUTPUT-D3-001, JIUWEN-OUTPUT-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Unit tests own detailed classification, safe logging, and projection edge cases. Existing D3 and D4 add real runtime transport and browser evidence.
+    behaviors:
+    - Rejections log safe rule, phase and correlation metadata without raw arguments, model output or exceptions.
+    - Known failures keep their category and retain the localized cause with the same live and history metadata.
+    - A stopped or waiting turn does not gain a spurious missing-terminal failure.
+    test_selectors:
+    - test/backend/utils/test_nexent_error_diagnostics.py
+    - test/sdk/core/agents/test_jiuwen_errors.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py::test_complete_calls_validated_before_exposure
+    - test/sdk/core/model_service/test_openai_chat_adapter.py::test_complete_tools_preserve_raw_provider_ids_and_invalid_arguments
+  notes: >-
+    Extends the existing runtime-agent-core-factory error-diagnostics SPEC and JIUWEN-OUTPUT rules.
+    Cases inherit runtime responsibility. D3 owns and releases loopback services, workers, and isolated PostgreSQL.
+    D4 owns and releases its browser context, mock routes and local fixture server. Both have empty shared preparation families.

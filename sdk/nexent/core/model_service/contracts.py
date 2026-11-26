@@ -24,6 +24,9 @@ class ToolCall(ProfileContract):
     raw_arguments: str = Field(repr=False)
     parsed_arguments: dict[str, JsonValue] | None = Field(default=None, repr=False)
     argument_error: Literal["INVALID_TOOL_ARGUMENTS"] | None = None
+    argument_diagnostic: Literal["arguments_invalid_json", "arguments_not_object", "arguments_duplicate_key"] | None = Field(
+        default=None, exclude=True, repr=False,
+    )
 
 
 class ToolDefinition(ProfileContract):

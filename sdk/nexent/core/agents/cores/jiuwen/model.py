@@ -3,6 +3,7 @@
 """Jiuwen's model interface over Nexent's single model transport service."""
 
 import json
+import logging
 import time
 import uuid
 from contextlib import aclosing
@@ -16,7 +17,7 @@ from openjiuwen.core.foundation.llm.schema.message import AssistantMessage, Usag
 from openjiuwen.core.foundation.llm.schema.message_chunk import AssistantMessageChunk
 from openjiuwen.core.foundation.llm.schema.tool_call import ToolCall as NativeToolCall
 
-from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
+from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested, InvalidClarification
 from nexent.core.agents.cores.jiuwen.messages import resource_view
 from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, JiuwenProtocolError, parse_execution_blocks
 from nexent.core.agents.output.answer import AnswerBoundaryError, normalize_public_answer
@@ -27,6 +28,7 @@ from nexent.core.model_service.resource_conversion import ResourceConverterRegis
 from nexent.core.model_service.service import ModelServiceError
 
 
+logger = logging.getLogger(__name__)
 _ARGUMENT_ERRORS = frozenset({
     "INVALID_TOOL_ARGUMENTS", "JIUWEN_NESTED_EXECUTION_BLOCK",
     "JIUWEN_INVALID_EXECUTION_BLOCK", "JIUWEN_EMPTY_EXECUTION_BLOCK", "JIUWEN_INVALID_CLARIFICATION",
@@ -118,12 +120,21 @@ class JiuwenServiceModel(Model):
         return self.converter.convert(self._resource_view(messages, tools), self.profile,
             request_id="context-preview", run_id=self.run_id).request
 
-    def _fail(self, request, category):
+    def _fail(self, request, category, *, reason=None):
         error = ModelError(
             category=category, scope="protocol", retryable=False, safe_message=category,
             request_id=request.request_id,
+            diagnostic_code=reason,
         )
-        raise ModelServiceError(error)
+        raise ModelServiceError(error) from None
+
+    def _reject_arguments(self, request, call, reason, *, rule=None, schema_path=(), missing_fields=()):
+        logger.warning(
+            "event=jiuwen_model_action_rejected category=INVALID_TOOL_ARGUMENTS reason=%s "
+            "run_id=%s request_id=%s tool=%r call_index=%s rule=%s schema_path=%r missing_fields=%r",
+            reason, self.run_id, request.request_id, call.name, call.index, rule, schema_path, missing_fields,
+        )
+        self._fail(request, "INVALID_TOOL_ARGUMENTS", reason=reason)
 
     def _completion(self, message, request, definitions):
         self._check_cancelled()
@@ -149,11 +160,22 @@ class JiuwenServiceModel(Model):
             if call.name not in schemas or call.name == EXECUTION_TOOL:
                 self._fail(request, "JIUWEN_UNAUTHORIZED_TOOL")
             if call.argument_error or not isinstance(call.parsed_arguments, dict):
-                self._fail(request, "INVALID_TOOL_ARGUMENTS")
+                self._reject_arguments(request, call, call.argument_diagnostic or "arguments_unparsed")
             try:
                 validate(call.parsed_arguments, schemas[call.name])
-            except ValidationError:
-                self._fail(request, "INVALID_TOOL_ARGUMENTS")
+            except ValidationError as error:
+                reason = {
+                    "required": "arguments_required", "type": "arguments_wrong_type",
+                    "additionalProperties": "arguments_extra_fields",
+                    "enum": "arguments_unsupported_value", "const": "arguments_unsupported_value",
+                }.get(error.validator, "arguments_schema_mismatch")
+                missing = ()
+                if error.validator == "required" and isinstance(error.instance, dict):
+                    missing = tuple(key for key in error.validator_value if key not in error.instance)[:5]
+                self._reject_arguments(
+                    request, call, reason, rule=error.validator,
+                    schema_path=tuple(error.absolute_schema_path)[:12], missing_fields=missing,
+                )
             calls.append(NativeToolCall(id=call.provider_call_id, type="function", name=call.name,
                                         arguments=call.raw_arguments, index=call.index))
         if self.text_protocol:
@@ -174,8 +196,14 @@ class JiuwenServiceModel(Model):
         if self.clarification is not None:
             try:
                 self._clarification_form = self.clarification.form_for(calls, text_protocol=self.text_protocol)
-            except JiuwenProtocolError as error:
-                self._fail(request, str(error))
+            except InvalidClarification as error:
+                logger.warning(
+                    "event=jiuwen_model_action_rejected category=JIUWEN_INVALID_CLARIFICATION reason=%s "
+                    "run_id=%s request_id=%s protocol=%s issues=%r",
+                    error.reason, self.run_id, request.request_id,
+                    "text" if self.text_protocol else "native", error.issues,
+                )
+                self._fail(request, str(error), reason=error.reason)
         if self.delegation is not None and self._clarification_form is None:
             try:
                 self.delegation.validate_calls(calls)

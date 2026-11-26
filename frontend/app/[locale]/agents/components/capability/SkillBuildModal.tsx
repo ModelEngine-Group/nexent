@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 import { hasRole } from "@/lib/roles";
+import { describeConversationRunError } from "@/lib/conversationRunError";
 
 import {
   useState,
@@ -730,7 +731,10 @@ export default function SkillBuildModal({
       } else if (event.type === "error") {
         targetedFilesRef.current = null;
         rollbackDraftStream();
-        message.error(t("skillManagement.message.chatError"));
+        message.error(
+          describeConversationRunError(event)?.text ??
+            t("skillManagement.message.chatError")
+        );
       } else if (event.type === "stream_closed") {
         if (streamHasDraftRef.current) rollbackDraftStream();
         setIsStreaming(false);

@@ -91,7 +91,7 @@ def test_invalid_stream_cannot_produce_final_answer(fault, expected):
         adapter.push(terminal(status="bad"))
     result = adapter.close()
     assert [e["type"] for e in result] == ["error"]
-    assert result[0]["content"] == expected
+    assert result[0].get("error_code", result[0]["content"]) == expected
 
 
 @pytest.mark.parametrize("status", ["failed", "stopped"])

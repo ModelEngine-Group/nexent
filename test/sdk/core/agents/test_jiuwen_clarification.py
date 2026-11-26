@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.jiuwen.clarification import InvalidClarification
 from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
 from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, JiuwenProtocolError
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
@@ -85,6 +86,20 @@ def test_text_clarification_rejects_mixed_dynamic_and_invalid_actions(code):
 def test_native_mixed_or_invalid_forms_are_rejected(calls):
     with pytest.raises(JiuwenProtocolError):
         control().form_for(calls, text_protocol=False)
+
+
+def test_clarification_issues_preserve_safe_rules_and_hide_unknown_field_names():
+    invalid_form = {"questions": [
+        {**FORM["questions"][0], "PRIVATE_KEY": "PRIVATE_VALUE"},
+        {"id": "choice", "type": "single_choice", "title": "Select an option"},
+    ]}
+    with pytest.raises(InvalidClarification) as caught:
+        control().form_for([call("ask_user", invalid_form)], text_protocol=False)
+    assert caught.value.reason == "clarification_form_invalid"
+    assert caught.value.issues == (
+        ("extra_forbidden", ("questions", 0, "<extra>")),
+        ("clarification_too_few_choices", ("questions", 1)),
+    )
 
 
 def test_literal_prose_or_an_unrelated_call_does_not_become_a_form():
