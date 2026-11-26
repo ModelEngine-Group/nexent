@@ -15,14 +15,15 @@ journey("PW-CHAT-02", async (context) => {
   const noToolMarker = `NO-TOOL-${token}`;
   const wirePath = process.env.NEXENT_TEST_MCP_WIRE_LOG || "";
   const chat = new ChatPage(page);
+  const waitForVisibleAnswer = (message: ReturnType<ChatPage["assistantMessages"]>) =>
+    expect(message.locator('[data-slot="aui_assistant-message-completion-indicator"]'))
+      .toHaveText(/^(已完成|Completed?)$/, { timeout: 90_000 });
   let agentDisplay = "";
   let wireOffset = 0;
   let toolAnswer = "";
   let noToolAnswer = "";
   let completedToolCount = 0;
   let wireAfterTool = 0;
-
-
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
@@ -60,7 +61,7 @@ journey("PW-CHAT-02", async (context) => {
         return "the current DOM exposed a real tool-call group and execution state";
       },
       async () => {
-        await chat.waitForCompletion(300_000);
+        await waitForVisibleAnswer(chat.assistantMessages().last());
         const group = page.locator("[data-slot='tool-group-root']").last();
         const trigger = group.locator("[data-slot='tool-group-trigger']");
         if ((await trigger.getAttribute("data-state")) === "closed") await trigger.click();
@@ -83,7 +84,8 @@ journey("PW-CHAT-02", async (context) => {
         const toolLabel = new RegExp("(?:Used tool:|已使用工具[:：]?)\\s*" + toolName);
         completedToolCount = await page.getByRole("button", { name: toolLabel }).count();
         wireAfterTool = readFileSync(wirePath, "utf8").length;
-        const response = await chat.sendAndWait(`不要调用任何工具，只回复：${noToolMarker}`);
+        const response = await chat.startMessage(`不要调用任何工具，只回复：${noToolMarker}`);
+        await waitForVisibleAnswer(response);
         noToolAnswer = await chat.messageText(response);
         expect(noToolAnswer).toContain(noToolMarker);
         await expect(page.getByRole("button", { name: toolLabel })).toHaveCount(completedToolCount);

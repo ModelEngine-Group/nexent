@@ -46,3 +46,5 @@ change:
     journal Body iterators close on completion and on assertion failure. The D4 cases
     retain their declared preparation groups and use the model selected for the owned
     Agent. Resource cleanup is through the case callbacks or authenticated asset journal.
+    The tool chat requires the actual successful completion indicator and checks the
+    final answer and MCP wire independently of Playwright response bookkeeping.
