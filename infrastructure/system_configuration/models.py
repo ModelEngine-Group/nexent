@@ -6,6 +6,9 @@ from sqlalchemy import Column, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 
+RESOURCE_DENYLIST_KEY = "NL2AGENT_RESOURCE_DENYLIST"
+
+
 class SystemConfiguration(TableBase):
     __tablename__ = "sys_configuration_t"
     __table_args__ = (
@@ -28,5 +31,5 @@ class SystemConfiguration(TableBase):
     configuration_value = Column(
         JSONB,
         nullable=False,
-        comment="Validated numeric or boolean configuration scalar",
+        comment="Validated configuration value",
     )

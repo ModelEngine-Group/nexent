@@ -185,7 +185,9 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   const availableKnowledgeSearchTool = useMemo(
     () =>
       availableTools.find(
-        (tool) => getSemanticToolName(tool) === profile.toolName
+        (tool) =>
+          !tool.blocked_by_denylist &&
+          getSemanticToolName(tool) === profile.toolName
       ),
     [availableTools, profile.toolName]
   );

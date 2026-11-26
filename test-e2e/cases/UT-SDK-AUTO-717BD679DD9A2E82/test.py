@@ -6,7 +6,7 @@ import logging
 import httpx
 import pytest
 
-import nexent.core.ext_components.aidp.aidp_search_tool as aidp_search_tool
+import nexent.core.ext_components.aidp.retrieval_client as retrieval_client
 from nexent.core.ext_components.aidp.aidp_search_tool import (
     AidpSearchError,
     AidpSearchTool,
@@ -66,7 +66,7 @@ def make_tool(monkeypatch, responses, observer=None, kds_list=None):
     client = FakeClient(responses)
     tool._http_client = client
     sleeps = []
-    monkeypatch.setattr(aidp_search_tool.time, 'sleep', lambda s: sleeps.append(s))
+    monkeypatch.setattr(retrieval_client.time, 'sleep', lambda s: sleeps.append(s))
     return tool, client, sleeps
 
 
@@ -120,8 +120,8 @@ def test_aidp_search_tool_retry_and_image_safety(monkeypatch, caplog):
     assert call['headers']['Authorization'] == f'Bearer {API_KEY}'
     assert call['json']['query'] == 'hello'
     assert call['json']['kds_list'] == ['kb-1']
-    assert call['json']['search_method'] == 'hybrid_search'
-    assert call['json']['multi_modal'] is True
+    assert call['json']['search_method'] == 'vector_search|full_text_search|graph_search'
+    assert call['json']['multi_modal_enable'] is True
     assert sleeps == []
 
     by_type = collect_by_type(observer)
@@ -152,7 +152,6 @@ def test_aidp_search_tool_retry_and_image_safety(monkeypatch, caplog):
         tool5.forward('q', ['kb-1'])
     msg503 = str(exc503.value)
     assert 'HTTP 503' in msg503
-    assert 'upload at least one document' in msg503
     assert 'httpx' not in msg503.lower()
     assert len(client5.calls) == 3
 

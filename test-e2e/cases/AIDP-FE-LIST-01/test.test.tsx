@@ -20,6 +20,7 @@ import {
   UploadTransport,
 } from "../../infra/automation/d1/frontend/aidp-fixtures";
 import AidpKnowledgeConfiguration from "@/ext_components/aidp/AidpKnowledgeConfiguration";
+import AidpKnowledgeLegacyPage from "@/app/[locale]/aidp-knowledges/page";
 import { useAidpKnowledgeList } from "@/ext_components/aidp/pages/knowledge-list/hooks/useAidpKnowledgeList";
 
 async function ready() {
@@ -41,6 +42,13 @@ const confirmDeleteKb = () =>
   );
 
 describe("AIDP-FE-LIST-01", () => {
+  it("legacy /aidp-knowledges entry redirects to the unified /knowledges page", async () => {
+    identity.replace.mockClear();
+    mount(<AidpKnowledgeLegacyPage />);
+    await waitFor(() => expect(identity.replace).toHaveBeenCalled());
+    expect(identity.replace).toHaveBeenLastCalledWith("/knowledges");
+  });
+
   it("card/table, guide and columns persist while only the name enters files", async () => {
     const view = await ready();
     expect(document.querySelector("article")).toBeTruthy();

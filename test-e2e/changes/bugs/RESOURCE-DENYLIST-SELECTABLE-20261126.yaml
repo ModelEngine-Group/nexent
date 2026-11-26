@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-DENYLIST-SELECTABLE-20261126
+  change_type: bugfix
+  bug_id: RESOURCE-DENYLIST-SELECTABLE-20261126
+  title: Restrict the resource exclusion editor to selectable tools
+  description: Align global and tenant exclusion catalogs with intrinsic Agent tool selection rules.
+  observed_behavior: Available tools were listed even when hidden from manual selection, including aidp_search and download_from_s3.
+  expected_behavior: Only selectable tools may be newly excluded; existing hidden selections remain visible and removable.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The existing persistence journey only used selectable tools and never checked hidden catalog entries.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Filter false selectability flags, system-managed names, managed knowledge names and semantic aliases in both scopes.
+    - Keep available ordinary tools and tenant isolation; retain removable historical exclusions and reject new hidden selections.
+    - Preserve the existing Agent tool picker selectability rules.
+    reason: SQLite query tests prove actual predicate behavior; editor UT proves historical handling and write errors. The existing D3 owns real PostgreSQL configuration persistence and needs no duplicate Case.
+    test_selectors:
+    - test/backend/services/test_resource_denylist_catalog.py
+    - test/backend/services/test_resource_denylist.py
+    - test/backend/services/test_tool_configuration_service.py
+  notes: SPEC is nexent-doc/docs/Developing/chat-nl2agent-resource-denylist/design.md and the existing resource-configuration change. F-045-RULE-12 owns the correction. D3 uses its existing owned PostgreSQL schema, Redis, ES and model endpoint; all resources are released by owned_runtime and the runner. D4 presentation and D2 authorization are unchanged. No external model dependency or new deployment mode is introduced. Branch reconciliation is deferred because the user worktree has unrelated uncommitted changes; this is local test deployment, not merge readiness.

@@ -31,6 +31,7 @@ const context = vi.hoisted(() => ({
   } | null,
   enabled: true,
   push: vi.fn(),
+  replace: vi.fn(),
   groups: {
     groups: [
       { group_id: 1, group_name: "Group A" },
@@ -64,7 +65,7 @@ vi.mock("@/hooks/group/useGroupList", () => ({
   }),
 }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: context.push }),
+  useRouter: () => ({ push: context.push, replace: context.replace }),
   useParams: () => ({ locale: "zh" }),
   useSearchParams: () => new URLSearchParams(),
 }));

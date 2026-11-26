@@ -50,6 +50,10 @@ safe to re-run.
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
+For the v2.9.0 release, the resource denylist migration is embedded at the end of
+`v2.9.0_merged_migrations.sql`, after the runtime replica section and the system
+configuration table definition. It has no separate migration file.
+
 The trajectory execution summaries, statistics snapshots, historical
 conversation placeholders, and OPS/SU menu grants are consolidated as the
 `v2.9.0_011_trajectory.sql` section of `v2.9.0_merged_migrations.sql`. That

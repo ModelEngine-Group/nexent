@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import or_, update as sa_update
+from sqlalchemy import or_, select, update as sa_update
 from sqlalchemy.orm import defer
 
 from infrastructure.system_configuration.runtime import get_config_snapshot
@@ -112,6 +112,18 @@ def create_or_update_skill_by_skill_info(
         )
         skill_instance = query.first()
 
+        if not allow_system and version_no == 0 and skill_info_dict.get("enabled", True) and (
+            skill_instance is None or not skill_instance.enabled
+        ):
+            from management.services.configuration.resource_denylist import require_skill_allowed
+
+            skill_name = session.scalar(select(SkillInfo.skill_name).where(
+                SkillInfo.skill_id == skill_info_dict.get("skill_id"),
+                SkillInfo.delete_flag != "Y",
+                or_(SkillInfo.tenant_id == tenant_id, SkillInfo.tenant_id.is_(None)),
+            ))
+            require_skill_allowed(tenant_id, skill_name, skill_info_dict.get("skill_id"), session=session)
+
         if skill_instance:
             for key, value in skill_info_dict.items():
                 if hasattr(skill_instance, key):
@@ -136,6 +148,19 @@ def query_skill_instances_by_agent_id(agent_id: int, tenant_id: str, version_no:
         )
         skill_instances = query.all()
         return [as_dict(skill_instance) for skill_instance in skill_instances]
+
+
+def query_skill_names_by_ids(tenant_id: str, skill_ids: list[int]) -> list[dict]:
+    """Read only binding policy identities, including shared skill definitions."""
+    if not skill_ids:
+        return []
+    with get_db_session() as session:
+        return [dict(row) for row in session.execute(select(
+            SkillInfo.skill_id, SkillInfo.skill_name.label("name"),
+        ).where(
+            SkillInfo.skill_id.in_(skill_ids), SkillInfo.delete_flag != "Y",
+            or_(SkillInfo.tenant_id == tenant_id, SkillInfo.tenant_id.is_(None)),
+        )).mappings()]
 
 
 def get_valid_skill_ids(tenant_id: str, skill_ids: List[int]) -> set:

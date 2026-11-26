@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "generated-678-rows",
+  "revision": "generated-682-rows",
   "routes": [
     {
       "method": "GET",
@@ -5707,6 +5707,28 @@
     },
     {
       "method": "GET",
+      "path": "/api/system_configurations/resource_denylist",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/system_configurations.py",
+      "route_id": "resource-denylist-ops-get",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system_configurations/resource_denylist",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/system_configurations.py",
+      "route_id": "resource-denylist-ops-put",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/tag-libraries",
       "transport": "http",
       "target": "management",
@@ -5998,6 +6020,28 @@
       "target": "management",
       "source": "backend/management/api/configuration/tenant_config.py",
       "route_id": "route-14cd6642d00b5714",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tenant_config/resource_denylist",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/configuration/resource_denylist.py",
+      "route_id": "resource-denylist-management-get",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tenant_config/resource_denylist",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/configuration/resource_denylist.py",
+      "route_id": "resource-denylist-management-put",
       "credential_kinds": [
         "session"
       ]

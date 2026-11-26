@@ -235,6 +235,7 @@ export interface Tool {
   initParams: ToolParam[];
   is_available?: boolean;
   is_user_selectable?: boolean;
+  blocked_by_denylist?: boolean;
   create_time?: string;
   usage?: string;
   inputs?: string;
@@ -350,6 +351,7 @@ export interface ToolSubGroup {
 
 // Skill interface for skill management
 export interface Skill {
+  blocked_by_denylist?: boolean;
   skill_id: number;
   tenant_id?: string;
   name: string;

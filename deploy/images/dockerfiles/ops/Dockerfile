@@ -51,6 +51,7 @@ COPY \
 COPY \
     backend/management/db/configuration/__init__.py \
     backend/management/db/configuration/models.py \
+    backend/management/db/configuration/resource_denylist.py \
     /opt/backend/management/db/configuration/
 COPY \
     backend/management/db/conversation/__init__.py \
@@ -80,6 +81,9 @@ COPY \
 COPY backend/management/db/mcp/__init__.py backend/management/db/mcp/models.py /opt/backend/management/db/mcp/
 COPY backend/management/db/model/__init__.py backend/management/db/model/models.py /opt/backend/management/db/model/
 COPY backend/management/services/__init__.py /opt/backend/management/services/
+COPY backend/management/services/configuration/__init__.py \
+    backend/management/services/configuration/resource_denylist.py \
+    /opt/backend/management/services/configuration/
 COPY \
     backend/management/services/permission/__init__.py \
     backend/management/services/permission/ops_access.py \

@@ -22,6 +22,10 @@ export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   systemConfigurations: `${API_BASE_URL}/system_configurations`,
+  resourceDenylist: {
+    global: `${API_BASE_URL}/system_configurations/resource_denylist`,
+    tenant: `${API_BASE_URL}/tenant_config/resource_denylist`,
+  },
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
     importArchive: `${API_BASE_URL}/trajectory/import`,

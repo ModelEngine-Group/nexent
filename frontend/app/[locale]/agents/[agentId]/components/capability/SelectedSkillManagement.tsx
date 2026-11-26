@@ -5,7 +5,7 @@
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Tooltip } from "antd";
+import { Button, Tag, Tooltip } from "antd";
 import {
   ChevronRight,
   Eye,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { useSkillList } from "@/hooks/agent/useSkillList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../../../components/capability/SkillDetailModal";
@@ -73,12 +74,16 @@ export default function SelectedSkillManagement({
   addEntry,
 }: SelectedSkillManagementProps) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
   const selectedSkills = useAgentStore(
     (state) => state.editedAgent?.skills ?? []
   );
   const updateSkills = useAgentStore((state) => state.updateSkills);
-  const { availableSkills: catalogSkillData } = useSkillList({ enabled: true });
-  const catalogSkills = catalogSkillData as Skill[];
+  const { skills: catalogSkillData } = useSkillList({ enabled: true });
+  const catalogSkills = useMemo(
+    () => (catalogSkillData ?? []) as Skill[],
+    [catalogSkillData]
+  );
   const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<
@@ -104,6 +109,9 @@ export default function SelectedSkillManagement({
       const hydratedSkill: Skill = {
         ...canonicalSkill,
         ...selectedSkill,
+        blocked_by_denylist:
+          canonicalSkill?.blocked_by_denylist ??
+          selectedSkill.blocked_by_denylist,
         skill_id: Number(selectedSkill.skill_id),
         name:
           selectedSkill.name ||
@@ -138,9 +146,26 @@ export default function SelectedSkillManagement({
   }, [catalogSkills, selectedSkills]);
 
   const removeSkill = (skillId: number) => {
-    updateSkills(
-      selectedSkills.filter((skill) => Number(skill.skill_id) !== skillId)
-    );
+    const agentId = useAgentStore.getState().agentId;
+    const remove = () => {
+      const state = useAgentStore.getState();
+      if (state.agentId !== agentId || state.isReadOnly || isReadOnly) return;
+      updateSkills(
+        (state.editedAgent?.skills ?? []).filter(
+          (skill) => Number(skill.skill_id) !== skillId
+        )
+      );
+    };
+    const skill = groupedSkills
+      .flatMap((group) => group.skills)
+      .find((item) => Number(item.skill_id) === skillId);
+    if (skill?.blocked_by_denylist) {
+      confirm({
+        title: t("skillPool.remove"),
+        content: t("resourceDenylist.removeWarning"),
+        onOk: remove,
+      });
+    } else remove();
   };
 
   const saveConfig = (skill: Skill, params: SkillParam[]) => {
@@ -201,6 +226,9 @@ export default function SelectedSkillManagement({
                         {skill.name}
                       </span>
                     </Tooltip>
+                    {skill.blocked_by_denylist && (
+                      <Tag>{t("resourceDenylist.existingBinding")}</Tag>
+                    )}
                     {(skill.tags || []).slice(0, 2).map((tag) => (
                       <span
                         key={tag}
@@ -344,6 +372,11 @@ export default function SelectedSkillManagement({
                               <span className="truncate text-sm font-medium text-gray-800">
                                 {skill.name}
                               </span>
+                              {skill.blocked_by_denylist && (
+                                <Tag>
+                                  {t("resourceDenylist.existingBinding")}
+                                </Tag>
+                              )}
                               {(skill.tags || []).slice(0, 2).map((tag) => (
                                 <span
                                   key={tag}

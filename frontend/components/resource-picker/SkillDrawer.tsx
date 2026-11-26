@@ -16,6 +16,7 @@ import { Pencil, Settings } from "lucide-react";
 
 import { ResourceDrawer } from "./ResourceDrawer";
 import { useSkillList } from "@/hooks/agent/useSkillList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { ResourceCollection, ResourceItem } from "./ResourceItem";
 import { fetchSkillInstances } from "@/services/agentConfigService";
@@ -117,6 +118,8 @@ export function SkillDrawer({
   isReadOnly,
 }: SkillDrawerProps) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
+  const removalEpoch = useRef(0);
   const catalog = useSkillList({ enabled: open && groups === undefined });
   const groupedSkills = groups ?? catalog.groupedSkills;
   const availableSkills = useMemo(
@@ -334,11 +337,25 @@ export function SkillDrawer({
   const removeSkill = useCallback(
     (id: string) => {
       if (isReadOnly) return;
-      setDraftSkills((current) =>
-        current.filter((skill) => Number(skill.skill_id) !== Number(id))
-      );
+      const epoch = removalEpoch.current;
+      const remove = () => {
+        if (removalEpoch.current !== epoch) return;
+        setDraftSkills((current) =>
+          current.filter((skill) => Number(skill.skill_id) !== Number(id))
+        );
+      };
+      const skill =
+        catalog.skills?.find((item) => Number(item.skill_id) === Number(id)) ??
+        draftSkills.find((item) => Number(item.skill_id) === Number(id));
+      if (skill?.blocked_by_denylist) {
+        confirm({
+          title: t("skillPool.remove"),
+          content: t("resourceDenylist.removeWarning"),
+          onOk: remove,
+        });
+      } else remove();
     },
-    [isReadOnly]
+    [catalog.skills, confirm, draftSkills, isReadOnly, t]
   );
 
   const selectAllVisibleSkills = useCallback(() => {
@@ -416,6 +433,7 @@ export function SkillDrawer({
   }, []);
 
   const onCloseDialog = useCallback(() => {
+    removalEpoch.current += 1;
     setSearch("");
     setActiveTab("");
     setPage(1);
