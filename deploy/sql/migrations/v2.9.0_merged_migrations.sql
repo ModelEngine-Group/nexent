@@ -1756,3 +1756,26 @@ SET params = d.new_params::json
 FROM aidp_definitions AS d
 WHERE t.tool_id = d.tool_id
   AND t.params::jsonb IS DISTINCT FROM d.new_params;
+
+-- Source migration: v2.9.0_018_runtime_fixed_replicas.sql
+-- Source SHA-256: e580af52c8bf4a60ac0c8ab9abf1fa3bb22657218374c05640bc1c0e603d60f8
+
+-- Index scheduled automation occurrences that have started.
+CREATE INDEX IF NOT EXISTS idx_agent_automation_run_started_occurrence
+    ON nexent.agent_automation_run_t (task_id, scheduled_fire_at)
+    WHERE user_message_id IS NOT NULL;
+
+-- Index the active execution scope for admission across replicas.
+ALTER TABLE nexent.agent_execution_t ADD COLUMN IF NOT EXISTS agent_scope VARCHAR(100);
+
+COMMENT ON COLUMN nexent.agent_execution_t.agent_scope IS
+    'Tenant-local Agent or Workbench identity used to enforce the admitted run limit across Runtime replicas.';
+
+CREATE INDEX IF NOT EXISTS idx_agent_execution_active_scope
+    ON nexent.agent_execution_t (tenant_id, agent_scope)
+    WHERE status IN ('starting', 'running') AND delete_flag = 'N';
+
+-- Index conversation execution history for Creator replay.
+CREATE INDEX IF NOT EXISTS idx_agent_execution_conversation_history
+    ON nexent.agent_execution_t (conversation_id, agent_scope, create_time DESC, run_id DESC)
+    WHERE delete_flag = 'N';

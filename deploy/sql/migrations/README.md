@@ -41,7 +41,8 @@ all migrations applied after the v2.5.1 release, through v2.6.0),
 the v2.6.1 release, through v2.7.0), `v2.8.0_merged_migrations.sql`
 (which merges every migration file still loose after the v2.7.0 release), and
 `v2.9.0_merged_migrations.sql` (which merges every migration file still loose
-after the v2.8.5 release, in `sort -V` deployment order).
+after the v2.8.5 release, through `v2.9.0_018_runtime_fixed_replicas.sql`, in
+`sort -V` deployment order).
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
