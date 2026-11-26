@@ -6,6 +6,14 @@
 -- each source file's leading copyright line, which appears once above.
 -- Do not reorder or rewrite sections without equivalence validation.
 
+-- Source migration: v2.8.0_001_a2a_ssl_verify.sql
+-- Source SHA-256: 2ddf1be0c0aa25dccebe417a261a7d3b059198b4729659385f3859b46e17227c
+ALTER TABLE nexent.ag_a2a_external_agent_t
+    ADD COLUMN IF NOT EXISTS ssl_verify BOOLEAN NOT NULL DEFAULT TRUE;
+
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.ssl_verify IS
+    'Verify peer TLS certificates for Agent Card retrieval and A2A invocation';
+
 -- Source migration: v2.8.0_aidp_fixed_retrieval_policy.sql
 -- Source SHA-256: 539333be0fbb3300ef065a59c0c88e286ea6c147f2138c444d3e74e877ef4119
 --
@@ -151,6 +159,31 @@ FROM fixed_instances AS f
 WHERE i.tool_instance_id = f.tool_instance_id
   AND i.version_no = f.version_no
   AND i.params::jsonb IS DISTINCT FROM f.new_params;
+
+-- Source migration: v2.8.3_001_fix_agent_ingroup_permission.sql
+-- Source SHA-256: 89a0e490748f6c021e5619618de1fb76c9077e744506c4632fb1b3592bfa3dcc
+
+-- Normalize legacy agent in-group permission values left by the pre-redesign
+-- deployment form. The classic form saved "EDITABLE" for the "editable" option,
+-- while backend draft-edit authorization (require_agent_draft_edit) only
+-- accepts the exact value "EDIT". Agents saved through the legacy form stayed
+-- read-only for non-creator, non-admin users even though the UI showed them
+-- as editable, and removing/configuring tools on such agents failed with
+-- agent_read_only. Align the stored value with the canonical enum so existing
+-- agents match what the UI intended.
+--
+-- Scope notes:
+--   - Case variants (e.g. "editable") are covered via UPPER().
+--   - NULL is intentionally untouched: it means "not configured" and resolves
+--     to READ_ONLY by design.
+--   - "INHERIT" is intentionally untouched: its inheritance semantics for
+--     draft-edit are a separate product decision.
+--   - Idempotent: re-running matches no rows. Safe under the migration
+--     runner's reapply-on-checksum-change behavior.
+
+UPDATE nexent.ag_tenant_agent_t
+SET ingroup_permission = 'EDIT'
+WHERE UPPER(ingroup_permission) = 'EDITABLE';
 
 -- Source migration: v2.9.0_001_local_user_accounts.sql
 -- Source SHA-256: 0769d1ecc7aa2e3b5d36cc48e9b81f4d567d17168794e097ce6e3fe60609edf7
