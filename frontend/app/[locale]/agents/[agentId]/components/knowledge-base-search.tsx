@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Database,
   ExternalLink,
+  FlaskConical,
   Settings,
   Trash2,
   Plus,
@@ -34,6 +35,9 @@ import {
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 import { ResourceAddButton } from "@/components/common/ResourceAddButton";
+import { ParamDialog } from "@/components/resource-picker/ParamDialog";
+import { parseToolInputs } from "@/services/agentConfigService";
+import ToolTestPanel from "../../components/capability/tool/ToolTestPanel";
 import type { ResourceSectionProps } from "./resource-section.types";
 
 type KnowledgeSelectorType = "knowledge_base_search" | "aidp_search";
@@ -444,6 +448,107 @@ export function KnowledgeBaseConfigActions() {
   );
 }
 
+function KnowledgeRetrievalTest({
+  state,
+  onClose,
+}: {
+  state: KnowledgeBaseConfigState;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("common");
+  const { selectionParam, selectorType, maxSelect } = state.profile;
+  const sources = state.selectedKnowledgeBases.filter(
+    (source) => source.knowledgeBase !== undefined
+  );
+  const [testIds, setTestIds] = useState(() => sources.map(({ id }) => id));
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const sourcesById = new Map(sources.map((source) => [source.id, source]));
+  const selected = testIds.flatMap((id) => {
+    const source = sourcesById.get(id);
+    return source ? [source] : [];
+  });
+  const tool = useMemo(() => {
+    const inputs = parseToolInputs(state.knowledgeSearchTool.inputs || "");
+    return {
+      ...state.knowledgeSearchTool,
+      source: state.knowledgeSearchTool.source || "local",
+      // Older Agent drafts omit the runtime input schema.
+      inputs: JSON.stringify({
+        query: {
+          type: "string",
+          description: t("agent.knowledge.test.query"),
+          required: true,
+          ...inputs.query,
+        },
+        [selectionParam]: {
+          type: "array",
+          description: t("agent.knowledge.button.select"),
+          ...inputs[selectionParam],
+        },
+      }),
+    };
+  }, [state.knowledgeSearchTool, selectionParam, t]);
+
+  return (
+    <>
+      <ParamDialog
+        open
+        variant="tool"
+        layout="test"
+        title={t("agent.knowledge.test.title")}
+        onClose={onClose}
+        footer={null}
+      >
+        <ToolTestPanel
+          visible
+          tool={tool}
+          configParams={state.configurableParams}
+          toolRequiresKbSelection
+          toolKbType={selectorType}
+          boundKnowledgeIds={sources.map(({ id }) => id)}
+          testPanelKbIds={selected.map(({ id }) => id)}
+          testPanelKbDisplayNames={selected.map(
+            ({ displayName }) => displayName
+          )}
+          onTestPanelKbIdsChange={(ids) => setTestIds(ids)}
+          onOpenKbSelector={() => setPickerOpen(true)}
+          onTestPanelKbRemove={(index) =>
+            setTestIds((ids) => ids.filter((id) => id !== selected[index]?.id))
+          }
+          configInvalid={state.isReadOnly || state.isError}
+          onClose={onClose}
+        />
+      </ParamDialog>
+      {pickerOpen && (
+        <KnowledgeDrawer
+          open
+          onClose={() => setPickerOpen(false)}
+          onConfirm={(items) => {
+            setTestIds(
+              items.map((item) =>
+                String(
+                  selectorType === "aidp_search"
+                    ? item.id
+                    : item.index_name || item.id
+                )
+              )
+            );
+            setPickerOpen(false);
+          }}
+          selectedIds={selected.flatMap(({ knowledgeBase }) =>
+            knowledgeBase ? [knowledgeBase.id] : []
+          )}
+          knowledgeBases={sources.flatMap(({ knowledgeBase }) =>
+            knowledgeBase ? [knowledgeBase] : []
+          )}
+          maxSelect={maxSelect}
+          isAidpSearch={selectorType === "aidp_search"}
+        />
+      )}
+    </>
+  );
+}
+
 export default function KnowledgeBaseConfig({
   highFidelity = false,
   renderSection,
@@ -453,10 +558,17 @@ export default function KnowledgeBaseConfig({
   const state = useKnowledgeBaseConfigState();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [retrievalTestOpen, setRetrievalTestOpen] = useState(false);
   const isReadOnly = useAgentReadOnly();
 
   if (highFidelity) {
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
+    const canTestRetrieval = Boolean(
+      state?.hasCurrentTool &&
+        !state.isError &&
+        !isReadOnly &&
+        selectedKnowledgeBases.some(({ knowledgeBase }) => knowledgeBase)
+    );
     const isAidpSearch = state?.profile.selectorType === "aidp_search";
     const content = (
       <div className="flex flex-col gap-2">
@@ -580,6 +692,15 @@ export default function KnowledgeBaseConfig({
     const actions = (
       <div className="flex h-6 items-center gap-2">
         <Button
+          type="link"
+          disabled={!canTestRetrieval}
+          icon={<FlaskConical size={14} aria-hidden="true" />}
+          onClick={() => setRetrievalTestOpen(true)}
+          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px]"
+        >
+          {t("agent.knowledge.test.title")}
+        </Button>
+        <Button
           type="text"
           size="small"
           icon={<Settings size={14} />}
@@ -613,6 +734,12 @@ export default function KnowledgeBaseConfig({
         )}
         {state ? (
           <>
+            {retrievalTestOpen && (
+              <KnowledgeRetrievalTest
+                state={state}
+                onClose={() => setRetrievalTestOpen(false)}
+              />
+            )}
             <KnowledgeDrawer
               open={selectorOpen}
               onClose={() => setSelectorOpen(false)}

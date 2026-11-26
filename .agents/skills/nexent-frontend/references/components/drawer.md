@@ -30,7 +30,9 @@ shadow-[-2px_0_12px_0_rgba(0,0,0,0.08)]
 
 The reusable component exposes a `width` prop for an adjusted width. The Ant Design `Drawer` width property controls the panel width.
 
-Use `mask={{ closable: false }}` so clicking the background does not close the drawer.
+Drawer masks block dismissal by default. The shared resource picker uses
+`mask={{ closable: true }}` to dismiss through the same close handler as the close icon.
+The handler keeps the drawer open while confirmation is in progress.
 
 ## Header
 

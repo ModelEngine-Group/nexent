@@ -3,16 +3,14 @@
 "use client";
 
 import {
-  ComposerAttachment,
-  ComposerDictation,
-} from "@/app/newchat/assistant-ui/composer-tools";
-import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type FC,
+  type SetStateAction,
 } from "react";
 import {
   AssistantRuntimeProvider,
@@ -63,11 +61,9 @@ import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
-import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
-import type { STTModelConfig } from "@/types/modelConfig";
+import { isDictationConfigured } from "@/lib/dictationConfig";
 import { conversationService } from "@/services/conversationService";
 import { useQueryClient } from "@tanstack/react-query";
 import { createConversationDetailLoader } from "@/lib/conversationDetails";
@@ -82,7 +78,6 @@ import { useConversationResume } from "@/hooks/chat/useConversationResume";
 import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
   ConversationKnowledgeScope,
-  KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
   KnowledgeScopeResolution,
   KnowledgeScopeWarning,
@@ -100,14 +95,6 @@ function useLocalChatRuntime(
     },
   });
 }
-
-const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
-  if (!config?.modelName) return false;
-  if (config.modelFactory === "volcengine") {
-    return Boolean(config.modelAppid && config.accessToken);
-  }
-  return Boolean(config.apiConfig?.apiKey);
-};
 
 export default function Home() {
   return <PersistentChatHome />;
@@ -321,7 +308,7 @@ const HomeContent: FC<{
   runtime: AssistantRuntime;
   selectedAgent: Agent | null;
   restoreViewTarget: LastChatViewState | null | undefined;
-  setSelectedAgent: (agent: Agent | null) => void;
+  setSelectedAgent: Dispatch<SetStateAction<Agent | null>>;
   isLoadingAgents: boolean;
   agents: Agent[];
   onAgentSelected: (agent: Agent) => Promise<void>;
@@ -347,27 +334,6 @@ const HomeContent: FC<{
     useState<ConversationKnowledgeScope | null>(null);
   const [knowledgePreview, setKnowledgePreview] =
     useState<KnowledgeScopeEffectivePreview | null>(null);
-  const { enableAidpKnowledge } = useDeployment();
-  // Observe the composer's catalog updates without starting another list request.
-  const { dataUpdatedAt: knowledgeCatalogUpdatedAt } =
-    useComposerKnowledgeBases(false, enableAidpKnowledge);
-  const knowledgeCapabilityKey = JSON.stringify([
-    selectedAgent?.id,
-    selectedAgent?.current_version_no,
-    enableAidpKnowledge,
-    knowledgeCatalogUpdatedAt,
-  ]);
-  const [knowledgeCapabilityState, setKnowledgeCapabilityState] = useState<{
-    key: string;
-    value: KnowledgeCapabilities | null;
-  }>({ key: knowledgeCapabilityKey, value: null });
-  if (knowledgeCapabilityState.key !== knowledgeCapabilityKey) {
-    setKnowledgeCapabilityState({ key: knowledgeCapabilityKey, value: null });
-  }
-  const knowledgeCapabilities =
-    knowledgeCapabilityState?.key === knowledgeCapabilityKey
-      ? knowledgeCapabilityState.value
-      : null;
   const [runtimeMetadata, setRuntimeMetadata] = useState<
     Record<string, unknown>
   >({});
@@ -549,43 +515,6 @@ const HomeContent: FC<{
       !sidebarSelectedAgent &&
       !restoreFallbackReady
     );
-
-  useEffect(() => {
-    if (!selectedAgent?.id) {
-      return;
-    }
-
-    let cancelled = false;
-    const versionNo = selectedAgent.current_version_no;
-    void conversationService
-      .getKnowledgeCapabilities(Number(selectedAgent.id), versionNo)
-      .then((capabilities) => {
-        if (!cancelled) {
-          const matches =
-            capabilities?.agent_id === Number(selectedAgent.id) &&
-            (versionNo === undefined || capabilities.version_no === versionNo);
-          setKnowledgeCapabilityState({
-            key: knowledgeCapabilityKey,
-            value: matches ? capabilities : null,
-          });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled)
-          setKnowledgeCapabilityState({
-            key: knowledgeCapabilityKey,
-            value: null,
-          });
-        log.error(
-          "[HomeContent] Failed to load knowledge capabilities:",
-          error
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedAgent, knowledgeCapabilityKey]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -779,7 +708,7 @@ const HomeContent: FC<{
             scope
           );
           conversationDetails.invalidate(String(numericConversationId));
-          nextPreview = result.effective_preview;
+          nextPreview = result.effective_preview ?? nextPreview;
           showKnowledgeScopeWarnings(result.warnings);
         }
         if (activeThreadId) {
@@ -833,7 +762,8 @@ const HomeContent: FC<{
     previousActiveThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
 
-  // Resolve the selected conversation's agent from thread metadata.
+  // Restore from a thread change or newly available metadata. A card click
+  // can update the selected Agent before the runtime leaves the old thread.
   useEffect(() => {
     if (
       !shouldRestoreAgentRef.current ||
@@ -846,17 +776,15 @@ const HomeContent: FC<{
     if (agentId === undefined || agentId === null) return;
 
     const matchedAgent = agents.find((agent) => agent.id === String(agentId));
-    if (matchedAgent && matchedAgent.id !== selectedAgent?.id) {
-      log.log(
-        `[HomeContent] Thread changed to ${activeThreadId}, updating selectedAgent to: ${matchedAgent.display_name || matchedAgent.name}`
+    if (matchedAgent) {
+      setSelectedAgent((current) =>
+        current?.id === matchedAgent.id ? current : matchedAgent
       );
-      setSelectedAgent(matchedAgent);
     }
   }, [
     activeThreadId,
     activeAgentId,
     agents,
-    selectedAgent?.id,
     setSelectedAgent,
   ]);
 
@@ -990,12 +918,8 @@ const HomeContent: FC<{
     invalidateDetail: conversationDetails.invalidate,
   });
 
-  // Publish the server conversation id registry to the thread-list adapter so
-  // `generateTitle` can wait for the real backend id before issuing its
-  // request. Without this, a brand-new thread would forward an empty-string
-  // `remoteId` (placeholder from `initialize()`), which `Number("")` coerces
-  // to `0`, and the backend's `rename_conversation(0, ...)` would silently
-  // no-op via `WHERE conversation_id = 0`.
+  // Let adapter operations resolve the server ID for threads that still have
+  // their local draft ID in the runtime.
   useEffect(() => {
     setServerConversationIdState({
       idsRef: serverConversationIdsRef,
@@ -1067,7 +991,8 @@ const HomeContent: FC<{
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
-      shouldRestoreAgentRef.current = true;
+      // Keep the explicit selection while the runtime opens its new thread.
+      shouldRestoreAgentRef.current = false;
       await onAgentSelected(agent);
     },
     [onAgentSelected]
@@ -1076,7 +1001,7 @@ const HomeContent: FC<{
   const handleAgentSwitched = useCallback(
     async (agent: Agent) => {
       try {
-        shouldRestoreAgentRef.current = true;
+        shouldRestoreAgentRef.current = false;
         await startAgentConversation(runtime, Number(agent.id));
         setSelectedAgent(agent);
       } catch (error) {
@@ -1132,15 +1057,9 @@ const HomeContent: FC<{
             onBack={handleThreadBack}
             chatMode={chatMode}
             onChatModeChange={handleChatModeChange}
-            composerTools={
-              <>
-                <ComposerAttachment />
-                <ComposerDictation configured={isDictationConfigured} />
-              </>
-            }
+            inputTools={{ attachments: true, dictationConfigured: isDictationConfigured }}
             knowledgeScope={knowledgeScope}
             knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
             onKnowledgeScopeChange={handleKnowledgeScopeChange}
             runtimeMetadata={runtimeMetadata}
             onRuntimeMetadataChange={handleRuntimeMetadataChange}

@@ -364,11 +364,15 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         planRegistry.data ? "set" : "null"
       }`
     );
-    if (!remoteId || remoteId.startsWith("workbench-draft:")) {
+    if (
+      !remoteId ||
+      remoteId.startsWith("workbench-draft:") ||
+      remoteId.startsWith("agent-draft:")
+    ) {
       if (loadGeneration === this.loadGeneration) {
         historicalPlanCache.delete("");
       }
-      log.log(`[history-adapter] no remoteId, returning empty`);
+      log.log(`[history-adapter] local draft, returning empty history`);
       return { messages: [] };
     }
 
@@ -1638,15 +1642,9 @@ export const createShareThreadListAdapter = (
 // Server conversation id registry
 // ---------------------------------------------------------------------------
 //
-// `generateTitle` is invoked by the assistant-ui runtime concurrently with
-// `ChatModelAdapter.run()`. For a brand-new thread the adapter's `remoteId`
-// is still the empty-string placeholder returned by `initialize()`, while the
-// real backend `conversation_id` only lands in the page state after the
-// `agent/run` response header is parsed. To avoid sending `conversation_id: 0`
-// (which happens because `Number("") === 0`) we let the page register a
-// resolver that points at its `serverConversationIdsRef` plus the active
-// assistant-ui thread id. `generateTitle` then polls the ref until the real
-// id is available before issuing the title request.
+// Drafts retain their local remoteId in the runtime. The page records the
+// backend conversation ID from the first agent/run response so adapter
+// operations such as rename and delete can resolve a real server ID.
 type ServerConversationIdState = {
   idsRef: MutableRefObject<Map<string, string>>;
   getActiveThreadId: () => string | undefined;
@@ -1716,7 +1714,7 @@ const waitForServerConversationId = async (
   // reliable than the active-thread registry while the sidebar is switching.
   if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
 
-  // New threads use an empty remoteId until they are reloaded from the
+  // New threads use a local draft ID until they are reloaded from the
   // backend. The sidebar captures the local ID before calling rename/delete,
   // because assistant-ui may switch the active thread as part of that action.
   const readNow = (): string | undefined => {
@@ -1870,12 +1868,12 @@ export const createConversationThreadListAdapter = (
       // run never reuses (see commit history for details).
       //
       return {
-        // Each reserved Workbench draft needs a distinct local identity so
-        // assistant-ui cannot merge unsent conversations under the empty ID.
+        // The runtime reconciles threads by remote ID, including empty IDs.
+        // Give every unsent draft its own identity until the first send.
         remoteId:
           conversationType === "workbench"
             ? `workbench-draft:${_threadId}`
-            : "",
+            : `agent-draft:${_threadId}`,
         externalId: "",
       };
     },

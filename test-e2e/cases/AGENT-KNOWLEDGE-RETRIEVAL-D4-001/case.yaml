@@ -1,0 +1,43 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-EDITOR
+case:
+  case_id: AGENT-KNOWLEDGE-RETRIEVAL-D4-001
+  feature_id: AGENT-EDITOR-WORKFLOWS
+  requirement_ids: [AGENT-KNOWLEDGE-RETRIEVAL-TEST-20261126]
+  business_rule_ids: [AGENT-EDITOR-RULE-009]
+  title: Test knowledge retrieval from Agent configuration
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Test the current Agent knowledge scope through the existing tool validation endpoint.
+  preconditions:
+  - A running local frontend and page-local HTTP fixtures for the Agent and retrieval service.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open the Agent knowledge test, enter a query, and clear and restore its scope in JSON mode.
+    expected: The shared tool test column retains its background, input spacing and result divider.
+      Scope defaults to the bound knowledge bases. Returning from JSON mode updates the visible
+      selections and disables testing while the scope is empty. Editing issues no retrieval request.
+  - order: 2
+    action: Run retrieval and close the dialog after results are displayed.
+    expected: One validation request uses the current knowledge scope and settings and displays the retrieved text.
+  expected_results:
+  - The Agent editor can test knowledge retrieval without saving configuration.
+  forbidden_side_effects:
+  - No draft, association or tool configuration writes. No live external retrieval.
+  actor: Agent configuration editor
+  journey: [Open retrieval test, Type query, Execute and read results, Close dialog]
+  final_business_result:
+  - An editor verifies retrieval with the Agent's current configuration.
+  failure_evidence:
+  - Playwright assertions and sanitized request evidence.
+  acceptance:
+  - id: AC-01
+    description: Run only after explicit execution, use the current scope and settings, and preserve configuration.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]

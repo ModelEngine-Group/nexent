@@ -91,7 +91,6 @@ vi.mock("@/components/resource-picker/ModelDrawer", () => ({
 vi.mock("@/components/resource-picker/ModelParamsModal", () => ({
   ModelParamsModal: () => null,
 }));
-vi.mock("@/components/common/ExpandEditModal", () => ({ default: () => null }));
 
 beforeEach(() => {
   mocks.agent.prompt = "Complete prompt with constraints and examples";
@@ -109,14 +108,17 @@ beforeEach(() => {
   mocks.updateDraft.mockReset();
 });
 
-function renderEditor(onOptimizePrompt?: () => boolean) {
+function renderEditor(onOptimizePrompt?: () => boolean, highFidelity = true) {
   let editorForm: ReturnType<typeof Form.useForm>[0];
   function Editor() {
     const [form] = Form.useForm();
     editorForm = form;
     return (
       <Form form={form}>
-        <AgentPrompt highFidelity onOptimizePrompt={onOptimizePrompt} />
+        <AgentPrompt
+          highFidelity={highFidelity}
+          onOptimizePrompt={onOptimizePrompt}
+        />
       </Form>
     );
   }
@@ -361,10 +363,13 @@ test("saved prompt focus targets the complete editor without opening a legacy mo
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-test.each(["", "Long prompt\n".repeat(1000)])(
-  "expands the current prompt and confirms edits without losing content",
-  async (content) => {
-    renderEditor();
+test.each([
+  { highFidelity: true, content: "" },
+  { highFidelity: false, content: "Long prompt\n".repeat(1000) },
+])(
+  "autosaves expanded prompt input with highFidelity=$highFidelity",
+  async ({ highFidelity, content }) => {
+    renderEditor(undefined, highFidelity);
     fireEvent.click(
       screen.getByRole("button", { name: "systemPrompt.button.expand" })
     );
@@ -372,36 +377,42 @@ test.each(["", "Long prompt\n".repeat(1000)])(
     const input = within(dialog).getByRole("textbox");
     expect(input).toHaveValue(mocks.agent.prompt);
     fireEvent.change(input, { target: { value: content } });
-    expect(mocks.updateDraft).not.toHaveBeenCalled();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "common.confirm" })
-    );
     expect(mocks.updateDraft).toHaveBeenCalledExactlyOnceWith({
       prompt: content,
     });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(dialog).toBeVisible());
   }
 );
 
-test.each(["common.cancel", "common.close"])(
-  "discards modal edits on %s and reopens with the current prompt",
+test.each(["common.done", "common.close", "Escape"])(
+  "reopens with the latest prompt after closing via %s",
   async (action) => {
-    renderEditor();
+    const view = renderEditor();
+    mocks.updateDraft.mockImplementation(({ prompt }) => {
+      mocks.agent.prompt = prompt;
+      view.refresh();
+    });
     const expand = screen.getByRole("button", {
       name: "systemPrompt.button.expand",
     });
     fireEvent.click(expand);
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByRole("textbox"), {
-      target: { value: "Unsaved edits" },
+      target: { value: "Automatically saved edits" },
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: action }));
+    if (action === "Escape") {
+      fireEvent.keyDown(dialog, { key: "Escape", code: "Escape", keyCode: 27 });
+    } else {
+      fireEvent.click(within(dialog).getByRole("button", { name: action }));
+    }
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(mocks.updateDraft).not.toHaveBeenCalled();
+    expect(mocks.updateDraft).toHaveBeenCalledExactlyOnceWith({
+      prompt: "Automatically saved edits",
+    });
     fireEvent.click(expand);
     expect(
       within(await screen.findByRole("dialog")).getByRole("textbox")
-    ).toHaveValue(mocks.agent.prompt);
+    ).toHaveValue("Automatically saved edits");
   }
 );
 
