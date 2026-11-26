@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /** Placeholder used wherever a real value is unavailable. */
 export const AIDP_UNKNOWN_VALUE = "—";
 
