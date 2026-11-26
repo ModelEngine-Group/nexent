@@ -34,6 +34,12 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
+import {
+  AIDP_METADATA_DEFAULT_PAGE_SIZE,
+  AIDP_METADATA_PAGE_SIZE_OPTIONS,
+  AIDP_METADATA_TYPE_LABEL_KEYS,
+  aidpMetadataFieldKey,
+} from "@/ext_components/aidp/pages/ontology/utils/aidpOntologyMetadata";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import {
   METADATA_FIELD_LIMIT,
@@ -72,18 +78,6 @@ interface CreateFormValues {
   field_type: AidpMetadataFieldType;
 }
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
-const DEFAULT_PAGE_SIZE = 10;
-
-const TYPE_LABEL_KEYS: Record<AidpMetadataFieldType, string> = {
-  string: "aidpKnowledge.ontologyMetadataTypeText",
-  date: "aidpKnowledge.ontologyMetadataTypeDate",
-  number: "aidpKnowledge.ontologyMetadataTypeNumber",
-};
-
-const fieldKey = (field: AidpOntologyMetadataField): string =>
-  String(field.id ?? field.field_name);
-
 const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   domainId,
   autoOpenCreate = false,
@@ -108,7 +102,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(AIDP_METADATA_DEFAULT_PAGE_SIZE);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [visibleColumns, setVisibleColumns] = useState({
     createTime: true,
@@ -150,7 +144,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const totalReliable = query.data?.total_reliable !== false;
   const atLimit = allCount >= limit;
   const selectedFields = fields.filter((field) =>
-    selectedKeys.includes(fieldKey(field))
+    selectedKeys.includes(aidpMetadataFieldKey(field))
   );
   const errorMessageFromQuery = query.error
     ? getAidpErrorMessage(
@@ -455,7 +449,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   };
 
   const typeLabel = (value: AidpMetadataFieldType) =>
-    t(TYPE_LABEL_KEYS[value]);
+    t(AIDP_METADATA_TYPE_LABEL_KEYS[value]);
 
   const columns: TableColumnsType<AidpOntologyMetadataField> = [
     {
@@ -711,7 +705,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           </div>
         ) : (
           <Table<AidpOntologyMetadataField>
-            rowKey={fieldKey}
+            rowKey={aidpMetadataFieldKey}
             size="middle"
             className={tableStyles.table}
             columns={resizableColumns}
@@ -742,7 +736,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           <AidpPagination
             currentPage={page}
             pageSize={pageSize}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            pageSizeOptions={AIDP_METADATA_PAGE_SIZE_OPTIONS}
             total={total}
             totalReliable={totalReliable}
             hasMore={hasMore}

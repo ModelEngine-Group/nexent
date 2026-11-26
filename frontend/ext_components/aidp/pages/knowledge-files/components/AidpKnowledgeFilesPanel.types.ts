@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import type { AidpDocumentItem, AidpFolderFileItem, AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
-import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 
 export interface AidpKnowledgeFilesPanelProps {
   knowledgeBase: AidpKbDetail;

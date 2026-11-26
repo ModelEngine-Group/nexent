@@ -14,7 +14,6 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 
-import type { AidpDocumentItem, AidpFolderFileItem } from "@/ext_components/aidp/shared/types/management";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpFileMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpFileMetadataDrawer";
@@ -25,17 +24,10 @@ import AidpFolderPickerModal from "@/ext_components/aidp/pages/knowledge-files/c
 import AidpFilesEmptyState from "@/ext_components/aidp/pages/knowledge-files/components/AidpFilesEmptyState";
 import panelStyles from "@/ext_components/aidp/pages/knowledge-files/components/AidpKnowledgeFilesPanel.module.css";
 import {
-  formatDetailDateTime,
-  formatFileSize,
   folderTreeStatusMeta,
-  splitFileNameExtension,
   sumColumnWidths,
-  withResizableHeaders,
 } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
-import {
-  folderPathSegments,
-  parentFolderPath,
-} from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
+import { parentFolderPath } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
 import {
   FILE_COLUMN_MIN_WIDTHS,
   type AidpKnowledgeFilesPanelProps,
