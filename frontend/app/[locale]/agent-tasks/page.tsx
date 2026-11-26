@@ -293,21 +293,31 @@ export default function AgentTasksPage() {
     });
   };
 
-  const resultRequestIdRef = useRef<Record<number, number>>({});
+  const resultRequests = useRef(new Map<number, { key: string }>());
   const expandedTaskIdsRef = useRef(expandedTaskIds);
   useEffect(() => {
     expandedTaskIdsRef.current = expandedTaskIds;
   }, [expandedTaskIds]);
 
   const loadTaskResult = useCallback(
-    async (task: AgentAutomationTask) => {
+    async (task: AgentAutomationTask, refresh = false) => {
       const taskId = task.task_id;
-      const requestId = (resultRequestIdRef.current[taskId] || 0) + 1;
-      resultRequestIdRef.current[taskId] = requestId;
+      const resultKey = JSON.stringify([
+        task.conversation_id,
+        task.last_fire_at,
+        task.last_run_status,
+        task.fire_count,
+        task.is_running,
+      ]);
+      const previous = resultRequests.current.get(taskId);
+      if (!refresh && previous?.key === resultKey) return;
+      const request = { key: resultKey };
+      resultRequests.current.set(taskId, request);
       setExpandLoadingTaskIds((current) => [
         ...current.filter((id) => id !== taskId),
         taskId,
       ]);
+      let loaded = false;
       try {
         const [runsPage, conversationResponse] = await Promise.all([
           agentAutomationService.runs(taskId, { page: 1, pageSize: 1 }),
@@ -315,14 +325,15 @@ export default function AgentTasksPage() {
         ]);
         const latestRun = runsPage.items[0] || null;
         const messages = conversationResponse.data?.[0]?.message || [];
-        if (resultRequestIdRef.current[taskId] !== requestId) return;
+        if (resultRequests.current.get(taskId) !== request) return;
+        loaded = true;
         setLatestRunByTask((current) => ({ ...current, [taskId]: latestRun }));
         setConversationMessagesByTask((current) => ({
           ...current,
           [taskId]: messages,
         }));
       } catch (error: unknown) {
-        if (resultRequestIdRef.current[taskId] !== requestId) return;
+        if (resultRequests.current.get(taskId) !== request) return;
         message.error(
           getAutomationErrorMessage(
             error,
@@ -331,16 +342,18 @@ export default function AgentTasksPage() {
           )
         );
       } finally {
-        if (resultRequestIdRef.current[taskId] !== requestId) return;
-        setExpandLoadingTaskIds((current) =>
-          current.filter((id) => id !== taskId)
-        );
+        if (resultRequests.current.get(taskId) === request) {
+          if (!loaded) resultRequests.current.delete(taskId);
+          setExpandLoadingTaskIds((current) =>
+            current.filter((id) => id !== taskId)
+          );
+        }
       }
     },
     [t]
   );
 
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (refreshResults = false) => {
     const requestId = ++loadRequestIdRef.current;
     setLoading(true);
     try {
@@ -358,7 +371,7 @@ export default function AgentTasksPage() {
         setTaskPageSize(loadedTasks.page_size);
         for (const task of loadedTasks.items) {
           if (expandedTaskIdsRef.current.includes(task.task_id)) {
-            void loadTaskResult(task);
+            void loadTaskResult(task, refreshResults);
           }
         }
       }
@@ -501,6 +514,21 @@ export default function AgentTasksPage() {
     }
   };
 
+  const clearTaskResult = (taskId: number) => {
+    resultRequests.current.delete(taskId);
+    setExpandLoadingTaskIds((current) => current.filter((id) => id !== taskId));
+    setLatestRunByTask((current) => {
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+    setConversationMessagesByTask((current) => {
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+  };
+
   const confirmDeleteRun = (run: AgentAutomationRun) => {
     Modal.confirm({
       title: t("agentAutomation.page.deleteRunTitle"),
@@ -511,6 +539,7 @@ export default function AgentTasksPage() {
       onOk: async () => {
         try {
           await agentAutomationService.deleteRun(run.run_id);
+          clearTaskResult(run.task_id);
           message.success(t("agentAutomation.page.deleteRunSuccess"));
           if (selectedTask) {
             await loadRuns(selectedTask);
@@ -546,19 +575,7 @@ export default function AgentTasksPage() {
       } else {
         message.info(t(`agentAutomation.runStatus.${result.status}`));
       }
-      resultRequestIdRef.current[task.task_id] =
-        (resultRequestIdRef.current[task.task_id] || 0) + 1;
-      // Invalidate cached run result so the next expand refetches.
-      setLatestRunByTask((current) => {
-        const next = { ...current };
-        delete next[task.task_id];
-        return next;
-      });
-      setConversationMessagesByTask((current) => {
-        const next = { ...current };
-        delete next[task.task_id];
-        return next;
-      });
+      clearTaskResult(task.task_id);
       setExpandedTaskIds((current) =>
         current.filter((id) => id !== task.task_id)
       );
@@ -608,6 +625,8 @@ export default function AgentTasksPage() {
   const deleteTask = async (task: AgentAutomationTask) => {
     try {
       await agentAutomationService.delete(task.task_id);
+      clearTaskResult(task.task_id);
+      setExpandedTaskIds((current) => current.filter((id) => id !== task.task_id));
       message.success(t("agentAutomation.page.deleteSuccess"));
       await loadTasks();
     } catch (error) {
@@ -930,7 +949,7 @@ export default function AgentTasksPage() {
           </div>
         </div>
         <Space>
-          <Button icon={<RefreshCw size={16} />} onClick={loadTasks}>
+          <Button icon={<RefreshCw size={16} />} onClick={() => void loadTasks(true)}>
             {t("common.refresh")}
           </Button>
           <Button

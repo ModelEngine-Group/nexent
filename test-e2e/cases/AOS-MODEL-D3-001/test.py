@@ -287,7 +287,10 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert provider_input["temperature"] == 0.3
     assert provider_input["top_p"] == 0.95
     assert provider_input["messages"][-1]["content"] == "verify model"
-    assert provider_input["max_tokens"] == 700
+    output_limits = {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+    for _, body in calls:
+        assert output_limits.isdisjoint(body)
+        assert output_limits.isdisjoint(body.get("extra_body") or {})
     assert embed_calls == [
         ("Bearer provider-secret", {"model": "test-embedding", "input": [query]})
         for query in ("search", "recall", "store memory", "updated memory")

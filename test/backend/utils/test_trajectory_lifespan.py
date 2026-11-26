@@ -51,9 +51,9 @@ async def test_trajectory_lifespan_always_releases_runtime_manager(resources, fa
         "writer_stop": processor.shutdown,
     }
 
-    async def run(_lane, _spec, function):
-        if function is processor.shutdown:
-            return function()
+    async def run(_lane, _spec, function, *args):
+        if function in (processor.shutdown, sandbox.shutdown):
+            return function(*args)
 
     manager.run.side_effect = run
     if failure:

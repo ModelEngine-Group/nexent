@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-LEXICAL-PRECISION-20261118
+  change_type: bugfix
+  bug_id: NL2AGENT-LEXICAL-PRECISION-20261118
+  title: Reject partial lexical matches before capability verification
+  description: Replace token-set maxima with directional query coverage and complete-name matching; prepare concise positive bilingual capability queries without a generic-word list.
+  observed_behavior: Partial names and unrelated interface text obtain high fuzzy scores, and ranking bonuses can admit weak relevance.
+  expected_behavior: Capability declarations or complete names establish relevance before ranking bonuses; bilingual recall and independent verification remain intact.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing UT and runtime bilingual checks lack wrong-action image and unrelated train/email candidate assertions.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified: [F-045]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [NL2A-COVERAGE-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_lexical_precision.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+      - test/backend/services/test_nl2agent_bilingual_recall.py
+      - test/backend/services/test_nl2agent_knowledge_priority.py
+      - test/backend/services/test_nl2agent_resource_provider_policy.py
+      - test/backend/services/test_nl2agent_service.py
+    behaviors:
+      - Full capability expressions and exact or misspelled complete names retain bilingual recall.
+      - Shared name fragments and interface-only matches cannot establish relevance.
+      - Bonuses never lift subthreshold relevance into recall; threshold-qualified ranking remains stable.
+      - Both model prompts request positive action/object expressions while retaining original eligibility constraints.
+      - Resource capability phrases exclude runtime business topics; native knowledge search remains recalled for material requests.
+      - Prepared bilingual phrases replace the full business request as recall input; legacy short-query and query fallback remain supported.
+    reason: New scoring UT owns algorithm boundaries; reuse runtime discovery regression without duplicating a D1 case. Runtime precision assertions will strengthen the existing D3 boundary.
+  notes: >-
+    SPEC ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md section 7.3 and tasks.md.
+    F-045 inherits agent_config responsibility. Existing D3 owns disposable services and cleanup.
+    No HTTP/schema, frontend, deployment or semantic-score change. D2/D4/D5 have no new boundary.

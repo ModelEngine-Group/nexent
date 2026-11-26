@@ -84,8 +84,19 @@ def test_opt_in_label_changes_only_optional_metadata(mocker, sources):
 @pytest.mark.parametrize("role,expected_ids", [("ADMIN", [1, 2, 3, 6]), ("USER", [1, 2, 3])])
 def test_published_list_preserves_fallback_and_its_distinct_visibility(mocker, sources, role, expected_ids):
     mocker.patch.object(versions, "get_user_tenant_by_user_id", return_value={"user_role": role})
+    knowledge_sources = mocker.patch.object(
+        versions,
+        "_published_knowledge_sources",
+        side_effect=lambda agent_id, _tenant_id, _version_no: {"local": agent_id == 1, "aidp": False},
+    )
     result = versions._list_published_agents_sync("a", "reader")
     assert [row["agent_id"] for row in result] == expected_ids
+    assert [row["knowledge_sources"] for row in result] == [
+        {"local": agent_id == 1, "aidp": False} for agent_id in expected_ids
+    ]
+    assert knowledge_sources.call_args_list == [
+        mocker.call(agent_id, "a", 3 if agent_id == 1 else 1) for agent_id in expected_ids
+    ]
     assert result[0]["current_version_no"] == 3
     assert result[0]["version_name"] == "Release three"
     assert result[0]["model_ids"] == [1]

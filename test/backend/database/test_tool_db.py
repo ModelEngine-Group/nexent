@@ -20,6 +20,11 @@ def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
         lambda *_args, **_kwargs: False,
         raising=False,
     )
+    from management.db.tool import repository
+    from management.services.configuration import resource_denylist
+
+    monkeypatch.setattr(repository, "select", lambda *args: MagicMock())
+    monkeypatch.setattr(resource_denylist, "require_tool_allowed", MagicMock())
 
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
@@ -308,10 +313,14 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
     session.flush = MagicMock()
 
     tool_info = MagicMock()
-    tool_info.__dict__ = {"agent_id": 1, "tool_id": 1}
+    tool_info.__dict__ = {"agent_id": 1, "tool_id": 1, "enabled": True}
+    session.scalar.return_value = "search"
+    allow_tool = MagicMock()
+    monkeypatch.setattr("management.services.configuration.resource_denylist.require_tool_allowed", allow_tool)
 
     result = create_or_update_tool_by_tool_info(tool_info, "tenant1", "user1")
 
+    allow_tool.assert_called_once_with("tenant1", "search", 1, session=session)
     # Result is now as_dict() of the tool_instance (a dict)
     assert isinstance(result, dict)
     session.add.assert_called_once()

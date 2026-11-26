@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """V5 REL-003 independently collected scenario."""
 
 import pytest
-from d5.scenarios import scenario_security_reliability_deployment as scenario
-from shared.cases import case_params
+from d5.scenarios.scenario_security_reliability_deployment import verify_workspace_cleanup
 
-@pytest.mark.parametrize("case", case_params("D5", ["REL-003"]))
-@pytest.mark.asyncio
-async def test_rel_003(case, tenant_a_admin, tenant_a_user, tenant_b_user):
-    await scenario.execute_d5_main(case, tenant_a_admin, tenant_a_user, tenant_b_user)
+
+@pytest.mark.case_id("REL-003")
+@pytest.mark.stage("D5")
+def test_rel_003():
+    verify_workspace_cleanup()

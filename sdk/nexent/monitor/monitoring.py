@@ -50,7 +50,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
 from .agent_version import agent_version_attributes
 from .first_token import stream_token_basis, valid_ttft
-from .local_content import local_capture_enabled
+from .local_content import local_capture_configured, local_capture_enabled
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
     DEFAULT_EXCLUDED_SPAN_NAMES,
@@ -204,6 +204,7 @@ class AgentRunMetadata:
     monitoring_group_ids: Optional[tuple[int, ...]] = None
     monitoring_run_id: Optional[str] = None
     monitoring_root_run_id: Optional[str] = None
+    monitoring_mcp_servers: Optional[List[Dict[str, Any]]] = None
     monitoring_parent_run_id: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
@@ -221,7 +222,10 @@ class AgentRunMetadata:
             "history_count": self.history_count,
             "minio_files_count": self.minio_files_count,
         }
-        metadata.update(self.extra_metadata or {})
+        metadata.update({
+            key: value for key, value in (self.extra_metadata or {}).items()
+            if key not in {"trajectory_id", "trajectory_turn_no", "trajectory_source_message_id"}
+        })
         return {key: value for key, value in metadata.items() if value is not None}
 
     def tags(self) -> List[str]:
@@ -440,6 +444,7 @@ class MonitoringConfig:
     excluded_span_names: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_SPAN_NAMES)
     )
+    capture_local_traces: bool = False
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
@@ -451,8 +456,8 @@ class MonitoringConfig:
 
         self.enable_telemetry = _as_bool(self.enable_telemetry)
         self.export_traces = _as_bool(self.export_traces, True)
-        if (self.enable_telemetry and self.export_traces and self.provider == "local_file"
-                and self.local_span_processor is None):
+        self.capture_local_traces = _as_bool(self.capture_local_traces, False)
+        if self.enable_telemetry and local_capture_configured(self) and self.local_span_processor is None:
             raise ValueError("Local monitoring requires an injected span processor")
         self.export_metrics = _as_bool(self.export_metrics, True) and self.provider != "local_file"
         self.instrument_requests = _as_bool(self.instrument_requests, False)
@@ -546,6 +551,7 @@ class MonitoringManager:
 
         self._config: Optional[MonitoringConfig] = None
         self._tracer_provider: Optional[Any] = None
+        self._sampler: Optional[Any] = None
         self._meter_provider: Optional[Any] = None
         self._tracer: Optional[Any] = None
         self._meter: Optional[Any] = None
@@ -577,6 +583,22 @@ class MonitoringManager:
         if config.enable_telemetry:
             self._init_telemetry_otlp()
 
+    def configure_local_capture(self, config: MonitoringConfig) -> None:
+        """Install local capture at startup on the same provider used by remote export."""
+        if not self.is_enabled or self._sampler is None:
+            self.configure(config)
+            return
+        if local_capture_configured(self._config):
+            if self._config.local_span_processor is not config.local_span_processor:
+                raise ValueError("Local monitoring is already configured with a different span processor")
+        else:
+            self._add_local_span_processor(config.local_span_processor)
+        self._config = config
+
+    def _add_local_span_processor(self, processor) -> None:
+        self._sampler.delegate = processor.wrap_sampler(self._sampler.delegate)
+        self._tracer_provider.add_span_processor(processor)
+
     def _init_telemetry_otlp(self) -> None:
         """Initialize OpenTelemetry tracing and metrics with OTLP exporters."""
         if not self._config or not self._config.enable_telemetry:
@@ -603,13 +625,15 @@ class MonitoringManager:
                 resource_attributes["openinference.project.name"] = self._config.project_name
             resource = Resource.create(resource_attributes)
 
-            # Initialize TracerProvider with OTLP exporter
+            from .span_processor import MonitoringSampler, MonitoringSpanProcessor
+
             self._tracer_provider = TracerProvider(resource=resource)
-            if self._config.export_traces and self._config.provider == "local_file":
-                local = self._config.local_span_processor
-                self._tracer_provider.sampler = local.wrap_sampler(self._tracer_provider.sampler)
-                self._tracer_provider.add_span_processor(local)
+            self._sampler = MonitoringSampler(self._tracer_provider.sampler)
+            self._tracer_provider.sampler = self._sampler
+            if local_capture_configured(self._config):
+                self._add_local_span_processor(self._config.local_span_processor)
             trace.set_tracer_provider(self._tracer_provider)
+            self._tracer = trace.get_tracer(self._config.service_name)
 
             if self._config.export_traces and self._config.provider != "local_file":
                 # Choose exporter based on protocol
@@ -631,8 +655,6 @@ class MonitoringManager:
                     schedule_delay_millis=1000,  # 1 second
                     max_export_batch_size=512
                 )
-                from .span_processor import MonitoringSpanProcessor
-
                 self._tracer_provider.add_span_processor(MonitoringSpanProcessor(
                     span_processor,
                     excluded_elasticsearch_operations=self._config.excluded_elasticsearch_operations,
@@ -666,7 +688,6 @@ class MonitoringManager:
             metrics.set_meter_provider(self._meter_provider)
 
             # Get tracer and meter instances
-            self._tracer = trace.get_tracer(self._config.service_name)
             self._meter = metrics.get_meter(self._config.service_name)
 
             # Create LLM-specific metrics (OpenInference semantic conventions)
@@ -1358,7 +1379,7 @@ class MonitoringManager:
                 summary["keys"],
                 ensure_ascii=False,
             )
-        if self._config and self._config.export_traces and self._config.provider == "local_file":
+        if local_capture_configured(self._config):
             slot = "output" if prefix.endswith("output") else "input" if prefix.endswith("input") else None
             if slot:
                 from .local_content import safe_local_content
@@ -1485,6 +1506,9 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
+            "context.maintenance_phase": getattr(evidence, "maintenance_phase", "prepare"),
+            "context.usage_source": getattr(evidence, "usage_source", "estimated"),
+            "context.calibrated_input_estimate": getattr(evidence, "calibrated_input_estimate", 0),
             "context.effective_input_limit_tokens": getattr(
                 evidence, "effective_input_limit_tokens", 0
             ),
@@ -1545,6 +1569,7 @@ class MonitoringManager:
         tool_name: str,
         agent_name: str,
         tool_input: Optional[Dict] = None,
+        safe_diagnostics: bool = False,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """
@@ -1605,17 +1630,21 @@ class MonitoringManager:
 
         with self._tracer.start_as_current_span(
             span_name,
-            attributes=openinference_attrs
+            attributes=openinference_attrs,
+            **({"record_exception": False, "set_status_on_exception": False} if safe_diagnostics else {}),
         ) as span:
             start_time = time.time()
             success = True
             try:
                 yield span
-            except Exception as e:
+            except BaseException as e:
+                if not safe_diagnostics and not isinstance(e, Exception):
+                    raise
                 success = False
-                span.set_status(Status(StatusCode.ERROR, str(e)))
+                detail = type(e).__name__ if safe_diagnostics else str(e)
+                span.set_status(Status(StatusCode.ERROR, detail))
                 span.set_attribute("error.type", type(e).__name__)
-                span.set_attribute("error.message", str(e))
+                span.set_attribute("error.message", detail)
                 span.set_attribute("agent.tool.success", False)
                 if self._agent_error_count:
                     self._agent_error_count.add(
@@ -1787,6 +1816,29 @@ class MonitoringManager:
         span = trace.get_current_span()
         if span:
             span.set_attributes(attributes)
+
+    def record_model_http_request(self, body: Dict[str, Any], *, request_id: str, attempt: int,
+                                  method: str, url: str) -> None:
+        """Observe prepared JSON; keep first-send input and separate retry events."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+        from .local_content import safe_local_content
+
+        attributes = self._trace_payload_attributes("input", body)
+        attributes.update({
+            "input.value": attributes.get("input.preview", ""),
+            "input.preview": attributes.get("input.preview", ""),
+            "input.mime_type": "application/json",
+            "http.request.method": method,
+            "url.full": safe_local_content(url),
+            "model.request_id": request_id,
+            "model.request.attempt": attempt,
+        })
+        if attempt == 1:
+            self.set_span_attributes(**attributes)
+        self.add_span_event("model_attempt_begin", {
+            "request_id": request_id, "attempt": attempt, **attributes,
+        })
 
     def create_token_tracker(self, model_name: str, span: Optional[Any] = None) -> 'LLMTokenTracker':
         """Create a token tracker for LLM calls."""
@@ -2008,6 +2060,7 @@ class LLMTokenTracker:
         self.manager = manager
         self.model_name = model_name
         self.span = span
+        self.remote_span = None
         self.start_time = time.time()
         self._start_monotonic = time.perf_counter()
         self.ttft_seconds: Optional[float] = None
@@ -2050,8 +2103,9 @@ class LLMTokenTracker:
         if self.first_token_time is None:
             self.record_first_token()
         self.token_count += 1
-        if self.span and not local_capture_enabled(self.manager):
-            self.span.add_event("token_generated", {
+        span = self.remote_span if local_capture_enabled(self.manager) else self.span
+        if span:
+            span.add_event("token_generated", {
                 "token_count": self.token_count,
                 "token_length": len(token)
             })

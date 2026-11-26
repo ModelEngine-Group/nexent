@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: NL2A-COMPLETION-D3-001
+  feature_id: F-045
+  business_rule_ids: [F-045-RULE-04]
+  title: NL2Agent stream separates field saves from full generation validation
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify save and validation as distinct tool outcomes through the NL2Agent run endpoint.
+  preconditions:
+  - The local backend test environment can create a disposable PostgreSQL schema.
+  - A case-owned Redis instance is reachable for pending prompt state.
+  test_data:
+    model: Case-owned deterministic HTTP provider
+    target: Case-owned editable Agent draft
+  steps:
+  - order: 1
+    action: Run a prompt-only save on an already complete draft and read back the row.
+    expected: Existing prompt is unchanged while a pending card stops the run. Explicit confirmation saves its exact text once without model invocation or full completion; duplicate confirmation does not write again.
+  - order: 2
+    action: Save conversation settings with a missing description, then explicitly validate and read back the row.
+    expected: Both settings persist; the save succeeds, validation reports the missing description, and no completion event is emitted.
+  - order: 3
+    action: Save the missing description and explicitly validate the complete draft in the same run.
+    expected: The stream emits the save before one completion event and then terminates normally.
+  - order: 4
+    action: Print fabricated completion and clarification markers, then call the real clarification tool.
+    expected: The fabricated output stays text. The real tool produces one clarification card and ends the turn.
+  - order: 5
+    action: Cancel a proposal, change original text before confirmation, and confirm another full-generation proposal.
+    expected: Cancel preserves original; stale confirmation returns conflict. Complete generation only resumes greetings, questions and explicit validation after applying the approved text.
+  - order: 6
+    action: Generate a complete prompt for an empty draft prompt.
+    expected: The prompt saves directly, without a confirmation card or full-completion event.
+  - order: 7
+    action: Confirm an edited proposal while another operation holds the database lock, then retry interrupted apply and cancel states.
+    expected: Active writers reject competing actions without writes; abandoned operations recover, exact edited text persists, and conflicting replays are rejected.
+  expected_results:
+  - Save events list only the fields persisted for the authorized target.
+  - Validation failure is separate from the save result and never undoes or retries the write.
+  - Explicit successful validation emits one completion event for the authorized target.
+  - Only a trusted internal MCP result can publish a card or a draft state event.
+  - Pending and cancelled proposals never change the original; conflicts reject stale text and full generation resumes only after real persistence.
+  - Empty prompts save directly without confirmation.
+  - Edited confirmations preserve exact text; interrupted operations recover without concurrent writes or cancelling committed changes.
+  forbidden_side_effects:
+  - Neither validation nor the prompt-only edit changes unrelated draft fields or publishes a version.
+  integration_boundary:
+  - Real run HTTP endpoint, SDK code action, local MCP discovery/dispatch, draft database, and SSE observer; identity issuer and model output use controlled fixtures.
+  observations:
+  - Ordered SSE state and terminal events, tool result codes, and draft and version rows read back from PostgreSQL.
+  cleanup:
+  - Own and release the PostgreSQL schema, model provider, MCP listener, workspace and runtime workers. No shared preparation families.
+  acceptance:
+  - id: AC-SAVE-ONLY
+    description: An existing prompt is previewed without writing, then explicit confirmation persists the exact text once without model invocation or full completion.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-INCOMPLETE
+    description: An explicit failed check reports what is missing while preserving the prior successful save.
+    steps: [2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-COMPLETE
+    description: Explicit validation of the completed draft emits completion after the separate save.
+    steps: [3]
+    expected_results: [1, 3]
+    forbidden_side_effects: [1]
+  - id: AC-TRUSTED-RESULT
+    description: Printed markers do not publish business events or stop the run; the real tool result does.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-CONFIRMATION
+    description: Cancel and revision conflicts preserve current text; full-generation confirmation saves before continuing and validating.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]
+  - id: AC-EMPTY-PROMPT
+    description: Empty prompts apply directly without confirmation or a full-completion event.
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [1]
+  - id: AC-EDIT-RECOVERY
+    description: The real endpoint saves user edits, rejects active competing operations, recovers abandoned claims and rejects conflicting replays.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [1]

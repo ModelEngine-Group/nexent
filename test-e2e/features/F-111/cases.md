@@ -14,6 +14,7 @@
 - D2 [API-AUTO-22F6CB69A36D094D](../../cases/API-AUTO-22F6CB69A36D094D/case.yaml) · active
 - D2 [API-AUTO-3B8A8FB947806F0E](../../cases/API-AUTO-3B8A8FB947806F0E/case.yaml) · active
 - D2 [API-AUTO-FECE331C989B771F](../../cases/API-AUTO-FECE331C989B771F/case.yaml) · active
+- D2 [V5-BASELINE-AIDP-CHUNK-D2-001](../../cases/V5-BASELINE-AIDP-CHUNK-D2-001/case.yaml) · active
 - D3 [AGT-AUTO-7A2120E630C381C7](../../cases/AGT-AUTO-7A2120E630C381C7/case.yaml) · active
 - D3 [API-AUTO-7513FEF9904B9F3F](../../cases/API-AUTO-7513FEF9904B9F3F/case.yaml) · active
 - D3 [CTR-047](../../cases/CTR-047/case.yaml) · active

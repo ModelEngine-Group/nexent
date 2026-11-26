@@ -119,6 +119,10 @@ def test_mount_service_maps_database_failure(mocker):
 @pytest.mark.parametrize("view", [None, "full", "mount"])
 @pytest.mark.parametrize("include_content", [None, False, True])
 def test_skill_api_routes_opt_in_without_changing_full_default(mocker, view, include_content):
+    from management.services.configuration.resource_denylist import ToolDenylist
+
+    policy = mocker.patch("management.services.configuration.resource_denylist.load_tool_denylist",
+                          return_value=ToolDenylist(frozenset(), frozenset({"skill:1"})))
     mocker.patch.object(skill_api, "get_current_user_id", return_value=("viewer", "tenant-a"))
     mocker.patch.object(skill_api, "resource_read_tenant", return_value=None)
     service = mocker.patch.object(skill_api, "SkillService").return_value
@@ -134,6 +138,12 @@ def test_skill_api_routes_opt_in_without_changing_full_default(mocker, view, inc
     if view == "mount":
         expected["for_mount"] = True
     service.list_visible_skills.assert_called_once_with(**expected)
+    if view == "mount":
+        policy.assert_called_once_with("tenant-a")
+        assert response.json()["skills"][0]["blocked_by_denylist"] is True
+    else:
+        policy.assert_not_called()
+        assert "blocked_by_denylist" not in response.json()["skills"][0]
 
 
 def test_skill_api_rejects_unknown_view(mocker):

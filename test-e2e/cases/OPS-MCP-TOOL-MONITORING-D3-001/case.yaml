@@ -9,18 +9,18 @@ case:
   title: MCP tool calls appear as published tenant-scoped statistics with resolved server types
   type: INTEGRATION
   priority: P1
-  status: blocked
+  status: active
   automation: automated
   objective: Verify the MCP runtime capture, shared Ops control store, Elasticsearch publication and the monitoring query API together.
   integration_boundary: [Actual SDK MCP transport with a stub MCP server, Ops PostgreSQL replay state and Elasticsearch publication]
   observations: [Tool call facts with caller-observed outcomes, resolved server types, published daily aggregates and API responses]
   cleanup: [Close the stub MCP server and remove only test-owned database and index data]
   preconditions: [An isolated Ops database and Elasticsearch are available with OPS_MONITORING_ENABLED=true, A stub MCP server can serve succeeding and failing tool calls, The product code and fixed script for this case are implemented; until then the case stays blocked]
-  test_data: {workload: One succeeding and one failing MCP tool call on a catalog-resolved endpoint plus one debug run and one catalog-miss endpoint followed by one batch replay}
+  test_data: {workload: One succeeding MCP tool call, one deadline-exceeded call and one protocol-level isError=true call on a catalog-resolved endpoint plus one debug run and one catalog-miss endpoint followed by one batch replay}
   steps:
   - order: 1
-    action: Run an agent against the stub MCP server so one tool call succeeds and one fails, with the endpoint resolved by the run catalog.
-    expected: Two fact identities are stored with succeeded and failed outcomes, caller-observed durations, the resolved server identity and the normalized type container or remote as resolved by the catalog.
+    action: Run an agent against the stub MCP server so one tool call succeeds, one exceeds the deadline and one returns isError=true, with the endpoint resolved by the run catalog.
+    expected: Three fact identities are stored with succeeded and failed outcomes (timeout and protocol tool error), caller-observed durations, the resolved server identity and the normalized type container or remote as resolved by the catalog. The isError call still returns its rendered content to the Agent.
   - order: 2
     action: Query the MCP tool monitoring endpoints for the affected tenant and date.
     expected: Request count, error count and duration aggregates match the stored facts; another tenant sees nothing.
@@ -39,39 +39,39 @@ case:
   - order: 7
     action: Block Elasticsearch fact writes for one batch, query the affected date, then unblock and publish the pending batch.
     expected: The affected date is stale while blocked, other dates are unaffected, and recovery clears the staleness.
-  expected_results: [Caller-observed outcomes with resolved server types are stored, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery]
+  expected_results: [Caller-observed outcomes with resolved server types are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery]
   forbidden_side_effects:
   - Writing tool arguments or results or credentials or headers into facts
   - Publishing a fact under a different tenant or fact kind
   - Deleting source facts or documents of unrelated kinds or dates
   acceptance:
   - id: AC-01
-    description: Every invoked MCP tool call yields exactly one terminal fact with the caller-observed outcome and duration.
+    description: Every invoked MCP tool call yields exactly one terminal fact with the caller-observed outcome and duration, including protocol-level isError results.
     steps: [1, 3]
-    expected_results: [1, 3]
+    expected_results: [1, 2, 4]
     forbidden_side_effects: [1, 2]
   - id: AC-02
     description: Facts carry run attribution and debug runs stay silent.
     steps: [1, 4]
-    expected_results: [1, 4]
+    expected_results: [1, 5]
     forbidden_side_effects: [2]
   - id: AC-03
     description: The normalized server type is resolved before emit and catalog misses degrade to unknown.
     steps: [1, 5]
-    expected_results: [1, 5]
+    expected_results: [1, 6]
     forbidden_side_effects: [2]
   - id: AC-04
     description: Tenant-scoped daily aggregates match stored facts and replay does not inflate them.
     steps: [2, 3]
-    expected_results: [2, 3]
+    expected_results: [3, 4]
     forbidden_side_effects: [1, 2, 3]
   - id: AC-05
     description: Facts and agent.tool spans share trace identity and measurements without copying trace content into Ops.
     steps: [6]
-    expected_results: [6]
+    expected_results: [7]
     forbidden_side_effects: [1]
   - id: AC-06
     description: Blocked Elasticsearch writes surface as staleness without corrupting published data and recovery clears it.
     steps: [7]
-    expected_results: [7]
+    expected_results: [8]
     forbidden_side_effects: [2, 3]

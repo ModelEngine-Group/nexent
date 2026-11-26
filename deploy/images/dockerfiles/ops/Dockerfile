@@ -22,7 +22,9 @@ RUN --mount=type=bind,from=uv,source=/uv,target=/usr/local/bin/uv \
 
 RUN --mount=type=cache,id=nexent-ops-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-ops-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bind9-dnsutils curl file iproute2 jq less lsof netcat-openbsd \
+        postgresql-client procps redis-tools unzip
 
 COPY backend/contracts /opt/backend/contracts
 COPY backend/gateway/identity /opt/backend/gateway/identity
@@ -36,7 +38,7 @@ COPY backend/ext_components/aidp/__init__.py /opt/backend/ext_components/aidp/
 COPY backend/ext_components/aidp/consts/aidp_exceptions.py /opt/backend/ext_components/aidp/consts/
 COPY backend/gateway/__init__.py /opt/backend/gateway/
 COPY backend/http/logging.py backend/http/ops_service.py /opt/backend/http/
-COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py /opt/backend/http/server/
+COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py backend/http/server/request_context.py /opt/backend/http/server/
 COPY backend/management/__init__.py /opt/backend/management/
 COPY backend/management/api/__init__.py /opt/backend/management/api/
 COPY backend/management/api/permission /opt/backend/management/api/permission
@@ -49,6 +51,7 @@ COPY \
 COPY \
     backend/management/db/configuration/__init__.py \
     backend/management/db/configuration/models.py \
+    backend/management/db/configuration/resource_denylist.py \
     /opt/backend/management/db/configuration/
 COPY \
     backend/management/db/conversation/__init__.py \
@@ -78,6 +81,9 @@ COPY \
 COPY backend/management/db/mcp/__init__.py backend/management/db/mcp/models.py /opt/backend/management/db/mcp/
 COPY backend/management/db/model/__init__.py backend/management/db/model/models.py /opt/backend/management/db/model/
 COPY backend/management/services/__init__.py /opt/backend/management/services/
+COPY backend/management/services/configuration/__init__.py \
+    backend/management/services/configuration/resource_denylist.py \
+    /opt/backend/management/services/configuration/
 COPY \
     backend/management/services/permission/__init__.py \
     backend/management/services/permission/ops_access.py \
@@ -103,6 +109,7 @@ COPY \
     infrastructure/rdb/account_record.py \
     infrastructure/rdb/agent_admission.py \
     infrastructure/rdb/agent_execution.py \
+    infrastructure/rdb/agent_monitoring.py \
     infrastructure/rdb/audit_fields.py \
     infrastructure/rdb/base.py \
     infrastructure/rdb/client.py \
@@ -120,8 +127,10 @@ COPY infrastructure/rdb/trajectory /opt/infrastructure/rdb/trajectory
 COPY infrastructure/trace /opt/infrastructure/trace
 COPY sdk/nexent /opt/nexent
 COPY VERSION /opt/nexent/VERSION
-COPY --chmod=0755 deploy/common/start-backend.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+COPY --chmod=0755 deploy/common/start-ops.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+# Preserve older deployed command paths with the same Ops-only initialization.
+RUN ln -s start-ops.sh /opt/nexent/scripts/start-backend.sh
 COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
 COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 
-ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service"]
+ENTRYPOINT ["/opt/nexent/scripts/start-ops.sh", "python", "-m", "backend.http.ops_service"]

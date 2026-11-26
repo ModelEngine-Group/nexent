@@ -225,6 +225,24 @@ async function mockNexent(page) {
     repositoryListings: [],
     agentList: [],
   };
+  await page.context().addCookies([
+    {
+      name: "nexent_token_expires_at",
+      value: String(Math.floor(Date.now() / 1000) + 3600),
+      url: baseUrl,
+    },
+  ]);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "user_info",
+      JSON.stringify({
+        id: "agent-repo-sort-d4-user",
+        tenantId: "agent-repo-sort-d4-tenant",
+        email: "agent-repo-sort-d4@nexent.test",
+        role: "SPEED",
+      }),
+    );
+  });
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (!url.pathname.includes("/api/")) return;

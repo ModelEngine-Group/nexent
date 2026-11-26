@@ -2,13 +2,17 @@
 """Elasticsearch completeness, idempotency, paging and template contracts."""
 
 from copy import deepcopy
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from elasticsearch import NotFoundError
+from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 
 from ops.monitoring import search
 from ops.monitoring.model import MODEL_MONITORING
+from ops.monitoring import query
 
 
 def missing():
@@ -159,3 +163,85 @@ def test_incomplete_snapshot_open_is_closed_and_never_yielded():
         with search.snapshot(es, "daily-*"):
             pytest.fail("Incomplete point in time must not be exposed")
     es.close_point_in_time.assert_called_once_with(id="partial")
+
+
+def test_skill_catalog_lists_only_active_tenant_installations(monkeypatch):
+    table = Table(
+        query.SkillInfo.__tablename__, MetaData(),
+        Column("tenant_id", String), Column("skill_id", Integer, primary_key=True),
+        Column("skill_name", String), Column("source", String), Column("delete_flag", String),
+        schema=query.SkillInfo.__table__.schema,
+    )
+    engine = create_engine("sqlite://", execution_options={"schema_translate_map": {table.schema: None}})
+    with engine.begin() as connection:
+        table.create(connection)
+        connection.execute(table.insert(), [
+            {"tenant_id": "tenant", "skill_id": 7, "skill_name": "summarize", "source": "official", "delete_flag": "N"},
+            {"tenant_id": "other", "skill_id": 8, "skill_name": "search", "source": "custom", "delete_flag": "N"},
+            {"tenant_id": None, "skill_id": 9, "skill_name": "template", "source": "official", "delete_flag": "N"},
+            {"tenant_id": "tenant", "skill_id": 10, "skill_name": "deleted", "source": "custom", "delete_flag": "Y"},
+        ])
+    monkeypatch.setattr(query, "get_db_session", engine.connect)
+    assert query.skill_catalog("tenant") == [
+        {"tenant_id": "tenant", "skill_id": 7, "skill_name": "summarize", "source": "official"}
+    ]
+    assert {item["skill_id"] for item in query.skill_catalog(None)} == {7, 8}
+
+    day = date(2026, 11, 23)
+    timestamp = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    starts = dict.fromkeys(("tenant", "other"), timestamp)
+    published = [
+        {"tenant_id": tenant, "statistic_date": day, "source_snapshot_at": timestamp,
+         "source_revision": 1, "published_source_revision": 1}
+        for tenant in starts
+    ]
+    service = SimpleNamespace(zone=timezone.utc, store=SimpleNamespace(
+        has_failed_batches=lambda *_args: False, coverage_starts=lambda *_args: starts,
+    ))
+    monkeypatch.setattr(query, "_read_published_rows", lambda *_args, **_kwargs: ([], published, published))
+    rows, inventory, _, status = query.read_skills(
+        service, tenant=None, start=day, end=day, groups=[], skill_id=None, skill_name=None,
+    )
+    assert status["coverage_state"] == "covered"
+    assert [item["metrics"] for item in query.skill_rows(rows, inventory, covered=True)] == [
+        {"usage_count": 0}, {"usage_count": 0}
+    ]
+    engine.dispose()
+
+
+def test_read_skills_applies_filters_and_builds_publication_status(monkeypatch):
+    service = SimpleNamespace(store=SimpleNamespace(has_failed_batches=lambda *args: True))
+    published = [{"statistic_date": "2026-11-23"}]
+    states = [{"tenant_id": "tenant", "source_revision": 2, "published_source_revision": 1}]
+    monkeypatch.setattr(query, "_read_published_rows", lambda *args, **kwargs: (
+        [{"tenant_id": "tenant", "skill_id": "7", "usage_count": 3}], states, published,
+    ))
+    monkeypatch.setattr(query, "skill_catalog", lambda tenant: [
+        {"tenant_id": tenant, "skill_id": 7, "skill_name": "summarize"},
+        {"tenant_id": tenant, "skill_id": 8, "skill_name": "other"},
+    ])
+    monkeypatch.setattr(query, "_publication_status", lambda *args, **kwargs: {
+        "coverage_state": "partial", "is_stale": True, "data_as_of": None,
+    })
+    result = query.read_skills(service, tenant="tenant", start=date(2026, 11, 23), end=date(2026, 11, 23),
+                               groups=[3], skill_id="7", skill_name="summarize")
+    assert result == (
+        [{"tenant_id": "tenant", "skill_id": "7", "usage_count": 3}],
+        [{"tenant_id": "tenant", "skill_id": "7", "skill_name": "summarize"}],
+        ["2026-11-23"], {"coverage_state": "partial", "is_stale": True, "data_as_of": None},
+    )
+
+
+def test_skill_rows_keeps_inventory_only_rows_uncovered_and_ignores_missing_ids():
+    rows = [
+        {"tenant_id": "tenant", "skill_id": 7, "skill_name": "summarize", "usage_count": 2},
+        {"tenant_id": "tenant", "skill_id": None, "skill_name": "ignored", "usage_count": 99},
+        {"tenant_id": "tenant", "skill_id": 8, "skill_name": "discovered", "usage_count": 1},
+    ]
+    inventory = [{"tenant_id": "tenant", "skill_id": "7", "skill_name": "summarize"},
+                 {"tenant_id": "tenant", "skill_id": "9", "skill_name": "unused"}]
+    result = query.skill_rows(rows, inventory, covered=False)
+    assert {item["skill_id"] for item in result} == {"7", "8", "9"}
+    assert next(item for item in result if item["skill_id"] == "7")["metrics"] == {"usage_count": 2}
+    assert next(item for item in result if item["skill_id"] == "9")["metrics"] is None
+    assert query.skill_metric_value({"metrics": None}) is None

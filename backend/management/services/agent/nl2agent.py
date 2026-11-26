@@ -19,6 +19,7 @@ from management.db.agent.repository import query_all_agent_info_by_tenant_id, up
 from management.db.skill.repository import query_enabled_skill_instances
 from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
 from management.services.agent.authorization import require_agent_draft_edit
+from management.services.agent.runtime_inputs import runtime_input_contract as _runtime_input_contract
 from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
 )
@@ -64,7 +65,6 @@ def _is_nl2agent_recommendable_tool(name: str) -> bool:
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
-MAX_INTERNAL_SOURCE_ITEMS = 300
 AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
@@ -242,7 +242,13 @@ def search_installed_mcp_tools_by_query(
     query = _normalize_search_text(query_text)
     scored_tools: list[tuple[float, int, dict[str, Any]]] = []
 
-    for tool in query_all_tools(tenant_id=tenant_id):
+    from management.services.configuration.resource_denylist import load_tool_denylist
+
+    tools = query_all_tools(tenant_id=tenant_id)
+    denylist = load_tool_denylist(tenant_id) if tools else None
+    for tool in tools:
+        if denylist and denylist.blocks(tool.get("name"), tool.get("tool_id")):
+            continue
         if tool.get("source") != ToolSourceEnum.MCP.value:
             continue
         if tool.get("is_available") is not True:
@@ -306,15 +312,60 @@ def _resource_text_variants(value: Any) -> tuple[str, str]:
 
 
 def _resource_similarity(left: Any, right: Any) -> float:
+    """Measure how much of the query a declaration supports, without a word list."""
     left_normalized, left_compact = _resource_text_variants(left)
     right_normalized, right_compact = _resource_text_variants(right)
     if not left_normalized or not right_normalized:
         return 0.0
-    return max(
-        fuzz.ratio(left_compact, right_compact),
-        fuzz.WRatio(left_normalized, right_normalized),
-        fuzz.token_set_ratio(left_normalized, right_normalized),
-    ) / 100
+    has_han = bool(re.search(r"[\u3400-\u9fff]", left_normalized))
+    if has_han and not re.search(r"[a-z0-9]", left_normalized):
+        # Unsegmented text needs whole-query alignment rather than word subsets.
+        alignment = fuzz.partial_ratio(left_compact, right_compact) / 100
+        for phrase in re.split(r"[。；;：:\n.!?]", _normalize_search_text(right)):
+            _, compact = _resource_text_variants(phrase)
+            if compact:
+                alignment = max(alignment, fuzz.ratio(left_compact, compact) / 100)
+        query_chars = set(re.findall(r"[\u3400-\u9fff]", left_normalized))
+        document_chars = set(re.findall(r"[\u3400-\u9fff]", right_normalized))
+        coverage = len(query_chars & document_chars) / len(query_chars)
+        return max(coverage ** 2, alignment ** 1.5 * min(1.0, len(right_compact) / len(left_compact)))
+    pattern = r"[a-z0-9]+|[\u3400-\u9fff]" if has_han else r"[^\W_]+"
+    query_words = set(re.findall(pattern, left_normalized))
+    document_words = set(re.findall(pattern, right_normalized))
+    if not query_words or not document_words:
+        return 0.0
+
+    def matches(word: str) -> bool:
+        return any(word == other or (
+            min(len(word), len(other)) >= 3 and (
+                word.startswith(other) or other.startswith(word)
+                or fuzz.ratio(word, other) >= 85
+            )
+        ) for other in document_words)
+
+    if has_han:
+        coverage = sum(len(word) for word in query_words if matches(word)) / sum(map(len, query_words))
+    else:
+        coverage = sum(matches(word) for word in query_words) / len(query_words)
+    # Missing actions count as much as long object names in word-based queries.
+    return coverage ** 2
+
+
+def _resource_name_similarity(query: Any, name: Any) -> float:
+    """Accept complete identifier variants and small typos, not token subsets."""
+    query_normalized, query_compact = _resource_text_variants(query)
+    name_normalized, name_compact = _resource_text_variants(name)
+    if not query_compact or not name_compact:
+        return 0.0
+    score = fuzz.ratio(query_compact, name_compact) / 100
+    if query_compact == name_compact:
+        return 1.0
+    query_parts, name_parts = query_normalized.split(), name_normalized.split()
+    complete = len(query_parts) == len(name_parts) and all(
+        word == other or (min(len(word), len(other)) >= 4 and fuzz.ratio(word, other) >= 80)
+        for word, other in zip(query_parts, name_parts)
+    )
+    return score if complete and score >= .85 else min(.49, score)
 
 
 def _flatten_resource_text(value: Any, *, limit: int = 4000) -> list[str]:
@@ -402,12 +453,27 @@ async def _load_installed_resource_catalog(
 ) -> list[dict[str, Any]]:
     from management.services.skill.service import SkillService
     from management.services.tool.configuration import list_all_tools
+    from management.services.mcp.service import list_visible_mcp_records
 
+    if not tenant_id or not user_id:
+        raise ValueError("Resource discovery requires an authenticated identity")
     tools = await list_all_tools(tenant_id=tenant_id)
+    visible_mcp_names = set()
+    if any(tool.get("source") == ToolSourceEnum.MCP.value and tool.get("is_available") is True
+           for tool in tools):
+        records, _ = await run_blocking(
+            "nl2agent-visible-tool-services", list_visible_mcp_records, tenant_id, user_id,
+            strict=True, lane="control-io", owner=__name__,
+        )
+        visible_mcp_names = {record["mcp_name"] for record in records
+                             if record.get("enabled") is True and record.get("mcp_name")}
     skills = SkillService(tenant_id=tenant_id).list_visible_skills(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    from management.services.configuration.resource_denylist import load_tool_denylist
+
+    skill_policy = load_tool_denylist(tenant_id) if skills else None
     internal_names = {
         *NL2A_MCP_LEGACY_TOOL_NAMES,
         *NL2A_MCP_TOOL_NAMES,
@@ -419,7 +485,9 @@ async def _load_installed_resource_catalog(
         name = str(tool.get("name") or "")
         if (
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
+            or (source == ToolSourceEnum.MCP.value and tool.get("usage") not in visible_mcp_names)
             or tool.get("is_available") is not True
+            or tool.get("blocked_by_denylist")
             or name in internal_names
             or not _is_nl2agent_recommendable_tool(name)
         ):
@@ -447,6 +515,7 @@ async def _load_installed_resource_catalog(
             }),
             "config": _normalize_tool_config(tool.get("params")),
             "form_kind": "TOOL_CONFIG",
+            "mcp_service_name": tool.get("usage") if source == ToolSourceEnum.MCP.value else None,
             "inputs": inputs,
             "installed": True,
             "quality": 1.0,
@@ -455,6 +524,8 @@ async def _load_installed_resource_catalog(
     for skill in skills:
         skill_id = skill.get("skill_id")
         name = str(skill.get("name") or "")
+        if skill_policy and skill_policy.blocks_skill(name, skill_id):
+            continue
         if not isinstance(skill_id, int) or skill_id <= 0 or not name:
             continue
         catalog.append({
@@ -497,10 +568,8 @@ def _score_resource_requirement(
     term_scores: list[float] = []
     for term in terms:
         term_scores.append(max(
-            max((_resource_similarity(term, value) for value in resource["names"]), default=0) * 1.00,
-            max((_resource_similarity(term, value) for value in resource["labels"]), default=0) * 0.95,
-            max((_resource_similarity(term, value) for value in resource["descriptions"]), default=0) * 0.90,
-            max((_resource_similarity(term, value) for value in resource["interfaces"]), default=0) * 0.80,
+            max((_resource_name_similarity(term, value) for value in resource["names"]), default=0),
+            _resource_similarity(term, "\n".join(resource["descriptions"])) * 0.95,
         ))
     top_scores = sorted(term_scores, reverse=True)[:3]
     capability_score = (
@@ -514,12 +583,16 @@ def _score_resource_requirement(
     )
     name_score = max(
         (
-            _resource_similarity(term, name)
+            _resource_name_similarity(term, name)
             for term in name_terms
             for name in resource["names"]
         ),
         default=0,
     )
+    if requirement.resource_name_hint:
+        _, hint = _resource_text_variants(requirement.resource_name_hint)
+        if hint and any(hint in _resource_text_variants(name)[1] for name in resource["names"]):
+            name_score = 1.0
     installed_bonus = 0.03 if resource.get("installed") else 0.0
     quality_bonus = 0.02 * max(
         0.0, min(1.0, float(resource.get("quality") or 0.0))
@@ -528,16 +601,16 @@ def _score_resource_requirement(
         score = (
             0.65 * capability_score
             + 0.30 * name_score
-            + installed_bonus
-            + quality_bonus
         )
     else:
         score = (
             0.82 * capability_score
             + 0.13 * name_score
-            + installed_bonus
-            + quality_bonus
         )
+    # Ranking preferences cannot turn weak relevance into a qualified match.
+    if score < MINIMUM_RESOURCE_SCORE:
+        return score
+    score += installed_bonus + quality_bonus
     # Explicit resource hints retain the existing name-matching precedence.
     if not requirement.resource_name_hint and MANAGED_KNOWLEDGE_NAMES.intersection(resource["names"]):
         score += 0.02
@@ -747,6 +820,8 @@ async def _load_internal_uninstalled_resource_catalog(
     )
     from management.services.skill.transfer import get_official_skills_with_status
 
+    if not tenant_id or not user_id:
+        raise ValueError("Resource discovery requires an authenticated identity")
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):
         name = str(skill.get("name") or "").strip()
@@ -780,25 +855,28 @@ async def _load_internal_uninstalled_resource_catalog(
 
     repository_items: list[dict[str, Any]] = []
     page = 1
-    while len(repository_items) < MAX_INTERNAL_SOURCE_ITEMS:
-        result = list_skill_repository_listings_impl(
+    while True:
+        result = await run_blocking(
+            "nl2agent-skill-repository-page",
+            list_skill_repository_listings_impl,
             tenant_id,
             user_id=user_id,
             status="shared",
             page=page,
             page_size=UNINSTALLED_SOURCE_PAGE_SIZE,
+            lane="control-io",
+            owner="management.services.agent.nl2agent",
         )
-        items = result.get("items") if isinstance(result, dict) else []
-        if not isinstance(items, list) or not items:
-            break
+        items = result["items"]
+        if not isinstance(items, list):
+            raise ValueError("Invalid Skill repository page")
         repository_items.extend(
             item for item in items if isinstance(item, dict)
         )
-        pagination = result.get("pagination") or {}
-        if page >= int(pagination.get("total_pages") or page):
+        if page >= result["pagination"]["total_pages"]:
             break
         page += 1
-    for item in repository_items[:MAX_INTERNAL_SOURCE_ITEMS]:
+    for item in repository_items:
         repository_id = item.get("skill_repository_id") or item.get("id")
         name = str(item.get("name") or "").strip()
         if not isinstance(repository_id, int) or repository_id <= 0 or not name:
@@ -841,22 +919,27 @@ async def _load_internal_uninstalled_resource_catalog(
 
     community_items: list[dict[str, Any]] = []
     cursor: str | None = None
-    while len(community_items) < MAX_INTERNAL_SOURCE_ITEMS:
+    seen_cursors: set[str] = set()
+    while True:
         result = await list_community_mcp_services(
             tenant_id=tenant_id,
             user_id=user_id,
+            strict_permissions=True,
             cursor=cursor,
             limit=UNINSTALLED_SOURCE_PAGE_SIZE,
         )
-        items = result.get("items") if isinstance(result, dict) else []
-        if not isinstance(items, list) or not items:
-            break
+        items = result["items"]
+        if not isinstance(items, list):
+            raise ValueError("Invalid MCP repository page")
         community_items.extend(item for item in items if isinstance(item, dict))
         next_cursor = result.get("nextCursor")
-        if not isinstance(next_cursor, str) or not next_cursor:
+        if next_cursor is None:
             break
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+            raise ValueError("Invalid or repeated MCP repository cursor")
+        seen_cursors.add(next_cursor)
         cursor = next_cursor
-    for item in community_items[:MAX_INTERNAL_SOURCE_ITEMS]:
+    for item in community_items:
         market_id = item.get("marketId") or item.get("communityId")
         name = str(item.get("name") or "").strip()
         transport_type = str(item.get("transportType") or "").casefold()
@@ -923,7 +1006,9 @@ async def _load_internal_uninstalled_resource_catalog(
             "installation_options": [option],
             "default_option_id": option.option_id,
         })
-    return catalog
+    from management.services.configuration.resource_denylist import filter_uninstalled_resources
+
+    return filter_uninstalled_resources(catalog, tenant_id)
 
 
 async def search_uninstalled_resources_impl(
@@ -1030,22 +1115,33 @@ async def recommend_installed_resources_impl(
     recommended_refs: list[str],
     tenant_id: str,
     user_id: str,
+    include_knowledge_recommendations: bool = True,
+    catalog: list[dict[str, Any]] | None = None,
+    binding_facts: dict[str, dict[str, Any]] | None = None,
 ) -> RecommendResourcesOutput:
     """Resolve model-selected refs into current tenant-owned card data."""
 
-    catalog = await _load_installed_resource_catalog(
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    # Internal callers may supply the catalog just authorized in their current stage.
+    if catalog is None:
+        catalog = await _load_installed_resource_catalog(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
     by_ref = {item["candidate_ref"]: item for item in catalog}
     bound_instances = query_all_enabled_tool_instances(
         agent_id=agent_id, tenant_id=tenant_id, version_no=0
     )
-    bound_tool_refs = {
-        f"tool:{instance['tool_id']}"
+    bound_tool_params = {
+        f"tool:{instance['tool_id']}": instance.get("params")
         for instance in bound_instances
         if isinstance(instance.get("tool_id"), int)
     }
+    bound_skill_params = {}
+    if binding_facts is not None and any(item.resource_type == "skill" for item in candidates):
+        bound_skill_params = {
+            f"skill:{instance['skill_id']}": instance.get("config_values")
+            for instance in query_enabled_skill_instances(agent_id=agent_id, tenant_id=tenant_id, version_no=0)
+        }
     knowledge_catalogs: dict[str, list[dict]] = {}
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
@@ -1057,7 +1153,10 @@ async def recommend_installed_resources_impl(
             actual=actual,
             supplied=supplied,
             recommended_refs=recommended,
-            is_bound=supplied.candidate_ref in bound_tool_refs,
+            is_bound=(supplied.candidate_ref in bound_tool_params and (
+                include_knowledge_recommendations
+                or _bound_config_ready(actual, bound_tool_params[supplied.candidate_ref])
+            )),
         )
         tool_name = next(
             (
@@ -1067,7 +1166,7 @@ async def recommend_installed_resources_impl(
             ),
             None,
         )
-        if actual["resource_type"] == "tool" and tool_name:
+        if include_knowledge_recommendations and actual["resource_type"] == "tool" and tool_name:
             try:
                 if tool_name not in knowledge_catalogs:
                     knowledge_catalogs[tool_name] = await run_blocking(
@@ -1145,6 +1244,13 @@ async def recommend_installed_resources_impl(
                 raise Nl2AgentResourceError(
                     "knowledge_search_failed", retryable=True
                 ) from exc
+        if binding_facts is not None:
+            saved_params = bound_skill_params if actual["resource_type"] == "skill" else bound_tool_params
+            exists = supplied.candidate_ref in saved_params
+            ready = exists and _bound_config_ready(actual, saved_params[supplied.candidate_ref])
+            binding_facts[supplied.candidate_ref] = {
+                "is_bound": exists, "readiness": "ready" if ready else "not_ready" if exists else "unbound",
+            }
         resources.append(resource)
     return RecommendResourcesOutput(resources=resources)
 
@@ -1209,12 +1315,28 @@ def _requires_policy_clarification(query: str) -> bool:
     return mentions_retry and not names_policy
 
 
+
+def _bound_config_ready(resource: dict, values: Any) -> bool:
+    values = values if isinstance(values, dict) else {}
+    for param in resource["config"]:
+        if not param.get("required"):
+            continue
+        value = values.get(param["name"], param.get("value"))
+        if value is None or value == "" or value == []:
+            return False
+    for name, field in (("aidp_search", "kds_list"), ("knowledge_base_search", "index_names")):
+        if name in resource.get("names", []) and not selection_values(values.get(field)):
+            return False
+    return True
+
+
 async def _load_verified_nl2agent_state(
     *,
     agent_id: int,
     tenant_id: str,
     user_id: str,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    include_binding_revision: bool = False,
+) -> tuple[dict[str, Any], list[dict[str, Any]]] | tuple[dict[str, Any], list[dict[str, Any]], str]:
     draft = require_agent_draft_edit(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -1226,64 +1348,75 @@ async def _load_verified_nl2agent_state(
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
     facts: list[dict[str, Any]] = []
-    for instance in query_all_enabled_tool_instances(
+    tools = query_all_enabled_tool_instances(
         agent_id=agent_id,
         tenant_id=tenant_id,
         version_no=0,
-    ):
+    )
+    skills = query_enabled_skill_instances(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=0,
+    )
+    for instance in tools:
         tool_id = instance.get("tool_id")
         resource = by_ref.get(f"tool:{tool_id}")
         if resource is None:
             continue
         params = instance.get("params")
+        if not _bound_config_ready(resource, params):
+            continue
         facts.append({
             "resource_type": "tool",
             "resource_id": tool_id,
             "name": resource["name"],
             "description": resource["description"],
-            "input_fields": sorted(resource["inputs"]),
-            "configured_fields": sorted(params) if isinstance(params, dict) else [],
+            "runtime_inputs": _runtime_input_contract(resource, set(params) if isinstance(params, dict) else set()),
         })
-    for instance in query_enabled_skill_instances(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        version_no=0,
-    ):
+    for instance in skills:
         skill_id = instance.get("skill_id")
         resource = by_ref.get(f"skill:{skill_id}")
         if resource is None:
             continue
-        config_values = instance.get("config_values")
+        if not _bound_config_ready(resource, instance.get("config_values")):
+            continue
         facts.append({
             "resource_type": "skill",
             "resource_id": skill_id,
             "name": resource["name"],
             "description": resource["description"],
-            "config_fields": sorted(
-                item["name"]
-                for item in resource["config"]
-                if isinstance(item, dict) and isinstance(item.get("name"), str)
-            ),
-            "configured_fields": (
-                sorted(config_values) if isinstance(config_values, dict) else []
-            ),
+            "runtime_inputs": [],
         })
     facts.sort(key=lambda item: (item["resource_type"], item["resource_id"]))
+    if include_binding_revision:
+        from services.nl2agent_prompt_service import binding_revision
+
+        return draft, facts, binding_revision(facts, tools, skills)
     return draft, facts
 
 
-async def _build_verified_bound_resources_context(
+async def read_generation_state(
     *,
     agent_id: int,
     tenant_id: str,
     user_id: str,
-) -> ContextItemInput:
-    draft, facts = await _load_verified_nl2agent_state(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
-    state = {
+    include_bindings: bool = True,
+    include_binding_revision: bool = False,
+) -> dict:
+    if include_bindings:
+        if include_binding_revision:
+            draft, facts, bindings = await _load_verified_nl2agent_state(
+                agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+                include_binding_revision=True,
+            )
+        else:
+            draft, facts = await _load_verified_nl2agent_state(
+                agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+            )
+    else:
+        draft = require_agent_draft_edit(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+        facts = None
+    return {
         "type": "nl2agent_verified_state",
         "agent_id": agent_id,
         "draft_fields": (
@@ -1299,8 +1432,17 @@ async def _build_verified_bound_resources_context(
             if isinstance(draft, dict)
             else {}
         ),
-        "bound_resources": facts,
+        **({"bound_resources": facts} if facts is not None else {}),
+        **({"binding_revision": bindings} if include_bindings and include_binding_revision else {}),
     }
+
+
+async def _build_verified_bound_resources_context(
+    *, agent_id: int, tenant_id: str, user_id: str, include_bindings: bool = True,
+) -> ContextItemInput:
+    state = await read_generation_state(
+        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id, include_bindings=include_bindings,
+    )
     return ContextItemInput(
         id="system:nl2agent_bound_resources",
         type=ContextItemType.SYSTEM,
@@ -1322,7 +1464,7 @@ async def validate_agent_generation_complete_impl(
 ) -> None:
     """Verify the final NL2Agent fields directly from persisted database state."""
 
-    draft, _facts = await _load_verified_nl2agent_state(
+    draft = require_agent_draft_edit(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,

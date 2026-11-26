@@ -16,11 +16,13 @@ import { Button, Tooltip } from "antd";
 import {
   Bell,
   Activity,
+  Archive,
   BookOpen,
   Blocks,
   Bot,
   Building2,
   CalendarClock,
+  ClipboardCheck,
   Code,
   Database,
   Globe,
@@ -44,6 +46,7 @@ import { NotificationBell } from "@/components/navigation/NotificationBell";
 import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
 import { useGlobalConfigStore } from "@/stores/global";
 import { AUTH_EVENTS } from "@/const/auth";
+import { OPS_PAGES } from "@/const/navigationPages";
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -55,6 +58,7 @@ import { publicAsset } from "@/lib/publicAsset";
 import { getHomeLogo, getHomeTitle } from "@/lib/projectBranding";
 
 interface RouteConfig {
+  pageId?: string;
   path: string;
   Icon: ComponentType<{ className?: string }>;
   labelKey: string;
@@ -66,14 +70,14 @@ interface RouteConfig {
 
 const ROUTE_CONFIG: RouteConfig[] = [
   {
-    path: "/ops/dashboard",
+    ...OPS_PAGES.dashboard,
     Icon: LineChart,
     labelKey: "ops.dashboard",
     order: 12.5,
     parentKey: null,
   },
   {
-    path: "/ops/configuration",
+    ...OPS_PAGES.configuration,
     Icon: Settings,
     labelKey: "ops.configuration",
     order: 12.6,
@@ -145,7 +149,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/evaluation",
-    Icon: LineChart,
+    Icon: ClipboardCheck,
     labelKey: "sidebar.agentEvaluation",
     order: 8,
     parentKey: "/agent-dev",
@@ -160,7 +164,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/agent-space",
-    Icon: Bot,
+    Icon: Archive,
     labelKey: "sidebar.agentSpace",
     order: 10,
     parentKey: "/resource-space",

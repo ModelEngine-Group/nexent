@@ -145,11 +145,24 @@ journey("SEARCH-DEEPSEEK-D4-001", async ({ page, contract }) => {
         })
         .click();
       const panel = dialog.locator('[data-config-part="test-panel"]');
+      const testColumn = dialog.locator('[data-config-part="test-column"]');
+      await expect(testColumn).toHaveCSS("background-color", "rgb(250, 250, 250)");
+      await expect(panel.locator('[data-config-part="test-inputs"]')).toHaveCSS(
+        "padding",
+        "20px 24px",
+      );
+      await expect(panel.locator('[data-config-part="test-result"]')).toHaveCSS(
+        "border-top-width",
+        "1px",
+      );
       await panel
-        .locator("input,textarea")
+        .getByRole("textbox")
         .first()
         .fill("DeepSeek site:github.com after:2025");
-      await panel.locator('[data-config-part="test-run"]').click();
+      await panel.getByRole("button", {
+        name: language === "zh" ? "运行测试" : "Run test",
+        exact: true,
+      }).click();
       await expect.poll(() => requests.at(-1)?.language).toBe(language);
       expect(requests.at(-1)?.params).toMatchObject({
         max_results: 10,
@@ -160,7 +173,7 @@ journey("SEARCH-DEEPSEEK-D4-001", async ({ page, contract }) => {
       );
       await dialog
         .getByRole("button", {
-          name: language === "zh" ? "确定" : "Confirm",
+          name: language === "zh" ? "保存配置" : "Save configuration",
           exact: true,
         })
         .click();
@@ -189,8 +202,8 @@ journey("SEARCH-DEEPSEEK-D4-001", async ({ page, contract }) => {
       .fill("synthetic-browser-key");
     await dialog.getByText("Test Tool", { exact: true }).click();
     const panel = dialog.locator('[data-config-part="test-panel"]');
-    await panel.locator("input,textarea").first().fill("topic");
-    await panel.locator('[data-config-part="test-run"]').click();
+    await panel.getByRole("textbox").first().fill("topic");
+    await panel.getByRole("button", { name: "Run test", exact: true }).click();
     await expect
       .poll(() => requests.at(-1)?.params.only_high_quality)
       .toBe(false);

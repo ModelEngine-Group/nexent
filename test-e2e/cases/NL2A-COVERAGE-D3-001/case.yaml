@@ -1,0 +1,262 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: NL2A-COVERAGE-D3-001
+  feature_id: F-045
+  business_rule_ids:
+  - F-045-RULE-02
+  - F-045-RULE-07
+  - F-045-RULE-09
+  - F-045-RULE-10
+  - F-045-RULE-12
+  title: NL2Agent uses verified requirements and current cards through the creation run
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise a unified card with gaps, direct incremental edits and readiness-gated continuation through the actual
+    runtime.
+  preconditions:
+  - Local disposable PostgreSQL, Redis and Elasticsearch test services are available.
+  test_data:
+    model: Case-owned deterministic HTTP provider
+    target: Case-owned editable Agent draft
+    resources: Controlled visible candidate declarations and persisted draft bindings
+  steps:
+  - order: 1
+    action: Verify a covered requirement, an unsupported requirement, and a repository MCP candidate with a disabled installation.
+    expected: Model verification submits accepted references per requirement. Tool evidence is separate from assistant output,
+      and the coverage card includes the disabled installation status.
+  - order: 2
+    action: Enable the repository MCP and register its tools, remove the unsupported requirement, confirm the remaining requirements,
+      and return to clarification.
+    expected: Only the requirement with newly available MCP tools is rechecked. Binding uses the actual tool and the returned
+      card preserves the accepted requirements.
+  - order: 3
+    action: Attempt a stale card action, then confirm the current card and continue after a valid binding. Generate cards
+      in two conversations on the same draft and submit an older-conversation action after the newer card was issued.
+    expected: The stale action does not advance the run. Continue uses the saved binding before Prompt and conversation settings
+      are saved and verified. Both conversations retain independently valid cards and confirmation succeeds without draft
+      writes.
+  - order: 4
+    action: Claim installation of a recommendation twice, recover the installed resource, then link a manually created resource
+      from clarification.
+    expected: One claim allows an installation write. Recovery finds the actual installed ID. A manually linked resource follows
+      its submitted requirement into verification before binding.
+  - order: 5
+    action: Interrupt the model after coverage confirmation, submit the original card again, then retry the failed conversation
+      turn.
+    expected: Direct resubmission is rejected as stale. Retrying the failed turn resumes verification with the saved requirements
+      and linked resource.
+  - order: 6
+    action: Discover Chinese and English requirements against opposite-language declarations, reject a related but insufficient
+      tool, and edit a requirement on the current card before preparing new bilingual expressions.
+    expected: Both language routes contribute deduplicated candidates. Coverage uses only model-accepted references. Edited
+      text stays authoritative and new expressions are prepared before searching again; confirming a legacy untranslated gap
+      refreshes it once, while unchanged bilingual evidence is retained.
+  - order: 7
+    action: Configure the owned embedding HTTP provider, discover resources across separate runs, then modify one capability,
+      an irrelevant field, and the embedding model. Exercise provider failure and no-model mode.
+    expected: Lexical-only and semantic-only candidates both reach verification with deduplication. Warm runs and irrelevant
+      edits reuse ES resource documents without TTL; one capability edit replaces only its stable document, a model switch
+      rebuilds in a separate index generation, no-model mode makes no embedding calls, and provider failure keeps lexical
+      candidates without draft writes.
+  - order: 8
+    action: Discover generic platform knowledge requirements in local and AIDP modes with lexical, hybrid and failed embedding
+      retrieval, verify qualified alternatives, and request binding recommendations.
+    expected: Only threshold-qualified recalled knowledge tools enter verification; available verified candidates rank by
+      score with stable reference ties, including a higher-scoring alternative ahead of a native tool. No query keywords or
+      ready bindings override scores. Resource authorization remains; empty or failed knowledge providers are not queried
+      during recommendations, while saved selections still determine binding readiness.
+  - order: 9
+    action: Search real ES with private, shared, stale-version and cross-tenant resources; update a resource and exercise
+      concurrent writers and oversized authorization scopes.
+    expected: Only current user-visible versions are scored; stable documents update without duplication, conflicts cannot
+      overwrite newer state, empty and failed authorization never searches globally, and source facts are rechecked before
+      disclosure.
+  - order: 10
+    action: Retrieve multiple distinct and duplicate queries concurrently in several recommendations against real ES, including
+      explicit-name and chunked authorization searches, then cancel or expire waiting and active requests.
+    expected: Actual searches reach but never exceed eight per recommendation or eight per process; duplicate queries share
+      results, tenant/reference/revision filters remain mandatory, expired or cancelled work does not start later, all clients
+      and permits return to baseline, and no draft writes occur.
+  - order: 11
+    action: Recall per-route Top3 tools from installed and installable pools, union bilingual lexical and embedding results,
+      assess each unique candidate and publish coverage or gap cards.
+    expected: Threshold failures do not enter verification, ties never expand Top3, and hybrid duplicates are checked once
+      per requirement. Missing or inconsistent assessments fail; all qualified recalled alternatives remain. Empty or fully
+      rejected results stay uncovered without another search.
+  - order: 12
+    action: Discover compact positive image-generation and train-route queries with complete matching tools and unrelated
+      image-analysis or email tools, and discover native knowledge-search capability for an event-material request, using
+      the real HTTP/callback/Redis flow without embeddings.
+    expected: Only complete capability matches reach model verification; shared name fragments and unrelated declarations
+      are excluded before verification. The accepted card retains the original query and no draft bindings are written.
+  - order: 13
+    action: Publish a unified card containing covered and unmatched requirements. Modify one query through the actual creator
+      endpoint and continue only after retained requirements have ready bindings.
+    expected: The unified card includes bindable resources despite gaps. Only changed queries prepare fresh bilingual expressions;
+      unchanged evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
+  - order: 14
+    action: Request concrete knowledge recommendations through the authorized current-card HTTP endpoint with real ES,
+      controlled embeddings, compatible and mismatched models, empty and revoked knowledge and stale card versions.
+    expected: Only visible selectable knowledge is returned. Repeated requests reuse metadata vectors, text fallback remains
+      available, stale versions are rejected and no selection, resource coverage or Agent draft is persisted.
+  - order: 15
+    action: Save tenant tool, MCP service and skill exclusions; add global names after a card is issued, then remove the global exclusions.
+    expected: Tenant references exclude only their own definitions, global names block same-name resources, service rules cover child tools, stale cards cannot continue and removing a global rule retains tenant selections. Existing enabled bindings remain configurable and present in execution binding reads; disabling them prevents re-enabling while blocked.
+  expected_results:
+  - Coverage is based on complete checked candidate sets and current evidence.
+  - Card actions are authorized, versioned and isolated to their Agent and conversation.
+  - Saved Prompt and conversation settings are distinct from the explicit completion result.
+  - Installing and linking a resource does not itself count as verified coverage.
+  - Retrying a failed confirmation resumes the saved verification without applying requirement edits again.
+  - Bilingual retrieval admits either-language matches without treating similarity as coverage or retaining translations for
+    edited requirements.
+  - Hybrid discovery unions lexical and semantic references, reuses versioned tenant ES resource documents without TTL, rebuilds
+    only changed content/model versions, streams real progress, and uses lexical only with no model or provider failure; similarity
+    never proves coverage.
+  - Score-based recommendations survive runtime verification and card generation using authorized resources, without knowledge-provider
+    queries; saved selection readiness, user configuration and capability rejection remain.
+  - ES scoring enforces tenant and visible-resource revisions before candidate retrieval; stale or unauthorized documents
+    cannot leak to the model or response.
+  - Search fan-out shares recommendation and process limits and the phase deadline; success, errors and cancellation release
+    owned searches without weakening authorization or changing deterministic results.
+  - Threshold failures do not enter verification, ties never expand Top3, and hybrid duplicates are checked once per requirement.
+    Missing or inconsistent assessments fail; all qualified recalled alternatives remain. Empty or fully rejected results
+    stay uncovered without another search.
+  - Complete capability matches reach verification while wrong-action partial matches are excluded before model checks; original
+    queries and draft bindings are preserved.
+  - The unified card includes bindable resources despite gaps. Only changed queries prepare fresh bilingual expressions; unchanged
+    evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
+  - An authorized current-card HTTP request recommends compatible visible knowledge metadata using real ES and controlled
+    embeddings, reuses metadata vectors, falls back to text, rejects stale cards and preserves the draft and resource state.
+  - Tool, MCP service and skill exclusions apply to current discovery and earlier cards without adding a binding; tenant isolation and saved tenant rules survive global exclusion removal.
+  forbidden_side_effects:
+  - Candidate discovery and returning to clarification never create a resource or modify the draft.
+  integration_boundary:
+  - NL2Agent run endpoint, signed Management tool callbacks, SDK, real ES resource index, Redis state, authorized draft, and
+    SSE.
+  observations:
+  - Candidate groups, typed coverage, card versions, SSE order and durable draft readback.
+  cleanup:
+  - Release owned ES indices/client/container, disposable Redis keys or instance, PostgreSQL schema, model provider, MCP listener,
+    workspace and workers.
+  acceptance:
+  - id: AC-TOOL-DENYLIST
+    description: Tenant and global tool, MCP service and skill rules filter current catalogs, block new bindings and cached card continuation, preserve tenant isolation and retain tenant choices on global removal. Exclusion catalogs omit intrinsically unselectable tools and reject new hidden tool selections. Equivalent global options with different descriptions are merged while tenant identities remain distinct.
+    steps: [15]
+    expected_results: [15]
+    forbidden_side_effects: [1]
+  - id: AC-KNOWLEDGE-AUTO
+    description: Concrete knowledge recommendations use current authorized model-compatible metadata, cached vectors and text fallback without business writes.
+    steps: [14]
+    expected_results: [14]
+    forbidden_side_effects: [1]
+  - id: AC-ES-SEARCH-CONCURRENCY
+    description: Real ES retrieval runs multiple query/source/name/chunk searches under default eight-per-recommendation and
+      eight-per-process limits with query reuse, original filters, shared deadline and cancellation cleanup; permits and clients
+      are reusable after interruption.
+    steps:
+    - 10
+    expected_results:
+    - 10
+    forbidden_side_effects:
+    - 1
+  - id: AC-ES-AUTHORIZED-RESOURCES
+    description: Real ES stores stable versioned resource documents and scores only backend-authorized tenant/reference/revision
+      scopes, with safe updates, conflict handling and no global search on empty or failed authorization.
+    steps:
+    - 9
+    expected_results:
+    - 9
+    forbidden_side_effects:
+    - 1
+  - id: AC-KNOWLEDGE-PRIORITY
+    description: Only threshold-qualified recalled knowledge tools enter verification; available verified candidates rank
+      by score with stable reference ties, including a higher-scoring alternative ahead of a native tool. No query keywords
+      or ready bindings override scores. Resource authorization remains; empty or failed knowledge providers are not queried
+      during recommendations, while saved selections still determine binding readiness.
+    steps:
+    - 8
+    expected_results:
+    - 8
+    forbidden_side_effects:
+    - 1
+  - id: AC-SEMANTIC-RECALL
+    description: Hybrid retrieval executes through HTTP and the runtime with reference union, actual ES document reuse and
+      stable identity, cross-run reuse, content and model version changes, trusted progress and lexical fallback/no-model
+      mode, leaving the draft unchanged.
+    steps:
+    - 7
+    expected_results:
+    - 7
+    forbidden_side_effects:
+    - 1
+  - id: AC-COVERAGE
+    description: A unified card contains gaps and bindable alternatives; edits reuse unchanged evidence.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-RETURN-AND-CONTINUE
+    description: The unified card accepts edits directly; only current versions with ready bindings for all retained requirements
+      may continue. Conversations remain isolated.
+    steps:
+    - 2
+    - 3
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-LINKED-RECHECK
+    description: Installation recovery and manual creation both link an actual installed resource for verification.
+    steps:
+    - 4
+    - 5
+    expected_results:
+    - 4
+    - 5
+    forbidden_side_effects:
+    - 1
+  - id: AC-BILINGUAL-RECALL
+    description: Opposite-language tools reach verification, unrelated candidates can be rejected, and requirement edits prepare
+      fresh expressions without changing original text or draft state. Compact positive expressions exclude wrong-action partial
+      lexical matches before verification without a generic-word list.
+    steps:
+    - 6
+    - 12
+    expected_results:
+    - 1
+    - 2
+    - 6
+    - 12
+    forbidden_side_effects:
+    - 1
+  - id: AC-SEARCH-ALTERNATIVES
+    description: Threshold failures do not enter verification, ties never expand Top3, and hybrid duplicates are checked once
+      per requirement. Missing or inconsistent assessments fail; all qualified recalled alternatives remain. Empty or fully
+      rejected results stay uncovered without another search.
+    steps:
+    - 11
+    expected_results:
+    - 11
+    forbidden_side_effects:
+    - 1
+  - id: AC-UNIFIED-CARD
+    description: The unified card includes bindable resources despite gaps. Only changed queries prepare fresh bilingual expressions;
+      unchanged evidence remains in Redis. Gaps and stale actions cannot advance generation or write bindings.
+    steps:
+    - 13
+    expected_results:
+    - 13
+    forbidden_side_effects:
+    - 1
+  requirement_ids:
+  - NL2AGENT-UNIFIED-CARD-20261120

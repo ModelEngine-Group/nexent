@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-MODEL-INPUT-TABLE-20261124
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-MODEL-INPUT-TABLE-20261124
+  title: 模型输入消息表格与 Markdown 正文
+  description: 可观测中心模型输入默认预览完整请求中的消息表格，正文支持块级 Markdown，不改变归档数据和原始正文读取。
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 验证消息顺序、正文 Markdown、分块待加载、原始请求复制、不支持数据回退及不加载图片。
+    reason: 前端组件测试覆盖数据结构和回退边界，复用既有浏览器旅程验证真实节点切换和模式切换；后端采集、接口及权限不变。
+    test_selectors:
+    - frontend/tests/component/trajectoryModelInput.test.tsx
+  notes: 责任域为 runtime。沿用既有隔离浏览器、受控请求和用例清理；不改变共享环境。工作区缺少外部 SPEC 文档库；该 D4 用例原有的整体验收阻塞保持不变。

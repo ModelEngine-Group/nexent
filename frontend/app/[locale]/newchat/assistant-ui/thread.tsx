@@ -33,7 +33,7 @@ import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
-import { Composer, type ChatMode } from "./composer";
+import { Composer, type ChatMode, type ComposerInputTools } from "./composer";
 import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { TextSuggestion } from "@/components/agent/agent-suggestion";
 import type { AgentSuggestionItem } from "@/types/agentSuggestion";
@@ -61,10 +61,8 @@ import {
 } from "@assistant-ui/react";
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
-import {
-  ConversationArtifactsToolbarEntry,
-  ConversationArtifactsPanel,
-} from "../ui/artifacts-panel";
+import { ConversationArtifactsPanel } from "../ui/artifacts-panel";
+import { ConversationToolbar } from "./conversation-toolbar";
 import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryRail } from "../ui/question-directory-rail";
 import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
@@ -146,6 +144,7 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { PromptGenerationCard } from "../ui/prompt-generation-card";
 import { findRequirementSubmission } from "../ui/requirement-clarification-history";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -246,7 +245,7 @@ export interface ThreadProps {
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   showAgentCreationResult?: boolean;
-  composerTools?: ReactNode;
+  inputTools?: ComposerInputTools;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -271,7 +270,6 @@ export interface ThreadProps {
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
-  onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
 }
 
@@ -308,7 +306,7 @@ export const Thread: FC<ThreadProps> = ({
   modelSelectionScope = "agent",
   showConversationTitle = true,
   showAgentCreationResult = true,
-  composerTools,
+  inputTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -330,7 +328,6 @@ export const Thread: FC<ThreadProps> = ({
   interactionContent,
   workbenchPresentation,
   workbenchResources,
-  onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
@@ -585,7 +582,7 @@ export const Thread: FC<ThreadProps> = ({
               showModelSelector={showModelSelector}
               showConversationTitle={showConversationTitle}
               showAgentCreationResult={showAgentCreationResult}
-              composerTools={composerTools}
+              inputTools={inputTools}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}
@@ -609,7 +606,6 @@ export const Thread: FC<ThreadProps> = ({
               interactionContent={interactionContent}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
-              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
               hasMessages={hasMessages}
               displayName={displayName}
@@ -711,7 +707,7 @@ interface ThreadViewProps {
   showModelSelector: boolean;
   showConversationTitle: boolean;
   showAgentCreationResult: boolean;
-  composerTools?: ReactNode;
+  inputTools?: ComposerInputTools;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities: KnowledgeCapabilities | null;
@@ -758,7 +754,6 @@ interface ThreadViewProps {
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
-  onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
 }
 
@@ -776,7 +771,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   showModelSelector,
   showConversationTitle,
   showAgentCreationResult,
-  composerTools,
+  inputTools,
   knowledgeScope,
   knowledgePreview,
   knowledgeCapabilities,
@@ -820,7 +815,6 @@ const ThreadView: FC<ThreadViewProps> = ({
   interactionContent,
   workbenchPresentation,
   workbenchResources,
-  onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
@@ -987,7 +981,16 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
-        <ConversationArtifactsToolbarEntry />
+        <ConversationToolbar
+          conversationId={
+            !configurationLayout &&
+            !debugLayout &&
+            variant !== "embedded" &&
+            !isShareMode
+              ? conversationId
+              : undefined
+          }
+        />
         <QuestionDirectoryRail
           questions={questionDirectory}
           onJump={handleJumpToQuestion}
@@ -1101,6 +1104,17 @@ const ThreadView: FC<ThreadViewProps> = ({
               ))}
             <Composer
               conversationId={conversationId}
+              inputTools={inputTools}
+              knowledgeAgent={
+                onKnowledgeScopeChange &&
+                !workbenchPresentation?.allowsSessionKnowledge
+                  ? {
+                      id: Number(agent.id),
+                      versionNo: agent.current_version_no,
+                      sources: agent.knowledge_sources,
+                    }
+                  : undefined
+              }
               hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
@@ -1122,11 +1136,8 @@ const ThreadView: FC<ThreadViewProps> = ({
               annotations={annotationsEnabled ? messageAnnotations : undefined}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
-              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-            >
-              {composerTools}
-            </Composer>
+            ></Composer>
             {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
@@ -1399,7 +1410,9 @@ const ThreadScrollToBottom: FC = () => {
 
 const MessageError: FC = () => {
   const { t } = useTranslation();
-  const hasInlineError = useAuiState((s) => s.message.content.some(part => (part as { isError?: boolean }).isError));
+  const hasInlineError = useAuiState((s) =>
+    s.message.content.some((part) => (part as { isError?: boolean }).isError)
+  );
   const rawError = useAuiState((state) => {
     const status = state.message.status;
     return status?.type === "incomplete" && status.reason === "error"
@@ -1450,18 +1463,34 @@ const AssistantCompletionIndicator: FC = () => {
   const status = useAuiState((s) => s.message.status);
   const isComplete = status?.type === "complete";
   const failed = status?.type === "incomplete" && status.reason === "error";
-  const stopped = status?.type === "incomplete" && status.reason === "cancelled";
+  const stopped =
+    status?.type === "incomplete" && status.reason === "cancelled";
 
   if (!isComplete && !failed && !stopped) return null;
 
   return (
     <span
       data-slot="aui_assistant-message-completion-indicator"
-      className={cn("inline-flex items-center gap-1 text-xs", failed ? "text-destructive" : stopped ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400")}
+      className={cn(
+        "inline-flex items-center gap-1 text-xs",
+        failed
+          ? "text-destructive"
+          : stopped
+            ? "text-muted-foreground"
+            : "text-emerald-600 dark:text-emerald-400"
+      )}
       role="status"
     >
       {isComplete && <DotMatrix state="success" aria-hidden />}
-      <span>{t(failed ? "chat.thread.failed" : stopped ? "chat.thread.stopped" : "chat.thread.complete")}</span>
+      <span>
+        {t(
+          failed
+            ? "chat.thread.failed"
+            : stopped
+              ? "chat.thread.stopped"
+              : "chat.thread.complete"
+        )}
+      </span>
     </span>
   );
 };
@@ -1553,7 +1582,40 @@ const AssistantMessage: FC<{
   const isLatestMessage = useAuiState(
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
+  const isLatestResourceCard = useAuiState(
+    (s) =>
+      s.thread.messages.findLast((message) => {
+        const card = (
+          message.metadata.custom as { nl2a?: Nl2aMessage } | undefined
+        )?.nl2a?.content;
+        return (
+          card && "protocol_version" in card && card.protocol_version === 2
+        );
+      })?.id === s.message.id
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const isLatestPromptCard = useAuiState(
+    (s) =>
+      s.thread.messages.findLast((message) => {
+        const metadata = message.metadata.custom as
+          | {
+              nl2a?: Nl2aMessage;
+              nl2agentStates?: Array<{
+                event: string;
+                updated_fields?: string[];
+              }>;
+            }
+          | undefined;
+        return (
+          metadata?.nl2a?.content.subtype === "prompt_generation" ||
+          metadata?.nl2agentStates?.some(
+            (event) =>
+              event.event === "agent_draft_fields_saved" &&
+              event.updated_fields?.includes("prompt")
+          )
+        );
+      })?.id === s.message.id
+  );
   const requirementMessages = useAuiState((s) =>
     nl2a?.content.subtype === "requirement_clarification"
       ? s.thread.messages
@@ -1898,7 +1960,20 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a?.content.subtype === "requirement_clarification" ? (
+        {nl2a?.content.subtype === "requirement_resources" ? (
+          <InstalledResourceBindingCard
+            key={nl2a.content.card_id}
+            payload={nl2a.content}
+            unifiedPayload={nl2a.content}
+            disabled={readOnly || !isLatestResourceCard}
+          />
+        ) : nl2a?.content.subtype === "prompt_generation" ? (
+          <PromptGenerationCard
+            key={nl2a.content.card_id}
+            payload={nl2a.content}
+            disabled={readOnly || !isLatestPromptCard}
+          />
+        ) : nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
             sourceMessageId={messageId}
@@ -1910,15 +1985,9 @@ const AssistantMessage: FC<{
         ) : nl2a?.content.subtype === "agent_draft" ? (
           <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
-          <SuggestedResourceInstallationCard
-            payload={nl2a.content}
-            disabled={readOnly || !isLatestMessage}
-          />
+          <SuggestedResourceInstallationCard payload={nl2a.content} disabled />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
-          <InstalledResourceBindingCard
-            payload={nl2a.content}
-            disabled={readOnly || !isLatestMessage}
-          />
+          <InstalledResourceBindingCard payload={nl2a.content} disabled />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />

@@ -36,7 +36,7 @@ class AgentResources(ToolResources, WorkspaceResources, SubagentResources):
                  cancellation_scope=None,
                  user_context=None,
                  tool_fastpath_enabled=True,
-                 tool_fastpath_allowed_tools=None, child_invocation_factory=None):
+                 tool_fastpath_allowed_tools=None, child_invocation_factory=None, runtime_lifecycle=None):
         """
         Initialize the shared run-scoped resources.
 
@@ -76,6 +76,7 @@ class AgentResources(ToolResources, WorkspaceResources, SubagentResources):
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
+        self.runtime_lifecycle = runtime_lifecycle or getattr(sandbox_config, 'run_lifecycle', None)
         self.tool_fastpath_enabled = tool_fastpath_enabled
         self.tool_fastpath_allowed_tools = tool_fastpath_allowed_tools
         self.minio_client = minio_client
@@ -87,7 +88,7 @@ class AgentResources(ToolResources, WorkspaceResources, SubagentResources):
         if sandbox_config is not None and sandbox_config.workspace_mode == "bind" and workspace_path:
             from nexent.core.agents.sandbox.config import SandboxLevel
 
-            if sandbox_config.level == SandboxLevel.DOCKER:
+            if sandbox_config.level in (SandboxLevel.DOCKER, SandboxLevel.KUBERNETES):
                 self.workspace_mapping = sandbox_config.bind_workspace().for_run(workspace_path)
         self.workspace_run_id = workspace_run_id
         self.minio_files = list(minio_files or [])
@@ -103,11 +104,17 @@ class AgentResources(ToolResources, WorkspaceResources, SubagentResources):
 
         self.agent = None
 
-    def close(self):
+    def close(self, *, publish_outputs=True):
         """Drain children before tearing down owned workspace and executors."""
         if self._resources_closed:
             return
         self._close_subagent_invocations()
+        if not publish_outputs:
+            containers = self._sandbox_containers() if getattr(self, "_sandbox_scope", None) == "system" else []
+            self._cleanup_sandbox()
+            self._cleanup_file_workspace(containers=containers)
+            self._resources_closed = True
+            return
         try:
             self._finalize_file_workspace()
         finally:

@@ -11,6 +11,7 @@ from contracts.constants.constants import (
     STATUS_DISABLED,
     STATUS_RELEASED,
 )
+from contracts.errors.exceptions import ValidationError
 from contracts.roles import has_any_role, roles_from_record
 from management.db.a2a import repository as a2a_repository
 from management.db.agent.repository import (
@@ -871,6 +872,20 @@ async def list_published_agents_impl(tenant_id: str, user_id: str) -> list[dict]
     )
 
 
+def _published_knowledge_sources(agent_id: int, tenant_id: str, version_no: int) -> Dict[str, bool]:
+    """Keep a dependency validation failure local to the affected list entry."""
+    from management.services.knowledge_base.scope import get_agent_knowledge_sources
+
+    try:
+        return get_agent_knowledge_sources(agent_id, tenant_id, version_no)
+    except ValidationError as exc:
+        logger.warning(
+            "Skipping knowledge source projection for published Agent %s version %s: %s",
+            agent_id, version_no, exc,
+        )
+        return {"local": False, "aidp": False}
+
+
 def _list_published_agents_sync(
     tenant_id: str,
     user_id: str,
@@ -1081,6 +1096,9 @@ def _list_published_agents_sync(
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),
+                "knowledge_sources": _published_knowledge_sources(
+                    agent["agent_id"], tenant_id, agent["current_version_no"],
+                ),
                 "version_name": agent.get("version_name"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
@@ -1089,6 +1107,7 @@ def _list_published_agents_sync(
                     agent.get("allow_mcp_header_passthrough", False)
                 ),
                 "model_params_override": agent.get("model_params_override"),
+                "enable_memory": agent.get("enable_memory") is not False,
                 "enable_protocol_repair_retry": agent.get("enable_protocol_repair_retry") is True,
             })
 

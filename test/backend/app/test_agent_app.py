@@ -134,6 +134,10 @@ sys.modules['nexent'] = types.ModuleType('nexent')
 sys.modules['nexent.core'] = types.ModuleType('nexent.core')
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
+# Route tests stub the SDK package; coordination admission has its own tests.
+runtime_sandbox_stub = types.ModuleType('runtime.sandbox_runtime')
+runtime_sandbox_stub.require_business_admission = Mock()
+sys.modules['runtime.sandbox_runtime'] = runtime_sandbox_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
 sys.modules['infrastructure.rdb.client'] = MagicMock()
@@ -358,8 +362,9 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
     prepared.model_copy.assert_called_once_with(update={"system_agent": AgentVersionReference(agent_id=77, version_no=0)})
-    create_stream.assert_called_once_with(prepared.model_copy.return_value, ServicePrincipal("user-a", "tenant-a"))
-    assert request.conversation_id is None
+    create_stream.assert_called_once_with(prepared.model_copy.return_value, ServicePrincipal("user-a", "tenant-a"), request=request)
+    assert prepared.model_copy.return_value.conversation_id == 42
+    assert request.conversation_id == 42
     assert request.persist_history is True
     assert actor == ServicePrincipal("user-a", "tenant-a")
     assert language == "en"
@@ -597,7 +602,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"))
+    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"), request=request)
     assert request.conversation_id is None
     assert request.persist_history is False
     assert "conversation_id" not in response.headers

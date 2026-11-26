@@ -36,6 +36,11 @@ export function CreatorHistoryToolbar({
   );
   const content = (
     <div className="w-72 max-w-[calc(100vw-32px)]">
+      {resourceKind === "agent" && (
+        <p className="mb-2 text-xs text-[var(--color-text-secondary)]">
+          {t("nl2agent.history.continueHint")}
+        </p>
+      )}
       {history.failed ? (
         <div role="alert">
           {t("nl2agent.history.loadFailed")}
@@ -86,18 +91,6 @@ export function CreatorHistoryToolbar({
               </Button>
             </li>
           ))}
-          {history.hasMore && (
-            <li>
-              <Button
-                type="link"
-                block
-                loading={history.fetchingMore}
-                onClick={() => void history.loadMore()}
-              >
-                {t("nl2agent.history.more")}
-              </Button>
-            </li>
-          )}
         </ul>
       )}
     </div>

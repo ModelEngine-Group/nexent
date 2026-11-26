@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-COLLABORATION-UNIT-COVERAGE-20261125
+  change_type: test-fix
+  title: Backfill unit tests for Jiuwen collaboration in PR 4415
+  description: >-
+    Exercise the native A2A transport, adapter error handling, and run-owned
+    delegation and sandbox boundaries with deterministic unit fixtures.
+  affected_features:
+    existing: [JIUWEN-RESOURCES]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    JIUWEN-RESOURCES-D3-002 and JIUWEN-RESOURCES-D5-003 already exercise the real
+    Runner and collaboration recovery paths. These additions verify local
+    decisions and error branches without changing those runtime contracts.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Use the configured A2A protocol, credentials and context. Merge artifact updates and honor terminal states.
+    - Cancel only a known active remote task and publish a sanitized failed or stopped terminal on error.
+    - Carry each same-input delegation's call identity to its own session and release that session on failure.
+    - Keep read-only and sandbox restrictions. Release admission and workspace resources without publishing partial files.
+    reason: >-
+      Prior unit tests covered artifact merging and denial of unverified
+      sessions. Method selection, transport errors, scoped dispatch and
+      parallel cleanup were covered primarily by formal runtime scenarios.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_native_a2a.py
+    - test/sdk/core/agents/test_jiuwen_collaboration.py
+    - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
+    - test/sdk/core/agents/test_jiuwen_adapter_preflight.py
+    - test/sdk/core/agents/test_jiuwen_execution_loop.py
+    - test/sdk/core/agents/test_jiuwen_native_files.py
+    - test/sdk/core/agents/test_jiuwen_parallel_sandbox.py
+    - test/sdk/core/agents/test_subagent_resource_ownership.py
+    - test/sdk/core/agents/test_subagent_wrapper.py
+  notes: >-
+    GitHub Codecov reported 64.01 percent patch coverage before the backfill
+    against a 90 percent target. Local pytest-cov verification against base
+    d71ef2e88 covered 495 of 503 changed Python lines, or 475 fully covered lines
+    (94.43 percent) with partial lines counted as misses. The selected SDK and
+    backend suites passed 1,119 tests and skipped 3. Coverage settings are unchanged.

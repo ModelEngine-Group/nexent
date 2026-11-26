@@ -142,6 +142,7 @@ export const fetchTools = async () => {
       source: tool.source,
       is_available: tool.is_available,
       is_user_selectable: tool.is_user_selectable !== false,
+      blocked_by_denylist: tool.blocked_by_denylist === true,
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
       category: tool.category,
@@ -229,6 +230,7 @@ type AgentListApiItem = {
   is_a2a_server?: boolean;
   allow_chat_metadata?: boolean;
   enable_protocol_repair_retry?: boolean;
+  enable_memory?: boolean;
   model_params_override?: Agent["model_params_override"];
   icon_url?: string;
   repository_info?: Agent["repository_info"];
@@ -262,6 +264,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     is_a2a_server: agent.is_a2a_server || false,
     allow_chat_metadata: agent.allow_chat_metadata ?? false,
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+    enable_memory: agent.enable_memory ?? true,
     model_params_override: agent.model_params_override ?? null,
     icon_url: agent.icon_url,
     repository_info: agent.repository_info,
@@ -438,12 +441,14 @@ export const fetchPublishedAgentList = async () => {
       is_new: agent.is_new || false,
       permission: agent.permission,
       current_version_no: agent.current_version_no,
+      knowledge_sources: agent.knowledge_sources,
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+      enable_memory: agent.enable_memory ?? true,
       icon_url: agent.icon_url,
       tags: Array.isArray(agent.tags)
         ? agent.tags.filter(
@@ -645,6 +650,7 @@ export interface UpdateAgentInfoPayload {
   provide_run_summary?: boolean;
   allow_chat_metadata?: boolean;
   enable_protocol_repair_retry?: boolean;
+  enable_memory?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;
   verification_config?: Record<string, any>;
@@ -1206,6 +1212,7 @@ export const searchAgentInfo = async (
       current_version_no: data.current_version_no,
       allow_chat_metadata: data.allow_chat_metadata ?? false,
       enable_protocol_repair_retry: data.enable_protocol_repair_retry ?? false,
+      enable_memory: data.enable_memory ?? true,
     };
 
     return {
@@ -1439,6 +1446,7 @@ export const fetchSkills = async (
     const skills = data.skills || data || [];
 
     const formattedSkills = skills.map((skill: any) => ({
+      blocked_by_denylist: Boolean(skill.blocked_by_denylist),
       skill_id: Number(skill.skill_id),
       name: skill.name,
       description: skill.description || "",

@@ -18,8 +18,8 @@ export function ComposerAttachment() {
   return (
     <ComposerAddAttachment
       tooltip={t("workbench.controls.uploadAttachment")}
-      icon={<Paperclip className="size-5" />}
-      className="size-8 text-muted-foreground"
+      icon={<Paperclip className="size-4" />}
+      className="size-8 text-foreground"
     />
   );
 }
@@ -38,9 +38,9 @@ export function ComposerDictation({ configured }: { configured: boolean }) {
                   variant="ghost"
                   size="icon"
                   disabled={!configured}
-                  className="size-8 text-muted-foreground"
+                  className="size-8 text-foreground"
                 >
-                  <Mic className="size-5" />
+                  <Mic className="size-4" />
                 </Button>
               </ComposerPrimitive.Dictate>
             </span>

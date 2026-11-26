@@ -7,6 +7,7 @@ import { AgentFieldError } from "./agent-field-error";
 import { useTranslation } from "react-i18next";
 import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
 import {
+  ArrowLeft,
   GripVertical,
   ListOrdered,
   LockKeyhole,
@@ -64,7 +65,6 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ExpandEditModal from "@/components/common/ExpandEditModal";
 import {
   reorderModelIds,
   resolveModelSelection,
@@ -73,8 +73,6 @@ import HighFidelityTextArea from "./HighFidelityTextArea";
 import HighFidelityPromptEditModal from "./HighFidelityPromptEditModal";
 
 const { TextArea } = Input;
-
-type PromptField = "prompt";
 
 type SortableModelItemProps = {
   disabled: boolean;
@@ -368,7 +366,7 @@ function HighFidelityModelGrid({
 
 interface AgentPromptProps {
   highFidelity?: boolean;
-  onOptimizePrompt?: () => void;
+  onOptimizePrompt?: () => boolean;
 }
 
 export default function AgentPrompt({
@@ -396,10 +394,39 @@ export default function AgentPrompt({
   const defaultModelId = defaultLlmModelConfig?.id;
   const modelInitialization = useRef({ agentId, complete: false });
   const { configFocusRequest } = useNl2AgentFlow();
-
-  const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(
+  const [promptFeedback, setPromptFeedback] = useState({
+    agentId,
+    active: false,
+  });
+  const promptFilled =
+    promptFeedback.agentId === agentId && promptFeedback.active;
+  if (promptFeedback.agentId !== agentId) {
+    setPromptFeedback({ agentId, active: false });
+  }
+  const promptFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+
+  useEffect(() => {
+    return () => {
+      if (promptFeedbackTimer.current)
+        clearTimeout(promptFeedbackTimer.current);
+    };
+  }, [agentId]);
+
+  const handleOptimizePrompt = () => {
+    if (!onOptimizePrompt?.()) return;
+    if (promptFeedbackTimer.current) clearTimeout(promptFeedbackTimer.current);
+    setPromptFeedback({ agentId, active: true });
+    promptFeedbackTimer.current = setTimeout(
+      () => setPromptFeedback({ agentId, active: false }),
+      4000
+    );
+  };
+
+  const [expandedPromptAgentId, setExpandedPromptAgentId] = useState<
+    number | null
+  >(null);
   const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const [isModelSelectionOpen, setIsModelSelectionOpen] = useState(false);
   useEffect(() => {
@@ -706,15 +733,7 @@ export default function AgentPrompt({
     [selectedModelIds, updateModelSelection]
   );
 
-  const expandedPromptConfig = {
-    prompt: {
-      title: t("agent.field.prompt"),
-      content: editedAgent.prompt ?? "",
-      save: (content: string) => updateDraft({ prompt: content }),
-    },
-  };
-
-  const renderExpandButton = (prompt: PromptField) => (
+  const renderExpandButton = () => (
     <Tooltip title={t("systemPrompt.button.expand")}>
       <Button
         type="text"
@@ -722,7 +741,7 @@ export default function AgentPrompt({
         icon={<Maximize2 size={15} />}
         aria-label={t("systemPrompt.button.expand")}
         disabled={isReadOnly}
-        onClick={() => setExpandedPrompt(prompt)}
+        onClick={() => setExpandedPromptAgentId(agentId)}
       />
     </Tooltip>
   );
@@ -918,7 +937,7 @@ export default function AgentPrompt({
             />
           )}
           <div className="absolute right-1 top-2 z-10">
-            {renderExpandButton("prompt")}
+            {renderExpandButton()}
           </div>
         </div>
       </Form.Item>
@@ -979,12 +998,24 @@ export default function AgentPrompt({
               <Button
                 type="link"
                 autoInsertSpace={false}
-                className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
-                icon={<Sparkles size={14} />}
+                className={`!h-[22px] !p-0 !text-sm !leading-[22px] disabled:!text-[#dfdfdf] ${promptFilled ? "!text-[var(--color-success)]" : "!text-[var(--color-brand)]"}`}
+                icon={
+                  promptFilled ? (
+                    <ArrowLeft size={14} />
+                  ) : (
+                    <Sparkles size={14} />
+                  )
+                }
                 disabled={isReadOnly || !onOptimizePrompt}
-                onClick={onOptimizePrompt}
+                onClick={handleOptimizePrompt}
               >
-                {t("agent.highFidelity.optimizePrompt")}
+                <span role="status" aria-live="polite">
+                  {t(
+                    promptFilled
+                      ? "agent.highFidelity.optimizePromptFilled"
+                      : "agent.highFidelity.optimizePrompt"
+                  )}
+                </span>
               </Button>
             )}
           </div>
@@ -1026,7 +1057,7 @@ export default function AgentPrompt({
                   }
                 />
                 <div className="absolute right-1 top-2 z-10">
-                  {renderExpandButton("prompt")}
+                  {renderExpandButton()}
                 </div>
               </div>
             )}
@@ -1052,31 +1083,18 @@ export default function AgentPrompt({
       )}
 
       {!promptsHidden &&
-        expandedPrompt &&
-        (highFidelity && expandedPrompt === "prompt" ? (
+        expandedPromptAgentId !== null &&
+        expandedPromptAgentId === agentId && (
           <HighFidelityPromptEditModal
-            key={`${agentId}-${expandedPrompt}`}
-            title={expandedPromptConfig[expandedPrompt].title}
-            content={expandedPromptConfig[expandedPrompt].content}
+            title={t("agent.field.prompt")}
+            content={editedAgent.prompt ?? ""}
             readOnly={isReadOnly}
-            onClose={() => setExpandedPrompt(null)}
-            onSave={(content) => {
-              if (!isReadOnly)
-                expandedPromptConfig[expandedPrompt].save(content);
+            onClose={() => setExpandedPromptAgentId(null)}
+            onChange={(prompt) => {
+              if (!isReadOnly) updateDraft({ prompt });
             }}
           />
-        ) : (
-          <ExpandEditModal
-            open
-            title={expandedPromptConfig[expandedPrompt].title}
-            content={expandedPromptConfig[expandedPrompt].content}
-            onClose={() => setExpandedPrompt(null)}
-            onSave={(content) => {
-              if (!isReadOnly)
-                expandedPromptConfig[expandedPrompt].save(content);
-            }}
-          />
-        ))}
+        )}
 
       {/* Per-model parameter override popup */}
       {configuringModel?.profileSchemaVersion ? (

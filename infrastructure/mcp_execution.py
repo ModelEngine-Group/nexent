@@ -6,9 +6,9 @@ import json
 from urllib.parse import quote, urljoin
 
 from contracts.constants import environment
+from infrastructure.monitoring.contracts import LOCAL_MCP_NAME
 from nexent.core.agents.contracts.config import ToolConfig
 
-LOCAL_MCP_NAME = "outer-apis"
 MCP_ARGUMENT_OVERRIDES = "agentos_mcp_argument_overrides"
 
 

@@ -139,3 +139,51 @@ async def test_rollback_leaves_original_result_in_owned_buffer_and_journal(captu
     assert replay.assistant_message_id == 4242
     assert capture.persist.call_count == 2
     assert capture.persist.call_args_list[0] == capture.persist.call_args_list[1]
+
+
+@pytest.mark.asyncio
+async def test_fix01_closed_action_survives_journal_projection_and_accepted_view(capture):
+    async def source(info, **_kwargs):
+        history = info.observer.execution_history
+        action = {'schema_version': 1, 'agent_core': 'smolagents', 'dispatch_state': 'dispatched', 'step_number': 1,
+                  'tool_calls': [{'id': 'python-call', 'name': 'python_interpreter', 'arguments': 'write(body=computed)'}]}
+        key = history.register('root-owner', {'STDOUT': 'actual original stdout'})
+        record = history.get(key)
+        record.model_action = action
+        yield json.dumps({'type': 'tool', 'tool_name': 'write', 'tool_arguments': {'body': 'expanded'},
+                          'content': '', 'step_id': 'step-1'})
+        yield json.dumps({'type': 'execution_logs', 'content': 'actual original stdout', 'step_id': 'step-1'})
+        yield json.dumps({'type': 'execution_result', 'content': {'execution_key': key}, 'step_id': 'step-1'})
+        record.model_view = {'preview': 'accepted head ... tail'}
+        yield json.dumps({'type': 'final_answer', 'content': 'done'})
+
+    public = await capture.run(source)
+    units = capture.persist.call_args.kwargs['message_units']
+    fact = next(unit for unit in units if unit['type'] == 'execution_result')
+    content = json.loads(fact['unit_content'])
+    assert content['covered_unit_indices'] == [0, 1]
+    assert content['model_action']['tool_calls'][0]['arguments'] == 'write(body=computed)'
+    assert content['model_view'] == {'preview': 'accepted head ... tail'}
+    assert content['content'] == '<STDOUT>actual original stdout</STDOUT>'
+    assert 'expanded' in units[0]['unit_content']
+    assert b'model_action' not in public and b'accepted head' not in public
+
+
+@pytest.mark.asyncio
+async def test_fix01_later_failure_retains_already_accepted_model_view(capture):
+    async def source(info, **_kwargs):
+        history = info.observer.execution_history
+        key = history.register('owner', {'ERROR': 'actual tool error'})
+        record = history.get(key)
+        record.model_action = {'schema_version': 1, 'agent_core': 'smolagents',
+            'dispatch_state': 'dispatched', 'step_number': 1,
+            'tool_calls': [{'id': 'python', 'name': 'python_interpreter', 'arguments': 'failing_action()'}]}
+        yield json.dumps({'type': 'execution_result', 'content': {'execution_key': key}, 'step_id': 'step-1'})
+        record.model_view = {'summary': 'accepted error summary'}
+        raise RuntimeError('later model failed')
+
+    await capture.run(source)
+    joined = b''.join(capture.frames)
+    assert b'agentos_execution_summary' in joined
+    assert b'accepted error summary' in joined
+    assert b'"status": "failed"' in joined

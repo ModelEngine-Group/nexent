@@ -161,6 +161,11 @@ def _get_skill_script_tools(
             for skill in enabled_skills
             if skill.get("name")
         }
+        skill_name_to_id = {
+            skill.get("name"): skill.get("skill_id")
+            for skill in enabled_skills
+            if skill.get("name") and skill.get("skill_id") is not None
+        }
     except Exception as exc:
         logger.warning(
             f"Failed to resolve effective skill configuration: {exc}", exc_info=True
@@ -187,6 +192,7 @@ def _get_skill_script_tools(
                             "isolated_skills_root": bool(skill_snapshot_root),
                             "workspace_path": file_context.get("workspace_path"),
                             "authorized_skill_names": sorted(skill_config_values),
+                            "skill_name_to_id": skill_name_to_id,
                         },
                         source="builtin",
                         usage="builtin",
@@ -204,6 +210,7 @@ def _get_skill_script_tools(
                             or CONTAINER_SKILLS_PATH,
                             "isolated_skills_root": bool(skill_snapshot_root),
                             "authorized_skill_names": sorted(skill_config_values),
+                            "skill_name_to_id": skill_name_to_id,
                         },
                         source="builtin",
                         usage="builtin",

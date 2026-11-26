@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Scoped D5 fault injection with write-ahead recovery and deployment locking.
 
 No compose up/down, image replacement, volume deletion or schema rollback is
@@ -19,7 +21,7 @@ import time
 import httpx
 
 from shared.asset_registry import AssetDependencyError, AutomationInfrastructureError
-from shared.config import service_url, test_root
+from shared.config import readiness_url, service_url, test_root
 
 ACTIVE = ContextVar('deployment_guard', default=None)
 SCOPES = {
@@ -178,8 +180,9 @@ class DeploymentGuard:
             try:
                 async with httpx.AsyncClient(timeout=5) as client:
                     # Data-process has its own app and no /health/ready route.
-                    endpoint = '/tasks' if service == 'nexent-data-process' else '/health/ready'
-                    response = await client.get(service_url(HTTP_SERVICES[service]) + endpoint)
+                    name = HTTP_SERVICES[service]
+                    url = service_url(name) + '/tasks' if name == 'data_process' else readiness_url(name)
+                    response = await client.get(url)
                     if service == 'nexent-data-process':
                         return response.status_code == 200 and isinstance(response.json().get('tasks'), list)
                     return response.status_code == 200 and response.json().get('status') == 'ready'

@@ -73,7 +73,7 @@ class ContextEvidenceCollector:
                         call.exceeds_effective_input_limit for call in self._calls
                     ),
                     compaction_attempts=sum(call.compaction_attempts for call in self._calls),
-                    model_call_count=len(self._calls),
+                    model_call_count=sum(call.maintenance_phase != "post_response" for call in self._calls),
                     loop_status=status,
                 )
         return self._finalized

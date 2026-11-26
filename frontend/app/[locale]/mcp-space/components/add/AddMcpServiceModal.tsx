@@ -1,4 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { useCallback, useRef } from "react";
 import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS } from "@/const/mcpTools";
@@ -8,11 +10,13 @@ import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 interface AddMcpServiceModalProps {
   open: boolean;
   onClose: () => void;
+  onCreated?: (name: string, mcpId?: number) => void;
 }
 
 export default function AddMcpServiceModal({
   open,
   onClose,
+  onCreated,
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
   const { enableUploadImage } = useMcpServerList({ enabled: open });
@@ -63,7 +67,11 @@ export default function AddMcpServiceModal({
           <AddMcpServiceLocalSection
             active
             enableUploadImage={enableUploadImage}
-            onAdded={onClose}
+            enableOnCreate={Boolean(onCreated)}
+            onAdded={(name, mcpId) => {
+              onCreated?.(name, mcpId);
+              onClose();
+            }}
             onSubmittingChange={setSubmitting}
           />
         </div>

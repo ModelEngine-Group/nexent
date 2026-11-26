@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -20,15 +22,16 @@ import { uploadMcpImageStream } from "@/services/mcpService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface UseMcpAddLocalParams {
-  onSuccess: () => void;
+  onSuccess: (name: string, mcpId?: number) => void;
   onContainerStarted?: (containerId: string) => void;
+  enableOnCreate?: boolean;
 }
 
 /**
  * Submission mutation for the "Add local MCP" form. The component owns the
  * draft; this hook only cares about the network call + cache invalidation.
  */
-export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocalParams) {
+export function useMcpAddLocal({ onSuccess, onContainerStarted, enableOnCreate }: UseMcpAddLocalParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
@@ -95,6 +98,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
 
     setSubmitting(true);
     try {
+      let mcpId: number | undefined;
       // Embed creator identity so the "我的" card can display the developer
       const registryJson: Record<string, unknown> = {};
       if (user?.email) {
@@ -129,6 +133,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
         if (!result.success) {
           throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));
         }
+        mcpId = result.data?.mcp_id;
       } else if (isContainer) {
         const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
         if (!mcpConfig) {
@@ -136,7 +141,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           return false;
         }
 
-        await addContainerMcpToolServiceStream({
+        const result = await addContainerMcpToolServiceStream({
           name: trimmedName,
           description: draft.description ?? "",
           source: McpSource.LOCAL,
@@ -150,8 +155,9 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
         }, (result) => {
           if (result.container_id) onContainerStarted?.(result.container_id);
         });
+        mcpId = result.mcp_id;
       } else {
-        await addMcpToolService({
+        const result = await addMcpToolService({
           name: trimmedName,
           description: draft.description ?? "",
           source: McpSource.LOCAL,
@@ -160,10 +166,12 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           custom_headers: customHeaders,
           config_json: configJson,
           registry_json: registryJson,
+          enabled: enableOnCreate,
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
           shared_fields: draft.sharedFields ?? undefined,
         });
+        mcpId = result.mcpId;
       }
 
       message.success(t("mcpTools.add.success"));
@@ -176,7 +184,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
         t,
         toastKey: "mcp-tools-refresh-tools-add-local",
       });
-      onSuccess();
+      onSuccess(trimmedName, mcpId);
       return true;
     } catch (error) {
       log.error("[useMcpAddLocal] Failed to add service", { error });

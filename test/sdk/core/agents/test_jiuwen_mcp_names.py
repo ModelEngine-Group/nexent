@@ -56,6 +56,9 @@ async def test_registered_name_maps_to_original_wire_and_saved_public_alias(monk
     result = await owner._ensure_and_call_coro("fixture", raw, {})
     assert result == "wire-result"
     client.call_tool.assert_awaited_once_with(raw, {})
+    # Monitoring identity resolves against the server URL captured at proxy
+    # construction; lazy tools bind it without contacting the server.
+    assert proxies[0].server_url == "http://fixture/mcp"
 
 
 @pytest.mark.asyncio

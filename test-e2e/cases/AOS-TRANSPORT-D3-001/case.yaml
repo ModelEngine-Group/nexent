@@ -9,6 +9,7 @@ case:
   - AOS-REQ-002
   business_rule_ids:
   - AOS-TRANSPORT-RULE-01
+  - AOS-TRANSPORT-RULE-02
   title: "Standard AgentOS transport and retired ingress isolation over local HTTP"
   type: INTEGRATION
   priority: P0
@@ -79,8 +80,8 @@ case:
     action: Submit a first public turn without a conversation ID and repeat it with the same submission key.
     expected: Management creates one conversation with the localized default title, announces its ID without consuming a Runtime cursor, and the retry returns the same conversation and run.
   - order: 18
-    action: Submit an owned Northbound turn, reject another user and tenant, and stop a staged run through signed AgentOS.
-    expected: One turn stages and projects. Northbound preserves response headers and SSE data frames. Stop fences the exact staged run and keeps its public response.
+    action: Submit an owned Northbound turn, reject another user and tenant, and stop a staged or active run through signed AgentOS. Hold the old Runtime execution and Management admission independently, then release them and submit another turn on the same conversation.
+    expected: Stop fences the exact run. It reports a conflict while release is pending and keeps the established success response once both reservations clear. The same conversation accepts the next turn. Northbound preserves response headers and SSE data frames.
   - order: 19
     action: Submit explicit runtime metadata to Northbound on an owned conversation through signed AgentOS.
     expected: Runtime receives the replacement and next version. Management stages that version and preserves it in the public response.
@@ -291,7 +292,7 @@ case:
     profiles:
     - name: mock
       required_services: []
-    timeout_seconds: 60
+    timeout_seconds: 120
   acceptance:
   - id: AC-01
     description: Signed run and stop traverse real service HTTP boundaries.
@@ -426,7 +427,7 @@ case:
     expected_results: [17]
     forbidden_side_effects: [1, 2]
   - id: AC-26
-    description: Northbound preserves public frames and conversation ownership during signed prepared execution and run-scoped cancellation.
+    description: Northbound preserves public frames and ownership and confirms the exact run's Runtime and Management release before successful stop and reuse, with a distinct bounded-wait conflict.
     steps: [18]
     expected_results: [18]
     forbidden_side_effects: [1, 2]

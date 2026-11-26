@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-DRAWER-MASK-DISMISS-20261126
+  change_type: bugfix
+  bug_id: RESOURCE-DRAWER-MASK-DISMISS-20261126
+  title: Dismiss resource drawers from their mask
+  description: Route mask clicks through the existing resource drawer close handler.
+  observed_behavior: The shared resource drawer disabled mask dismissal in the Agent editor and Workbench.
+  expected_behavior: Clicking the mask dismisses resource selection without committing it. Confirmation in progress prevents dismissal.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing cancellation journeys only clicked explicit close controls.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [AGENT-EDITOR-WORKFLOWS, WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-EDITOR-D4-004, WB-RESOURCE-LAZY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Mask clicks call the existing close handler without triggering confirmation.
+    - Mask clicks leave the drawer open while confirmation is in progress.
+    reason: The component test proves native mask dispatch and the close guard. Browser cases prove cancellation with pending selections on each page.
+    test_selectors:
+    - frontend/tests/component/resourceDrawer.test.tsx
+    - frontend/tests/workbench/SharedResourceComponents.test.tsx
+  notes: Both D4 journeys use page-local HTTP fixtures and own no persistent test resources.

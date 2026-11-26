@@ -43,7 +43,7 @@ The tabs shown at the top of **Skill Repository** depend on your role:
 | **Developer** | Repository, My Skills | Browse shared Skills, copy a Skill, manage Skills they can edit, and apply for listing |
 | **Admin** | Repository, My Skills, Review Center | All developer capabilities, plus reviewing listing requests and taking down repository Skills |
 
-> The Review Center is available only to admins. Developers track their own requests from **My Skills**.
+> The Review Center is available only to admins (including multi-role users who hold the Admin role). Developers track their own requests from **My Skills**.
 
 **Developer view** (Repository / My Skills):
 
@@ -68,7 +68,7 @@ The **Repository** tab lists Skills that have been listed and shared within the 
 ### Browse and Search
 
 - Browse listed Skills as cards
-- Search by **Skill name, description, or tag**
+- Search by **Skill name, description, or tag**, with structured filtering against the tag library
 - Cards show a summary such as name, description, tags, source, and download count
 
 <div style="display: flex; justify-content: left;">
@@ -102,7 +102,7 @@ Use **My Skills** to manage Skills that you can edit, including Skills you creat
 ### Filter and Search
 
 - **All / Created by me / Others** filters Skills by ownership
-- Search by Skill name, description, or tag
+- Search by Skill name, description, or tag, with structured filtering against the tag library
 - Browse Skills as cards with pagination
 
 <div style="display: flex; justify-content: left;">
@@ -122,7 +122,7 @@ Use **Edit** on a Skill card to update its name, description, tags, group permis
 
 You can apply to list a Skill that you are allowed to edit in the tenant repository:
 
-1. Click **List** on the Skill card.
+1. Click **Apply for Listing** in the more-actions menu of the Skill card.
 2. Optionally provide a listing note to help the admin understand the request.
 3. Click **Submit request** and wait for an admin review.
 
@@ -138,7 +138,9 @@ Open the review-status dialog from a Skill with a submitted request to view its 
 
 - **Pending review**: You can cancel the listing request.
 - **Listed**: You can take the Skill down.
-- **Rejected**: Edit the Skill first, then cancel the current listing request and click **List** again to resubmit.
+- **Rejected**: Edit the Skill first, then cancel the current listing request and submit a new one.
+
+Review results (approved / rejected) are pushed to the applicant via **in-app notifications**; selecting the notification opens the review status of the corresponding Skill directly.
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/resource-repository/skill_under_review_en.png" style="width: 80%; height: auto;" alt="Review progress" />
@@ -170,7 +172,7 @@ The queue shows information such as the Skill name, submitter, listing note, and
 
 ### Configuring Skills for an Agent
 
-1. Open the **[Agent Development](../agent-development.md)** page.
+1. Open the **[Agent Configuration](../agent-development/agent-configuration.md)** page.
 2. In **Select Tools**, switch to the **Skills** tab and click **Select Skills**.
 3. Select the Skill you want to configure; select it again to remove it.
 4. If the Skill has required parameters, its configuration dialog opens automatically. Complete and save the parameters before the Skill is added to the current agent.
@@ -231,7 +233,7 @@ tags:
 
 | Field | Required | Description | Example |
 |-------|----------|-------------|---------|
-| `name` | Yes | Skill name; English only, lowercase, hyphenated | `github-repo-analyzer` |
+| `name` | Yes | Skill name; lowercase English with hyphens is recommended, Chinese names are also supported | `github-repo-analyzer` |
 | `description` | Yes | Skill function description; 1-3 sentences, include use case | `This skill analyzes GitHub repositories and extracts key metrics` |
 | `tags` | No | Skill tag list for categorization and search | `["code", "github", "analysis"]` |
 | `allowed-tools` | No | List of allowed tools (all available by default) | `[file_read, web_search]` |
@@ -421,14 +423,15 @@ query:
 
 ### Learning from Existing Skills
 
-The system includes several complete skill reference examples in `test_skill_examples/official-skills/`:
+When writing your own skills, refer to the source files of the platform's built-in official skills. After installing official skills (see [Official Skills](./official-skills)), open the corresponding skill in **My Skills** to inspect its complete structure:
 
-| Skill Name | Reference Value |
+| Official Skill | Reference Value |
 |-----------|-----------------|
-| `create-file-directory` | Standard writing for tool skills, with complete parameter tables, usage examples, and error handling tables |
 | `search-knowledge-base` | Parameter configuration for search skills, with complete `schema.yaml` and `config.yaml` examples |
 | `analyze-image` | Multimodal tool example with `<code>` call format |
-| `code_review_expert` | Agent skill reference with bundled scripts and `<use_script>` tag usage |
+| `run-shell-ssh` | Bundled scripts and `<use_script>` tag usage |
+
+You can also browse skills listed by other members in the tenant repository to learn how they organize their SKILL.md.
 
 ### FAQ
 
@@ -458,7 +461,11 @@ In simple terms:
 
 ### Quick Start
 
-#### Step 1: Describe Your Requirement
+#### Step 1: Open the Conversational Creation Panel
+
+In **My Skills**, click **Create Skill** and choose **Interactive creation** to open the conversational creation panel (same experience as Agent Chat). The panel lets you pick the model used for generation and provides a history toolbar to view, resume, or restart previous creation sessions.
+
+#### Step 2: Describe Your Requirement
 
 In the input box, describe the skill you want in natural language. The clearer your description, the better the generated result.
 
@@ -471,25 +478,23 @@ In the input box, describe the skill you want in natural language. The clearer y
 - "Help me make a chat skill" (too vague)
 - "Search tool" (lacks specific capability description)
 
-#### Step 2: Watch the Generation Process
+#### Step 3: Watch the Generation Process
 
-After clicking "Generate," the page displays the AI's thinking and writing process in real time:
+After you send the requirement, the panel displays the AI's analysis and writing process in real time:
 - See the AI analyzing your requirement
 - See it writing the skill definition file
 - See it planning the parameter structure
 
 This process is like watching AI write code live. You can click "Stop" at any time to interrupt.
 
-#### Step 3: Preview and Save
+#### Step 4: Preview and Save
 
 After generation completes, the system displays the complete skill content:
 - Skill name and description
 - Parameter list (what each parameter is, whether required)
 - Usage examples
 
-Check the preview carefully:
-- To make adjustments, click "Edit" to fine-tune
-- If it meets your expectations, click "Save" to add the skill to your skill library
+You can keep refining the skill by describing changes in the conversation; once the content meets your expectations, save the skill to **My Skills**.
 
 ### Writing Tips
 
@@ -547,7 +552,7 @@ If the skill has complex usage scenarios with high accuracy requirements, explic
 During generation, skill content progressively appears in the preview area:
 - `SKILL.md` content: skill definition, description, tags
 - `examples.md`: skill usage examples
-- `scripts/*.py`: tool scripts (in complex mode)
+- `scripts/*.py`: bundled scripts
 
 #### Stop Anytime
 
@@ -557,10 +562,10 @@ If the generation direction deviates from expectations:
 
 #### Multiple Attempts
 
-If the first generation result is unsatisfactory:
-- Directly add more requirement details; modify based on the existing result
-- Or manually adjust in the preview
-- If you want to start completely fresh, click the "trash" icon in the upper right corner to clear all skill content
+If the generation result is unsatisfactory:
+- Describe additional requirement details in the conversation to keep iterating on the existing result
+- Or manually adjust the content in the preview
+- Select "New session" in the panel to start a completely fresh creation; previous creation sessions can be viewed and resumed from the history toolbar
 
 ### Limitations and Notes
 
@@ -577,11 +582,7 @@ If the generation result is unsatisfactory, try:
 
 #### Token Consumption
 
-Complex skill generation consumes more tokens:
-- **Simple mode**: Usually consumes less; suitable for quick validation
-- **Complex mode**: Consumes more; suitable for formally creating complete skills
-
-It is recommended to first test the idea in simple mode, then use complex mode for formal creation after confirming feasibility.
+Complex skill generation consumes more tokens. It is recommended to validate the core idea first, then progressively refine it into a formal skill.
 
 #### Not All Requirements Can Be Realized
 
@@ -599,52 +600,9 @@ When encountering requirements that cannot be fulfilled, the system will provide
 
 #### Modifying Skills
 
-In **My Skills**, find the Skill you want to change and click **Edit**. On the agent configuration page, you can also click the pencil icon for a Skill that you are allowed to edit. The system loads its basic information, `SKILL.md` body, and additional files. You can use the interactive creation view to refine the content with natural language, or edit the files directly and save your changes.
+In **My Skills**, find the Skill you want to change and click **Edit**. On the agent configuration page, you can also click the pencil icon for a Skill that you are allowed to edit. The system loads its basic information, `SKILL.md` body, and additional files. You can refine the content with natural language in the conversational creation panel, or edit the files directly and save your changes.
 
 When creating or uploading a Skill, if its name already exists, the system prompts you to change the name before submitting again.
-
-## Official Skills Overview
-
-### File Operations
-
-| Skill Name | Description | Main Tools |
-|-----------|-------------|------------|
-| `read-file` | Read file content and metadata within the workspace | `read_file` |
-| `create-file-directory` | Create files or directories | `create_file`, `create_directory` |
-| `delete-file-directory` | Delete files or directories (irreversible) | `delete_file`, `delete_directory` |
-| `move-file-directory` | Move or rename files/directories | `move_item` |
-| `list-directory` | List directory structure in a tree view | `list_directory` |
-
-### Knowledge Base Search
-
-| Skill Name | Description | Main Tools |
-|-----------|-------------|------------|
-| `search-knowledge-base` | Local knowledge base semantic search | `knowledge_base_search` |
-| `search-dify` | Dify knowledge base search (supports semantic / keyword / full_text / hybrid modes) | `dify_search` |
-| `search-idata` | iData knowledge base search | `idata_search` |
-| `search-datamate` | DataMate knowledge base search (with similarity threshold control) | `datamate_search` |
-
-### Web Search
-
-| Skill Name | Description | Main Tools |
-|-----------|-------------|------------|
-| `search-web-tavily` | Tavily real-time web search | `tavily_search` |
-| `search-web-linkup` | Linkup image and text mixed search | `linkup_search` |
-| `search-web-exa` | Exa deep web search | `exa_search` |
-
-### Multimodal Analysis
-
-| Skill Name | Description | Main Tools |
-|-----------|-------------|------------|
-| `analyze-image` | VLM-based image content analysis and Q&A | `analyze_image` |
-| `analyze-text-file` | PDF/Word/Excel file content extraction and Q&A | `analyze_text_file` |
-
-### Communication and Remote Operations
-
-| Skill Name | Description | Main Tools |
-|-----------|-------------|------------|
-| `email-utils` | IMAP receive / SMTP send (supports HTML / CC / BCC) | `get_email`, `send_email` |
-| `run-shell-ssh` | Persistent SSH session for remote command execution | `terminal` |
 
 ## Security and Best Practices
 
@@ -652,11 +610,13 @@ When creating or uploading a Skill, if its name already exists, the system promp
 - **Web search**: Tavily / Linkup / Exa web search requires the corresponding API Key to be configured in the platform security settings first
 - **Path security**: File operations within skill packages are limited to the skill directory scope and cannot access arbitrary system paths
 - **Irreversible operations**: Delete and move operations are irreversible; confirm the target before executing
-- **NL-to-Skill Token consumption**: Complex skill generation consumes more model tokens; it is recommended to test in simple mode first
+- **Script sandbox**: Skill scripts run in a controlled sandbox; the isolation level and memory, CPU, and timeout limits are managed by deployment-side configuration, with network access disabled by default in container isolation mode
+- **Quotas**: Each tenant can create up to 1,000 Skills; a single uploaded skill package must not exceed 10 MB
 
 ## Related References
 
-- [Agent Development](../agent-development.md)
+- [Agent Configuration](../agent-development/agent-configuration.md)
 - [Local Tools Overview](../local-tools/index.md)
-- [MCP Repository Configuration](./mcp-repository.md)
+- [MCP Space](./mcp-repository.md)
+- [Official Skills](./official-skills.md)
 - [Skills System Overview](/en/backend/skills/overview)

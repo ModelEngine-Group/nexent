@@ -109,7 +109,7 @@ it("keeps only the Recent Result control and removes the empty expansion column"
   expect(conversationService.getDetail).not.toHaveBeenCalled();
 });
 
-it("loads fresh output whenever Recent Result is reopened", async () => {
+it("reuses loaded output when Recent Result is reopened", async () => {
   await openPage();
   fireEvent.click(eye());
   expect(await screen.findByText("RESULT_OUTPUT")).toBeVisible();
@@ -124,8 +124,23 @@ it("loads fresh output whenever Recent Result is reopened", async () => {
   );
   fireEvent.click(eye());
   expect(await screen.findByText("RESULT_OUTPUT")).toBeVisible();
-  expect(agentAutomationService.runs).toHaveBeenCalledTimes(2);
-  expect(conversationService.getDetail).toHaveBeenCalledTimes(2);
+  expect(agentAutomationService.runs).toHaveBeenCalledTimes(1);
+  expect(conversationService.getDetail).toHaveBeenCalledTimes(1);
+});
+
+it("shares the loading request across a quick collapse and reopen", async () => {
+  let resolveRuns!: (value: never) => void;
+  vi.mocked(agentAutomationService.runs).mockImplementationOnce(
+    () => new Promise((resolve) => { resolveRuns = resolve; })
+  );
+  await openPage();
+  fireEvent.click(eye());
+  fireEvent.click(eye());
+  fireEvent.click(eye());
+  expect(agentAutomationService.runs).toHaveBeenCalledTimes(1);
+  expect(conversationService.getDetail).toHaveBeenCalledTimes(1);
+  await act(async () => resolveRuns(runs as never));
+  expect(await screen.findByText("RESULT_OUTPUT")).toBeVisible();
 });
 
 it("reports a failed load and retries through Recent Result", async () => {
@@ -149,7 +164,7 @@ it("reports a failed load and retries through Recent Result", async () => {
   expect(conversationService.getDetail).toHaveBeenCalledTimes(2);
 });
 
-it("refetches an empty result when reopened", async () => {
+it("caches a successful empty result when reopened", async () => {
   vi.mocked(agentAutomationService.runs).mockResolvedValue({
     ...runs,
     items: [],
@@ -159,7 +174,7 @@ it("refetches an empty result when reopened", async () => {
   expect(await screen.findByText("agentAutomation.page.noRuns")).toBeVisible();
   fireEvent.click(eye());
   fireEvent.click(eye());
-  expect(agentAutomationService.runs).toHaveBeenCalledTimes(2);
+  expect(agentAutomationService.runs).toHaveBeenCalledTimes(1);
 });
 
 function nextResult(text: string) {

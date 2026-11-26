@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CODEAGENT-CODE-END-STOP-20261124
+  change_type: bugfix
+  bug_id: CODEAGENT-CODE-END-STOP-20261124
+  title: Keep the CodeAgent closing tag out of model stop sequences
+  description: Allow the model to finish code actions when the literal closing tag occurs within generated content.
+  observed_behavior: The stop delimiter can cut off reasoning or code and an incomplete action can be closed by the runtime.
+  expected_behavior: Keep RESULT as the strict CodeAgent stop sequence and validate complete model output without repairing the closing tag.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The existing HTTP case did not check the stop field or execute a complete action containing a closing-tag literal.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-171]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CONTEXT-POST-RESPONSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Exercise the actual CodeAgent dispatch and protocol rejection paths in the existing UT modules.
+    behaviors:
+      - Reject incomplete strict code actions without dispatch and preserve the existing legacy and provider-capability branches.
+    test_selectors:
+      - test/sdk/core/agents/test_core_agent.py
+      - test/sdk/core/agents/test_output_protocol_patch.py
+      - test/sdk/core/agents/test_execution_history_review_regressions.py

@@ -8,10 +8,17 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.responses import StreamingResponse
 
-from contracts.agent import AgentRequest
-from contracts.agentos import AgentLegacyResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
+from contracts.agentos import (
+    AgentLegacyResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun,
+    ModelBindings, RunModelBinding,
+)
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.exceptions import (
+    AppException, NorthboundStopInProgressError, RuntimeMetadataVersionConflict,
+    RuntimeServiceUnavailableError, RuntimeUpstreamError,
+)
+from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from management.services.agent import prepared_turn, runtime_client
 
 
@@ -73,6 +80,31 @@ async def test_public_prepared_stages_confirms_and_uses_signed_journal(flow):
     assert result.headers["run_id"] == REFERENCE.run_id and result.headers["conversation_id"] == "42"
     assert result.headers["X-Runtime-Metadata-Version"] == "2"
     assert b"".join([chunk async for chunk in result.body_iterator]) == b"data: answer\n\n"
+
+
+@pytest.mark.asyncio
+async def test_workbench_automation_stages_the_resolved_model(flow, mocker):
+    operations, compile_snapshot, client, _ = flow
+    config = WorkbenchSessionConfig(mode="generic_chat")
+    mocker.patch.object(prepared_turn, "_prepare_workbench", return_value=SimpleNamespace(
+        config=config, knowledge=None, version=2, previous_version=1,
+    ))
+    mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+    snapshot = compile_snapshot.return_value
+    snapshot.resource = SimpleNamespace(
+        agent_id=7, version_no=3, workbench_skill_refs=[],
+        tools=[SimpleNamespace(tool_id=AUTOMATION_PROPOSAL_TOOL)],
+    )
+    snapshot.models = ModelBindings(llm=RunModelBinding(model_id=21, alias="root", revision="v1"))
+    request = AgentRequest.model_validate({
+        **PAYLOAD.request, "entrypoint": "workbench", "enable_automation_tool": True,
+    })
+
+    result = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+
+    assert operations == ["stage", "start", "confirm"]
+    assert prepared_turn.store.stage_turn.call_args.args[5]["automation"]["model_id"] == 21
+    assert result.headers["run_id"] == REFERENCE.run_id
 
 
 @pytest.mark.asyncio
@@ -390,15 +422,17 @@ async def test_explicit_workbench_resume_obeys_disabled_feature_before_lookup(fl
 
 
 @pytest.mark.asyncio
-async def test_event_store_rejection_does_not_create_a_visible_turn(flow):
+@pytest.mark.parametrize("code", ["AGENTOS_EVENT_STORE_UNAVAILABLE", "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN"])
+async def test_confirmed_unavailable_rejection_does_not_create_a_visible_turn(flow, code):
     operations, _, client, _ = flow
-    error = RuntimeUpstreamError(503, b'{"detail":{"code":"AGENTOS_EVENT_STORE_UNAVAILABLE"}}', {})
+    error = RuntimeUpstreamError(503, json.dumps({"detail": {"code": code}}).encode(), {})
     client.start_prepared_run.side_effect = error
 
     with pytest.raises(RuntimeUpstreamError):
         await prepared_turn.start_turn(PAYLOAD, AgentRequest.model_validate(PAYLOAD.request), *ACTOR, client)
 
     assert operations == ["stage", "close"]
+    client.start_prepared_run.assert_awaited_once()
     client.resume.assert_not_awaited()
 
 
@@ -415,7 +449,9 @@ async def test_first_prepared_turn_compiles_before_creating_a_conversation(flow,
     assert compile_snapshot.await_args.kwargs["new_conversation"] is True
     assert response.headers["conversation_id"] == str(REFERENCE.conversation_id)
     output = b"".join([part async for part in response.body_iterator])
-    assert b'"type":"conversation_created"' in output and output.endswith(b"data: answer\n\n")
+    created = json.loads(output.split(b"\n\n", 1)[0].removeprefix(b"data: "))
+    assert created == {"type": "conversation_created", "content": {"conversation_id": REFERENCE.conversation_id}}
+    assert output.endswith(b"data: answer\n\n")
     client.find_active_run.assert_not_awaited()
 
 
@@ -499,15 +535,18 @@ async def test_northbound_translates_and_closes_legacy_admission_conflict(mocker
 @pytest.mark.asyncio
 async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
     pending = SimpleNamespace(reference=REFERENCE, user_id=ACTOR[0], tenant_id=ACTOR[1])
-    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=pending)
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", side_effect=[pending, pending, None])
+    reconcile = mocker.patch.object(prepared_turn, "reconcile_turn")
     client = SimpleNamespace(
         stop=AsyncMock(), stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+        find_active_run=AsyncMock(return_value=None),
     )
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
 
-    find.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
+    assert find.await_args_list == [mocker.call(REFERENCE.conversation_id, *ACTOR)] * 3
+    reconcile.assert_awaited_once_with(pending, client)
     client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
     client.stop.assert_not_awaited()
     assert result["message"] == "successfully stopped agent run for user_id actor, run_id 42"
@@ -515,19 +554,55 @@ async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
 
 @pytest.mark.asyncio
 async def test_northbound_stop_targets_registered_run_without_legacy_stop(mocker):
-    mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
     client = SimpleNamespace(
-        find_active_run=AsyncMock(return_value=REFERENCE.run_id), stop=AsyncMock(),
+        find_active_run=AsyncMock(side_effect=[REFERENCE.run_id, REFERENCE.run_id, "b" * 32]), stop=AsyncMock(),
+        stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(runtime_client, "_NORTHBOUND_STOP_POLL_SECONDS", 0)
+
+    result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+
+    assert client.find_active_run.await_args_list == [mocker.call(REFERENCE.conversation_id, *ACTOR)] * 3
+    assert find.await_count == 2
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
+    client.stop.assert_not_awaited()
+    assert result == {"status": "success", "message": "successfully stopped agent run for user_id actor, run_id 42"}
+
+
+@pytest.mark.asyncio
+async def test_northbound_stop_times_out_while_runtime_still_owns_run(mocker):
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    client = SimpleNamespace(
+        find_active_run=AsyncMock(return_value=REFERENCE.run_id),
+        stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(runtime_client, "_NORTHBOUND_STOP_WAIT_SECONDS", 0.02)
+
+    with pytest.raises(NorthboundStopInProgressError):
+        await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+
+    find.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
+    assert client.find_active_run.await_count >= 2
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
+
+
+@pytest.mark.asyncio
+async def test_northbound_stop_propagates_release_lookup_failure(mocker):
+    mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    failure = RuntimeServiceUnavailableError("Runtime unavailable")
+    client = SimpleNamespace(
+        find_active_run=AsyncMock(side_effect=[REFERENCE.run_id, failure]),
         stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
     )
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
-    result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+    with pytest.raises(RuntimeServiceUnavailableError) as result:
+        await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
 
-    client.find_active_run.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
-    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
-    client.stop.assert_not_awaited()
-    assert result == {"status": "success", "message": "successfully stopped agent run for user_id actor, run_id 42"}
+    assert result.value is failure
 
 
 @pytest.mark.asyncio

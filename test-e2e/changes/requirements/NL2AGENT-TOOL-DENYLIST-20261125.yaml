@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-TOOL-DENYLIST-20261125
+  change_type: requirement
+  requirement_id: NL2AGENT-TOOL-DENYLIST-20261125
+  title: Resource configuration with global and tenant MCP, tool and skill exclusions
+  description: Global tool names apply across tenants, while tenant rules apply to individual tool definitions.
+    Current settings control NL2Agent recommendations and new Agent bindings. Resource configuration
+    tabs contain a configuration table and a shared drawer with MCP service/tool hierarchy and skills.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-045
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - RESOURCE-CONFIG-JOURNEY-D4-001
+    modified:
+    - NL2A-COVERAGE-D3-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Combine the global names and the current tenant references using exact matching.
+    - Deduplicate edits and reject unknown selections, globally locked edits and stale revisions.
+    - Lock globally blocked options and save separate tenant references for same-name tools.
+    - Match MCP services and skills by global name or tenant ID, retain legacy tool rules and reject cross-tenant references.
+    - Open a shared drawer from the configuration table; search, select services/tools/skills, cancel or save with locked global entries.
+    reason: Unit tests cover rule composition and editor validation. The existing D3 journey exercises real
+      configuration persistence and the changed card and tool catalog boundary.
+    test_selectors:
+    - test/backend/services/test_resource_denylist.py
+    - frontend/tests/component/resourceDenylist.test.tsx
+  notes: The D3 fixture owns an isolated schema, Redis state, and model endpoint. Its cleanup removes all
+    tool and configuration rows created during the test.

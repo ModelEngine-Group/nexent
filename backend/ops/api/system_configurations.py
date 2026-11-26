@@ -10,6 +10,8 @@ from contracts.configuration import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from contracts.resource_denylist import GlobalDenylistUpdate
+from management.services.configuration.resource_denylist import DenylistConflict, read_denylist, update_denylist
 from management.services.permission.identity.session import authenticate
 from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
@@ -50,6 +52,25 @@ def _list_authorized_configurations(user):
 def _save_authorized_configurations(changes, user):
     actor = authorize_configuration_write(user)
     return save_system_configurations(changes, actor=actor)
+
+
+@router.get("/resource_denylist")
+async def get_global_denylist(request: Request, user: CurrentUser = Depends(authenticate)):
+    authorize_operations(user)
+    return await run_system_configuration_io(request.app.state.thread_manager, read_denylist)
+
+
+@router.put("/resource_denylist")
+async def put_global_denylist(
+    payload: GlobalDenylistUpdate, request: Request, user: CurrentUser = Depends(authenticate)
+):
+    actor = authorize_configuration_write(user)
+    try:
+        return await run_system_configuration_io(request.app.state.thread_manager, update_denylist, payload, actor)
+    except DenylistConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("")

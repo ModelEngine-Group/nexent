@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-KNOWLEDGE-REVIEW-FIXES-20261126
+  change_type: bugfix
+  bug_id: AGENT-KNOWLEDGE-REVIEW-FIXES-20261126
+  title: Isolate published Agent knowledge metadata and synchronize test scope
+  description: Address the two knowledge handling review findings in PR 4446.
+  observed_behavior: An invalid Skill dependency can break the published list. JSON edits can leave the form showing the old knowledge selection.
+  expected_behavior: Affected list entries suppress unresolved knowledge source flags. Valid JSON scope updates the form and the visible selection together.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Previous checks did not combine valid and invalid published Agents or round-trip the retrieval test scope through JSON.
+  feature_contract_changed: true
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: [AGENT-EDITOR-WORKFLOWS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-KNOWLEDGE-RETRIEVAL-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_agent_knowledge_sources.py
+    - frontend/tests/component/toolTestPanel.test.tsx
+    behaviors:
+    - Mixed published lists preserve healthy flags and suppress unresolved flags on the affected entry.
+    - Local and AIDP test scopes round-trip through JSON, including empty and unbound selections.
+    reason: The service test proves the per-entry error boundary. Component and D4 tests prove form and selector synchronization.
+  notes: The strengthened D4 case uses browser-local HTTP fixtures. The published list case changes display metadata only and retains the existing execution validator.

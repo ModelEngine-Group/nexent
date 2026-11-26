@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -44,8 +45,9 @@ class FakeRedisClient:
             self.hashes.pop(key, None)
             self.values.pop(key, None)
 
-    def hdel(self, key, field):
-        self.hashes.get(key, {}).pop(field, None)
+    def hdel(self, key, *fields):
+        for field in fields:
+            self.hashes.get(key, {}).pop(field, None)
 
     def hgetall(self, key):
         self._maybe_fail("hgetall")
@@ -164,6 +166,28 @@ def test_mark_stream_completed_shortens_completed_runtime_key_ttls(monkeypatch):
         ("runtime:stream:done:user-1:42", 300),
         ("runtime:replay:user-1:42", 300),
     }
+
+
+def test_maintenance_sends_message_binding_and_all_stream_keys_in_one_redis_operation(monkeypatch):
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_COMPLETED_TTL_SECONDS", 300)
+    monkeypatch.setattr(runtime_state_module.time, "time", lambda: 100)
+    client = MagicMock()
+    service = TestRuntimeStateService(client)
+
+    service.mark_interrupted_run("user-1", 42, 123)
+
+    assert client.mock_calls == [call.eval(
+        client.eval.call_args.args[0], 5, "runtime:run:user-1:42", "runtime:stream:done:user-1:42",
+        "runtime:cancel:user-1:42", "runtime:stream:user-1:42", "runtime:replay:user-1:42", "123", "100", 300,
+    )]
+
+
+def test_maintenance_does_not_swallow_redis_operation_failure():
+    client = MagicMock()
+    client.eval.side_effect = ConnectionError("Redis offline")
+
+    with pytest.raises(ConnectionError, match="Redis offline"):
+        TestRuntimeStateService(client).mark_interrupted_run("user-1", 42, 123)
 
 
 def test_disabled_service_methods_return_without_client(monkeypatch):

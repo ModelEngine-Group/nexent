@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+
 
 CASE_ID = 'AGT-AUTO-BCDD880DF58AECED'
 
@@ -104,6 +106,9 @@ def _minimal_agent_info():
 
 def _setup_memory_runtime(monkeypatch, provider):
     import management.services.agent.preparation.compiler as mod
+
+    snapshot = DEFAULT_CATALOG.build_snapshot(DEFAULT_CATALOG.defaults)
+    monkeypatch.setattr(mod, 'get_config_snapshot', lambda: snapshot)
 
     run_blocking_spy = _RunBlockingSpy()
     fixed_tool_spy = _FixedSearchToolSpy()

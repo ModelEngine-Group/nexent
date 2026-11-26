@@ -16,6 +16,7 @@ from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.agents.cores.smolagents.output_protocol import (
     ExecutableAction,
+    ExplicitFinalAnswer,
     ModelOutputProtocolError,
     NonterminalThought,
     classify_model_output,
@@ -134,3 +135,57 @@ def test_ac004_mixed_stream_executes_once_and_continues_with_actual_result(stric
                       context_runtime=ManagedContextRuntime(ContextManager(), []), enable_protocol_repair_retry=strict)
     assert str(agent.run('Run actual once and report the result.')) == 'Confirmed REAL_FAILURE'
     assert calls == ['actual'] and len(requests) == 2
+
+
+@pytest.mark.parametrize(("output", "finish"), [
+    ("</code>", "length"),
+    ("<code>print(9)", "length"),
+    ("<code>print(9", "stop"),
+    ("<code>```javascript\nprint(9)\n```</code>", "stop"),
+    ("<code>print(9)\n```python\nprint(10)\n```</code>", "stop"),
+    ("<code>print(9)</code><RESULT>fabricated</RESULT>", "stop"),
+])
+def test_strict_protocol_rejects_incomplete_or_malformed_actions(output, finish):
+    with pytest.raises(ModelOutputProtocolError):
+        classify_model_output(
+            output, protocol="code_action", finish_reason=finish,
+        )
+
+
+def test_stray_closers_do_not_hide_a_real_action_or_change_quoted_text():
+    output = '</code> <code>print("</code>")</code></code>'
+    assert classify_model_output(output, protocol="code_action") == ExecutableAction('print("</code>")')
+
+
+@pytest.mark.parametrize(("output", "answer"), [
+    ("</code> <final_answer>Done.</final_answer>", "Done."),
+    ("<final_answer>Done.</final_answer> </code></CoDe>", "Done."),
+    ("<final_answer><result>5</result></final_answer></code>", "<result>5</result>"),
+])
+def test_stray_closers_do_not_require_repair_for_a_complete_answer(output, answer):
+    assert classify_model_output(output, protocol="code_action") == ExplicitFinalAnswer(answer)
+
+
+@pytest.mark.parametrize(("content", "expected"), [
+    ("</code> \n </CoDe>", "*The model returned no content.*"),
+    ("</code><final_answer>Done.</final_answer></code>", "Done."),
+])
+def test_stray_closing_tags_do_not_send_a_second_model_request(content, expected):
+    requests = []
+
+    class RuntimeModel(Model):
+        def generate(self, messages, **kwargs):
+            requests.append(messages)
+            return ChatMessage(role="assistant", content=content)
+
+    templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
+    templates["system_prompt"] = "Respond with a final answer."
+    agent = CoreAgent(
+        observer=MessageObserver(lang="en"), model=RuntimeModel(model_id="unit"), tools=[],
+        prompt_templates=templates, context_runtime=ManagedContextRuntime(ContextManager()),
+        enable_protocol_repair_retry=True, verbosity_level=-1,
+    )
+
+    assert agent.run("Complete the task.") == expected
+    assert len(requests) == 1
+    assert all(not getattr(step, "tool_calls", None) for step in agent.memory.steps)

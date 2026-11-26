@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any
 
 from nexent.core.agents.contracts.identity import root_clarification_allowed
+from nexent.core.agents.output.answer import EXECUTION_RECORD_TAGS, PublicTextFilter
 
 
 _NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
@@ -232,7 +233,14 @@ class MessageObserver:
             ProcessType.FINAL_ANSWER,
             "" if streamed and streamed.strip() == answer.strip() else answer,
             agent_name=agent_name,
-            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
+            metadata={
+                "answer_phase": "complete",
+                "reclassify_step": state.get("reclassify_step", False),
+                # Authoritative answer carried alongside the phase marker so
+                # consumers (evaluation, exports) never have to guess whether
+                # the content field holds the answer or an empty trailer.
+                "accepted_answer": answer,
+            },
         )
 
     @property
@@ -412,6 +420,7 @@ class MessageObserver:
     def _reset_model_stream_state(self) -> None:
         self.token_buffer.clear()
         self.think_buffer.clear()
+        self._stream_state.public_model_filters = {}
         self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
         self.in_think_mode = False
         self.legacy_code_fence_pending = False
@@ -447,8 +456,21 @@ class MessageObserver:
         )
         self._model_attempt_id.set(None)
 
+    def _filter_model_text(self, channel, text):
+        filters = getattr(self._stream_state, "public_model_filters", None)
+        if filters is None:
+            filters = self._stream_state.public_model_filters = {}
+        if channel not in filters:
+            filters[channel] = PublicTextFilter(preserve_final=True, hidden_tags=EXECUTION_RECORD_TAGS)
+        return filters[channel].push(str(text))
+
     def add_model_new_token(self, new_token):
-        """Stream safe text immediately while retaining only incomplete protocol tags."""
+        """Remove internal records before the token can enter any public event."""
+        if new_token:
+            self._add_public_model_token(self._filter_model_text("body", new_token))
+
+    def _add_public_model_token(self, new_token):
+        """Stream visible text while retaining incomplete output protocol tags."""
         if not new_token:
             return
         pending = "".join(self.think_buffer) + str(new_token)
@@ -569,6 +591,14 @@ class MessageObserver:
         """
         send the remaining tokens in the double-ended queue
         """
+        filters = getattr(self._stream_state, "public_model_filters", {})
+        if "reasoning" in filters:
+            tail = filters["reasoning"].flush_visible_tail()
+            if tail:
+                self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, tail)
+        if "body" in filters:
+            self._add_public_model_token(filters["body"].flush_visible_tail())
+
         # Process the incomplete think marker as literal content at EOF.
         if self.think_buffer:
             think_buffer_text = ''.join(self.think_buffer)
@@ -761,6 +791,7 @@ class MessageObserver:
                    if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
                               "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
                               "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "source_protocol", "call_group_id", "call_index", "call_count", "parent_call_id",
                               "step_number", "duration", "step_error", "status", "end_reason", "final_content",
                               "final_block_ids", "error", "context_capacity"}}
             },
@@ -899,10 +930,9 @@ class MessageObserver:
         Handle reasoning content from the model with type MODEL_OUTPUT_DEEP_THINKING
         """
         if reasoning_content:
-            # Provider reasoning is explicitly typed and may quote the output
-            # protocol. Only the visible model body can enter the answer role.
-            self._emit(
-                ProcessType.MODEL_OUTPUT_DEEP_THINKING, reasoning_content)
+            text = self._filter_model_text("reasoning", reasoning_content)
+            if text:
+                self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, text)
 
     def get_cached_message(self):
         with self._message_query_lock:

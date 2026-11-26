@@ -7,6 +7,8 @@ import { outputStatus } from "@/lib/nexentOutputStatus";
 import type { NexentOutputStatus } from "@/types/nexentOutput";
 
 import { getCreatorMode } from "@/lib/creatorConversation";
+import { recordNl2AgentState } from "./nl2agent-state-history";
+import type { Nl2AgentStateEvent } from "./remote-chat-model-adapter";
 import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
@@ -362,11 +364,15 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         planRegistry.data ? "set" : "null"
       }`
     );
-    if (!remoteId || remoteId.startsWith("workbench-draft:")) {
+    if (
+      !remoteId ||
+      remoteId.startsWith("workbench-draft:") ||
+      remoteId.startsWith("agent-draft:")
+    ) {
       if (loadGeneration === this.loadGeneration) {
         historicalPlanCache.delete("");
       }
-      log.log(`[history-adapter] no remoteId, returning empty`);
+      log.log(`[history-adapter] local draft, returning empty history`);
       return { messages: [] };
     }
 
@@ -509,6 +515,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       const content: any[] = [];
       let restoredRuntimeStatus: NexentOutputStatus | undefined;
       let historicalCardAction: Nl2AgentCardAction | null = null;
+      let historicalWorkflowStates: Nl2AgentStateEvent[] = [];
       let historicalNl2a:
         import("./remote-chat-model-adapter").Nl2aMessage | null = null;
 
@@ -525,7 +532,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             action.agent_id > 0
           ) {
             historicalCardAction = action;
-            text = formatNl2AgentActionSummary(action.subtype);
+            const summaries: Partial<Record<Nl2AgentCardAction["subtype"], string>> =
+              {
+                prompt_generation: action.action === "cancel" ? "Prompt replacement cancelled" : "Prompt application confirmed",
+              };
+            text = summaries[action.subtype] || formatNl2AgentActionSummary(action.subtype);
           }
         } catch {
           // Ordinary user text is not a structured card action.
@@ -771,6 +782,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
           if (part.type === "nl2a_state") {
             const state = parseNl2AgentState(part.content);
+            if (state && getCreatorMode(detail) === "agent_create" &&
+                detail.target?.type === "agent" && state.agent_id === detail.target.id) {
+              historicalWorkflowStates = recordNl2AgentState(historicalWorkflowStates, state);
+            }
             if (
               getCreatorMode(detail) === "agent_create" &&
               state?.event === "agent_generation_completed" &&
@@ -1278,7 +1293,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         if (content.length === 0) {
           const fallbackText = messageParts
-            .filter((part) => part.type !== "skill_file_uploads")
+            .filter((part) => !["skill_file_uploads", "nl2a_state", "nl2a"].includes(part.type))
             .map((part) => part.content)
             .join("\n");
           if (fallbackText) content.push({ type: "text", text: fallbackText });
@@ -1368,7 +1383,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // An NL2Agent turn may consist only of an interactive card boundary.
       // Keep the message so its restored metadata can render the card.
       if (
-        (historicalNl2a ||
+        (historicalNl2a || historicalWorkflowStates.length > 0 ||
           (msg.role === "assistant" && msg.status === "streaming")) &&
         content.length === 0
       ) {
@@ -1408,6 +1423,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             ? { nl2agentCardAction: historicalCardAction }
             : {}),
           ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
+          ...(historicalWorkflowStates.length ? { nl2agentStates: historicalWorkflowStates } : {}),
           // Empty saved usage must not fall back to another turn's live counters.
           stepTokenCounts,
           ...(msg.role === "user" && msg.annotations?.length
@@ -1626,15 +1642,9 @@ export const createShareThreadListAdapter = (
 // Server conversation id registry
 // ---------------------------------------------------------------------------
 //
-// `generateTitle` is invoked by the assistant-ui runtime concurrently with
-// `ChatModelAdapter.run()`. For a brand-new thread the adapter's `remoteId`
-// is still the empty-string placeholder returned by `initialize()`, while the
-// real backend `conversation_id` only lands in the page state after the
-// `agent/run` response header is parsed. To avoid sending `conversation_id: 0`
-// (which happens because `Number("") === 0`) we let the page register a
-// resolver that points at its `serverConversationIdsRef` plus the active
-// assistant-ui thread id. `generateTitle` then polls the ref until the real
-// id is available before issuing the title request.
+// Drafts retain their local remoteId in the runtime. The page records the
+// backend conversation ID from the first agent/run response so adapter
+// operations such as rename and delete can resolve a real server ID.
 type ServerConversationIdState = {
   idsRef: MutableRefObject<Map<string, string>>;
   getActiveThreadId: () => string | undefined;
@@ -1704,7 +1714,7 @@ const waitForServerConversationId = async (
   // reliable than the active-thread registry while the sidebar is switching.
   if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
 
-  // New threads use an empty remoteId until they are reloaded from the
+  // New threads use a local draft ID until they are reloaded from the
   // backend. The sidebar captures the local ID before calling rename/delete,
   // because assistant-ui may switch the active thread as part of that action.
   const readNow = (): string | undefined => {
@@ -1858,12 +1868,12 @@ export const createConversationThreadListAdapter = (
       // run never reuses (see commit history for details).
       //
       return {
-        // Each reserved Workbench draft needs a distinct local identity so
-        // assistant-ui cannot merge unsent conversations under the empty ID.
+        // The runtime reconciles threads by remote ID, including empty IDs.
+        // Give every unsent draft its own identity until the first send.
         remoteId:
           conversationType === "workbench"
             ? `workbench-draft:${_threadId}`
-            : "",
+            : `agent-draft:${_threadId}`,
         externalId: "",
       };
     },

@@ -86,16 +86,47 @@ def _redact_urls(text, depth=0):
     return _URL_PATTERN.sub(replace, text)
 
 
-def local_capture_enabled(manager):
-    """Use concrete configuration values; permissive test doubles must stay disabled."""
-    config = getattr(manager, '_config', None)
+def local_capture_configured(config):
+    """Recognize independent local capture and the legacy local-only provider."""
+    if getattr(config, 'capture_local_traces', False) is True:
+        return True
     sink = getattr(config, 'provider', None)
-    return (getattr(manager, 'is_enabled', False) is True
-            and getattr(config, 'export_traces', False) is True
+    return (getattr(config, 'export_traces', False) is True
             and type(sink) is str and sink == 'local_file')
 
 
-def local_content_value(value):
+def local_capture_enabled(manager):
+    """Use concrete configuration values; permissive test doubles must stay disabled."""
+    return (
+        getattr(manager, 'is_enabled', False) is True
+        and local_capture_configured(getattr(manager, '_config', None))
+    )
+
+
+def _redact_json_text(text, clean, depth):
+    shadowed_secret = False
+
+    def object_from_pairs(pairs):
+        nonlocal shadowed_secret
+        obj = {}
+        for key, value in pairs:
+            if key in obj and clean(obj[key], depth + 1) != obj[key]:
+                shadowed_secret = True
+            obj[key] = value
+        return obj
+
+    try:
+        decoded = json.loads(text, object_pairs_hook=object_from_pairs)
+    except json.JSONDecodeError:
+        return _redact_urls(text)
+    sanitized = clean(decoded, depth + 1)
+    # Keep original whitespace and escapes only when every original value was safe.
+    if not shadowed_secret and sanitized == decoded:
+        return text
+    return json.dumps(sanitized, ensure_ascii=False, allow_nan=False)
+
+
+def local_content_value(value, *, redact_json_strings=False):
     """Convert supported SDK DTOs without inspecting arbitrary runtime services."""
     def clean(item, depth=0):
         if depth > 64:
@@ -103,6 +134,8 @@ def local_content_value(value):
         if isinstance(item, Enum):
             return clean(item.value, depth + 1)
         if isinstance(item, str):
+            if redact_json_strings and item.lstrip().startswith(('{', '[', '"')):
+                return _redact_json_text(item, clean, depth)
             return _redact_urls(item)
         if item is None or type(item) in {int, float, bool}:
             return item
@@ -136,6 +169,18 @@ def local_content_value(value):
     return clean(value)
 
 
-def safe_local_content(value):
-    cleaned = local_content_value(value)
+def safe_local_content(value, *, redact_json_strings=False):
+    cleaned = local_content_value(value, redact_json_strings=redact_json_strings)
     return cleaned if isinstance(cleaned, str) else json.dumps(cleaned, ensure_ascii=False, allow_nan=False)
+
+
+def set_local_span_content(span, field, value):
+    """Attach a private body or mark its capture gap without affecting business execution."""
+    try:
+        span.set_attribute(f'nexent.local.{field}.value', safe_local_content(value, redact_json_strings=True))
+    except Exception:
+        try:
+            span.set_attributes({'nexent.local.nexent.trajectory.gap': True,
+                                 f'nexent.local.nexent.availability.{field}': 'serialization_failed'})
+        except Exception:
+            pass

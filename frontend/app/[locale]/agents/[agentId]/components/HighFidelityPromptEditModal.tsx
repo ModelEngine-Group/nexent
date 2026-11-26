@@ -2,7 +2,6 @@
 
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Modal } from "antd";
@@ -13,7 +12,7 @@ interface HighFidelityPromptEditModalProps {
   content: string;
   readOnly: boolean;
   onClose: () => void;
-  onSave: (content: string) => void;
+  onChange: (content: string) => void;
 }
 
 export default function HighFidelityPromptEditModal({
@@ -21,10 +20,9 @@ export default function HighFidelityPromptEditModal({
   content,
   readOnly,
   onClose,
-  onSave,
+  onChange,
 }: HighFidelityPromptEditModalProps) {
   const { t } = useTranslation("common");
-  const [editContent, setEditContent] = useState(content);
 
   return (
     <Modal
@@ -36,26 +34,17 @@ export default function HighFidelityPromptEditModal({
       styles={{
         body: { maxHeight: "50vh", overflowY: "auto", paddingBlock: 16 },
       }}
-      cancelText={t("common.cancel")}
-      okText={t("common.confirm")}
       onCancel={onClose}
-      onOk={() => {
-        if (readOnly) return;
-        onSave(editContent);
-        onClose();
-      }}
       footer={
-        readOnly ? (
-          <div className="flex justify-end">
-            <Button onClick={onClose}>{t("common.close")}</Button>
-          </div>
-        ) : undefined
+        <Button type="primary" onClick={onClose}>
+          {t("common.done")}
+        </Button>
       }
     >
       <HighFidelityTextArea
         limit={100000}
-        value={editContent}
-        onChange={(event) => setEditContent(event.target.value)}
+        value={content}
+        onChange={(event) => onChange(event.target.value)}
         disabled={readOnly}
         aria-label={title}
         classNames={{

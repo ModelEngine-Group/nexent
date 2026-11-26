@@ -20,6 +20,10 @@ export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   systemConfigurations: `${API_BASE_URL}/system_configurations`,
+  resourceDenylist: {
+    global: `${API_BASE_URL}/system_configurations/resource_denylist`,
+    tenant: `${API_BASE_URL}/tenant_config/resource_denylist`,
+  },
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
     importArchive: `${API_BASE_URL}/trajectory/import`,
@@ -40,6 +44,24 @@ export const API_ENDPOINTS = {
   operations: {
     authorization: `${API_BASE_URL}/ops/authorization`,
     scope: `${API_BASE_URL}/ops/scope`,
+    resources: `${API_BASE_URL}/ops/resources`,
+    agentMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/agents`,
+    agentMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/agents/summary`,
+    agentMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/agents/trends`,
+    agentMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/agents/rankings`,
+    modelMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/models/trends`,
+    modelMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/models`,
+    modelMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/models/summary`,
+    skillMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/skills/summary`,
+    skillMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/skills/trends`,
+    skillMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/skills`,
+    skillMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/skills/rankings`,
+    mcpMonitoringCatalog: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/catalog`,
+    mcpMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/summary`,
+    mcpMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/trends`,
+    mcpMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools`,
+    mcpMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/rankings`,
+    mcpMonitoringOverview: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/overview`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
@@ -128,6 +150,10 @@ export const API_ENDPOINTS = {
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
+    nl2agentResourceInstallations: `${API_BASE_URL}/agent/nl2agent/resource_installations`,
+    nl2agentResourceInstallationAttempts: `${API_BASE_URL}/agent/nl2agent/resource_installation_attempts`,
+    nl2agentResourceLinks: `${API_BASE_URL}/agent/nl2agent/resource_links`,
+    nl2agentKnowledgeRecommendations: `${API_BASE_URL}/agent/nl2agent/knowledge_recommendations`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     listPage: `${API_BASE_URL}/agent/list/page`,
@@ -615,6 +641,7 @@ export const API_ENDPOINTS = {
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
       embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
+      tenantSwitch: `${API_BASE_URL}/memory/config/tenant-switch`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>

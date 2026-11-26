@@ -14,6 +14,8 @@ from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel
 from nexent.core.agents.resources.workspace import SandboxWorkspace
 from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool
+from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
+from nexent.core.utils.observer import ProcessType
 
 
 @pytest.fixture
@@ -107,6 +109,52 @@ def test_download_returns_kernel_path_but_writes_host_path(tmp_path):
     result = json.loads(tool.forward('s3://bucket/input.txt', 'inputs/input.txt'))
     assert result['local_path'] == '/mnt/run/inputs/input.txt'
     assert (tmp_path / 'inputs' / 'input.txt').read_text(encoding='utf-8') == 'hello'
+
+
+def test_bind_finalize_uploads_new_artifact_once(bind_agent, mocker):
+    outputs = Path(bind_agent.workspace_path) / 'outputs'
+    explicit_file = outputs / 'doubled.txt'
+    explicit_file.write_bytes(b'2\n4\n6\n')
+    report_file = outputs / 'reports' / 'child-a-report.txt'
+    report_file.parent.mkdir()
+    report_file.write_bytes(b'child A report')
+
+    client = Mock(default_bucket='nexent')
+    payloads = []
+    def accept(stream, key):
+        payloads.append((stream.read(), key))
+        return True, ''
+    client.upload_fileobj.side_effect = accept
+    bind_agent.observer = Mock()
+    bind_agent._workspace_uploads = []
+    tool = UploadToS3Tool(
+        workspace_path=bind_agent.workspace_path,
+        minio_client=client,
+        user_id='user',
+        run_id='run',
+        on_upload=bind_agent._record_workspace_upload,
+    )
+    tool.workspace_mapping = bind_agent.workspace_mapping
+    bind_agent.agent.tools = {'upload_to_s3': tool}
+
+    tool.forward('doubled.txt')
+    forward = mocker.patch.object(tool, 'forward', wraps=tool.forward)
+    bind_agent._finalize_file_workspace()
+
+    forward.assert_called_once_with(
+        '/mnt/work/user/run/outputs/reports/child-a-report.txt',
+        'outputs/reports/child-a-report.txt',
+    )
+    assert payloads == [
+        (b'2\n4\n6\n', 'workspace/user/run/outputs/doubled.txt'),
+        (b'child A report', 'workspace/user/run/outputs/reports/child-a-report.txt'),
+    ]
+    bind_agent.observer.add_message.assert_called_once_with(
+        '', ProcessType.FILE_ARTIFACT, {'artifacts': bind_agent._workspace_uploads},
+    )
+    assert [item['filename'] for item in bind_agent._workspace_uploads] == [
+        'doubled.txt', 'child-a-report.txt',
+    ]
 
 
 def test_bootstrap_retries_only_failed_initialization(bind_agent):

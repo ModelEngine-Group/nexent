@@ -37,7 +37,7 @@ import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-a
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
-import type { STTModelConfig } from "@/types/modelConfig";
+import { isDictationConfigured } from "@/lib/dictationConfig";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import {
@@ -87,14 +87,6 @@ function useLocalChatRuntime(
     },
   });
 }
-
-const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
-  if (!config?.modelName) return false;
-  if (config.modelFactory === "volcengine") {
-    return Boolean(config.modelAppid && config.accessToken);
-  }
-  return Boolean(config.apiConfig?.apiKey);
-};
 
 export function WorkbenchSessionProvider({
   children,

@@ -10,6 +10,7 @@ import {
   FileIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  ImageIcon,
   MusicIcon,
   PlusIcon,
   PresentationIcon,
@@ -235,49 +236,58 @@ const AttachmentPreview: FC<{
     }
   };
 
-  // Composer mode renders a compact single-line chip inside the input box:
-  // blue document icon (or image thumbnail), truncated name, always-visible ×.
   if (isComposer) {
+    const fileSize = formatFileSize(attachment.file?.size ?? attachment.size);
+    const canPreview = Boolean(isImage && localImageUrl);
+    const CardContent = canPreview ? "button" : "div";
     return (
       <>
-        <div
-          className="group/attachment flex h-8 max-w-65 items-center gap-2 rounded-lg border bg-card py-1 pl-2 pr-1 text-left"
-          onClick={handleCardClick}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              handleCardClick();
+        <div className="flex w-60 max-w-full items-center gap-1 rounded-lg border border-[var(--color-border-separator)] bg-card p-2">
+          <CardContent
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-2 text-left",
+              canPreview &&
+                "rounded-base focus-visible:outline-2 focus-visible:outline-primary"
+            )}
+            type={canPreview ? "button" : undefined}
+            onClick={canPreview ? handleCardClick : undefined}
+            aria-label={
+              canPreview ? t("chat.attachments.preview", { name }) : undefined
             }
-          }}
-          role={isImage && localImageUrl ? "button" : undefined}
-          tabIndex={isImage && localImageUrl ? 0 : undefined}
-          aria-label={
-            isImage && localImageUrl
-              ? t("chat.attachments.preview", { name })
-              : undefined
-          }
-        >
-          {isImage && thumbnailUrl ? (
-            <img
-              src={thumbnailUrl}
-              alt={name}
-              className="size-5 shrink-0 rounded object-cover"
-            />
-          ) : (
-            <span className="shrink-0 text-blue-600 [&_svg]:size-4">
-              {getFileIcon(name, contentType)}
-            </span>
-          )}
-          <span className="min-w-0 flex-1 truncate text-sm leading-5 text-[#191919]">
-            {name}
-          </span>
-          <AttachmentPrimitive.Remove
-            aria-label={t("chat.attachments.remove", { name })}
-            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
           >
-            <XIcon className="size-3.5" />
+            <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-base bg-brand-soft text-primary">
+              {isImage && thumbnailUrl ? (
+                <img
+                  src={thumbnailUrl}
+                  alt=""
+                  className="size-full object-cover"
+                />
+              ) : (
+                (getFileIcon(name, contentType) ?? (
+                  <ImageIcon className="size-5" />
+                ))
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className="block truncate text-sm font-medium leading-5 text-foreground"
+                title={name}
+              >
+                {name}
+              </span>
+              {fileSize && (
+                <span className="block text-xs leading-4 text-[var(--color-text-secondary)]">
+                  {fileSize}
+                </span>
+              )}
+            </span>
+          </CardContent>
+          <AttachmentPrimitive.Remove
+            type="button"
+            aria-label={t("chat.attachments.remove", { name })}
+            className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-base text-foreground hover:bg-accent"
+          >
+            <XIcon className="size-4" />
           </AttachmentPrimitive.Remove>
         </div>
 
@@ -455,7 +465,7 @@ export const ComposerAttachments: FC<{ className?: string }> = ({
   className,
 }) => {
   return (
-    <div className={cn("flex flex-wrap gap-2 px-2 py-1", className)}>
+    <div className={cn("flex min-w-0 flex-wrap gap-2", className)}>
       <ComposerPrimitive.Attachments>
         {({ attachment }) => {
           return <AttachmentPreview attachment={attachment} mode="composer" />;

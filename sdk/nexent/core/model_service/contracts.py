@@ -2,10 +2,11 @@
 
 """Provider-independent model messages, requests and complete responses."""
 
+from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 from uuid import UUID, uuid4
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue, PrivateAttr, model_validator
 
 from nexent.core.model_service.profiles.contracts import NonBlankString, ProfileContract
 
@@ -70,7 +71,19 @@ class TokenUsage(ProfileContract):
     semantics_id: NonBlankString | None = None
 
 
+@dataclass(frozen=True)
+class AgentCompletionInput:
+    """Private Agent opt-in data; never a response wire/telemetry field."""
+
+    request_id: str
+    attempt: int
+    semantic_json: str = field(repr=False)
+    binding: object = field(repr=False)
+
+
 class AssistantMessage(ProfileContract):
+    _agent_input: AgentCompletionInput | None = PrivateAttr(default=None)
+
     message_id: UUID = Field(default_factory=uuid4)
     content_parts: list[dict[str, JsonValue]] = Field(default_factory=list, repr=False)
     reasoning_parts: list[dict[str, JsonValue]] = Field(default_factory=list, repr=False)

@@ -19,7 +19,7 @@ case:
   preconditions:
   - A disposable Nexent deployment with this implementation and an approved controlled provider profile is available.
   - A disposable authenticated browser session and a working current sandbox image are available.
-  - The maintained private TFP fixture and runner-owned controlled provider are available for the published test Agent.
+  - The TFP deployment provides an owned Skill and a runner-owned controlled provider for the published test Agent.
   test_data:
     profile: mock
   steps:

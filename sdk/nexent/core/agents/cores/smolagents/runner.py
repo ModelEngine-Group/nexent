@@ -71,6 +71,8 @@ def _run_with_resources(agent_run_info, tool_collection=None):
         minio_files=getattr(agent_run_info, "minio_files", None),
         cancellation_scope=agent_run_info.cancellation_scope,
     )
+    if agent_run_info.__dict__.get('_runtime_run_lifecycle') is not None:
+        kwargs['runtime_lifecycle'] = agent_run_info.__dict__['_runtime_run_lifecycle']
     if tool_collection is not None:
         kwargs["mcp_tool_collection"] = tool_collection
     nexent = NexentAgent(**kwargs)

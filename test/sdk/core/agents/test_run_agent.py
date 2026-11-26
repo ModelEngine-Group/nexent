@@ -1631,6 +1631,7 @@ def test_agent_run_thread_grouped_mcp_failure_friendly_message(
     """End to end: grouped MCP failure → friendly FINAL_ANSWER + error-level log."""
     basic_agent_run_info.observer.lang = "en"
     basic_agent_run_info.mcp_host = _mcp_host_single()
+    _mock_managed_mcp(monkeypatch)
     failing = MagicMock(name="NexentAgentInstance")
     failing.create_single_agent.side_effect = BaseExceptionGroup(
         "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
@@ -1656,3 +1657,50 @@ def test_agent_run_thread_grouped_mcp_failure_friendly_message(
         if "event=agent_run_failed" in record.getMessage()
     ]
     assert error_records and error_records[0].levelname == "ERROR"
+
+
+def test_agent_run_thread_propagates_monitoring_mcp_catalog(basic_agent_run_info, monkeypatch):
+    """The per-run MCP catalog travels from AgentRunInfo into the monitoring context."""
+    from nexent.monitor.monitoring import get_agent_monitoring_context
+
+    catalog = [{
+        "url": "http://mcp.invalid/mcp",
+        "mcp_server_id": 3,
+        "mcp_server_name": "docs",
+        "mcp_server_type": "container",
+    }]
+    basic_agent_run_info.monitoring_mcp_servers = catalog
+    captured = {}
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+
+    def create_nexent_agent(*args, **kwargs):
+        context = get_agent_monitoring_context()
+        captured["catalog"] = getattr(context, "monitoring_mcp_servers", None)
+        return mock_nexent_instance
+
+    monkeypatch.setattr(smol_runner, "NexentAgent", MagicMock(side_effect=create_nexent_agent))
+    run_agent.agent_run_thread(basic_agent_run_info)
+    assert captured["catalog"] == catalog
+
+
+def test_agent_run_thread_inherits_catalog_from_existing_context(basic_agent_run_info, monkeypatch):
+    """A catalog bound before the run is preserved when the run info carries none."""
+    from nexent.monitor.monitoring import (
+        AgentRunMetadata,
+        agent_monitoring_context,
+        get_agent_monitoring_context,
+    )
+
+    catalog = [{"url": "http://a.invalid/mcp", "mcp_server_type": "remote"}]
+    captured = {}
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+
+    def create_nexent_agent(*args, **kwargs):
+        context = get_agent_monitoring_context()
+        captured["catalog"] = getattr(context, "monitoring_mcp_servers", None)
+        return mock_nexent_instance
+
+    monkeypatch.setattr(smol_runner, "NexentAgent", MagicMock(side_effect=create_nexent_agent))
+    with agent_monitoring_context(AgentRunMetadata(monitoring_mcp_servers=catalog)):
+        run_agent.agent_run_thread(basic_agent_run_info)
+    assert captured["catalog"] == catalog

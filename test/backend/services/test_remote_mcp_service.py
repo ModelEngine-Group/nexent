@@ -2153,6 +2153,41 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    @patch_import_context('management.services.mcp.service.asyncio.sleep', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_registry_json_by_id')
+    @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server')
+    async def test_retries_transient_session_failure(
+        self, mock_tools, mock_update, mock_health, mock_get, mock_sleep,
+    ):
+        mock_get.return_value = {
+            "mcp_name": "example",
+            "mcp_server": "https://srv/mcp",
+            "authorization_token": None,
+            "custom_headers": None,
+            "registry_json": {},
+        }
+        mock_health.return_value = ["tool1"]
+        calls = 0
+
+        async def fail_once(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise MCPConnectionError("Session terminated")
+            return [SimpleNamespace(name="tool1", description="First tool")]
+
+        mock_tools.side_effect = fail_once
+
+        result = await refresh_mcp_service_tool_count(
+            tenant_id="tid", user_id="uid", mcp_id=1,
+        )
+
+        self.assertEqual(result, ["tool1"])
+        self.assertEqual(calls, 2)
+        mock_sleep.assert_awaited_once_with(0.2)
+
     @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_record_not_found(self, mock_get):
         """Missing record raises McpNotFoundError."""

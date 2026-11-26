@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-PARALLEL-CALL-ID-20261125
+  change_type: bugfix
+  bug_id: JIUWEN-PARALLEL-CALL-ID-20261125
+  title: Preserve native Jiuwen child invocation identity during parallel dispatch
+  description: Carry the scheduled call ID through native collaborator dispatch and bind the child policy to it.
+  observed_behavior: Identical arguments left both scheduled children without their assigned isolation mode.
+  expected_behavior: Distinct call IDs preserve read-only or Docker isolation even when arguments match.
+    Unverifiable native calls are rejected before invoking the child.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The existing parallel fixture used different child names and inputs.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-RESOURCES]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-RESOURCES-D5-003]
+    added: []
+    modified: [JIUWEN-RESOURCES-D3-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Reject missing, mismatched and repeated dispatch identities before child execution.
+    - Apply the trusted provider ID to workspace isolation, timeout and Python concurrency limits.
+    reason: Unit tests cover invalid identity and sandbox dispatch. D3 uses actual Runner, model transport and workers
+      to prove same-input overlap and read-only visibility. Existing Docker variants cover Kernel ownership.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_collaboration.py
+    - test/sdk/core/agents/test_jiuwen_parallel_sandbox.py
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/changes/runtime-jiuwen-native-parallel/.
+    The existing D3 fixture owns its local HTTP peers, Runner sessions, and worker threads. No shared preparation is needed.

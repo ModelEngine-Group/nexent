@@ -13,7 +13,7 @@ function renderModal(onClose = vi.fn()) {
       content=""
       readOnly={false}
       onClose={onClose}
-      onSave={vi.fn()}
+      onChange={vi.fn()}
     />
   );
   return onClose;

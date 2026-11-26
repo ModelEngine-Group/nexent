@@ -148,3 +148,90 @@ async def test_memory_query_embedding_checks_binding_and_dimension(mocker, outco
         invoke.assert_awaited_once_with(
             model_id=11, revision="rev", query="query", user_id=_ACTOR.user_id, tenant_id=_ACTOR.tenant_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_memory_embedding_budget_reaches_runtime_adapter_without_changing_normal_invocations(monkeypatch):
+    from infrastructure import memory_embedding_health
+
+    monkeypatch.setattr(memory_embedding_health, "MEMORY_EMBEDDING_COOLDOWN_SECONDS", 0)
+    adapter = SimpleNamespace(
+        get_embeddings_with_deadline=AsyncMock(return_value=[[0.25, 0.75]]),
+        invoke=AsyncMock(return_value=[[0.25, 0.75]]),
+    )
+    record = _record(model_type="embedding", model_name="embed", max_tokens=2)
+    service = ModelService(Mock(return_value=record), Mock(return_value=adapter))
+    automatic = await service.invoke(EmbeddingInvocation(
+        model_id=7, input=["query"], memory_timeout_seconds=0.5,
+    ), _ACTOR)
+    assert automatic.output == [[0.25, 0.75]]
+    assert 0 < adapter.get_embeddings_with_deadline.await_args.kwargs["timeout"] < 0.5
+    adapter.invoke.assert_not_awaited()
+    ordinary = await service.invoke(EmbeddingInvocation(model_id=7, input=["a", "b"]), _ACTOR)
+    assert ordinary.output == [[0.25, 0.75]]
+    assert adapter.invoke.await_args.args[0].inputs == ["a", "b"]
+    assert adapter.invoke.await_args.args[0].retries == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["healthy", "upstream_timeout", "connection", "transport_deadline", "cancel"])
+async def test_shared_embedding_health_uses_an_available_runtime_lane(monkeypatch, outcome):
+    import asyncio
+    import httpx
+    from threading import Event, get_ident
+    from infrastructure import memory_embedding_health as health, memory_io
+    from nexent.core.concurrency import LanePolicy, ThreadManager
+    from runtime.thread_management import runtime_thread_manager
+
+    # Use the actual Runtime lane names; an invented lane must not silently
+    # degrade shared health into process-local-only state.
+    manager = ThreadManager('health-runtime-contract', {
+        lane.name: LanePolicy(name=lane.name, max_workers=2, max_queue_size=0,
+                              queue_timeout_seconds=0, cancel_grace_seconds=0, shutdown_grace_seconds=1)
+        for lane in runtime_thread_manager.snapshot().lanes
+    })
+    manager.start()
+    caller = get_ident()
+    worker = []
+    entered, release = Event(), Event()
+    def read(_key):
+        worker.append(get_ident())
+        entered.set()
+        if outcome == "cancel":
+            release.wait(.5)
+        return None
+    redis = Mock(get=Mock(side_effect=read))
+    monkeypatch.setattr(health, '_client', lambda: redis)
+    monkeypatch.setattr(health, 'MEMORY_EMBEDDING_COOLDOWN_SECONDS', 300)
+    monkeypatch.setattr(memory_io, 'get_default_thread_manager', lambda: manager)
+    adapter = SimpleNamespace(get_embeddings_with_deadline=AsyncMock(return_value=[[.25, .75]]))
+    if outcome in {"upstream_timeout", "transport_deadline", "connection"}:
+        adapter.get_embeddings_with_deadline.side_effect = (
+            httpx.ConnectError("unreachable") if outcome == "connection" else httpx.ReadTimeout("read deadline")
+        )
+    if outcome == "transport_deadline":
+        from runtime.model import memory_embedding
+        monkeypatch.setattr(memory_embedding, "remaining_time", Mock(side_effect=[1., .15, .04]))
+    health._local.clear()
+    record = _record(model_type='embedding', model_name='embed', max_tokens=2)
+    service = ModelService(Mock(return_value=record), Mock(return_value=adapter))
+    try:
+        invocation = service.invoke(EmbeddingInvocation(model_id=7, input=['query'], memory_timeout_seconds=1), _ACTOR)
+        if outcome == "cancel":
+            task = asyncio.create_task(invocation)
+            while not entered.is_set():
+                await asyncio.sleep(.001)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            adapter.get_embeddings_with_deadline.assert_not_awaited()
+        else:
+            result = await invocation
+            assert result.output == ([[.25, .75]] if outcome == "healthy" else None)
+            assert redis.set.called is (outcome in {"upstream_timeout", "connection"})
+        redis.get.assert_called_once()
+        assert worker and worker[0] != caller
+    finally:
+        release.set()
+        await manager.shutdown(timeout=1)
+        health._local.clear()

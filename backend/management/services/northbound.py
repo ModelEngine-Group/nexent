@@ -15,15 +15,16 @@ from nexent.core.concurrency import ManagedTaskSpec
 
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
+from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, NorthboundStopInProgressError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.agent import AgentRequest
+from contracts.agentos import AgentResume
 from contracts.tool import ToolParamsRequest
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
 from management.db.conversation.repository import get_conversation_list, get_conversation_messages
 from management.db.identity.token import get_latest_usage_metadata, log_token_usage
 from management.services.agent.management import get_agent_by_name_impl
-from management.services.agent.runtime_client import forward_agent_stop, forward_northbound_run
+from management.services.agent.runtime_client import forward_agent_stop, forward_conversation_resume, forward_northbound_run
 from management.thread_management import config_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.versions import list_published_agents_impl
@@ -373,6 +374,7 @@ async def start_streaming_chat(
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None,
     final_answer_mode: Literal["complete", "delta"] = "complete",
+    stream_cursor: bool = False,
 ) -> StreamingResponse:
     new_conversation_data: Optional[Dict[str, Any]] = None
     try:
@@ -437,6 +439,7 @@ async def start_streaming_chat(
             version_no=latest_version_no,
             metadata=metadata,
             enable_automation_tool=False,
+            stream_cursor=stream_cursor,
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
         await idempotency_start(composed_key)
@@ -488,6 +491,20 @@ async def start_streaming_chat(
     return response
 
 
+async def resume_streaming_chat(ctx: NorthboundContext, conversation_id: int | None, replay_cursor: str):
+    if conversation_id is None or conversation_id <= 0:
+        raise ValueError("Replay requires an existing conversation ID")
+    cursor = AgentResume(
+        conversation_id=conversation_id, run_id=replay_cursor.partition(":")[0], after_event_id=replay_cursor,
+    )
+    await check_and_consume_rate_limit(ctx.tenant_id)
+    response = await forward_conversation_resume(cursor, ctx.user_id, ctx.tenant_id)
+    response.headers["X-Request-Id"] = ctx.request_id
+    response.headers["conversation_id"] = str(conversation_id)
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
+
+
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
         stop_result = await forward_agent_stop(
@@ -510,6 +527,7 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
     except (
+        NorthboundStopInProgressError,
         RuntimeServiceTimeoutError,
         RuntimeServiceUnavailableError,
         RuntimeUpstreamError,

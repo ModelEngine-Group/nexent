@@ -11,6 +11,7 @@ import sys
 import types
 import importlib
 import json
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -996,6 +997,25 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
     assert result[0] == "hello world"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_id", [None, -123])
+async def test_evaluation_preserves_its_scope_when_dispatched_through_agentos(service_module, monkeypatch, conversation_id):
+    from management.services.agent import runtime_client
+
+    answer = types.SimpleNamespace(answer="answer", events=[])
+    dispatch = AsyncMock(return_value=answer)
+    monkeypatch.setattr(runtime_client, "forward_evaluation_case", dispatch)
+    result = await service_module._run_agent_to_final_answer(
+        1, "tenant", "user", "query", 1, conversation_id=conversation_id,
+    )
+
+    assert result == ("answer", [])
+    payload, user, tenant = dispatch.await_args.args
+    assert (user, tenant) == ("user", "tenant")
+    assert payload.conversation_id == (conversation_id or 0)
+    assert (payload.agent_id, payload.version_no, payload.query) == (1, 1, "query")
+
+
 def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
     first = service_module._evaluation_conversation_id(10, 20)
     second = service_module._evaluation_conversation_id(10, 21)
@@ -1141,6 +1161,7 @@ def test_make_background_done_callback_failure_marks_run_failed(service_module):
         agent_evaluation_id=99,
     )
     future = MagicMock()
+    future.cancelled.return_value = False
     future.exception.return_value = RuntimeError("worker crashed")
 
     callback(future)
@@ -1148,6 +1169,7 @@ def test_make_background_done_callback_failure_marks_run_failed(service_module):
     assert captured["agent_evaluation_id"] == 99
     assert captured["tenant_id"] == "t1"
     assert captured["status"] == "FAILED"
+    assert captured["expected_status"] == "PENDING"
     assert captured["updated_by"] == "u1"
     assert "error_message" in captured
 
@@ -1167,6 +1189,7 @@ def test_make_background_done_callback_no_exception_is_noop(service_module):
         agent_evaluation_id=100,
     )
     future = MagicMock()
+    future.cancelled.return_value = False
     future.exception.return_value = None
 
     callback(future)
@@ -1189,10 +1212,36 @@ def test_make_background_done_callback_update_failure_is_logged(service_module):
         agent_evaluation_id=101,
     )
     future = MagicMock()
+    future.cancelled.return_value = False
     future.exception.return_value = RuntimeError("worker crashed")
 
     # Should not raise even though the inner update fails.
     callback(future)
+
+
+def test_worker_submission_failure_keeps_a_persisted_evaluation_pending(service_module):
+    from management.services.evaluation.dispatch import EvaluationSubmissionError
+
+    update = MagicMock()
+    bind_import_attribute(service_module, "update_agent_evaluation_status", update)
+    future = MagicMock()
+    future.cancelled.return_value = False
+    future.exception.return_value = EvaluationSubmissionError(500, "Failed to submit agent evaluation run")
+
+    service_module._make_background_done_callback("t1", "u1", 99)(future)
+
+    update.assert_not_called()
+
+
+def test_cancelled_background_dispatch_keeps_a_persisted_evaluation_pending(service_module):
+    update = MagicMock()
+    bind_import_attribute(service_module, "update_agent_evaluation_status", update)
+    future = Future()
+    assert future.cancel()
+
+    service_module._make_background_done_callback("t1", "u1", 99)(future)
+
+    update.assert_not_called()
 
 
 def test_create_agent_evaluation_run_happy_path(service_module):
@@ -1351,6 +1400,22 @@ def test_execute_agent_evaluation_run_completes_with_overall_score(service_modul
     ]
     assert len(completed_calls) == 1
     assert completed_calls[0].kwargs["score_overall"] == 1.0
+
+
+def test_owned_evaluation_persists_its_terminal_status_after_case_completion(service_module):
+    _wire_executor_dependencies(service_module, [_make_exec_case(1)])
+    writes = service_module.update_agent_evaluation_status
+    case_writes = service_module.update_agent_evaluation_case_result
+
+    def check_case_completion(*, status, **_):
+        if status == "COMPLETED":
+            assert case_writes.call_args.kwargs["status"] == "COMPLETED"
+
+    writes.side_effect = check_case_completion
+    service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
+
+    assert [record.kwargs["status"] for record in writes.call_args_list] == ["RUNNING", "RUNNING", "COMPLETED"]
+    assert all(record.kwargs["expected_status"] == "RUNNING" for record in writes.call_args_list)
 
 
 def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module):
@@ -1989,6 +2054,30 @@ class TestScoreWithEvaluators:
         )
         assert scores == {"n1": 0.9, "c1": 1.0}
         executor.submit.assert_called_once()
+        assert executor.submit.call_args.args[0] == "model-tool-io"
+        assert executor.submit.call_args.args[1].task_name == "agent-evaluation-judge"
+
+    @pytest.mark.parametrize("cancelled", [False, True])
+    def test_partial_judge_submission_waits_for_accepted_children(self, service_module, monkeypatch, cancelled):
+        executor = MagicMock()
+        first_future = Future()
+        if cancelled:
+            first_future.cancel()
+        else:
+            first_future.set_exception(RuntimeError("first judge failed"))
+        read_result = MagicMock(wraps=first_future.result)
+        monkeypatch.setattr(first_future, "result", read_result)
+        executor.submit.side_effect = [
+            types.SimpleNamespace(future=first_future),
+            RuntimeError("judge capacity full"),
+        ]
+        set_import_attribute(monkeypatch, service_module, "config_thread_manager", executor)
+        evaluators = {1: {"evaluator_type": "llm"}, 2: {"evaluator_type": "llm"}}
+
+        with pytest.raises(RuntimeError, match="judge capacity full"):
+            service_module._score_with_evaluators(evaluators, "sys", "t1", "q", "e", "a", 99, user_id="u1")
+
+        read_result.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -2303,8 +2392,73 @@ class TestEvaluateQuery:
             )
         run_agent.assert_not_called()
 
+    def test_empty_answer_skips_judges_and_fails(self, service_module, monkeypatch):
+        # Regression for the v2.8.4 incident: an empty actual answer must not
+        # reach the judges (which scored empty air and produced phantom
+        # passes / JSON format errors).
+        import asyncio
+
+        run_agent = AsyncMock(return_value=("", []))
+        score_mock = MagicMock(return_value=({"n1": 1.0}, {"n1": "should not happen"}))
+        set_import_attribute(monkeypatch, service_module, "_run_agent_to_final_answer", run_agent)
+        set_import_attribute(monkeypatch, service_module, "_score_with_evaluators", score_mock)
+        answer, events, score, reason = asyncio.run(
+            service_module._evaluate_query(
+                tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
+                query="q", judge_model_id=99,
+                evaluators={1: {"name": "n1"}}, judge_system_prompt="sys",
+            )
+        )
+        assert answer == ""
+        assert score == {"n1": 0.0}
+        from management.services.evaluation.execution import _EMPTY_ANSWER_REASON
+        assert reason == {"n1": _EMPTY_ANSWER_REASON}
+        score_mock.assert_not_called()
+
+    def test_whitespace_answer_skips_judges(self, service_module, monkeypatch):
+        import asyncio
+
+        run_agent = AsyncMock(return_value=("   \n  ", []))
+        score_mock = MagicMock()
+        set_import_attribute(monkeypatch, service_module, "_run_agent_to_final_answer", run_agent)
+        set_import_attribute(monkeypatch, service_module, "_score_with_evaluators", score_mock)
+        _, _, score, reason = asyncio.run(
+            service_module._evaluate_query(
+                tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
+                query="q", judge_model_id=99,
+                evaluators={1: {"name": "n1"}, 2: {"name": "n2"}}, judge_system_prompt="sys",
+            )
+        )
+        assert score == {"n1": 0.0, "n2": 0.0}
+        from management.services.evaluation.execution import _EMPTY_ANSWER_REASON
+        assert set(reason.values()) == {_EMPTY_ANSWER_REASON}
+        score_mock.assert_not_called()
+
 
 class TestCasePassStatusHelpers:
+    def test_runtime_upstream_detail_handles_bytes_and_strings(self, service_module):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+        from management.services.evaluation.execution import _runtime_upstream_detail
+
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+        ) == 'HTTP 401: {"code":"TOKEN_EXPIRED"}'
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(500, '{"code":"X"}', {})
+        ) == 'HTTP 500: {"code":"X"}'
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(503, None, {})
+        ) == "HTTP 503:"
+
+    def test_friendly_error_message_surfaces_runtime_upstream_detail(self, service_module):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+
+        exc = RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+        message = service_module._generate_friendly_error_message(
+            exc, "default msg", model_id=99, tenant_id="t1", user_id="u1"
+        )
+        assert message == 'Runtime call failed: HTTP 401: {"code":"TOKEN_EXPIRED"}'
+
     def test_determine_case_pass_status(self, service_module):
         assert (
             service_module._determine_case_pass_status(1, {})
@@ -2503,14 +2657,53 @@ class TestSetupNoSetAndExecute:
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         assert service_module._generate_test_queries.call_args.kwargs["model_id"] == 99
 
-    def test_failure_marks_run_failed(self, service_module, monkeypatch):
+    def test_failure_marks_run_failed_with_exception_detail(self, service_module, monkeypatch):
         bind_import_attribute(service_module, 'get_db_session', MagicMock(side_effect=RuntimeError('db down')))
         bind_import_attribute(service_module, '_generate_test_queries', MagicMock(side_effect=RuntimeError('llm down')))
         bind_import_attribute(service_module, 'update_agent_evaluation_status', MagicMock())
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         kw = service_module.update_agent_evaluation_status.call_args.kwargs
         assert kw["status"] == service_module.EvalRunStatus.FAILED
-        assert kw["error_message"] == "Failed to generate test queries"
+        # The fixed generic string is now suffixed with the actual failure so
+        # the UI can show a real reason instead of "no-error failure".
+        assert kw["error_message"].startswith("Failed to generate test queries")
+        assert "RuntimeError" in kw["error_message"]
+        assert "llm down" in kw["error_message"]
+
+    def test_submission_failure_keeps_generated_cases_available_for_redispatch(self, service_module):
+        from management.services.evaluation.dispatch import EvaluationSubmissionError
+
+        self._wire(service_module, models=[_make_eval_model(99, "llm")])
+        service_module._dispatch_agent_evaluation_run.side_effect = EvaluationSubmissionError(500)
+        update = MagicMock()
+        bind_import_attribute(service_module, "update_agent_evaluation_status", update)
+
+        service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
+
+        service_module.create_agent_evaluation_cases.assert_called_once()
+        update.assert_not_called()
+
+    def test_runtime_upstream_failure_reports_dispatch_detail(self, service_module, monkeypatch):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+
+        # Model fallback stays healthy; the runtime 401 hits at dispatch time.
+        bind_import_attribute(service_module, 'get_db_session', MagicMock(side_effect=RuntimeError('db down')))
+        bind_import_attribute(service_module, '_generate_test_queries', MagicMock(return_value=['q1']))
+        bind_import_attribute(service_module, 'materialize_virtual_evaluation_set_for_run', MagicMock(return_value=1))
+        bind_import_attribute(service_module, 'get_evaluation_set_cases_all', MagicMock(return_value=[]))
+        bind_import_attribute(service_module, 'create_agent_evaluation_cases', MagicMock())
+        bind_import_attribute(
+            service_module, '_dispatch_agent_evaluation_run',
+            MagicMock(side_effect=RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})),
+        )
+        bind_import_attribute(service_module, 'update_agent_evaluation_status', MagicMock())
+        service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
+        kw = service_module.update_agent_evaluation_status.call_args.kwargs
+        assert kw["status"] == service_module.EvalRunStatus.FAILED
+        # Runtime dispatch failures carry their own HTTP detail instead of the
+        # query-generation message.
+        assert kw["error_message"].startswith("Runtime dispatch failed: HTTP 401")
+        assert "TOKEN_EXPIRED" in kw["error_message"]
 
 
 class TestPreloadEvaluatorsForRun:

@@ -3,16 +3,19 @@
 import { hasRole } from "@/lib/roles";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { Bot, Inbox, ShieldCheck, User } from "lucide-react";
+import { Button } from "antd";
+import { Bot, FileInput, Inbox, ShieldCheck, User } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useAgentFileImport } from "@/hooks/agent/useAgentFileImport";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { AgentSpace } from "./agent-space";
 import { MyAgent } from "./my-agent";
 import { ReviewCenter } from "./review-center";
@@ -27,7 +30,11 @@ export default function AgentRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
-  const { user } = useAuthorizationContext();
+  const { locale } = useParams<{ locale: string }>();
+  const router = useRouter();
+  const { user, canAccessRoute } = useAuthorizationContext();
+  const { importData, openImport, closeImport } = useAgentFileImport();
+  const canImportAgent = canAccessRoute("/agents");
   const isAdmin = hasRole(user, "ADMIN");
   const [tab, setTab] = useState<AgentRepositoryTab>(() => {
     const backTab = searchParams.get("back_tab");
@@ -105,6 +112,15 @@ export default function AgentRepositoryPage() {
                     </p>
                   </div>
                 </div>
+                {canImportAgent && (
+                  <Button
+                    className="self-start"
+                    icon={<FileInput className="size-4" />}
+                    onClick={openImport}
+                  >
+                    {t("agentConfig.button.import")}
+                  </Button>
+                )}
               </section>
 
               <Tabs
@@ -177,6 +193,17 @@ export default function AgentRepositoryPage() {
           </motion.div>
         </div>
       </div>
+      {importData && (
+        <AgentImportWizard
+          visible
+          initialData={importData}
+          onCancel={closeImport}
+          onImportComplete={(agentId) => {
+            closeImport();
+            router.push(`/${locale}/agents/${agentId}?from=agent-space&tab=mine`);
+          }}
+        />
+      )}
     </>
   );
 }

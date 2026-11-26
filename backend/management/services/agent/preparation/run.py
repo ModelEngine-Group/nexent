@@ -125,6 +125,7 @@ async def create_agent_run_info(
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
     metadata: Optional[Dict[str, Any]] = None,
     user_query: str | None = None,
+    memory_query_deadline: float | None = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -174,6 +175,8 @@ async def create_agent_run_info(
         "enable_planning": enable_planning,
         "portable_evaluation": True,
     }
+    if memory_query_deadline is not None:
+        create_config_kwargs["memory_query_deadline"] = memory_query_deadline
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if authorized_knowledge_tools is not None:
@@ -385,9 +388,7 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
         else:
             resolved = merge_model_preferences(profile, values)
         root = configured.model_copy(deep=True, update={"cite_name": "conversation_root_model_" + uuid.uuid4().hex,
-            "resolved_profile": resolved,
-            "default_output_reserve_tokens": resolved.parameter_values.get("max_output_tokens",
-                configured.default_output_reserve_tokens)})
+            "resolved_profile": resolved})
         model_list.append(root)
         agent_config.model_name = root.cite_name
         return

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Locator, type Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 
@@ -66,8 +68,10 @@ export class McpPage {
     await panel.getByPlaceholder("请填写服务名称").fill(name);
     await panel.getByPlaceholder("请输入端口号").fill(String(port));
     await panel.getByPlaceholder("服务描述").fill(`controlled container ${name}`);
-    const deploying = this.page.waitForResponse((response) =>
-      response.request().method() === "POST" && response.url().includes("/mcp/add-from-config/stream"));
+    const deploying = this.page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().includes("/mcp/add-from-config/stream"),
+      { timeout: 180_000 },
+    );
     await dialog.getByRole("button", { name: "保存并添加", exact: true }).click();
     const response = await deploying;
     if (!response.ok()) {
@@ -129,8 +133,15 @@ export class McpPage {
 
   async enable(name: string): Promise<void> {
     const button = this.card(name).getByRole("button", { name: /^启\s*用$|^已启用$/ });
-    if ((await button.innerText()).replace(/\s/g, "") === "启用") await button.click();
-    await expect(button).toHaveText("已启用");
+    if ((await button.innerText()).replace(/\s/g, "") === "启用") {
+      const enabled = this.page.waitForResponse(
+        (response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/mcp/enable",
+        { timeout: 180_000 },
+      );
+      await button.click();
+      if (!(await enabled).ok()) throw new Error(`MCP ${name} enable failed`);
+    }
+    await expect(button).toHaveText("已启用", { timeout: 180_000 });
   }
 
   async openTools(name: string, toolName: string): Promise<void> {

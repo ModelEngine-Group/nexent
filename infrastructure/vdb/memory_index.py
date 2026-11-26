@@ -101,6 +101,7 @@ class MemoryIndexService:
         record: Dict[str, Any],
         embedding: Optional[List[float]],
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
+        *, refresh: bool | str = "wait_for",
     ) -> bool:
         """Upsert a single memory record into its target index.
 
@@ -110,6 +111,7 @@ class MemoryIndexService:
             embedding: Embedding vector; required for vector search.
             embedding_model_info: Used to resolve the index name when
                 ``record["es_index_name"]`` is missing.
+            refresh: ES refresh policy; False acknowledges indexing without waiting for visibility.
 
         Returns:
             True if the document was indexed (or already existed), False on
@@ -132,6 +134,7 @@ class MemoryIndexService:
             self.vdb_core.create_chunk(
                 index_name=index_name,
                 chunk=_memory_chunk_payload(record, embedding, index_name),
+                **({"refresh": refresh} if refresh != "wait_for" else {}),
             )
             return True
         except Exception:
@@ -168,6 +171,7 @@ class MemoryIndexService:
         query_text: Optional[str] = None,
         weight_accurate: float = 0.3,
         embedding_model: Any = None,
+        request_timeout: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Run a memory search scoped to the agent's isolation boundary.
 
@@ -225,6 +229,7 @@ class MemoryIndexService:
                     isolation_filter=isolation_filter,
                     top_k=top_k,
                     weight_accurate=weight_accurate,
+                    request_timeout=request_timeout,
                 )
 
         return self._knn_search_similar(
@@ -232,6 +237,7 @@ class MemoryIndexService:
             embedding=embedding,
             isolation_filter=isolation_filter,
             top_k=top_k,
+            request_timeout=request_timeout,
         )
 
     # ------------------------------------------------------------------ #
@@ -262,6 +268,7 @@ class MemoryIndexService:
         embedding: List[float],
         isolation_filter: List[Dict[str, Any]],
         top_k: int,
+        request_timeout: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Pure kNN branch (unchanged from the previous release)."""
         query = {
@@ -276,9 +283,12 @@ class MemoryIndexService:
         }
 
         try:
-            response = self.vdb_core.search(index_name=index_name, query=query)
+            response = self.vdb_core.search(index_name=index_name, query=query,
+                                            **({"request_timeout": request_timeout} if request_timeout is not None else {}))
             response_body = response.body if hasattr(response, "body") else response
         except Exception:
+            if request_timeout is not None:
+                raise
             logger.exception("search_similar failed for %s", index_name)
             return []
 
@@ -296,6 +306,7 @@ class MemoryIndexService:
         isolation_filter: List[Dict[str, Any]],
         top_k: int,
         weight_accurate: float,
+        request_timeout: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Hybrid (BM25 + kNN) branch with the same isolation filter.
 
@@ -320,9 +331,12 @@ class MemoryIndexService:
                 embedding=embedding,
                 isolation_filter=isolation_filter,
                 top_k=top_k,
+                request_timeout=request_timeout,
             )
 
         vector_options = {"query_embedding": embedding}
+        if request_timeout is not None:
+            vector_options["request_timeout"] = request_timeout
         if embedding_model is not None:
             vector_options["embedding_model"] = embedding_model
         try:
@@ -338,8 +352,11 @@ class MemoryIndexService:
             logger.warning("[ES_HYBRID] filtered hybrid search unavailable; using isolated kNN.")
             return self._knn_search_similar(
                 index_name=index_name, embedding=embedding, isolation_filter=isolation_filter, top_k=top_k,
+                request_timeout=request_timeout,
             )
         except Exception:
+            if request_timeout is not None:
+                raise
             logger.exception("hybrid_search failed for %s", index_name)
             return []
 

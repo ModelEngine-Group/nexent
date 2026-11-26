@@ -292,6 +292,7 @@ class NexentAgent(AgentResources):
             context_manager = ContextManager(
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
+                message_format="codeagent",
             )
             from nexent.core.agents.prompt.policies import with_common_behavior
 
@@ -318,6 +319,7 @@ class NexentAgent(AgentResources):
 
             enable_clarification = (
                 root_clarification_allowed(self.core_run_info, managed_context=_managed_context)
+                and getattr(self.observer, "manages_requirement_clarification", False) is not True
                 and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
             )
@@ -363,7 +365,9 @@ class NexentAgent(AgentResources):
             if self.sandbox_config is not None:
                 from nexent.core.agents.sandbox.config import SandboxLevel
 
-                deferred = self.tool_fastpath_enabled and self.sandbox_config.level == SandboxLevel.DOCKER
+                deferred = self.tool_fastpath_enabled and self.sandbox_config.level in {
+                    SandboxLevel.DOCKER, SandboxLevel.KUBERNETES,
+                }
                 self._sandbox_scope = self.sandbox_config.scope.value
 
                 def release_executor(executor):
@@ -431,12 +435,20 @@ class NexentAgent(AgentResources):
                                     and not isinstance(configured_timeout, bool)
                                     else 300
                                 )
-                                script_runner = SandboxSkillScriptRunner(
+                                runner_type = SandboxSkillScriptRunner
+                                runner_options = {}
+                                if getattr(python_executor, "_nexent_backend", None) == "kubernetes":
+                                    from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
+
+                                    runner_type = KubernetesSkillScriptRunner
+                                    runner_options['workspace_access'] = self.sandbox_config.workspace_access
+                                script_runner = runner_type(
                                     python_executor,
                                     timeout_seconds=skill_timeout,
                                     workspace_path=self.workspace_path,
                                     network_enabled=not self.sandbox_config.network_disabled,
                                     workspace_mapping=getattr(self, "workspace_mapping", None),
+                                    **runner_options,
                                 )
                                 for tool in tool_list:
                                     bind_backend = getattr(tool, "bind_execution_backend", None)
@@ -1072,6 +1084,7 @@ class NexentAgent(AgentResources):
             cancellation_scope=scope, user_context=self.user_context,
             tool_fastpath_enabled=self.tool_fastpath_enabled,
             tool_fastpath_allowed_tools=self.tool_fastpath_allowed_tools,
+            runtime_lifecycle=self.runtime_lifecycle,
         )
         runtime._sandbox_skill_cleanup_owner = self._sandbox_skill_cleanup_owner
         try:

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -21,7 +22,7 @@ from ext_components.aidp.services.aidp_permission_service import (
     require_permission,
 )
 
-CAN_EDIT_ALL_USER_ROLES = ('SU', 'ADMIN', 'SPEED', 'ASSET_OWNER')
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 
 
 def _record(kb_id='kb-1', owner_user_id='owner-1', ingroup_permission=READ_ONLY, group_ids=None):

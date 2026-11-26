@@ -4,6 +4,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -22,6 +23,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
 import { compositeAttachmentAdapter } from "../adapter/attachment-adapter";
 import { useConfig } from "@/hooks/useConfig";
+import { isDictationConfigured } from "@/lib/dictationConfig";
 import { ServerDictationAdapter } from "../adapter/server-dictation-adapter";
 import {
   remoteChatModelAdapter,
@@ -38,6 +40,7 @@ import { message } from "antd";
 import { conversationService } from "@/services/conversationService";
 import { useCreatorHistories } from "@/hooks/chat/useCreatorHistories";
 import { CreatorHistoryToolbar } from "./creator-history-toolbar";
+import { Nl2AgentWorkflowHeader } from "./nl2agent-workflow-progress";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -64,7 +67,7 @@ export interface Nl2AgentChatPanelProps {
 
 export interface Nl2AgentChatPanelHandle {
   cancelRun: () => void;
-  fillPrompt: (prompt: string) => void;
+  fillPrompt: (prompt: string) => boolean;
 }
 
 export const Nl2AgentChatPanel = forwardRef<
@@ -85,14 +88,44 @@ export const Nl2AgentChatPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation("common");
+  const activeRun = useRef<symbol | null>(null);
   const { modelConfig } = useConfig();
   const historyRef = useRef<{ agentId: number | null; id?: string }>({
     agentId,
   });
   if (historyRef.current.agentId !== agentId) historyRef.current = { agentId };
   const history = useCreatorHistories("agent", agentId);
+  const refreshHistory = history.refresh;
   const [selectedId, setSelectedId] = useState<string>();
   const [restoring, setRestoring] = useState(false);
+  const [entryReady, setEntryReady] = useState(false);
+  const initialHistory = useRef({ agentId, attempted: false });
+  if (initialHistory.current.agentId !== agentId) {
+    initialHistory.current = { agentId, attempted: false };
+    setEntryReady(false);
+    setSelectedId(undefined);
+    setRestoring(false);
+  }
+  const initializing =
+    agentId != null && (history.pending || (history.ready && !entryReady));
+  const [promptHighlight, setPromptHighlight] = useState({
+    agentId,
+    active: false,
+  });
+  const promptHighlighted =
+    promptHighlight.agentId === agentId && promptHighlight.active;
+  if (promptHighlight.agentId !== agentId) {
+    setPromptHighlight({ agentId, active: false });
+  }
+  const promptHighlightTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  useEffect(() => {
+    return () => {
+      if (promptHighlightTimer.current)
+        clearTimeout(promptHighlightTimer.current);
+    };
+  }, [agentId]);
   const loadGeneration = useRef(0);
   useEffect(
     () => () => {
@@ -115,7 +148,9 @@ export const Nl2AgentChatPanel = forwardRef<
   const chatModelAdapter = useMemo<ChatModelAdapter>(
     () => ({
       async *run(options) {
-        if (!modelControls.canSend || restoring) return;
+        if (!modelControls.canSend || restoring || initializing) return;
+        const token = Symbol("retrieval-run");
+        activeRun.current = token;
         if (agentId !== null) onRunStart?.(agentId);
         try {
           const runResult = remoteChatModelAdapter.run({
@@ -128,11 +163,16 @@ export const Nl2AgentChatPanel = forwardRef<
                 onServerConversationId: (id: string) => {
                   historyRef.current.id = id;
                   setSelectedId(id);
-                  void history.refresh();
+                  void refreshHistory();
                 },
                 agentId,
                 turnModelControls: modelControls.snapshot,
-                onNl2AgentState: onStateEvent,
+                onNl2AgentState: (event: Nl2AgentStateEvent) => {
+                  if (activeRun.current !== token || event.agent_id !== agentId)
+                    return;
+                  if (event.event !== "resource_retrieval_progress")
+                    onStateEvent?.(event);
+                },
                 onNl2AgentStopped: onStopped,
               },
             },
@@ -143,7 +183,10 @@ export const Nl2AgentChatPanel = forwardRef<
             yield* runResult;
           }
         } finally {
-          void history.refresh();
+          if (activeRun.current === token) {
+            activeRun.current = null;
+          }
+          void refreshHistory();
           if (agentId !== null) onRunEnd?.(agentId);
         }
       },
@@ -156,8 +199,9 @@ export const Nl2AgentChatPanel = forwardRef<
       onStopped,
       modelControls.snapshot,
       modelControls.canSend,
-      history.refresh,
+      refreshHistory,
       restoring,
+      initializing,
     ]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
@@ -166,45 +210,73 @@ export const Nl2AgentChatPanel = forwardRef<
     () => runtime.thread.getState().isRunning,
     () => false
   );
-  const selectHistory = async (id: number) => {
-    if (runtime.thread.getState().isRunning || agentId == null) return;
-    const generation = ++loadGeneration.current;
-    setRestoring(true);
-    try {
-      const detail = await conversationService.getById(String(id));
-      if (generation !== loadGeneration.current) return;
-      if (
-        detail.agent_system_key !== "nl2agent_main" ||
-        detail.target?.type !== "agent" ||
-        detail.target.id !== agentId
-      ) {
-        throw new Error("Creator history target mismatch");
+  const selectHistory = useCallback(
+    async (id: number) => {
+      if (runtime.thread.getState().isRunning || agentId == null) return;
+      initialHistory.current.attempted = true;
+      setEntryReady(true);
+      const generation = ++loadGeneration.current;
+      setRestoring(true);
+      try {
+        const detail = await conversationService.getById(String(id));
+        if (generation !== loadGeneration.current) return;
+        if (
+          detail.agent_system_key !== "nl2agent_main" ||
+          detail.target?.type !== "agent" ||
+          detail.target.id !== agentId
+        ) {
+          throw new Error("Creator history target mismatch");
+        }
+        const { RemoteConversationHistoryAdapter } =
+          await import("../adapter/conversation-thread-list-adapter");
+        if (generation !== loadGeneration.current) return;
+        const saved = await new RemoteConversationHistoryAdapter(
+          () => String(id),
+          async () => ({ remoteId: String(id), externalId: String(id) }),
+          async () => detail
+        ).load();
+        if (generation !== loadGeneration.current) return;
+        await runtime.thread.composer.reset();
+        if (generation !== loadGeneration.current) return;
+        onConversationChange?.(agentId);
+        runtime.thread.import(saved);
+        historyRef.current.id = String(id);
+        setSelectedId(String(id));
+      } catch {
+        if (generation === loadGeneration.current)
+          message.error(t("nl2agent.history.restoreFailed"));
+      } finally {
+        if (generation === loadGeneration.current) setRestoring(false);
       }
-      const { RemoteConversationHistoryAdapter } =
-        await import("../adapter/conversation-thread-list-adapter");
-      if (generation !== loadGeneration.current) return;
-      const saved = await new RemoteConversationHistoryAdapter(
-        () => String(id),
-        async () => ({ remoteId: String(id), externalId: String(id) }),
-        async () => detail
-      ).load();
-      if (generation !== loadGeneration.current) return;
-      await runtime.thread.composer.reset();
-      if (generation !== loadGeneration.current) return;
-      onConversationChange?.(agentId);
-      runtime.thread.import(saved);
-      historyRef.current.id = String(id);
-      setSelectedId(String(id));
-    } catch {
-      if (generation === loadGeneration.current)
-        message.error(t("nl2agent.history.restoreFailed"));
-    } finally {
-      if (generation === loadGeneration.current) setRestoring(false);
-    }
-  };
+    },
+    [runtime, agentId, onConversationChange, t]
+  );
+  useEffect(() => {
+    if (
+      !history.ready ||
+      initialHistory.current.attempted ||
+      disabled ||
+      isRunning ||
+      agentId == null
+    )
+      return;
+    initialHistory.current.attempted = true;
+    setEntryReady(true);
+    if (!historyRef.current.id && history.items[0])
+      void selectHistory(history.items[0].conversation_id);
+  }, [
+    history.ready,
+    history.items,
+    disabled,
+    isRunning,
+    agentId,
+    selectHistory,
+  ]);
   const newConversation = async () => {
     if (runtime.thread.getState().isRunning || disabled || agentId == null)
       return;
+    initialHistory.current.attempted = true;
+    setEntryReady(true);
     const generation = ++loadGeneration.current;
     setRestoring(true);
     try {
@@ -230,16 +302,25 @@ export const Nl2AgentChatPanel = forwardRef<
         if (
           disabled ||
           restoring ||
+          initializing ||
           agentId === null ||
           !prompt.trim() ||
           !modelControls.canSend ||
           runtime.thread.getState().isRunning
         )
-          return;
+          return false;
         runtime.thread.composer.setText(prompt.trim());
+        if (promptHighlightTimer.current)
+          clearTimeout(promptHighlightTimer.current);
+        setPromptHighlight({ agentId, active: true });
+        promptHighlightTimer.current = setTimeout(
+          () => setPromptHighlight({ agentId, active: false }),
+          2000
+        );
+        return true;
       },
     }),
-    [agentId, disabled, restoring, runtime, modelControls.canSend]
+    [agentId, disabled, restoring, initializing, runtime, modelControls.canSend]
   );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
@@ -273,7 +354,8 @@ export const Nl2AgentChatPanel = forwardRef<
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
         <div
-          className="flex h-full min-h-0 w-full flex-col"
+          data-prompt-highlighted={promptHighlighted}
+          className={`flex h-full min-h-0 w-full flex-col ${promptHighlighted ? "[&_[data-slot=chat-composer]]:!border-[var(--color-brand)] [&_[data-slot=chat-composer]]:ring-2 [&_[data-slot=chat-composer]]:ring-[var(--color-select)]" : ""}`}
           style={{
             background:
               "radial-gradient(ellipse at 0% 100%, #66ebff1a, transparent 48%), radial-gradient(ellipse at 100% 100%, #7a66ff12, transparent 48%), radial-gradient(ellipse at 80% 85%, #669fff0f, transparent 48%), #fff",
@@ -283,10 +365,11 @@ export const Nl2AgentChatPanel = forwardRef<
             history={history}
             selectedId={selectedId}
             disabled={agentId == null || disabled || isRunning}
-            restoring={restoring}
+            restoring={restoring || initializing}
             onSelect={selectHistory}
             onNew={newConversation}
           />
+          <Nl2AgentWorkflowHeader agentId={agentId} restoring={restoring} />
           <div className="min-h-0 flex-1 [&>div]:!bg-transparent">
             <Thread
               agent={nl2AgentDisplay}
@@ -295,9 +378,18 @@ export const Nl2AgentChatPanel = forwardRef<
               {...modelControls}
               modelSelectionScope="tenant"
               showModelSelector
+              inputTools={{
+                attachments: true,
+                dictationConfigured: isDictationConfigured(modelConfig?.stt),
+              }}
               showConversationTitle={false}
               showAgentCreationResult={false}
-              readOnly={disabled || restoring || !modelControls.canCreate}
+              readOnly={
+                disabled ||
+                restoring ||
+                initializing ||
+                !modelControls.canCreate
+              }
               variant="embedded"
               welcomeContent={
                 <AgentWelcome

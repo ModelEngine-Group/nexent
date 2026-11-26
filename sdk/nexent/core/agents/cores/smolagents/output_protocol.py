@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from nexent.core.agents.contracts.adapter import ModelOutputProtocolExhaustedError as ModelOutputProtocolExhaustedError
 from nexent.core.agents.contracts.clarification import ClarificationForm, parse_clarification_call
+from nexent.core.agents.output.answer import EXECUTION_RECORD_TAGS, contains_provider_tool_markup
 from nexent.core.agents.prompt.clarification import CLARIFICATION_SCHEMA_GUIDANCE
 
 
@@ -29,6 +30,8 @@ class ProtocolErrorReason(str, Enum):
     EMPTY_VISIBLE_CONTENT = "empty_visible_content"
     UNSUPPORTED_OR_TAG_ONLY_OUTPUT = "unsupported_or_tag_only_output"
     MALFORMED_ACTION = "malformed_action"
+    PROVIDER_TOOL_MARKUP = "provider_tool_markup"
+    RUNTIME_HISTORY_ECHO = "runtime_history_echo"
     MISSING_EXPLICIT_TERMINATION = "missing_explicit_termination"
     TRUNCATED_GENERATION = "truncated_generation"
     INVALID_FINAL_ENVELOPE = "invalid_final_envelope"
@@ -90,10 +93,11 @@ class RuntimeFinalAnswer(Exception):
 
 _FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z", re.IGNORECASE)
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
-_RUNTIME_RECORD_RE = re.compile(
-    r"</?(?:completed_action_history|completed_action|code_exec_result|summaried_result|output_ref)\b",
+_RUNTIME_HISTORY_ECHO_RE = re.compile(
+    r"<\s*/?\s*(?:" + "|".join(sorted(EXECUTION_RECORD_TAGS)) + r")\b",
     re.IGNORECASE,
 )
+_RUNTIME_RECORD_RE = re.compile(_RUNTIME_HISTORY_ECHO_RE.pattern + r"|</?result>", re.IGNORECASE)
 _CODE_MARKER_RE = re.compile(r"</?code>", re.IGNORECASE)
 _PROTOCOL_MARKER_RE = re.compile(r"</?(?:code|final_answer)>|```<run>", re.IGNORECASE)
 _MARKDOWN_RE = re.compile(
@@ -101,8 +105,13 @@ _MARKDOWN_RE = re.compile(
     r"[\s\S]*?(?:^[ \t]{0,3}(?P=fence)[ \t]*(?:\n|$)|\Z)"
     r"|(?P<ticks>`+)[\s\S]*?(?P=ticks)"
 )
+_PYTHON_FENCE_RE = re.compile(
+    r"```python[^\S\r\n]*\r?\n(?P<body>[\s\S]*?)\r?\n[ \t]*```",
+    re.IGNORECASE,
+)
 _CODE_OPEN = "<code>"
 _CODE_CLOSE = "</code>"
+_TRAILING_CODE_CLOSERS_RE = re.compile(r"(?:</code>\s*)+\Z", re.IGNORECASE)
 _PYTHON_DATA_TOKEN_TYPES = {
     tokenize.STRING,
     tokenize.COMMENT,
@@ -156,6 +165,15 @@ def protocol_repair_instruction(
         return (
             prefix + "Return exactly one complete <final_answer>...</final_answer> envelope. "
             "Put the required <skill>, <file>, and <summary> content inside it, with no content outside the envelope."
+        )
+    if reason in {ProtocolErrorReason.PROVIDER_TOOL_MARKUP, ProtocolErrorReason.RUNTIME_HISTORY_ECHO}:
+        return (
+            prefix + "Resume the unfinished task from the last successful execution result. "
+            "Emit the next actual Python or tool action in a top-level <code>...</code> block. "
+            "For a tool, call its registered Python function by name inside that block. "
+            "Resolve missing prerequisites or failed steps before requesting their dependent tools. "
+            "Do not echo runtime history or emit DSML or serialized tool tags. Do not repeat successful actions. "
+            "Return a final answer only after the required actions have returned real results."
         )
     if reason == ProtocolErrorReason.INVALID_CLARIFICATION_FORM:
         return (
@@ -252,6 +270,34 @@ def _markdown_spans(text: str) -> list[tuple[int, int]]:
             if not match.group(0).lower().startswith("```<run>")]
 
 
+def contains_runtime_record_echo(text: str) -> bool:
+    """Recognize reserved execution markup outside quoted examples and Python literals."""
+    records = list(_RUNTIME_HISTORY_ECHO_RE.finditer(text))
+    if not records:
+        return False
+    spans = _markdown_spans(text)
+    markers = _outer_code_markers(text)
+    for opening, closing in zip(markers, markers[1:]):
+        if opening.group().lower() != _CODE_OPEN or closing.group().lower() != _CODE_CLOSE:
+            continue
+        start = opening.end()
+        spans.extend(
+            (start + left, start + right)
+            for left, right in _python_literal_and_comment_spans(text[start:closing.start()])
+        )
+    return any(not _position_in_spans(record.start(), spans) for record in records)
+
+
+def has_unquoted_match(text: str, pattern: re.Pattern[str]) -> bool:
+    """Find a protocol marker outside Markdown code examples."""
+    examples = _markdown_spans(text)
+    return any(not _position_in_spans(match.start(), examples) for match in pattern.finditer(text))
+
+
+def is_stray_code_closer_only(output: Any) -> bool:
+    return _TRAILING_CODE_CLOSERS_RE.fullmatch(strip_protocol_padding(output)) is not None
+
+
 def is_raw_final_answer_candidate(output: Any) -> bool:
     """Keep reserved protocol records out of the exhaustion-only fallback."""
     text = strip_protocol_padding(output)
@@ -259,6 +305,7 @@ def is_raw_final_answer_candidate(output: Any) -> bool:
         has_meaningful_visible_content(text)
         and not _PROTOCOL_MARKER_RE.search(text)
         and not _MODEL_CONTROL_TOKEN_RE.search(text)
+        and not contains_provider_tool_markup(text)
         and not _RUNTIME_RECORD_RE.search(text)
         and not re.search(r"</?(?:think|tool_call|code_exec_result|summaried_result|output_ref)\b", text, re.I)
     )
@@ -291,8 +338,12 @@ def _classify_code_action(
         start = position + marker.start()
         end = position + marker.end()
         tag = marker.group().lower()
+        if tag == _CODE_CLOSE:
+            position = end
+            continue
         if tag == "<final_answer>":
-            final = _classify_final_envelope(text[start:], protocol=protocol, logger=logger)
+            envelope = _TRAILING_CODE_CLOSERS_RE.sub("", text[start:]).rstrip()
+            final = _classify_final_envelope(envelope, protocol=protocol, logger=logger)
             final_answer = final.answer
             break
         if tag == "```<run>":
@@ -310,6 +361,9 @@ def _classify_code_action(
         if len(markers) < 2 or markers[1].group().lower() != _CODE_CLOSE:
             _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
         body = strip_protocol_padding(region[markers[0].end():markers[1].start()])
+        fence = _PYTHON_FENCE_RE.fullmatch(body)
+        if fence:
+            body = strip_protocol_padding(fence.group("body"))
         if not has_meaningful_visible_content(body):
             _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
         bodies.append(body)
@@ -334,6 +388,8 @@ def _classify_final_envelope(
     envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
     if envelope_match and text.lower().count("<final_answer>") == 1 and text.lower().count("</final_answer>") == 1:
         answer = envelope_match.group("body")
+        if contains_runtime_record_echo(answer):
+            _raise_protocol_error(ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT, protocol, logger)
         if has_meaningful_visible_content(answer):
             return ExplicitFinalAnswer(answer=answer)
     _raise_protocol_error(
@@ -358,6 +414,8 @@ def classify_model_output(
         _raise_protocol_error(ProtocolErrorReason.TRUNCATED_GENERATION, protocol, logger)
 
     text = strip_protocol_padding(output)
+    if contains_provider_tool_markup(text):
+        _raise_protocol_error(ProtocolErrorReason.PROVIDER_TOOL_MARKUP, protocol, logger)
     if not has_meaningful_visible_content(text):
         _raise_protocol_error(ProtocolErrorReason.EMPTY_VISIBLE_CONTENT, protocol, logger)
 

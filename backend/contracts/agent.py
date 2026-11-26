@@ -215,6 +215,9 @@ class AgentRequest(BaseModel):
     history: Optional[List[HistoryItem]] = None
     retry_user_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
     retry_message_index: Optional[int] = Field(default=None, ge=0, strict=True)
+    resume_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    replay_cursor: Optional[str] = Field(default=None, max_length=64)
+    stream_cursor: bool = False
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
@@ -225,7 +228,7 @@ class AgentRequest(BaseModel):
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
     knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
-    entrypoint: Optional[Literal["workbench"]] = None
+    entrypoint: Optional[Literal["workbench", "automation"]] = None
     workbench: Optional[WorkbenchSessionConfig] = None
     expected_workbench_config_version: Optional[int] = Field(default=None, ge=0)
     context_policy: Optional[Dict[str, Any]] = Field(
@@ -253,7 +256,7 @@ class AgentRequest(BaseModel):
         return _validated_context_policy(value)
 
     @model_validator(mode="after")
-    def validate_workbench_entrypoint(self):
+    def validate_conversation_entrypoint(self):
         if self.retry_message_index is not None and self.retry_user_message_id is None:
             raise ValueError("Retry requires an original user message ID")
         if self.retry_user_message_id is not None and (not self.conversation_id or self.is_debug):
@@ -266,6 +269,10 @@ class AgentRequest(BaseModel):
             raise ValueError("workbench entrypoint requires a Workbench configuration")
         if self.workbench is not None and self.entrypoint != "workbench":
             raise ValueError("Workbench configuration requires entrypoint='workbench'")
+        if self.entrypoint == "automation" and (
+            not self.agent_id or self.agent_id < 1 or self.is_debug or not self.enable_automation_tool
+        ):
+            raise ValueError("automation entrypoint requires an interactive Agent with the proposal tool enabled")
         return self
 
     enable_plan: Optional[bool] = Field(
@@ -284,6 +291,7 @@ class NL2ModelControlsRequest(BaseModel):
     """The same per-model preferences used by every Agent conversation."""
 
     model_id: Optional[StrictInt] = Field(default=None, gt=0)
+    resume_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
     model_parameter_preferences: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -429,6 +437,7 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    enable_memory: Optional[bool] = Field(default=None, strict=True)
     enable_protocol_repair_retry: Optional[bool] = None
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
@@ -482,6 +491,7 @@ class ExportAndImportAgentInfo(BaseModel):
     provide_run_summary: bool
     allow_chat_metadata: bool = False
     allow_mcp_header_passthrough: bool = False
+    enable_memory: bool = Field(default=True, strict=True)
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None

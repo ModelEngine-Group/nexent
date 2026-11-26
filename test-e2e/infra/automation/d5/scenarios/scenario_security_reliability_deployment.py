@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -126,10 +127,12 @@ async def _runtime_lifecycle(identity) -> None:
     async with client("runtime", token=identity.access_token) as api:
         automations = await api.get("/agent/automations", params={"page": 1, "page_size": 1})
     assert_status(automations, 200)
-    source = (repo_root() / "backend" / 'runtime' / 'api' / 'application.py').read_text(encoding="utf-8")
-    assert "cleanup_orphaned_agent_workspaces()" in source
-    assert "await agent_automation_scheduler.start()" in source
-    assert "await agent_automation_scheduler.stop()" in source
+    backend = repo_root() / "backend"
+    runtime = (backend / "runtime/api/application.py").read_text(encoding="utf-8")
+    management = (backend / "management/api/application.py").read_text(encoding="utf-8")
+    assert "cleanup_orphaned_agent_workspaces()" in runtime
+    assert "await agent_automation_scheduler.start()" in management
+    assert "await agent_automation_scheduler.stop()" in management
 
 
 async def _config_sync(identity) -> None:
@@ -153,13 +156,39 @@ async def _config_sync_isolated() -> None:
         await _config_sync(accounts["tenant_a_admin"])
 
 
-async def _workspace_cleanup_contract() -> None:
-    source = (repo_root() / "backend" / "services" / "workspace_cleanup_service.py").read_text(encoding="utf-8")
-    assert "cleanup_orphaned_agent_workspaces" in source
-    assert "_RUN_ID_PATTERN.fullmatch(run_dir.name)" in source
-    assert "root.is_symlink()" in source and "run_dir.is_symlink()" in source
-    assert "not run_dir.is_dir()" in source
-    assert "shutil.rmtree" in source
+def verify_workspace_cleanup() -> None:
+    from runtime.workspace_cleanup import cleanup_orphaned_agent_workspaces
+
+    with tempfile.TemporaryDirectory(prefix="nexent-rel-003-") as scratch:
+        root = Path(scratch) / "workspaces"
+        user = root / "fixture-user"
+        orphan = user / uuid.uuid4().hex
+        orphan.mkdir(parents=True)
+        (orphan / "leftover.txt").write_text("previous run", encoding="utf-8")
+        shared = user / "shared"
+        shared.mkdir()
+        retained_file = shared / "shared.txt"
+        retained_file.write_text("shared data", encoding="utf-8")
+        non_directory = user / uuid.uuid4().hex
+        non_directory.write_text("ordinary file", encoding="utf-8")
+        external = Path(scratch) / "other-workspace"
+        external.mkdir()
+        protected_file = external / "active.txt"
+        protected_file.write_text("active external data", encoding="utf-8")
+        linked_run = user / uuid.uuid4().hex
+        linked_run.symlink_to(external, target_is_directory=True)
+        linked_root = Path(scratch) / "linked-workspaces"
+        linked_root.symlink_to(root, target_is_directory=True)
+
+        assert cleanup_orphaned_agent_workspaces(str(linked_root)) == 0
+        assert orphan.is_dir()
+        assert cleanup_orphaned_agent_workspaces(str(root)) == 1
+        assert not orphan.exists()
+        assert retained_file.read_text(encoding="utf-8") == "shared data"
+        assert non_directory.read_text(encoding="utf-8") == "ordinary file"
+        assert linked_run.is_symlink()
+        assert protected_file.read_text(encoding="utf-8") == "active external data"
+        assert cleanup_orphaned_agent_workspaces(str(root)) == 0
 
 
 async def _docker_deployment() -> None:
@@ -552,7 +581,7 @@ async def execute_d5_main(case, tenant_a_admin, tenant_a_user, tenant_b_user):
     elif case_id == "REL-002":
         await _config_sync_isolated()
     elif case_id == "REL-003":
-        await _workspace_cleanup_contract()
+        verify_workspace_cleanup()
     elif case_id == "DEP-001":
         await _docker_deployment()
     elif case_id == "DEP-004":

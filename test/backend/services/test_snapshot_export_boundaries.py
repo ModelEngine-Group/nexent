@@ -63,6 +63,15 @@ def test_memory_search_export_rejects_unowned_or_inconsistent_observer_events(ma
         snapshot._export_memory_search(SimpleNamespace(pre_run_tool_events=events), allow)
 
 
+def test_memory_search_export_preserves_long_context_query():
+    query = "q" * 82_601
+    events = PreparedMemorySearch(query=query, result="No relevant memories found.").observer_events()
+
+    exported = snapshot._export_memory_search(SimpleNamespace(pre_run_tool_events=events), allow_memory=True)
+
+    assert exported.query == query
+
+
 @pytest.mark.parametrize("params,metadata", [
     ({"workspace_path": "/request-workspace"}, None),
     ({"unexpected": "value"}, None),
@@ -213,6 +222,66 @@ def test_snapshot_rejects_incomplete_or_ambiguous_skill_bindings(mocker, case):
         read.assert_not_called()
     else:
         read.assert_called_once_with(7, 3, "tenant")
+
+
+def test_snapshot_accepts_builtin_authorized_skill_configuration(mocker):
+    from contracts.constants import environment
+
+    authorized = ["reports"]
+    tools = [
+        ToolConfig(
+            name=EvaluationSkillTool.SCRIPT.value,
+            class_name=EvaluationSkillTool.SCRIPT.class_name,
+            source="builtin",
+            usage="builtin",
+            params={
+                "local_skills_dir": environment.CONTAINER_SKILLS_PATH,
+                "isolated_skills_root": False,
+                "workspace_path": None,
+                "authorized_skill_names": authorized,
+            },
+            metadata={"agent_id": 7, "tenant_id": "tenant", "version_no": 3},
+        ),
+        ToolConfig(
+            name=EvaluationSkillTool.GUIDE.value,
+            class_name=EvaluationSkillTool.GUIDE.class_name,
+            source="builtin",
+            usage="builtin",
+            params={
+                "local_skills_dir": environment.CONTAINER_SKILLS_PATH,
+                "isolated_skills_root": False,
+                "authorized_skill_names": authorized,
+            },
+            metadata={"agent_id": 7, "tenant_id": "tenant", "version_no": 3},
+        ),
+        ToolConfig(
+            name=EvaluationSkillTool.CONFIG.value,
+            class_name=EvaluationSkillTool.CONFIG.class_name,
+            source="builtin",
+            usage="builtin",
+            params={
+                "local_skills_dir": environment.CONTAINER_SKILLS_PATH,
+                "config_overrides": {"reports": {}},
+                "authorized_skill_names": authorized,
+            },
+            metadata={"agent_id": 7, "tenant_id": "tenant", "version_no": 3},
+        ),
+    ]
+    mocker.patch.object(
+        snapshot,
+        "read_bound_skills",
+        return_value=[{"name": "reports", "config": {}, "instance_id": 11}],
+    )
+    mocker.patch.object(snapshot, "validate_skill_context")
+    mocker.patch.object(snapshot, "capture_skill_files", return_value={})
+    mocker.patch.object(snapshot, "skill_execution_revision", return_value="0" * 64)
+    agent = AgentConfig(
+        agent_id=7, version_no=3, name="Agent", description="", model_name="llm", tools=tools,
+    )
+
+    result = snapshot._export_skill_bindings(agent, "tenant", [])
+
+    assert [binding.instance_id for binding in result] == [11]
 
 
 @pytest.mark.parametrize("case", ["sandbox", "plan", "proposal", "executor"])

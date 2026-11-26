@@ -177,9 +177,11 @@ class _MockManagedContextRuntime:
 
 
 class _MockContextManager:
-    def __init__(self, config, max_steps):
+    def __init__(self, config, max_steps, *, message_format="codeagent"):
+        assert message_format == "codeagent"
         self.config = config
         self.max_steps = max_steps
+        self.message_format = message_format
 
 
 class _MockContextManagerConfig:
@@ -4294,6 +4296,8 @@ class TestSandboxWarmUp:
         class SandboxLevel(str, Enum):
             LOCAL = "local"
             DOCKER = "docker"
+            KUBERNETES = "kubernetes"
+            WASM = "wasm"
 
         mock_sandbox_config = MagicMock()
         mock_sandbox_config.level = SandboxLevel.LOCAL
@@ -6635,6 +6639,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         class SandboxLevel(str, Enum):
             LOCAL = "local"
             DOCKER = "docker"
+            KUBERNETES = "kubernetes"
             WASM = "wasm"
 
         return SandboxLevel

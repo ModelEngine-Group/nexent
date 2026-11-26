@@ -59,6 +59,17 @@ class MCPToolNotFoundError(Exception):
         )
 
 
+class MCPToolResultError(Exception):
+    """Protocol-level tool failure reported by ``CallToolResult.isError``.
+
+    Tool adapters render an error result as plain content, so the failure is
+    carried out-of-band from the protocol result into the monitoring fact
+    without changing what the Agent receives.
+    """
+
+    _nexent_mcp_result_error = True
+
+
 def _iter_exception_chain(error: BaseException) -> Iterator[BaseException]:
     """Yield the exception tree in pre-order: the error itself, then taskgroup
     members, then ``__cause__``/``__context__`` links, cycle-safe."""
@@ -139,6 +150,8 @@ def _mcp_sdk_error_type() -> type | None:
 def _classify_leaf_exception(leaf: BaseException) -> str | None:
     """Map one exception node to an MCP failure category (leaf type first, message fallback)."""
     message = str(leaf).lower()
+    if getattr(leaf, "_nexent_mcp_result_error", False):
+        return "tool_error"
     if (
         getattr(leaf, "_nexent_mcp_timeout", False)
         or getattr(leaf, "_nexent_mcp_connection_timeout", False)

@@ -81,13 +81,12 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 COPY VERSION /opt/nexent/VERSION
 RUN /opt/backend/.venv/bin/python -B -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
-COPY deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
-COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
-COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 RUN chmod +x /opt/nexent/scripts/*.sh
 RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bind9-dnsutils btop file iproute2 jq less lsof nano netcat-openbsd \
+        postgresql-client procps psmisc redis-tools strace tcpdump
 
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
@@ -102,7 +101,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        fontconfig fonts-noto-cjk && \
+        fontconfig fonts-noto-cjk unzip && \
     fc-cache -f
 RUN --mount=type=bind,from=builder,source=/usr/local/bin/uv,target=/tmp/uv \
     --mount=type=bind,from=builder,source=/opt/backend/management-requirements.txt,target=/tmp/management-requirements.txt \
@@ -114,8 +113,7 @@ FROM management-base AS management
 
 ENV NEXENT_SQL_STARTUP_MODE=migrate
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
-COPY deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql
+COPY deploy/sql/migrations/v2.9.0_merged_migrations.sql /opt/deploy/sql/migrations/v2.9.0_merged_migrations.sql
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 
@@ -129,6 +127,14 @@ COPY backend/adapters /opt/backend/adapters
 COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
 COPY backend/memory_provider_plugins /opt/backend/memory_provider_plugins
 COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
+COPY backend/services/__init__.py \
+    backend/services/nl2agent_configuration.py \
+    backend/services/nl2agent_knowledge_recommendations.py \
+    backend/services/nl2agent_prompt_service.py \
+    backend/services/nl2agent_resource_flow.py \
+    backend/services/nl2agent_retrieval_progress.py \
+    backend/services/nl2agent_semantic_retrieval.py \
+    backend/services/nl2agent_state_service.py /opt/backend/services/
 COPY backend/tool_collection/mcp /opt/backend/tool_collection/mcp
 COPY backend/mcp /opt/backend/mcp
 COPY backend/http/client.py backend/http/logging.py backend/http/mcp_service.py /opt/backend/http/
@@ -139,6 +145,10 @@ COPY backend/gateway/identity /opt/backend/gateway/identity
 
 # Runtime target excludes Management business code.
 FROM backend-common AS runtime
+
+RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sysstat
 
 ENV NEXENT_SQL_STARTUP_MODE=off
 

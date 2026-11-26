@@ -103,6 +103,10 @@ class RuntimeServiceUnavailableError(Exception):
     pass
 
 
+class NorthboundStopInProgressError(Exception):
+    """The targeted run still occupies its conversation after the Northbound wait."""
+
+
 class RuntimeServiceTimeoutError(Exception):
     """Raised when a request to the runtime service times out."""
 
@@ -573,10 +577,17 @@ class RuntimeCapacityExceededError(RuntimeError):
     retry_after_seconds = 1
 
 
+class RuntimeCoordinationUnavailableError(RuntimeError):
+    """The authoritative execution state could not be read or written."""
+
+
+class RuntimeUserMessagePersistenceError(RuntimeError):
+    """An admitted Runtime turn could not persist the user message."""
+
+
 def __getattr__(name):
     if name in {"ModelOutletConflictError", "ModelOutletValidationError"}:
         from nexent.core.model_service.profiles import configuration_errors
-
         return getattr(configuration_errors, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

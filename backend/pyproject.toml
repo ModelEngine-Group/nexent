@@ -29,7 +29,7 @@ dependencies = [
     "langchain>=0.3.26",
     "numpy>=1.24.0",
     "defusedxml>=0.7.1",
-    "openjiuwen==0.1.19",
+    "openjiuwen[all-a2a]==0.1.19",
     "pydantic-settings>=2.0.0",
     "python-docx>=1.1.0",
     "xlrd>=2.0.1",
@@ -65,7 +65,7 @@ test = [
     "redis<8.2",
     "httpx>=0.28.1",
     "selenium",
-    "botocore"
+    "botocore",
 ]
 
 [dependency-groups]

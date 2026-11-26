@@ -34,6 +34,10 @@ runtime_thread_manager = ThreadManager(
             cancel_grace_seconds=2,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
         ),
+        "memory-write": LanePolicy(
+            name="memory-write", max_workers=8, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=2, shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "model-tool-io": LanePolicy(
             name="model-tool-io",
             max_workers=max(4, RUNTIME_AGENT_THREAD_MAX_WORKERS),
@@ -76,6 +80,14 @@ runtime_thread_manager = ThreadManager(
         ),
         "evaluation": LanePolicy(
             name="evaluation",
+            max_workers=6,
+            max_queue_size=12,
+            queue_timeout_seconds=RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS,
+            cancel_grace_seconds=5,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
+        "evaluation-judge": LanePolicy(
+            name="evaluation-judge",
             max_workers=6,
             max_queue_size=12,
             queue_timeout_seconds=0,

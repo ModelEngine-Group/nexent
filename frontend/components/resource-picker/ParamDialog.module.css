@@ -248,26 +248,26 @@
   resize: vertical;
 }
 
-/* The tool editor keeps both configuration and testing visible. */
-.dialog[data-config-layout="split"] {
+/* Tool configuration and standalone testing share the same test column. */
+.dialog[data-config-layout] {
   gap: 0;
   padding: 0;
   overflow: hidden;
   font-family: inherit;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="heading"] {
+.dialog[data-config-layout] [data-config-part="heading"] {
   padding: 16px 20px;
   border-bottom: 1px solid #e5e5e5;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="header"] {
+.dialog[data-config-layout] [data-config-part="header"] {
   height: auto;
   min-height: 24px;
   align-items: flex-start;
 }
 
-.dialog[data-config-layout="split"] .body {
+.dialog[data-config-layout] .body {
   display: grid;
   grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
   height: min(568px, calc(100dvh - 240px));
@@ -278,52 +278,59 @@
   overflow: hidden;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="config-column"],
-.dialog[data-config-layout="split"] [data-config-part="test-column"] {
+.dialog[data-config-layout="test"] .body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dialog[data-config-layout] [data-config-part="config-column"],
+.dialog[data-config-layout] [data-config-part="test-column"] {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="config-column"] {
+.dialog[data-config-layout] [data-config-part="config-column"] {
   padding: 20px 24px;
+}
+
+.dialog[data-config-layout] [data-config-part="test-column"] {
+  background: #fafafa;
 }
 
 .dialog[data-config-layout="split"] [data-config-part="test-column"] {
   border-left: 1px solid #e5e5e5;
-  background: #fafafa;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="test-inputs"] {
+.dialog[data-config-layout] [data-config-part="test-inputs"] {
   padding: 20px 24px;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="test-result"] {
+.dialog[data-config-layout] [data-config-part="test-result"] {
   min-height: 200px;
   padding: 20px 24px;
   border-top: 1px solid #e5e5e5;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="footer"] {
+.dialog[data-config-layout] [data-config-part="footer"] {
   height: auto;
   padding: 16px 24px;
   border-top: 1px solid #e5e5e5;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="section-heading"] {
+.dialog[data-config-layout] [data-config-part="section-heading"] {
   box-sizing: border-box;
   min-height: 34px;
   padding: 5px 0;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="test-heading"] {
+.dialog[data-config-layout] [data-config-part="test-heading"] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 16px;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="section-title"] {
+.dialog[data-config-layout] [data-config-part="section-title"] {
   position: relative;
   flex-shrink: 0;
   padding-left: 22px;
@@ -331,64 +338,64 @@
 }
 
 /* Keep the icon outside the text baseline calculation. */
-.dialog[data-config-layout="split"] [data-config-part="section-title"] > svg {
+.dialog[data-config-layout] [data-config-part="section-title"] > svg {
   position: absolute;
   top: 4px;
   left: 0;
 }
 
-.dialog[data-config-layout="split"] [data-config-label] {
+.dialog[data-config-layout] [data-config-label] {
   font-size: 14px;
   line-height: 22px;
   font-family: inherit;
 }
 
 /* Keep entered values consistent across all input control variants. */
-.dialog[data-config-layout="split"] input,
-.dialog[data-config-layout="split"] textarea,
-.dialog[data-config-layout="split"] select,
-.dialog[data-config-layout="split"] :global(.ant-input-affix-wrapper),
-.dialog[data-config-layout="split"] :global(.ant-input-number),
-.dialog[data-config-layout="split"] :global(.ant-select),
-.dialog[data-config-layout="split"] :global(.ant-select-content),
-.dialog[data-config-layout="split"] :global(.ant-select-selection-item),
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout] input,
+.dialog[data-config-layout] textarea,
+.dialog[data-config-layout] select,
+.dialog[data-config-layout] :global(.ant-input-affix-wrapper),
+.dialog[data-config-layout] :global(.ant-input-number),
+.dialog[data-config-layout] :global(.ant-select),
+.dialog[data-config-layout] :global(.ant-select-content),
+.dialog[data-config-layout] :global(.ant-select-selection-item),
+.dialog[data-config-layout]
   [data-config-part="tool-fields"]
   :global(.ant-tag),
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout]
   [data-config-part="test-inputs"]
   :global(.ant-tag) {
   font-size: 14px !important;
 }
 
-.dialog[data-config-layout="split"] :global(input.ant-input)::placeholder,
-.dialog[data-config-layout="split"] :global(textarea.ant-input)::placeholder,
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout] :global(input.ant-input)::placeholder,
+.dialog[data-config-layout] :global(textarea.ant-input)::placeholder,
+.dialog[data-config-layout]
   :global(.ant-input-number-input)::placeholder,
-.dialog[data-config-layout="split"] :global(.ant-select-selection-placeholder) {
+.dialog[data-config-layout] :global(.ant-select-selection-placeholder) {
   font-size: 14px;
 }
 
-.dialog[data-config-layout="split"] button,
-.dialog[data-config-layout="split"] pre {
+.dialog[data-config-layout] button,
+.dialog[data-config-layout] pre {
   font-family: inherit !important;
 }
 
 /* Place the required mark after the name, before the help icon. */
-.dialog[data-config-layout="split"] [data-config-label] > * {
+.dialog[data-config-layout] [data-config-label] > * {
   order: 2;
 }
 
-.dialog[data-config-layout="split"] [data-config-label-text] {
+.dialog[data-config-layout] [data-config-label-text] {
   order: 0;
 }
 
-.dialog[data-config-layout="split"] [data-config-required] {
+.dialog[data-config-layout] [data-config-required] {
   position: static;
   order: 1;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="input-mode"] {
+.dialog[data-config-layout] [data-config-part="input-mode"] {
   flex-shrink: 0;
   padding: 3px;
   font-size: 14px;
@@ -399,13 +406,13 @@
   background: #f0f2f5;
 }
 
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout]
   [data-config-part="input-mode"]
   :global(.ant-segmented-group) {
   gap: 4px;
 }
 
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout]
   [data-config-part="input-mode"]
   :global(.ant-segmented-item-label) {
   display: flex;
@@ -420,7 +427,7 @@
   line-height: 22px;
 }
 
-.dialog[data-config-layout="split"] [data-config-part="input-mode-option"] {
+.dialog[data-config-layout] [data-config-part="input-mode-option"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -428,7 +435,7 @@
   color: inherit;
 }
 
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout]
   [data-config-part="input-mode-option"]
   > svg {
   flex: 0 0 14px;
@@ -437,7 +444,7 @@
   color: inherit;
 }
 
-.dialog[data-config-layout="split"]
+.dialog[data-config-layout]
   [data-config-part="input-mode"]
   :global(.ant-segmented-item-selected) {
   color: #2673e5;
@@ -445,24 +452,24 @@
 }
 
 @media (max-width: 767px) {
-  .dialog[data-config-layout="split"] [data-config-part="test-heading"] {
+  .dialog[data-config-layout] [data-config-part="test-heading"] {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
 
-  .dialog[data-config-layout="split"] [data-config-part="input-mode"] {
+  .dialog[data-config-layout] [data-config-part="input-mode"] {
     justify-self: start;
   }
 
-  .dialog[data-config-layout="split"] .body {
+  .dialog[data-config-layout] .body {
     display: flex;
     height: auto;
     max-height: calc(100dvh - 260px);
     overflow-y: auto;
   }
 
-  .dialog[data-config-layout="split"] [data-config-part="config-column"],
-  .dialog[data-config-layout="split"] [data-config-part="test-column"] {
+  .dialog[data-config-layout] [data-config-part="config-column"],
+  .dialog[data-config-layout] [data-config-part="test-column"] {
     overflow: visible;
   }
 

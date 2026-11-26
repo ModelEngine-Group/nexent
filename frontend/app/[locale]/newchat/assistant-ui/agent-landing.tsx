@@ -296,9 +296,7 @@ function AgentCard({
   const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
   const displayName = agent.display_name || agent.name;
-  // TODO(mock): the published-agent API does not return tags yet; fall back to a
-  // placeholder tag so cards match the design until the API ships real tags.
-  const firstTag = agent.tags?.[0] ?? t("chat.agentLanding.defaultTag");
+  const firstTag = agent.tags?.[0];
 
   const menuItems: MenuProps["items"] = [
     {

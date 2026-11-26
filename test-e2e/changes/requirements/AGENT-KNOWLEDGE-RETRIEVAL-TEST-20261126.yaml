@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-KNOWLEDGE-RETRIEVAL-TEST-20261126
+  change_type: requirement
+  requirement_id: AGENT-KNOWLEDGE-RETRIEVAL-TEST-20261126
+  title: Test knowledge retrieval from Agent configuration
+  description: Open the shared tool test from the knowledge configuration header with the current bound scope and retrieval settings.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AGENT-EDITOR-WORKFLOWS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AGENT-KNOWLEDGE-RETRIEVAL-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/toolTestPanel.test.tsx
+    behaviors:
+    - Opening or typing does not invoke retrieval.
+    - Local and AIDP requests use their own scope keys and keep the configured parameters.
+    - The existing test panel displays retrieval results and rejects out-of-scope JSON input.
+    reason: Component tests cover both request variants. D4 covers the Agent configuration entry point and the HTTP boundary.
+  notes: The browser journey uses page-local HTTP fixtures with no persistent test resources.

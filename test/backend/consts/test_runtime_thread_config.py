@@ -64,11 +64,35 @@ def test_ut_be_tlm_034_platform_defaults_match_deployment_example():
     assert RUNTIME_AGENT_THREAD_MAX_WORKERS == 200
     assert RUNTIME_MCP_TOOL_TIMEOUT_SECONDS == 60
 
+    from runtime.thread_management import runtime_thread_manager
+    lanes = {lane.name: lane for lane in runtime_thread_manager.snapshot().lanes}
+    from management.thread_management import config_thread_manager
+    config_lanes = {lane.name: lane for lane in config_thread_manager.snapshot().lanes}
+    assert config_lanes["memory-read"].max_workers == 16
+    assert lanes["memory-write"].max_workers == 8
+    assert config_lanes["memory-read"].max_queue_size == lanes["memory-write"].max_queue_size == 0
+
     example_path = Path(__file__).resolve().parents[3] / "deploy" / "env" / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     assert "RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS=50" in example
     assert "RUNTIME_AGENT_THREAD_MAX_WORKERS=200" in example
     assert "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS=60" in example
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("startup", "startup"), ("fixed_replicas", "fixed_replicas"), ("maintenance", "fixed_replicas")],
+)
+def test_recovery_mode_accepts_existing_deployment_configuration(value, expected):
+    result = subprocess.run(
+        [sys.executable, "-c", "from backend.contracts.constants.environment import NEXENT_RECOVERY_MODE; print(NEXENT_RECOVERY_MODE)"],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "NEXENT_RECOVERY_MODE": value},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == expected
 
 
 @pytest.mark.parametrize(

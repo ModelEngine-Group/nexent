@@ -42,6 +42,7 @@ northbound_service_module = types.ModuleType("management.services.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
+northbound_service_module.resume_streaming_chat = AsyncMock()
 northbound_service_module.start_streaming_chat = MagicMock()
 northbound_service_module.stop_chat = MagicMock()
 northbound_service_module.get_agent_info_list = MagicMock()

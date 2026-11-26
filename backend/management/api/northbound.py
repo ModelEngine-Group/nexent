@@ -19,7 +19,7 @@ from contracts.authentication import NorthboundContext
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, RATE_LIMIT_EXCEEDED_DETAIL, CONFIG_SERVICE_NAME
 from contracts.knowledge import VectorDatabaseType, HybridSearchRequest, ProcessParams
 from contracts.conversation import GenerateTitleRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NorthboundStopInProgressError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
 from contracts.tool import ToolParamsRequest
 from fastapi import (
@@ -93,6 +93,7 @@ from management.services.northbound import (
     get_conversation_history,
     list_configured_models,
     list_conversations,
+    resume_streaming_chat,
     start_streaming_chat,
     stop_chat,
     update_conversation_title,
@@ -404,10 +405,15 @@ async def run_chat(
         description="Final answer delivery: complete returns one full root answer (default); "
                     "delta preserves incremental final_answer events and their completion phase.",
     ),
+    stream_cursor: bool = Body(False, embed=True, description="Include SSE event IDs for reconnectable runs."),
+    replay_cursor: Optional[str] = Body(None, embed=True, max_length=64,
+                                        description="Resume from a previously processed SSE event ID without starting a run."),
 ):
     try:
         reject_legacy_agent_fields(await request.json())
         ctx: NorthboundContext = await _get_northbound_context(request)
+        if replay_cursor is not None:
+            return await resume_streaming_chat(ctx, conversation_id, replay_cursor)
         return await start_streaming_chat(
             ctx=ctx,
             conversation_id=conversation_id,
@@ -420,6 +426,7 @@ async def run_chat(
             model_id=model_id,
             idempotency_key=idempotency_key,
             final_answer_mode=final_answer_mode,
+            **({"stream_cursor": True} if stream_cursor else {}),
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
@@ -459,6 +466,12 @@ async def stop_chat_stream(
     try:
         ctx: NorthboundContext = await _get_northbound_context(request)
         return await stop_chat(ctx=ctx, conversation_id=conversation_id, meta_data=parsed_meta_data)
+    except NorthboundStopInProgressError:
+        return JSONResponse(
+            status_code=HTTPStatus.CONFLICT,
+            content={"code": "NORTHBOUND_STOP_IN_PROGRESS", "message": "The conversation is still stopping."},
+            headers={"Retry-After": "1"},
+        )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")

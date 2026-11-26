@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 // https://vitepress.dev/reference/site-config
 import { defineConfig } from "vitepress";
 
@@ -91,132 +92,197 @@ export default defineConfig({
             ],
           },
           {
-            text: "User Guide",
-            collapsed: false,
-            items: [
-              { text: "Home Page", link: "/en/user-guide/home-page" },
-              { text: "Start Chat", link: "/en/user-guide/start-chat" },
-              { text: "Quick Setup", link: "/en/user-guide/quick-setup" },
-              { text: "Auto Tasks", link: "/en/user-guide/auto-tasks" },
+            "text": "User Guide",
+            "collapsed": false,
+            "items": [
               {
-                text: "Agent Development",
-                link: "/en/user-guide/agent-development",
-                collapsed: false,
-                items: [
-                  {
-                    text: "Model Configuration",
-                    link: "/en/user-guide/agent-development/model-configuration",
-                  },
-                  {
-                    text: "Knowledge Configuration",
-                    link: "/en/user-guide/agent-development/knowledge-configuration",
-                  },
-                  {
-                    text: "Agent Configuration",
-                    link: "/en/user-guide/agent-development/agent-configuration",
-                    collapsed: false,
-                    items: [
-                      {
-                        text: "Add External A2A Agents",
-                        link: "/en/user-guide/agent-development/a2a-external",
-                      },
-                      {
-                        text: "Publish as A2A Agent",
-                        link: "/en/user-guide/agent-development/a2a-publish",
-                      },
-                      {
-                        text: "Local Tools",
-                        link: "/en/user-guide/local-tools/",
-                        collapsed: false,
-                        items: [
-                          {
-                            text: "File Tools",
-                            link: "/en/user-guide/local-tools/file-tools",
-                          },
-                          {
-                            text: "Email Tools",
-                            link: "/en/user-guide/local-tools/email-tools",
-                          },
-                          {
-                            text: "Search Tools",
-                            link: "/en/user-guide/local-tools/search-tools",
-                          },
-                          {
-                            text: "Multimodal Tools",
-                            link: "/en/user-guide/local-tools/multimodal-tools",
-                          },
-                          {
-                            text: "Terminal Tool",
-                            link: "/en/user-guide/local-tools/terminal-tool",
-                          },
-                          {
-                            text: "SQL Tools",
-                            link: "/en/user-guide/local-tools/sql-tools",
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  {
-                    text: "Memory Configuration",
-                    link: "/en/user-guide/agent-development/memory-configuration",
-                  },
-                  {
-                    text: "Agent Evaluation",
-                    link: "/en/user-guide/evaluation",
-                    items: [
-                      {
-                        text: "Create an Evaluation Task",
-                        link: "/en/user-guide/evaluation/create-task",
-                      },
-                      {
-                        text: "Manage Evaluation Sets",
-                        link: "/en/user-guide/evaluation/sets",
-                      },
-                      {
-                        text: "Configure Evaluators",
-                        link: "/en/user-guide/evaluation/evaluators",
-                      },
-                      {
-                        text: "View Results and Annotations",
-                        link: "/en/user-guide/evaluation/results",
-                      },
-                    ],
-                  },
-                ],
-              },
-              { text: "Agent Market", link: "/en/user-guide/agent-market" },
-              {
-                text: "Resource Repository",
-                collapsed: false,
-                items: [
-                  {
-                    text: "Agent Repository",
-                    link: "/en/user-guide/resource-repository/agent-repository",
-                  },
-                  {
-                    text: "MCP Repository",
-                    link: "/en/user-guide/resource-repository/mcp-repository",
-                  },
-                  {
-                    text: "Skill Repository",
-                    link: "/en/user-guide/resource-repository/skill-repository",
-                  },
-                ],
+                "text": "Home Page",
+                "link": "/en/user-guide/home-page"
               },
               {
-                text: "Resource Management",
-                link: "/en/user-guide/resource-management",
+                "text": "Workbench",
+                "link": "/en/user-guide/workbench"
               },
               {
-                text: "ModelEngine Integration",
-                link: "/en/user-guide/modelengine",
+                "text": "Agent Chat",
+                "link": "/en/user-guide/start-chat"
               },
               {
-                text: "Monitoring & Operations",
-                link: "/en/user-guide/monitor",
+                "text": "Automation Tasks",
+                "link": "/en/user-guide/auto-tasks"
               },
-            ],
+              {
+                "text": "Model Configuration",
+                "link": "/en/user-guide/agent-development/model-configuration"
+              },
+              {
+                "text": "Knowledge Base Configuration",
+                "link": "/en/user-guide/agent-development/knowledge-configuration"
+              },
+              {
+                "text": "Agent Configuration",
+                "link": "/en/user-guide/agent-development",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "Create and Configure Agents",
+                    "link": "/en/user-guide/agent-development/agent-configuration"
+                  },
+                  {
+                    "text": "Add External A2A Agents",
+                    "link": "/en/user-guide/agent-development/a2a-external"
+                  },
+                  {
+                    "text": "Publish as an A2A Agent",
+                    "link": "/en/user-guide/agent-development/a2a-publish"
+                  }
+                ]
+              },
+              {
+                "text": "Memory Configuration",
+                "link": "/en/user-guide/agent-development/memory-configuration"
+              },
+              {
+                "text": "Agent Evaluation",
+                "link": "/en/user-guide/evaluation",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "Create an Evaluation Task",
+                    "link": "/en/user-guide/evaluation/create-task"
+                  },
+                  {
+                    "text": "Manage Evaluation Sets",
+                    "link": "/en/user-guide/evaluation/sets"
+                  },
+                  {
+                    "text": "Configure Evaluators",
+                    "link": "/en/user-guide/evaluation/evaluators"
+                  },
+                  {
+                    "text": "View Results and Annotations",
+                    "link": "/en/user-guide/evaluation/results"
+                  }
+                ]
+              },
+              {
+                "text": "Resource Repository",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "Agent Space",
+                    "link": "/en/user-guide/resource-repository/agent-repository"
+                  },
+                  {
+                    "text": "MCP Space",
+                    "link": "/en/user-guide/resource-repository/mcp-repository"
+                  },
+                  {
+                    "text": "Skill Space",
+                    "link": "/en/user-guide/resource-repository/skill-repository",
+                    "collapsed": false,
+                    "items": [
+                      {
+                        "text": "Official Skills",
+                        "link": "/en/user-guide/resource-repository/official-skills"
+                      },
+                      {
+                        "text": "Using create-docx",
+                        "link": "/en/user-guide/resource-repository/create-docx"
+                      },
+                      {
+                        "text": "Custom File Generation Skills",
+                        "link": "/en/user-guide/resource-repository/custom-file-generation-skill"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "text": "Built-in Tools",
+                "link": "/en/user-guide/local-tools/",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "File Tools",
+                    "link": "/en/user-guide/local-tools/file-tools"
+                  },
+                  {
+                    "text": "Email Tools",
+                    "link": "/en/user-guide/local-tools/email-tools"
+                  },
+                  {
+                    "text": "Search Tools",
+                    "link": "/en/user-guide/local-tools/search-tools"
+                  },
+                  {
+                    "text": "Multimodal Tools",
+                    "link": "/en/user-guide/local-tools/multimodal-tools"
+                  },
+                  {
+                    "text": "Terminal Tool",
+                    "link": "/en/user-guide/local-tools/terminal-tool"
+                  },
+                  {
+                    "text": "SQL Tools",
+                    "link": "/en/user-guide/local-tools/sql-tools"
+                  }
+                ]
+              },
+              {
+                "text": "Observability Center",
+                "link": "/en/user-guide/observability"
+              },
+              {
+                "text": "Resource Management",
+                "link": "/en/user-guide/resource-management"
+              },
+              {
+                "text": "Operations Management",
+                "link": "/en/user-guide/monitor",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "Operations Dashboard",
+                    "link": "/en/user-guide/operations/dashboard"
+                  },
+                  {
+                    "text": "System Configuration",
+                    "link": "/en/user-guide/operations/configuration"
+                  }
+                ]
+              },
+              {
+                "text": "External Platform Integration",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "ModelEngine Integration",
+                    "link": "/en/user-guide/modelengine"
+                  },
+                  {
+                    "text": "Dify Integration",
+                    "link": "/en/user-guide/dify"
+                  },
+                  {
+                    "text": "RAGFlow Integration",
+                    "link": "/en/user-guide/ragflow"
+                  },
+                  {
+                    "text": "Haotian Integration",
+                    "link": "/en/user-guide/haotian"
+                  },
+                  {
+                    "text": "iData Integration",
+                    "link": "/en/user-guide/idata"
+                  },
+                  {
+                    "text": "AIDP Integration",
+                    "link": "/en/user-guide/aidp"
+                  }
+                ]
+              }
+            ]
           },
           {
             text: "Developer Guide",
@@ -465,144 +531,197 @@ export default defineConfig({
             ],
           },
           {
-            text: "用户指南",
-            collapsed: false,
-            items: [
-              { text: "首页", link: "/zh/user-guide/home-page" },
-              { text: "开始问答", link: "/zh/user-guide/start-chat" },
-              { text: "快速配置", link: "/zh/user-guide/quick-setup" },
-              { text: "自动任务", link: "/zh/user-guide/auto-tasks" },
+            "text": "用户指南",
+            "collapsed": false,
+            "items": [
               {
-                text: "智能体开发",
-                link: "/zh/user-guide/agent-development",
-                collapsed: false,
-                items: [
-                  {
-                    text: "模型配置",
-                    link: "/zh/user-guide/agent-development/model-configuration",
-                  },
-                  {
-                    text: "知识库配置",
-                    link: "/zh/user-guide/agent-development/knowledge-configuration",
-                  },
-                  {
-                    text: "智能体配置",
-                    link: "/zh/user-guide/agent-development/agent-configuration",
-                    collapsed: false,
-                    items: [
-                      {
-                        text: "添加外部 A2A Agent",
-                        link: "/zh/user-guide/agent-development/a2a-external",
-                      },
-                      {
-                        text: "发布为 A2A Agent",
-                        link: "/zh/user-guide/agent-development/a2a-publish",
-                      },
-                      {
-                        text: "本地工具",
-                        link: "/zh/user-guide/local-tools/",
-                        collapsed: false,
-                        items: [
-                          {
-                            text: "文件工具",
-                            link: "/zh/user-guide/local-tools/file-tools",
-                          },
-                          {
-                            text: "邮件工具",
-                            link: "/zh/user-guide/local-tools/email-tools",
-                          },
-                          {
-                            text: "搜索工具",
-                            link: "/zh/user-guide/local-tools/search-tools",
-                          },
-                          {
-                            text: "多模态工具",
-                            link: "/zh/user-guide/local-tools/multimodal-tools",
-                          },
-                          {
-                            text: "终端工具",
-                            link: "/zh/user-guide/local-tools/terminal-tool",
-                          },
-                          {
-                            text: "SQL 工具",
-                            link: "/zh/user-guide/local-tools/sql-tools",
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  {
-                    text: "记忆配置",
-                    link: "/zh/user-guide/agent-development/memory-configuration",
-                  },
-                  {
-                    text: "智能体评估",
-                    link: "/zh/user-guide/evaluation",
-                    items: [
-                      {
-                        text: "创建评估任务",
-                        link: "/zh/user-guide/evaluation/create-task",
-                      },
-                      {
-                        text: "管理评测集",
-                        link: "/zh/user-guide/evaluation/sets",
-                      },
-                      {
-                        text: "配置评估器",
-                        link: "/zh/user-guide/evaluation/evaluators",
-                      },
-                      {
-                        text: "查看结果与标注",
-                        link: "/zh/user-guide/evaluation/results",
-                      },
-                    ],
-                  },
-                ],
-              },
-              { text: "智能体市场", link: "/zh/user-guide/agent-market" },
-              {
-                text: "资源仓库",
-                collapsed: false,
-                items: [
-                  {
-                    text: "智能体仓库",
-                    link: "/zh/user-guide/resource-repository/agent-repository",
-                  },
-                  {
-                    text: "MCP仓库",
-                    link: "/zh/user-guide/resource-repository/mcp-repository",
-                  },
-                  {
-                    text: "技能仓库",
-                    link: "/zh/user-guide/resource-repository/skill-repository",
-                  },
-                  {
-                    text: "官方技能",
-                    link: "/zh/user-guide/resource-repository/official-skills",
-                  },
-                  {
-                    text: "create-docx 官方技能",
-                    link: "/zh/user-guide/resource-repository/create-docx",
-                  },
-                  {
-                    text: "自定义文件生成技能",
-                    link: "/zh/user-guide/resource-repository/custom-file-generation-skill",
-                  },
-                ],
+                "text": "首页",
+                "link": "/zh/user-guide/home-page"
               },
               {
-                text: "资源管理",
-                link: "/zh/user-guide/resource-management",
+                "text": "工作台",
+                "link": "/zh/user-guide/workbench"
               },
               {
-                text: "ModelEngine 对接指南",
-                link: "/zh/user-guide/modelengine",
+                "text": "智能体对话",
+                "link": "/zh/user-guide/start-chat"
               },
               {
-                text: "监控与运维",
-                link: "/zh/user-guide/monitor",
+                "text": "自动任务",
+                "link": "/zh/user-guide/auto-tasks"
               },
-            ],
+              {
+                "text": "模型配置",
+                "link": "/zh/user-guide/agent-development/model-configuration"
+              },
+              {
+                "text": "知识库配置",
+                "link": "/zh/user-guide/agent-development/knowledge-configuration"
+              },
+              {
+                "text": "智能体配置",
+                "link": "/zh/user-guide/agent-development",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "创建与配置智能体",
+                    "link": "/zh/user-guide/agent-development/agent-configuration"
+                  },
+                  {
+                    "text": "添加外部 A2A 智能体",
+                    "link": "/zh/user-guide/agent-development/a2a-external"
+                  },
+                  {
+                    "text": "发布为 A2A 智能体",
+                    "link": "/zh/user-guide/agent-development/a2a-publish"
+                  }
+                ]
+              },
+              {
+                "text": "记忆配置",
+                "link": "/zh/user-guide/agent-development/memory-configuration"
+              },
+              {
+                "text": "智能体评估",
+                "link": "/zh/user-guide/evaluation",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "创建评估任务",
+                    "link": "/zh/user-guide/evaluation/create-task"
+                  },
+                  {
+                    "text": "管理评测集",
+                    "link": "/zh/user-guide/evaluation/sets"
+                  },
+                  {
+                    "text": "配置评估器",
+                    "link": "/zh/user-guide/evaluation/evaluators"
+                  },
+                  {
+                    "text": "查看结果与标注",
+                    "link": "/zh/user-guide/evaluation/results"
+                  }
+                ]
+              },
+              {
+                "text": "资源仓库",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "Agent 仓库",
+                    "link": "/zh/user-guide/resource-repository/agent-repository"
+                  },
+                  {
+                    "text": "MCP 仓库",
+                    "link": "/zh/user-guide/resource-repository/mcp-repository"
+                  },
+                  {
+                    "text": "Skill 仓库",
+                    "link": "/zh/user-guide/resource-repository/skill-repository",
+                    "collapsed": false,
+                    "items": [
+                      {
+                        "text": "官方 Skill",
+                        "link": "/zh/user-guide/resource-repository/official-skills"
+                      },
+                      {
+                        "text": "create-docx 使用示例",
+                        "link": "/zh/user-guide/resource-repository/create-docx"
+                      },
+                      {
+                        "text": "自定义文件生成 Skill",
+                        "link": "/zh/user-guide/resource-repository/custom-file-generation-skill"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "text": "内置工具",
+                "link": "/zh/user-guide/local-tools/",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "文件工具",
+                    "link": "/zh/user-guide/local-tools/file-tools"
+                  },
+                  {
+                    "text": "邮件工具",
+                    "link": "/zh/user-guide/local-tools/email-tools"
+                  },
+                  {
+                    "text": "搜索工具",
+                    "link": "/zh/user-guide/local-tools/search-tools"
+                  },
+                  {
+                    "text": "多模态工具",
+                    "link": "/zh/user-guide/local-tools/multimodal-tools"
+                  },
+                  {
+                    "text": "终端工具",
+                    "link": "/zh/user-guide/local-tools/terminal-tool"
+                  },
+                  {
+                    "text": "SQL 工具",
+                    "link": "/zh/user-guide/local-tools/sql-tools"
+                  }
+                ]
+              },
+              {
+                "text": "可观测中心",
+                "link": "/zh/user-guide/observability"
+              },
+              {
+                "text": "资源管理",
+                "link": "/zh/user-guide/resource-management"
+              },
+              {
+                "text": "运维管理",
+                "link": "/zh/user-guide/monitor",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "运维看板",
+                    "link": "/zh/user-guide/operations/dashboard"
+                  },
+                  {
+                    "text": "系统配置",
+                    "link": "/zh/user-guide/operations/configuration"
+                  }
+                ]
+              },
+              {
+                "text": "外部平台对接",
+                "collapsed": false,
+                "items": [
+                  {
+                    "text": "ModelEngine 对接",
+                    "link": "/zh/user-guide/modelengine"
+                  },
+                  {
+                    "text": "Dify 知识库对接",
+                    "link": "/zh/user-guide/dify"
+                  },
+                  {
+                    "text": "RAGFlow 知识库对接",
+                    "link": "/zh/user-guide/ragflow"
+                  },
+                  {
+                    "text": "昊天 Haotian 知识库对接",
+                    "link": "/zh/user-guide/haotian"
+                  },
+                  {
+                    "text": "iData 知识库对接",
+                    "link": "/zh/user-guide/idata"
+                  },
+                  {
+                    "text": "AIDP 知识库对接",
+                    "link": "/zh/user-guide/aidp"
+                  }
+                ]
+              }
+            ]
           },
           {
             text: "开发者指南",

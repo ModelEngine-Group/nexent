@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchTools } from "@/services/agentConfigService";
 import { useMemo, useCallback } from "react";
@@ -41,7 +43,11 @@ export function useToolList(options?: {
       const canonicalTool = availableTools.find(
         (availableTool: Tool) => String(availableTool.id) === String(tool.id)
       );
-      return (canonicalTool ?? tool).is_user_selectable !== false;
+      const currentTool = canonicalTool ?? tool;
+      return (
+        currentTool.is_user_selectable !== false &&
+        !currentTool.blocked_by_denylist
+      );
     },
     [availableTools]
   );
@@ -50,7 +56,9 @@ export function useToolList(options?: {
     () =>
       availableTools.filter(
         (tool: Tool) =>
-          !isManagedKnowledgeTool(tool) && tool.is_user_selectable !== false
+          !isManagedKnowledgeTool(tool) &&
+          tool.is_user_selectable !== false &&
+          !tool.blocked_by_denylist
       ),
     [availableTools]
   );

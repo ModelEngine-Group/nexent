@@ -113,7 +113,24 @@ journey("PW-KB-AIDP-01", async (context) => {
           nodes.map((node) => node.getAttribute("aria-label") || ""),
         );
         expect(labels.join("\n")).toContain(oracle.expectedSource);
-        return `citation named the oracle source ${oracle.expectedSource}`;
+        // Clicking a citation must open the sources panel anchored on the same
+        // document, so a reader can jump from the answer to the evidence.
+        let oracleChip = -1;
+        for (let index = 0; index < (await chips.count()); index += 1) {
+          const label = (await chips.nth(index).getAttribute("aria-label")) || "";
+          if (label.includes(oracle.expectedSource)) {
+            oracleChip = index;
+            break;
+          }
+        }
+        expect(oracleChip).toBeGreaterThanOrEqual(0);
+        await chips.nth(oracleChip).click();
+        const sourcesPanel = page.getByLabel("来源面板");
+        await expect(sourcesPanel).toBeVisible({ timeout: 30_000 });
+        await expect(sourcesPanel).toContainText(oracle.expectedSource, {
+          timeout: 30_000,
+        });
+        return `citation named and opened the oracle source ${oracle.expectedSource}`;
       },
       async () => {
         await page.reload({ waitUntil: "domcontentloaded" });

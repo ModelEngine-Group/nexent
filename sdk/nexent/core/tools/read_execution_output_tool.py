@@ -6,10 +6,17 @@ from smolagents.tools import Tool
 class ReadExecutionOutputTool(Tool):
     _nexent_execute_on_host = True
     name = "read_execution_output"
-    description = "Read original execution output using OUTPUT_REF, with Unicode character offset and a bounded length."
+    description = (
+        "Read original completed execution output by its authorized OUTPUT_REF. "
+        "History summaries can be inaccurate; verify exact values and calculations against original results. "
+        "If a history checkpoint is loaded, output_ref='summary' discovers its covered source references, "
+        "tool names and argument previews, without result bodies. Paginate with next_offset; offset is a "
+        "source cursor in this mode. Then read the returned output_ref for original text (offset is a "
+        "character offset). Previews and summaries are navigation, not authoritative result values."
+    )
     inputs = {
-        "output_ref": {"type": "string", "description": "Exact OUTPUT_REF from a compact execution result."},
-        "offset": {"type": "integer", "description": "Unicode character offset; initially zero.", "nullable": True},
+        "output_ref": {"type": "string", "description": "Exact OUTPUT_REF, or 'summary' to discover checkpoint-covered sources."},
+        "offset": {"type": "integer", "description": "Character offset, or discovery cursor; initially zero.", "nullable": True},
         "max_chars": {"type": "integer", "description": "Maximum characters, up to 16000.", "nullable": True},
     }
     output_type = "string"
@@ -21,7 +28,10 @@ class ReadExecutionOutputTool(Tool):
         self.on_read = on_read
 
     def forward(self, output_ref: str, offset: int = 0, max_chars: int = 4000) -> str:
-        result = self.history.read(self.owner, output_ref, offset, max_chars)
+        result = self.history.read(
+            self.owner, output_ref, 0 if offset is None else offset,
+            4000 if max_chars is None else max_chars,
+        )
         self.on_read()
         return result
 

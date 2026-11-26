@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from infrastructure.monitoring.contracts import MAX_LONG, Fact, Outcome
+from infrastructure.monitoring.contracts import MAX_LONG, Fact, McpServerType, Outcome
 
 
 RunId = Annotated[str, Field(min_length=1, max_length=128)]
@@ -57,4 +57,30 @@ class AgentFact(Fact):
         return self
 
 
-FACT_MODELS = {"model": ModelFact, "agent": AgentFact}
+class McpToolFact(Fact):
+    fact_kind: Literal["mcp_tool"] = "mcp_tool"
+    tool_name: str = Field(min_length=1, max_length=200)
+    mcp_server_id: int | None = Field(default=None, gt=0, le=2147483647)
+    mcp_server_name: str | None = Field(default=None, max_length=200)
+    mcp_server_type: McpServerType
+    error_category: str | None = Field(default=None, pattern=r"^[A-Z0-9_]{1,50}$")
+    trace_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    span_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+
+
+class SkillFact(Fact):
+    """A formal Skill guide read or script start."""
+
+    fact_kind: Literal["skill"] = "skill"
+    skill_id: str = Field(min_length=1, max_length=128)
+    skill_name: str = Field(min_length=1, max_length=200)
+    triggered_at: AwareDatetime
+    trigger_kind: Literal["guide_read", "script_started"]
+
+
+FACT_MODELS = {
+    "model": ModelFact,
+    "mcp_tool": McpToolFact,
+    "agent": AgentFact,
+    "skill": SkillFact,
+}

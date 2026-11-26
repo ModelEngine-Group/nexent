@@ -8,4 +8,11 @@
 - D3 [AGT-004](../../cases/AGT-004/case.yaml) · active
 - D3 [AGT-AUTO-01804EF17A1DF51B](../../cases/AGT-AUTO-01804EF17A1DF51B/case.yaml) · active
 - D3 [AGT-AUTO-6A6BC7594487E771](../../cases/AGT-AUTO-6A6BC7594487E771/case.yaml) · active
+- D3 [NL2A-COMPLETION-D3-001](../../cases/NL2A-COMPLETION-D3-001/case.yaml) · active
+- D3 [NL2A-CONFIG-D3-001](../../cases/NL2A-CONFIG-D3-001/case.yaml) · active
+- D3 [NL2A-COVERAGE-D3-001](../../cases/NL2A-COVERAGE-D3-001/case.yaml) · active
+- D3 [NL2A-INPUT-D3-001](../../cases/NL2A-INPUT-D3-001/case.yaml) · active
+- D4 [NL2A-PROMPT-D4-001](../../cases/NL2A-PROMPT-D4-001/case.yaml) · active
+- D4 [NL2A-WORKFLOW-D4-001](../../cases/NL2A-WORKFLOW-D4-001/case.yaml) · active
+- D4 [RESOURCE-CONFIG-JOURNEY-D4-001](../../cases/RESOURCE-CONFIG-JOURNEY-D4-001/case.yaml) · active
 - D5 [AGENT-PROMPT-D5-001](../../cases/AGENT-PROMPT-D5-001/case.yaml) · active

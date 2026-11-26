@@ -1,0 +1,36 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-MONITORING-UI
+  name: Monitoring dashboard filters
+  status: active
+  description: Provide the authorized monitoring dashboard shell and tenant-scoped directory filters.
+  business_rules:
+  - rule_id: OPS-MONITORING-UI-RULE-01
+    description: The existing dashboard entry presents five tabs, with shared tenant and calendar dates and tenant-scoped group and resource choices.
+  - rule_id: OPS-MONITORING-UI-RULE-02
+    description: A tenant change clears all dependent selections and a service change clears its tool selection. Refresh reads the active directories and connected statistics.
+  - rule_id: OPS-MONITORING-UI-RULE-03
+    description: Agent inventory is scoped by tenant. Execution and Token cards and daily trends use the selected tenant, Agent, group and dates. Missing values, coverage and publication state remain explicit.
+  - rule_id: OPS-MONITORING-UI-RULE-04
+    description: Agent details use scoped server search, sorting and pagination. Date and group changes reset only the page within the same tenant and Agent. A current Agent row can select its tenant-qualified resource.
+  - rule_id: OPS-MONITORING-UI-RULE-05
+    description: All Agents show the server's Top 5 for the active metric and authorized scope. A single Agent shows success and failure shares from the summary and the call total separately.
+  - rule_id: OPS-MONITORING-UI-RULE-06
+    description: The overview counts current Agents, Models, registered MCP services and Skills for the authorized tenant scope. Dates affect only their daily trends.
+  - rule_id: OPS-MONITORING-UI-RULE-07
+    description: The Agent and Model detail tables share the name-column search control. Each submits to its own tenant-scoped endpoint and returns to page one on search or clear.
+  - rule_id: OPS-MONITORING-UI-RULE-08
+    description: Model cards and both charts respect the active filters. The all-model inventory count only depends on tenant, and both charts use a single trends response.
+  - rule_id: OPS-MONITORING-UI-RULE-09
+    description: Model details sort six metrics on the server. A sort change resets the page and keeps list search and monitoring filters. Each row opens statistics scoped to its tenant and model ID while keeping the date range.
+  - rule_id: OPS-MONITORING-UI-RULE-10
+    description: Skill monitoring reads the scoped summary, daily trend, Top 5 and searchable paginated details. All skills show current total and usage, and one Skill shows usage and a full-width trend. The current catalog and its sources remain visible with missing statistics. Missing usage and true zero are distinct.
+  - rule_id: OPS-MONITORING-UI-RULE-11
+    description: MCP monitoring switches between all services, one service and one tool. Services and the current registered service count come from the authorized MCP catalog. Tools come from the session tenant's service directory. Summary and daily calls use the selected tenant, group, service, tool and dates, with unpublished values kept distinct from zero. Service and tool rankings preserve server order. Details use server-side search, sorting and pagination. Ranking and row actions use an addressable identity to drill down, carrying the dates. Tool statistics remain available from published rows when the live directory cannot enumerate them.
+  required_test_stages: [D4]
+  source:
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123, OPS-MONITORING-OVERVIEW-20261123, OPS-MODEL-UI-DETAILS-20261124, OPS-MODEL-UI-METRICS-20261124, OPS-MODEL-UI-NAVIGATION-20261124, OPS-SKILL-UI-SHELL-20261124, OPS-MCP-UI-SHELL-20261124, OPS-SKILL-UI-METRICS-20261125, OPS-MCP-UI-METRICS-20261125, OPS-MCP-UI-COMPLETE-20261125]
+    spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md

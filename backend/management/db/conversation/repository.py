@@ -62,7 +62,6 @@ from management.db.conversation.models import (
     ConversationSourceImage,
     ConversationSourceSearch,
 )
-from management.db.identity.models import UserTenant
 from management.db.knowledge_base.models import KnowledgeRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 from infrastructure.rdb.orm import as_dict
@@ -73,35 +72,12 @@ def load_execution_result_content(
 ) -> str:
     """Load one execution unit in the caller's current conversation scope."""
 
-    membership = select(UserTenant.user_id).where(
-        UserTenant.user_id == user_id,
-        UserTenant.tenant_id == tenant_id,
-        UserTenant.delete_flag == "N",
-    ).exists()
-    statement = (
-        select(ConversationMessageUnit.unit_content)
-        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
-        .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-        .where(
-            membership,
-            ConversationRecord.created_by == user_id,
-            ConversationRecord.conversation_id == conversation_id,
-            ConversationRecord.delete_flag == "N",
-            ConversationMessage.message_id == message_id,
-            ConversationMessage.delete_flag == "N",
-            ConversationMessageUnit.conversation_id == conversation_id,
-            ConversationMessageUnit.unit_index == unit_index,
-            ConversationMessageUnit.unit_type == "execution_result",
-            ConversationMessageUnit.delete_flag == "N",
-        )
-    )
-    with get_db_session() as session:
-        rows = session.execute(statement).scalars().all()
-    if not rows:
+    from infrastructure.rdb.conversation_state import load_execution_result_record
+
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] != "execution_result":
         raise PermissionError("Execution result is unavailable or not authorized")
-    if len(rows) != 1:
-        raise ValueError("Ambiguous execution result reference")
-    payload = json.loads(rows[0])
+    payload = json.loads(record["content"])
     if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
         raise ValueError("Invalid persisted execution content")
     return payload["content"]
@@ -289,6 +265,8 @@ def create_conversation(
     """
     with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         _enforce_user_conversation_limit(session, user_id)
+        if user_id and agent_id and target and target.get("type") in ("agent", "skill"):
+            _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{agent_id}:{target['type']}:{target['id']}")
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
@@ -296,6 +274,8 @@ def create_conversation(
             data["conversation_id"] = reserved_conversation_id
         if target is not None:
             data["target"] = deepcopy(target)
+            if target.get("type") in ("agent", "skill"):
+                data["last_activity_time"] = func.timezone("UTC", func.clock_timestamp())
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -337,6 +317,7 @@ def create_conversation(
         record = session.execute(stmt).fetchone()
         from infrastructure.rdb.trajectory.repository import seed_conversation
         seed_conversation(session, record.conversation_id, user_id, agent_id)
+        retain_creator_histories(user_id, agent_id, target, session=session)
 
         # Convert to dictionary and ensure timestamps are integers
         result_dict = {
@@ -1101,6 +1082,37 @@ def branch_conversation(
         }
 
 
+def _completed_turn_checkpoint(session, parent, checkpoint):
+    """Resolve a Runtime proposal only inside its authorized completed projection transaction."""
+    from contracts.agentos import CompletedTurnHistoryCheckpointCandidate
+
+    candidate = CompletedTurnHistoryCheckpointCandidate.model_validate(checkpoint)
+    prior = session.scalar(select(ConversationMessage.message_id).where(
+        ConversationMessage.conversation_id == parent.conversation_id,
+        ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index)).limit(1))
+    if prior != candidate.history_tail_message_id:
+        raise HistorySummaryPersistenceError("completed-turn history boundary changed")
+    checkpoints = session.execute(select(ConversationMessageUnit.unit_id, ConversationMessageUnit.unit_content,
+                                         ConversationMessage.message_id)
+        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
+        .where(ConversationMessageUnit.conversation_id == parent.conversation_id,
+            ConversationMessage.conversation_id == parent.conversation_id,
+            ConversationMessageUnit.unit_type == HISTORY_SUMMARY_UNIT_TYPE,
+            ConversationMessageUnit.unit_status == "completed", ConversationMessageUnit.delete_flag == "N",
+            ConversationMessage.status == "completed", ConversationMessage.delete_flag == "N",
+            ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))).all()
+    latest = next((row.unit_id for row in checkpoints
+                   if (parsed := _parse_history_summary_content(row.unit_content))
+                   and parsed["covered_through_message_id"] == row.message_id), None)
+    if latest != candidate.previous_summary_unit_id:
+        raise HistorySummaryPersistenceError("completed-turn previous checkpoint changed")
+    return {"summary": candidate.summary, "covered_through_message_id": parent.message_id,
+            "previous_summary_unit_id": candidate.previous_summary_unit_id, "trigger": candidate.trigger}
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,
@@ -1319,20 +1331,26 @@ def persist_assistant_run_batch(
                 ensure_ascii=False,
             )
 
-        for checkpoint in history_checkpoints or ():
-            try:
-                with session.begin_nested():
-                    save_history_summary(
-                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
-                    )
-            except (HistorySummaryPersistenceError, SQLAlchemyError) as exc:
-                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
-                               conversation_id, type(exc).__name__)
-
         parent.message_content = message_content or ""
         parent.status = terminal_status
         parent.updated_by = user_id
         parent.update_time = func.current_timestamp()
+        if history_checkpoints:
+            session.flush()
+        for checkpoint in history_checkpoints or ():
+            try:
+                with session.begin_nested():
+                    if checkpoint.get("coverage_scope") == "current_completed_turn":
+                        if terminal_status != "completed" or any(
+                                unit.get("unit_type") == "human_interaction" for unit in message_units):
+                            continue
+                        checkpoint = _completed_turn_checkpoint(session, parent, checkpoint)
+                    save_history_summary(
+                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
+                    )
+            except (HistorySummaryPersistenceError, SQLAlchemyError, ValueError) as exc:
+                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
+                               conversation_id, type(exc).__name__)
 
         if message_content or any(
             unit.get("unit_type") not in {HISTORY_SUMMARY_UNIT_TYPE, "history_summary_candidate"}
@@ -2175,7 +2193,14 @@ def rename_conversation(
 
 def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> bool:
     """
-    Delete a conversation (soft delete)
+    Delete a conversation owned by the user (soft delete, cascading)
+
+    Only a conversation whose created_by matches user_id is affected. Child
+    rows cascade by conversation_id, and only when the owned conversation
+    row itself matched, so a caller passing an id it does not own cannot
+    touch another user's data (aligned with delete_conversations_batch).
+    A None user_id matches no row (created_by = NULL never compares equal),
+    so the call is a safe no-op; callers must pass the authenticated owner.
 
     Args:
         conversation_id: Conversation ID (integer)
@@ -2193,14 +2218,17 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
-        # 1. Mark conversation as deleted
+        # 1. Mark conversation as deleted (ownership filter: created_by == user_id).
+        # Not owned (or already deleted): rowcount 0 refuses before any child row.
         conversation_stmt = (
             update(ConversationRecord)
-            .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                ConversationRecord.created_by == user_id,
+            )
             .values(update_data)
         )
-        if user_id:
-            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
         if conversation_result.rowcount == 0:
             return False
@@ -2247,11 +2275,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         )
         session.execute(image_stmt)
 
-        # Check if the conversation record was affected
-        return conversation_result.rowcount > 0
+        # Ownership was already verified in step 1; the cascade only runs
+        # after a successful owned-conversation update.
+        return True
 
 
-def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
+def delete_conversations_batch(
+    conversation_ids: List[int], user_id: Optional[str] = None, *, session: Optional[Session] = None,
+) -> List[int]:
     """
     Soft-delete multiple conversations owned by the user (cascading).
 
@@ -2266,7 +2297,7 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
     Returns:
         List of conversation IDs that were actually deleted
     """
-    with get_db_session() as session:
+    with (nullcontext(session) if session is not None else get_db_session()) as session:
         ids = [int(i) for i in conversation_ids]
         if not ids:
             return []
@@ -3548,22 +3579,29 @@ def get_historical_context(
             records = session.execute(select(
                 ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
                 ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
-                ConversationMessageUnit.invocation_id,
+                ConversationMessageUnit.invocation_id, ConversationMessageUnit.unit_index,
             ).where(
                 ConversationMessageUnit.conversation_id == conversation_id,
                 ConversationMessageUnit.message_id.in_(assistant_ids),
                 ConversationMessageUnit.unit_type.in_([
-                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result",
                 ]),
                 ConversationMessageUnit.unit_status == "completed",
                 ConversationMessageUnit.delete_flag == "N",
             ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
             by_message = {}
+            from nexent.core.agents.context.native_history import decode_history_event
+
             for record in records:
-                by_message.setdefault(record.message_id, []).append({
+                history_record = {
                     "record_type": record.unit_type, "content": record.unit_content,
                     "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
-                })
+                    "unit_index": record.unit_index,
+                }
+                event = decode_history_event(history_record)
+                if event is not None:
+                    history_record["execution_event"] = event
+                by_message.setdefault(record.message_id, []).append(history_record)
             for turn in turns:
                 if turn["assistant_message_id"] in by_message:
                     turn["execution_records"] = by_message[turn["assistant_message_id"]]
@@ -3572,7 +3610,8 @@ def get_historical_context(
         if summary_record and summary_payload:
             summary_result = {
                 "unit_id": summary_record.unit_id,
-                **summary_payload,
+                **{key: value for key, value in summary_payload.items()
+                   if key not in {"structured_source_proofs", "execution_sources"}},
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
                 "current_user_message_index": before_message_index}
@@ -3641,14 +3680,41 @@ def remove_conversation_knowledge_bindings(
         record.update_time = func.current_timestamp()
 
 
+def retain_creator_histories(user_id, executor_id, target, *, session=None):
+    """Keep the latest three owned Agent or Skill creator conversations and cascade soft deletion."""
+    if not user_id or not executor_id or not target or target.get("type") not in ("agent", "skill"):
+        return
+    with (nullcontext(session) if session is not None else get_db_session()) as session:
+        _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{executor_id}:{target['type']}:{target['id']}")
+        excess = session.scalars(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.agent_id == executor_id,
+                ConversationRecord.target == target,
+                ConversationRecord.delete_flag == "N",
+            ).order_by(_activity_time_expression().desc(), ConversationRecord.conversation_id.desc()).offset(3)
+        ).all()
+        if excess:
+            delete_conversations_batch(excess, user_id, session=session)
+
+
 def bind_creation_conversation_target(conversation_id, executor_id, expected_target, target, user_id):
     """Compare-and-set a resource target without changing the executor or messages."""
     with get_db_session() as session:
+        if target.get("type") in ("agent", "skill"):
+            _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{executor_id}:{target['type']}:{target['id']}")
         predicate = ConversationRecord.target.is_(None) if expected_target is None else ConversationRecord.target == expected_target
+        update_data = {"target": target, "updated_by": user_id}
+        if target.get("type") in ("agent", "skill"):
+            update_data.update(update_time=func.current_timestamp(),
+                               last_activity_time=func.timezone("UTC", func.clock_timestamp()))
         result = session.execute(update(ConversationRecord).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.created_by == user_id,
             ConversationRecord.agent_id == executor_id,
             ConversationRecord.delete_flag == "N", predicate,
-        ).values(target=target, updated_by=user_id))
-        return result.rowcount == 1
+        ).values(**update_data))
+        bound = result.rowcount == 1
+        if bound:
+            retain_creator_histories(user_id, executor_id, target, session=session)
+        return bound

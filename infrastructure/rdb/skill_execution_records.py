@@ -115,7 +115,7 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
 
     statement = (
         select(
-            SkillInstance.skill_instance_id, SkillInfo.skill_name, SkillInfo.skill_description,
+            SkillInstance.skill_instance_id, SkillInstance.skill_id, SkillInfo.skill_name, SkillInfo.skill_description,
             SkillInfo.config_values, SkillInstance.config_values,
         )
         .join(SkillInfo, SkillInfo.skill_id == SkillInstance.skill_id)
@@ -123,7 +123,7 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
     )
     with get_db_session() as session:
         return [
-            {"instance_id": instance_id, "name": name, "description": description,
+            {"instance_id": instance_id, "skill_id": skill_id, "name": name, "description": description,
              "config": {**(defaults or {}), **(overrides or {})}}
-            for instance_id, name, description, defaults, overrides in session.execute(statement)
+            for instance_id, skill_id, name, description, defaults, overrides in session.execute(statement)
         ]

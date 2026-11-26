@@ -162,6 +162,10 @@ class ContextSummaryModel(Protocol):
 @dataclass(frozen=True)
 class ContextEvidence:
     purpose: str = "step"
+    maintenance_phase: str = "prepare"
+    usage_source: str = "estimated"
+    provider_input_tokens: int | None = None
+    calibrated_input_estimate: int = 0
     selected_item_ids: tuple[str, ...] = ()
     selected_item_types: tuple[str, ...] = ()
     stable_message_count: int = 0

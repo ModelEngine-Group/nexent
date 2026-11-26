@@ -1,0 +1,88 @@
+.root {
+  container-type: inline-size;
+  flex-shrink: 0;
+  margin: 0 12px 10px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--workflow-border);
+  border-radius: var(--workflow-radius);
+  background: var(--workflow-bg);
+  box-shadow: var(--workflow-shadow);
+  color: var(--workflow-text);
+}
+
+.steps {
+  padding: 12px 16px 10px;
+}
+.steps :global(.ant-steps-item-title) {
+  font-size: 12px;
+}
+.steps :global(.ant-steps-item-description) {
+  font-size: 12px;
+}
+.finished {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--workflow-success);
+  color: var(--workflow-white);
+}
+.details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-top: 1px solid var(--workflow-border);
+  background: var(--workflow-subtle);
+  font-size: 12px;
+  min-width: 0;
+}
+.mode {
+  margin-inline-end: 0;
+  background: var(--workflow-bg);
+  color: var(--workflow-muted);
+}
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.pipelineItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.check {
+  color: var(--workflow-success);
+}
+.muted {
+  color: var(--workflow-muted);
+}
+.fallback {
+  color: var(--workflow-muted);
+  flex-basis: 100%;
+}
+.compact {
+  display: none;
+  padding: 10px 14px;
+  font-size: 12px;
+}
+@container (max-width: 420px) {
+  .steps {
+    display: none;
+  }
+  .compact {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .details {
+    padding: 8px 12px;
+  }
+}

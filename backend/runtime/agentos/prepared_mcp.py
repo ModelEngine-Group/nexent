@@ -103,3 +103,13 @@ class PreparedMCP:
         if binding.version in {"2", "3"}:
             return SkillDerivedMCPBinding.model_validate(binding.parameters)
         raise ValueError("Unsupported MCP tool binding")
+
+    @property
+    def servers(self) -> list[dict]:
+        """Execution server rows read for this run (empty before materialize)."""
+        return list(self._servers or [])
+
+    @property
+    def used_urls(self) -> list[str]:
+        """Distinct MCP endpoint URLs materialized for this run."""
+        return [host["url"] for host in self.hosts.values() if host.get("url")]

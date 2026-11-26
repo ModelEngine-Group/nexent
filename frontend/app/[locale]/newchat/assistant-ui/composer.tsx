@@ -10,16 +10,14 @@ import {
   type FC,
   type ReactNode,
 } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { App } from "antd";
-import log from "@/lib/logger";
-import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
-import { SkillPicker } from "@/features/workbench/components/SkillPicker";
-import type { WorkbenchSkillMount } from "@/features/workbench/types";
+import { ComposerAttachment, ComposerDictation } from "./composer-tools";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
+import { SelectedResourceTags } from "@/features/workbench/components/SelectedResourceTags";
 import {
   Send,
-  Square,
+  CircleStop,
   Play,
   Check,
   Circle,
@@ -28,9 +26,9 @@ import {
   MessageCircleMore,
   Bot,
   Sparkles,
-  X,
 } from "lucide-react";
-import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { conversationService } from "@/services/conversationService";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -156,6 +154,11 @@ function clearComposerMessageAnnotations(thread: ThreadRuntime) {
   });
 }
 
+export interface ComposerInputTools {
+  attachments?: boolean;
+  dictationConfigured?: boolean;
+}
+
 export interface ComposerProps {
   conversationId?: number;
   models: readonly ModelOption[];
@@ -165,9 +168,15 @@ export interface ComposerProps {
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   children?: ReactNode;
+  inputTools?: ComposerInputTools;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
+  knowledgeAgent?: {
+    id: number;
+    versionNo?: number;
+    sources?: { local: boolean; aidp: boolean };
+  };
   onKnowledgeScopeChange?: (
     scope: ConversationKnowledgeScope | null,
     preview?: KnowledgeScopeEffectivePreview | null
@@ -183,7 +192,6 @@ export interface ComposerProps {
   hidePlan?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
-  onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
   /** Pending reply annotations attached to the next outgoing message. */
   annotations?: MessageAnnotationsControl;
@@ -314,9 +322,11 @@ export const Composer: FC<ComposerProps> = ({
   onChatModeChange,
   showModelSelector = true,
   children,
+  inputTools,
   knowledgeScope = null,
   knowledgePreview = null,
-  knowledgeCapabilities = null,
+  knowledgeCapabilities: suppliedKnowledgeCapabilities = null,
+  knowledgeAgent,
   onKnowledgeScopeChange,
   skillFiles,
   runtimeMetadata = {},
@@ -329,18 +339,17 @@ export const Composer: FC<ComposerProps> = ({
   hidePlan = false,
   workbenchPresentation,
   workbenchResources,
-  onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
   annotations,
 }) => {
-  const conversationResources =
-    !workbenchResources &&
-    !workbenchPresentation &&
-    Boolean(onKnowledgeScopeChange);
   const { t, i18n } = useTranslation();
   const aui = useAui();
+  const modelParameterScope = useAuiState(
+    (state) => state.threads?.mainThreadId
+  );
   const runtime = aui.threads().__internal_getAssistantRuntime?.();
   const [sendError, setSendError] = useState("");
+  const [removingResource, setRemovingResource] = useState(false);
   const prepareSend = (event?: { preventDefault: () => void }) => {
     if (!runtime || runtime.thread.getState().isRunning) return;
     const threadId = runtime.threads.getState().mainThreadId;
@@ -443,11 +452,6 @@ export const Composer: FC<ComposerProps> = ({
     thread.composer.setText("");
     void thread.composer.clearAttachments();
   };
-  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
-  const [conversationSkills, setConversationSkills] = useState<
-    Array<WorkbenchSkillMount & { name: string }>
-  >([]);
-  const { message } = App.useApp();
   const creationMode =
     workbenchPresentation?.mode === "skill_create" ||
     workbenchPresentation?.mode === "agent_create"
@@ -455,16 +459,36 @@ export const Composer: FC<ComposerProps> = ({
       : null;
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const knowledgeSource = enableAidpKnowledge ? "aidp" : "local";
-  const isWorkbench = Boolean(workbenchPresentation || workbenchResources);
-  const canSelectKnowledge = Boolean(
-    isDeploymentReady &&
-    !creationMode &&
-    onKnowledgeScopeChange &&
-    (isWorkbench || knowledgeCapabilities?.sources[knowledgeSource].enabled)
+  const allowsSessionKnowledge =
+    workbenchPresentation?.allowsSessionKnowledge === true;
+  const hasKnowledgeControl = Boolean(
+    isDeploymentReady && !creationMode && onKnowledgeScopeChange
   );
-  const knowledgeAccessKey = isWorkbench
-    ? `workbench:${knowledgeSource}:${canSelectKnowledge}`
-    : `${knowledgeCapabilities?.agent_id}:${knowledgeCapabilities?.version_no}:${knowledgeSource}:${canSelectKnowledge}`;
+  const loadKnowledgeOnOpen = !allowsSessionKnowledge && !!knowledgeAgent;
+  const configuredKnowledgeSource =
+    knowledgeAgent?.sources?.[knowledgeSource] === true;
+  const { user } = useAuthorizationContext();
+  const suppliedSourceEnabled =
+    suppliedKnowledgeCapabilities?.sources[knowledgeSource].enabled;
+  const knowledgeEntryEnabled =
+    hasKnowledgeControl &&
+    (allowsSessionKnowledge ||
+      (loadKnowledgeOnOpen
+        ? configuredKnowledgeSource
+        : suppliedSourceEnabled === true));
+  const knowledgeAccessKey = loadKnowledgeOnOpen
+    ? JSON.stringify([
+        user?.tenantId,
+        user?.id,
+        knowledgeAgent?.id,
+        knowledgeAgent?.versionNo,
+        knowledgeSource,
+        configuredKnowledgeSource,
+        modelParameterScope,
+      ])
+    : allowsSessionKnowledge
+      ? `session:${knowledgeSource}:${modelParameterScope}:${knowledgeEntryEnabled}`
+      : `${suppliedKnowledgeCapabilities?.agent_id}:${suppliedKnowledgeCapabilities?.version_no}:${knowledgeSource}:${hasKnowledgeControl && suppliedSourceEnabled === true}`;
   const [knowledgeModalState, setKnowledgeModalState] = useState({
     key: knowledgeAccessKey,
     open: false,
@@ -473,7 +497,7 @@ export const Composer: FC<ComposerProps> = ({
     setKnowledgeModalState({ key: knowledgeAccessKey, open: false });
   }
   const knowledgeModalOpen =
-    canSelectKnowledge &&
+    knowledgeEntryEnabled &&
     knowledgeModalState.key === knowledgeAccessKey &&
     knowledgeModalState.open;
   const setKnowledgeModalOpen = (open: boolean) =>
@@ -482,104 +506,161 @@ export const Composer: FC<ComposerProps> = ({
         ? { key: knowledgeAccessKey, open }
         : current
     );
+  const agentId = knowledgeAgent?.id;
+  const versionNo = knowledgeAgent?.versionNo;
+  const capabilityQuery = useQuery({
+    queryKey: [
+      "agent-chat-knowledge-capabilities",
+      user?.tenantId,
+      user?.id,
+      agentId,
+      versionNo,
+      knowledgeSource,
+    ],
+    enabled: loadKnowledgeOnOpen && knowledgeModalOpen,
+    queryFn:
+      loadKnowledgeOnOpen && agentId !== undefined
+        ? async () => {
+            const capabilities =
+              await conversationService.getKnowledgeCapabilities(
+                agentId,
+                versionNo
+              );
+            if (
+              capabilities?.agent_id !== agentId ||
+              (versionNo !== undefined && capabilities.version_no !== versionNo)
+            ) {
+              throw new Error(
+                "Knowledge capabilities do not match the current agent"
+              );
+            }
+            return capabilities;
+          }
+        : skipToken,
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const knowledgeCapabilities = loadKnowledgeOnOpen
+    ? (capabilityQuery.data ?? null)
+    : suppliedKnowledgeCapabilities;
+  const sourceEnabled = knowledgeCapabilities?.sources[knowledgeSource].enabled;
+  const canSelectKnowledge =
+    knowledgeEntryEnabled && (allowsSessionKnowledge || sourceEnabled === true);
+  const toolbar = {
+    mode: !creationMode ? onChatModeChange : undefined,
+    agent: !creationMode ? workbenchResources?.onSelectAgent : undefined,
+    knowledge: knowledgeEntryEnabled,
+    skill: !creationMode ? onOpenWorkbenchSkillPicker : undefined,
+    metadata: allowRuntimeMetadata ? onRuntimeMetadataChange : undefined,
+  };
   const onKnowledgeOpenChange = workbenchPresentation?.onKnowledgeOpenChange;
   useEffect(() => {
     onKnowledgeOpenChange?.(knowledgeModalOpen);
     return () => onKnowledgeOpenChange?.(false);
   }, [knowledgeModalOpen, onKnowledgeOpenChange]);
-  const { data: knowledgeBases = [] } = useComposerKnowledgeBases(
-    conversationResources && canSelectKnowledge,
-    enableAidpKnowledge
-  );
-  const selectedSkillNames = conversationSkills.map((skill) => skill.name);
-
   const isRunning = useAuiState((state) => state.thread.isRunning);
-  const modelParameterScope = useAuiState(
-    (state) => state.threads?.mainThreadId
-  );
   const hasAttachments = useAuiState(
     (state) => state.composer.attachments.length > 0
   );
-  const [knowledgeSaving, setKnowledgeSaving] = useState(false);
-  const sourceScope = knowledgeScope?.[knowledgeSource];
-  const selectedKbIds =
-    sourceScope?.mode === "disabled"
-      ? []
-      : sourceScope?.mode === "override"
-        ? knowledgeSource === "local"
-          ? knowledgeScope!.local.knowledge_ids
-          : knowledgeScope!.aidp.kds_ids
-        : knowledgeCapabilities?.sources[knowledgeSource]
-            .default_knowledge_ids || [];
-  const selectedKnowledgeBaseChips = selectedKbIds.map((id) => {
-    const knowledgeBase = knowledgeBases.find((item) => item.id === id);
-    const previewNames =
-      knowledgeSource === "local"
-        ? knowledgePreview?.local.display_names
-        : knowledgePreview?.aidp.display_names;
-    const previewIds =
-      knowledgeSource === "local"
-        ? knowledgePreview?.local.knowledge_ids
-        : knowledgePreview?.aidp.kds_ids;
-    const previewIndex = previewIds?.indexOf(id) ?? -1;
-    return {
-      id,
-      name:
-        knowledgeBase?.name ||
-        (previewIndex >= 0 ? previewNames?.[previewIndex] : undefined) ||
-        id,
+  const agentCount = workbenchResources?.agents.length ?? 0;
+  const skillCount = workbenchResources?.skills.length ?? 0;
+  const knowledgeIds =
+    knowledgeSource === "local"
+      ? knowledgeScope?.local.mode === "override"
+        ? knowledgeScope.local.knowledge_ids
+        : []
+      : knowledgeScope?.aidp.mode === "override"
+        ? knowledgeScope.aidp.kds_ids
+        : [];
+  const knowledgeCount = knowledgeIds.length;
+  const knowledgePreviewIds =
+    knowledgeSource === "local"
+      ? knowledgePreview?.local.knowledge_ids
+      : knowledgePreview?.aidp.kds_ids;
+  const knowledgePreviewNames =
+    knowledgePreview?.[knowledgeSource].display_names;
+  const knowledgeNamesById = new Map(
+    knowledgePreviewIds?.map((id, index) => [id, knowledgePreviewNames?.[index]])
+  );
+  const knowledgeResources = knowledgeIds.map((id) => ({
+    id,
+    name: knowledgeNamesById.get(id) || `#${id}`,
+  }));
+  const removeKnowledge = (id: string) => {
+    if (!knowledgeScope || !onKnowledgeScopeChange) return;
+    const remaining = knowledgeResources.filter((item) => item.id !== id);
+    const ids = remaining.map((item) => item.id);
+    const display_names = remaining.map((item) => item.name);
+    const mode = ids.length > 0 ? "override" : "disabled";
+    const local = knowledgeSource === "local";
+    const nextScope: ConversationKnowledgeScope = {
+      ...knowledgeScope,
+      local: local ? { mode, knowledge_ids: ids } : knowledgeScope.local,
+      aidp: local ? knowledgeScope.aidp : { mode, kds_ids: ids },
     };
-  });
-  const toggleKnowledgeBase = async (id: string) => {
-    if (
-      isRunning ||
-      knowledgeSaving ||
-      !canSelectKnowledge ||
-      !onKnowledgeScopeChange
-    )
-      return;
-    const capabilities = knowledgeCapabilities?.sources[knowledgeSource];
-    const ids = selectedKbIds.includes(id)
-      ? selectedKbIds.filter((value) => value !== id)
-      : [...selectedKbIds, id];
-    const maxSelect =
-      capabilities?.max_select ?? (enableAidpKnowledge ? 10 : 50);
-    if (maxSelect > 0 && ids.length > maxSelect) {
-      message.warning(t("chat.knowledgeScope.maxSelect", { count: maxSelect }));
-      return;
-    }
-    if (
-      !enableAidpKnowledge &&
-      new Set(
-        knowledgeBases
-          .filter((kb) => ids.includes(kb.id))
-          .map((kb) => kb.embeddingModel)
-          .filter(Boolean)
-      ).size > 1
-    ) {
-      message.error(t("chat.knowledgeScope.embeddingMismatch"));
-      return;
-    }
-    const scope: ConversationKnowledgeScope = {
-      schema_version: 1,
-      local: {
-        mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
-        knowledge_ids: enableAidpKnowledge ? [] : ids,
-      },
-      aidp: {
-        mode: enableAidpKnowledge && ids.length ? "override" : "disabled",
-        kds_ids: enableAidpKnowledge ? ids : [],
-      },
-    };
-    setKnowledgeSaving(true);
+    return onKnowledgeScopeChange(nextScope, {
+      local: local
+        ? { disabled: !ids.length, knowledge_ids: ids, display_names }
+        : knowledgePreview?.local ?? {
+            disabled: nextScope.local.mode === "disabled",
+            knowledge_ids: [],
+            display_names: [],
+          },
+      aidp: local
+        ? knowledgePreview?.aidp ?? {
+            disabled: nextScope.aidp.mode === "disabled",
+            kds_ids: [],
+            display_names: [],
+          }
+        : { disabled: !ids.length, kds_ids: ids, display_names },
+    });
+  };
+  const resourceTags = [
+    ...(toolbar.agent && workbenchResources
+      ? workbenchResources.agents.map(({ id, name }) => ({
+          id: `agent:${id}`,
+          name,
+          icon: <Bot className="size-3.5" />,
+          remove: () => workbenchResources.onRemoveAgent(id),
+        }))
+      : []),
+    ...(toolbar.knowledge
+      ? knowledgeResources.map(({ id, name }) => ({
+          id: `knowledge:${id}`,
+          name,
+          icon: <KnowledgeBookIcon className="size-3.5" />,
+          remove: () => removeKnowledge(id),
+        }))
+      : []),
+    ...(toolbar.skill && workbenchResources
+      ? workbenchResources.skills.map(({ id, name }) => ({
+          id: `skill:${id}`,
+          name,
+          icon: <SkillStackIcon className="size-3.5" />,
+          remove: () => workbenchResources.onRemoveSkill(id),
+        }))
+      : []),
+  ];
+  const onRemoveResource = async (id: string) => {
+    const resource = resourceTags.find((item) => item.id === id);
+    if (!resource || removingResource || disabled || isRunning) return;
+    setRemovingResource(true);
+    setSendError("");
     try {
-      await onKnowledgeScopeChange(scope);
+      await resource.remove();
     } catch (error) {
-      log.error("Failed to update composer knowledge scope", error);
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : t("workbench.controls.saveConfigFailed")
+      );
     } finally {
-      setKnowledgeSaving(false);
+      setRemovingResource(false);
     }
   };
+
   const hasIncompatibleScope = Boolean(
     isDeploymentReady &&
     knowledgeScope &&
@@ -674,13 +755,13 @@ export const Composer: FC<ComposerProps> = ({
     <div className="relative w-full min-w-0 font-sans">
       {workbenchPresentation && workbenchPresentation.actions}
       <fieldset
+        data-slot="chat-composer"
         disabled={fieldsetDisabled}
         aria-disabled={fieldsetDisabled}
         className={cn(
-          "relative m-0 flex min-w-0 w-full flex-col overflow-visible gap-2 rounded-[20px] border-[0.5px] border-solid border-[#191919]/[0.08] bg-white px-4 pb-4 pt-5 shadow-[0_1px_6px_0_rgba(0,0,0,0.16)]",
+          "relative m-0 flex w-full min-w-0 flex-col overflow-visible gap-3 rounded-[20px] border border-[var(--color-border-separator)] bg-card p-3 text-foreground shadow-sm sm:p-4",
           fieldsetDisabled && "cursor-not-allowed opacity-60",
-          configurationLayout &&
-            "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
+          configurationLayout && "min-h-[164px]"
         )}
       >
         {disabled && disabledReason ? (
@@ -714,7 +795,7 @@ export const Composer: FC<ComposerProps> = ({
         <ComposerPrimitive.Unstable_TriggerPopoverRoot>
           {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
           <ComposerPrimitive.Root
-            className="flex w-full flex-col gap-2.5 outline-none"
+            className="flex w-full min-w-0 flex-col gap-3 outline-none"
             onSubmit={(event) => {
               if (isRunning) event.preventDefault();
               else prepareSend(event);
@@ -730,7 +811,17 @@ export const Composer: FC<ComposerProps> = ({
               }
             }}
           >
-            {hasAttachments && <ComposerAttachments className="px-0" />}
+            {(resourceTags.length > 0 || hasAttachments) && (
+              <div className="flex min-w-0 flex-col gap-2">
+                <SelectedResourceTags
+                  items={resourceTags}
+                  compact
+                  disabled={disabled || isRunning || removingResource}
+                  onRemove={(id) => void onRemoveResource(id)}
+                />
+                {hasAttachments && <ComposerAttachments />}
+              </div>
+            )}
             <ComposerAnnotationChip
               annotations={annotations?.annotations ?? []}
               disabled={isRunning || disabled}
@@ -740,70 +831,11 @@ export const Composer: FC<ComposerProps> = ({
               onRemove={(id) => annotations?.removeAnnotation(id)}
               onClear={() => annotations?.clearAnnotations()}
             />
-            {conversationResources &&
-              (selectedSkillNames.length > 0 ||
-                (canSelectKnowledge &&
-                  selectedKnowledgeBaseChips.length > 0)) && (
-                <div className="flex min-w-0 flex-wrap gap-2 px-2">
-                  {selectedSkillNames.map((name) => (
-                    <span
-                      key={`skill-${name}`}
-                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
-                    >
-                      <SkillStackIcon
-                        className="size-3.5 shrink-0 text-[#666]"
-                        aria-hidden
-                      />
-                      <span className="truncate" title={name}>
-                        {name}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`${t("common.delete")} ${name}`}
-                        disabled={isRunning || disabled}
-                        className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
-                        onClick={() =>
-                          setConversationSkills((current) =>
-                            current.filter((skill) => skill.name !== name)
-                          )
-                        }
-                      >
-                        <X className="size-3" aria-hidden />
-                      </button>
-                    </span>
-                  ))}
-                  {(canSelectKnowledge ? selectedKnowledgeBaseChips : []).map(
-                    ({ id, name }) => (
-                      <span
-                        key={id}
-                        className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
-                      >
-                        <KnowledgeBookIcon
-                          className="size-3.5 shrink-0 text-[#666]"
-                          aria-hidden
-                        />
-                        <span className="truncate" title={name}>
-                          {name}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={isRunning || knowledgeSaving}
-                          aria-label={`${t("common.delete")} ${name}`}
-                          className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
-                          onClick={() => void toggleKnowledgeBase(id)}
-                        >
-                          <X className="size-3" aria-hidden />
-                        </button>
-                      </span>
-                    )
-                  )}
-                </div>
-              )}
             {skillFiles ? (
               <LexicalComposerInput
                 aria-label={t("chat.composer.inputLabel")}
                 placeholder=""
-                className="relative mb-0 max-h-48 min-h-20 w-full bg-transparent px-0 py-0 text-sm text-[#191919] outline-none [&_.aui-lexical-input]:min-h-20 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:text-muted-foreground"
+                className="relative mb-0 max-h-48 min-h-20 w-full bg-transparent px-0 py-0 text-sm text-foreground outline-none [&_.aui-lexical-input]:min-h-20 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:text-muted-foreground"
                 submitMode="enter"
                 autoFocus
                 formatter={combinedSkillDirectiveFormatter}
@@ -816,8 +848,8 @@ export const Composer: FC<ComposerProps> = ({
                   aria-label={t("chat.composer.inputLabel")}
                   placeholder=""
                   className={cn(
-                    "max-h-48 min-h-20 min-w-0 w-auto flex-1 resize-none bg-transparent px-0 py-0 text-sm text-[#191919] outline-none placeholder:text-muted-foreground",
-                    configurationLayout && "!min-h-[56px] !px-4"
+                    "max-h-48 min-h-20 min-w-0 w-auto flex-1 resize-none bg-transparent px-0 py-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                    configurationLayout && "!min-h-[56px]"
                   )}
                   rows={1}
                   submitMode="enter"
@@ -825,95 +857,86 @@ export const Composer: FC<ComposerProps> = ({
                 />
               </div>
             )}
-            {workbenchResources && (
-              <SelectedResourceChips
-                resources={workbenchResources}
-                scope={knowledgeScope}
-                knowledgeNames={{
-                  local: Object.fromEntries(
-                    (knowledgePreview?.local.knowledge_ids || []).map(
-                      (id, index) => [
-                        id,
-                        knowledgePreview?.local.display_names[index] ||
-                          `#${id}`,
-                      ]
-                    )
-                  ),
-                  aidp: Object.fromEntries(
-                    (knowledgePreview?.aidp.kds_ids || []).map((id, index) => [
-                      id,
-                      knowledgePreview?.aidp.display_names[index] || `#${id}`,
-                    ])
-                  ),
-                }}
-                disabled={isRunning}
-                onEditSkill={onOpenWorkbenchSkillPicker}
-                onRemoveSkill={onRemoveWorkbenchSkill}
-                onEditKnowledge={() => setKnowledgeModalOpen(true)}
-                onKnowledgeChange={(scope) => {
-                  // The controller presents save/conflict errors; keep rejected saves out of the event loop.
-                  void Promise.resolve(onKnowledgeScopeChange?.(scope)).catch(
-                    () => undefined
-                  );
-                }}
-              />
-            )}
-            <div className="relative flex min-h-8 flex-wrap items-center justify-between gap-2">
+            <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1">
-                {!creationMode && onChatModeChange && (
+                {toolbar.mode && (
                   <WorkbenchPlanningMenu
                     chatMode={chatMode}
-                    onChatModeChange={onChatModeChange}
+                    onChatModeChange={toolbar.mode}
                     disabled={isRunning || disabled}
                   />
                 )}
-                {!creationMode && workbenchResources?.onSelectAgent && (
+                {toolbar.agent && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isRunning || disabled}
-                    className="h-8 text-sm font-normal text-muted-foreground"
-                    onClick={workbenchResources.onSelectAgent}
+                    disabled={isRunning || disabled || removingResource}
+                    className={resourceButtonClass(agentCount)}
+                    onClick={toolbar.agent}
                     aria-label={t("workbench.controls.agents", "智能体")}
+                    aria-description={
+                      agentCount > 0
+                        ? t("knowledgeBase.selected.count", {
+                            count: agentCount,
+                          })
+                        : undefined
+                    }
                   >
-                    <Bot className="size-5" />
+                    <Bot className="size-4" />
                     {t("workbench.controls.agents", "智能体")}
+                    <ResourceCount count={agentCount} />
                   </Button>
                 )}
-                {!creationMode && canSelectKnowledge && (
+                {toolbar.knowledge && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isRunning || disabled}
-                    className="h-8 text-sm font-normal text-muted-foreground"
+                    disabled={isRunning || disabled || removingResource}
+                    className={resourceButtonClass(knowledgeCount)}
                     onClick={() => setKnowledgeModalOpen(true)}
                     aria-label={t("chat.composer.knowledgeBase")}
+                    aria-description={
+                      knowledgeCount > 0
+                        ? t("knowledgeBase.selected.count", {
+                            count: knowledgeCount,
+                          })
+                        : undefined
+                    }
                     title={knowledgeSummary}
                   >
-                    <KnowledgeBookIcon className="size-5" />
+                    <KnowledgeBookIcon className="size-4" />
                     {t("chat.composer.knowledgeBase")}
+                    <ResourceCount count={knowledgeCount} />
                   </Button>
                 )}
-                {!creationMode && onOpenWorkbenchSkillPicker && (
+                {toolbar.skill && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isRunning || disabled}
-                    className="h-8 text-sm font-normal text-muted-foreground"
-                    onClick={onOpenWorkbenchSkillPicker}
+                    disabled={isRunning || disabled || removingResource}
+                    className={resourceButtonClass(skillCount)}
+                    onClick={toolbar.skill}
                     aria-label={t("chat.composer.skills")}
+                    aria-description={
+                      skillCount > 0
+                        ? t("knowledgeBase.selected.count", {
+                            count: skillCount,
+                          })
+                        : undefined
+                    }
                   >
-                    <SkillStackIcon className="size-5" />
+                    <SkillStackIcon className="size-4" />
                     {t("chat.composer.skills")}
+                    <ResourceCount count={skillCount} />
                   </Button>
                 )}
-                {allowRuntimeMetadata && onRuntimeMetadataChange && (
+                {toolbar.metadata && (
                   <RuntimeMetadataEditor
                     value={runtimeMetadata}
-                    onChange={onRuntimeMetadataChange}
+                    onChange={toolbar.metadata}
                     disabled={isRunning}
                   />
                 )}
@@ -931,35 +954,54 @@ export const Composer: FC<ComposerProps> = ({
                     onValueChange={onModelChange}
                     variant="ghost"
                     size="sm"
-                    className="min-w-0 max-w-[280px] text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
+                    className="min-w-0 max-w-[280px] text-sm font-normal leading-5 text-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
+                  />
+                )}
+                {inputTools?.attachments && <ComposerAttachment />}
+                {inputTools?.dictationConfigured !== undefined && (
+                  <ComposerDictation
+                    configured={inputTools.dictationConfigured}
                   />
                 )}
                 {children}
                 <ComposerSendOrCancel
                   onSend={prepareSend}
-                  disabled={disabled || knowledgeSaving}
+                  disabled={disabled}
                   hasAnnotations={(annotations?.annotations.length ?? 0) > 0}
                 />
               </div>
             </div>
           </ComposerPrimitive.Root>
-          {canSelectKnowledge && (
+          {knowledgeModalOpen && (
             <ConversationKnowledgeScopeModal
+              key={loadKnowledgeOnOpen ? knowledgeAccessKey : undefined}
               presentation="drawer"
               disabled={isRunning || disabled}
               open={knowledgeModalOpen}
               value={knowledgeScope}
               capabilities={knowledgeCapabilities}
-              onRetryCapabilities={workbenchPresentation?.onKnowledgeRetry}
+              requireEnabledSource={loadKnowledgeOnOpen}
+              onRetryCapabilities={
+                loadKnowledgeOnOpen
+                  ? () => void capabilityQuery.refetch()
+                  : workbenchPresentation?.onKnowledgeRetry
+              }
               capabilitiesPending={
-                Boolean(
-                  workbenchPresentation?.onKnowledgeOpenChange &&
-                  !knowledgeCapabilities &&
-                  !workbenchPresentation?.knowledgeUnavailable
-                ) || workbenchPresentation?.knowledgePending
+                loadKnowledgeOnOpen
+                  ? !knowledgeCapabilities &&
+                    (!capabilityQuery.isError || capabilityQuery.isFetching)
+                  : Boolean(
+                      workbenchPresentation?.onKnowledgeOpenChange &&
+                      !knowledgeCapabilities &&
+                      !workbenchPresentation?.knowledgeUnavailable
+                    ) || workbenchPresentation?.knowledgePending
               }
               capabilitiesUnavailable={
-                workbenchPresentation?.knowledgeUnavailable
+                loadKnowledgeOnOpen
+                  ? !knowledgeCapabilities &&
+                    capabilityQuery.isError &&
+                    !capabilityQuery.isFetching
+                  : workbenchPresentation?.knowledgeUnavailable
               }
               onCancel={() => setKnowledgeModalOpen(false)}
               onConfirm={async (scope, preview) => {
@@ -971,27 +1013,6 @@ export const Composer: FC<ComposerProps> = ({
           )}
         </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       </fieldset>
-      {conversationResources && skillPickerOpen && (
-        <SkillPicker
-          open
-          disabled={isRunning || disabled}
-          selected={conversationSkills}
-          onCancel={() => setSkillPickerOpen(false)}
-          onConfirm={(mounts, skills) => {
-            if (isRunning || disabled) return;
-            setConversationSkills(
-              mounts.map((mount) => ({
-                ...mount,
-                name:
-                  skills.find(
-                    (skill) => Number(skill.skill_id) === mount.skill_id
-                  )?.name || String(mount.skill_id),
-              }))
-            );
-            setSkillPickerOpen(false);
-          }}
-        />
-      )}
       {creationMode && workbenchPresentation && (
         <div className="mt-6">
           <CreationExamples mode={creationMode} />
@@ -1005,6 +1026,22 @@ export const Composer: FC<ComposerProps> = ({
     </div>
   );
 };
+
+const resourceButtonClass = (count: number) =>
+  cn(
+    "h-8 gap-1.5 rounded-base px-2 text-sm font-normal text-foreground",
+    count > 0 &&
+      "bg-brand-soft text-primary hover:bg-brand-soft hover:text-primary"
+  );
+
+function ResourceCount({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="inline-flex min-w-4 items-center justify-center rounded-base bg-primary px-1 text-xs font-medium leading-4 text-white">
+      {count}
+    </span>
+  );
+}
 
 const WorkbenchPlanningMenu: FC<{
   chatMode: ChatMode;
@@ -1026,7 +1063,7 @@ const WorkbenchPlanningMenu: FC<{
           variant="ghost"
           size="sm"
           disabled={disabled}
-          className="-ml-2 h-8 shrink-0 gap-1.5 px-2 text-sm font-normal leading-5 text-muted-foreground"
+          className="h-8 shrink-0 gap-1.5 px-2 text-sm font-normal leading-5 text-foreground"
         >
           {chatMode === "planning" ? (
             <MessageCircleMore className="size-5" />
@@ -1086,11 +1123,11 @@ const ComposerSendOrCancel: FC<{
           >
             <Button
               size="icon"
-              variant="outline"
+              variant="ghost"
               aria-label={t("chat.composer.stopGenerating")}
-              className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
+              className="size-8 rounded-base text-foreground hover:bg-accent"
             >
-              <Square className="size-4 fill-current" />
+              <CircleStop aria-hidden="true" className="size-5" />
             </Button>
           </ComposerPrimitive.Cancel>
         </TooltipWrapper>

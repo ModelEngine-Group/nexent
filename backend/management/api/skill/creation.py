@@ -5,16 +5,18 @@ from http import HTTPStatus
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.agent import NL2SkillRunRequest
 from contracts.agentos import AgentVersionReference
-from contracts.errors.exceptions import AgentRunAlreadyActiveError, WorkbenchError
-from management.services.conversation.creator_execution import start_creation_turn
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
-from contracts.errors.exceptions import RunModelControlsError
+from contracts.errors.exceptions import (
+    AgentRunAlreadyActiveError, ForbiddenError, RunModelControlsError, RuntimeCapacityExceededError,
+    RuntimeCoordinationUnavailableError, RuntimeQueueTimeoutError, WorkbenchError,
+)
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from management.services.conversation.creation_history import persist_creation_stream, prepare_creation_history
+from management.services.conversation.creator_execution import start_creation_turn
 from management.services.permission.identity.session import get_current_user_info
 from management.services.skill.creation import create_nl2skill_stream, prepare_nl2skill_snapshot
 from nexent.core.concurrency import run_blocking
@@ -68,7 +70,19 @@ async def nl2skill_run_api(
         return StreamingResponse(await prepare_stream(request), media_type="text/event-stream")
     except AgentRunAlreadyActiveError as exc:
         raise HTTPException(status_code=409, detail={"code": "CREATOR_RUN_ACTIVE"}) from exc
-    except PermissionError as exc:
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content={"message": {"code": "RUNTIME_CAPACITY_EXCEEDED", "retryable": True}},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except RuntimeCoordinationUnavailableError:
+        return JSONResponse(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            content={"code": "RUNTIME_COORDINATION_UNAVAILABLE", "message": "Runtime coordination is unavailable.",
+                     "retryable": True}, headers={"Retry-After": "1"},
+        )
+    except (PermissionError, ForbiddenError) as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc

@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
+
+import { ResourceDenylistPanel } from "@/components/resource-picker/ResourceDenylistPanel";
 import { effectiveRoles, hasRole, roleLabelKey } from "@/lib/roles";
 
 import { UserIdentity } from "@/components/auth/UserIdentity";
@@ -66,6 +68,7 @@ import TagList from "./resources/TagList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
+import TenantMemorySettingsTab from "./resources/TenantMemorySettingsTab";
 import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -1380,6 +1383,36 @@ export default function UserManageComp() {
                             />
                           ),
                         },
+                        ...(tenantId === user?.tenantId &&
+                        hasRole(user, "ADMIN", "SU")
+                          ? [
+                              {
+                                key: "resource-configuration",
+                                label: t("resourceDenylist.configurationTab"),
+                                children: (
+                                  <ResourceDenylistPanel
+                                    key={tenantId}
+                                    scope="tenant"
+                                    tenantId={tenantId}
+                                  />
+                                ),
+                              },
+                            ]
+                          : []),
+                        ...(tenantId === user?.tenantId
+                          ? [
+                              {
+                                key: "memory",
+                                label: t("tenantResources.tabs.memory"),
+                                children: (
+                                  <TenantMemorySettingsTab
+                                    userId={user.id}
+                                    tenantId={tenantId}
+                                  />
+                                ),
+                              },
+                            ]
+                          : []),
                         {
                           key: "mcp",
                           label: t("tenantResources.tabs.mcp") || "MCP",

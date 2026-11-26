@@ -1,248 +1,126 @@
-# Terminal Tool User Manual
+---
+title: Terminal Tool
+---
 
-The Terminal tool is a powerful local tool provided by the Nexent platform that allows agents to execute shell commands on remote servers through SSH connections. The tool supports session management to maintain shell state between commands, uses password authentication for secure connections, and returns command output results. This manual will detail how to configure and use the Terminal tool.
+# Terminal Tool
 
-## 🖥️ SSH Server Setup
+The Terminal tool allows agents to execute shell commands on remote servers through SSH connections. It supports session management to maintain shell state between commands, uses password authentication for secure connections, and returns command output results.
 
-The Terminal tool supports two SSH server configuration methods:
+## 🧭 Tool List
 
-1. **Nexent Terminal Container**: Use the pre-configured SSH container provided by Nexent (recommended)
-2. **Third-party SSH Server**: Set up SSH service on existing servers
+- `terminal`: Execute shell commands on a remote terminal over SSH, with multi-session state, password authentication, and output cleanup
 
-### Method 1: Nexent Terminal Container Configuration
+## 🧰 Example Use Cases
 
-Nexent provides a pre-configured Terminal container with a complete SSH server environment and necessary tools, ready to use out of the box.
+- Run remote operations commands, check logs, processes, and system status
+- Run scripts and manage files or directories on remote hosts
+- Maintain shell state across multi-step operations (e.g., change directory first, then run commands)
 
-#### 1. Image Deployment Methods
+## 🧾 Parameters & Behavior
 
-Nexent Terminal container supports two deployment methods:
+### Runtime parameters
 
-##### Method A: Deploy Script Auto-Deployment (Recommended)
+- `command`: The shell command to execute, required
+- `session_name`: Session name for connection reuse, default `default`
+- `timeout`: Command timeout in seconds, default 30
 
-```bash
-# Use deploy script for automatic pull and deployment
-# Script automatically pulls nexent/nexent-ubuntu-terminal from Nexent Docker repository
-# Supports development, production, and cloud server deployment
+### Connection configuration parameters
 
-# Container configuration
-Container name: nexent-openssh-server
-SSH port: 2222
-Working directory: /opt/terminal
-```
+- `ssh_host`: IP address or hostname of the SSH server (default `nexent-openssh-server` for the Nexent Terminal container)
+- `ssh_port`: SSH service port, default 22
+- `ssh_user`: SSH login username
+- `password`: SSH login password
+- `init_path`: Initial working directory, default `~`
 
-##### Method B: Local Image Build
-```bash
-# Build Ubuntu Terminal image locally
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
-```
+### Port notes
 
-> 📚 **Detailed Build Instructions**: Refer to [Docker Build Guide](/en/deployment/docker-build) for complete image build and push processes.
+- The tool's `ssh_port` defaults to 22; the SSH service inside the Nexent Terminal container also listens on 22, so the default configuration works directly within the platform container network
+- The development Compose file maps host port 2222 to container port 22 (use `ssh -p 2222` when testing from the host); the production Compose file does not publish a host port
+- For third-party SSH servers, fill in the actual port
 
-#### 2. Deploy Script Configuration
+### Output format
 
-When running the deployment script, choose to enable the Terminal tool container:
+The tool returns a JSON result containing:
 
-```bash
-# Run deployment script from the repository root
-bash deploy.sh docker --components infrastructure,application,data-process,terminal
+- **command**: The executed command
+- **session_name**: The session name used
+- **output**: Command output (control characters and prompts are cleaned automatically)
+- **timestamp**: Execution timestamp
+- **error**: Error message (when execution fails)
 
-# During script execution, select:
-# During script execution, select or keep the terminal component enabled.
-# Then configure SSH credentials and the host mount directory when prompted.
-```
+## 🛠️ How to Use
 
-#### 3. Container Features
+### Option 1: Use the Nexent Terminal container (recommended)
 
-The Nexent Terminal container includes the following pre-installed tools:
+Nexent ships a pre-configured Terminal container `nexent-openssh-server` with a complete SSH environment and common tools, ready out of the box:
 
-- **Basic Tools**: curl, wget, vim, git
-- **Python Environment**: Python3, pip, virtualenv, conda
-- **SSH Configuration**: Optimized timeout settings (60-minute sessions)
+- Enable it through the deployment script: `bash deploy.sh docker --components infrastructure,application,data-process,terminal`; choose to enable the terminal container when prompted, and configure SSH credentials and the mounted directory as instructed
+- The container working directory is `/opt/terminal`, preloaded with curl, wget, vim, git, and a Python 3 environment (pip, virtualenv, conda); SSH sessions time out after 60 minutes
+- You can also build the image locally: `docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .`; see the [Docker build guide](/en/deployment/docker-build) for the full build and push workflow
 
-#### 4. Verify Container Operation
+Verify the container is running:
 
 ```bash
 # Check container status
 docker ps | grep nexent-openssh-server
 
-# Test SSH connection
+# Test SSH from the host in development (2222 maps to container 22)
 ssh -p 2222 root@localhost
 
-# View container logs
+# Check container logs
 docker logs nexent-openssh-server
 ```
 
+### Option 2: Use a third-party SSH server
 
-### Method 2: Third-party SSH Server Setup
+To set up SSH on an existing server or a self-built container:
 
-If you need to set up SSH service on existing servers, you can use the following two methods:
+**Container-based (good for development testing and temporary use)**: build an Ubuntu image with `openssh-server` installed, create a user, and allow password login:
 
-#### Method A: Container Deployment (Recommended)
-
-**Build and start container directly using Dockerfile**:
-
-##### 1. Create Dockerfile
 ```dockerfile
 FROM ubuntu:24.04
-
-# Set environment variables to avoid interaction
 ENV DEBIAN_FRONTEND=noninteractive
-
-# Install openssh-server and common tools
-RUN apt-get update && apt-get install -y \
-    openssh-server \
-    sudo \
-    vim \
-    bash \
+RUN apt-get update && apt-get install -y openssh-server sudo vim bash \
     && rm -rf /var/lib/apt/lists/*
-
-# Create test user and set password
 RUN useradd -ms /bin/bash test \
     && echo 'test:test@123' | chpasswd \
     && usermod -aG sudo test
-
-# Set root user password
-RUN echo 'root:nexent@123' | chpasswd
-
-# Ensure SSH service directory exists
-RUN mkdir /var/run/sshd
-
-# Allow root user to login with password
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
+RUN mkdir /var/run/sshd \
+    && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-
-# Run sshd when container starts
 CMD ["/usr/sbin/sshd", "-D"]
 ```
 
-##### 2. Build and start container
 ```bash
-# Build image
 docker build -t nexent-terminal .
-
-# Start container
 docker run -d --name nexent-terminal -p 2222:22 nexent-terminal
 ```
 
-##### 3. Connection information
-- **SSH Address**: `localhost:2222`
-- **Username**: `test` or `root`
-- **Password**: `test@123` or `nexent@123`
-- **Container name**: `nexent-terminal`
+**Server installation (good for production)**: install and enable `openssh-server` on the Linux server, ensure `PasswordAuthentication yes` in `/etc/ssh/sshd_config`, set the port as needed, and restart the SSH service. Native performance with full control over SSH configuration.
 
-**Advantages**:
-- Custom Ubuntu 24.04 environment
-- Pre-installed common development tools
-- Supports multi-user access
-- Containerized isolation, secure and reliable
+### Configure the Terminal tool in an agent
 
-#### Method B: Server Configuration
-
-Install and configure SSH service directly on Linux servers:
-
-```bash
-# Ubuntu/Debian
-sudo apt update && sudo apt install openssh-server -y
-sudo systemctl start ssh && sudo systemctl enable ssh
-
-# CentOS/RHEL
-sudo yum install openssh-server -y
-sudo systemctl start sshd && sudo systemctl enable sshd
-
-# Configure SSH (edit /etc/ssh/sshd_config)
-sudo nano /etc/ssh/sshd_config
-# Ensure the following configuration:
-# PasswordAuthentication yes
-# Port 22
-# PermitRootLogin yes
-
-# Restart SSH service
-sudo systemctl restart ssh
-```
-
-**Advantages**:
-- Native performance, low resource usage
-- Complete control over SSH configuration
-- Suitable for long-term production use
-
-#### Selection Recommendations
-
-- **Development/Testing**: Recommend container deployment, quick and convenient
-- **Production Environment**: Recommend server configuration, better performance
-- **Temporary Use**: Recommend container deployment, delete after use
-
-
-## 🚀 Tool Features
-
-The Terminal tool provides the following core features:
-
-### Basic Features
-
-- **Remote Command Execution**: Execute shell commands through SSH connections
-- **Session Management**: Support multiple sessions, maintain shell state
-- **Password Authentication**: Use passwords for SSH authentication
-- **Output Cleaning**: Automatically clean control characters and prompts from command output
-
-### Input Parameters
-
-- **command**: Shell command to execute (required)
-- **session_name**: Session name for connection reuse (optional, default "default")
-- **timeout**: Command timeout time in seconds (optional, default 30)
-
-### Output Format
-
-The tool returns results in JSON format, including:
-
-- **command**: Executed command
-- **session_name**: Used session name
-- **output**: Command output results
-- **timestamp**: Execution timestamp
-- **error**: Error information (if execution fails)
-
-## ⚙️ Terminal Tool Configuration
-
-### Configure Terminal Tool in Nexent
-
-1. Log in to the Nexent platform
-2. Navigate to the **[Agent Development](../agent-development)** page
-3. Select the agent to configure
-4. Find "Terminal Tool" in the "Select Agent Tools" tab
+1. Open the **[Agent Configuration](../agent-development/agent-configuration)** page and select the target agent
+2. Find the Terminal tool in the tool list and add it
+3. Select Configure on the tool row and fill in the connection parameters
 
 <div style="display: flex; justify-content: center;">
-  <img src="./../assets/local-tools/terminal-tool.png" style="width: 80%; height: auto;" alt="Agent Tool Configuration Page" />
+  <img src="./../assets/local-tools/terminal-tool.png" style="width: 80%; height: auto;" alt="Agent tool configuration page" />
 </div>
 
-#### Configure SSH Connection Parameters
-
-Click the configuration button for the Terminal tool and fill in the following parameters:
-
-**Basic Configuration**:
-- **ssh_host**: SSH server IP address or domain name (Nexent container defaults to nexent-openssh-server)
-- **ssh_port**: SSH service port (Nexent container defaults to 2222, third-party servers default to 22)
-- **ssh_user**: SSH login username
-- **password**: SSH login password
-- **init_path**: Initial working directory (defaults to ~)
-
-<div style="display: flex; justify-content: center;">
-  <img src="./../assets/local-tools/terminal-tool-setting.png" style="width: 80%; height: auto;" alt="Terminal Tool Configuration Interface" />
-</div>
-
-
-### Configuration Examples
-
-#### Example 1: Nexent Terminal Container Configuration
+**Example configuration (Nexent Terminal container, inside the platform container network)**:
 
 ```json
 {
-  "ssh_host": "host.docker.internal",
-  "ssh_port": 2222,
+  "ssh_host": "nexent-openssh-server",
+  "ssh_port": 22,
   "ssh_user": "root",
   "password": "your-container-password",
   "init_path": "/opt/terminal"
 }
 ```
 
-#### Example 2: Third-party SSH Server Configuration
+**Example configuration (third-party SSH server)**:
 
 ```json
 {
@@ -254,168 +132,75 @@ Click the configuration button for the Terminal tool and fill in the following p
 }
 ```
 
+<div style="display: flex; justify-content: center;">
+  <img src="./../assets/local-tools/terminal-tool-setting.png" style="width: 80%; height: auto;" alt="Terminal tool configuration" />
+</div>
 
-## 🔧 Common Issues
+## 🛡️ Safety & Best Practices
 
-### Connection Issues
-
-#### Q1: What to do if SSH connection times out?
-
-**A1:** Check the following items:
-
-**Nexent Terminal Container**:
-
-- Whether the container is running normally
-- Whether port 2222 is occupied
-- Whether there are error messages in container logs
+- Use strong passwords and never expose SSH credentials in conversations
+- Nexent Terminal container: keep the image updated, restrict access to the mounted directory, monitor resource usage, and back up important data regularly
+- Third-party servers: change the default SSH port, configure IP allowlists, and enable fail2ban protection
 
 ```bash
-# Check container status
-docker ps | grep nexent-openssh-server
+# Install and configure fail2ban against brute-force attacks
+sudo apt install fail2ban -y
+sudo nano /etc/fail2ban/jail.local
+# [sshd]
+# enabled = true
+# port = ssh
+# filter = sshd
+# logpath = /var/log/auth.log
+# maxretry = 3
+# bantime = 3600
+```
 
-# Check port occupancy
+## 🔧 FAQ
+
+**Q1: SSH connection times out**
+
+Check the following:
+
+- **Nexent Terminal container**: whether the container is running, whether the port mapping is correct (development host 2222 → container 22), and whether the container logs show errors
+- **Third-party SSH server**: network connectivity, SSH service status, firewall rules, and the port
+
+```bash
+# Check container status and port usage
+docker ps | grep nexent-openssh-server
 netstat -tlnp | grep :2222
 
-# View container logs
-docker logs nexent-openssh-server
-
-# Test container SSH connection
-ssh -p 2222 root@localhost
-```
-
-**Third-party SSH Server**:
-
-- Whether network connection is normal
-- Whether the server SSH service is running
-- Whether firewall is blocking connection
-- Whether SSH port is correct
-
-```bash
-# Check SSH service status
+# Check SSH status on a third-party server
 sudo systemctl status ssh
-
-# Check port listening
 sudo netstat -tlnp | grep :22
-
-# Test network connectivity
-ping your-server-ip
-telnet your-server-ip 22
 ```
 
-#### Q2: How to resolve authentication failure?
+**Q2: Authentication fails**
 
-**A2:** Check password authentication:
-- **Username**: Confirm username is correct
-- **Password**: Confirm password is correct, note case sensitivity
-- **Server Status**: Confirm SSH service is running normally
+- Confirm the username and password are correct (case-sensitive)
+- Confirm password login is allowed (`PasswordAuthentication yes`)
+- Use `ssh -v username@server-ip` to inspect the authentication process
 
-```bash
-# Test SSH connection
-ssh -v username@server-ip
+**Q3: Insufficient permission to run commands**
 
-# Check SSH service status
-sudo systemctl status ssh
-```
+- Confirm the user has execute permission (`groups username`)
+- Check the sudo configuration (`sudo -l`)
+- Verify the target file permissions (`ls -la /path/to/command`)
 
-### Permission Issues
+**Q4: Commands run slowly**
 
-#### Q3: What to do if command execution has insufficient permissions?
+- Check server load and disk usage (`top`, `df -h`)
+- Adjust the `timeout` parameter and optimize how commands are executed
 
-**A3:** Check user permissions:
-- Confirm user has permission to execute commands
-- Check sudo configuration
-- Verify file system permissions
+**Q5: The Nexent Terminal container fails to start**
 
 ```bash
-# Check user groups
-groups username
-
-# Check sudo permissions
-sudo -l
-
-# Check file permissions
-ls -la /path/to/command
-```
-
-### Performance Issues
-
-#### Q4: What to do if command execution is very slow?
-
-**A4:** Optimization suggestions:
-- Check server performance
-- Adjust timeout settings
-- Optimize command execution method
-
-```bash
-# Check system load
-top
-htop
-
-# Check disk usage
-df -h
-iostat -x 1
-```
-
-### Security Issues
-
-#### Q5: What to do if Nexent Terminal container cannot start?
-
-**A5:** Check the following items:
-
-```bash
-# Check Docker service status
 sudo systemctl status docker
-
-# Check container configuration
 docker-compose config
-
-# View detailed error logs
 docker-compose logs nexent-openssh-server
-
-# Restart container
 docker-compose restart nexent-openssh-server
-
-# Check environment variable configuration
 cat .env | grep -E "(SSH_USERNAME|SSH_PASSWORD|TERMINAL_MOUNT_DIR)"
 ```
 
-**Common Solutions**:
-- Ensure Docker service is running normally
-- Check if port 2222 is occupied by other services
-- Verify environment variable configuration is correct
-- Check mount directory permissions
+Common causes: Docker not running, port already in use, incorrect environment variables, or insufficient permissions on the mounted directory.
 
-#### Q6: How to improve SSH security?
-
-**A6:** Security hardening measures:
-
-**Nexent Terminal Container**:
-- Regularly update container images
-- Limit access permissions to mount directories
-- Monitor container resource usage
-- Regularly backup important data
-
-**Third-party SSH Server**:
-- Use strong passwords
-- Change default SSH port
-- Configure IP whitelist
-- Enable fail2ban protection
-
-```bash
-# Install fail2ban
-sudo apt install fail2ban -y
-
-# Configure fail2ban
-sudo nano /etc/fail2ban/jail.local
-
-# Add SSH protection configuration
-[sshd]
-enabled = true
-port = ssh
-filter = sshd
-logpath = /var/log/auth.log
-maxretry = 3
-bantime = 3600
-```
-
-Need help? Please open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you run into any problem, ask in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) for support.

@@ -74,7 +74,7 @@ def test_parent_child_totals_count_only_actual_model_request_owners(publication)
     assert result.days[DAY]["tokens"]["total_tokens"]["value"] == "23"
     publication[3].assert_called_once_with(
         publication[0], tenant="a", kind="model", start=PREVIOUS, end=DAY,
-        initiator_group_ids=[12, 13], agent_id=None, has_agent_run=True,
+        initiator_group_ids=[12, 13], agent_id=None, has_agent_run=True, exclude_system_agents=True,
     )
 
 

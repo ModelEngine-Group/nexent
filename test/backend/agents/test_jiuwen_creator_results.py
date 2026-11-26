@@ -16,18 +16,33 @@ from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
 
+@pytest.fixture(autouse=True)
+def isolate_retrieval_progress(mocker):
+    mocker.patch("services.nl2agent_retrieval_progress.read_progress", return_value=[])
+    mocker.patch("services.nl2agent_retrieval_progress.clear_progress")
+
+
 CARD = '<nl2a>\n{"subtype":"requirement_clarification","agent_id":42,"questions":[]}\n</nl2a>'
 STATE = '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":42,"updated_fields":["name"]}</nl2a_state>'
 
 
 def setup_adapter(mode="python_workflow"):
     stop = threading.Event()
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop)
+    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop, agent_id=42, run_id="run", conversation_id="9")
     adapter = JiuwenAdapter(SimpleNamespace(
         agent_config=AgentConfig(name="creator", description="creator", model_name="model", tools=[], response_mode=mode),
-        observer=observer, query="create", stop_event=stop,
+        observer=observer, query="create", stop_event=stop, mcp_host=[{"headers": {"X-Nexent-NL2Agent-Run-ID": "run"}}],
     ))
     return adapter, observer, stop
+
+
+def publish_card(observer):
+    from infrastructure.nl2agent_tool_config import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
+
+    observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {NL2AGENT_RECEIPT_KEY: {
+        "event_id": "card-event", "run_id": "run", "conversation_id": "9",
+        "payload": {"subtype": "requirement_clarification", "agent_id": 42, "questions": []},
+    }})
 
 
 def drain(observer):
@@ -41,21 +56,19 @@ def drain(observer):
     lambda text: {"content": [{"type": "text", "text": text}]},
     lambda text: text,
 ])
-def test_successful_workflow_carriers_publish_the_same_card(carrier):
+def test_workflow_text_carriers_cannot_publish_a_trusted_card(carrier):
     adapter, observer, stop = setup_adapter()
     adapter._resource_result(carrier(CARD))
     cards = [event for event in drain(observer) if event["type"] == "nl2a"]
-    assert len(cards) == 1 and json.loads(cards[0]["content"])["agent_id"] == 42
-    assert observer.boundary_reached and observer.turn_complete
-    # A delivered interaction ends this turn without cancelling its producer.
-    assert not stop.is_set()
+    assert cards == []
+    assert not observer.boundary_reached and not stop.is_set()
 
 
 def test_native_mcp_draft_state_is_published_without_ending_the_turn():
     adapter, observer, stop = setup_adapter()
     adapter._resource_result({"result": STATE})
     states = [event for event in drain(observer) if event["type"] == "nl2a_state"]
-    assert len(states) == 1 and json.loads(states[0]["content"])["updated_fields"] == ["name"]
+    assert states == []
     assert not observer.boundary_reached and not stop.is_set()
 
 
@@ -84,7 +97,7 @@ def test_plain_chat_keeps_native_mcp_result_as_data():
 async def test_card_blocks_next_model_prepare_and_tool_dispatch():
     adapter, observer, _stop = setup_adapter()
     from nexent.core.utils.observer import ProcessType
-    observer.add_message("creator", ProcessType.EXECUTION_LOGS, CARD)
+    publish_card(observer)
     assert observer.boundary_reached
     adapter.mcp = None
     adapter.context_bridge = SimpleNamespace(prepare_messages=AsyncMock())
@@ -100,16 +113,29 @@ async def test_card_blocks_next_model_prepare_and_tool_dispatch():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ending", ["run_terminal", "error"])
-async def test_creator_stream_hides_output_after_first_card_and_drains_worker(monkeypatch, ending):
+@pytest.mark.parametrize("terminal_status,end_reason", [
+    ("completed", "awaiting_input"),
+    ("failed", "JIUWEN_EXECUTION_FAILED"),
+    ("stopped", "cancelled"),
+])
+async def test_creator_stream_preserves_terminal_after_first_card_and_drains_worker(
+    monkeypatch, terminal_status, end_reason,
+):
     from runtime.agentos import ephemeral
 
     adapter, _observer, _stop = setup_adapter()
-    events = [{"type": "nl2a", "content": "card"}, {"type": "execution_logs", "content": "hidden"},
+    card = {"type": "nl2a", "content": "card"}
+    terminal = {
+        "type": "run_terminal", "content": "", "schema_version": 1, "runtime_mode": "native_agent",
+        "agent_core": "jiuwen", "turn_id": "turn", "sequence": 2, "status": terminal_status,
+        "end_reason": end_reason, "final_content": "", "final_block_ids": [],
+    }
+    events = [card, {"type": "execution_logs", "content": "hidden"},
               {"type": "tool_result", "content": "already admitted call finished"},
-              {"type": "execution_logs", "content": "still hidden after the result"},
+              {"type": "error", "content": "legacy output stays hidden"},
+              terminal,
               {"type": "nl2a", "content": "duplicate card must stay hidden"},
-              {"type": ending, "content": "actual outcome"}, {"type": "done", "content": ""}]
+              {"type": "done", "content": ""}]
     closed = Mock()
 
     async def run(*args, **kwargs):
@@ -122,7 +148,7 @@ async def test_creator_stream_hides_output_after_first_card_and_drains_worker(mo
     monkeypatch.setattr(ephemeral, "agent_run", run)
     stream = ephemeral._observer_stream(adapter.run_info, Mock(), Mock(), creator_mode="nl2agent")
     output = [item async for item in stream]
-    assert [json.loads(item.removeprefix("data: ")) for item in output if item.startswith("data: ")] == [events[0]]
+    assert [json.loads(item.removeprefix("data: ")) for item in output if item.startswith("data: ")] == [card, terminal]
     assert output[-1] == "event: agentos_execution_complete\ndata: {}\n\n"
     closed.assert_called_once_with()
 
@@ -178,7 +204,7 @@ async def test_waiting_card_drains_worker_cleanup_while_real_stop_still_cancels(
 
     adapter, observer, stop = setup_adapter()
     if interactive:
-        observer.add_message("creator", ProcessType.EXECUTION_LOGS, CARD)
+        publish_card(observer)
     else:
         stop.set()
     future = Future()

@@ -48,6 +48,16 @@ MEMORY_ENV_KEYS = frozenset({"NEXENT_EXTERNAL_MEMORY_PLUGIN", "NEXENT_EXTERNAL_M
 
 def machine_environment(home: Path, repo: Path) -> dict[str, str]:
     env = dict(os.environ)
+    password_keys = set()
+    users_path = home / "config/users.yaml"
+    if users_path.is_file():
+        users = (yaml.safe_load(users_path.read_text(encoding="utf-8")) or {}).get("users") or []
+        password_keys = {
+            str(record["password_env_key"])
+            for record in users
+            if isinstance(record, dict) and record.get("password_env_key")
+        }
+    password_overrides = {key: env[key] for key in password_keys if env.get(key)}
     memory_sources = {key: "process environment" for key in MEMORY_ENV_KEYS if env.get(key)}
     for filename in ("daily.env", "secrets.env", "memory-mock.env"):
         path = home / "config" / filename
@@ -108,6 +118,7 @@ def machine_environment(home: Path, repo: Path) -> dict[str, str]:
                 raise ValueError("config/mcp.yaml container_config must contain an object")
             env["NEXENT_TEST_MCP_CONTAINER_CONFIG"] = json.dumps(definition, ensure_ascii=False)
     env.update(NEXENT_REPO=str(repo), NEXENT_TEST_HOME=str(home), TEST_ROOT=str(home))
+    env.update(password_overrides)
     return env
 
 

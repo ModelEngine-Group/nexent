@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-COVERAGE-STAGE-20261123
+  change_type: bugfix
+  bug_id: NL2AGENT-COVERAGE-STAGE-20261123
+  title: Keep unified cards in coverage until every requirement is covered
+  description: Project workflow steps from every retained requirement rather than any bindable resource.
+  observed_behavior: Mixed gap cards enter binding when their resources array is nonempty.
+  expected_behavior: Uncovered, installable-only or pending requirements keep coverage active. Full verified installed coverage enters binding; later gaps roll back, including replay.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing unified browser checks asserted partial binding and blocked continuation but not the step for mixed coverage.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-WORKFLOW-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Uncovered, installable-only and pending requirements prevent step advancement despite other bindable resources.
+    - Full coverage advances; empty or malformed coverage does not. New gaps roll back and replay uses latest scoped facts.
+    - Editing, collapse and creation entry points remain functional after font and background adjustments.
+    reason: Frontend projection UT and the existing browser journey prove this branch without backend changes or duplicate D1, D2, D3 or D5 cases.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentWorkflowProgress.test.tsx
+    - frontend/tests/workbench/Nl2AgentUnifiedCard.test.tsx
+  notes: 'SPEC baseline: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/. F-045 owns agent_config. Reuse browser-local fixtures and context cleanup with no persistent business writes. Frontend image rebuild only.'
