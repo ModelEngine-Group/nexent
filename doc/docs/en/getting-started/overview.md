@@ -1,8 +1,6 @@
 # Nexent
 
-Nexent is a zero-code agent platform built on **Harness Engineering** principles. Describe your goal in natural language, and the system generates an agent configuration and helps configure tools, Skills, knowledge bases, memory, and collaborative agents. You can then debug, publish, and continuously iterate on the generated agent without manually orchestrating complex workflows.
-
-> One prompt. Endless reach.
+Nexent is an enterprise-grade platform for building and managing AI agents. Users drive agent creation, debugging, and continuous optimization through natural language, while the platform automatically configures tools, Skills, and knowledge bases and connects to existing business systems via MCP and open APIs. Across the full agent lifecycle, Nexent provides access control, version management, runtime monitoring, and end-to-end tracing—helping organizations turn AI pilots into governed, reliable, and sustainably operated production applications.
 
 ![Nexent Banner](../../assets/NexentBanner.png)
 
@@ -17,7 +15,9 @@ Nexent is a zero-code agent platform built on **Harness Engineering** principles
 
 > *If you want to go fast, go alone; if you want to go far, go together.*
 
-This documentation corresponds to **Nexent v2.5.0**. This release enhances natural-language agent generation (NL2Agent), tool and Skill recommendations, isolated sandbox execution, generated file handling, layered memory, personal knowledge-base capacity, and northbound APIs. The platform also supports A2A agent collaboration, MCP tools, knowledge-base retrieval, multimodal interaction, version management, and multi-tenant access control.
+Our vision for Nexent is that anyone can build agents and organizations can govern them wherever they run. We want people who know their work best to be able to turn their ideas and experience into agents using natural language, even if they have never written code. They can start with a specific problem, refine their agents through everyday use, and share what works with other teams.
+
+We also want organizations to be able to govern agents at every stage, from creation and publication to day-to-day operation. They should be able to define who can create, publish, and use agents, see which tools each run called and what results it produced, and trace the cause when something goes wrong. That way, ideas from frontline teams can grow from small pilots into dependable parts of everyday work that teams can keep improving.
 
 - **🗺️ Check our [Feature Map](https://github.com/orgs/ModelEngine-Group/projects/6)** to explore current and upcoming features.
 - **🔍 Try the current build** and leave ideas or bugs in the [Issues](https://github.com/ModelEngine-Group/nexent/issues) tab.
@@ -32,21 +32,29 @@ Most of all, we need visibility. Star ⭐ and watch the [GitHub repository](http
 
 ## ✨ Key Features
 
-Nexent v2.5.0 provides the following core capabilities:
+### 🛠️ Easier agent development
 
-- **⚙️ Multi-Model Integration** — Centrally manage LLM, Embedding, Rerank, image, video, audio, STT, and TTS models
-- **🤖 Zero-Code Agent Generation** — Clarify requirements through multi-turn natural-language conversations, recommend resources, and generate a debuggable agent configuration
-- **🤝 A2A Agent Collaboration** — Agent-to-Agent protocol for seamless multi-agent workflows
-- **🧠 Layered Memory Architecture** — Tenant, User, and Agent memory, with Dreaming for consolidating long-term memory
-- **📝 Progressive Skill Disclosure** — Load Skill instructions and resources on demand and execute scripts in an isolated sandbox
-- **🗄️ Personal Knowledge Bases** — Support multiple document formats, intelligent retrieval, access permissions, and capacity quotas
-- **🔧 MCP Tool Ecosystem** — A plug-and-play extensible tool system with support for custom development
-- **🌐 Internet Knowledge Integration** — Multi-source hybrid search blending real-time web with private data
-- **🔍 Knowledge-Level Traceability** — Precise citations and source verification so that every fact can be traced
-- **🎭 Multimodal and File Processing** — Accept text, image, audio, video, and document inputs, and display generated files for preview or download
-- **🔢 Agent Version Management** — Iterate through versions and review history with safe, controlled rollbacks
-- **🏪 Resource Marketplace** — Share and reuse agents, MCP services, and Skills, with listing approval support
-- **👥 Delegated Administration** — Multi-tenant isolation, RBAC, user groups, resource authorization, API keys, and knowledge-base capacity management
+- **Interactive agent creation and refinement** — Business users can describe the agent they want to build in natural language in the workbench. Nexent asks for key details and generates a complete agent configuration that users can debug and continue to refine.
+- **Asset repository** — Users can copy agents, MCP services, and Skills listed in the repository and reuse them in similar scenarios. They can also publish their own assets to the repository to share them within their organization.
+- **Official agent assets** — Organizations can deploy official agents for domains such as government services and healthcare with one click. Teams can use a concrete scenario to see whether the platform meets their business needs, speeding up initial trials and platform selection.
+
+### 📊 Centralized management and operations
+
+- **Agent version management** — Teams can keep testing changes in a draft while users continue working with the published version. If answer quality drops after a release, teams can roll back to an earlier version to recover faster.
+- **Monitoring dashboard** — Operations teams can review metrics such as active users and average response time in one place to understand platform usage and spot changes in responsiveness worth investigating.
+- **Observability center** — When users report an unexpected result or a slow response, operators can inspect the tool calls, inputs, outputs, and timings for that run to pinpoint the step behind the problem.
+
+### 🔗 A more open integration ecosystem
+
+- **Multi-model integration** — Teams can connect leading large language models and import in-house models with one click. This lets them choose models for each use case and reuse their organization's existing model services.
+- **MCP tool ecosystem** — Teams can connect remote services through MCP and verify tool inputs and outputs before binding a tool to an agent. They can also convert existing APIs into MCP services to reuse them in agent applications.
+- **A2A protocol** — Agents can collaborate with external third-party agents through the A2A protocol and consolidate the results.
+
+### 🛡️ Enterprise-grade governance
+
+- **Delegated administration and user management** — Organizations can use multi-tenant isolation, role-based access, and user group permissions to give each team access to agents, knowledge bases, and tools according to its responsibilities.
+- **Agent evaluation** — Before release, teams can evaluate an agent against a batch of business test cases. Individual scores help identify scenarios where the agent underperforms, and the overall assessment helps determine whether it meets release criteria.
+- **Secure sandbox** — Model-generated code and Skill scripts run in a secure, isolated sandbox, protecting core platform services and business data from the effects of agent execution.
 
 For detailed feature information and examples, see our **[Features Guide](./features)**.
 
@@ -58,7 +66,7 @@ Nexent separates configuration management, agent runtime, MCP, northbound APIs, 
 
 - **Frontend Layer** — Modern user interface built with Next.js + React + TypeScript
 - **API Service Layer** — FastAPI-based configuration, runtime, MCP, northbound, and data-processing APIs
-- **Business Logic Layer** — Agent, conversation, knowledge-base, model, memory, permission, and marketplace management
+- **Business Logic Layer** — Manages agents, conversations, knowledge bases, models, memory, permissions, and the asset repository
 - **Data Layer** — PostgreSQL, Elasticsearch, Redis, and MinIO store different types of data
 
 ### 🚀 Core Service Architecture
