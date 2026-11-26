@@ -408,7 +408,17 @@ export class AgentPage {
       const payload = await persisted.json();
       expect((payload.data || payload).tools.some((tool: any) => Number(tool.tool_id || tool.id) === expectedToolId)).toBe(true);
     }
-    await expect(this.page.getByText(toolName, { exact: true }).first()).toBeVisible();
+    if (serviceName) {
+      const service = this.page.getByTestId(`agent-selected-mcp-service-${serviceName}`);
+      const selector = service.getByRole("button", { name: `选择 ${serviceName} 的工具`, exact: true });
+      await expect(selector).toBeVisible();
+      await selector.click();
+      const selectedTool = this.page.getByRole("checkbox", { name: toolName, exact: true });
+      await expect(selectedTool).toBeVisible();
+      await expect(selectedTool).toBeChecked();
+    } else {
+      await expect(this.page.getByText(toolName, { exact: true }).first()).toBeVisible();
+    }
   }
 
   async bindSkill(skillName: string): Promise<void> {
