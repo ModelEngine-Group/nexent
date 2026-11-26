@@ -54,7 +54,7 @@ export function ModelMonitoringDetails({
     placeholderData: keepPreviousData,
   });
   const response = details.isPlaceholderData ? undefined : details.data;
-  const total = details.data?.data.total;
+  const total = response?.data.total;
   const lastPage = Math.max(1, Math.ceil((total ?? 0) / list.pageSize));
   if (listScope === scope && response && list.page > lastPage) {
     setList({ ...list, page: lastPage });
