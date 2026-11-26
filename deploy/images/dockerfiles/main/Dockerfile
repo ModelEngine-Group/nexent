@@ -111,8 +111,7 @@ FROM management-base AS management
 
 ENV NEXENT_SQL_STARTUP_MODE=migrate
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
-COPY deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql
+COPY deploy/sql/migrations/v2.9.0_merged_migrations.sql /opt/deploy/sql/migrations/v2.9.0_merged_migrations.sql
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 

@@ -46,7 +46,8 @@ An existing incomplete table is not imported into or modified automatically.
 For a new migration, failed validation rolls back the new table, exclusions and
 profile moves before commit. Completed local accounts are preserved on rerun.
 
-The immutable `v2.9.0_001_local_user_accounts.sql` creates the legacy account schema, without
+The immutable account schema section (`v2.9.0_001_local_user_accounts.sql` inside
+`v2.9.0_merged_migrations.sql`) creates the legacy account schema, without
 `account_status` or pending placeholders. Legacy status columns are converted to
 `delete_flag` and dropped inside the same transaction; ordinary replay never
 recreates them. Existing soft-deleted accounts, credentials and operator changes
@@ -73,8 +74,9 @@ acceptance completes.
 The host needs Bash and Docker CLI, or Bash and kubectl with access to the original
 namespace. **No host Python, pip, PostgreSQL driver or jq is required.** The selected
 `NEXENT_IMAGE` must package the current Python worker, its existing psycopg2
-runtime, `v2.9.0_001_local_user_accounts.sql`, and
-`v2.9.0_010_account_and_ops_roles.sql`. The worker applies the account schema changes
+runtime, and `v2.9.0_merged_migrations.sql`, whose
+`v2.9.0_001_local_user_accounts.sql` and `v2.9.0_010_account_and_ops_roles.sql`
+sections carry the account SQL. The worker applies the account schema changes
 inside the credential transaction. The startup SQL runner also applies invitation
 roles and operations grants. Standard deployment selects the image automatically.
 Preload it for offline deployment. The migration worker uses the Management image.

@@ -9,10 +9,11 @@ import pytest
 
 from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationConflict, import_users
 from local_auth import disposable_database
+from shared.merged_migrations import merged_migration_sql
 
 
 def assert_consolidated_schema(root):
-    sql = (root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    sql = merged_migration_sql("v2.9.0_001_local_user_accounts.sql")
     assert not (root / "deploy/sql/migrations/v2.9.0_002_account_availability.sql").exists()
     assert "ADD COLUMN account_status" not in sql and "account_status VARCHAR" not in sql
     dual_id, banned_id = str(uuid4()), str(uuid4())
@@ -77,7 +78,7 @@ def assert_consolidated_schema(root):
 
 
 def assert_legacy_account_columns(root):
-    sql = (root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    sql = merged_migration_sql("v2.9.0_001_local_user_accounts.sql")
     ddl = sql[sql.index("CREATE TABLE IF NOT EXISTS"):].split(");", 1)[0] + ");"
     ddl = ddl.replace("user_email VARCHAR(255)", "email VARCHAR(255),account_status VARCHAR(30) DEFAULT 'active'")
     with disposable_database() as dsn:

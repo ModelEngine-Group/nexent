@@ -47,8 +47,5 @@ def initialize_target(dsn):
         cursor.execute(
             "CREATE TABLE nexent.user_tenant_t (user_id varchar(100), tenant_id varchar(100), user_role varchar(30), user_email varchar(255), delete_flag varchar(1) DEFAULT 'N')"
         )
-        cursor.execute(
-            (
-                ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
-            ).read_text(encoding="utf-8")
-        )
+        from shared.merged_migrations import merged_migration_sql
+        cursor.execute(merged_migration_sql("v2.9.0_001_local_user_accounts.sql"))
