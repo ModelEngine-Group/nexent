@@ -2,32 +2,21 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
-  App,
-  Button,
-  Checkbox,
-  Dropdown,
   Empty,
   Input,
   Segmented,
   Skeleton,
   Table,
   Tag,
-  Tooltip,
   type TableColumnsType,
 } from "antd";
-import {
-  ApartmentOutlined,
-  DownloadOutlined,
-  SearchOutlined,
-  SettingOutlined,
-} from "@ant-design/icons";
+import { ApartmentOutlined, SearchOutlined } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
@@ -36,11 +25,9 @@ import type {
   AidpOntologyRule,
 } from "@/ext_components/aidp/shared/types/ontology";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
-import AidpKnowledgeOntologyPicker from "./AidpKnowledgeOntologyPicker";
 import styles from "./AidpKnowledgeOntologyTab.module.css";
 
 interface AidpKnowledgeOntologyTabProps {
-  kdsId: string;
   /** AIDP KDS detail bind_lib_id; the domain ID when bind_lib_type=ontology. */
   bindingId?: number | string | null;
   /** AIDP KDS detail bind_lib_type: ontology / jargon / none. */
@@ -48,7 +35,6 @@ interface AidpKnowledgeOntologyTabProps {
   /** AIDP KDS detail bind_lib_name. */
   bindingName?: string | null;
   bindingLoading: boolean;
-  onBindingChanged?: () => void;
 }
 
 type ReadonlyView = "metadata" | "entities" | "rules";
@@ -70,23 +56,26 @@ const relationName = (value: unknown): string => {
 };
 
 const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
-  kdsId,
   bindingId,
   bindingType,
   bindingName,
   bindingLoading,
-  onBindingChanged,
 }) => {
   const { t } = useTranslation();
-  const { modal, message } = App.useApp();
   const scope = useAidpQueryScope();
-  const queryClient = useQueryClient();
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<ReadonlyView>("metadata");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [showChunkCount, setShowChunkCount] = useState(true);
   const pageSize = 10;
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setSearch(searchInput.trim()),
+      250
+    );
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
   const domainId =
     bindingType === "ontology" && bindingId ? String(bindingId) : null;
@@ -101,72 +90,44 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   });
 
   const metadataQuery = useQuery({
-    queryKey: [...scope.key, "ontology-metadata-fields", domainId],
-    queryFn: () => aidpOntologyService.listMetadataFields(domainId as string),
+    queryKey: [
+      ...scope.key,
+      "ontology-metadata-fields",
+      domainId,
+      page,
+      search,
+    ],
+    queryFn: () =>
+      aidpOntologyService.listMetadataFields(
+        domainId as string,
+        page,
+        pageSize,
+        search
+      ),
     enabled: scope.enabled && !!domainId && view === "metadata",
     staleTime: 0,
     retry: false,
   });
   const entitiesQuery = useQuery({
-    queryKey: [...scope.key, "kb-ontology-entities", domainId],
-    queryFn: () => aidpOntologyService.listEntities(domainId as string, 1, 50),
+    queryKey: [...scope.key, "kb-ontology-entities", domainId, page, search],
+    queryFn: () =>
+      aidpOntologyService.listEntities(
+        domainId as string,
+        page,
+        pageSize,
+        search
+      ),
     enabled: scope.enabled && !!domainId && view === "entities",
     staleTime: 0,
     retry: false,
   });
   const rulesQuery = useQuery({
     queryKey: [...scope.key, "kb-ontology-rules", domainId],
-    queryFn: () => aidpOntologyService.listRules(domainId as string, 1, 50),
+    queryFn: () => aidpOntologyService.listRules(domainId as string, 1, 200),
     enabled: scope.enabled && !!domainId && view === "rules",
     staleTime: 0,
     retry: false,
   });
-
-  const refresh = () => {
-    void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "ontology-domain"],
-    });
-    onBindingChanged?.();
-  };
-
-  const handleUnbind = (change: boolean) => {
-    if (!domainId) return;
-    modal.confirm({
-      title: change
-        ? t("aidpKnowledge.ontologyKbChangeTitle")
-        : t("aidpKnowledge.ontologyKbUnbindTitle", {
-            name: domainQuery.data?.name || bindingName || domainId,
-          }),
-      content: (
-        <div className={styles.confirmBody}>
-          <p>{t("aidpKnowledge.ontologyKbUnbindContent")}</p>
-        </div>
-      ),
-      width: 520,
-      okText: change
-        ? t("aidpKnowledge.ontologyKbUnbindFirst")
-        : t("common.confirm"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      centered: true,
-      onOk: async () => {
-        try {
-          await aidpOntologyService.deleteBinding(domainId, kdsId);
-          message.success(t("aidpKnowledge.ontologyUnbindSuccess"));
-          refresh();
-        } catch (error) {
-          message.error(
-            getAidpErrorMessage(
-              error,
-              t,
-              t("aidpKnowledge.ontologyUnbindFailed")
-            )
-          );
-          throw error;
-        }
-      },
-    });
-  };
 
   const metadataColumns: TableColumnsType<AidpOntologyMetadataField> = [
     {
@@ -264,44 +225,23 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
     },
   ];
 
-  const metadataRows = (metadataQuery.data?.value ?? []).filter((item) =>
-    item.field_name.toLowerCase().includes(search.trim().toLowerCase())
-  );
-  const entityRows = (entitiesQuery.data?.value ?? []).filter((item) =>
-    `${item.display_name ?? ""} ${item.api_name}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase())
-  );
+  const metadataRows = metadataQuery.data?.value ?? [];
+  const entityRows = entitiesQuery.data?.value ?? [];
   const ruleRows = (rulesQuery.data?.value ?? []).filter((item) =>
-    (item.name ?? "").toLowerCase().includes(search.trim().toLowerCase())
+    (item.name ?? "").toLowerCase().includes(search.toLowerCase())
   );
-  const activeTotal =
+  const total =
     view === "metadata"
-      ? metadataRows.length
+      ? (metadataQuery.data?.total_count ?? metadataRows.length)
       : view === "entities"
-        ? entityRows.length
+        ? (entitiesQuery.data?.total_count ?? entityRows.length)
         : ruleRows.length;
-
-  const handleExport = () => {
-    const rows =
-      view === "metadata"
-        ? metadataRows
-        : view === "entities"
-          ? entityRows
-          : ruleRows;
-    const blob = new Blob([JSON.stringify(rows, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `ontology-${domainId}-${view}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-    message.success(t("aidpKnowledge.ontologyKbExportDone"));
-  };
+  const hasMore =
+    view === "metadata"
+      ? (metadataQuery.data?.has_more ?? page * pageSize < total)
+      : view === "entities"
+        ? (entitiesQuery.data?.has_more ?? page * pageSize < total)
+        : page * pageSize < total;
 
   const renderReadonly = () => {
     if (view === "metadata") {
@@ -312,13 +252,8 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           rowKey={(record) => String(record.id ?? record.field_name)}
           size="middle"
           className={tableStyles.table}
-          columns={metadataColumns.filter(
-            (column) => showChunkCount || column.key !== "chunk"
-          )}
-          dataSource={metadataRows.slice(
-            (page - 1) * pageSize,
-            page * pageSize
-          )}
+          columns={metadataColumns}
+          dataSource={metadataRows}
           pagination={false}
           scroll={{ x: 760 }}
         />
@@ -332,10 +267,8 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           rowKey={(record) => record.entity_id ?? record.api_name}
           size="middle"
           className={tableStyles.table}
-          columns={entityColumns.filter(
-            (column) => showChunkCount || column.key !== "chunk"
-          )}
-          dataSource={entityRows.slice((page - 1) * pageSize, page * pageSize)}
+          columns={entityColumns}
+          dataSource={entityRows}
           pagination={false}
           scroll={{ x: 760 }}
         />
@@ -349,7 +282,10 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
         size="middle"
         className={tableStyles.table}
         columns={ruleColumns}
-        dataSource={ruleRows.slice((page - 1) * pageSize, page * pageSize)}
+        dataSource={ruleRows.slice(
+          (page - 1) * pageSize,
+          page * pageSize
+        )}
         pagination={false}
         scroll={{ x: 760 }}
       />
@@ -389,20 +325,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
             />
           }
           description={t("aidpKnowledge.ontologyKbEmpty")}
-        >
-          <Button type="primary" onClick={() => setPickerOpen(true)}>
-            {t("aidpKnowledge.ontologyKbAdd")}
-          </Button>
-        </Empty>
-        <AidpKnowledgeOntologyPicker
-          open={pickerOpen}
-          kdsId={kdsId}
-          mode="add"
-          onClose={() => setPickerOpen(false)}
-          onBound={() => {
-            setPickerOpen(false);
-            refresh();
-          }}
         />
       </div>
     );
@@ -422,14 +344,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
             {domainQuery.data?.description || "—"}
           </p>
         </div>
-        <div className={styles.actions}>
-          <Button danger onClick={() => handleUnbind(false)}>
-            {t("aidpKnowledge.ontologyKbRemoveBinding")}
-          </Button>
-          <Button type="primary" onClick={() => handleUnbind(true)}>
-            {t("aidpKnowledge.ontologyKbChangeShort")}
-          </Button>
-        </div>
       </section>
 
       <Segmented<ReadonlyView>
@@ -437,6 +351,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
         onChange={(next) => {
           setView(next);
           setPage(1);
+          setSearchInput("");
           setSearch("");
         }}
         options={[
@@ -456,9 +371,9 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           allowClear
           className={styles.contentSearch}
           prefix={<SearchOutlined />}
-          value={search}
+          value={searchInput}
           onChange={(event) => {
-            setSearch(event.target.value);
+            setSearchInput(event.target.value);
             setPage(1);
           }}
           placeholder={
@@ -469,49 +384,16 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
                 : t("aidpKnowledge.ontologyKbSearchRules")
           }
         />
-        <Tooltip title={t("aidpKnowledge.ontologyMetadataExport")}>
-          <Button
-            aria-label={t("aidpKnowledge.ontologyMetadataExport")}
-            icon={<DownloadOutlined />}
-            disabled={activeTotal === 0}
-            onClick={handleExport}
-          />
-        </Tooltip>
-        <Dropdown
-          trigger={["click"]}
-          menu={{
-            items: [
-              {
-                key: "chunk",
-                label: (
-                  <Checkbox
-                    checked={showChunkCount}
-                    onChange={(event) =>
-                      setShowChunkCount(event.target.checked)
-                    }
-                  >
-                    {t("aidpKnowledge.ontologyMetadataColumnChunkCount")}
-                  </Checkbox>
-                ),
-              },
-            ],
-          }}
-        >
-          <Button
-            aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
-            icon={<SettingOutlined />}
-          />
-        </Dropdown>
       </div>
       <div className={styles.tableArea}>{renderReadonly()}</div>
-      {activeTotal > 0 && (
+      {total > 0 && (
         <AidpPagination
           currentPage={page}
           pageSize={pageSize}
           pageSizeOptions={[10]}
-          total={activeTotal}
+          total={total}
           totalReliable
-          hasMore={page * pageSize < activeTotal}
+          hasMore={hasMore}
           onPageChange={setPage}
           onPageSizeChange={() => undefined}
         />

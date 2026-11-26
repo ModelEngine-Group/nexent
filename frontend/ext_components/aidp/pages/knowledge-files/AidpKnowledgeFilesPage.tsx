@@ -299,14 +299,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
 
       {activeTab === "ontology" && (
         <AidpKnowledgeOntologyTab
-          kdsId={knowledgeBase.kds_id}
           bindingId={detail.bind_lib_id}
           bindingType={detail.bind_lib_type}
           bindingName={detail.bind_lib_name}
           bindingLoading={detailQuery.isLoading}
-          onBindingChanged={() => {
-            void detailQuery.refetch();
-          }}
         />
       )}
 

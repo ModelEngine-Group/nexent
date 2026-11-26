@@ -99,22 +99,29 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
     retry: false,
   });
   const metadataQuery = useQuery({
-    queryKey: [...scope.key, "ontology-metadata-fields", domainId],
-    queryFn: () => aidpOntologyService.listMetadataFields(domainId as string),
+    queryKey: [...scope.key, "ontology-metadata-fields", domainId, page],
+    queryFn: () =>
+      aidpOntologyService.listMetadataFields(
+        domainId as string,
+        page,
+        pageSize
+      ),
     enabled: scope.enabled && open && !!domainId && view === "metadata",
     staleTime: 0,
     retry: false,
   });
   const entitiesQuery = useQuery({
-    queryKey: [...scope.key, "kb-ontology-entities", domainId],
-    queryFn: () => aidpOntologyService.listEntities(domainId as string, 1, 50),
+    queryKey: [...scope.key, "kb-ontology-entities", domainId, page],
+    queryFn: () =>
+      aidpOntologyService.listEntities(domainId as string, page, pageSize),
     enabled: scope.enabled && open && !!domainId && view === "entities",
     staleTime: 0,
     retry: false,
   });
   const rulesQuery = useQuery({
-    queryKey: [...scope.key, "kb-ontology-rules", domainId],
-    queryFn: () => aidpOntologyService.listRules(domainId as string, 1, 50),
+    queryKey: [...scope.key, "kb-ontology-rules", domainId, page],
+    queryFn: () =>
+      aidpOntologyService.listRules(domainId as string, page, pageSize),
     enabled: scope.enabled && open && !!domainId && view === "rules",
     staleTime: 0,
     retry: false,
@@ -205,7 +212,12 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
       : view === "entities"
         ? (entitiesQuery.data?.total_count ?? rows.length)
         : (rulesQuery.data?.total_count ?? rows.length);
-  const pagedRows = rows.slice((page - 1) * pageSize, page * pageSize);
+  const hasMore =
+    view === "metadata"
+      ? (metadataQuery.data?.has_more ?? page * pageSize < total)
+      : view === "entities"
+        ? (entitiesQuery.data?.has_more ?? page * pageSize < total)
+        : (rulesQuery.data?.has_more ?? page * pageSize < total);
   const loading =
     (view === "metadata" && metadataQuery.isLoading) ||
     (view === "entities" && entitiesQuery.isLoading) ||
@@ -319,7 +331,7 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
                 size="middle"
                 className={tableStyles.table}
                 columns={metadataColumns}
-                dataSource={pagedRows as AidpOntologyMetadataField[]}
+                dataSource={rows as AidpOntologyMetadataField[]}
                 pagination={false}
                 locale={{ emptyText: t("aidpKnowledge.ontologyTableEmpty") }}
               />
@@ -329,7 +341,7 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
                 size="middle"
                 className={tableStyles.table}
                 columns={entityColumns}
-                dataSource={pagedRows as AidpOntologyEntity[]}
+                dataSource={rows as AidpOntologyEntity[]}
                 pagination={false}
                 locale={{ emptyText: t("aidpKnowledge.ontologyTableEmpty") }}
               />
@@ -339,7 +351,7 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
                 size="middle"
                 className={tableStyles.table}
                 columns={ruleColumns}
-                dataSource={pagedRows as AidpOntologyRule[]}
+                dataSource={rows as AidpOntologyRule[]}
                 pagination={false}
                 locale={{ emptyText: t("aidpKnowledge.ontologyTableEmpty") }}
               />
@@ -353,7 +365,7 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
               pageSizeOptions={[10]}
               total={total}
               totalReliable
-              hasMore={page * pageSize < total}
+              hasMore={hasMore}
               showTotal
               onPageChange={setPage}
             />

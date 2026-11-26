@@ -31,6 +31,7 @@ from ext_components.aidp.apps.aidp_ontology_validation import (
     _domain_id_path,
     _require_ontology_manager,
 )
+from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_ontology_common import METADATA_FIELD_LIMIT
 from ext_components.aidp.services.aidp_ontology_metadata_service import (
     batch_unbind_metadata_impl,
@@ -280,6 +281,9 @@ async def export_chunk_metadata(
     """Export one chunk's user metadata; empty ``metadata_json`` means none."""
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
+    perms.require_permission(
+        str(body.kds_id), user_id, tenant_id, required="READ"
+    )
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-export-chunk-metadata",
@@ -304,6 +308,9 @@ async def import_chunk_metadata(
     """Write user metadata onto chunks; AIDP reports per-chunk results."""
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
+    perms.require_permission(
+        str(body.kds_id), user_id, tenant_id, required="EDIT"
+    )
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-import-chunk-metadata",
@@ -353,6 +360,10 @@ async def sync_ontology_tags(
     """Queue the domain-scoped auto-tagging task for the given knowledge bases."""
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
+    for kb_id in body.kb_ids:
+        perms.require_permission(
+            str(kb_id), user_id, tenant_id, required="EDIT"
+        )
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-sync-ontology-tags",

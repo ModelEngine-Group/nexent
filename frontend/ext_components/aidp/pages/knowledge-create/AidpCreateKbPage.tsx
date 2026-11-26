@@ -268,10 +268,6 @@ const AidpCreateKbPage: React.FC = () => {
     setValidating(true);
     try {
       const values = await form.validateFields();
-      if (!values.name?.trim() || !values.description?.trim()) {
-        setStep(0);
-        return;
-      }
       const permission = isUser
         ? "PRIVATE"
         : values.ingroup_permission || "READ_ONLY";

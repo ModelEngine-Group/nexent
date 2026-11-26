@@ -64,13 +64,10 @@ export interface AidpOntologyEntityListResponse {
 }
 
 export interface AidpOntologyEntityCreatePayload {
-  kind: AidpOntologyKind;
   api_name: string;
   display_name?: string;
   description?: string;
   properties?: AidpOntologyEntityProperty[];
-  primary_properties?: string[];
-  type_id?: string;
   /** AIDP create accepts up to 9 parent / synonym entity IDs. */
   parent_entities?: string[];
   synonym_entities?: string[];
@@ -82,7 +79,6 @@ export interface AidpOntologyEntityUpdatePayload {
   display_name?: string;
   description?: string;
   properties?: AidpOntologyEntityProperty[];
-  primary_properties?: string[];
   /** Translated to Relations create/delete by the BFF. */
   parent_entities?: string[];
   child_entities?: string[];

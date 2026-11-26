@@ -4387,6 +4387,8 @@ class TestOntologyChunkMetadataEndpoints:
         result = {"od_id": 1, "kds_id": 2, "chunk_id": 3, "metadata_json": {"a": "b"}}
         role_patch, has_patch = self._manager()
         with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes.perms, "require_permission",
+                          return_value=MagicMock()), \
              patch.object(aidp_ontology_metadata_routes, "export_chunk_metadata_impl",
                           return_value=result) as export_metadata:
             response = _client().post(
@@ -4425,6 +4427,8 @@ class TestOntologyChunkMetadataEndpoints:
         }
         role_patch, has_patch = self._manager()
         with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes.perms, "require_permission",
+                          return_value=MagicMock()), \
              patch.object(aidp_ontology_metadata_routes, "import_chunk_metadata_impl",
                           return_value=result) as import_metadata:
             response = _client().post(
@@ -4470,6 +4474,8 @@ class TestOntologyChunkMetadataEndpoints:
         result = {"task_id": 42, "task_type": "ontology_auto_extract"}
         role_patch, has_patch = self._manager()
         with role_patch, has_patch, \
+             patch.object(aidp_ontology_metadata_routes.perms, "require_permission",
+                          return_value=MagicMock()), \
              patch.object(aidp_ontology_metadata_routes, "sync_ontology_tags_impl",
                           return_value=result) as sync_tags:
             response = _client().post(

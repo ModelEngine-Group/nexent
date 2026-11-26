@@ -2,13 +2,7 @@
 
 "use client";
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -48,11 +42,8 @@ import AidpPagination from "@/ext_components/aidp/shared/components/AidpPaginati
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
-import {
-  AIDP_MIN_COLUMN_WIDTH,
-  fitAidpColumnWidths,
-  resizeAidpColumnPair,
-} from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
 import AidpOntologyDomainDrawer from "./components/common/AidpOntologyDomainDrawer";
@@ -105,21 +96,6 @@ const AidpOntologyListPage: React.FC = () => {
   const [deletingDomain, setDeletingDomain] =
     useState<AidpOntologyDomain | null>(null);
 
-  // Column widths follow the knowledge-base list: fit the container, then let
-  // each drag move one boundary without changing the total table width.
-  const tableContainer = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const [columnWeights, setColumnWeights] =
-    useState<Record<ColumnKey, number>>(BASE_COLUMN_WEIGHTS);
-  useEffect(() => {
-    const element = tableContainer.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => {
-      setContainerWidth(entry.contentRect.width);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
   const activeColumnKeys = useMemo<ColumnKey[]>(
     () =>
       canManage
@@ -127,37 +103,12 @@ const AidpOntologyListPage: React.FC = () => {
         : ["name", "description", "update_time"],
     [canManage]
   );
-  const columnWidths = fitAidpColumnWidths(
-    activeColumnKeys,
-    columnWeights,
-    containerWidth ||
-      activeColumnKeys.reduce((sum, key) => sum + columnWeights[key], 0)
-  );
-  const totalTableWidth = activeColumnKeys.reduce(
-    (sum, key) => sum + columnWidths[key],
-    0
-  );
-  const handleResize = (
-    key: ColumnKey,
-    nextKey: ColumnKey,
-    delta: number,
-    renderedWidths: Record<string, number>
-  ) => {
-    const resized = resizeAidpColumnPair(renderedWidths, key, nextKey, delta);
-    setColumnWeights((current) => {
-      const totalWeight = activeColumnKeys.reduce(
-        (sum, item) => sum + current[item],
-        0
-      );
-      const totalWidth =
-        activeColumnKeys.reduce((sum, item) => sum + resized[item], 0) || 1;
-      const next = { ...current };
-      activeColumnKeys.forEach((item) => {
-        next[item] = (resized[item] / totalWidth) * totalWeight;
-      });
-      return next;
-    });
-  };
+  const {
+    tableContainer,
+    columnWidths,
+    totalWidth: totalTableWidth,
+    handleResize,
+  } = useAidpOntologyColumnWidths(activeColumnKeys, BASE_COLUMN_WEIGHTS);
   const changeViewMode = (value: ListView) => {
     setViewMode(value);
     try {

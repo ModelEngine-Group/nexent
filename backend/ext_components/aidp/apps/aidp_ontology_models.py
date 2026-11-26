@@ -66,31 +66,20 @@ class OntologyDomainUpdateRequest(BaseModel):
 class OntologyEntityCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["type", "entity"]
+    kind: Literal["entity"] = "entity"
     api_name: EntityApiName = Field(..., description="Stable AIDP entity API name")
     display_name: EntityName | None = None
     description: EntityDescription | None = None
     properties: list[EntityPropertyRequest] = Field(default_factory=list)
-    primary_properties: list[str] = Field(default_factory=list)
-    type_id: str | None = None
     parent_entities: list[str] = Field(default_factory=list)
     synonym_entities: list[str] = Field(default_factory=list)
     child_entities: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_kind_rules(self):
-        if self.kind == "type" and self.type_id:
-            raise ValueError("a type cannot have a type_id")
-        if self.kind == "type" and self.parent_entities:
-            raise ValueError("a type cannot have parent entities")
+    def validate_properties(self):
         property_names = [item.api_name.strip() for item in self.properties]
         if len(set(property_names)) != len(property_names):
             raise ValueError("property api_name values must be unique")
-        missing = [
-            name for name in self.primary_properties if name not in property_names
-        ]
-        if missing:
-            raise ValueError("primary properties must be configured properties")
         return self
 
 

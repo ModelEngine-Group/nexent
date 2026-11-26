@@ -56,7 +56,10 @@ interface AidpOntologyEntityDrawerProps {
 type PropertyDataType = "str" | "string" | "float" | "datetime" | "list[str]";
 
 interface PropertyFormValue {
+  /** Visible property label; for existing rows this is display_name. */
   name: string;
+  /** Existing AIDP identifier, kept verbatim when the label is edited. */
+  api_name?: string;
   data_type: PropertyDataType;
   value?: string | string[] | number | Dayjs | null;
   /** AIDP persists any string here and returns it verbatim. */
@@ -68,8 +71,6 @@ interface EntityFormValues {
   display_name: string;
   api_name: string;
   description?: string;
-  type_id?: string;
-  primary_properties?: string[];
   properties?: PropertyFormValue[];
   demo_parents?: string[];
   demo_synonyms?: string[];
@@ -252,7 +253,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
 
   const kind = (Form.useWatch("kind", form) as "entity" | "type") ?? "entity";
   const displayName = Form.useWatch("display_name", form) as string | undefined;
-  const assignedTypeId = Form.useWatch("type_id", form) as string | undefined;
+  const assignedTypeId = entity?.type_id ?? undefined;
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -350,6 +351,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         .filter((property) => property.api_name !== "synonym")
         .map((property) => ({
           name: property.display_name || property.api_name,
+          api_name: property.api_name,
           data_type: toDataType(property.data_type),
           value: property.value ?? "",
           range: property.range ?? "",
@@ -366,7 +368,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       display_name: entity?.display_name ?? "",
       api_name: entity?.api_name ?? "",
       description: entity?.description ?? "",
-      type_id: entity?.type_id ?? undefined,
       properties: initialProperties,
       demo_parents: (entity?.parent_entities ?? [])
         .map(relationId)
@@ -402,13 +403,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     } catch {
       return;
     }
-    const entityKind: "entity" | "type" = values.kind ?? "entity";
     const displayNameValue = values.display_name.trim();
     const apiNameValue = values.api_name.trim();
     const properties: AidpOntologyEntityProperty[] = (values.properties ?? [])
       .filter((property) => property?.name?.trim())
       .map((property) => ({
-        api_name: property.name.trim(),
+        api_name: property.api_name?.trim() || property.name.trim(),
         display_name: property.name.trim(),
         data_type: toDataType(property.data_type),
         value: propertyValueToText(property.value) || "",
@@ -456,21 +456,13 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         });
         message.success(t("aidpKnowledge.ontologyEntityUpdated"));
       } else {
-        const typeId = entityKind === "entity" ? values.type_id : undefined;
-        const parentIdsWithoutType = parentIds.filter((id) => id !== typeId);
         const created = await aidpOntologyService.createEntity(domainId, {
-          kind: entityKind,
           api_name: apiNameValue,
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           properties,
-          ...(typeId ? { type_id: typeId } : {}),
-          ...(entityKind === "entity" && parentIdsWithoutType.length
-            ? { parent_entities: parentIdsWithoutType }
-            : {}),
-          ...(entityKind === "entity" && childIds.length
-            ? { child_entities: childIds }
-            : {}),
+          ...(parentIds.length ? { parent_entities: parentIds } : {}),
+          ...(childIds.length ? { child_entities: childIds } : {}),
         });
         if (created.relation_error) {
           const reason =

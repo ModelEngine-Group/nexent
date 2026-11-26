@@ -315,41 +315,10 @@ async def create_ontology_entity(
             }
             for item in body.properties
         ],
-        "primary_properties": body.primary_properties,
     }
 
-    if body.kind == "entity" and body.type_id:
-        types = await run_blocking(
-            "aidp-ontology-entity-types",
-            list_ontology_entities_impl,
-            server_url,
-            api_key,
-            domain_id,
-            page=1,
-            page_size=100,
-            kind="type",
-            lane="control-io",
-            owner="config",
-        )
-        type_ids = {
-            str(item.get("entity_id") or item.get("id")) for item in types["value"]
-        }
-        type_names = {str(item.get("api_name")) for item in types["value"]}
-        if body.type_id not in type_ids and body.type_id not in type_names:
-            raise _bad_request("the selected type does not exist in this ontology")
-        payload["type_id"] = int(body.type_id)
-    parent_ids: list[int] = []
-    if body.kind == "entity" and body.parent_entities:
-        parent_ids = [int(item) for item in body.parent_entities]
-        # type_id already creates the is-a to the assigned type; never create
-        # the same endpoint twice through both fields.
-        if body.type_id:
-            parent_ids = [
-                parent_id
-                for parent_id in parent_ids
-                if str(parent_id) != str(body.type_id)
-            ]
-    if body.kind == "entity" and body.synonym_entities:
+    parent_ids = [int(item) for item in body.parent_entities]
+    if body.synonym_entities:
         payload["synonym_entities"] = [int(item) for item in body.synonym_entities]
 
     result = await run_blocking(
@@ -368,11 +337,7 @@ async def create_ontology_entity(
     # export -> import round trip keeps a valid relation name. A failed
     # writeback must not hide the fact that the entity itself was created.
     relation_error: str | None = None
-    if (
-        body.kind == "entity"
-        and entity_id is not None
-        and (parent_ids or body.child_entities)
-    ):
+    if entity_id is not None and (parent_ids or body.child_entities):
         try:
             await _reconcile_entity_relations(
                 server_url,
