@@ -5,26 +5,33 @@
 import json
 import sys
 import time
+import traceback
 
 import httpx
 from infrastructure.rdb.client import get_db_session
-from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
-from management.services.permission.identity.authentication_helpers import generate_session_jwt
+from management.db.models import AgentInfo, ConversationMessage, ConversationMessageUnit, ConversationRecord
+from management.services.permission.identity.session import generate_session_jwt
 
 
 def main():
     agent_id, source_id = int(sys.argv[1]), int(sys.argv[2])
     user, expected = sys.argv[3:5]
+    vision_model_id = int(sys.argv[5]) if sys.argv[5] else None
     with get_db_session() as session:
         source = session.query(ConversationMessage).filter_by(message_id=source_id, message_role="user").one()
         owner = session.query(ConversationRecord).filter_by(conversation_id=source.conversation_id).one()
         assert owner.created_by == user, "Source image ownership mismatch"
         files = json.loads(source.minio_files) if isinstance(source.minio_files, str) else source.minio_files
         assert files and any(f.get("type", "").startswith("image/") for f in files), "Image fixture required"
-        assert session.query(AgentInfo).filter_by(agent_id=agent_id, agent_core="jiuwen", delete_flag="N").count()
+        agent_name = session.query(AgentInfo).filter_by(
+            agent_id=agent_id, version_no=0, created_by=user, delete_flag="N"
+        ).one().name
+
     headers = {"Authorization": "Bearer " + generate_session_jwt(user, expires_in=1800)}
     conversation = None
-    with httpx.Client(base_url="http://127.0.0.1:5014", headers=headers, trust_env=False, timeout=240) as client:
+    with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=240) as client:
+        deployment = client.get("/tenant_config/deployment_version")
+        assert deployment.status_code == 200 and deployment.json().get("agent_core") == "jiuwen"
         try:
             response = client.put("/conversation/create", json={"title": "Jiuwen image regression verification"})
             assert response.status_code == 200, "Conversation creation failed"
@@ -37,6 +44,11 @@ def main():
                     "根据上轮已经完成的图片分析，图中衣服的主要颜色是什么？只用已有结果，不要重新调用任何工具。",
                 ]
             ):
+                tool_configuration = {}
+                if vision_model_id is not None:
+                    tool_configuration = {"tool_params": {"agents": {
+                        agent_name: {"tools": {"analyze_image": {"selected_model_id": vision_model_id}}},
+                    }}}
                 response = client.post(
                     "/agent/run",
                     json={
@@ -45,14 +57,16 @@ def main():
                         "query": query,
                         "history": [],
                         "minio_files": files if not index else [],
+                        **tool_configuration,
                     },
                 )
                 assert response.status_code == 200, "Runtime HTTP failed"
                 events = [
-                    json.loads(line[5:].strip()) for line in response.text.splitlines() if line.startswith("data:")
+                    json.loads(line[5:].strip()) for line in response.text.splitlines() if line.startswith("data:") and line[5:].strip() != "[DONE]"
                 ]
-                terminal = [e for e in events if e.get("type") == "run_terminal" and not e.get("invocation_id")]
-                assert len(terminal) == 1 and terminal[0]["status"] == "completed", "Root execution failed"
+                finals = [e for e in events if e.get("type") == "final_answer"
+                          and e.get("answer_phase") == "complete" and not e.get("invocation_id")]
+                assert len(finals) == 1 and not any(e.get("type") == "error" for e in events), "Root execution failed"
                 calls = [e for e in events if e.get("type") == "tool"]
                 if not index:
                     image_calls = [e for e in calls if e.get("tool_name") == "analyze_image"]
@@ -60,14 +74,22 @@ def main():
                     results = [
                         e
                         for e in events
-                        if e.get("type") == "tool_result" and e.get("local_call_id") == image_calls[0]["local_call_id"]
+                        if e.get("type") == "execution_logs"
+                        and e.get("tool_call_id") == image_calls[0]["tool_call_id"]
+                        and isinstance(e.get("is_error"), bool)
                     ]
-                    assert len(results) == 1 and results[0].get("is_error") is False, "Image tool failed"
-                    text = json.dumps(results[0].get("result"), ensure_ascii=False)
+                    if len(results) != 1 or results[0].get("is_error") is True:
+                        print("IMAGE_FAILURE=" + json.dumps({
+                            "matched_results": len(results),
+                            "execution_logs": sum(e.get("type") == "execution_logs" for e in events),
+                            "tool_result_error": any(e.get("is_error") is True for e in results),
+                        }), flush=True)
+                    assert len(results) == 1 and results[0].get("is_error") is not True, "Image tool failed"
+                    text = str(results[0].get("content", ""))
                     assert len(text) > 40 and expected in text, "Visual result lacks expected fixture fact"
                 else:
                     assert not calls, "Follow-up replayed a tool"
-                final = terminal[0].get("final_content") or ""
+                final = finals[0].get("content") or ""
                 assert len(final) > 3 and expected in final, "Answer lacks the known image fact"
                 for _ in range(40):
                     with get_db_session() as session:
@@ -87,6 +109,13 @@ def main():
                 assert len(snapshot) == (index + 1) * 2 and snapshot[-1][3] == "completed"
                 assert [m[1] for m in snapshot] == list(range(len(snapshot))), "Message order regressed"
                 assert expected in snapshot[-1][4]
+                with get_db_session() as session:
+                    persisted_terminal = session.query(ConversationMessageUnit).filter_by(
+                        message_id=snapshot[-1][0], unit_type="run_terminal"
+                    ).all()
+                    root_terminal = [unit for unit in persisted_terminal if not unit.invocation_id]
+                    assert len(root_terminal) == 1
+                    assert json.loads(root_terminal[0].unit_content)["status"] == "completed"
                 if saved:
                     assert snapshot[: len(saved)] == saved, "Earlier messages changed"
                 saved = snapshot
@@ -109,5 +138,10 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print("IMAGE_FAILURE=" + type(error).__name__, flush=True)
+        line = next(
+            (frame.lineno for frame in reversed(traceback.extract_tb(error.__traceback__))
+             if frame.filename == __file__),
+            None,
+        )
+        print("IMAGE_FAILURE=" + json.dumps({"type": type(error).__name__, "line": line}), flush=True)
         raise SystemExit(1)

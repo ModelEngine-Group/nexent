@@ -79,7 +79,7 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
     const respond=(data:unknown)=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(data)});
     if(path==="/user/current_user_info")return respond({data:{user:{
       user_id:"output-fixture",tenant_id:"output-tenant",user_email:"fixture@nexent.test",user_role:"SPEED",
-      auth_provider:"local",permissions:["agent:create"],accessibleRoutes:["/","/agents","/newchat"],
+      auth_provider:"local",permissions:["agent:create"],accessiblePages:["/","/agents","/newchat"],
     }}});
     if(path==="/memory/config/load")return respond({MEMORY_SWITCH:"N"});
     if(path==="/conversation/list")return respond({code:0,data:{items:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,create_time:Date.now(),update_time:Date.now()}],metadata:{total:1,today:1,last_7_days:0,older:0}}});

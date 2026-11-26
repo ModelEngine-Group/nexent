@@ -11,7 +11,8 @@ import zipfile
 from pathlib import Path
 
 import httpx
-from infrastructure.rdb.client import get_db_session, minio_client
+from infrastructure.object_storage.client import minio_client
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
 from management.services.permission.identity.session import generate_session_jwt
 
@@ -56,7 +57,7 @@ def main():
         with get_db_session() as session:
             draft = session.query(AgentInfo).filter_by(agent_id=source, version_no=0, delete_flag="N").one()
             published = session.query(AgentInfo).filter_by(agent_id=source, version_no=draft.current_version_no).one()
-            assert published.agent_core in {"smolagents", "jiuwen"}, "Unsupported source Core"
+            assert draft.created_by == user, "Source Agent must belong to the fixture actor"
             originals = session.query(ConversationRecord).filter_by(agent_id=source, created_by=user).all()
             conversations = {row.conversation_id: history(row.conversation_id) for row in originals}
             keys = ["model_ids", "business_logic_model_id", "prompt",
@@ -72,9 +73,11 @@ def main():
     else:
         state = json.loads(path.read_text())
     headers = {"Authorization": "Bearer " + state["access_token"]}
-    with httpx.Client(base_url="http://nexent-config:5010", headers=headers, trust_env=False, timeout=90) as config, \
-            httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=90) as runtime:
+    with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=90) as config, \
+            httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=90) as runtime:
         if mode == "setup":
+            deployment = checked(config.get("/tenant_config/deployment_version"))
+            assert deployment["agent_core"] == "jiuwen", "Jiuwen deployment required"
             exported = export_agent(config, state["source"])
             assert len(exported["agent_info"]) == 1, "Fixture expects standalone file generator"
             state["source_export_hash"] = digest(exported)
@@ -89,8 +92,7 @@ def main():
             result = checked(config.post("/agent/import", json={"agent_info": exported}))
             state["agent_id"] = result["agent_id"]
             path.write_text(json.dumps(state, default=str))
-            checked(config.post("/agent/update", json={"agent_id": state["agent_id"], **state["fields"],
-                                                       "agent_core": "jiuwen"}))
+            checked(config.post("/agent/update", json={"agent_id": state["agent_id"], **state["fields"]}))
             for skill in enabled:
                 checked(config.post("/skills/instance/update", json={"agent_id": state["agent_id"],
                     "skill_id": skill["skill_id"], "enabled": True, "version_no": 0,
@@ -98,7 +100,7 @@ def main():
             checked(config.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Skill-files-real"}))
             cloned = export_agent(config, state["agent_id"])
             clone = cloned["agent_info"][str(state["agent_id"])]
-            assert clone["agent_core"] == "jiuwen", "Owned target must use Jiuwen"
+            assert "agent_core" not in clone, "Portable Agent must inherit the deployment Core"
             for key in ["model_ids", "prompt"]:
                 assert clone[key] == entry[key], "Clone mismatch: " + key
             # Skill bindings have no priority order; retain exact membership and duplicate checks.

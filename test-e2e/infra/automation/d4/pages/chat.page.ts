@@ -75,11 +75,42 @@ export class ChatPage {
       has: this.page.getByText(displayName, { exact: true }),
     });
     await expect(card).toHaveCount(1);
+    await this.dismissMissingEmbeddingWarning();
     await card.click();
     // Landing selection is complete when the discover page is replaced by
     // the conversation view with a usable composer.
     await expect(this.page.getByRole("heading", { name: "发现智能体" })).toBeHidden();
     await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
+  }
+
+  private async dismissMissingEmbeddingWarning(): Promise<void> {
+    const warning = this.page.getByRole("dialog", { name: /Embedding model not configured|尚未配置向量模型/ });
+    if (await warning.isVisible()) {
+      await warning.getByRole("button", { name: /^(关闭|Close)$/, exact: true }).click();
+      await expect(warning).toBeHidden();
+    }
+  }
+
+  async selectBoundModel(modelId: number): Promise<void> {
+    const response = await this.page.request.get(new URL("/api/model/list", this.page.url()).href);
+    expect(response.ok()).toBe(true);
+    const payload = await response.json();
+    const model = payload.data.find((item: { model_id?: number; id?: number }) =>
+      Number(item.model_id ?? item.id) === modelId,
+    );
+    expect(model?.display_name, `Fixture model ${modelId} must be listed for the actor`).toBeTruthy();
+    await this.selectModelByDisplayName(model.display_name);
+  }
+
+  async selectModelByDisplayName(displayName: string): Promise<void> {
+    const trigger = this.page.locator('[data-slot="model-selector-trigger"]');
+    await expect(trigger).toBeVisible();
+    if (await trigger.getByText(displayName, { exact: true }).isVisible()) return;
+    await this.dismissMissingEmbeddingWarning();
+    await trigger.click();
+    await this.page.locator('[data-slot="model-selector-item"]')
+      .filter({ has: this.page.getByText(displayName, { exact: true }) }).click();
+    await expect(trigger.getByText(displayName, { exact: true })).toBeVisible();
   }
 
   async selectMode(mode: "规划" | "执行"): Promise<void> {
@@ -361,6 +392,8 @@ export class ChatPage {
   async openThread(title: string, occurrence?: "first" | "last"): Promise<void> {
     const matches = this.threadButton(title);
     const target = occurrence === "first" ? matches.first() : occurrence === "last" ? matches.last() : matches;
+    await expect(target).toBeVisible();
+    await this.dismissMissingEmbeddingWarning();
     await target.click();
     await expect(this.activeThread()).toContainText(title);
   }

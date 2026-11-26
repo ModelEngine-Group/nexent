@@ -76,9 +76,9 @@ def main():
     headers = {"Authorization": "Bearer " + state["access_token"]}
     with httpx.Client(headers=headers, trust_env=False, timeout=30) as client:
         for cid in owned:
-            assert client.delete(f"http://nexent-runtime:5014/conversation/{cid}").status_code == 200
+            assert client.delete(f"http://nexent-gateway:5013/api/conversation/{cid}").status_code == 200
         for skill in skills:
-            assert client.delete(f"http://nexent-config:5010/skills/{state['name']}").status_code == 200
+            assert client.delete(f"http://nexent-gateway:5013/api/skills/{state['name']}").status_code == 200
     path.unlink()
     print(json.dumps({"cleanup": True, "original_history_unchanged": True,
                       "owned_conversations": len(owned), "owned_skills": len(skills)}))

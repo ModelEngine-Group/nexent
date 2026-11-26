@@ -81,11 +81,19 @@ async def test_final_answer_runtime(tenant_a_admin, kind):
         fixture = fixtures[kind]
         async with owned_conversation(tenant_a_admin, 'FAF ' + kind) as conversation_id:
             async with client('runtime', token=tenant_a_admin.access_token, timeout=MODEL_TIMEOUT) as api:
+                model_id = fixture['model_id']
+                preferences = await api.patch(
+                    f'/conversation/{conversation_id}/model_preferences/{model_id}',
+                    json={'parameter_values': {'enable_thinking': False}},
+                )
+                assert_status(preferences, 200)
                 async with api.stream('POST', '/agent/run', json={
                     'query': 'Execute the final-answer acceptance task.', 'agent_id': fixture['agent_id'],
                     'version_no': fixture['version_no'], 'conversation_id': conversation_id,
-                    'history': [], 'is_debug': False, 'generation_config': {'deep_thinking': False},
+                    'history': [], 'is_debug': False, 'model_id': model_id,
                 }) as response:
+                    if response.status_code != 200:
+                        await response.aread()
                     assert_status(response, 200)
                     frames = await read_sse_with_evidence(response, 'faf-' + kind)
                 history = await api.get(f'/conversation/{conversation_id}')

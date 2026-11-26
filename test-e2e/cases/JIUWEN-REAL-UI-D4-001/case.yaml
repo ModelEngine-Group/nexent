@@ -17,11 +17,11 @@ case:
   status: active
   automation: automated
   objective: Prove actual browser upload, real configured model/tool execution, persisted
-    multi-turn and configuration-side Core switching with the same Nexent rendering.
+    multi-turn history and deployment Core switching with the same Nexent rendering.
   preconditions:
   - Authorized saved file assistant, owned reference image with known visual fact,
-    configured available real main/vision models, deployed unified Web and runtime;
-    machine-local fixture identity.
+    available real main/vision models, and an isolated deployment with the unified Web,
+    persistent database and a machine-local Core switch and fixture identity.
   test_data:
     profile: real_smoke
     locale: zh
@@ -31,20 +31,20 @@ case:
   steps:
   - order: 1
     action: Clone the saved file assistant with equivalent model, prompts, policies
-      and tool bindings. Publish smolagents, upload the owned image through the Composer
+      and tool bindings. Publish the clone on the smolagents deployment, upload the owned image through the Composer
       and ask for actual analysis and a fresh marker, then follow up from saved history.
     expected: Real upload and analyze_image occur, successful visual result and one
       substantive final are rendered by original components; follow-up recalls the
       fact and marker without replaying analysis.
   - order: 2
-    action: Change the owned assistant Core to Jiuwen in the configuration page, publish,
-      reopen the same history and continue; upload again as an explicit new task and
+    action: Switch the isolated deployment to Jiuwen. Reopen the same assistant and
+      history and continue. Upload again as an explicit new task and
       follow up.
     expected: Original messages and attachments remain unchanged, actual Jiuwen execution
       recalls saved facts and marker without old tool replay; new analysis succeeds
       and uses the same process/tool/final components.
   - order: 3
-    action: Switch the owned assistant back to smolagents, publish, reopen and continue
+    action: Switch the isolated deployment back to smolagents, reopen and continue
       the same history. Reload the finished conversation and compare Core presentation.
     expected: Both Core directions continue the same conversation, final content is
       not duplicated, persisted display agrees with live display and no Agent run
@@ -53,7 +53,7 @@ case:
       configured CM threshold; CM off retains capacity and CM on retains adaptive
       mode.
   - order: 4
-    action: Switch the owned assistant back to Jiuwen, request a docx through its
+    action: Switch the isolated deployment back to Jiuwen, request a docx through the assistant's
       configured file-generation child, follow up and reload history.
     expected: The actual child generates and uploads a docx containing the random
       marker; downloaded document content verifies, follow-up does not replay tools,
@@ -62,7 +62,7 @@ case:
   expected_results:
   - Real browser uploads and both Core image analyses use configured real models and
     return known visual facts, with completed persisted turns.
-  - Multi-turn and bidirectional configuration changes preserve history and recall
+  - Multi-turn and bidirectional deployment Core changes preserve history and recall
     marker/fact without replay on follow-ups; common original UI components render
     both Core outputs. Usage presentation retains shared capacity with CM off/on,
       and legacy unknown history stays compatible. Live and reloaded reasoning step
@@ -80,7 +80,7 @@ case:
   actor: Authorized Agent development user
   journey:
   - Upload and analyze with smolagents and follow up.
-  - Switch configuration to Jiuwen, continue history, analyze a new upload and follow
+  - Switch deployment to Jiuwen, continue history, analyze a new upload and follow
     up.
   - Switch back to smolagents and continue, reload and verify common presentation.
   final_business_result:

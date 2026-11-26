@@ -1,19 +1,22 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { journey, observeAgentRunBodies, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
+import { deploymentCoreSwitch } from "../../infra/automation/d4/runner/deployment-core";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
-  const input = JSON.parse(
-    readFileSync(process.env.NEXENT_REAL_UI_CONFIG!, "utf8"),
-  );
+  const input = readFixtureConfig("NEXENT_REAL_UI_CONFIG");
   const base = process.env.NEXENT_BASE_URL || "http://127.0.0.1:3000";
-  const container = input.container || "nexent-runtime";
+  const deployment = deploymentCoreSwitch(page, base);
+  const readRunBody = await observeAgentRunBodies(page);
+  const container = deployment.fixtureContainer;
+  contract.deferCleanup(deployment.restore);
   const target =
-    "/tmp/nexent_retry_" + randomUUID().replaceAll("-", "").slice(0, 12);
+    deployment.fixtureDirectory + "/nexent_retry_" + randomUUID().replaceAll("-", "").slice(0, 12);
   const stateFile = join(contract.caseDir, "private-state.json");
   const outcomes: any[] = [];
   const save = () =>
@@ -32,7 +35,7 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
       docker(
         "exec",
         "-e",
-        "PYTHONPATH=/opt/backend",
+        "PYTHONPATH=/opt:/opt/backend",
         "-w",
         "/opt/backend",
         container,
@@ -145,11 +148,11 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
     const cid =
       body.conversation_id || Number(response.headers()["conversation_id"]);
     expect(cid).toBeGreaterThan(0);
+    const stream = await readRunBody(streaming);
     if (!streaming) {
-      const events = (await response.body())
-        .toString("utf8")
+      const events = stream
         .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
+        .filter((line) => line.startsWith("data:") && line.slice(5).trim() !== "[DONE]")
         .map((line) => JSON.parse(line.slice(5).trim()));
       expect(events.filter((event) => event.type === "error")).toEqual([]);
       await expect(
@@ -162,6 +165,7 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
     return { cid, body };
   };
   const send = async (text: string) => {
+    await new ChatPage(page).selectBoundModel(Number(state.copied_fields.model_ids[0]));
     await page.getByRole("textbox").last().fill(text);
     return request(() =>
       page.getByRole("button", { name: "发送", exact: true }).click(),
@@ -177,7 +181,7 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
       streaming,
     );
   const completed: {
-    core: string;
+    core: "smolagents" | "jiuwen";
     cid: number;
     marker: string;
     question: string;
@@ -185,8 +189,8 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
   }[] = [];
   const steps = contract.expectedIds("steps");
   await contract.step(steps[0], async () => {
-    for (const core of ["smolagents", "jiuwen"]) {
-      expect(fixture("select-core", core).configured_core).toBe(core);
+    for (const core of ["smolagents", "jiuwen"] as const) {
+      await deployment.select(core);
       await open();
       const marker = "RETRY_" + core + "_" + randomUUID().slice(0, 8);
       const question = `不要调用工具，只回复“重试验收 ${marker}”，不要补充其他内容。`;
@@ -222,7 +226,7 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
   });
   await contract.step(steps[1], async () => {
     for (const item of completed) {
-      fixture("select-core", item.core);
+      await deployment.select(item.core);
       await open(item.cid);
       const before = runs;
       await page.reload();
@@ -268,8 +272,8 @@ journey("CHAT-RETRY-HISTORY-D4-001", async ({ page, contract, expect }) => {
     }
   });
   await contract.step(steps[2], async () => {
-    for (const core of ["smolagents", "jiuwen"]) {
-      fixture("select-core", core);
+    for (const core of ["smolagents", "jiuwen"] as const) {
+      await deployment.select(core);
       await open();
       const marker = "STREAM_" + core + "_" + randomUUID().slice(0, 8);
       const first = await send(

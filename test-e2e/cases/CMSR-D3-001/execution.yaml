@@ -9,8 +9,10 @@ implementations:
   file: test.py
   selector: CMSR-D3-001
   profiles: [mock]
+required_mock_services:
+- model-provider
 preparation:
   families: []
-  anchors: true
+  anchors: false
   special_assets: false
   d4_groups: []

@@ -82,9 +82,14 @@ vi.mock("@assistant-ui/react", async () => {
         rename: fixture.rename,
         delete: vi.fn(),
       };
+      const threads = {
+        getState: () => getState().threads,
+        reload: fixture.reload,
+        switchToThread: vi.fn(),
+      };
       return {
         threadListItem: Object.assign(() => item, item),
-        threads: { reload: fixture.reload, switchToThread: vi.fn() },
+        threads: Object.assign(() => threads, threads),
       };
     },
     AuiIf: ({

@@ -44,7 +44,8 @@ def controlled_services(repo, directory, env, enabled, required_mock_services=()
         service for service in (required_mock_services or [])
         if service in EXT_LOGICAL_SERVICES
     ]
-    if not enabled and not ext_required:
+    local_services_required = enabled or "model-provider" in (required_mock_services or ())
+    if not local_services_required and not ext_required:
         yield
         return
     processes, handles = [], []
@@ -86,7 +87,7 @@ def controlled_services(repo, directory, env, enabled, required_mock_services=()
             env["NEXENT_EXT_KNOWLEDGE_OWNER_RUN_ID"] = directory.name
             env["NEXENT_EXT_KNOWLEDGE_RUNNER_URL"] = f"http://127.0.0.1:{port}"
             env["NEXENT_EXT_KNOWLEDGE_PRODUCT_URL"] = f"http://{host}:{port}"
-        if enabled:
+        if local_services_required:
             host = env.get("NEXENT_TEST_ASSETS_CONTAINER_HOST", "").strip()
             mcp_host = env.get("NEXENT_TEST_MCP_CONTAINER_HOST", "").strip() or host
             if not host or not mcp_host:

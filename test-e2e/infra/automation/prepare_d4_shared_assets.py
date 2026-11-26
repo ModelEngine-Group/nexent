@@ -23,6 +23,7 @@ from shared.asset_registry import register_asset, resolve_asset, mark_asset_stat
 from shared.auth import sign_in
 from shared.config import test_root
 from shared.http import assert_status, client
+from shared.model_catalog import load_model_catalog
 
 
 def _data(response):
@@ -476,6 +477,15 @@ async def prepare_file_chat(identity) -> dict:
 
 async def prepare_multi(identity) -> dict:
     always_fail_id = await _controlled_tool_id(identity, "always_fail")
+    parent_model_id = await model_id("llm", identity)
+    models, _, _ = await load_model_catalog(identity)
+    parent_model_name = next(
+        (row.get("display_name") for row in models
+         if str(row.get("model_id") or row.get("id")) == str(parent_model_id)),
+        None,
+    )
+    if not parent_model_name:
+        raise AssertionError("The prepared parent model has no visible catalog name")
     child_a_id, child_a_name, _ = await _create_agent(
         identity, prefix="D4 Multi Child A", model_type="llm",
         prompt="Complete every delegated task and include CHILD_A_OK in the result.",
@@ -494,6 +504,7 @@ async def prepare_multi(identity) -> dict:
     register_asset("agents", "d4_multi_child_b_runtime_name", _runtime_agent_name(child_b_name), owner_case_id="D4-PREP")
     multi_id, multi_name, _ = await _create_agent(
         identity, prefix="D4 Multi Parent", model_type="llm",
+        model_id_override=parent_model_id,
         related_agent_ids=[child_a_id, child_b_id],
         prompt=(
             "For every request, delegate one concrete subtask to each of the two configured "
@@ -502,6 +513,7 @@ async def prepare_multi(identity) -> dict:
         ),
     )
     _register_agent("d4_multi", multi_id, multi_name)
+    register_asset("models", "d4_multi_parent_display_name", parent_model_name, owner_case_id="D4-PREP")
     return {"NEXENT_TEST_MULTI_AGENT": multi_name, "NEXENT_TEST_MULTI_CHILD_A": child_a_name, "NEXENT_TEST_MULTI_CHILD_B": child_b_name}
 
 

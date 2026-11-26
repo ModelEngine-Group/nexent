@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Observe only owned runtime keys; never mutate Redis or global run state."""
 from __future__ import annotations
 
@@ -30,7 +32,12 @@ class StopObservation:
         self.records = []
 
     def read(self, target):
-        suffix = f'{self.identity.user_id}:{target}'
+        owner = self.identity.user_id
+        if str(target).startswith('debug-'):
+            from runtime.agentos.debug import debug_owner
+
+            owner = debug_owner(self.identity)
+        suffix = f'{owner}:{target}'
         with self.wire.pipeline(transaction=True) as pipe:
             pipe.hget(f'runtime:run:{suffix}', 'status')
             pipe.hget(f'runtime:stream:done:{suffix}', 'status')

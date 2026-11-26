@@ -1,15 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { journey, observeAgentRunBodies, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
-  const config = JSON.parse(
-    readFileSync(process.env.NEXENT_REAL_HITL_CONFIG!, "utf8"),
-  );
+  const config = readFixtureConfig("NEXENT_REAL_HITL_CONFIG");
   const base = process.env.NEXENT_BASE_URL || "http://127.0.0.1:3000";
   const container = config.container || "nexent-config";
   const expectedCore: "jiuwen" | "smolagents" = config.core ?? "jiuwen";
@@ -63,6 +62,7 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
   let first: any, continued: any, restored: any, finalAudit: any;
   const submitted: Record<string, string> = {};
   const errors: string[] = [];
+  const readRunBody = await observeAgentRunBodies(page);
   page.on("pageerror", (error) => errors.push(error.name));
   page.on("request", (request) => {
     if (
@@ -119,10 +119,10 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
       response.request().postDataJSON().conversation_id ||
       Number(response.headers()["conversation_id"]);
     expect(cid).toBeGreaterThan(0);
-    const body = (await response.body()).toString("utf8");
+    const body = await readRunBody();
     const result = body
       .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
+      .filter((line) => line.startsWith("data:") && line.slice(5).trim() !== "[DONE]")
       .map((line) => JSON.parse(line.slice(5).trim()));
     expect(result.filter((event) => event.type === "error")).toEqual([]);
     const completed = body
@@ -138,10 +138,13 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     return result;
   };
   const send = async (query: string) => {
+    await new ChatPage(page).selectBoundModel(Number(state.source_models[0]));
     await page.getByRole("textbox").last().fill(query);
-    const promise = wireFor();
-    await page.getByRole("button", { name: "发送", exact: true }).click();
-    return promise;
+    const [response] = await Promise.all([
+      wireFor(),
+      page.getByRole("button", { name: "发送", exact: true }).click(),
+    ]);
+    return response;
   };
   const savedCard = async () => {
     await expect(card()).toBeVisible();
