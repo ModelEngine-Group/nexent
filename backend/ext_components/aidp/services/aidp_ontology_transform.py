@@ -13,6 +13,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic_core import PydanticCustomError
+
 
 logger = logging.getLogger("aidp_ontology_transform")
 
@@ -42,6 +45,63 @@ _EXPORTED_RELATION_FIELDS = (
 )
 
 MAX_SYNC_IMPORT_ITEMS = 200
+
+
+class _ExportedProperty(BaseModel):
+    """One property row of an exported entity."""
+
+    model_config = ConfigDict(extra="allow")
+
+    api_name: str
+    data_type: Any = "string"
+    value: Any = ""
+
+    @field_validator("api_name", mode="before")
+    @classmethod
+    def validate_api_name(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise PydanticCustomError(
+                "property_api_name_required", "Property api_name is required"
+            )
+        return value.strip()
+
+
+class _ExportedEntity(BaseModel):
+    """One exported type/entity row; unknown export-only fields are preserved."""
+
+    model_config = ConfigDict(extra="allow")
+
+    api_name: str
+    kind: Any = None
+    properties: list[_ExportedProperty] | None = None
+    primary_properties: list[Any] | None = None
+
+    @field_validator("api_name", mode="before")
+    @classmethod
+    def validate_api_name(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise PydanticCustomError("api_name_required", "api_name is required")
+        return value.strip()
+
+
+class _ExportedRelation(BaseModel):
+    """One exported relation row; endpoint resolution stays in this module."""
+
+    model_config = ConfigDict(extra="allow")
+
+    api_name: str
+    source_api_name: Any = None
+    source_kind: Any = None
+    object_api_name: Any = None
+    object_kind: Any = None
+    display_name: Any = None
+
+    @field_validator("api_name", mode="before")
+    @classmethod
+    def validate_api_name(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise PydanticCustomError("api_name_required", "api_name is required")
+        return value.strip()
 
 
 class OntologyImportValidationError(ValueError):
@@ -80,6 +140,70 @@ def _issue(
     if params:
         issue["params"] = params
     return issue
+
+
+def _validation_issue(
+    exc: ValidationError,
+    *,
+    index: int,
+    object_type: str,
+    item: Any,
+) -> dict[str, Any]:
+    """Map the first Pydantic shape error to the existing browser reason codes."""
+    error = exc.errors(include_url=False)[0]
+    loc = tuple(error.get("loc", ()))
+    error_type = str(error.get("type", ""))
+    api_name = item.get("api_name") if isinstance(item, dict) else None
+    if loc[:1] == ("properties",) and error_type in {
+        "property_api_name_required",
+        "missing",
+        "string_type",
+        "model_type",
+    }:
+        position = loc[1] if len(loc) > 1 and isinstance(loc[1], int) else 0
+        return _issue(
+            index,
+            object_type,
+            api_name,
+            f"properties[{position}].api_name",
+            "property_api_name_required",
+            "Property api_name is required",
+        )
+    if loc == ("api_name",) or error_type == "api_name_required":
+        return _issue(
+            index,
+            object_type,
+            api_name,
+            "api_name",
+            "api_name_required",
+            "api_name is required",
+        )
+    if loc == ("properties",) and error_type == "list_type":
+        return _issue(
+            index,
+            object_type,
+            api_name,
+            "properties",
+            "properties_not_array",
+            "properties must be an array",
+        )
+    if loc == ("primary_properties",) and error_type == "list_type":
+        return _issue(
+            index,
+            object_type,
+            api_name,
+            "primary_properties",
+            "primary_properties_not_array",
+            "primary_properties must be an array",
+        )
+    return _issue(
+        index,
+        object_type,
+        api_name,
+        "$",
+        "item_not_object",
+        "Each entry must be an object",
+    )
 
 
 def _clean_text(value: Any) -> str:
@@ -129,14 +253,16 @@ def _project_entity(
     errors: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     object_type = "type" if kind == ONTOLOGY_KIND_TYPE else "entity"
-    if not isinstance(item, dict):
-        errors.append(_issue(index, object_type, None, "$", "item_not_object", "Each entry must be an object"))
+    try:
+        model = _ExportedEntity.model_validate(item)
+    except ValidationError as exc:
+        errors.append(
+            _validation_issue(exc, index=index, object_type=object_type, item=item)
+        )
         return None
-    api_name = _clean_text(item.get("api_name"))
-    if not api_name:
-        errors.append(_issue(index, object_type, None, "api_name", "api_name_required", "api_name is required"))
-        return None
-    declared_kind = _clean_text(item.get("kind")).lower()
+
+    api_name = model.api_name
+    declared_kind = _clean_text(model.kind).lower()
     if declared_kind and declared_kind != kind:
         errors.append(
             _issue(
@@ -151,48 +277,28 @@ def _project_entity(
 
     projected: dict[str, Any] = {"api_name": api_name, "kind": kind}
     for field in _EXPORTED_ENTITY_FIELDS:
-        if field in item:
+        if field not in item:
+            continue
+        if field == "properties":
+            projected["properties"] = (
+                None
+                if model.properties is None
+                else [prop.model_dump() for prop in model.properties]
+            )
+        elif field == "primary_properties":
+            projected["primary_properties"] = model.primary_properties
+        else:
             projected[field] = item[field]
-    properties = projected.get("properties")
-    if properties is not None and not isinstance(properties, list):
-        errors.append(
-            _issue(index, object_type, api_name, "properties", "properties_not_array", "properties must be an array")
-        )
-        return None
-    primary = projected.get("primary_properties")
-    if primary is not None and not isinstance(primary, list):
-        errors.append(
-            _issue(
-                index,
-                object_type,
-                api_name,
-                "primary_properties",
-                "primary_properties_not_array", "primary_properties must be an array",
-            )
-        )
-        return None
-    for position, prop in enumerate(properties or []):
-        if not isinstance(prop, dict) or not _clean_text(prop.get("api_name")):
-            errors.append(
-                _issue(
-                    index,
-                    object_type,
-                    api_name,
-                    f"properties[{position}].api_name",
-                    "property_api_name_required", "Property api_name is required",
-                )
-            )
-            return None
-        # Confirmed import contract requires data_type on every property; the
-        # export contract may omit it, so default to string and keep "" as the
-        # only legal blank value.
+    # Confirmed import contract requires data_type on every property; the
+    # export contract may omit it, so default to string and keep "" as the
+    # only legal blank value.
+    for prop in projected.get("properties") or []:
         prop.setdefault("data_type", "string")
-        if "value" not in prop or prop.get("value") is None:
+        if prop.get("value") is None:
             prop["value"] = ""
     # The import payload groups objects by array, not by kind.
     projected.pop("kind", None)
     return projected
-
 
 def _resolve_relation_endpoint(
     relation: dict[str, Any],
@@ -277,14 +383,17 @@ def _project_relation(
     entity_kinds: dict[str, set[str]],
     errors: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        errors.append(_issue(index, "relation", None, "$", "item_not_object", "Each entry must be an object"))
-        return None
-    api_name = _clean_text(item.get("api_name"))
-    if not api_name:
-        errors.append(_issue(index, "relation", None, "api_name", "api_name_required", "api_name is required"))
+    try:
+        model = _ExportedRelation.model_validate(item)
+    except ValidationError as exc:
+        errors.append(
+            _validation_issue(
+                exc, index=index, object_type="relation", item=item
+            )
+        )
         return None
 
+    api_name = model.api_name
     projected: dict[str, Any] = {"api_name": api_name}
     for field in _EXPORTED_RELATION_FIELDS:
         if field in item:
@@ -314,7 +423,6 @@ def _project_relation(
     ):
         return None
     return projected
-
 
 def build_import_request(
     document: Any, domain_name: str
