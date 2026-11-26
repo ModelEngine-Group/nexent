@@ -138,6 +138,15 @@ const AidpFileDetailPage: React.FC = () => {
           canEdit={detail?.permission === "EDIT"}
           summaryEnabled={detail?.summary_enable === true}
           summaryPreview={detail?.summary_preview === true}
+          binding={
+            detail
+              ? {
+                  id: detail.bind_lib_id,
+                  type: detail.bind_lib_type,
+                  name: detail.bind_lib_name,
+                }
+              : undefined
+          }
           onBack={handleBack}
         />
       </div>

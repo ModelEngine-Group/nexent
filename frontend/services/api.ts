@@ -563,7 +563,6 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities/${encodeURIComponent(entityId)}`,
       bindings: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings`,
-      allBindings: `${API_BASE_URL}/aidp-mgmt/ontology/bindings`,
       // AIDP has no BindingId: a row is addressed by (domain_id, kds_id).
       unbind: (domainId: string, kdsId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(kdsId)}`,

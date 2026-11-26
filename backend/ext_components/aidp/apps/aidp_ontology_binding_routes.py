@@ -41,32 +41,6 @@ logger = logging.getLogger("aidp_ontology_binding_routes")
 aidp_ontology_binding_router = APIRouter()
 
 
-@aidp_ontology_binding_router.get("/bindings")
-async def list_all_bindings(request: Request) -> JSONResponse:
-    user_id, tenant_id = await _auth(request)
-    rows = await _load_bindings(user_id, tenant_id)
-    names = await _domain_names(tenant_id)
-    enriched = await run_blocking(
-        "aidp-ontology-binding-enrich",
-        _enrich_bindings_sync,
-        rows,
-        tenant_id,
-        names,
-        _credentials()[0],
-        _credentials()[1],
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(
-        status_code=HTTPStatus.OK,
-        content={
-            "value": enriched,
-            "total_count": len(enriched),
-            "has_more": False,
-            "total_reliable": True,
-        },
-    )
-
 
 @aidp_ontology_binding_router.get("/domains/{domain_id}/bindings")
 async def list_domain_bindings(

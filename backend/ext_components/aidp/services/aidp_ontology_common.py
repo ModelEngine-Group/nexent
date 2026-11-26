@@ -43,9 +43,6 @@ _METADATA_FIELD_LIMIT = 20
 _METADATA_TYPES = ("string", "number", "date")
 
 
-_BINDING_SCAN_DOMAIN_LIMIT = 100
-
-
 # Entity/domain business codes documented by AIDP. They arrive with HTTP
 # statuses that would otherwise be classified as auth or parameter errors.
 _ONTOLOGY_BUSINESS_ERRORS = {

@@ -11,15 +11,11 @@ import logging
 from typing import Any
 
 from ext_components.aidp.services.aidp_ontology_common import (
-    _BINDING_SCAN_DOMAIN_LIMIT,
     _domain_id_value,
     _list_envelope,
     _log_business_failure,
     _ontology_request,
     _resolve_tenant_id,
-)
-from ext_components.aidp.services.aidp_ontology_domain_service import (
-    list_ontology_domains_impl,
 )
 
 
@@ -90,43 +86,16 @@ def list_ontology_bindings_impl(
     server_url: str,
     api_key: str,
     *,
-    domain_id: str | None = None,
+    domain_id: str,
     kds_id: str | None = None,
     tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List ontology bindings.
-
-    AIDP only exposes a per-domain query. By-domain reads page that endpoint;
-    by-KB and all-bindings reads scan every domain and filter locally (bounded
-    by ``_BINDING_SCAN_DOMAIN_LIMIT``). The scan is how the KB detail tab and
-    the "one KB, one domain" pre-check work in real deployments.
-    """
-    if domain_id:
-        rows = _list_domain_bindings_raw(
-            server_url, api_key, domain_id, tenant_id=tenant_id
-        )
-        if kds_id:
-            rows = [row for row in rows if row["kds_id"] == str(kds_id)]
-        return rows
-
-    domains = list_ontology_domains_impl(
-        server_url,
-        api_key,
-        page=1,
-        page_size=100,
-        tenant_id=tenant_id,
-    )["value"]
-    rows = []
-    for item in domains[:_BINDING_SCAN_DOMAIN_LIMIT]:
-        raw_id = item.get("od_id") or item.get("domain_id") or item.get("id")
-        if raw_id is None:
-            continue
-        for binding in _list_domain_bindings_raw(
-            server_url, api_key, str(raw_id), tenant_id=tenant_id
-        ):
-            if kds_id and binding["kds_id"] != str(kds_id):
-                continue
-            rows.append(binding)
+    """List one domain's bindings; AIDP exposes no reverse KB lookup."""
+    rows = _list_domain_bindings_raw(
+        server_url, api_key, domain_id, tenant_id=tenant_id
+    )
+    if kds_id:
+        rows = [row for row in rows if row["kds_id"] == str(kds_id)]
     return rows
 
 

@@ -168,12 +168,6 @@ class AidpOntologyService {
     );
   }
 
-  listAllBindings(): Promise<AidpOntologyBindingListResponse> {
-    return jsonRequest<AidpOntologyBindingListResponse>(
-      API_ENDPOINTS.aidpMgmt.ontology.allBindings
-    );
-  }
-
   createBinding(
     domainId: string,
     kdsId: string

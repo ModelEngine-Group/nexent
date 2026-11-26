@@ -45,6 +45,7 @@ import {
   useKbOntologyBinding,
   useOntologyEntityOptions,
   useOntologyMetadataSchema,
+  type AidpKbBindingInput,
 } from "./hooks/useAidpChunkMetadata";
 import styles from "./AidpSemanticChunks.module.css";
 
@@ -56,6 +57,8 @@ interface AidpSemanticChunksPanelProps {
   fileUuid: string;
   fileName: string;
   canEdit: boolean;
+  /** KB detail binding passed down from the knowledge-base page. */
+  binding?: AidpKbBindingInput | null;
 }
 
 interface ChunkDrawerState {
@@ -75,6 +78,7 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
   fileUuid,
   fileName,
   canEdit,
+  binding,
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -102,7 +106,7 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
   );
   // Tags and user metadata come from the bound ontology domain; without a
   // binding the drawer keeps the plain text-only form.
-  const bindingQuery = useKbOntologyBinding(kdsId);
+  const bindingQuery = useKbOntologyBinding(kdsId, binding);
   const odId = bindingQuery.data?.binding?.od_id ?? null;
   const metadataSchemaQuery = useOntologyMetadataSchema(odId);
   const entityOptionsQuery = useOntologyEntityOptions(odId);

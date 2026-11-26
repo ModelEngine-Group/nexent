@@ -17,6 +17,10 @@ export interface AidpKnowledgeBaseItem extends Omit<
   summary_enable?: boolean;
   summary_model?: string;
   summary_preview?: boolean;
+  /** Ontology/jargon binding projected from the KB detail. */
+  bind_lib_id?: number | string | null;
+  bind_lib_type?: "ontology" | "jargon" | "none" | string | null;
+  bind_lib_name?: string | null;
 }
 
 export interface AidpKnowledgeBaseListResponse extends Omit<

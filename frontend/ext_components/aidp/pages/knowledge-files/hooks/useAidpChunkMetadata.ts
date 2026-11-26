@@ -2,27 +2,67 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import type { AidpOntologyMetadataField } from "@/ext_components/aidp/shared/types/ontology";
+import type {
+  AidpOntologyBinding,
+  AidpOntologyMetadataField,
+} from "@/ext_components/aidp/shared/types/ontology";
+
+export interface AidpKbBindingInput {
+  id?: number | string | null;
+  type?: string | null;
+  name?: string | null;
+}
+
+const bindingFromInput = (
+  kdsId: string,
+  input: AidpKbBindingInput | null
+): AidpOntologyBinding | null => {
+  if (!input || input.type !== "ontology" || input.id === null || input.id === undefined) {
+    return null;
+  }
+  return {
+    kds_id: kdsId,
+    od_id: String(input.id),
+    od_name: input.name ?? null,
+  };
+};
 
 /**
  * Resolve a knowledge base's ontology binding.
  *
  * Chunk metadata fields and tag choices both come from the bound ontology
  * domain, so the chunk drawers only offer those editors while a binding
- * exists. A failed lookup degrades to "no binding" (the callers then hide the
- * metadata editor) instead of blocking the chunk form.
+ * exists. Callers that already have the KB detail pass it in; otherwise this
+ * reads the KB detail directly instead of scanning every ontology domain.
  */
-export const useKbOntologyBinding = (kdsId: string) => {
+export const useKbOntologyBinding = (
+  kdsId: string,
+  supplied?: AidpKbBindingInput | null
+) => {
   const scope = useAidpQueryScope();
   return useQuery({
-    queryKey: [...scope.key, "kb-ontology-binding", kdsId],
+    queryKey: [
+      ...scope.key,
+      "kb-ontology-binding",
+      kdsId,
+      supplied?.type ?? "load",
+      supplied?.id ?? "",
+    ],
     queryFn: async () => {
-      const response = await aidpOntologyService.listAllBindings();
-      const binding =
-        response.value.find((item) => item.kds_id === kdsId) ?? null;
-      return { binding };
+      if (supplied !== undefined) {
+        return { binding: bindingFromInput(kdsId, supplied) };
+      }
+      const detail = await aidpKnowledgeService.getKb(kdsId);
+      return {
+        binding: bindingFromInput(kdsId, {
+          id: detail.bind_lib_id,
+          type: detail.bind_lib_type,
+          name: detail.bind_lib_name,
+        }),
+      };
     },
     enabled: scope.enabled && !!kdsId,
     staleTime: 60_000,

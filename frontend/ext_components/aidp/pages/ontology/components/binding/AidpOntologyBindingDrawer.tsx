@@ -20,7 +20,6 @@ import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnow
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
 import styles from "./AidpOntologyBindingDrawer.module.css";
 
@@ -52,23 +51,19 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
     retry: false,
   });
 
-  const bindingsQuery = useQuery({
-    queryKey: [...scope.key, "ontology-all-bindings"],
-    queryFn: () => aidpOntologyService.listAllBindings(),
-    enabled: scope.enabled && open,
-    staleTime: 0,
-    retry: false,
-  });
-
-  const boundKbIds = useMemo(
-    () => new Set((bindingsQuery.data?.value ?? []).map((item) => item.kds_id)),
-    [bindingsQuery.data?.value]
-  );
-
+  // One KB can bind to only one ontology/jargon library. The KB list already
+  // carries that binding, so candidates need no all-bindings scan.
   const candidates = useMemo(
     () =>
-      (kbQuery.data?.value ?? []).filter((kb) => !boundKbIds.has(kb.kds_id)),
-    [boundKbIds, kbQuery.data?.value]
+      (kbQuery.data?.value ?? []).filter((kb) => {
+        const type = kb.bind_lib_type;
+        return (
+          type !== "ontology" &&
+          type !== "jargon" &&
+          (kb.bind_lib_id === null || kb.bind_lib_id === undefined)
+        );
+      }),
+    [kbQuery.data?.value]
   );
 
   const handleClose = () => {
@@ -172,10 +167,7 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
             required
           />
         </div>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyBindingCandidateScanGap")}
-        </AidpOntologyGapNote>
-        {kbQuery.isLoading || bindingsQuery.isLoading ? (
+        {kbQuery.isLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />
         ) : (
           <Table<AidpKnowledgeBaseItem>
@@ -198,11 +190,6 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
                 : t("aidpKnowledge.ontologyBindNoKb"),
             }}
           />
-        )}
-        {bindingsQuery.isError && (
-          <div className={drawerStyles.error} role="alert">
-            {t("aidpKnowledge.ontologyBindingFilterGap")}
-          </div>
         )}
         {errorMessage && (
           <div className={drawerStyles.error} role="alert">

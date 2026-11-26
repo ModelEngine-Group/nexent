@@ -19,6 +19,7 @@ import { getAidpDownloadFilename } from "@/ext_components/aidp/shared/utils/aidp
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import log from "@/lib/logger";
 import AidpSemanticChunksPanel from "../knowledge-files/AidpSemanticChunksPanel";
+import type { AidpKbBindingInput } from "../knowledge-files/hooks/useAidpChunkMetadata";
 import AidpFileSummaryPanel from "./AidpFileSummaryPanel";
 import styles from "./AidpFileDetail.module.css";
 
@@ -38,6 +39,8 @@ interface AidpFileDetailViewProps {
   summaryEnabled?: boolean;
   /** KB summary_preview; an explicit false shows the not-previewable state. */
   summaryPreview?: boolean;
+  /** KB detail binding, passed to the chunk metadata editors. */
+  binding?: AidpKbBindingInput | null;
   onBack: () => void;
 }
 
@@ -54,6 +57,7 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
   canEdit,
   summaryEnabled = false,
   summaryPreview = false,
+  binding,
   onBack,
 }) => {
   const { t } = useTranslation();
@@ -211,6 +215,7 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
                 fileUuid={file.file_uuid}
                 fileName={file.file_name}
                 canEdit={canEdit}
+                binding={binding}
               />
             )}
           </div>
