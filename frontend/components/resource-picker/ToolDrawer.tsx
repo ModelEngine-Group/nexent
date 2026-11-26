@@ -119,7 +119,7 @@ export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
 
-  const { selectableTools } = useToolList({ enabled: open });
+  const { selectableTools, isUserSelectable } = useToolList({ enabled: open });
   const scanTools = useScanToolList();
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
@@ -302,11 +302,11 @@ export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
 
   const selectedChips = useMemo(
     () =>
-      draftTools.map((tool) => ({
+      draftTools.filter(isUserSelectable).map((tool) => ({
         id: String(tool.id),
         label: tool.name,
       })),
-    [draftTools]
+    [draftTools, isUserSelectable]
   );
 
   const mcpGroups = useMemo(() => {

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServer, Tool, ToolParam } from "@/types/agentConfig";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import { tagManagementApi } from "@/services/tagManagementService";
 
 const state = vi.hoisted(() => ({
@@ -59,7 +60,12 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 vi.mock("@/hooks/agent/useToolList", () => ({
-  useToolList: () => ({ selectableTools: state.tools, invalidate: vi.fn() }),
+  useToolList: () => ({
+    selectableTools: state.tools,
+    isUserSelectable: (tool: Tool) =>
+      !isManagedKnowledgeTool(tool) && tool.is_user_selectable !== false,
+    invalidate: vi.fn(),
+  }),
 }));
 vi.mock("@/hooks/mcp/useMcpServerList", () => ({
   useMcpServerList: () => ({ serverList: state.servers }),
@@ -98,6 +104,55 @@ vi.mock("@/app/agents/components/capability/tool/ToolConfigModal", () => ({
 }));
 
 describe("ToolDrawer shared rows", () => {
+  it("hides managed knowledge tools from the picker and preserves their configuration on confirm", async () => {
+    const knowledgeTools: Tool[] = [
+      {
+        ...state.tools[0],
+        id: "3",
+        name: "knowledge_base_search",
+        initParams: [
+          {
+            name: "index_names",
+            type: "array",
+            required: true,
+            value: ["kb-1"],
+          },
+        ],
+      },
+      {
+        ...state.tools[0],
+        id: "4",
+        name: "External knowledge search",
+        origin_name: "aidp_search",
+      },
+    ];
+    state.editedAgent.tools = knowledgeTools;
+    state.updateTools.mockClear();
+    try {
+      render(
+        <App>
+          <ToolDrawer open onClose={vi.fn()} />
+        </App>
+      );
+      const option = screen.getByRole("option", { name: "Alpha tool" });
+      fireEvent.click(option);
+      await waitFor(() =>
+        expect(option).toHaveAttribute("aria-selected", "true")
+      );
+      for (const tool of knowledgeTools) {
+        expect(screen.queryByText(tool.name)).not.toBeInTheDocument();
+      }
+      fireEvent.click(screen.getByRole("button", { name: "确认" }));
+      expect(state.updateTools).toHaveBeenCalledWith([
+        ...knowledgeTools,
+        state.tools[0],
+      ]);
+    } finally {
+      state.editedAgent.tools = [];
+      state.updateTools.mockClear();
+    }
+  });
+
   it("uses the chosen page size for tool rows and resets the current page", async () => {
     const original = state.tools;
     state.tools = Array.from({ length: 21 }, (_, index) => ({
