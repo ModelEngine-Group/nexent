@@ -3,7 +3,7 @@
 """Read owned creator histories for one tenant resource, independently of entrypoint."""
 
 from management.db.agent.repository import query_agent_records_for_nl2agent
-from management.db.conversation.repository import get_conversation_list_page
+from management.db.conversation.repository import get_conversation_list_page, retain_creator_histories
 from management.db.skill.repository import get_skill_by_id
 from management.services.agent.system import system_agent_provider
 
@@ -23,8 +23,11 @@ def list_creator_histories(*, kind: str, target_id: int, user_id: str, tenant_id
     if not accessible:
         raise PermissionError("Creator target is not accessible in this tenant")
     executor = system_agent_provider.get_creator_ref(tenant_id, f"nl2{kind}_main")
+    target = {"type": kind, "id": target_id}
+    retain_creator_histories(user_id, executor.agent_id, target)
+    offset, limit = 0, 3
     page = get_conversation_list_page(
         user_id=user_id, today_start_ms=0, week_start_ms=0, offset=offset, limit=limit,
-        creator_agent_id=executor.agent_id, creator_target={"type": kind, "id": target_id},
+        creator_agent_id=executor.agent_id, creator_target=target,
     )
     return {"items": page["items"], "total": page["metadata"]["total"]}

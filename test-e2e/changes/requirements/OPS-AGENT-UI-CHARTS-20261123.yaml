@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-UI-CHARTS-20261123
+  change_type: requirement
+  requirement_id: OPS-AGENT-UI-CHARTS-20261123
+  title: Connect Agent rankings and outcome distribution
+  description: Show scoped server rankings, derive single-Agent outcomes from the summary, and preserve table controls on date and group changes.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/agentMonitoring.test.tsx
+    - test/backend/ops/test_agent_list_sorting.py
+    behaviors:
+    - Verify ranking request scope, metric selection and request failure propagation.
+    - Verify success and failure shares from eligible counts, including missing, zero and one-sided samples.
+    reason: The existing backend tests cover ranking ordering and precision. The browser Case covers filter changes, active refresh and visible chart modes.
+  notes: Base ac8c40cc1. This increment reuses the existing summary and rankings endpoints. The browser uses controlled API responses.

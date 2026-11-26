@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Module-level cache for tag assignment reads.
  *
@@ -33,6 +35,25 @@ export function mergeAssignmentCacheKey(
 }
 
 const assignmentCache = new Map<string, AssignmentCacheEntry>();
+const assignmentListeners = new Map<string, Set<() => void>>();
+
+/** Observe resource-scoped writes without coupling mounted chips to their writer. */
+export function subscribeToAssignmentChanges(
+  resourceType: string,
+  resourceId: string,
+  listener: () => void
+): () => void {
+  const prefix = `${resourceType}::${resourceId}::`;
+  const listeners = assignmentListeners.get(prefix) ?? new Set<() => void>();
+  assignmentListeners.set(prefix, listeners);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && assignmentListeners.get(prefix) === listeners) {
+      assignmentListeners.delete(prefix);
+    }
+  };
+}
 
 function keyFor(key: AssignmentCacheKey): string {
   return `${key.resourceType}::${key.resourceId}::${key.query}`;
@@ -58,7 +79,8 @@ export function getCachedAssignmentPromise(
     expiresAt: now + ttlMs,
   };
   fresh.promise = fresh.promise.catch((error: unknown) => {
-    assignmentCache.delete(cacheKey);
+    if (assignmentCache.get(cacheKey) === fresh)
+      assignmentCache.delete(cacheKey);
     throw error;
   });
   assignmentCache.set(cacheKey, fresh);
@@ -73,6 +95,8 @@ export function clearCachedAssignmentsByResource(
   for (const key of assignmentCache.keys()) {
     if (key.startsWith(prefix)) assignmentCache.delete(key);
   }
+  for (const listener of [...(assignmentListeners.get(prefix) ?? [])])
+    listener();
 }
 
 export function clearAssignmentCache(): void {

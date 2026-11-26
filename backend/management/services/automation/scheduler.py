@@ -6,30 +6,27 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Hashable
 
-from contracts.constants.environment import AGENT_AUTOMATION_ENABLED, AGENT_AUTOMATION_LEASE_SECONDS, AGENT_AUTOMATION_MAX_CONCURRENT_RUNS, AGENT_AUTOMATION_POLL_INTERVAL_SECONDS, AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS
-from management.db.automation import repository as agent_automation_db
-from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
-from nexent.core.concurrency import run_blocking
-
 from contracts.automation import ScheduleTrigger
+from contracts.constants import environment
+from contracts.constants.environment import (
+    AGENT_AUTOMATION_ENABLED,
+    AGENT_AUTOMATION_LEASE_SECONDS,
+    AGENT_AUTOMATION_MAX_CONCURRENT_RUNS,
+    AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
+    AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS,
+)
+from management.db.automation import repository as agent_automation_db
+from management.services.agent.runtime_client import _agentos_client
 from management.services.automation.runner import agent_automation_runner
-
-
-
-logger = logging.getLogger("agent_automation.scheduler")
-_MISFIRE_POLICY_SKIP = "SKIP"
-
-
-
-from datetime import datetime
-
+from nexent.core.concurrency import run_blocking
+from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig, ScheduleSpec
 from nexent.scheduler import (
-    ScheduleSpec,
     compute_next_fire_at as compute_sdk_next_fire_at,
     is_valid_cron_expression as validate_sdk_cron_expression,
 )
 
-from contracts.automation import ScheduleTrigger
+logger = logging.getLogger("agent_automation.scheduler")
+_MISFIRE_POLICY_SKIP = "SKIP"
 
 
 def is_valid_cron_expression(expression: str) -> bool:
@@ -58,25 +55,54 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def recover_automation_runs() -> dict[str, int]:
+    """Recover runs and release leases left behind by the previous scheduler."""
+    return {
+        "automation_runs": agent_automation_db.recover_orphaned_runs(),
+        "automation_locks": agent_automation_db.release_all_task_locks(),
+    }
+
+
 class AgentAutomationLeaseStore:
     """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
     def __init__(self) -> None:
+        self.fixed_replicas = False
         self._recovery_time: datetime | None = None
+        self._projection_cursor = 0
+
+    def _uses_scoped_recovery(self):
+        return (
+            not self.fixed_replicas
+            and environment.IS_DEPLOYED_BY_KUBERNETES
+            and environment.NEXENT_SANDBOX_PROVIDER == "kubernetes"
+        )
+
+    async def _refresh_recovery_time(self):
+        status = await _agentos_client().recovery_status()
+        cutoff = status.restart_cutoff
+        if cutoff is not None and (self._recovery_time is None or cutoff > self._recovery_time):
+            self._recovery_time = cutoff
 
     async def recover(self) -> None:
+        if self.fixed_replicas:
+            self._recovery_time = None
+            return
+        if self._uses_scoped_recovery():
+            await self._refresh_recovery_time()
+            return
         recovery_time = _utcnow()
         await run_blocking(
             "automation-recover-runs",
             agent_automation_db.recover_orphaned_runs,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         await run_blocking(
             "automation-release-locks",
             agent_automation_db.release_all_task_locks,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         self._recovery_time = recovery_time
 
@@ -86,6 +112,8 @@ class AgentAutomationLeaseStore:
         limit: int,
         lease_seconds: float,
     ) -> list[ClaimedJob[Dict[str, Any]]]:
+        if self._uses_scoped_recovery():
+            await self._refresh_recovery_time()
         tasks = await run_blocking(
             "automation-claim-due",
             agent_automation_db.claim_due_tasks,
@@ -93,7 +121,7 @@ class AgentAutomationLeaseStore:
             limit,
             lease_seconds,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         runnable_tasks = []
         for task in tasks:
@@ -101,6 +129,18 @@ class AgentAutomationLeaseStore:
                 continue
             runnable_tasks.append(task)
         return [ClaimedJob(job_id=task["task_id"], payload=task) for task in runnable_tasks]
+
+    async def reconcile_pending_projection(self) -> None:
+        pending = await run_blocking(
+            "automation-pending-projections", agent_automation_db.list_pending_projections,
+            self._projection_cursor, 1, lane="control-io", owner="management",
+        )
+        self._projection_cursor = pending[-1]["run_id"] if pending else 0
+        for run in pending:
+            try:
+                await asyncio.wait_for(agent_automation_runner.recover_prepared_run(run), timeout=30)
+            except Exception as exc:
+                logger.warning("Deferred automation recovery run_id=%s error=%s", run["run_id"], type(exc).__name__)
 
     async def _skip_claimed_misfire(self, task: Dict[str, Any], owner_id: str) -> bool:
         """Advance a pre-restart recurring fire without invoking its executor."""
@@ -154,7 +194,7 @@ class AgentAutomationLeaseStore:
             owner_id,
             task_values,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         if not updated:
             logger.warning(
@@ -172,7 +212,7 @@ class AgentAutomationLeaseStore:
             owner_id,
             lease_seconds,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
 
     async def release(self, job_id: Hashable, owner_id: str) -> bool:
@@ -182,7 +222,7 @@ class AgentAutomationLeaseStore:
             int(job_id),
             owner_id,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
 
 
@@ -201,8 +241,10 @@ class AgentAutomationScheduler:
     """Application lifecycle wrapper around the reusable SDK scheduler."""
 
     def __init__(self) -> None:
+        self._store = AgentAutomationLeaseStore()
+        self._recovery_task: asyncio.Task | None = None
         self._scheduler = LeaseScheduler(
-            store=AgentAutomationLeaseStore(),
+            store=self._store,
             executor=execute_agent_automation,
             config=SchedulerConfig(
                 poll_interval_seconds=AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
@@ -220,13 +262,30 @@ class AgentAutomationScheduler:
     def is_running(self) -> bool:
         return self._scheduler.is_running
 
-    async def start(self) -> None:
-        if not AGENT_AUTOMATION_ENABLED:
+    async def start(self, *, fixed_replicas: bool = False) -> None:
+        if not self._scheduler.is_running:
+            self._store.fixed_replicas = fixed_replicas
+        if AGENT_AUTOMATION_ENABLED:
+            await self._scheduler.start()
+        else:
             logger.info("Agent automation scheduler disabled")
-            return
-        await self._scheduler.start()
+        # Manual runs and previously admitted work still need reconciliation.
+        if self._recovery_task is None:
+            self._recovery_task = asyncio.create_task(self._recover_projections(), name="automation-projection-recovery")
+
+    async def _recover_projections(self) -> None:
+        while True:
+            try:
+                await self._store.reconcile_pending_projection()
+            except Exception:
+                logger.exception("Unable to load pending automation projections")
+            await asyncio.sleep(AGENT_AUTOMATION_POLL_INTERVAL_SECONDS)
 
     async def stop(self) -> None:
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+            await asyncio.gather(self._recovery_task, return_exceptions=True)
+            self._recovery_task = None
         await self._scheduler.stop()
 
 

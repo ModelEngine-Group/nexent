@@ -48,7 +48,7 @@ def test_missing_tool_reports_domain_error():
 
 
 def test_external_import_prepares_policy_once_and_snapshot_import_does_not(monkeypatch):
-    config = {"top_k": 7, "search_method": "hybrid_search"}
+    config = {"top_k": 7, "hybrid_top_k": 2, "graph_top_k": 2, "search_method": "hybrid_search"}
     tool = SimpleNamespace(class_name="AidpSearchTool", params=config)
     uploaded = SimpleNamespace(agent_info={"1": SimpleNamespace(tools=[tool])})
     prepare_import_retrieval_params(uploaded)

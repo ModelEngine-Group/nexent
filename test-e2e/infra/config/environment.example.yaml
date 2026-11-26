@@ -3,10 +3,13 @@ base_url: http://localhost:3000
 locale: zh-CN
 timezone: Asia/Shanghai
 services:
+  # Business HTTP requests enter Gateway when the signed identity boundary is enabled.
   config:
-    url: http://localhost:5010
+    url: http://localhost:5013/api
+    readiness_url: http://localhost:5010/health/ready
   runtime:
-    url: http://localhost:5014
+    url: http://localhost:5013/api
+    readiness_url: http://localhost:5014/health/ready
   northbound:
     url: http://localhost:5013
   data_process:

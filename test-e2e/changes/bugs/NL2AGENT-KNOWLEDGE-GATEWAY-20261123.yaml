@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-KNOWLEDGE-GATEWAY-20261123
+  change_type: bugfix
+  bug_id: NL2AGENT-KNOWLEDGE-GATEWAY-20261123
+  title: Expose NL2Agent card operations through the session Gateway
+  description: Register existing management card routes and deploy the Gateway snapshot.
+  observed_behavior: The active card request returns Gateway 404 before reaching knowledge
+    recommendation.
+  expected_behavior: Existing POST card operations reach Management with session authentication;
+    undeclared methods remain denied.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: The recommendation D3 calls Management directly and D4 intercepts
+      transport, so neither proves Gateway publication.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-045
+    - GW-AUTH
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - GW-AUTH-D3-002
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Existing card routes resolve only as session POST operations to Management;
+      GET and WebSocket remain denied.
+    reason: Gateway registry UT reproduces all four missing routes before the fix.
+      Existing network D3 is strengthened to prove actual forwarding without duplicating
+      a Case.
+    test_selectors:
+    - test/backend/gateway/test_exposure.py
+  notes: 'Baseline: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md
+    11.11. F-045 recommendation behavior is unchanged; GW-AUTH owns exposure. GW-AUTH-D3-002
+    owns local Gateway/upstream listeners and joins them on cleanup. Prior NL2A D3/D4
+    still prove business/UI behavior, but cannot prove edge publication. No DB/model
+    writes or credential-policy widening.'

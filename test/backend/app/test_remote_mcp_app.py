@@ -48,9 +48,9 @@ minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 patch('contracts.constants.environment.ENABLE_UPLOAD_IMAGE', True).start()
 patch('management.services.mcp.containers.create_container_client_from_config').start()
@@ -62,7 +62,7 @@ from fastapi import FastAPI
 from http import HTTPStatus
 
 from management.api.mcp.remote_mcp import router
-from management.utils.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 from management.api.mcp import remote_mcp as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
@@ -133,6 +133,7 @@ class TestAddMcpService:
     @patch('management.api.mcp.remote_mcp.add_mcp_service')
     def test_add_success(self, mock_add, mock_auth):
         mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
         resp = client.post("/mcp/add", json={
             "name": "test-svc", "description": "desc",
             "source": "local", "server_url": "http://srv/mcp",
@@ -140,6 +141,7 @@ class TestAddMcpService:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
+        assert resp.json()["mcp_id"] == 42
 
     @patch('management.api.mcp.remote_mcp.get_current_user_info')
     @patch('management.api.mcp.remote_mcp.add_mcp_service')
@@ -228,6 +230,7 @@ class TestAddMcpService:
     def test_add_with_custom_headers(self, mock_add, mock_auth):
         """Test that custom_headers is passed to add_mcp_service (line 125)."""
         mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
         resp = client.post("/mcp/add", json={
             "name": "test-svc", "description": "desc",
             "source": "local", "server_url": "http://srv/mcp",
@@ -245,6 +248,7 @@ class TestAddMcpService:
     def test_add_with_empty_custom_headers(self, mock_add, mock_auth):
         """Test that empty custom_headers is passed correctly (line 125)."""
         mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
         resp = client.post("/mcp/add", json={
             "name": "test-svc", "description": "desc",
             "source": "local", "server_url": "http://srv/mcp",
@@ -260,6 +264,7 @@ class TestAddMcpService:
     def test_add_with_skip_health_check(self, mock_add, mock_auth):
         """skip_health_check=True is passed to add_mcp_service."""
         mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
         resp = client.post("/mcp/add", json={
             "name": "test-svc", "source": "community",
             "server_url": "http://localhost:8080/mcp",
@@ -275,6 +280,7 @@ class TestAddMcpService:
     def test_add_with_container_port(self, mock_add, mock_auth):
         """container_port is passed to add_mcp_service."""
         mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
         resp = client.post("/mcp/add", json={
             "name": "test-svc", "source": "community",
             "server_url": "http://localhost:8080/mcp",
@@ -298,7 +304,7 @@ class TestAddFromConfig:
         mock_auth.return_value = ("uid", "tid", "en")
         mock_add.return_value = {
             "service_name": "svc", "mcp_url": "http://localhost:8080/mcp",
-            "container_id": "cid", "container_name": "svc-uid", "host_port": 8080,
+            "container_id": "cid", "container_name": "svc-uid", "host_port": 8080, "mcp_id": 42,
         }
         resp = client.post("/mcp/add-from-config", json={
             "name": "svc", "source": "local", "port": 8080,
@@ -308,6 +314,7 @@ class TestAddFromConfig:
         data = resp.json()
         assert data["status"] == "success"
         assert data["data"]["container_id"] == "cid"
+        assert data["data"]["mcp_id"] == 42
 
     @patch('management.api.mcp.remote_mcp.get_current_user_info')
     @patch('management.api.mcp.remote_mcp.add_container_mcp_service')
@@ -585,6 +592,19 @@ class TestStopMcpContainer:
 
 class TestGetMcpList:
     """Test GET /mcp/list"""
+
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.list_visible_mcp_records')
+    def test_installation_status_only_uses_current_tenant_and_excludes_credentials(self, mock_records, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_records.return_value = ([
+            {"market_id": 3, "enabled": False, "authorization_token": "fixture-secret"},
+            {"market_id": None, "enabled": True},
+        ], [])
+        resp = client.get("/mcp/list?installation_status_only=true&tenant_id=other", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["remote_mcp_server_list"] == [{"market_id": 3, "enabled": False}]
+        mock_records.assert_called_once_with("tid", "uid")
 
     @patch('management.api.mcp.remote_mcp.get_current_user_info')
     @patch('management.api.mcp.remote_mcp.get_remote_mcp_server_list')
@@ -968,6 +988,7 @@ class TestMcpAuditEntries:
         """Successful add records name/source/server_url, never credentials."""
         import logging
         mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
 
         with caplog.at_level(logging.INFO, logger="audit.security"):
             resp = client.post("/mcp/add", headers=AUTH_HEADER, json={

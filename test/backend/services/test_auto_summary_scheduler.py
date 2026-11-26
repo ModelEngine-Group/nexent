@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 # MOCK external dependencies BEFORE importing modules under test
 # =============================================================================
 
-# Mock psycopg2 before management.db.client is imported
+# Mock psycopg2 before infrastructure.rdb.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -189,10 +189,10 @@ sys.modules['nexent.core.models.stt_model'] = stt_mod
 sys.modules['nexent.core.models.tts_model'] = tts_mod
 
 # Mock agent modules
-agent_model_mod = types.ModuleType('nexent.core.agents.agent_model')
+agent_model_mod = types.ModuleType('nexent.core.agents.contracts.config')
 agent_model_mod.ToolConfig = object
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
-sys.modules['nexent.core.agents.agent_model'] = agent_model_mod
+sys.modules['nexent.core.agents.contracts.config'] = agent_model_mod
 
 # Mock jinja2
 jinja2_mod = types.ModuleType('jinja2')
@@ -282,15 +282,10 @@ setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 import importlib
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
-backend_database_client_module = importlib.import_module('management.db.client')
-sys.modules['management.db.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('infrastructure.rdb.client')
+sys.modules['infrastructure.rdb.client'] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-
-# Mock MinioClient after loading the module
-minio_client_mock = MagicMock()
-with patch.object(backend_database_client_module, 'MinioClient', minio_client_mock):
-    pass
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # =============================================================================
 # Import modules under test
@@ -350,13 +345,11 @@ class TestParseLastSummaryTime:
         assert result is None
 
     def test_parse_iso_string_with_timezone(self):
-        """ISO string with timezone should be parsed correctly."""
+        """ISO string with timezone should have tzinfo stripped, not converted."""
         iso_str = "2025-04-30T10:30:00+08:00"
         result = _parse_last_summary_time(iso_str)
-        assert result is not None
-        assert result.year == 2025
-        assert result.month == 4
-        assert result.day == 30
+        assert result == datetime(2025, 4, 30, 10, 30, 0)
+        assert result.tzinfo is None
 
 
 class TestIsDueForSummary:

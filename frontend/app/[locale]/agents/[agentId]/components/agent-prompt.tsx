@@ -7,6 +7,7 @@ import { AgentFieldError } from "./agent-field-error";
 import { useTranslation } from "react-i18next";
 import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
 import {
+  ArrowLeft,
   GripVertical,
   ListOrdered,
   LockKeyhole,
@@ -33,6 +34,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Image from "next/image";
+import { isSamplingField } from "@/lib/modelSamplingParameters";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
@@ -367,7 +369,7 @@ function HighFidelityModelGrid({
 
 interface AgentPromptProps {
   highFidelity?: boolean;
-  onOptimizePrompt?: () => void;
+  onOptimizePrompt?: () => boolean;
 }
 
 export default function AgentPrompt({
@@ -395,6 +397,35 @@ export default function AgentPrompt({
   const defaultModelId = defaultLlmModelConfig?.id;
   const modelInitialization = useRef({ agentId, complete: false });
   const { configFocusRequest } = useNl2AgentFlow();
+  const [promptFeedback, setPromptFeedback] = useState({
+    agentId,
+    active: false,
+  });
+  const promptFilled =
+    promptFeedback.agentId === agentId && promptFeedback.active;
+  if (promptFeedback.agentId !== agentId) {
+    setPromptFeedback({ agentId, active: false });
+  }
+  const promptFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  useEffect(() => {
+    return () => {
+      if (promptFeedbackTimer.current)
+        clearTimeout(promptFeedbackTimer.current);
+    };
+  }, [agentId]);
+
+  const handleOptimizePrompt = () => {
+    if (!onOptimizePrompt?.()) return;
+    if (promptFeedbackTimer.current) clearTimeout(promptFeedbackTimer.current);
+    setPromptFeedback({ agentId, active: true });
+    promptFeedbackTimer.current = setTimeout(
+      () => setPromptFeedback({ agentId, active: false }),
+      4000
+    );
+  };
 
   const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(
     null
@@ -574,6 +605,11 @@ export default function AgentPrompt({
       }
     }
 
+    if (!hasOverride) {
+      delete base.temperature;
+      delete base.top_p;
+    }
+
     // Custom params are the exception: model-level customs render as plain
     // editable rows (merged display). Deletion persists as a null marker in
     // the override entry, so deleted rows do NOT reappear on reopen.
@@ -640,6 +676,7 @@ export default function AgentPrompt({
       // Reasoning is an agent-owned snapshot; do not compare with the model
       // level setting.
       if (
+        isSamplingField(key) ||
         key === "enable_thinking" ||
         key === "reasoning_effort" ||
         key === "reasoning_budget_tokens"
@@ -972,12 +1009,24 @@ export default function AgentPrompt({
               <Button
                 type="link"
                 autoInsertSpace={false}
-                className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
-                icon={<Sparkles size={14} />}
+                className={`!h-[22px] !p-0 !text-sm !leading-[22px] disabled:!text-[#dfdfdf] ${promptFilled ? "!text-[var(--color-success)]" : "!text-[var(--color-brand)]"}`}
+                icon={
+                  promptFilled ? (
+                    <ArrowLeft size={14} />
+                  ) : (
+                    <Sparkles size={14} />
+                  )
+                }
                 disabled={isReadOnly || !onOptimizePrompt}
-                onClick={onOptimizePrompt}
+                onClick={handleOptimizePrompt}
               >
-                {t("agent.highFidelity.optimizePrompt")}
+                <span role="status" aria-live="polite">
+                  {t(
+                    promptFilled
+                      ? "agent.highFidelity.optimizePromptFilled"
+                      : "agent.highFidelity.optimizePrompt"
+                  )}
+                </span>
               </Button>
             )}
           </div>

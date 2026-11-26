@@ -112,6 +112,14 @@ export function useConversationResume({
         }
         const streamingMessage = streaming.message;
         const parentId = parent.message.id;
+        const creatorMode =
+          conversation.agent_system_key === "nl2agent_main" ||
+          conversation.workbench_config?.mode === "agent_create"
+            ? "nl2agent"
+            : conversation.agent_system_key === "nl2skill_main" ||
+                conversation.workbench_config?.mode === "skill_create"
+              ? "nl2skill"
+              : undefined;
         // resumeRun creates a new assistant. Replace only the persisted running
         // branch so it remains a sibling of earlier retries, never their child.
         runtime.thread.import({
@@ -131,14 +139,47 @@ export function useConversationResume({
           sourceId: null,
           runConfig: {
             custom: {
+              ...(creatorMode
+                ? runtime.thread.composer.getState().runConfig.custom
+                : {}),
               threadId: String(numericConversationId),
-              ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-              ...(selectedAgent?.current_version_no
+              ...(creatorMode
+                ? {
+                    runtimeMode: creatorMode,
+                    creationTarget: conversation.target,
+                    ...(creatorMode === "nl2agent"
+                      ? { agentId: conversation.target?.id }
+                      : {}),
+                  }
+                : {}),
+              ...(!creatorMode && selectedAgent?.id
+                ? { agentId: selectedAgent.id }
+                : {}),
+              ...(!creatorMode && selectedAgent?.current_version_no
                 ? { agentVersionNo: selectedAgent.current_version_no }
                 : {}),
               onGenerationStopped: handleGenerationStopped,
+              loadPersistedReplay: async () => {
+                invalidateDetail?.(remoteId);
+                const persistedHistory = new RemoteConversationHistoryAdapter(
+                  () => remoteId,
+                  async () => ({ remoteId }),
+                  () => loadDetail(remoteId)
+                );
+                const saved = (await persistedHistory.load()).messages.find(
+                  (entry) => entry.message.id === streamingId
+                )?.message;
+                if (saved?.role === "assistant") {
+                  return {
+                    content: saved.content,
+                    metadata: saved.metadata,
+                    status: saved.status,
+                  };
+                }
+              },
               enablePlan: chatMode === "planning",
               resume: true,
+              resumeMessageId: conversation.streaming_message.message_id,
             },
           },
           stream: async function* (options) {

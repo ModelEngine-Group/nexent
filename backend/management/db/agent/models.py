@@ -87,6 +87,7 @@ class AgentInfo(TableBase):
         ),
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
+    enable_memory = Column(Boolean, default=True, server_default=text("true"), nullable=False)
     enable_protocol_repair_retry = Column(
         Boolean,
         default=False,

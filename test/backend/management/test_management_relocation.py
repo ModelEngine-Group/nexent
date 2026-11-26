@@ -2,27 +2,46 @@
 """Regression guards for canonical ownership and relocation-sensitive resources."""
 
 import ast
+import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
 BACKEND = ROOT / "backend"
+FLAT_SERVICE_MODULES = {
+    "nl2agent_configuration",
+    "nl2agent_knowledge_recommendations",
+    "nl2agent_prompt_service",
+    "nl2agent_resource_flow",
+    "nl2agent_retrieval_progress",
+    "nl2agent_semantic_retrieval",
+    "nl2agent_state_service",
+}
 
 
 def test_flat_service_exclusions_match_remaining_scope():
-    assert {p.name for p in (BACKEND / "services").rglob("*.py")} == {
-        "__init__.py", "nl2skill_service.py", "skill_repository_service.py",
-        "nl2agent_service.py", "northbound_service.py", "workspace_cleanup_service.py",
+    services_dir = BACKEND / "services"
+    assert {p.relative_to(services_dir).as_posix() for p in services_dir.rglob("*.py")} == {
+        "__init__.py",
+        *(f"{module}.py" for module in FLAT_SERVICE_MODULES),
     }
     assert not list((BACKEND / "utils").glob("*.py"))
-    for service in ("gateway", "runtime"):
-        assert (BACKEND / service / "api/__init__.py").is_file()
+    assert (BACKEND / "runtime/api/application.py").is_file()
+    assert (BACKEND / "gateway/application.py").is_file()
+    assert not (BACKEND / "gateway/api").exists()
+    assert (BACKEND / "management/api/northbound.py").is_file()
+    assert (BACKEND / "runtime/api/__init__.py").is_file()
 
 
 def test_production_imports_use_canonical_owners():
     unexpected = []
-    for path in BACKEND.rglob("*.py"):
-        if ".venv" in path.parts or "__pycache__" in path.parts:
+    allowed_imports = {f"services.{module}" for module in FLAT_SERVICE_MODULES}
+    paths = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "backend"], cwd=ROOT, text=True,
+    ).splitlines()
+    for relative in paths:
+        path = ROOT / relative
+        if path.suffix != ".py" or not path.is_file():
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
             if isinstance(node, ast.ImportFrom):
@@ -33,14 +52,7 @@ def test_production_imports_use_canonical_owners():
                 continue
             for name in names:
                 name = name.removeprefix("backend.")
-                if name.startswith("utils.") or (
-                    name.startswith("services.")
-                    and name not in {
-                        "services.nl2skill_service", "services.skill_repository_service",
-                        "services.nl2agent_service", "services.northbound_service",
-                        "services.workspace_cleanup_service",
-                    }
-                ):
+                if name.startswith(("utils.", "services.")) and name not in allowed_imports:
                     unexpected.append((path.relative_to(ROOT).as_posix(), name))
     assert unexpected == []
 

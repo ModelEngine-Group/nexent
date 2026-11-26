@@ -166,6 +166,7 @@ class ErrorMessage:
         ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND: "Agent not found.",
         ErrorCode.AGENT_EVALUATION_JUDGE_MODEL_REQUIRED: "Judge model ID is required.",
         ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE: "Only the creator or a tenant administrator can delete this evaluation run.",
+        ErrorCode.AGENT_EVALUATION_EVALUATOR_REQUIRED: "At least one published evaluator is required.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED: "Failed to generate test queries.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT: "AI returned invalid format for test queries.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY: "AI generated no valid test queries.",

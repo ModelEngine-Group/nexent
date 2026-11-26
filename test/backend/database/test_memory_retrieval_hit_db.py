@@ -5,6 +5,8 @@
 import sys
 import types
 from datetime import datetime
+from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,18 +19,20 @@ sys.path.insert(
 )
 
 
-# Stub management.db.client
-client_mod = types.ModuleType("management.db.client")
+# Stub infrastructure.rdb.client
+client_mod = types.ModuleType("infrastructure.rdb.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = lambda data, _model: dict(data)
-sys.modules["management.db.client"] = client_mod
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 # Stub SQLAlchemy
@@ -57,6 +61,15 @@ class _Column:
 
     def isnot(self, other):
         return ("isnot", self.name, other)
+
+    def is_(self, other):
+        return ("is", self.name, other)
+
+    def __ne__(self, other):
+        return ("ne", self.name, other)
+
+    def distinct(self):
+        return self
 
     def desc(self):
         return self
@@ -326,15 +339,18 @@ def test_list_hits_for_user_with_since(monkeypatch, mock_session_ctx):
     query.limit.assert_called_once_with(20)
 
 
-def test_list_hits_for_user_rolls_back_on_error(monkeypatch, mock_session_ctx):
+def test_list_hits_for_user_propagates_read_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    session.query.side_effect = RuntimeError("database unavailable")
+    failure = RuntimeError("database unavailable")
+    session.query.side_effect = failure
     monkeypatch.setattr(
         "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
-    assert memory_retrieval_hit_db.list_hits_for_user("t1", "u1") == []
-    session.rollback.assert_called_once()
+    with pytest.raises(RuntimeError) as exc_info:
+        memory_retrieval_hit_db.list_hits_for_user("t1", "u1")
+    assert exc_info.value is failure
+    assert ctx.__exit__.call_args.args[1] is failure
 
 
 def test_aggregate_memory_stats_applies_scope_and_collects_dimensions(
@@ -401,38 +417,64 @@ def test_delete_hits_before_rolls_back_on_error(monkeypatch, mock_session_ctx):
     session.rollback.assert_called_once()
 
 
-def test_ac078_aggregate_dreaming_stats_filters_and_accumulates(monkeypatch):
+@pytest.mark.parametrize("agent_id", [None, "a1"])
+def test_ac078_aggregate_dreaming_stats_filters_and_accumulates(
+    monkeypatch, mock_session_ctx, agent_id,
+):
+    session, ctx = mock_session_ctx
+    query = MagicMock()
+    query.filter.return_value = query
+    query.group_by.return_value = query
     newer = datetime(2026, 1, 3)
-    older = datetime(2026, 1, 2)
-    monkeypatch.setattr(
-        memory_retrieval_hit_db,
-        "list_hits_for_user",
-        MagicMock(return_value=[
-            {"agent_id": "other", "memory_id": 1},
-            {"agent_id": "a1", "memory_id": None},
-            {
-                "agent_id": "a1", "memory_id": 64, "grounded": True,
-                "day": "2026-01-02", "query_hash": "q1",
-                "retrieval_score": 0.4, "occurred_at": older,
-            },
-            {
-                "agent_id": "a1", "memory_id": "64", "grounded": False,
-                "day": "2026-01-03", "query_hash": "q2",
-                "retrieval_score": 0.6, "occurred_at": newer,
-            },
-        ]),
-    )
+    query.all.return_value = [SimpleNamespace(
+        memory_id=64, hit_count=10003, grounded_count=2,
+        days=["2026-01-02", "2026-01-03"], query_hashes=["q1", "q2"],
+        total_retrieval_score=Decimal("1.0"), last_recalled_at=newer,
+    ), SimpleNamespace(
+        memory_id=65, hit_count=1, grounded_count=0, days=None,
+        query_hashes=None, total_retrieval_score=None, last_recalled_at=newer,
+    )]
+    session.query.return_value = query
+    monkeypatch.setattr(memory_retrieval_hit_db, "get_db_session", lambda: ctx)
+    raw_hits = MagicMock(side_effect=AssertionError("Raw recall events must not be truncated"))
+    monkeypatch.setattr(memory_retrieval_hit_db, "list_hits_for_user", raw_hits)
+    since = datetime(2026, 1, 1)
 
     result = memory_retrieval_hit_db.aggregate_dreaming_stats(
-        "t1", "u1", "a1", since=datetime(2026, 1, 1)
+        "t1", "u1", agent_id, since=since,
     )
 
     assert result == [{
-        "memory_id": 64,
-        "hit_count": 2,
-        "grounded_count": 1,
-        "days": {"2026-01-02", "2026-01-03"},
-        "query_hashes": {"q1", "q2"},
-        "total_retrieval_score": 1.0,
-        "last_recalled_at": newer,
+        "memory_id": 64, "hit_count": 10003, "grounded_count": 2,
+        "days": {"2026-01-02", "2026-01-03"}, "query_hashes": {"q1", "q2"},
+        "total_retrieval_score": 1.0, "last_recalled_at": newer,
+    }, {
+        "memory_id": 65, "hit_count": 1, "grounded_count": 0,
+        "days": set(), "query_hashes": set(),
+        "total_retrieval_score": 0.0, "last_recalled_at": newer,
     }]
+    filters = [condition for call in query.filter.call_args_list for condition in call.args]
+    assert ("eq", "tenant_id", "t1") in filters
+    assert ("eq", "user_id", "u1") in filters
+    assert ("ge", "occurred_at", since) in filters
+    assert ("isnot", "memory_id", None) in filters
+    assert (("eq", "agent_id", "a1") in filters) is (agent_id is not None)
+    raw_hits.assert_not_called()
+    query.limit.assert_not_called()
+
+
+def test_aggregate_dreaming_stats_empty_and_read_failure(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    query = MagicMock()
+    query.filter.return_value = query
+    query.group_by.return_value = query
+    query.all.return_value = []
+    session.query.return_value = query
+    monkeypatch.setattr(memory_retrieval_hit_db, "get_db_session", lambda: ctx)
+    assert memory_retrieval_hit_db.aggregate_dreaming_stats("t", "u", None, since=datetime(2026, 1, 1)) == []
+    failure = RuntimeError("database unavailable")
+    query.all.side_effect = failure
+    with pytest.raises(RuntimeError) as error:
+        memory_retrieval_hit_db.aggregate_dreaming_stats("t", "u", "a", since=datetime(2026, 1, 1))
+    assert error.value is failure
+    assert ctx.__exit__.call_args.args[1] is failure

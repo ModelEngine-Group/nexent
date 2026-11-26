@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MCP-TOOL-MONITORING-20261118
+  change_type: requirement
+  requirement_id: OPS-MCP-TOOL-MONITORING-20261118
+  title: MCP tool call monitoring on the shared operations data plane
+  description: Capture MCP tool call attempts with server identity and a normalized deployment type, aggregate and publish them through the shared monitoring pipeline, and expose tenant-scoped statistics.
+  affected_features:
+    existing: [OPS-BOOTSTRAP, OPS-MODEL-MONITORING]
+    added: [OPS-MCP-TOOL-MONITORING]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-MODEL-MONITORING-D3-001]
+    added: [OPS-MCP-TOOL-MONITORING-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/ops/test_monitoring.py
+    - test/backend/ops/test_monitoring_api.py
+    - test/sdk/core/model_service/test_mcp_fact_capture.py
+    - test/sdk/core/agents/test_managed_mcp.py
+    behaviors:
+    - Verify the observation lifecycle, caller-observed outcomes (including timeout and cancellation) and capture failure isolation.
+    - Verify attribution binding, debug/validation suppression and the normalized server type mapping.
+    - Verify the mcp_tool reducer, revision merge, replay idempotence, template field merge and the new monitoring API endpoints.
+    reason: Existing monitoring tests only cover the model kind; MCP tool calls have no capture, aggregation or query coverage.
+  notes: D3 must prove an actual agent run with a stub MCP server producing facts in real Elasticsearch with published daily aggregates and API queries. No new SQL migration or deployment mode, so no D5 is added; OPS-MODEL-MONITORING-D5-001 remains the Ops deployment proof.

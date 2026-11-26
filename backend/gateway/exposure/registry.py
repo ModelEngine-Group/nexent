@@ -1,0 +1,161 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Immutable public exposure snapshot; downstream declarations never open routes."""
+
+from dataclasses import dataclass, field
+import difflib
+from functools import lru_cache
+import hashlib
+import json
+import logging
+from pathlib import Path
+import re
+
+from starlette.convertors import CONVERTOR_TYPES
+from starlette.routing import compile_path
+
+from gateway.identity.policy import is_public_request
+
+logger = logging.getLogger(__name__)
+
+
+def valid_path(path, raw_path=None):
+    if not isinstance(path, str) or not path.startswith("/"):
+        return False
+    if any(c in path for c in ("\\", "\x00", "?", "#")) or "//" in path:
+        return False
+    if any(part.lower() in {".", "..", "internal"} for part in path.split("/")):
+        return False
+    raw = raw_path.lower() if raw_path is not None else path.encode("utf-8").lower()
+    return not any(value in raw for value in (b"%2f", b"%5c", b"%25", b"%00"))
+
+
+@dataclass(frozen=True)
+class Exposure:
+    route_id: str
+    method: str
+    path: str
+    transport: str
+    target: str
+    credential_kinds: tuple[str, ...]
+    pattern: object = field(repr=False, compare=False)
+
+
+class ExposureRegistry:
+    def __init__(self, document):
+        if (not isinstance(document, dict) or type(document.get("version")) is not int or document.get("version") != 1
+                or not isinstance(document.get("revision"), str)
+                or not document["revision"].strip()
+                or not isinstance(document.get("routes"), list) or not document["routes"]):
+            raise ValueError("Invalid Gateway exposure document")
+        routes, seen, ids = [], set(), set()
+        for row in document["routes"]:
+            if not isinstance(row, dict):
+                raise ValueError("Invalid Gateway exposure entry")
+            required = {"route_id", "method", "path", "transport", "target", "credential_kinds"}
+            if not required <= row.keys() or row.keys() - required - {"source", "capability_id"}:
+                raise ValueError("Invalid Gateway exposure fields")
+            if any(not isinstance(row[key], str) for key in required - {"credential_kinds"}):
+                raise ValueError("Invalid Gateway exposure field type")
+            method, path, transport = row["method"], row["path"], row["transport"]
+            if (method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+                    or transport not in {"http", "websocket"}
+                    or transport == "websocket" and method != "GET"
+                    or row["target"] not in {"management", "runtime", "ops"}
+                    or not valid_path(path) or "*" in path):
+                raise ValueError("Invalid Gateway exposure route")
+            if not isinstance(row["route_id"], str) or not row["route_id"] or row["route_id"] in ids:
+                raise ValueError("Duplicate or invalid Gateway route ID")
+            kinds = row["credential_kinds"]
+            if (not isinstance(kinds, list) or not kinds or any(not isinstance(k, str) or k not in {"anonymous", "session", "api_key"} for k in kinds)
+                    or len(set(kinds)) != len(kinds)):
+                raise ValueError("Invalid Gateway credential policy")
+            expected = "api_key" if path.startswith(("/nb/", "/api/nb/")) else "session"
+            if "anonymous" in kinds and not is_public_request(method, path):
+                raise ValueError("Anonymous exposure requires an explicit public-entry policy")
+            if any(kind not in {"anonymous", expected} for kind in kinds) and not is_public_request(method, path):
+                raise ValueError("Exposure credential policy conflicts with the service identity protocol")
+            # Reject equivalent templates even if parameter names differ.
+            shape = re.sub(r"\{[^}:]+", "{parameter", path.rstrip("/"))
+            key = method, shape, transport
+            if key in seen:
+                raise ValueError("Ambiguous Gateway exposure route")
+            pattern, _, converters = compile_path(path.rstrip("/") or "/")
+            if any(converter not in CONVERTOR_TYPES.values() for converter in converters.values()):
+                raise ValueError("Unsupported path converter")
+            if ":path}" in path and len(path.split("{", 1)[0].strip("/").split("/")) < 2:
+                raise ValueError("Unbounded Gateway exposure template")
+            seen.add(key)
+            ids.add(row["route_id"])
+            routes.append(Exposure(row["route_id"], method, path, transport, row["target"], tuple(kinds), pattern))
+        # Literal routes take precedence over parameter routes.
+        self.routes = tuple(sorted(routes, key=lambda r: (r.path.count("{"), ":path}" in r.path,
+                                                         -r.path.count(":int}"), -len(r.path))))
+        self.revision = document["revision"]
+        self.digest = hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def match(self, method, path, *, transport="http", raw_path=None):
+        if not valid_path(path, raw_path):
+            return None
+        path = path.rstrip("/") or "/"
+        return next((r for r in self.routes if r.method == method and r.transport == transport
+                     and r.pattern.fullmatch(path)), None)
+
+
+@lru_cache(maxsize=8)
+def default_registry(excluded=None):
+    """Load the committed snapshot with the emergency exclusion applied.
+
+    ``excluded`` defaults to the deployment environment (the deployment
+    truth); callers assembling an app from injected settings pass their own
+    list so the registry matches those settings instead of the process env.
+    """
+    document = json.loads(Path(__file__).with_name("registry.json").read_text(encoding="utf-8"))
+    if excluded is None:
+        excluded = _excluded_capabilities()
+    if excluded:
+        excluded = set(excluded)
+        # Known identifiers include both capability ids and raw paths: gate
+        # rows may be excluded by either, so a successful path exclusion must
+        # not be reported as an unknown entry.
+        known = set()
+        for row in document["routes"]:
+            known.add(row["path"])
+            if row.get("capability_id"):
+                known.add(row["capability_id"])
+        kept, removed = [], []
+        for row in document["routes"]:
+            # match by capability_id, or raw path for non-gate rows
+            if row.get("capability_id") in excluded or row["path"] in excluded:
+                removed.append(row["path"])
+            else:
+                kept.append(row)
+        if removed:
+            document = {**document, "routes": kept}
+            logger.warning(
+                "Northbound emergency exclusion removed %d exposure row(s): %s",
+                len(removed),
+                ", ".join(sorted(set(removed))),
+            )
+        # warn on entries that matched nothing, with a spelling suggestion
+        for unknown in excluded - known:
+            suggestions = difflib.get_close_matches(unknown, sorted(known), n=2)
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+            logger.warning(
+                "GATEWAY_NB_EXCLUDED_CAPABILITIES entry %r matched nothing.%s",
+                unknown,
+                hint,
+            )
+    return ExposureRegistry(document)
+
+
+def _excluded_capabilities():
+    """The emergency-exclusion ids/paths, read once via the settings layer.
+
+    Deployment-level kill switch: removing a capability takes one env line
+    and a gateway restart — no image rebuild, no service restart (declared
+    and exposed separation: the snapshot stays the code truth, the env is
+    the deployment truth).
+    """
+    from gateway.configuration import load_settings
+
+    return load_settings().nb_excluded_capabilities

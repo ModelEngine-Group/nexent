@@ -1,12 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for sub-agent wrapper delegation and observer boundaries."""
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper, _default_task_extractor
+from nexent.core.agents.resources.subagents import SubAgentToolWrapper, _default_task_extractor
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 
 
@@ -56,6 +57,26 @@ def test_wrapper_is_marked_for_runtime_host_execution(observer: Mock) -> None:
     wrapper = SubAgentToolWrapper(InnerAgent(), observer)
 
     assert wrapper._nexent_execute_on_host is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_async_remote_invocation_balances_observation_and_records_only_success(observer, failed):
+    wrapper = SubAgentToolWrapper(InnerAgent(), observer, agent_id="remote", agent_name="Remote agent")
+    success = Mock()
+    wrapper.set_success_callback(success)
+    invoke = AsyncMock(side_effect=RuntimeError("remote failed") if failed else None, return_value="remote answer")
+    if failed:
+        with pytest.raises(RuntimeError, match="remote failed"):
+            await wrapper.invoke_async(invoke, task="Search")
+        success.assert_not_called()
+    else:
+        assert await wrapper.invoke_async(invoke, task="Search") == "remote answer"
+        success.assert_called_once_with("researcher")
+    invoke.assert_awaited_once_with(task="Search")
+    start = observer.add_subagent_start.call_args.kwargs
+    end = observer.add_subagent_end.call_args.kwargs
+    assert start["task"] == "Search" and start["invocation_id"] == end["invocation_id"]
 
 
 def test_setattr_forwards_tool_contract_attribute_to_inner_agent(observer: Mock) -> None:

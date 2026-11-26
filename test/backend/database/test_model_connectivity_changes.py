@@ -61,18 +61,26 @@ def test_cs01_metadata_and_context_preserve_status(database, openai_profile):
     assert not changed(db, openai_profile, ResolvedModelProfile.model_validate(data))
 
 
-@pytest.mark.parametrize("parameter,value", [("temperature", 0.3), ("top_p", 0.8),
-    ("enable_thinking", True), ("max_output_tokens", 1024)])
-def test_cs02_sent_parameters_reset(database, openai_profile, parameter, value):
+@pytest.mark.parametrize("parameter,value,reset", [("temperature", 0.3, True), ("top_p", 0.8, True),
+    ("enable_thinking", True, True), ("max_output_tokens", 1024, False),
+    ("max_tokens", 1024, False), ("max_completion_tokens", 1024, False)])
+def test_cs02_sent_parameters_reset(database, openai_profile, parameter, value, reset):
     db, _, _ = database
     data = openai_profile.model_dump()
+    if not reset:
+        # Historical profiles have one output-length binding; avoid duplicate /max_tokens rules.
+        limits = {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+        data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] not in limits]
+        data["parameter_values"] = {k: v for k, v in data["parameter_values"].items() if k not in limits}
     data["parameter_values"][parameter] = value
     if not any(r["key"] == parameter for r in data["parameter_rules"]):
         data["parameter_rules"].append({"key": parameter, "schema": {}, "visible": True,
             "editable": True, "required": False, "allowed_scopes": ["outlet"], "ui_group": "common",
             "owner": "provider", "source": {}, "api_binding": {"path": "/" + parameter,
             "transform_ref": "identity_v1", "transform_version": 1}})
-    assert changed(db, openai_profile, ResolvedModelProfile.model_validate(data))
+    proposed = ResolvedModelProfile.model_validate(data)
+    assert proposed.parameter_values[parameter] == value
+    assert changed(db, openai_profile, proposed) is reset
 
 
 def test_cs01_unsupported_sampling_change_is_not_a_wire_change(database, openai_profile):
@@ -85,12 +93,18 @@ def test_cs01_unsupported_sampling_change_is_not_a_wire_change(database, openai_
     assert not changed(db, current, ResolvedModelProfile.model_validate(data))
 
 
-@pytest.mark.parametrize("value,reset", [(0.7, False), (0.4, True)])
-def test_cs02_atomic_update_preserves_or_resets_only_status(database, openai_profile, value, reset):
+@pytest.mark.parametrize("field,original,value,reset", [
+    ("temperature", 0.7, 0.7, False),
+    ("temperature", 0.7, 0.4, True),
+    ("top_p", 0, None, True),
+])
+def test_cs02_atomic_update_preserves_or_resets_only_status(database, openai_profile, field, original, value, reset):
+    from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+
     db, _, _ = database
-    data = openai_profile.model_dump()
+    data = ensure_outlet_sampling_rules(openai_profile).model_dump()
     data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 12
-    data["parameter_values"]["temperature"] = 0.7
+    data["parameter_values"][field] = original
     current = ResolvedModelProfile.model_validate(data)
     stored = encode_resolved_model_profile(current, registered_references=model_service_references())
     stored.update(api_key="existing", http_headers={"x-gateway": "token"}, connect_status="available")
@@ -99,7 +113,10 @@ def test_cs02_atomic_update_preserves_or_resets_only_status(database, openai_pro
     read.mappings.return_value.first.return_value = stored
     write.scalar_one_or_none.return_value = 2
     session.execute.side_effect = [read, write]
-    data["parameter_values"]["temperature"] = value
+    if value is None:
+        data["parameter_values"].pop(field)
+    else:
+        data["parameter_values"][field] = value
     proposed = ResolvedModelProfile.model_validate(data)
     db.update_resolved_model_record(proposed, 1, "actor", "tenant",
         registered_references=model_service_references(), http_headers={"X-GATEWAY": "token"},

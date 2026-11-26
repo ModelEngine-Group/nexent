@@ -1,8 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+from sqlalchemy.dialects import postgresql
 
 from management.db.automation import repository as agent_automation_db
 from management.db.models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
@@ -82,6 +86,17 @@ def _install_recording_session(monkeypatch, result):
     monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
     monkeypatch.setattr(agent_automation_db, "as_dict", lambda value: value)
     return session
+
+
+def test_background_runtime_lookup_keeps_conversation_tenant_and_user_scope(monkeypatch):
+    expected = {"run_id": 5, "runtime_run_id": "a" * 32}
+    session = _install_recording_session(monkeypatch, _RecordingResult(payload=expected))
+    assert agent_automation_db.get_run_by_runtime_id("a" * 32, "tenant", "actor", conversation_id=42) == expected
+    query = session.calls[0][0]
+    assert query.compile().params == {
+        "runtime_run_id_1": "a" * 32, "tenant_id_1": "tenant", "user_id_1": "actor",
+        "conversation_id_1": 42, "delete_flag_1": "N",
+    }
 
 
 def test_list_tasks_filters_by_owner_status_and_literal_title_search(monkeypatch):
@@ -219,33 +234,35 @@ def test_get_active_run_task_ids_filters_owner_and_active_statuses(monkeypatch):
     assert "delete_flag" in statement
 
 
-def test_renew_rejects_expired_or_reassigned_lease(monkeypatch):
-    class ScalarResult:
-        def scalar_one_or_none(self):
-            return 1
+@pytest.mark.parametrize("matched", [True, False])
+@pytest.mark.parametrize("operation", ["renew", "missed_fire"])
+def test_lease_writes_check_database_clock_after_lock(monkeypatch, operation, matched):
+    payload = {"task_id": 1, "lock_owner": None}
+    row = (1 if operation == "renew" else payload) if matched else None
+    session = _install_recording_session(monkeypatch, _RecordingResult(payload=row))
 
-    class ScalarSession(_FakeSession):
-        def execute(self, statement, params=None):
-            self.statement = str(statement)
-            self.params = params
-            return ScalarResult()
+    if operation == "renew":
+        assert agent_automation_db.renew_task_lock(1, "scheduler-a", 120) is matched
+    else:
+        result = agent_automation_db.update_task_if_lock_owner(
+            1, "tenant", "user", "scheduler-a", {"lock_owner": None},
+        )
+        assert result == (payload if matched else None)
 
-    fake_session = ScalarSession()
-
-    @contextmanager
-    def fake_get_db_session():
-        yield fake_session
-
-    monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
-
-    assert agent_automation_db.renew_task_lock(1, "scheduler-a", 120) is True
-    assert "lock_owner = :lock_owner" in fake_session.statement
-    assert "lock_until > now()" in fake_session.statement
-    assert fake_session.params == {
-        "task_id": 1,
-        "lock_owner": "scheduler-a",
-        "lease_seconds": 120,
-    }
+    (statement, _), = session.calls
+    compiled = statement.compile(dialect=postgresql.dialect())
+    locked_scan, write = str(compiled).split("UPDATE ", 1)
+    assert "AS MATERIALIZED" in locked_scan and "FOR UPDATE" in locked_scan
+    assert "clock_timestamp()" not in locked_scan
+    assert "locked_task.lock_until > clock_timestamp()" in write
+    assert compiled.params["task_id_1"] == 1 and compiled.params["lock_owner_1"] == "scheduler-a"
+    assert compiled.params["delete_flag_1"] == "N"
+    if operation == "renew":
+        assert compiled.params["status_1"] == "ACTIVE"
+        assert "lock_until=(clock_timestamp() +" in write
+        assert timedelta(seconds=120) in compiled.params.values()
+    else:
+        assert compiled.params["tenant_id_1"] == "tenant" and compiled.params["user_id_1"] == "user"
 
 
 def test_conversation_unique_active_index_exists_in_orm_and_sql():
@@ -423,9 +440,9 @@ def test_run_crud_helpers_cover_lifecycle_and_owner_filters(monkeypatch):
     assert agent_automation_db.get_run(3, "tenant", "user") == payload
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") == payload
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["CANCELED"]) == payload
-    assert agent_automation_db.cancel_runs_by_conversation(9, "user", "deleted") == 1
+    assert agent_automation_db.cancel_runs_by_conversation(9, "user", "tenant", "deleted") == 1
     assert agent_automation_db.list_runs(1, "tenant", "user", limit=1) == [payload]
-    assert agent_automation_db.has_active_run_for_conversation(9) is True
+    assert agent_automation_db.has_active_run_for_conversation(9, "user", "tenant") is True
 
 
 def test_list_runs_paginated_counts_and_applies_offset(monkeypatch):
@@ -491,6 +508,17 @@ def test_lease_recovery_helpers_cover_empty_and_success_paths(monkeypatch):
     assert "QUEUED" not in recovery_sql
 
 
+@pytest.mark.parametrize("method", ["recover_orphaned_runs", "release_all_task_locks"])
+def test_automation_recovery_uses_existing_transaction(monkeypatch, method):
+    opened_session = _install_recording_session(monkeypatch, _RecordingResult(rowcount=4))
+    batch_session = _RecordingSession(_RecordingResult(rowcount=1))
+
+    assert getattr(agent_automation_db, method)(db_session=batch_session) == 1
+
+    assert not opened_session.calls
+    assert len(batch_session.calls) == 1
+
+
 def test_optional_database_rows_return_empty_values(monkeypatch):
     result = _RecordingResult(payload=None, rows=[], rowcount=0)
     _install_recording_session(monkeypatch, result)
@@ -503,5 +531,5 @@ def test_optional_database_rows_return_empty_values(monkeypatch):
     assert agent_automation_db.get_run(3, "tenant", "user") is None
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") is None
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["FAILED"]) is None
-    assert agent_automation_db.has_active_run_for_conversation(9) is False
+    assert agent_automation_db.has_active_run_for_conversation(9, "user", "tenant") is False
     assert agent_automation_db.renew_task_lock(1, "scheduler-a", 30) is False

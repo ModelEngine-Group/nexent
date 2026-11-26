@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Build bounded, evidence-traceable Dreaming long-term memory versions."""
 
 from __future__ import annotations
@@ -119,8 +121,12 @@ def build_user_memory_summary(
     run_id: Optional[int] = None,
     agent_id: Optional[str] = None,
     backoff_base_seconds: float = 1.0,
+    length_tolerance_percent: int = 0,
 ) -> DreamingVersionBuildResult:
     """Build RAW and bounded published content without mutating parent data."""
+    if not 0 <= length_tolerance_percent <= 100:
+        raise ValueError("length_tolerance_percent must be between 0 and 100")
+    accepted_max_chars = max_chars + max_chars * length_tolerance_percent // 100
     if max_chars <= 0:
         raise ValueError("max_chars must be positive")
     if max_attempts < 0:
@@ -181,7 +187,7 @@ def build_user_memory_summary(
             feedback = _validate_summary(
                 output,
                 required_literals=required_literals,
-                max_chars=max_chars,
+                max_chars=accepted_max_chars,
             )
             if not feedback:
                 summarization_audit.append(

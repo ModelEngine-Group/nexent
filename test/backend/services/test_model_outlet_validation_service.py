@@ -90,7 +90,24 @@ def probe(monkeypatch, outlet_database):
     monkeypatch.setattr(model_service.ModelService, "astream", stream)
     db, _ = outlet_database
     db.update_model_outlet_connectivity = Mock()
-    return profile, loader, invoke, db.update_model_outlet_connectivity
+    from contracts.agentos import ModelAdministrationOperation
+    from gateway.identity.context import identity_context
+    from management.clients.agentos import AgentOSClient
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    from runtime.model.profile_probe import probe_model_profile
+
+    async def command(_client, operation, payload, user_id, tenant_id):
+        assert operation is ModelAdministrationOperation.PROFILE_PROBE
+        assert (user_id, tenant_id) == ("probe-owner", "tenant")
+        captured = ResolvedModelProfile.model_validate(payload.profile)
+        return await probe_model_profile(captured, payload.api_key, http_headers=payload.http_headers)
+
+    monkeypatch.setattr(AgentOSClient, "model_command", command)
+    token = identity_context.set({"user_id": "probe-owner", "tenant_id": "tenant"})
+    try:
+        yield profile, loader, invoke, db.update_model_outlet_connectivity
+    finally:
+        identity_context.reset(token)
 
 
 @pytest.mark.asyncio
@@ -100,7 +117,7 @@ async def test_saved_probe_uses_captured_parameters_and_revision(probe):
     assert result["ok"] is True and result["check_scope"] == "connection_only"
     loader.assert_called_once_with(42, "tenant")
     call, captured = invoke.call_args.args
-    assert captured is profile and captured.parameter_values == {"enable_thinking": False}
+    assert captured == profile and captured.parameter_values == {"enable_thinking": False}
     assert call.tools == [] and call.stream is True and call.purpose == "connection_validation"
     assert call.messages[0].semantic_role == "user"
     assert call.messages[0].content_parts == [{"type": "text", "text": "Hello"}]

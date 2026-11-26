@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from html import escape
 from typing import Any
 
@@ -16,6 +17,7 @@ from .formatting import (
     _format_tools_description,
     _format_worker_agents_description,
 )
+from .history_facts import turn_execution_text, turn_user_text
 from .models import ContextItem, ContextItemType
 
 
@@ -85,34 +87,41 @@ def _summary_dict_to_markdown(data: dict, labels: dict | None = None) -> str:
 
 
 def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
-    return [
-        _text_message("user", str(item.content["user_message"])),
-        _text_message("assistant", str(item.content["assistant_final_answer"])),
-    ]
+    messages = [_text_message("user", turn_user_text(item.content))]
+    execution = turn_execution_text(item.content)
+    if execution:
+        messages.append(_text_message("user", execution))
+    messages.append(_text_message("assistant", str(item.content["assistant_final_answer"])))
+    return messages
 
 
-def _render_legacy_tool_call(call: Any) -> str:
-    """Keep ordinary calls as evidence; only interpreter source is code."""
-    if isinstance(call, dict) and call.get("name") == "python_interpreter":
-        source = call.get("arguments")
-        if isinstance(source, dict) and set(source) == {"code"}:
-            source = source["code"]
-        if isinstance(source, str):
-            return f"<code>\n{source}\n</code>"
-    record = escape(json.dumps(call, ensure_ascii=False, default=str))
-    return f"<TOOL_RECORD>{record}</TOOL_RECORD>"
+def _render_tool_arguments(arguments: Any) -> str:
+    """Preserve interpreter source and ordinary arguments as read-only data."""
+    value = arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False, default=str)
+    return escape(value)
 
 
-def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
+def _render_current_action(item: ContextItem, *, result_role: str = "assistant") -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
-    from .execution_history import result_text
-
     c = item.content
-    messages = []
-    original = c.get("assistant_output")
-    if original:
-        messages.append(_text_message("assistant", original))
+    labels = load_prompt(item.metadata.get("language", "en"), "agent/context_sections")["history"]
+    parts = [
+        '<completed_action_history read_only="true">',
+        labels["completed_action_notice"],
+        labels["completed_action_format_notice"],
+        "<completed_action>",
+    ]
+    if c.get("step_number") is not None:
+        parts.append(f"index: {escape(str(c['step_number']))}")
+    calls = c.get("tool_calls") or []
+    calls = calls if isinstance(calls, list) else [calls]
+    for call in calls:
+        if isinstance(call, dict) and "name" in call:
+            parts.append(f"tool: {escape(str(call['name']))}")
+            parts.append("input:\n" + _render_tool_arguments(call.get("arguments", {})))
+        else:
+            parts.append("tool_record: " + _render_tool_arguments(call))
     fields = c.get("execution_fields")
     if fields is None:
         # Compatibility for externally supplied ContextItems, without duplicating result text.
@@ -120,34 +129,86 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
         if c.get("observations") is not None:
             fields["OUTPUT"] = str(c["observations"])
         result = c.get("result")
-        if result is not None and str(result) != str(c.get("observations", "")):
+        if result is not None and (c.get("observations") is None or str(result) != str(c["observations"])):
             fields["RETURN_VALUE"] = str(result)
         if c.get("error"):
             fields["ERROR"] = str(c["error"])
-    if not original and c.get("tool_calls"):
-        calls = c["tool_calls"]
-        calls = calls if isinstance(calls, list) else [calls]
-        messages.extend(_text_message("assistant", _render_legacy_tool_call(call)) for call in calls)
     if not fields:
         fields = {"STDOUT": ""}
+    fields = dict(fields)
+    if "RETURN_VALUE" in fields:
+        value = fields["RETURN_VALUE"]
+        duplicate = any(channel in fields and fields[channel] in (value, value + "\n")
+                        for channel in ("STDOUT", "OUTPUT"))
+        if (not duplicate and c.get("execution_fields") is not None and "OUTPUT" in fields
+                and any(isinstance(call, dict) and call.get("name") == "python_interpreter" for call in calls)):
+            # Remote interpreter text/plain represents strings with Python repr.
+            # Compare complete output only; print may add one final newline.
+            output = fields["OUTPUT"]
+            duplicate = value in (repr(output), repr(output.removesuffix("\n")))
+        if duplicate:
+            del fields["RETURN_VALUE"]
+    if item.metadata.get("use_result_observations", False):
+        return _render_result_observation(c, calls, fields)
     if c.get("summary"):
-        body = f"<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>"
+        parts.append(f"outcome:\n<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>")
     elif c.get("preview") is not None:
-        body = '<OUTPUT preview="head_tail">' + escape(c["preview"]) + "</OUTPUT>"
+        parts.append('outcome:\n<OUTPUT preview="head_tail">' + escape(c["preview"]) + "</OUTPUT>")
+    else:
+        for channel, value in fields.items():
+            label = {"STDOUT": "outcome", "OUTPUT": "outcome", "RETURN_VALUE": "recorded_result",
+                     "ERROR": "recorded_error"}.get(channel)
+            if label:
+                parts.append(f"{label}:\n{escape(value)}")
+            else:
+                parts.append(f"outcome:\n{escape(channel)}:\n{escape(value)}")
+    if (c.get("summary") or c.get("preview") is not None) and fields.get("ERROR"):
+        parts.append("recorded_error:\n" + escape(fields["ERROR"]))
+    if c.get("output_ref"):
+        parts.append("<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>")
+    parts.extend(["</completed_action>", "</completed_action_history>"])
+    return [_text_message(result_role, "\n".join(parts))]
+
+
+def render_chat_action(item: ContextItem) -> list[dict[str, Any]]:
+    """Keep real native messages; code actions stay explicit read-only evidence."""
+    if "messages" in item.content:
+        messages = deepcopy(item.content["messages"])
+        if any(message.get("role") not in {"system", "developer", "user", "assistant", "tool"}
+               or message.get("role") == "tool" and not message.get("tool_call_id") for message in messages):
+            raise ContextItemRenderingError("Invalid Chat Completions action messages")
+        return messages
+    return _render_current_action(item.model_copy(update={
+        "metadata": {**item.metadata, "use_result_observations": False},
+    }))
+
+
+def _render_result_observation(content: dict, calls: list, fields: dict) -> list[dict[str, Any]]:
+    from .execution_history import result_text
+
+    messages = []
+    if calls and content.get("assistant_output"):
+        messages.append(_text_message("assistant", content["assistant_output"]))
+    if content.get("summary"):
+        body = f"<SUMMARIED_RESULT>{escape(content['summary'])}</SUMMARIED_RESULT>"
+    elif content.get("preview") is not None:
+        body = '<OUTPUT preview="head_tail">' + escape(content["preview"]) + "</OUTPUT>"
     else:
         body = result_text(fields)
-    if (c.get("summary") or c.get("preview") is not None) and fields.get("ERROR"):
+    if (content.get("summary") or content.get("preview") is not None) and fields.get("ERROR"):
         body += "\n<ERROR>" + escape(fields["ERROR"]) + "</ERROR>"
-    if c.get("output_ref"):
-        body += "\n<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>"
-    messages.append(_text_message("assistant", "<CODE_EXEC_RESULT>\n" + body + "\n</CODE_EXEC_RESULT>"))
+    if content.get("output_ref"):
+        body += "\n<OUTPUT_REF>" + escape(content["output_ref"]) + "</OUTPUT_REF>"
+    messages.append(_text_message("tool-response", f"<RESULT>\n{body}\n</RESULT>"))
     return messages
 
 
 class ContextItemRenderer:
     """Registry-backed renderer that consumes only the selected item values."""
 
-    def __init__(self, handlers: dict[ContextItemType, ItemHandler] | None = None):
+    def __init__(
+        self, handlers: dict[ContextItemType, ItemHandler] | None = None, *, execution_result_role: str = "assistant",
+    ):
         self._handlers = {
             ContextItemType.SYSTEM: lambda item: _render_text(item, default_role="system"),
             ContextItemType.KNOWLEDGE_BASE: lambda item: _render_text(item, default_role="user"),
@@ -155,7 +216,7 @@ class ContextItemRenderer:
             ContextItemType.CONVERSATION_TURN: _render_turn,
             ContextItemType.CURRENT_TASK: lambda item: _render_text(item, default_role="user"),
             ContextItemType.CURRENT_PLANNING: lambda item: _render_text(item, default_role="assistant"),
-            ContextItemType.CURRENT_ACTION: _render_current_action,
+            ContextItemType.CURRENT_ACTION: lambda item: _render_current_action(item, result_role=execution_result_role),
         }
         self._handlers.update(handlers or {})
 

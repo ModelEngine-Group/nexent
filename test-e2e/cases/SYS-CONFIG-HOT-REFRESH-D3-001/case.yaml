@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D3
+module: SYSTEM-CONFIG
+case:
+  case_id: SYS-CONFIG-HOT-REFRESH-D3-001
+  feature_id: SYSTEM-CONFIGURATION
+  requirement_ids: [SYSTEM-CONFIGURATION-20261110, SYSTEM-CONFIGURATION-20261123]
+  business_rule_ids: [SYS-CONFIG-RULE-01, SYS-CONFIG-RULE-03, SYS-CONFIG-RULE-04, SYS-CONFIG-RULE-05]
+  title: Real database and Redis refresh update subsequent business checks
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove migrations, atomic writes and independent config/runtime/northbound refresh against real infrastructure.
+  preconditions: [An isolated PostgreSQL database, Redis instance and three consumer processes are available with owned cleanup.]
+  test_data:
+    environment: Managed environment values deliberately differ from SQL seed values.
+    scenarios: [repeat migration, concurrent different-key saves, same-key last commit, lost notification, Redis reconnect, invalid stored row, table lock timeout]
+  steps:
+  - order: 1
+    action: Initialize without a mounted installation env file, modify values and rerun migrations concurrently.
+    expected: Exactly eighteen active keys remain after all configuration migrations; the retired super-administrator key is soft-deleted and other saved values and audit fields survive duplicate migration with no duplicate keys.
+  - order: 2
+    action: Save different and same keys concurrently, inject a failure mid-batch and verify each consumer database role.
+    expected: Different keys survive, the same key follows commit order, failed batches leave no partial writes and consumers cannot write the table.
+  - order: 3
+    action: Start independent config/runtime/northbound workers, publish duplicate and stale notifications, drop Redis and ops, then restore dependencies.
+    expected: Each worker reads the current full database snapshot independently, retains its last valid value on invalid refresh and reconciles after reconnection or polling.
+  - order: 4
+    action: Exercise subsequent tenant/conversation/upload checks and newly prepared Agent parameters while changing related values.
+    expected: New checks use refreshed limits, existing resources and in-flight prepared runs remain unchanged, and related size values share one snapshot.
+  - order: 5
+    action: Hold an exclusive table lock across a refresh, then release it after the configured lock deadline and retry.
+    expected: The blocked read fails within the finite lock timeout, the last valid snapshot remains available, and the next refresh succeeds after lock release.
+  expected_results:
+  - Migration is idempotent and environment-independent with safe retry and no user-value overwrite.
+  - Writes are atomic and consumer database sessions are read-only.
+  - Notification loss, duplication, stale delivery, Redis/ops outage and database recovery preserve bounded eventual refresh.
+  - Actual subsequent business behavior uses the new snapshot without deleting resources or altering in-flight parameters.
+  - Database lock waits are bounded and recover without losing the last valid snapshot.
+  forbidden_side_effects:
+  - No environment fallback, hidden management HTTP configuration proxy, consumer heartbeat/application report or unowned resource left behind.
+  integration_boundary: [Real ops repository and PostgreSQL/Redis protocols through independent config, runtime and northbound processes]
+  observations: [Database rows and audit fields, consumer business decisions, prepared SDK parameters, per-worker snapshots and cleanup receipts]
+  cleanup: [Stop owned consumers, close Redis subscriptions and database pools, restore original configuration and remove only test-owned database keys.]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: SQL initialization and repeated migration preserve database authority.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Locked batch writes preserve concurrency and read-only consumer boundaries.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Independent workers recover through notifications and bounded reconciliation.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Real subsequent checks and new runs use coherent refreshed values.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: Database lock deadlines release refresh and permit recovery with the last valid snapshot retained.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]

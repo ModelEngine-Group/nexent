@@ -18,9 +18,9 @@ from management.services.conversation.sharing import (
     get_share_snapshot_service,
 )
 from management.services.file.service import get_file_stream_impl, get_preview_stream, resolve_preview_file
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 
-from management.utils.file_http import build_content_disposition_header
+from management.api.file.http import build_content_disposition_header
 
 logger = logging.getLogger("conversation_share_app")
 

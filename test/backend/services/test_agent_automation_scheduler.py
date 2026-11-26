@@ -3,7 +3,7 @@ import importlib
 import sys
 import types
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -32,7 +32,48 @@ def _load_scheduler_with_runner_stub(monkeypatch):
         return func(*args, **kwargs)
 
     monkeypatch.setattr(module, "run_blocking", run_inline)
+    monkeypatch.setattr(module.agent_automation_db, "list_pending_projections", lambda *_args: [])
     return module
+
+
+@pytest.mark.asyncio
+async def test_fixed_replica_store_starts_without_recovering_other_pods(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    recover = AsyncMock()
+    monkeypatch.setattr(scheduler_module, "run_blocking", recover)
+    store = scheduler_module.AgentAutomationLeaseStore()
+    store.fixed_replicas = True
+
+    await store.recover()
+
+    recover.assert_not_awaited()
+    assert store._recovery_time is None
+
+
+@pytest.mark.asyncio
+async def test_start_pins_replica_mode_before_store_recovery(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", True)
+    application = scheduler_module.AgentAutomationScheduler()
+    recover = AsyncMock()
+    monkeypatch.setattr(scheduler_module, "run_blocking", recover)
+
+    async def start():
+        if not scheduler.is_running:
+            await application._store.recover()
+            scheduler.is_running = True
+
+    scheduler = types.SimpleNamespace(start=AsyncMock(side_effect=start), stop=AsyncMock(), is_running=False)
+    monkeypatch.setattr(application, "_scheduler", scheduler)
+    monkeypatch.setattr(application, "_recover_projections", AsyncMock())
+
+    try:
+        await application.start(fixed_replicas=True)
+        await application.start()
+        assert application._store.fixed_replicas is True
+        recover.assert_not_awaited()
+    finally:
+        await application.stop()
 
 
 @pytest.mark.asyncio
@@ -55,7 +96,11 @@ async def test_store_recovers_orphans_before_releasing_all_locks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
+@pytest.mark.parametrize(
+    "fixed_replicas, distributed, restart_confirmed",
+    [(False, False, True), (False, True, True), (False, True, False), (True, True, True)],
+)
+async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch, fixed_replicas, distributed, restart_confirmed):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
     missed_fire = datetime(2026, 7, 18, 2, 0, tzinfo=timezone.utc)
@@ -76,9 +121,14 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
     }
     update = {}
 
+    monkeypatch.setattr(scheduler_module.environment, "IS_DEPLOYED_BY_KUBERNETES", distributed)
+    monkeypatch.setattr(scheduler_module.environment, "NEXENT_SANDBOX_PROVIDER", "kubernetes")
+    status = AsyncMock(return_value=types.SimpleNamespace(restart_cutoff=recovery_time if restart_confirmed else None))
+    monkeypatch.setattr(scheduler_module, "_agentos_client", lambda: types.SimpleNamespace(recovery_status=status))
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: None)
+    recovery_calls = []
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: recovery_calls.append("runs"))
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: recovery_calls.append("locks"))
     monkeypatch.setattr(
         scheduler_module.agent_automation_db,
         "claim_due_tasks",
@@ -91,8 +141,16 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
     )
 
     store = scheduler_module.AgentAutomationLeaseStore()
+    store.fixed_replicas = fixed_replicas
     await store.recover()
     jobs = await store.claim_due("scheduler-a", 2, 120)
+
+    assert status.await_count == (2 if distributed and not fixed_replicas else 0)
+    assert recovery_calls == ([] if distributed or fixed_replicas else ["runs", "locks"])
+    if fixed_replicas or not restart_confirmed:
+        assert jobs == [ClaimedJob(job_id=42, payload=claimed_task)]
+        assert update == {}
+        return
 
     assert jobs == []
     assert update["next_fire_at"] == datetime(2026, 7, 21, 2, 0, tzinfo=timezone.utc)
@@ -261,9 +319,55 @@ async def test_scheduler_wrapper_honors_feature_flag_and_delegates_lifecycle(mon
     monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", False)
     await service.start()
     inner.start.assert_not_awaited()
+    recovery = service._recovery_task
+    assert recovery is not None
 
     monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", True)
     await service.start()
+    assert service._recovery_task is recovery
     await service.stop()
+    assert recovery.done()
     inner.start.assert_awaited_once()
     inner.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_projection_poll_advances_past_a_temporarily_unavailable_run(monkeypatch):
+    module = _load_scheduler_with_runner_stub(monkeypatch)
+    store = module.AgentAutomationLeaseStore()
+    cursors = []
+
+    def pending(cursor, limit):
+        assert limit == 1
+        cursors.append(cursor)
+        return {0: [{"run_id": 5}], 5: [{"run_id": 9}], 9: []}[cursor]
+
+    monkeypatch.setattr(module.agent_automation_db, "list_pending_projections", pending)
+    recover = AsyncMock(side_effect=[RuntimeError("offline"), None, None])
+    monkeypatch.setattr(module.agent_automation_runner, "recover_prepared_run", recover, raising=False)
+    for _ in range(4):
+        await store.reconcile_pending_projection()
+
+    assert cursors == [0, 5, 9, 0]
+    assert [call.args[0]["run_id"] for call in recover.await_args_list] == [5, 9, 5]
+
+
+@pytest.mark.asyncio
+async def test_scoped_scheduler_defers_claims_when_runtime_ownership_is_unknown(monkeypatch):
+    module = _load_scheduler_with_runner_stub(monkeypatch)
+    monkeypatch.setattr(module.AgentAutomationLeaseStore, "_uses_scoped_recovery", staticmethod(lambda: True))
+    unavailable = AsyncMock(side_effect=RuntimeError("ownership unknown"))
+    monkeypatch.setattr(module, "_agentos_client", lambda: types.SimpleNamespace(recovery_status=unavailable))
+    claim = Mock()
+    orphan_recovery = Mock()
+    monkeypatch.setattr(module.agent_automation_db, "claim_due_tasks", claim)
+    monkeypatch.setattr(module.agent_automation_db, "recover_orphaned_runs", orphan_recovery)
+
+    store = module.AgentAutomationLeaseStore()
+    with pytest.raises(RuntimeError, match="ownership unknown"):
+        await store.recover()
+    with pytest.raises(RuntimeError, match="ownership unknown"):
+        await store.claim_due("scheduler-a", 1, 120)
+
+    claim.assert_not_called()
+    orphan_recovery.assert_not_called()

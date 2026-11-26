@@ -20,11 +20,9 @@ APPLICATION_DEPLOYMENTS = {
     "nexent-config",
     "nexent-data-process",
     "nexent-mcp",
-    "nexent-northbound",
+    "nexent-gateway",
+    "nexent-ops",
     "nexent-runtime",
-    "nexent-supabase-auth",
-    "nexent-supabase-db",
-    "nexent-supabase-kong",
     "nexent-web",
 }
 INFRASTRUCTURE_DEPLOYMENTS = {
@@ -40,7 +38,7 @@ APPLICATION_SINGLE_REPLICA = {
     "nexent-mcp",
     "nexent-config",
     "nexent-data-process",
-    "nexent-northbound",
+    "nexent-gateway",
     "nexent-runtime",
     "nexent-supabase-kong",
     "nexent-supabase-auth",
@@ -49,7 +47,6 @@ APPLICATION_SINGLE_REPLICA = {
 STARTUP_RECOVERY_DEPLOYMENTS = {
     "nexent-config",
     "nexent-data-process",
-    "nexent-northbound",
     "nexent-runtime",
 }
 APPLICATION_PVCS = {
@@ -58,7 +55,7 @@ APPLICATION_PVCS = {
     "nexent-memory-plugins",
     "nexent-logs",
     "nexent-project-config",
-    "nexent-supabase-db",
+    "nexent-trajectory",
 }
 INFRASTRUCTURE_PVCS = {
     "nexent-elasticsearch",
@@ -79,6 +76,7 @@ def _run(
         check=check,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
         env=env,
     )
@@ -148,6 +146,10 @@ def isolated_k8s_project(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     _write_executable(
         mock_bin / "helm",
         """#!/bin/bash
+if [ "$1" = "template" ] && [ "$2" = "nexent-runtime-values" ]; then
+  printf 'replicaCount: %s\\n' "${MOCK_CHART_RUNTIME_REPLICAS:-1}"
+  exit 0
+fi
 printf 'helm %s\\n' "$*" >> "$MOCK_LOG"
 case "$1" in
   status)
@@ -161,7 +163,11 @@ case "$1" in
     fi
     exit 0
     ;;
-  upgrade|uninstall) exit 0 ;;
+  upgrade)
+    if [ "$2" = "nexent" ] && [ "${MOCK_FAIL_DIRECT_UPGRADE:-false}" = "true" ]; then exit 1; fi
+    exit 0
+    ;;
+  uninstall) exit 0 ;;
 esac
 exit 0
 """,
@@ -170,14 +176,75 @@ exit 0
         mock_bin / "kubectl",
         """#!/bin/bash
 printf 'kubectl %s\\n' "$*" >> "$MOCK_LOG"
+if [[ "$*" == *"deployment/nexent-postgresql"*"migration psql"* ]]; then
+  cat >/dev/null
+  printf '{"legacy":false}\\n'
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then exit 1; fi
+if [ "$1" = "get" ] && [ "$2" = "pvc" ]; then
+  if [ "${MOCK_RUNTIME_STORAGE:-}" = "missing" ]; then exit 1; fi
+  case "${MOCK_RUNTIME_STORAGE:-}" in
+    pending) printf 'Pending::ReadWriteMany,' ;;
+    rwo) printf 'Bound:pv-%s:ReadWriteOnce,' "$3" ;;
+    *) printf 'Bound:pv-%s:ReadWriteMany,' "$3" ;;
+  esac
+  if [[ "$*" == *'.spec.volumeMode'* ]]; then
+    case "${MOCK_RUNTIME_STORAGE:-}" in
+      pvc-block) printf ':Block' ;;
+      omitted-volume-mode) printf ':' ;;
+      *) printf ':Filesystem' ;;
+    esac
+  fi
+  exit 0
+fi
+if [ "$1" = "get" ] && [ "$2" = "pv" ] && [[ "$3" == pv-* ]]; then
+  if [[ "$*" == *'.spec.volumeMode'* ]]; then
+    case "${MOCK_RUNTIME_STORAGE:-}" in
+      pv-block) volume_mode='Block' ;;
+      omitted-volume-mode) volume_mode='' ;;
+      *) volume_mode='Filesystem' ;;
+    esac
+    field=":$volume_mode"
+  else
+    field=''
+  fi
+  if [[ "$*" == *'.spec.hostPath.path'* ]]; then
+    host_path=''
+    if [ "${MOCK_RUNTIME_STORAGE:-}" = "hostpath" ]; then host_path='/var/lib/nexent'; fi
+    field="$field:$host_path"
+  fi
+  case "${MOCK_RUNTIME_STORAGE:-}" in
+    local) printf 'Bound:ReadWriteMany,%s:/var/lib/nexent' "$field" ;;
+    wrong-pv-mode) printf 'Bound:ReadWriteOnce,%s:' "$field" ;;
+    unavailable) exit 1 ;;
+    *) printf 'Bound:ReadWriteMany,%s:' "$field" ;;
+  esac
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "pv" ]; then exit 1; fi
 if [ "$1" = "get" ] && [ "$2" = "deployment" ]; then
+  if [[ "$*" == *observedGeneration* ]]; then
+    printf '2:2:0:'
+    exit 0
+  fi
+  if [ "$3" = "nexent-config" ] && [[ "$*" == *"/release-name"*".spec.replicas"* ]]; then
+    if [ "${MOCK_MISSING_CONFIG:-false}" = "true" ]; then exit 1; fi
+    printf '%s:%s:%s' "${MOCK_CONFIG_OWNER:-nexent}" "${MOCK_CONFIG_NAMESPACE:-nexent}" "${MOCK_CONFIG_REPLICAS:-1}"
+    exit 0
+  fi
   if [ "${MOCK_APP_EXISTS:-false}" = "true" ]; then printf 'deployment/%s\\n' "$3"; fi
   exit 0
 fi
 if [ "$1" = "scale" ] && [ "${MOCK_FAIL_SCALE:-false}" = "true" ]; then exit 1; fi
-if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then printf 'nexent-system-bootstrap-test\\n'; exit 0; fi
+if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then
+  if [[ "$*" == *'app in (nexent-system-bootstrap,nexent-runtime-maintenance)'* ]]; then
+    if [ "${MOCK_FAIL_PREVIOUS_WRITER:-false}" = "true" ]; then printf 'nexent-runtime-maintenance-prior::\\n'; fi
+  else
+    printf 'nexent-system-bootstrap-test\\n'
+  fi
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "job" ]; then
   if [ "${MOCK_FAIL_BOOTSTRAP:-false}" = "true" ]; then printf '1';
   elif [[ "$*" == *succeeded* ]]; then printf '1:'; fi
@@ -207,6 +274,22 @@ if [ "$1" = "rollout" ]; then
   exit 0
 fi
 if [ "$1" = "exec" ]; then
+  if [[ "$*" == *"deployment/nexent-postgresql"*"runtime-deploy-lock psql"* ]]; then
+    IFS= read -r postgres_password || exit 1
+    while IFS= read -r query; do
+      printf 'db %s\\n' "$query" >> "$MOCK_LOG"
+      case "$query" in
+        *pg_try_advisory_lock*)
+          if [ "${MOCK_FAIL_LOCK:-false}" = "true" ]; then printf 'busy\\n'; else printf '123\\n'; fi ;;
+        *pg_locks*)
+          if [ "${MOCK_FAIL_LOCK_LOSS:-false}" = "true" ] && grep -Fq '.status.succeeded' "$MOCK_LOG"; then exit 1; fi
+          if [ "${MOCK_FAIL_DIRECT_LOCK_LOSS:-false}" = "true" ] &&
+              grep -Fq 'kubectl rollout status deployment/nexent-web ' "$MOCK_LOG"; then exit 1; fi
+          printf '123\\n' ;;
+      esac
+    done
+    exit 0
+  fi
   if [[ "$*" == *"sha256sum ./*.zip"* ]]; then
     if [ "${MOCK_FAIL_OFFICIAL_CHECKSUM:-false}" = "true" ]; then
       printf 'invalid-checksum  ./invalid.zip\n'
@@ -264,6 +347,8 @@ def _instrument_shell_function(path: Path, function_name: str) -> None:
 def _application_dynamic_args() -> list[str]:
     return [
         "--set",
+        "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret",
+        "--set",
         "global.sharedStorage.mode=dynamic",
         "--set",
         "global.sharedStorage.storageClassName=rwx-storage",
@@ -320,11 +405,71 @@ def _infrastructure_existing_args() -> list[str]:
 
 
 def _template(chart: Path, release: str, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return _run(["helm", "template", release, str(chart), *args], check=False)
+    baseline = [
+        "--set", "nexent-runtime.replicaCount=1",
+        "--set", "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret",
+    ] if chart.name == "nexent" else []
+    return _run(["helm", "template", release, str(chart), *baseline, *args], check=False)
 
 
 def _documents(rendered: str) -> list[dict]:
     return [document for document in yaml.safe_load_all(rendered) if isinstance(document, dict)]
+
+
+@pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_compose_sql_startup_is_owned_by_management(filename: str) -> None:
+    path = PROJECT_ROOT / "deploy/docker/compose" / filename
+    services = yaml.safe_load(path.read_text(encoding="utf-8"))["services"]
+    management = services["nexent-config"]
+    assert management["environment"]["NEXENT_SQL_STARTUP_MODE"] == "migrate"
+    assert any("/opt/nexent/sql" in str(volume) for volume in management["volumes"])
+    assert "healthcheck" in management
+    for name, service in services.items():
+        if name == "nexent-config":
+            continue
+        environment = service.get("environment", {})
+        if isinstance(environment, list):
+            environment = {key: value for key, _, value in (item.partition("=") for item in environment)}
+        assert environment.get("NEXENT_SQL_STARTUP_MODE", "off") == "off", name
+        assert not any("/opt/nexent/sql" in str(volume) or "/docker-entrypoint-initdb.d/" in str(volume)
+                       for volume in service.get("volumes", [])), name
+    for name in ("nexent-runtime", "nexent-mcp", "nexent-data-process"):
+        assert services[name]["depends_on"]["nexent-config"]["condition"] == "service_healthy"
+
+
+def test_helm_sql_startup_is_owned_by_management(chart_dirs: dict[str, Path]) -> None:
+    rendered = _template(chart_dirs["application"], "nexent", [
+        *_application_dynamic_args(), "--set-file",
+        f"nexent-common.sqlFiles.init={(PROJECT_ROOT / 'deploy/sql/init.sql').as_posix()}",
+    ])
+    assert rendered.returncode == 0, rendered.stderr
+    sql_config = next(document for document in _documents(rendered.stdout)
+                      if document.get("kind") == "ConfigMap" and document["metadata"]["name"] == "nexent-sql-files")
+    assert sql_config["data"]["init.sql"].strip() == (PROJECT_ROOT / "deploy/sql/init.sql").read_text(encoding="utf-8").strip()
+    deployments = {
+        document["metadata"]["name"]: document for document in _documents(rendered.stdout)
+        if document.get("kind") == "Deployment"
+    }
+    for name in ("nexent-config", "nexent-runtime", "nexent-mcp", "nexent-data-process"):
+        pod = deployments[name]["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        env = {item["name"]: item.get("value") for item in container["env"]}
+        assert env["NEXENT_SQL_STARTUP_MODE"] == ("migrate" if name == "nexent-config" else "off")
+        mounts = {item["mountPath"] for item in container.get("volumeMounts", [])}
+        assert ("/opt/nexent/sql" in mounts) == (name == "nexent-config")
+        sql_volumes = [item for item in pod.get("volumes", []) if item.get("name") == "nexent-sql-files"]
+        assert bool(sql_volumes) == (name == "nexent-config")
+        if name != "nexent-config":
+            wait = next(item for item in pod["initContainers"] if item["name"] == "wait-for-management")
+            assert "http://nexent-config:5010/health/ready" in wait["command"][-1]
+            assert "psql" not in " ".join(wait["command"])
+
+    infrastructure = _template(chart_dirs["infrastructure"], "nexent-infrastructure", _infrastructure_dynamic_args())
+    assert infrastructure.returncode == 0, infrastructure.stderr
+    postgres = next(document for document in _documents(infrastructure.stdout)
+                    if document.get("kind") == "Deployment" and document["metadata"]["name"] == "nexent-postgresql")
+    mounts = postgres["spec"]["template"]["spec"]["containers"][0]["volumeMounts"]
+    assert all(not item["mountPath"].startswith("/docker-entrypoint-initdb.d") for item in mounts)
 
 
 def _resource_ids(documents: list[dict]) -> set[tuple[str, str, str, str]]:
@@ -551,7 +696,7 @@ def test_infrastructure_components_cannot_be_scaled(
     assert f"{component} must remain single-replica" in rendered.stderr
 
 
-def test_startup_recovery_deployments_use_single_replica_recreate(
+def test_single_replica_recovery_deployments_use_recreate(
     chart_dirs: dict[str, Path],
 ) -> None:
     rendered = _template(
@@ -572,8 +717,8 @@ def test_startup_recovery_deployments_use_single_replica_recreate(
         assert spec["strategy"] == {"type": "Recreate"}
 
 
-@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS))
-def test_startup_recovery_deployments_cannot_be_scaled(
+@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS - {"nexent-runtime"}))
+def test_other_startup_recovery_deployments_cannot_be_scaled(
     chart_dirs: dict[str, Path],
     component: str,
 ) -> None:
@@ -607,6 +752,41 @@ def test_startup_recovery_deployments_require_recreate(
     )
 
 
+@pytest.mark.parametrize("network_verified", [False, True])
+def test_fixed_runtime_replicas_render_with_kubernetes_system_sandbox(
+    chart_dirs: dict[str, Path], network_verified: bool,
+) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        [
+            *_application_dynamic_args(),
+            "--set", "global.sandboxProvider=kubernetes",
+            "--set", f"global.sandboxNetworkPolicyVerified={str(network_verified).lower()}",
+            "--set", "nexent-runtime.replicaCount=3",
+        ],
+    )
+    if not network_verified:
+        assert rendered.returncode != 0
+        assert "requires an enforced NetworkPolicy" in rendered.stderr
+        return
+
+    assert rendered.returncode == 0, rendered.stderr
+    resources = _documents(rendered.stdout)
+    runtime = next(doc for doc in resources if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "nexent-runtime")
+    assert runtime["spec"]["replicas"] == 3
+    assert runtime["spec"]["strategy"] == {"type": "Recreate"}
+    pod = runtime["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "nexent-runtime-sandbox"
+    env = {entry["name"]: entry for entry in pod["containers"][0]["env"]}
+    assert env["NEXENT_SANDBOX_PROVIDER"]["value"] == "kubernetes"
+    assert env["NEXENT_SANDBOX_DEFAULT_LEVEL"]["value"] == "kubernetes"
+    assert env["NEXENT_SANDBOX_DEFAULT_SCOPE"]["value"] == "system"
+    assert env["NEXENT_RECOVERY_MODE"]["value"] == "fixed_replicas"
+    assert env["NEXENT_RUNTIME_POD_UID"]["valueFrom"]["fieldRef"]["fieldPath"] == "metadata.uid"
+    assert any(doc["kind"] == "NetworkPolicy" and doc["metadata"]["name"] == "nexent-sandbox-control" for doc in resources)
+
+
 def test_stateless_web_can_still_be_scaled(chart_dirs: dict[str, Path]) -> None:
     rendered = _template(
         chart_dirs["application"],
@@ -634,7 +814,7 @@ def test_deploy_and_uninstall_scripts_have_valid_shell_syntax() -> None:
 
 @pytest.mark.parametrize(
     ("component", "port"),
-    (("nexent-config", 5010), ("nexent-runtime", 5014), ("nexent-northbound", 5013)),
+    (("nexent-config", 5010), ("nexent-runtime", 5014), ("nexent-gateway", 5013)),
 )
 def test_backend_charts_declare_delayed_process_health_probes(component: str, port: int) -> None:
     chart = APPLICATION_CHART_SOURCE / "charts" / component
@@ -871,7 +1051,7 @@ def test_default_deploy_bootstraps_while_paused_then_activates_application(
             "nexent-config",
             "nexent-runtime",
             "nexent-mcp",
-            "nexent-northbound",
+            "nexent-gateway",
             "nexent-web",
         )
     ]

@@ -207,6 +207,16 @@ data: {"type":"final_answer","content":"Analysis complete","unit_index":2}
 
 When `final_answer_mode` is omitted or set to `complete`, process events still stream immediately. After successful execution and persistence, one root `final_answer` contains the entire answer. Legacy clients can read the full result from the first `final_answer`. Child answers are not published as final results; failed or stopped runs do not promote partial answers to success.
 
+For smolagents, root answer fragments also stream as `model_output_thinking` with `answer_preview: true` and `answer_phase: "delta"`. These are unconfirmed answer previews, distinct from ordinary thinking. Use their `step_id`, `attempt_id` and invocation scope to update one answer slot; the final full `final_answer` confirms or replaces that slot rather than appending another copy. Honor `model_attempt_control` rollback events to discard rejected previews. Previews are not stored as thinking units; reloaded history contains the canonical answer once. Delta mode and jiuwen retain their existing event behavior.
+
+```text
+data: {"type":"model_output_thinking","answer_preview":true,"answer_phase":"delta","step_id":"s1","content":"Analysis "}
+
+data: {"type":"model_output_thinking","answer_preview":true,"answer_phase":"delta","step_id":"s1","content":"complete"}
+
+data: {"type":"final_answer","answer_phase":"complete","step_id":"s1","content":"Analysis complete"}
+```
+
 Clients requiring incremental answers must send `"final_answer_mode":"delta"` in the request body. The event type remains `final_answer`, with `answer_phase` identifying the stage:
 
 ```text
@@ -250,7 +260,7 @@ curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
 
 ### Ordinary stop and compatibility
 
-Continue using `GET /nb/v1/chat/stop/{conversation_id}`. Success acknowledges the stop request; the run remains reserved until its worker actually exits. If the next send receives `X-Stream-Status: conflict`, preserve the draft and ask the user to send again shortly without automatically retrying. A new query after stopping can read the original task, the stop notice, and saved partial results. Stopping does not roll back external operations already performed.
+Use `GET /nb/v1/chat/stop/{conversation_id}` to cancel the current run. After HTTP 200, the stopped run has released its conversation reservation and you can send the next query with the same ID. A new query can read the original task, the stop notice, and saved partial results. Stopping does not roll back external operations already performed.
 
 The old HITL routes, approvals, pause/resume engine, four-table runtime dependencies, and encryption-key settings have been removed. Northbound `/chat/run` returns `400` for any request containing `enable_hitl`, `hitl_run_id`, or `hitl_after_event`, including false, null, and zero values. Update Web and runtime together. Existing identity, permissions, attachment, metadata, and ordinary error contracts remain unchanged.
 
@@ -300,6 +310,8 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/attachments/upload" \
 Use the returned `s3_url` as the value of the `attachments` field in the `/nb/v1/chat/run` API.
 
 ## Stop Conversation
+
+After requesting cancellation, this endpoint waits up to 5 seconds for the targeted worker to exit and the conversation reservation to clear. HTTP 200 confirms release or an already idle conversation. If release is still pending, the endpoint returns HTTP 409 with `code: NORTHBOUND_STOP_IN_PROGRESS` and `Retry-After: 1`. Cancellation continues. Keep the next query pending until stop is confirmed. Concurrent requests starting a new run can still conflict.
 
 Terminate an ongoing conversation (streaming response).
 

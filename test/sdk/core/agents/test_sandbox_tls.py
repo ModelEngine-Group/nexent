@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Verified TLS transport and non-destructive migration of legacy containers."""
 
 import io
@@ -13,10 +14,10 @@ from unittest.mock import Mock
 
 import pytest
 from cryptography import x509
-from nexent.core.agents import sandbox
-from nexent.core.agents import sandbox_tls as tls
-from nexent.core.agents import sandbox_tls_bootstrap as bootstrap
-from nexent.core.agents.sandbox_tls_bootstrap import generate_identity
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.sandbox import tls
+from nexent.core.agents.sandbox import tls_bootstrap as bootstrap
+from nexent.core.agents.sandbox.tls_bootstrap import generate_identity
 from requests.exceptions import SSLError
 
 
@@ -48,6 +49,15 @@ def test_generated_certificate_covers_native_and_docker_hosts(certificate):
     names = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert 'sandbox-test' in names.get_values_for_type(x509.DNSName)
     assert '127.0.0.1' in [str(value) for value in names.get_values_for_type(x509.IPAddress)]
+
+
+def test_long_kubernetes_service_dns_remains_complete_in_san():
+    hostname = 'nexent-sandbox-' + 'a' * 40 + '.nexent-ksm-s1-20261112.svc'
+    _, certificate = generate_identity(hostname)
+    cert = x509.load_pem_x509_certificate(certificate)
+    names = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert hostname in names.get_values_for_type(x509.DNSName)
+    assert len(cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value) <= 64
 
 
 def test_verified_transport_keeps_certificate_checks_enabled(certificate):

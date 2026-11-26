@@ -27,8 +27,12 @@ from contracts.conversation import MessageRequest, MessageUnit
 from contracts.conversation import MessageSource, encode_activity_cursor
 from management.db.conversation import repository as db
 from management.db.conversation import pins as pins
-from management.db.client import db_client
-from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch
+from infrastructure.rdb.client import db_client
+from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+from management.db.models import (
+    AgentInfo, ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage,
+    ConversationSourceSearch, TrajectoryExecution,
+)
 from management.services.automation.conversation import AutomationConversationAdapter
 from management.services.conversation.service import save_message
 
@@ -39,8 +43,8 @@ def persistence(monkeypatch, request):
     engine = db_client.engine.execution_options(schema_translate_map={"nexent": schema})
     with engine.begin() as connection:
         connection.execute(CreateSchema(schema))
-        for model in (ConversationRecord, ConversationMessage, ConversationMessageUnit,
-                      ConversationSourceSearch, ConversationSourceImage):
+        for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
+                      ConversationSourceSearch, ConversationSourceImage, TrajectoryExecution):
             model.__table__.create(connection)
     try:
         @contextmanager
@@ -51,7 +55,8 @@ def persistence(monkeypatch, request):
 
         monkeypatch.setattr(db, "get_db_session", sessions)
         monkeypatch.setattr(pins, "get_db_session", sessions)
-        monkeypatch.setattr(db, "MAX_CONVERSATION_TURNS", 100)
+        config = DEFAULT_CATALOG.validate_changes(DEFAULT_CATALOG.defaults, {"MAX_CONVERSATION_TURNS": 100})
+        monkeypatch.setattr(db, "get_config_snapshot", lambda: config)
         monkeypatch.setattr(routes, "get_current_user_id", lambda token: ("owner", "tenant"))
         now = datetime.now(timezone.utc)
         with sessions() as session:

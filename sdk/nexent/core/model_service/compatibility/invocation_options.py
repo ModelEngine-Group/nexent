@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal, validate_sampling_parameters
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+from nexent.core.models.sampling import without_unset_sampling
 from nexent.core.models.capacity_budget import (
-    CallerMaxTokensOverrideForbidden,
+    CallerMaxTokensOverrideForbidden as CallerMaxTokensOverrideForbidden,
     ContextBudgetSnapshot,
     parse_context_budget_snapshot,
     verify_context_budget_capacity,
@@ -31,7 +32,10 @@ class LegacyInvocationOptions:
         from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
         profile = ensure_outlet_parameter_rules(profile)
-        submitted = dict(self.parameters)
+        submitted = {key: value for key, value in self.parameters.items()
+                     if key not in {"max_tokens", "max_completion_tokens", "max_output_tokens"}}
+        submitted = without_unset_sampling(submitted)
+        validate_sampling_parameters(submitted)
         for key, value in (("stop", self.stop_sequences), ("response_format", self.response_format)):
             if value is None:
                 continue
@@ -44,14 +48,6 @@ class LegacyInvocationOptions:
             submitted.pop("enable_thinking")
         if submitted.get("reasoning_effort") == "auto" and "reasoning_effort" not in declared:
             submitted.pop("reasoning_effort")
-        output_keys = {rule["key"] for rule in profile.parameter_rules if rule.get("api_binding")} & {
-            "max_tokens", "max_output_tokens",
-        }
-        if "max_tokens" in submitted and output_keys == {"max_output_tokens"}:
-            value = submitted.pop("max_tokens")
-            if "max_output_tokens" in submitted and not json_values_equal(submitted["max_output_tokens"], value):
-                raise ParameterValidationError("LEGACY_PARAMETER_CONFLICT", "/max_output_tokens")
-            submitted["max_output_tokens"] = value
         if self.context_budget_snapshot is not None:
             if not isinstance(self.context_budget_snapshot, (dict, ContextBudgetSnapshot)):
                 raise TypeError("context_budget_snapshot must be a ContextBudgetSnapshot or dict")
@@ -60,14 +56,6 @@ class LegacyInvocationOptions:
             verify_context_budget_capacity(budget_snapshot=budget, capacity_snapshot={
                 "provider": profile.identity.provider_id, "model_name": profile.identity.request_model_id,
             })
-            if len(output_keys) != 1:
-                raise ParameterValidationError("LEGACY_OUTPUT_BINDING_REQUIRED")
-            key = next(iter(output_keys))
-            if submitted.get(key) is not None and not json_values_equal(submitted[key], budget.requested_output_tokens):
-                raise CallerMaxTokensOverrideForbidden(
-                    snapshot_value=budget.requested_output_tokens, caller_value=submitted[key],
-                )
-            submitted[key] = budget.requested_output_tokens
         resolved = overlay_profile_parameters(profile, submitted, scope="outlet") if submitted else profile
         if self.custom_overrides is not None:
             from nexent.core.model_service.profiles.request_parameters import overlay_extra_api_parameters

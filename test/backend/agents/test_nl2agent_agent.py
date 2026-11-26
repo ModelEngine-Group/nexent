@@ -3,6 +3,7 @@
 import ast
 import json
 import re
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,13 +14,15 @@ from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
 
-from management.services.agent.creation import (
-    build_nl2agent_system_prompt,
-    create_nl2agent_agent_config,
-)
-from tool_collection.mcp.local_mcp_service import local_mcp_service
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from infrastructure.agentos_identity import ServicePrincipal
+from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
+    DISCOVER_REQUIREMENTS_NAME,
+    VERIFY_REQUIREMENTS_NAME,
+    SHOW_RESOURCE_CARD_NAME,
+    READ_CONFIGURATION_NAME,
+    SAVE_CONFIGURATION_NAME,
+    READ_GENERATION_CONTEXT_NAME,
     NL2A_WRAPPER_NAME,
     RECOMMEND_RESOURCES_NAME,
     RecommendResourcesInput,
@@ -27,11 +30,18 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceRequirement,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     SearchInstalledResourcesInput,
     build_nl2a_wrapper,
 )
+from runtime.agentos.agent_creator_config import (
+    build_nl2agent_system_prompt,
+    create_nl2agent_agent_config,
+)
+from runtime.agentos.prepared_agent_creator import _callback_tools
+from tool_collection.mcp.local_mcp_service import local_mcp_service
 
 
 @pytest.mark.parametrize(
@@ -41,13 +51,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
             "en",
             "### Role",
             "When `name` is absent, empty, or whitespace-only",
-            "generate only `description`",
+            "Save the description once the purpose is clear",
         ),
         (
             "zh",
             "### 核心职责",
             "当 `name` 缺失、为空字符串或只包含空白时",
-            "只生成 `description`",
+            "目标明确后保存描述",
         ),
     ],
 )
@@ -69,15 +79,15 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert heading in prompt
     assert name_rule in prompt
     assert description_rule in prompt
-    assert "runtime_search" in prompt
-    assert "runtime_recommend" in prompt
+    assert DISCOVER_REQUIREMENTS_NAME in prompt
+    assert VERIFY_REQUIREMENTS_NAME in prompt
     assert "runtime_wrapper" in prompt
     assert "runtime_save" in prompt
     assert "json.loads" in prompt
     assert "bound_resources" in prompt
     assert "business_description" not in prompt
     assert 'subtype="requirement_clarification"' in prompt
-    assert 'subtype="installed_resource_binding"' in prompt
+    assert SHOW_RESOURCE_CARD_NAME in prompt
     assert 'subtype="final_confirmation"' not in prompt
     assert "agent_generation_completed" in prompt
     assert "agent_id=None" not in prompt
@@ -88,14 +98,15 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert "```" not in prompt
 
     if language == "en":
-        assert "enter the Resource-Dependent Prompt Generation stage" in prompt
-        assert "Resource-Dependent Prompt Generation must atomically regenerate" in prompt
+        assert "Enter Resource-Dependent Prompt Generation for actual resource changes" in prompt
+        assert "atomically save the complete Prompt using the verified resources and declared inputs" in prompt
         assert "### State And Completion Rules" in prompt
         assert "They never prove that its configuration is complete" in prompt
-        assert "For `full_generation`, if the current input is not a submitted" in prompt
+        assert "clarify with one requirement_clarification card" in prompt
         assert "Partial tasks are exempt" in prompt
         assert "Configuration is complete only after the description is saved" in prompt
-        assert "before receiving `agent_generation_completed`" in prompt
+        assert "Before the validation tool succeeds" in prompt
+        assert "purpose=\"recommend\" for recommendations only" in prompt
         assert "### Completion Summary" in prompt
         assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
@@ -110,10 +121,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "修订总结" in prompt
         assert "### 状态判定与完成标准" in prompt
         assert "不证明该 Agent 已完成配置" in prompt
-        assert "对 `full_generation`，如果当前输入不是已提交的" in prompt
+        assert "如果目标、预期结果或关键约束不明确，使用一张需求澄清卡" in prompt
         assert "局部任务不受此规则影响" in prompt
         assert "只有描述已保存、资源需求已安装并绑定或明确放弃" in prompt
-        assert "在收到 `agent_generation_completed` 前，不得输出普通完成说明" in prompt
+        assert "显式校验工具成功前，不得声称完整生成已完成" in prompt
+        assert '只推荐用 purpose="recommend"' in prompt
         assert "### 完成总结" in prompt
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
@@ -124,12 +136,8 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "请详细说明这个智能体需要完成的任务" not in prompt
         assert '"question_id": "expected_output"' in prompt
 
-    description_save = prompt.index('"description":')
-    resource_search = prompt.index("raw_results = parallel_executor")
-    assert description_save < resource_search
-
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 9
+    assert code_blocks
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -166,19 +174,19 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     [
         (
             "en",
-            "explicit choice to continue without any suggested Tool or Skill",
+            "If there are no resource requirements, go directly to Prompt generation",
         ),
-        ("zh", "明确选择不安装任何建议的 Tool 或 Skill"),
+        ("zh", "没有资源需求时直接生成 Prompt"),
     ],
 )
-def test_build_nl2agent_system_prompt_allows_skipping_all_suggested_resources(
+def test_build_nl2agent_system_prompt_handles_creation_without_resources(
     language,
     skip_all_rule,
 ):
     prompt = build_nl2agent_system_prompt(language)
 
     assert skip_all_rule in prompt
-    assert "binding_required=false" in prompt
+    assert "nl2a_read_generation_context()" in prompt
 
 
 @pytest.mark.parametrize(
@@ -197,7 +205,7 @@ def test_build_nl2agent_system_prompt_allows_skipping_all_suggested_resources(
             "### Scheduled-task Boundary",
             "this workflow does not create the scheduled task",
             "Never search for a scheduled-task resource",
-            "do not show a binding card",
+            "If there are no resource requirements, go directly to Prompt generation",
             "Every Prompt field describes one invocation",
             "open [Scheduled tasks](/agent-tasks)",
         ),
@@ -206,7 +214,7 @@ def test_build_nl2agent_system_prompt_allows_skipping_all_suggested_resources(
             "### 定时任务边界",
             "本流程不创建定时任务",
             "不得搜索定时任务资源",
-            "不得显示资源绑定卡",
+            "没有资源需求时直接生成 Prompt",
             "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
             "前往[定时任务](/agent-tasks)",
         ),
@@ -257,12 +265,12 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "One request may update multiple explicitly requested fields in one save call",
             "Omit every unspecified field so its persisted value remains unchanged",
             "listing only the potentially affected fields",
-            "searches only for the newly requested capability",
-            "reconfigure a specifically requested bound resource",
+            'purpose="bind" to add resources',
+            "An accepted continue action uses confirmed_requirements from the trusted context and the saved bound_resources",
             "Never start at `prompt` or enter the full Prompt generation chain",
             'Start with "Updated:"',
-            "Conversational removal is unsupported",
-            "model settings, publication status, version state",
+            "If the user asks to remove a resource",
+            "names, icons, inference parameters",
         ),
         (
             "zh",
@@ -272,12 +280,12 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "一次请求可在一次保存调用中更新多个明确指定字段",
             "所有未指定字段都必须省略并保持数据库原值",
             "只列出可能受影响的字段",
-            "只搜索用户新请求的能力",
-            "重新配置用户明确指定的已绑定资源",
+            '新增资源用 purpose="bind"',
+            "运行服务接受 continue 后",
             "不得因卡片已确认就从 `prompt` 开始",
             "以“已更新：”开头",
-            "不支持通过对话移除资源",
-            "模型设置、发布状态、版本状态",
+            "用户要求移除资源时",
+            "名称、头像、推理参数",
         ),
     ],
 )
@@ -298,17 +306,14 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 ):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert "### Intent And Minimal Workflow" in prompt or "### 任务意图与最小流程" in prompt
+    assert "### Understand the user's goal" in prompt or "### 明确用户要做什么" in prompt
     assert "Partial tasks are exempt" in prompt or "局部任务不受此规则影响" in prompt
     assert partial_patch_rule in prompt
     assert preserve_rule in prompt
     assert clarification_rule in prompt
     assert "Never cascade automatically" in prompt or "禁止自动级联" in prompt
     assert resource_scope_rule in prompt
-    assert (
-        "does not confirm any Prompt update" in prompt
-        or "不代表用户确认更新任何 Prompt" in prompt
-    )
+    assert "nl2a_read_agent_configuration" in prompt
     assert reconfigure_rule in prompt
     assert "resource-dependent" in prompt.lower() or "资源依赖" in prompt
     assert revision_summary_rule in prompt
@@ -322,10 +327,14 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert f"({SEARCH_INSTALLED_RESOURCES_NAME}," in prompt
-    assert f"({SEARCH_UNINSTALLED_RESOURCES_NAME}," in prompt
-    assert f"raw_resource_result = {RECOMMEND_RESOURCES_NAME}(" in prompt
+    assert f"{DISCOVER_REQUIREMENTS_NAME}(" in prompt
+    assert f"{VERIFY_REQUIREMENTS_NAME}(" in prompt
+    assert "requirements_limit_exceeded" in prompt
+    assert "max_requirements" in prompt
+    assert ("split the request" if language == "en" else "分批或缩小范围") in prompt
+    assert f"{SHOW_RESOURCE_CARD_NAME}()" in prompt
     assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
+    assert f"{VALIDATE_AGENT_GENERATION_COMPLETE_NAME}()" in prompt
     assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
     assert "external_registry" not in prompt
     assert "MCP_OFFICIAL_REGISTRY" not in prompt
@@ -465,30 +474,39 @@ def test_requirement_clarification_accepts_at_most_five_questions():
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(language):
     """UT-BE-DPR-011: ephemeral agents retain parallel tool localization."""
-    config = create_nl2agent_agent_config(language)
+    actor = ServicePrincipal("user", "tenant")
+    tools = list(_callback_tools(SimpleNamespace(run_id="a" * 32, agent_id=42), actor))
+    config = create_nl2agent_agent_config(language, tools)
+    assert all(tool.source == "langchain" for tool in config.tools[:-1])
     registered_tools = await local_mcp_service.get_tools()
 
     assert [tool.name for tool in config.tools] == [
+        DISCOVER_REQUIREMENTS_NAME,
+        VERIFY_REQUIREMENTS_NAME,
+        SHOW_RESOURCE_CARD_NAME,
+        READ_CONFIGURATION_NAME,
+        SAVE_CONFIGURATION_NAME,
+        READ_GENERATION_CONTEXT_NAME,
         SEARCH_INSTALLED_RESOURCES_NAME,
         SEARCH_UNINSTALLED_RESOURCES_NAME,
         RECOMMEND_RESOURCES_NAME,
         SAVE_AGENT_DRAFT_FIELDS_NAME,
+        VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
         NL2A_WRAPPER_NAME,
         ParallelExecutorTool.name,
     ]
-    assert [tool.description for tool in config.tools] == [
-        registered_tools[SEARCH_INSTALLED_RESOURCES_NAME].description,
-        registered_tools[SEARCH_UNINSTALLED_RESOURCES_NAME].description,
-        registered_tools[RECOMMEND_RESOURCES_NAME].description,
-        registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
-        registered_tools[NL2A_WRAPPER_NAME].description,
-        ParallelExecutorTool.description,
+    assert [tool.description for tool in config.tools[:-1]] == [
+        registered_tools[tool.name].description for tool in config.tools[:-1]
     ]
+    assert config.tools[-1].description == ParallelExecutorTool.description
     assert config.tools[-1].description_zh == ParallelExecutorTool.description_zh
-    assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
-    assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
-    assert json.loads(config.tools[2].inputs)["agent_id"] == "int"
-    save_inputs = json.loads(config.tools[3].inputs)
+    inputs_by_tool = {tool.name: json.loads(tool.inputs) for tool in config.tools}
+    assert inputs_by_tool[SEARCH_INSTALLED_RESOURCES_NAME]["agent_id"] == "int"
+    assert inputs_by_tool[SEARCH_UNINSTALLED_RESOURCES_NAME]["agent_id"] == "int"
+    assert inputs_by_tool[RECOMMEND_RESOURCES_NAME]["agent_id"] == "int"
+    assert "agent_id" not in inputs_by_tool[DISCOVER_REQUIREMENTS_NAME]
+    assert "agent_id" not in inputs_by_tool[SAVE_CONFIGURATION_NAME]
+    save_inputs = inputs_by_tool[SAVE_AGENT_DRAFT_FIELDS_NAME]
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
         "enable_protocol_repair_retry",
@@ -498,7 +516,8 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "greeting_message",
         "example_questions",
     }
-    assert set(json.loads(config.tools[4].inputs)) == {
+    assert inputs_by_tool[VALIDATE_AGENT_GENERATION_COMPLETE_NAME] == {}
+    assert set(inputs_by_tool[NL2A_WRAPPER_NAME]) == {
         "subtype",
         "agent_id",
         "resource_result",
@@ -519,7 +538,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
 
 
 def test_nl2agent_explicit_system_context_reaches_final_model_messages():
-    config = create_nl2agent_agent_config("zh")
+    config = create_nl2agent_agent_config("zh", [])
     runtime_agent = CodeAgent(
         tools=[],
         model=MagicMock(),

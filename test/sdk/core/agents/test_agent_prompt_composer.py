@@ -259,7 +259,7 @@ def test_ut_sdk_dpr_003_two_context_snapshots_do_not_share_resources():
 
 def test_ut_sdk_dpr_001_nested_manager_call_uses_manager_role():
     """UT-SDK-DPR-001: a called manager retains its own task/report module."""
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 
     agent = CoreAgent.__new__(CoreAgent)
     agent.workspace_path = None
@@ -268,7 +268,7 @@ def test_ut_sdk_dpr_001_nested_manager_call_uses_manager_role():
     agent.prompt_templates = AgentPromptComposer(_bundle(role="manager")).compatibility_templates()
     agent.run = MagicMock(return_value='{"answer":"done"}')
     agent.observer = MagicMock()
-    with patch("nexent.core.agents.core_agent.RunResult", type("UnusedRunResult", (), {})):
+    with patch("nexent.core.agents.cores.smolagents.core_agent.RunResult", type("UnusedRunResult", (), {})):
         report = agent(task='Return JSON with only the key "answer".')
 
     assert agent.run.call_args.args[0] == 'Return JSON with only the key "answer".'
@@ -478,7 +478,7 @@ def test_ut_sdk_dpr_004_rejects_unversioned_or_invalid_policy(values):
 
 
 
-def test_scheduled_task_internal_tool_appears_only_in_policy():
+def test_scheduled_task_internal_tool_appears_in_the_allowed_inventory():
     composer = AgentPromptComposer(_bundle())
     tools = {
         "create_scheduled_task_proposal": {"name": "create_scheduled_task_proposal", "description": "duplicate"},
@@ -488,7 +488,7 @@ def test_scheduled_task_internal_tool_appears_only_in_policy():
         language="en", is_manager=False, tools=tools, enable_automation_tool_policy=True,
     )
     ids = {item.id for item in items}
-    assert "tool:create_scheduled_task_proposal" not in ids
+    assert "tool:create_scheduled_task_proposal" in ids
     assert "tool:search" in ids
     assert "system:automation_tool_policy" in ids
     assert "create_scheduled_task_proposal" in tools

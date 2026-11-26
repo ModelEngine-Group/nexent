@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from threading import RLock
 
 from opentelemetry import trace
+from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.context import Context
-from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
-from opentelemetry.trace import SpanKind
+from opentelemetry.sdk.trace import Event, ReadableSpan, Span, SpanProcessor
+from opentelemetry.sdk.trace.sampling import Sampler
+from opentelemetry.sdk.util import BoundedList
+from opentelemetry.trace import Link, SpanKind
 
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
@@ -21,6 +25,19 @@ from .trace_name import (
     inherited_trace_name,
     remember_server_span,
 )
+
+
+class MonitoringSampler(Sampler):
+    """Allow Runtime startup to enable local recording for existing tracers."""
+
+    def __init__(self, delegate: Sampler):
+        self.delegate = delegate
+
+    def should_sample(self, *args, **kwargs):
+        return self.delegate.should_sample(*args, **kwargs)
+
+    def get_description(self) -> str:
+        return self.delegate.get_description()
 
 
 class MonitoringSpanProcessor(SpanProcessor):
@@ -37,8 +54,25 @@ class MonitoringSpanProcessor(SpanProcessor):
             normalize_span_exclusions(excluded_elasticsearch_operations)
         )
         self._excluded_span_names = frozenset(normalize_span_exclusions(excluded_span_names))
+        self._parent_lock = RLock()
+        self._local_parents = {}
+        self._public_parents = {}
+
+    @staticmethod
+    def _identity(context):
+        return (context.trace_id, context.span_id) if context is not None else None
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        identity = self._identity(span.get_span_context())
+        parent_key = self._identity(span.parent)
+        with self._parent_lock:
+            parent = self._local_parents.get(parent_key, span.parent)
+            if (span.attributes or {}).get("nexent.local_only"):
+                self._local_parents[identity] = parent
+            elif parent_key in self._local_parents:
+                self._public_parents[identity] = parent
+        if (span.attributes or {}).get("nexent.local_only"):
+            return
         if span.kind == SpanKind.SERVER:
             remember_server_span(span)
         name = inherited_trace_name(span.get_span_context().trace_id, trace.get_current_span(parent_context))
@@ -47,6 +81,13 @@ class MonitoringSpanProcessor(SpanProcessor):
         self._delegate.on_start(span, parent_context=parent_context)
 
     def on_end(self, span: ReadableSpan) -> None:
+        identity = self._identity(span.context)
+        with self._parent_lock:
+            self._local_parents.pop(identity, None)
+            reparent = identity in self._public_parents
+            parent = self._public_parents.pop(identity, span.parent)
+        if (span.attributes or {}).get("nexent.local_only"):
+            return
         if span.kind == SpanKind.SERVER:
             forget_server_span(span.context.span_id)
         if span.name in self._excluded_span_names:
@@ -57,6 +98,60 @@ class MonitoringSpanProcessor(SpanProcessor):
             and attributes.get("db.operation") in self._excluded_elasticsearch_operations
         ):
             return
+
+        def private(key):
+            return key.startswith("nexent.local.")
+
+        def public_attributes(values, dropped):
+            public = BoundedAttributes(
+                attributes={key: value for key, value in (values or {}).items() if not private(key)}
+            )
+            public.dropped = dropped
+            return public
+
+        if (
+            reparent
+            or any(private(key) for key in attributes)
+            or any(private(key) for event in span.events for key in (event.attributes or {}))
+            or any(private(key) for link in span.links for key in (link.attributes or {}))
+        ):
+            events = BoundedList.from_seq(
+                None,
+                [
+                    Event(
+                        event.name,
+                        attributes=public_attributes(event.attributes, event.dropped_attributes),
+                        timestamp=event.timestamp,
+                    )
+                    for event in span.events
+                ],
+            )
+            events.dropped = span.dropped_events
+            links = BoundedList.from_seq(
+                None,
+                [
+                    Link(
+                        link.context,
+                        attributes=public_attributes(link.attributes, link.dropped_attributes),
+                    )
+                    for link in span.links
+                ],
+            )
+            links.dropped = span.dropped_links
+            span = ReadableSpan(
+                name=span.name,
+                context=span.context,
+                parent=parent,
+                resource=span.resource,
+                attributes=public_attributes(attributes, span.dropped_attributes),
+                events=events,
+                links=links,
+                kind=span.kind,
+                status=span.status,
+                start_time=span.start_time,
+                end_time=span.end_time,
+                instrumentation_scope=span.instrumentation_scope,
+            )
         self._delegate.on_end(span)
 
     def shutdown(self) -> None:

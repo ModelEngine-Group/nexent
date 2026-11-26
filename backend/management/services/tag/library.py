@@ -416,6 +416,7 @@ class TagManagementService:
         *,
         provider: str | None = None,
         knowledge_base_id: str | None = None,
+        remove_value_ids: list[int] | None = None,
     ) -> dict:
         identity = await cls._resolve_assignment_resource(
             caller,
@@ -434,6 +435,7 @@ class TagManagementService:
                 identity.library_code,
                 normalized_value_ids,
                 caller.user_id,
+                **({"remove_value_ids": remove_value_ids} if remove_value_ids is not None else {}),
             )
         except (IntegrityError, DBAPIError) as error:
             cls._translate_database_error(error)

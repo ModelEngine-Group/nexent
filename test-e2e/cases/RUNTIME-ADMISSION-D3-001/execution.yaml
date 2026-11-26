@@ -1,0 +1,48 @@
+schema_version: '1.0'
+case_id: RUNTIME-ADMISSION-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-ADMISSION-D3-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-003:
+  - test_agent_cross_pod_conflict_and_quota
+  - test_workbench_cross_pod_conflict_and_tenant_quota
+  - test_northbound_cross_pod_conflict_and_quota
+  - test_evaluation_cross_pod_claim_and_rollback
+  - test_evaluation_submission_capacity_rejects_only_on_full_pod
+  - test_creator_cross_pod_conflict_and_preparing_quota
+  AC-P1-004:
+  - test_agent_cross_pod_conflict_and_quota
+  - test_agent_backlog_stays_on_origin_when_peer_accepts
+  - test_agent_coordination_faults_do_not_mutate_peer
+  - test_agent_failed_preparation_releases_shared_quota
+  - test_workbench_cross_pod_conflict_and_tenant_quota
+  - test_northbound_cross_pod_conflict_and_quota
+  - test_evaluation_cross_pod_claim_and_rollback
+  - test_evaluation_submission_capacity_rejects_only_on_full_pod
+  - test_creator_cross_pod_conflict_and_preparing_quota
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained preparation uses an opted-in, isolated machine-local Kubernetes
+  cluster, an owned namespace and dynamic volumes, two individually routed Runtime
+  Pods, test-only identities and a controlled provider. Cleanup uses the namespace
+  UID and verifies reclamation. Directed Gateway fixtures keep the production
+  Management and Runtime calls and point Management to the selected Runtime
+  Pod. The program reads the unified SQL execution, the run-scoped AgentOS
+  journal, or the Creator stream. Workbench quota is observed while Runtime
+  work is active. An older owner's settlement runs against an active successor
+  before the successor's independent assistant projection. Creator preparation
+  holds a case-owned message write after admission, preserving the quota test.
+  Evaluation uses two isolated Management dispatch processes, a real conditional
+  PostgreSQL claim, six live workers and twelve distinct queued submissions on
+  one process. Failure to submit rolls its evaluation row back to pending.
+  Northbound uses the same directed Management path. The local Agent lane
+  and fault branches still require candidate integration against the public
+  wire contracts.
+  Formal execution and cleanup are pending for all branches.

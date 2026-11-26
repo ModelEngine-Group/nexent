@@ -1,51 +1,68 @@
 schema_version: 1
 # Routing contacts, not defect attribution. Counts do not participate in routing.
 domains:
+  # Agent management.
   skill:
     label: Skill仓库
-    owner: '@马群'
-    feature_categories: [技能]
+    owner: '@李佳阳'
+    feature_categories: [Skill仓库, 技能]
     feature_id_patterns: ['^V5-PW-SKILL-', '^V5-UT-FE-023$']
   mcp:
     label: MCP仓库
-    owner: '@马群'
-    feature_categories: [MCP]
+    owner: '@李佳阳'
+    feature_categories: [MCP仓库, MCP]
     feature_id_patterns: ['^V5-PW-MCP-', '^V5-UT-BE-016$', '^V5-UT-FE-024$']
   agent_repository:
     label: Agent仓库
-    owner: '@马群'
-    feature_categories: []
+    owner: '@李佳阳'
+    feature_categories: [Agent仓库]
     feature_id_patterns: ['^V5-PW-MARKET-AGENT-', '^V5-UT-BE-014$', '^V5-UT-FE-022$']
   knowledge:
-    label: Nexent知识库 & AIDP知识库
+    label: 知识库配置
     owner: '@曹杰'
-    feature_categories: [知识库与文件]
-    feature_id_patterns: ['^V5-PW-KB-', '^V5-UT-BE-01[012]$', '^V5-UT-FE-02[678]$']
+    feature_categories: [知识库配置, 知识库与文件]
+    feature_id_patterns: ['^V5-PW-KB-(?!AIDP-)', '^V5-UT-BE-01[012]$', '^V5-UT-FE-02[678]$']
   model:
     label: 模型管理
-    owner: '@武兆福'
-    feature_categories: [模型与多模态]
+    owner: '@李佳阳'
+    feature_categories: [模型管理, 模型与多模态]
     feature_id_patterns: ['^V5-PW-(MODEL|MEDIA)-', '^V5-UT-BE-009$', '^V5-REL-02$']
-  evaluation:
-    label: 智能体评估
-    owner: '@丁驰'
-    feature_categories: [评估]
-    feature_id_patterns: ['^V5-PW-EVAL-', '^V5-UT-BE-020$', '^V5-UT-FE-035$']
   system:
-    label: 系统管理整体
+    label: 配置管理
     owner: '@武兆福'
-    feature_categories: [身份认证与账号, 租户与资源权限, 系统管理, 全局前端, 前端与全局UI, 平台运维能力, 平台资源治理]
-    feature_id_patterns: ['^V5-PW-(AUTH|PROFILE|QUOTA|RESOURCE|UI)-', '^V5-UT-BE-00[678]$', '^V5-UT-FE-0(0[89]|1[012]|3[78])$']
+    feature_categories: [配置管理, 系统管理, 全局前端, 前端与全局UI, 平台运维能力]
+    feature_id_patterns: ['^V5-PW-UI-', '^V5-UT-FE-038$']
+  guardrails:
+    label: 安全护栏
+    owner: '@武兆福'
+    feature_categories: [安全护栏]
+    feature_id_patterns: []
+  aidp:
+    label: AIDP对接
+    owner: '@曹杰'
+    feature_categories: [AIDP对接]
+    feature_id_patterns: ['^AIDP-', '^V5-PW-KB-AIDP-']
+  northbound:
+    label: 北向生态能力
+    owner: '@夏一辰'
+    feature_categories: [北向生态能力, Northbound, Northbound API]
+    feature_id_patterns: ['^V5-UT-BE-02[14]$']
+  a2a_acp:
+    label: A2A & ACP
+    owner: '@徐雅琦'
+    feature_categories: [A2A, ACP, A2A & ACP]
+    feature_id_patterns: ['^V5-PW-A2A-', '^V5-UT-BE-017$', '^V5-UT-FE-025$']
+  # Agent runtime.
   memory:
-    label: 记忆系统
+    label: 记忆管理
     owner: '@王靖泷'
-    feature_categories: [记忆]
+    feature_categories: [记忆管理, 记忆]
     feature_id_patterns: ['^V5-PW-(MEM|MEMORY)-', '^V5-UT-BE-025$', '^V5-UT-FE-033$']
   runtime:
-    label: 智能体运行
+    label: Agent Loop
     owner: '@潘业宏'
-    feature_categories: [智能体运行时与对话, 智能体运行与对话, 会话与分享, A2A, Northbound, Northbound API]
-    feature_id_patterns: ['^CMSR-', '^V5-PW-(CHAT|A2A|SHARE|HITL|PLAN|REACT|PARALLEL)-', '^V5-UT-BE-0(17|18|21|24)$', '^V5-UT-FE-0(25|29|30|31|32)$', '^V5-REL-(04|11)$']
+    feature_categories: [Agent Loop, 智能体运行时与对话, 智能体运行与对话, 会话与分享]
+    feature_id_patterns: ['^CMSR-', '^V5-PW-(CHAT|SHARE|PLAN|REACT)-', '^V5-UT-BE-018$', '^V5-UT-FE-0(29|30|31|32)$', '^V5-REL-04$']
   context:
     label: 上下文工程
     owner: '@夏一辰'
@@ -54,25 +71,78 @@ domains:
   task:
     label: 定时任务
     owner: '@董济宝'
-    feature_categories: [自动任务]
+    feature_categories: [定时任务, 自动任务]
     feature_id_patterns: ['^V5-PW-TASK-', '^V5-UT-BE-019$', '^V5-UT-FE-034$', '^V5-REL-01$']
   agent_config:
-    label: 智能体开发配置
+    label: NL2Agent
     owner: '@徐雅琦'
-    feature_categories: [智能体配置]
+    feature_categories: [NL2Agent, 智能体配置]
     feature_id_patterns: ['^V5-PW-(AGENT|NL2AGENT|VERSION)-', '^V5-UT-BE-0(13|15)$', '^V5-UT-FE-0(15|16|19|20|21)$']
   sandbox:
-    label: 沙箱
+    label: 容器沙箱
     owner: '@杜宇骁'
-    feature_categories: [沙箱]
+    feature_categories: [容器沙箱, 沙箱]
     feature_id_patterns: ['^V5-PW-SANDBOX-']
+  collaboration:
+    label: 多智能体协作
+    owner: '@潘业宏'
+    feature_categories: [多智能体协作]
+    feature_id_patterns: ['^V5-PW-PARALLEL-']
+  human_in_loop:
+    label: 人在回路&A2UI
+    owner: '@潘业宏'
+    feature_categories: [人在回路&A2UI, 人在回路, A2UI, HITL]
+    feature_id_patterns: ['^V5-PW-HITL-', '^V5-REL-11$']
+  # Agent operations. Self-evolution routing can be added once its Feature lands and has a contact.
+  evaluation:
+    label: 智能体评估
+    owner: '@丁驰'
+    feature_categories: [智能体评估, 评估]
+    feature_id_patterns: ['^V5-PW-EVAL-', '^V5-UT-BE-020$', '^V5-UT-FE-035$']
   deployment:
     label: 安装部署/升级
     owner: '@贺思聪'
-    feature_categories: [安装部署与升级, 安装部署, 部署与升级]
+    feature_categories: [安装部署/升级, 安装部署与升级, 安装部署, 部署与升级]
     feature_id_patterns: ['^V5-DEP-']
+  observability:
+    label: 智能体可观测
+    owner: '@贺思聪'
+    feature_categories: [智能体可观测]
+    feature_id_patterns: []
+  resource_management:
+    label: 资源管理
+    owner: '@丁驰'
+    feature_categories: [资源管理, 租户与资源权限, 平台资源治理]
+    feature_id_patterns: ['^V5-PW-QUOTA-', '^V5-UT-BE-008$', '^V5-UT-FE-012$']
+  user_permissions:
+    label: 用户与权限管理
+    owner: '@夏一辰'
+    feature_categories: [用户与权限管理, 身份认证与账号]
+    feature_id_patterns: ['^V5-PW-(AUTH|PROFILE)-', '^V5-UT-BE-00[67]$', '^V5-UT-FE-0(0[89]|1[01]|37)$']
+  ops_dashboard:
+    label: 运维看板
+    owner: '@苏明明'
+    feature_categories: [运维看板]
+    feature_id_patterns: []
+  system_configuration_alerts:
+    label: 系统配置与告警
+    owner: '@马群'
+    feature_categories: [系统配置与告警]
+    feature_id_patterns: []
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  NEXENT-SERVICE-REPLICAS: deployment
+  AOS-MODEL: model
+  AOS-TRANSPORT: runtime
+  SI-STORAGE: system
+  GW-AUTH: user_permissions
+  AGENT-CORE-CONFIG: agent_config
+  JIUWEN-CONTEXT: context
+  JIUWEN-MODEL-BRIDGE: runtime
+  JIUWEN-OUTPUT: runtime
+  JIUWEN-RECOVERY: runtime
+  JIUWEN-RELEASE: runtime
+  JIUWEN-RESOURCES: runtime
   BE-MODEL-OUTLET-SCHEMA: model
   BE-MODEL-OUTLET-PERSISTENCE: model
   SDK-MODEL-OUTLET-RESOLUTION: model
@@ -83,52 +153,74 @@ feature_overrides:
   SDK-MODEL-PROFILE-NORMALIZATION: model
   SDK-MODEL-PROFILE-PARAMETERS: model
   SDK-MODEL-TRANSPORT: model
-  AUTH-MULTI-ROLE: system
+  AUTH-MULTI-ROLE: user_permissions
   AGENT-EDITOR-WORKFLOWS: agent_config
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config
   AGENT-REPO-SORT-MAIN-TAG: agent_repository
-  AIDP-RETRIEVAL: knowledge
-  AUTH-LOCAL: system
-  CAS-USER-DISPLAY: system
+  AIDP-RETRIEVAL: aidp
+  AUTH-LOCAL: user_permissions
+  CAS-USER-DISPLAY: user_permissions
   CHAT-AGENT-DISCOVERY: runtime
   CHAT-CLARIFICATION-HISTORY: runtime
   CHAT-MODEL-CONTROLS: model
   CHAT-SIDEBAR: runtime
+  CHAT-TRAJECTORY: observability
   FAF-001: runtime
   MSRF-001: model
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
-  OPS-BOOTSTRAP: system
+  OPS-BOOTSTRAP: deployment
+  OPS-MCP-TOOL-MONITORING: ops_dashboard
+  OPS-AGENT-FACTS: ops_dashboard
+  OPS-MODEL-MONITORING: ops_dashboard
+  OPS-MONITORING-UI: ops_dashboard
+  SYSTEM-CONFIGURATION: system_configuration_alerts
   PR-QUALITY-FRONTEND: model
-  RESOURCE-TAG-MANAGEMENT: system
-  SAI-001: runtime
+  RESOURCE-TAG-MANAGEMENT: resource_management
+  RUNTIME-REPLICAS: runtime
+  RUNTIME-AUTOSCALING: runtime
+  KSM-CONFIG: sandbox
+  KSM-SYSTEM: sandbox
+  SAI-001: collaboration
   SDK-SQL-ROWS: runtime
   SEARCH-DEEPSEEK: runtime
   SYS-AGENT-LIFECYCLE: system
   TFP-001: sandbox
   TPC-001: runtime
   WB-CONTROLS: runtime
-  F-003: system
+  F-003: user_permissions
+  F-018: user_permissions
+  F-019: user_permissions
+  F-020: user_permissions
+  F-021: user_permissions
+  F-022: user_permissions
+  F-023: user_permissions
   F-046: context
   F-047: context
   F-048: context
   F-049: context
+  F-052: collaboration
+  F-060: collaboration
+  F-061: collaboration
   F-064: context
   F-066: agent_config
   F-067: agent_config
-  F-068: runtime
+  F-068: a2a_acp
   F-069: agent_repository
   F-070: agent_repository
   F-071: agent_repository
   F-110: context
   F-115: context
-  F-152: knowledge
+  F-152: northbound
+  F-153: observability
+  F-154: ops_dashboard
+  F-155: system_configuration_alerts
   F-158: sandbox
   F-166: task
   F-167: knowledge
   F-168: knowledge
-  F-169: system
+  F-169: observability
   F-170: model
   F-171: runtime
   F-172: deployment
@@ -136,9 +228,12 @@ feature_overrides:
   F-174: deployment
   F-175: deployment
   F-176: deployment
+  F-179: human_in_loop
+  F-181: observability
+  F-182: deployment
   F-183: context
   F-186: task
-  V5-PERF-01: runtime
+  V5-PERF-01: collaboration
   V5-PERF-02: runtime
   V5-PERF-03: knowledge
   V5-PERF-04: knowledge
@@ -150,11 +245,17 @@ feature_overrides:
   V5-PERF-10: knowledge
   V5-PW-AUTO-37453582F1CFB11D: skill
   V5-PW-CHART-01: runtime
+  V5-PW-CHAT-04: collaboration
   V5-PW-FILE-01: knowledge
+  V5-PW-RESOURCE-01: resource_management
+  V5-PW-RESOURCE-02: user_permissions
+  V5-PW-RESOURCE-03: user_permissions
+  V5-PW-RESOURCE-04: resource_management
+  V5-PW-RESOURCE-APIKEY-01: user_permissions
   V5-REL-03: knowledge
   V5-REL-05: system
-  V5-REL-12: system
-  V5-REL-AUTO-0420654CDB5C783B: runtime
+  V5-REL-12: observability
+  V5-REL-AUTO-0420654CDB5C783B: a2a_acp
   V5-REL-AUTO-0ED11882BC558420: evaluation
   V5-REL-AUTO-1FAFCA5A681580F5: runtime
   V5-REL-AUTO-3CE643378A04EF53: knowledge
@@ -162,7 +263,7 @@ feature_overrides:
   V5-REL-AUTO-4CBD1BF08020ABF9: knowledge
   V5-REL-AUTO-53457E34A331A3FF: task
   V5-REL-AUTO-58D118DDC12E94CA: task
-  V5-REL-AUTO-80AA755E2436D269: system
+  V5-REL-AUTO-80AA755E2436D269: resource_management
   V5-REL-AUTO-AF6CA560E762D682: system
   V5-REL-AUTO-BCE0AAF43667C67B: runtime
   V5-REL-AUTO-CCF3D3CB5D0FC268: evaluation
@@ -173,27 +274,56 @@ feature_overrides:
   V5-REL-AUTO-DAED0399BC7F3CAB: evaluation
   V5-REL-AUTO-DAF6A75DB19AEFBC: evaluation
   V5-REL-AUTO-DD1A9CB3B544F39F: evaluation
-  V5-REL-AUTO-ECAC7A02C22B21FF: runtime
+  V5-REL-AUTO-ECAC7A02C22B21FF: northbound
   V5-SEC-02: knowledge
-  V5-SEC-01: system
+  V5-SEC-01: user_permissions
   V5-SEC-03: runtime
-  V5-SEC-04: system
-  V5-SEC-05: system
+  V5-SEC-04: user_permissions
+  V5-SEC-05: user_permissions
   V5-SEC-06: system
   V5-SEC-07: skill
   V5-SEC-08: system
   V5-SEC-09: context
-  V5-SEC-10: system
+  V5-SEC-10: user_permissions
   V5-SEC-11: runtime
   V5-SEC-AUTO-223E157CE3543948: sandbox
   V5-SEC-AUTO-54F2ABC236F8E944: memory
   V5-SEC-AUTO-926FF16475B223A7: context
-  V5-SEC-AUTO-A4AD5354E1E6A58E: system
+  V5-SEC-AUTO-A4AD5354E1E6A58E: resource_management
   V5-SEC-AUTO-F4D28F8271C36B99: memory
   V5-UT-BE-022: model
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
 case_overrides:
+  NEXENT-CONFIG-JOBS-D3-001: system
+  NEXENT-CONFIG-STATE-D3-001: system
+  NEXENT-NORTHBOUND-STATE-D3-001: runtime
+  NEXENT-MCP-SESSION-D3-001: mcp
+  NEXENT-DATA-WORKERS-D3-001: knowledge
+  NEXENT-WEB-CONFIG-D3-001: system
+  RUNTIME-OFFLINE-DEPLOY-D5-001: deployment
+  RUNTIME-SHARED-STORAGE-D3-001: deployment
+  RUNTIME-AUTOSCALE-D5-001: deployment
+  RUNTIME-SCHEDULER-D3-001: task
+  # F-111 also covers providers other than AIDP.
+  AGT-AUTO-7A2120E630C381C7: aidp
+  AIDP-FE-FILES-01: aidp
+  AIDP-FE-GRAPH-01: aidp
+  AIDP-FE-LIST-01: aidp
+  API-AUTO-0210A73052FA9CE0: aidp
+  API-AUTO-22F6CB69A36D094D: aidp
+  API-AUTO-3B8A8FB947806F0E: aidp
+  API-AUTO-7513FEF9904B9F3F: aidp
+  API-AUTO-FECE331C989B771F: aidp
+  UT-BE-AUTO-C41A646DB91F8B53: aidp
+  UT-FE-AUTO-BA4BBC902BC06BE6: aidp
+  UT-SDK-AUTO-58CB146CF2F8ACF3: aidp
+  UT-SDK-AUTO-68AB35BBEA8983F4: aidp
+  UT-SDK-AUTO-717BD679DD9A2E82: aidp
+  # The history retry and database migration Cases prove different parts of these Features.
+  CHAT-RETRY-HISTORY-D4-001: runtime
+  UT-FE-040: runtime
+  OPS-MODEL-MONITORING-D5-001: deployment
   MODEL-LEGACY-TOOLS-D3-001: model
   CHAT-MODEL-CONTROLS-D2-001: runtime
   CHAT-MODEL-CONTROLS-D3-001: runtime

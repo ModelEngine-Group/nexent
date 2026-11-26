@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-CONFIG-JOBS-D3-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-02
+  - NEXENT-SERVICE-REPLICAS-RULE-03
+  title: 两个 Config 竞争后台作业，重启不回收健康 owner
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 通过真实 Config/DB/Runtime 协作证明模型检测、评测准备/生成/维护和 Dreaming 的业务键认领与所有权。
+  preconditions:
+  - 产品和本 Case 固定脚本/执行绑定尚未实现，当前阻塞；实施后仅使用本次拥有的独立实例和专属 DB/Redis 数据域。
+  - 两个可指定访问的 Config A/B、至少两个 Runtime；同一完成的维护批次，模型/语音可用受控协议服务，作业认领与持久化不替换。
+  - 可指定访问 A/B，另行验证稳定 Service；测试凭据与连接参数在机器本地配置，输出脱敏。
+  test_data:
+    variants:
+    - 模型检测
+    - 评测准备
+    - 用例生成
+    - 评测维护重试/取消
+    - Dreaming 周期任务
+    barriers: 同业务键并发屏障、模型调用 request_tag、可暂停的旧 owner 与新代次。
+    preparation: 现有准备目录没有多应用副本集群工厂；实施时补齐真实 families 或自包含准备依据，当前不虚构支持。
+  steps:
+  - order: 1
+    action: 分别对每个变体由 A/B 同时触发同一业务键，阻塞后端协议完成并查询认领记录。
+    expected: 同一键仅一个有效 owner；评测子任务由 Runtime 的 PENDING 条件认领，重复调度不产生第二个有效执行。
+  - order: 2
+    action: 解除协议屏障并比对输出、计费标记及状态；再执行互不相同的租户/业务键。
+    expected: 每个输入版本只有一次有效输出/终态；不同键可并行，不因全局单锁串行化所有任务。
+  - order: 3
+    action: 制造准备/投递失败与旧 owner 的迟到回调；对已有租约任务让租约丢失后产生新 owner。
+    expected: 自己的失败被收敛；失租 worker 停止，旧 owner 不能续租或覆盖新代次；普通后台作业失联不被自动重放。
+  - order: 4
+    action: A 保持检测/评测/Dreaming 工作时重启 B，核对 A 的租约、状态、输入输出与上传哨兵。
+    expected: B 启动不触发全局恢复、recover_stale(True) 或上传清理；A 正常完成，健康租约和文件未被修改。
+  - order: 5
+    action: 结束全部受控作业，回收本次业务记录与 A/B 实例。
+    expected: 无本次活动预约、worker、临时文件或协议资源；其他数据校验和不变。
+  expected_results:
+  - 每个作业变体跨 Config 只认领/提交一次有效结果，不同作用域可并发。
+  - 单实例启动、失败补偿和旧代次回调不伤害健康任务；既有租约失效者不能继续提交。
+  - 本次资源全部回收，普通作业无自动副作用重放。
+  forbidden_side_effects:
+  - 用 mock 的认领调用次数代替真实数据库争抢，或用一个作业变体代替其他变体。
+  - 重启回收健康 Dreaming/评测/检测，旧 owner 改写新状态或删除他人上传。
+  - 自动重放失联普通作业、重复模型/工具副作用，或清理外部数据。
+  acceptance:
+  - id: AC-APP-002
+    description: Config/Northbound/Data Process 普通启动不执行全局恢复、上传清理或重复迁移；维护失败保持停止，健康 owner 的任务不变。
+    steps:
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-APP-003
+    description: 模型检测、评测准备/生成/维护和 Dreaming 按业务键认领；旧 owner 不覆盖新结果，启动不回收健康租约。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定与隔离准备/清理能力尚未实现。
+    primary_domain: system
+    preparation_plan: 测试独占 A/B 实例、DB/Redis 键域与本次身份/对象；受控协议仅替代外部提供者；记录资源 owner 和前置检查。
+    cleanup_plan: finally 停止本次运行/worker/连接，按本次标识回收数据/实例；核对无锁/预约/对象遗留，不清空外部 PVC/共享 Redis。
+  integration_boundary:
+  - 两个 Config 真实 HTTP/后台任务→共享 PostgreSQL 预约/领域认领→Runtime 评测执行→受控模型协议。
+  observations:
+  - 各变体的业务键、owner/attempt、认领与条件提交行数、模型调用标记、重启前后任务/租约和文件校验和。
+  cleanup:
+  - 按测试资源标签关闭本次实例、连接与后台任务，回收本次数据及临时文件；保留外部基础设施与卷，并核对未拥有数据校验和。

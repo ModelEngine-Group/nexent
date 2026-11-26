@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: SYSTEM-CONFIG
+  name: System configuration
+feature:
+  feature_id: SYSTEM-CONFIGURATION
+  name: SU-managed hot system configuration
+  status: active
+  description: Manage eighteen non-secret hot-update settings through a SU-only workspace with database persistence and shared consumer refresh.
+  business_rules:
+  - rule_id: SYS-CONFIG-RULE-01
+    description: Only the frozen eighteen-key catalog is readable and writable through ops; unknown or invalid batches are rejected atomically.
+  - rule_id: SYS-CONFIG-RULE-02
+    description: Page and API access require the SU role and an explicit ops.configuration grant; OPS and other roles cannot use historical configuration grants.
+  - rule_id: SYS-CONFIG-RULE-03
+    description: Versioned SQL seeds built-in defaults without importing managed environment values or overwriting saved values.
+  - rule_id: SYS-CONFIG-RULE-04
+    description: Config, runtime and northbound share validated immutable snapshots, Redis-triggered reads and bounded database reconciliation.
+  - rule_id: SYS-CONFIG-RULE-05
+    description: Saving confirms only the committed database values; notification failure is degraded and no consumer application confirmation is exposed.
+  - rule_id: SYS-CONFIG-RULE-06
+    description: Current parameters have no reliable automatic recommendation and expose no executable recommendation action.
+  required_test_stages: [D2, D3, D4]
+  source:
+    requirement_ids: [SYSTEM-CONFIGURATION-20261110, SYSTEM-CONFIGURATION-20261123]
+    notes: OpenSpec add-system-configuration-page owns the detailed acceptance criteria and frozen parameter catalog.

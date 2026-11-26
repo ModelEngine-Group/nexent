@@ -4,6 +4,7 @@ import { defineConfig } from "playwright/test";
 import { join } from "node:path";
 
 const fakeAudio = process.env.NEXENT_TEST_BROWSER_FAKE_AUDIO;
+const executablePath = process.env.NEXENT_TEST_BROWSER_EXECUTABLE_PATH;
 
 export default defineConfig({
   testDir: "../../../cases",
@@ -11,7 +12,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: Number(process.env.D4_WORKERS || "1"),
   retries: 0,
-  timeout: Number(process.env.D4_CASE_TIMEOUT_MS || "1800000"),
+  timeout: Number(process.env.D4_CASE_TIMEOUT_MS || "600000"),
   expect: { timeout: Number(process.env.D4_ASSERT_TIMEOUT_MS || "30000") },
   reporter: [["line"]],
   outputDir: process.env.D4_PLAYWRIGHT_OUTPUT_DIR || join(process.env.RESULT_DIR || ".", ".playwright-internal"),
@@ -29,6 +30,7 @@ export default defineConfig({
     headless: true,
     permissions: ["microphone"],
     launchOptions: {
+      ...(executablePath ? { executablePath } : {}),
       args: fakeAudio
         ? ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${fakeAudio}`]
         : [],

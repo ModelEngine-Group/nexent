@@ -7,12 +7,14 @@ from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from nexent.core.agents.resources import workspace as workspace_resources
+
 import pytest
 
-from nexent.core.agents import nexent_agent as agent_module
-from nexent.core.agents import sandbox
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents import agent as agent_module
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -116,8 +118,10 @@ def test_cleanup_failure_does_not_hide_construction_failure(construction, caplog
     assert 'Failed to release sandbox resources' in caplog.text
 
 
-def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
+@pytest.mark.parametrize("level", [sandbox.SandboxLevel.DOCKER, sandbox.SandboxLevel.KUBERNETES])
+def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker, level):
     c = construction
+    c.factory.sandbox_config.level = level
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool')
@@ -130,7 +134,7 @@ def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
         ToolConfig(name='plain_tool', class_name='PlainTool', source='local', params={}),
     ]
     mocker.patch.object(c.factory, 'create_tool', side_effect=[tool, plain_tool])
-    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
+    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _, *, observer=None: tool)
     result = c.factory.create_single_agent(c.config)
     assert result is c.core.return_value
     assert c.factory.workspace_mapping is None
@@ -157,9 +161,28 @@ def test_deferred_strict_warmup_failure_releases_executor(construction, mocker, 
     assert wrapper.remote is None
     assert c.factory._sandbox_executors == []
     assert c.factory._sandbox_skill_runners == []
-    release.assert_called_once_with(c.executor, agent_module.logger, timeout=5.0)
+    release.assert_called_once_with(c.executor, workspace_resources.logger, timeout=5.0)
     wrapper.cleanup()
     release.assert_called_once()
+
+
+def test_kubernetes_cold_path_and_cleanup_never_initialize_unavailable_backend(construction):
+    c = construction
+    c.factory.sandbox_config.level = sandbox.SandboxLevel.KUBERNETES
+    c.factory.sandbox_config.scope = sandbox.SandboxScope.SYSTEM
+    c.factory.tool_fastpath_enabled = True
+    c.factory.workspace_mapping = None
+    c.build.side_effect = sandbox.SandboxBackendUnavailableError('T02 backend unavailable')
+    c.factory.create_single_agent(c.config)
+    wrapper = c.core.call_args.kwargs['executor']
+    wrapper.send_tools({})
+    wrapper('print("cold")')
+    c.build.assert_not_called()
+    with pytest.raises(sandbox.SandboxBackendUnavailableError, match='T02'):
+        wrapper('import math')
+    assert wrapper.remote is None
+    wrapper.cleanup()
+    c.build.assert_called_once()
 
 
 def test_deferred_strict_mode_rejects_local_executor(construction, mocker):
@@ -186,7 +209,7 @@ def test_deferred_local_fallback_clears_mapping_and_warns(construction, mocker):
     tool.name = 'read'
     c.config.tools = [ToolConfig(name='read', class_name='ReadFileTool', source='local', params={})]
     mocker.patch.object(c.factory, 'create_tool', return_value=tool)
-    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
+    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _, *, observer=None: tool)
     mocker.patch.object(c.factory, '_push_file_workspace_to_sandbox')
     mocker.patch.object(c.factory, '_initialize_sandbox_workspaces')
     release = mocker.patch.object(sandbox, 'cleanup_executor')

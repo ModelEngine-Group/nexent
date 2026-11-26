@@ -5,6 +5,7 @@ Unit tests for backend monitoring utilities (OTLP-based).
 Tests the actual functionality and integration of the OTLP monitoring system.
 """
 
+import os
 import sys
 import types
 from unittest.mock import MagicMock
@@ -14,7 +15,13 @@ import pytest
 fake_consts = types.ModuleType("contracts.constants.environment")
 for name, value in {
     "ENABLE_TELEMETRY": False,
-    "MONITORING_PROVIDER": "",
+    "LOCAL_FILE_MONITORING_ENABLED": False,
+    "ENABLE_MODEL_MONITORING": False,
+    "MODEL_MONITORING_BATCH_SIZE": 100,
+    "MODEL_MONITORING_FLUSH_INTERVAL_SECONDS": 30,
+    "MONITORING_PROVIDER": "otlp",
+    "TRAJECTORY_READ_ENABLED": False,
+    "TRAJECTORY_CLEANUP_ENABLED": False,
     "MONITORING_PROJECT_NAME": "",
     "OTEL_SERVICE_NAME": "test-service",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
@@ -41,7 +48,11 @@ fake_consts_package.const = fake_consts
 sys.modules.setdefault("consts", fake_consts_package)
 sys.modules.setdefault("contracts.constants.environment", fake_consts)
 
-from infrastructure.observability.bootstrap import monitoring_manager
+with pytest.MonkeyPatch.context() as platform:
+    if os.name == "nt":
+        # These tests exercise telemetry configuration without writing trajectory files.
+        platform.setitem(sys.modules, "fcntl", types.ModuleType("fcntl"))
+    from infrastructure.trace.bootstrap import monitoring_manager
 
 
 class TestMonitoringUtilsModule:
@@ -178,7 +189,7 @@ class TestMonitoringUtilsModule:
 
     def test_module_attributes(self):
         """Test that the module has correct attributes."""
-        from infrastructure.observability import bootstrap as monitoring_module
+        from infrastructure.trace import bootstrap as monitoring_module
 
         assert hasattr(monitoring_module, 'monitoring_manager')
         assert hasattr(monitoring_module, '__all__')
@@ -186,8 +197,8 @@ class TestMonitoringUtilsModule:
 
     def test_singleton_behavior(self):
         """Test that monitoring manager maintains singleton behavior."""
-        from infrastructure.observability.bootstrap import monitoring_manager as manager1
-        from infrastructure.observability.bootstrap import monitoring_manager as manager2
+        from infrastructure.trace.bootstrap import monitoring_manager as manager1
+        from infrastructure.trace.bootstrap import monitoring_manager as manager2
 
         assert manager1 is manager2
 
@@ -253,12 +264,17 @@ class TestMonitoringUtilsModule:
     def test_module_uses_backend_constants_when_top_level_import_is_unavailable(self, monkeypatch):
         """The module should support imports from the backend package namespace."""
         import importlib
-        from infrastructure.observability import bootstrap as monitoring_module
+        from infrastructure.trace import bootstrap as monitoring_module
 
         backend_consts = types.ModuleType("backend.contracts.constants.environment")
         for name, value in {
             "ENABLE_TELEMETRY": False,
-            "MONITORING_PROVIDER": "",
+            "ENABLE_MODEL_MONITORING": False,
+            "MODEL_MONITORING_BATCH_SIZE": 100,
+            "MODEL_MONITORING_FLUSH_INTERVAL_SECONDS": 30,
+            "MONITORING_PROVIDER": "otlp",
+            "TRAJECTORY_READ_ENABLED": False,
+            "TRAJECTORY_CLEANUP_ENABLED": False,
             "MONITORING_PROJECT_NAME": "",
             "OTEL_SERVICE_NAME": "fallback-service",
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
@@ -281,11 +297,12 @@ class TestMonitoringUtilsModule:
             setattr(backend_consts, name, value)
 
         monkeypatch.delitem(sys.modules, "consts", raising=False)
-        monkeypatch.delitem(sys.modules, "contracts.constants.environment", raising=False)
+        monkeypatch.setitem(sys.modules, "contracts.constants.environment", None)
         monkeypatch.setitem(sys.modules, "consts", types.ModuleType("consts"))
         monkeypatch.setitem(sys.modules, "backend.contracts.constants.environment", backend_consts)
 
         reloaded_module = importlib.reload(monitoring_module)
 
+        assert reloaded_module.environment is backend_consts
         assert reloaded_module.monitoring_manager is not None
         assert reloaded_module.__all__ == ["monitoring_manager"]

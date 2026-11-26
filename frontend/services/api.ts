@@ -19,9 +19,45 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  systemConfigurations: `${API_BASE_URL}/system_configurations`,
+  trajectory: {
+    records: `${API_BASE_URL}/trajectory/records`,
+    importArchive: `${API_BASE_URL}/trajectory/import`,
+    imports: `${API_BASE_URL}/trajectory/imports`,
+    savedImport: (id: string) =>
+      `${API_BASE_URL}/trajectory/imports/${encodeURIComponent(id)}`,
+    exportArchive: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/export`,
+    conversation: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}`,
+    snapshot: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/snapshot`,
+    content: (id: string, contentId: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/contents/${encodeURIComponent(contentId)}`,
+    cleanup: `${API_BASE_URL}/trajectory/cleanup`,
+    cleanupSchedule: `${API_BASE_URL}/trajectory/cleanup/schedule`,
+  },
   operations: {
     authorization: `${API_BASE_URL}/ops/authorization`,
     scope: `${API_BASE_URL}/ops/scope`,
+    resources: `${API_BASE_URL}/ops/resources`,
+    agentMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/agents`,
+    agentMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/agents/summary`,
+    agentMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/agents/trends`,
+    agentMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/agents/rankings`,
+    modelMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/models/trends`,
+    modelMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/models`,
+    modelMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/models/summary`,
+    skillMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/skills/summary`,
+    skillMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/skills/trends`,
+    skillMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/skills`,
+    skillMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/skills/rankings`,
+    mcpMonitoringCatalog: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/catalog`,
+    mcpMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/summary`,
+    mcpMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/trends`,
+    mcpMonitoringList: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools`,
+    mcpMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/rankings`,
+    mcpMonitoringOverview: `${API_BASE_URL}/ops/v1/monitoring/mcp-tools/overview`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
@@ -75,6 +111,7 @@ export const API_ENDPOINTS = {
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
+    branch: `${API_BASE_URL}/conversation/branch`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     target: (id: number) => `${API_BASE_URL}/conversation/${id}/target`,
     knowledgeScope: (id: number) =>
@@ -109,6 +146,10 @@ export const API_ENDPOINTS = {
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
+    nl2agentResourceInstallations: `${API_BASE_URL}/agent/nl2agent/resource_installations`,
+    nl2agentResourceInstallationAttempts: `${API_BASE_URL}/agent/nl2agent/resource_installation_attempts`,
+    nl2agentResourceLinks: `${API_BASE_URL}/agent/nl2agent/resource_links`,
+    nl2agentKnowledgeRecommendations: `${API_BASE_URL}/agent/nl2agent/knowledge_recommendations`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     listPage: `${API_BASE_URL}/agent/list/page`,
@@ -192,10 +233,6 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
     updateLabels: `${API_BASE_URL}/tool/labels`,
-  },
-  prompt: {
-    optimize: `${API_BASE_URL}/prompt/optimize`,
-    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
@@ -415,10 +452,11 @@ export const API_ENDPOINTS = {
     upload: `${API_BASE_URL}/file/upload`,
     process: `${API_BASE_URL}/file/process`,
     // Error info service
-    getErrorInfo: (indexName: string, pathOrUrl: string) =>
-      `${API_BASE_URL}/indices/${indexName}/documents/${encodeURIComponent(
-        pathOrUrl
-      )}/error-info`,
+    getErrorInfo: (indexName: string, pathOrUrl: string, fileId?: string) => {
+      const query = new URLSearchParams({ path_or_url: pathOrUrl });
+      if (fileId) query.set("file_id", fileId);
+      return `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/documents/error-info?${query}`;
+    },
     // Embedding model status and configuration
     embeddingModelStatus: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/embedding-model-status`,
@@ -599,6 +637,7 @@ export const API_ENDPOINTS = {
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
       embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
+      tenantSwitch: `${API_BASE_URL}/memory/config/tenant-switch`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>
@@ -811,7 +850,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
-      if (params?.lang) queryParams.append("lang", (params as any).lang);
+      if (params?.lang) queryParams.append("lang", params.lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
@@ -960,7 +999,11 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
-          errorDetails = errorDetail.details;
+          errorDetails =
+            errorDetail.details ??
+            (typeof errorDetail.field === "string"
+              ? { field: errorDetail.field }
+              : undefined);
         } else if (Array.isArray(errorData?.detail)) {
           errorMessage = "Validation failed";
           errorDetails = {

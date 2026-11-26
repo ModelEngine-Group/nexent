@@ -9,6 +9,8 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
+import httpx
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -20,7 +22,8 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.utils.app_factory import create_app, register_exception_handlers
+from contracts.constants import environment
+from backend.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -112,6 +115,79 @@ class TestCreateApp:
         app = create_app(lifespan=lifespan)
 
         assert app.router.lifespan_context is lifespan
+
+    def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+        app.add_api_route("/service", lambda: {"ok": True}, methods=["POST"])
+        app.add_api_route("/ordinary", lambda: {"ok": True}, methods=["POST"])
+        client = TestClient(app)
+        assert client.post("/service").json() == {"ok": True}
+        assert client.post("/ordinary").status_code == 401
+
+    def test_create_app_forwards_internal_runtime_request(self):
+        """The runtime launcher passes a predicate that must reach the middleware."""
+
+        def is_internal(method, path):
+            return method == "POST" and path == "/internal/run"
+
+        app = create_app(
+            gateway_identity_audience="runtime",
+            internal_runtime_request=is_internal,
+        )
+
+        identity_middleware = [
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "GatewayIdentityMiddleware"
+        ]
+        assert len(identity_middleware) == 1
+        assert identity_middleware[0].kwargs["audience"] == "runtime"
+        assert identity_middleware[0].kwargs["internal_runtime_request"] is is_internal
+
+    def test_create_app_identity_middleware_without_internal_predicate(self):
+        """Non-runtime services keep the predicate unset instead of guessing."""
+        app = create_app(gateway_identity_audience="management")
+
+        identity_middleware = [
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "GatewayIdentityMiddleware"
+        ]
+        assert len(identity_middleware) == 1
+        assert identity_middleware[0].kwargs["internal_runtime_request"] is None
+
+    @pytest.mark.asyncio
+    async def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.identity.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+
+        async def ok():
+            return {"ok": True}
+
+        app.add_api_route("/service", ok, methods=["POST"])
+        app.add_api_route("/ordinary", ok, methods=["POST"])
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
+            assert (await client.post("/service")).json() == {"ok": True}
+            assert (await client.post("/ordinary")).status_code == 401
 
 
 class TestRegisterExceptionHandlers:
@@ -515,8 +591,8 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch('management.utils.app_factory.monitoring_manager', None):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', None):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -532,7 +608,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -551,8 +627,8 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch('management.utils.app_factory.monitoring_manager', mock_module.monitoring_manager):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', mock_module.monitoring_manager):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available
@@ -695,7 +771,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('management.utils.exception_handlers.logger') as mock_logger:
+        with patch('backend.http.server.exception_handlers.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -855,7 +931,7 @@ class TestAidpImportErrorBranch:
         from unittest.mock import patch
         from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 
-        with patch("management.utils.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
+        with patch("backend.http.server.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
             fresh_app = FastAPI()
             register_exception_handlers(fresh_app)
 
@@ -900,9 +976,7 @@ class TestGenericHandlerAppExceptionDelegation:
         # Create a request-like object and an AppException
         exc = AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Delegated error")
 
-        response = asyncio.get_event_loop().run_until_complete(
-            generic_handler(None, exc)
-        )
+        response = asyncio.run(generic_handler(None, exc))
 
         assert response.status_code == 400
         body = __import__("json").loads(response.body)
@@ -928,3 +1002,57 @@ class TestGenericHandlerAppExceptionDelegation:
             "message": "Session expired, please log in again",
             "code": "TOKEN_EXPIRED",
         }
+
+
+
+
+class TestOpsMonitoringLifespanWiring:
+    """The shared producer from infrastructure.monitoring wraps app lifespans."""
+
+    @staticmethod
+    def _stub_lifespan(state):
+        @asynccontextmanager
+        async def lifespan(_app):
+            state["lifespan"] = True
+            yield
+
+        return lifespan
+
+    @staticmethod
+    def _stub_producer(state):
+        @asynccontextmanager
+        async def producer_lifespan():
+            state["producer"] = True
+            yield
+
+        return producer_lifespan
+
+    def test_enabled_combines_producer_and_lifespan(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["producer"] is True
+        assert state["lifespan"] is True
+
+    def test_disabled_keeps_lifespan_unwrapped(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", False)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["lifespan"] is True
+        assert "producer" not in state

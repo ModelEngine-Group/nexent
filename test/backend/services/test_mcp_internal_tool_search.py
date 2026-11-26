@@ -9,9 +9,9 @@ from fastmcp import FastMCP
 from mcp.types import Tool
 from pydantic import ValidationError
 
-import services.nl2agent_service as nl2agent_service
+from management.services.agent import nl2agent as nl2agent_service
 from management.services.tool import configuration as tool_configuration_service
-import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
+import management.services.agent.nl2agent_tools as nl2agent_mcp_tools_module
 from contracts.errors.exceptions import AgentDraftEditError
 from management.services.tool.configuration import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
@@ -21,7 +21,7 @@ from tool_collection.mcp.local_mcp_service import (
 from tool_collection.mcp.nl2agent_mcp_service import (
     nl2agent_mcp_service,
 )
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from management.services.agent.nl2agent_tools import (
     NL2AGENT_AGENT_ID_HEADER,
     NL2AGENT_MCP_TOOL_META,
     NL2A_MCP_LOCAL_TOOL_NAMES,
@@ -48,6 +48,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
     SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
     SearchUninstalledResourcesInput,
     SuggestedResourceInstallationPayload,
     build_nl2a_wrapper,
@@ -73,10 +74,10 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         "get_http_request",
         return_value=SimpleNamespace(headers={"Authorization": "Bearer tenant-token"}),
     )
-    get_current_user_id = mocker.patch.object(
+    authenticate_identity = mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     query_all_tools = mocker.patch.object(
         nl2agent_service,
@@ -148,7 +149,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         [" Weather ", "forecast", "WEATHER"]
     )
 
-    get_current_user_id.assert_called_once_with("Bearer tenant-token")
+    authenticate_identity.assert_called_once_with("Bearer tenant-token")
     query_all_tools.assert_called_once_with(tenant_id="tenant-a")
     assert {
         call.args[0]
@@ -225,8 +226,8 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -275,6 +276,9 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     recommend_tool = mounted_tools[RECOMMEND_RESOURCES_NAME]
     wrapper_tool = mounted_tools[NL2A_WRAPPER_NAME]
     save_tool = mounted_tools[SAVE_AGENT_DRAFT_FIELDS_NAME]
+    validate_tool = mounted_tools[VALIDATE_AGENT_GENERATION_COMPLETE_NAME]
+    assert not validate_tool.parameters.get("properties")
+    assert validate_tool.meta == NL2AGENT_MCP_TOOL_META
 
     assert LOCAL_MCP_TOOL_NAME_OVERRIDES == {
         name: name
@@ -495,8 +499,8 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     save_impl = mocker.patch.object(
         nl2agent_service,
@@ -563,38 +567,14 @@ async def test_save_agent_draft_fields_rejects_missing_id_and_forbidden_fields(
 
 
 @pytest.mark.asyncio
-async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_http_request",
-        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
-    )
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "save_agent_draft_fields_impl",
-        side_effect=nl2agent_service.Nl2AgentDraftSaveError(
-            "draft_save_failed",
-            retryable=True,
-        ),
-    )
-
-    result_json, state_wrapper = (
-        await save_agent_draft_fields(1042, {"prompt": "Research"})
-    ).split("\n", 1)
-
-    assert json.loads(result_json)["code"] == "draft_save_failed"
-    assert json.loads(
-        state_wrapper.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
-    ) == {
-        "event": "prompt_generation_failed",
-        "agent_id": 1042,
-        "failed_fields": ["prompt"],
-    }
+async def test_save_agent_draft_fields_rejects_prompt_without_run_context(mocker):
+    mocker.patch.object(nl2agent_mcp_tools_module, "get_http_request",
+                        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}))
+    mocker.patch.object(nl2agent_mcp_tools_module, "_tool_actor", return_value=("user-a", "tenant-a"))
+    save = mocker.patch.object(nl2agent_service, "save_agent_draft_fields_impl")
+    result = json.loads(await save_agent_draft_fields(1042, {"prompt": "Research"}))
+    assert result == {"status": "error", "code": "invalid_prompt_context", "retryable": False}
+    save.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -612,8 +592,8 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
 
     def save_impl(*, agent_id, fields, tenant_id, user_id):
@@ -637,7 +617,7 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     first = await save_agent_draft_fields(1042, {"description": "Updated"})
     second = await save_agent_draft_fields(
         1042,
-        {"prompt": "Verify sources"},
+        {"name": "research_assistant"},
     )
 
     assert [call.kwargs["agent_id"] for call in save.call_args_list] == [1042, 1042]
@@ -651,14 +631,11 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     assert json.loads(
         second_state.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
     ) == {
-        "event": "agent_generation_completed",
+        "event": "agent_draft_fields_saved",
         "agent_id": 1042,
+        "updated_fields": ["name"],
     }
-    validate_complete.assert_awaited_once_with(
-        agent_id=1042,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    )
+    validate_complete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -707,8 +684,8 @@ async def test_clarification_wrapper_keeps_trusted_agent_id(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     require_edit = mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -822,8 +799,8 @@ async def test_uninstalled_search_returns_stable_permission_and_runtime_errors(m
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     require_edit = mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -870,8 +847,8 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
     )
     get_user = mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     search_output = MagicMock()
     search_output.model_dump.return_value = {
@@ -987,8 +964,8 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     require_edit = mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -1055,8 +1032,8 @@ async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -1116,8 +1093,8 @@ async def test_resource_wrapper_validates_results_sources_and_empty_binding(mock
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -1188,266 +1165,6 @@ async def test_resource_wrapper_validates_results_sources_and_empty_binding(mock
 
 
 @pytest.mark.asyncio
-async def test_final_prompt_batch_emits_generation_completed_state(mocker):
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_http_request",
-        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
-    )
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    save_impl = mocker.patch.object(
-        nl2agent_service,
-        "save_agent_draft_fields_impl",
-        return_value={
-            "status": "success",
-            "agent_id": 42,
-            "created": False,
-            "updated_fields": ["greeting_message", "example_questions"],
-        },
-    )
-    validate_complete = mocker.patch.object(
-        nl2agent_service,
-        "validate_agent_generation_complete_impl",
-        new=AsyncMock(),
-    )
-
-    result_json, state_wrapper = (
-        await save_agent_draft_fields(
-            42,
-            {
-                "greeting_message": "Hello",
-                "example_questions": ["What should I research?"],
-            },
-        )
-    ).split("\n", 1)
-
-    assert json.loads(result_json)["updated_fields"] == [
-        "greeting_message",
-        "example_questions",
-    ]
-    assert json.loads(
-        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
-            "</nl2a_state>"
-        )
-    ) == {
-        "event": "agent_generation_completed",
-        "agent_id": 42,
-    }
-    save_impl.assert_called_once()
-    validate_complete.assert_awaited_once_with(
-        agent_id=42,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("fields", "updated_fields"),
-    [
-        (
-            {
-                "prompt": "Use reliable sources.",
-                "greeting_message": "Hello",
-                "example_questions": ["What should I research?"],
-            },
-            [
-                "prompt",
-                "greeting_message",
-                "example_questions",
-            ],
-        ),
-        (
-            {"example_questions": ["What should I research?"]},
-            ["example_questions"],
-        ),
-        ({"prompt": "Research the requested topic."}, ["prompt"]),
-        (
-            {"greeting_message": "Hello"},
-            ["greeting_message"],
-        ),
-        (
-            {"prompt": "Question: Example\nAnswer: Example", "example_questions": ["Question"]},
-            ["prompt", "example_questions"],
-        ),
-    ],
-)
-async def test_completion_validation_uses_persisted_state_for_prompt_saves(
-    mocker,
-    fields,
-    updated_fields,
-):
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_http_request",
-        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
-    )
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "save_agent_draft_fields_impl",
-        return_value={
-            "status": "success",
-            "agent_id": 42,
-            "created": False,
-            "updated_fields": updated_fields,
-        },
-    )
-    validate_complete = mocker.patch.object(
-        nl2agent_service,
-        "validate_agent_generation_complete_impl",
-        new=AsyncMock(),
-    )
-
-    result_json, state_wrapper = (
-        await save_agent_draft_fields(42, fields)
-    ).split("\n", 1)
-
-    assert json.loads(result_json)["updated_fields"] == updated_fields
-    assert json.loads(
-        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
-            "</nl2a_state>"
-        )
-    ) == {
-        "event": "agent_generation_completed",
-        "agent_id": 42,
-    }
-    validate_complete.assert_awaited_once_with(
-        agent_id=42,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("fields", "updated_fields"),
-    [
-        ({"greeting_message": "Hello"}, ["greeting_message"]),
-        ({"prompt": "Research the requested topic."}, ["prompt"]),
-    ],
-)
-async def test_partial_prompt_save_remains_saved_when_database_is_incomplete(
-    mocker, fields, updated_fields
-):
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_http_request",
-        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
-    )
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "save_agent_draft_fields_impl",
-        return_value={
-            "status": "success",
-            "agent_id": 42,
-            "created": False,
-            "updated_fields": updated_fields,
-        },
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "validate_agent_generation_complete_impl",
-        new=AsyncMock(
-            side_effect=nl2agent_service.Nl2AgentCompletionError(
-                "prompt_fields_incomplete",
-                ["example_questions"],
-            )
-        ),
-    )
-
-    result_json, state_wrapper = (await save_agent_draft_fields(42, fields)).split(
-        "\n", 1
-    )
-
-    assert json.loads(result_json)["updated_fields"] == updated_fields
-    assert json.loads(
-        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
-            "</nl2a_state>"
-        )
-    ) == {
-        "event": "agent_draft_fields_saved",
-        "agent_id": 42,
-        "updated_fields": updated_fields,
-    }
-
-
-@pytest.mark.asyncio
-async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mocker):
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_http_request",
-        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
-    )
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "save_agent_draft_fields_impl",
-        return_value={
-            "status": "success",
-            "agent_id": 42,
-            "created": False,
-            "updated_fields": ["greeting_message", "example_questions"],
-        },
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "validate_agent_generation_complete_impl",
-        new=AsyncMock(
-            side_effect=nl2agent_service.Nl2AgentCompletionError(
-                "prompt_fields_incomplete",
-                ["prompt"],
-            )
-        ),
-    )
-
-    result_json, state_wrapper = (
-        await save_agent_draft_fields(
-            42,
-            {
-                "greeting_message": "Hello",
-                "example_questions": ["What should I research?"],
-            },
-        )
-    ).split("\n", 1)
-
-    assert json.loads(result_json) == {
-        "status": "error",
-        "agent_id": 42,
-        "created": False,
-        "updated_fields": [],
-        "code": "prompt_fields_incomplete",
-        "retryable": True,
-    }
-    assert json.loads(
-        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
-            "</nl2a_state>"
-        )
-    ) == {
-        "event": "prompt_generation_failed",
-        "agent_id": 42,
-        "failed_fields": ["prompt"],
-    }
-
-
-@pytest.mark.asyncio
 async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocker):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
@@ -1456,8 +1173,8 @@ async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocke
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -1484,7 +1201,7 @@ async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocke
     assert invalid_result["code"] == "invalid_agent_fields"
     assert invalid_result["retryable"] is False
 
-    nl2agent_mcp_tools_module.get_current_user_id.side_effect = PermissionError(
+    nl2agent_mcp_tools_module.authenticate_identity.side_effect = PermissionError(
         "private authorization details"
     )
     unauthorized_result = json.loads(
@@ -1493,7 +1210,7 @@ async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocke
     assert unauthorized_result["code"] == "unauthorized"
     assert "private authorization details" not in json.dumps(unauthorized_result)
 
-    nl2agent_mcp_tools_module.get_current_user_id.side_effect = RuntimeError(
+    nl2agent_mcp_tools_module.authenticate_identity.side_effect = RuntimeError(
         "private database details"
     )
     failed_result = json.loads(
@@ -1552,8 +1269,8 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -1574,7 +1291,13 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
 @pytest.mark.asyncio
 async def test_public_mcp_scanner_skips_internal_tools(mocker):
     from management.services.tool import discovery as tool_discovery
+    from test.backend.configuration.helpers import system_config_snapshot
 
+    mocker.patch.object(
+        tool_discovery,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.list_tools.return_value = [

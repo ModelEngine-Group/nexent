@@ -69,6 +69,7 @@ function PermissionsProbe() {
     isAuthzReady,
     isAuthorized,
     isLoading,
+    isAuthzPromptModalOpen,
     canAccessRoute,
     refetch,
   } = useAuthorizationContext();
@@ -76,7 +77,10 @@ function PermissionsProbe() {
     <output
       data-testid="permissions"
       data-authorized={isAuthorized}
+      data-denied={isAuthzPromptModalOpen}
       data-workbench={canAccessRoute("/workbench")}
+      data-dashboard={canAccessRoute("/ops/dashboard")}
+      data-configuration={canAccessRoute("/ops/configuration")}
       data-loading={isLoading}
     >
       {isAuthzReady ? permissions.join(",") : "pending"}
@@ -106,7 +110,7 @@ function response(routes = ["/", "/resource-manage"]): AuthInfoResponse {
       role: USER_ROLES.SU,
       groupIds: [],
       permissions: ["resource:manage"],
-      accessibleRoutes: routes,
+      accessiblePages: routes,
     },
   };
 }
@@ -119,6 +123,83 @@ function pendingRequest() {
   });
   return { promise, resolve, reject };
 }
+
+test("dashboard identifiers authorize the existing route and nested pages", async () => {
+  state.pathname = "/zh/ops/dashboard/models";
+  const auth = response(["ops-dashboard", "/ops/dashboard"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-dashboard", "true");
+  expect(probe).toHaveAttribute("data-configuration", "false");
+});
+
+test("an unknown page identifier cannot authorize the dashboard", async () => {
+  state.pathname = "/zh/ops/dashboard";
+  const auth = response(["ops-dashboar"]);
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).not.toHaveTextContent("pending"));
+  expect(probe).toHaveAttribute("data-authorized", "false");
+  expect(probe).toHaveAttribute("data-dashboard", "false");
+});
+test("root resolves a single authorized route without a denial prompt", async () => {
+  const auth = response(["ops-configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome();
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() =>
+    expect(state.replace).toHaveBeenCalledWith("/ops/dashboard")
+  );
+  expect(probe).toHaveAttribute("data-denied", "false");
+});
+
+test("OPS admin can open personal profile with only the system configuration grant", async () => {
+  state.pathname = "/zh/users";
+  const auth = response(["ops-configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-denied", "false");
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test("SU can open the legacy system configuration alias", async () => {
+  state.pathname = "/zh/system-config";
+  const auth = response(["ops-configuration"]);
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-denied", "false");
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test.each(["ops-configuration", "/ops/configuration"])(
+  "OPS cannot open system configuration with grant %s",
+  async (pageId) => {
+    state.pathname = "/zh/ops/configuration";
+    const auth = response([pageId]);
+    auth.user.role = USER_ROLES.OPS;
+    auth.user.roles = [USER_ROLES.OPS];
+    state.request.mockResolvedValueOnce(auth);
+    renderHome(false);
+    const probe = screen.getByTestId("permissions");
+    await waitFor(() => expect(probe).toHaveAttribute("data-denied", "true"));
+    expect(probe).toHaveAttribute("data-authorized", "false");
+    expect(state.replace).toHaveBeenCalledWith("/");
+  }
+);
+
 async function retryButton() {
   return screen.findByRole("button", { name: /page.retryAuthorization/ });
 }
@@ -184,7 +265,9 @@ test.each([
   null,
   {},
   { user: {} },
-  { user: { permissions: [], accessibleRoutes: null } },
+  { user: { permissions: [], accessiblePages: null } },
+  { user: { permissions: [], accessiblePages: [null] } },
+  { user: { permissions: [], accessiblePages: [7] } },
 ])("invalid response %j is recoverable", async (invalid) => {
   state.request
     .mockResolvedValueOnce(invalid as AuthInfoResponse | null)

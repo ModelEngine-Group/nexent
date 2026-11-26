@@ -1,12 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Channel readiness must precede execution; cancelled requests must not retry."""
 
 import json
 import ssl
+import socket
 from concurrent.futures import CancelledError
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents import sandbox as sb
+from nexent.core.agents.sandbox import execution as sb
 from websocket import (
     ABNF,
     WebSocketBadStatusException,
@@ -237,6 +239,7 @@ def test_cancellation_closes_only_current_channel_and_never_retries(lease, monke
         lease.run_code_raise_errors("side_effect()")
     connect.assert_called_once()
     ws.shutdown.assert_called_once()
+    ws.sock.shutdown.assert_called_once_with(socket.SHUT_RDWR)
     ws.close.assert_called_once()
     replace.assert_not_called()
     assert not lease._cancellation_scope._closers

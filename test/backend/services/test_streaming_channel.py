@@ -6,7 +6,7 @@ Unit tests for StreamingChannel event-driven implementation.
 import asyncio
 import pytest
 
-from infrastructure.streaming.channels import (
+from infrastructure.agent_stream_channels import (
     StreamingChannel,
     StreamingChannelManager,
     DEFAULT_HISTORY_SIZE,
@@ -24,11 +24,11 @@ def disable_external_runtime_stream_writes(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "infrastructure.streaming.channels.runtime_state_service.append_stream_event_async",
+        "infrastructure.agent_stream_channels.runtime_state_service.append_stream_event_async",
         _append,
     )
     monkeypatch.setattr(
-        "infrastructure.streaming.channels.runtime_state_service.mark_stream_completed_async",
+        "infrastructure.agent_stream_channels.runtime_state_service.mark_stream_completed_async",
         _complete,
     )
 
@@ -40,6 +40,28 @@ class TestStreamingChannel:
     def channel(self):
         """Create a fresh channel for each test."""
         return StreamingChannel(conversation_id="test-conv-1", user_id="test-user")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("generation, expected_sequences, expected_count", [
+        ("a" * 32, [None, None], None),
+        ("execution:42", [1, 2], 2),
+    ])
+    async def test_replay_sequence_depends_on_durability(
+        self, channel, monkeypatch, generation, expected_sequences, expected_count,
+    ):
+        channel.generation = generation
+        sequences = []
+
+        async def append(_chunk, replay_update):
+            sequences.append(replay_update.get("sequence"))
+            return "1-0"
+
+        monkeypatch.setattr(channel, "_append_shared", append)
+        await channel.publish("first")
+        await channel.publish("second")
+
+        assert sequences == expected_sequences
+        assert channel.durable_event_count == expected_count
 
     @pytest.mark.asyncio
     async def test_publish_and_subscribe(self, channel):
@@ -168,7 +190,7 @@ class TestStreamingChannel:
     async def test_ac_001_history_buffer_obeys_byte_limit(self, monkeypatch):
         """AC-001: local replay evicts whole events to honor the byte policy."""
         monkeypatch.setattr(
-            "infrastructure.streaming.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
+            "infrastructure.agent_stream_channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 
@@ -197,7 +219,7 @@ class TestStreamingChannel:
     async def test_ac_001_single_oversized_event_does_not_accumulate(self, monkeypatch):
         """AC-001: one live event may exceed the cap, but oversized events do not stack."""
         monkeypatch.setattr(
-            "infrastructure.streaming.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
+            "infrastructure.agent_stream_channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 

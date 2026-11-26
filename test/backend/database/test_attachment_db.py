@@ -53,7 +53,7 @@ sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
 
-# Mock management.db.client
+# Mock infrastructure.rdb.client
 minio_client_mock = MagicMock()
 minio_client_mock.storage_config = MagicMock()
 minio_client_mock.storage_config.default_bucket = 'test-bucket'
@@ -62,14 +62,16 @@ minio_client_mock.default_bucket = 'test-bucket'
 client_mock = MagicMock()
 client_mock.minio_client = minio_client_mock
 sys.modules['database'] = MagicMock()
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Patch minio_client before importing
 with patch('management.db.file.attachment.minio_client', minio_client_mock):
@@ -457,8 +459,21 @@ class TestGetFileUrl:
         assert result['object_name'] == 'attachments/test.txt'
         assert result['expires_in'] == 7200
         assert 'error' not in result
+        # Default callers keep the internal signing authority (external=False).
         minio_client_mock.get_file_url.assert_called_once_with(
-            'attachments/test.txt', 'bucket', 7200
+            'attachments/test.txt', 'bucket', 7200, external=False
+        )
+
+    def test_get_file_url_forwards_external_opt_in(self):
+        """Partner direct-link callers opt into the external signing authority."""
+        minio_client_mock.get_file_url.reset_mock()
+        minio_client_mock.get_file_url.return_value = (True, 'https://files.example.com/presigned-url')
+
+        result = get_file_url('attachments/test.txt', 'bucket', 7200, external=True)
+
+        assert result['success'] is True
+        minio_client_mock.get_file_url.assert_called_once_with(
+            'attachments/test.txt', 'bucket', 7200, external=True
         )
 
     def test_get_file_url_failure(self):

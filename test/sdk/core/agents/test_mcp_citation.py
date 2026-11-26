@@ -590,6 +590,20 @@ def test_works_with_real_message_observer():
     assert all(item["tool_sign"] == "q" for item in reported)
 
 
+def _messages_for(observer, process_name):
+    """Collect the harness observer's messages for a process type.
+
+    The agent shares the genuine ``mcp_citation`` module imported above, so
+    the recorded process type is the real enum member; match its value (or a
+    plain string when the harness mock leaks through).
+    """
+    return [
+        entry for entry in observer.messages
+        if len(entry["args"]) >= 3
+        and getattr(entry["args"][1], "value", entry["args"][1]) == process_name
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Integration: create_tool mcp branch wires the citation wrapper
 # ---------------------------------------------------------------------------
@@ -611,12 +625,7 @@ def test_create_tool_mcp_branch_applies_citation_wrapper():
     payload = json.loads(tool.forward(query="deploy"))
     assert [item["index"] for item in payload] == ["q1", "q2"]
     assert payload[0]["reference_mark"] == "[[q1]]"
-    # The harness-loaded agent binds the mocked ProcessType whose
-    # SEARCH_CONTENT member is the plain "search_content" string.
-    search_messages = [
-        entry for entry in observer.messages
-        if len(entry["args"]) >= 3 and entry["args"][1] == "search_content"
-    ]
+    search_messages = _messages_for(observer, "search_content")
     assert len(search_messages) == 1
     reported = json.loads(search_messages[0]["args"][2])
     assert reported[0]["cite_index"] == 1
@@ -643,17 +652,8 @@ def test_create_tool_mcp_branch_wires_metadata_image_url_builder():
     payload = json.loads(tool.forward(query="diagram"))
     # The builder injected through tool metadata activates the rebuild.
     assert "/__aidp_image__/q1" in payload[0]["text"]
-    picture_messages = [
-        entry for entry in observer.messages
-        if len(entry["args"]) >= 3 and entry["args"][1] == "picture_web"
-    ]
+    picture_messages = _messages_for(observer, "picture_web")
     assert len(picture_messages) == 1
     assert json.loads(picture_messages[0]["args"][2]) == {"images_url": ["/proxy/8"]}
-    reported = json.loads(
-        next(
-            entry["args"][2]
-            for entry in observer.messages
-            if len(entry["args"]) >= 3 and entry["args"][1] == "search_content"
-        )
-    )
+    reported = json.loads(_messages_for(observer, "search_content")[0]["args"][2])
     assert reported[0]["image_key"] == "q1"

@@ -10,19 +10,17 @@ import time
 
 import pytest
 
-from contracts.constants.environment import NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE, NORTHBOUND_CONTROL_THREAD_MAX_WORKERS, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS, RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS, RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS, RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,
     ManagerState,
     ThreadManager,
+    ThreadManagerBase,
 )
-from infrastructure.concurrency import (
-    config_thread_manager,
-    mcp_thread_manager,
-    northbound_thread_manager,
-    runtime_thread_manager,
-)
+from management.thread_management import config_thread_manager
+from backend.mcp.thread_management import mcp_thread_manager
+from runtime.thread_management import runtime_thread_manager
 
 CASE_ID = 'UT-BE-AUTO-A5E5C8329C318684'
 
@@ -30,14 +28,14 @@ RUNTIME_LANES = {
     'agent-run',
     'control-io',
     'model-tool-io',
+    'model-embedding',
     'mcp-session',
     'sandbox',
     'background-service',
     'evaluation',
 }
 CONFIG_LANES = {'control-io', 'background-service', 'evaluation', 'model-tool-io'}
-NORTHBOUND_LANES = {'control-io', 'background-service', 'model-tool-io'}
-MCP_LANES = {'control-io', 'background-service'}
+MCP_LANES = {'control-io', 'background-service', 'model-tool-io'}
 
 
 def _assert_policy(policy, lane_name, max_workers, max_queue_size,
@@ -59,16 +57,14 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
     managers = [
         runtime_thread_manager,
         config_thread_manager,
-        northbound_thread_manager,
         mcp_thread_manager,
     ]
-    assert all(isinstance(m, ThreadManager) for m in managers)
+    assert all(isinstance(m, ThreadManagerBase) for m in managers)
 
-    assert len({id(m) for m in managers}) == 4
+    assert len({id(m) for m in managers}) == 3
     assert [m.service_name for m in managers] == [
         'runtime',
         'config',
-        'northbound',
         'api-to-mcp',
     ]
 
@@ -88,6 +84,11 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
     assert agent_run.cancel_grace_seconds == RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS
 
     assert rt._policies['model-tool-io'].max_workers == max(4, RUNTIME_AGENT_THREAD_MAX_WORKERS)
+    _assert_policy(
+        rt._policies['model-embedding'], 'model-embedding', max(4, RUNTIME_AGENT_THREAD_MAX_WORKERS),
+        RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE, 0, RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
+        RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+    )
 
     for lane in ('control-io', 'model-tool-io', 'mcp-session', 'sandbox',
                  'background-service', 'evaluation'):
@@ -104,25 +105,13 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
     for lane in CONFIG_LANES:
         assert cfg._policies[lane].shutdown_grace_seconds == RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 
-    nb = northbound_thread_manager
-    assert set(nb._policies.keys()) == NORTHBOUND_LANES
-    for lane, policy in nb._policies.items():
-        assert policy.name == lane
-    _assert_policy(nb._policies['control-io'], 'control-io',
-                   NORTHBOUND_CONTROL_THREAD_MAX_WORKERS,
-                   NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE,
-                   0, 2, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS)
-    _assert_policy(nb._policies['background-service'], 'background-service',
-                   12, 8, 0, 2, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS)
-    _assert_policy(nb._policies['model-tool-io'], 'model-tool-io',
-                   6, 16, 0, 5, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS)
-
     mcp = mcp_thread_manager
     assert set(mcp._policies.keys()) == MCP_LANES
     for lane, policy in mcp._policies.items():
         assert policy.name == lane
     _assert_policy(mcp._policies['control-io'], 'control-io', 8, 16, 0, 5, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
     _assert_policy(mcp._policies['background-service'], 'background-service', 12, 8, 0, 5, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+    _assert_policy(mcp._policies['model-tool-io'], 'model-tool-io', 6, 16, 0, 5, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
 
     for i, left in enumerate(managers):
         for right in managers[i + 1:]:
@@ -135,7 +124,6 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
     assert rt._policies['control-io'].shutdown_grace_seconds == RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
     assert cfg._policies['control-io'].shutdown_grace_seconds == RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
     assert mcp._policies['control-io'].shutdown_grace_seconds == RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-    assert nb._policies['control-io'].shutdown_grace_seconds == NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
 
     started_here = False
     if runtime_thread_manager.state is ManagerState.CREATED:
@@ -182,12 +170,13 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
                 assert drained.stuck_execution_ids == ()
                 assert runtime_thread_manager.snapshot().active_count == 0
 
-    await _check_northbound_model_lane_isolation(nb)
+    await _check_management_model_lane_isolation(cfg)
+    await _check_management_model_lane_isolation(mcp)
     for secret in ('sk-', 'api_key=', 'password=', 'authorization: bearer'):
         assert secret not in caplog.text.lower()
 
 
-async def _check_northbound_model_lane_isolation(manager):
+async def _check_management_model_lane_isolation(manager):
     """Model results/errors propagate while control I/O is blocked, then drain."""
     started_here = manager.state is ManagerState.CREATED
     if started_here:

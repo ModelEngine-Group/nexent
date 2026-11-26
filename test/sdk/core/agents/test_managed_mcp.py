@@ -1,21 +1,20 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import asyncio
 import threading
 from concurrent.futures import CancelledError
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import mcp.types
 import mcpadapt.core
 import pytest
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
-from nexent.consts.mcp_errors import (
-    MCPConnectionFailure,
-    MCPConnectionTimeoutError,
-    MCPToolTimeoutError,
-)
+
+from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
+from nexent.monitor.facts import set_fact_sink
+from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
 
 
 class _BlockingAsyncSession:
@@ -31,15 +30,31 @@ class _BlockingAsyncSession:
             self.cancelled.set()
 
 
+class _CompletedAsyncSession:
+    async def call_tool(self, name, arguments):
+        return {"ok": True}
+
+
+class _PassthroughAdapter:
+    """Adapt MCP tools into plain callables that forward arguments untouched."""
+
+    def adapt(self, call_tool, tool):
+        def forward(arguments=None, **_kwargs):
+            return call_tool(arguments)
+
+        return SimpleNamespace(name=tool.name, forward=forward)
+
+
 class _AsyncMCPContext:
-    def __init__(self, session, exited: threading.Event):
+    def __init__(self, session, exited: threading.Event, name: str = "blocking_tool"):
         self.session = session
         self.exited = exited
+        self.name = name
         self.exit_count = 0
 
     async def __aenter__(self):
         tool = mcp.types.Tool(
-            name="blocking_tool",
+            name=self.name,
             description="Blocks until the session is closed",
             inputSchema={"type": "object", "properties": {}},
         )
@@ -73,6 +88,41 @@ def _manager():
     )
     manager.start()
     return manager
+
+
+def test_tool_result_callback_is_bound_to_its_server():
+    class Session:
+        async def call_tool(self, name, arguments):
+            return mcp.types.CallToolResult(
+                content=[mcp.types.TextContent(type="text", text="public output")],
+                _meta={"receipt": name},
+            )
+
+    manager = _manager()
+    receipt = MagicMock()
+    local = _AsyncMCPContext(Session(), threading.Event(), "local_tool")
+    remote = _AsyncMCPContext(Session(), threading.Event(), "remote_tool")
+
+    def factory(parameters, **kwargs):
+        assert "on_tool_result" not in parameters
+        return local if parameters["url"] == "local" else remote
+
+    try:
+        with ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[{"url": "local", "on_tool_result": receipt}, {"url": "remote"}],
+            cancellation_scope=RunCancellationScope(),
+            tool_timeout_seconds=1,
+            close_timeout_seconds=0.5,
+            session_context_factory=factory,
+        ) as collection:
+            tools = {tool.name: tool for tool in collection.tools}
+            assert tools["remote_tool"].forward() == "public output"
+            receipt.assert_not_called()
+            assert tools["local_tool"].forward() == "public output"
+            receipt.assert_called_once_with("local_tool", {"receipt": "local_tool"})
+    finally:
+        asyncio.run(manager.shutdown(timeout=1))
 
 
 def test_ut_sdk_tlm_029_tool_deadline_closes_session_owner(caplog):
@@ -274,6 +324,53 @@ def test_ut_sdk_tlm_032_run_cancel_cancels_active_call_future():
     asyncio.run(manager.shutdown(timeout=1))
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_prepared_mcp_discovery_only_exposes_names_authorized_for_each_server(missing):
+    from contextlib import asynccontextmanager
+
+    manager = _manager()
+    seen_parameters = []
+
+    @asynccontextmanager
+    async def sessions(parameters, **_kwargs):
+        assert "allowed_tools" not in parameters
+        seen_parameters.append(parameters["url"])
+        first = parameters["url"] == "http://first.invalid/mcp"
+        names = ["own-first", "own_second"] if first else ["own-first"]
+        if not first and not missing:
+            names.append("own_second")
+        discovered = [
+            mcp.types.Tool(name=name, description=parameters["url"], inputSchema={"type": "object", "properties": {}})
+            for name in names
+        ]
+        yield object(), discovered
+
+    scope = RunCancellationScope()
+    try:
+        collection = ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[
+                {"url": "http://first.invalid/mcp", "allowed_tools": {"own-first": "own_first"}},
+                {"url": "http://second.invalid/mcp", "allowed_tools": {"own_second": "own_second"}},
+            ],
+            cancellation_scope=scope, tool_timeout_seconds=1, close_timeout_seconds=0.5,
+            session_context_factory=sessions,
+        )
+        if missing:
+            with pytest.raises(ValueError, match="missing from discovery"), collection:
+                pytest.fail("The session must fail before exposing tools")
+        else:
+            with collection:
+                assert [(tool.name, tool.description) for tool in collection.tools] == [
+                    ("own_first", "http://first.invalid/mcp"),
+                    ("own_second", "http://second.invalid/mcp"),
+                ]
+        assert seen_parameters == ["http://first.invalid/mcp", "http://second.invalid/mcp"]
+        assert manager.snapshot().active_count == 0
+    finally:
+        asyncio.run(manager.shutdown(timeout=1))
+
+
 class _FailingConnectContext:
     async def __aenter__(self):
         raise ConnectionRefusedError("[Errno 111] Connection refused")
@@ -336,3 +433,182 @@ def test_connection_cancellation_is_not_wrapped():
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(run_session())
     asyncio.run(manager.shutdown(timeout=1))
+
+
+def _metadata(**overrides):
+    values = {
+        "tenant_id": "tenant-1",
+        "agent_id": 7,
+        "monitoring_run_id": "run-1",
+        "monitoring_root_run_id": "root-1",
+        "monitoring_group_ids": (1, 2),
+        "is_debug": False,
+    }
+    values.update(overrides)
+    return AgentRunMetadata(**values)
+
+
+def test_mcp_tool_call_emits_one_caller_observed_fact():
+    manager = _manager()
+    scope = RunCancellationScope()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_CompletedAsyncSession(), exited)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with (
+            ManagedMCPToolCollection(
+                manager=manager,
+                server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+                cancellation_scope=scope,
+                tool_timeout_seconds=1,
+                close_timeout_seconds=0.5,
+                tool_adapter_factory=_PassthroughAdapter,
+                session_context_factory=_async_context_factory(context),
+            ) as collection,
+            agent_monitoring_context(_metadata()),
+        ):
+            result = collection.tools[0].forward(value="secret-tool-argument")
+    finally:
+        set_fact_sink(None)
+        asyncio.run(manager.shutdown(timeout=1))
+
+    assert result == {"ok": True}
+    assert exited.is_set()
+    assert [fact["record_revision"] for fact in facts] == [1, 2]
+    assert [fact["outcome"] for fact in facts] == ["started", "succeeded"]
+    assert facts[1]["fact_id"] == facts[0]["fact_id"]
+    assert facts[0]["tool_name"] == "blocking_tool"
+    assert facts[0]["tenant_id"] == "tenant-1"
+    assert facts[0]["agent_id"] == 7
+    assert facts[0]["agent_run_id"] == "run-1"
+    assert facts[0]["root_run_id"] == "root-1"
+    assert facts[0]["initiator_group_ids"] == (1, 2)
+    assert "secret-tool-argument" not in str(facts)
+
+
+def test_mcp_tool_timeout_emits_single_failed_fact():
+    manager = _manager()
+    scope = RunCancellationScope()
+    entered = threading.Event()
+    cancelled = threading.Event()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_BlockingAsyncSession(entered, cancelled), exited)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with (
+            ManagedMCPToolCollection(
+                manager=manager,
+                server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+                cancellation_scope=scope,
+                tool_timeout_seconds=0.02,
+                close_timeout_seconds=0.5,
+                request_timeout_seconds=10,
+                session_context_factory=_async_context_factory(context),
+            ) as collection,
+            agent_monitoring_context(_metadata()),
+            pytest.raises(MCPToolTimeoutError, match="0.02 seconds"),
+        ):
+            collection.tools[0].forward()
+    finally:
+        set_fact_sink(None)
+        asyncio.run(manager.shutdown(timeout=1))
+
+    assert entered.is_set()
+    assert cancelled.wait(1)
+    assert exited.wait(1)
+    assert [fact["record_revision"] for fact in facts] == [1, 2]
+    assert facts[0]["outcome"] == "started"
+    assert facts[1]["outcome"] == "failed"
+    assert facts[1]["error_category"] == "TIMEOUT"
+    assert facts[1]["fact_id"] == facts[0]["fact_id"]
+
+
+class _ResultErrorSession:
+    """Return a protocol-level tool error exactly as FastMCP/MCP sends it."""
+
+    async def call_tool(self, name, arguments):
+        return SimpleNamespace(isError=True, content=[])
+
+
+class _MixedResultSession:
+    """Succeed or fail per invocation so concurrent calls must stay distinct."""
+
+    async def call_tool(self, name, arguments):
+        failed = bool((arguments or {}).get("fail"))
+        return SimpleNamespace(isError=failed, content=[])
+
+
+def test_mcp_tool_is_error_result_emits_failed_fact_without_changing_result():
+    manager = _manager()
+    scope = RunCancellationScope()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_ResultErrorSession(), exited)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with (
+            ManagedMCPToolCollection(
+                manager=manager,
+                server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+                cancellation_scope=scope,
+                tool_timeout_seconds=1,
+                close_timeout_seconds=0.5,
+                tool_adapter_factory=_PassthroughAdapter,
+                session_context_factory=_async_context_factory(context),
+            ) as collection,
+            agent_monitoring_context(_metadata()),
+        ):
+            result = collection.tools[0].forward(value="secret-tool-argument")
+    finally:
+        set_fact_sink(None)
+        asyncio.run(manager.shutdown(timeout=1))
+
+    assert result.isError is True
+    assert [fact["outcome"] for fact in facts] == ["started", "failed"]
+    assert facts[1]["error_category"] == "TOOL_ERROR"
+    assert facts[1]["fact_id"] == facts[0]["fact_id"]
+    assert "secret-tool-argument" not in str(facts)
+
+
+def test_mcp_tool_result_errors_are_tracked_per_invocation():
+    from concurrent.futures import ThreadPoolExecutor
+
+    manager = _manager()
+    scope = RunCancellationScope()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_MixedResultSession(), exited)
+    facts = []
+    set_fact_sink(facts.append)
+    try:
+        with (
+            ManagedMCPToolCollection(
+                manager=manager,
+                server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+                cancellation_scope=scope,
+                tool_timeout_seconds=5,
+                close_timeout_seconds=0.5,
+                tool_adapter_factory=_PassthroughAdapter,
+                session_context_factory=_async_context_factory(context),
+            ) as collection,
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            def invoke(arguments):
+                # The monitoring context is a context variable, so each worker
+                # enters its own before the observed call.
+                with agent_monitoring_context(_metadata()):
+                    return collection.tools[0].forward(arguments)
+
+            outcomes = [
+                pool.submit(invoke, {"fail": True}),
+                pool.submit(invoke, {"fail": False}),
+            ]
+            results = [future.result(timeout=5) for future in outcomes]
+    finally:
+        set_fact_sink(None)
+        asyncio.run(manager.shutdown(timeout=1))
+
+    assert [result.isError for result in results] == [True, False]
+    terminal = [fact for fact in facts if fact["record_revision"] == 2]
+    assert sorted(fact["outcome"] for fact in terminal) == ["failed", "succeeded"]

@@ -6,8 +6,16 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
+from contracts.clarification import ClarificationResponse
+from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.conversation import HistoryItem
+from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
+from contracts.model import WorkbenchGenerationConfig as WorkbenchGenerationConfig
+from contracts.skill import SkillResolution, SkillZipEntry
+from contracts.tool import ToolParamsRequest
+from contracts.agent_prompt import normalize_imported_agent_bundle
 from nexent.core.agent_names import validate_agent_name
-from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -20,11 +28,11 @@ from pydantic import (
 
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
-from contracts.conversation import ConversationTarget, HistoryItem
+from contracts.conversation import ConversationTarget, HistoryItem, MessageAnnotationItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_prompt import normalize_imported_agent_bundle
+from contracts.agent_prompt import normalize_imported_agent_bundle
 
 
 @dataclass(frozen=True)
@@ -190,12 +198,26 @@ def reject_legacy_agent_fields(value):
 
 
 class AgentRequest(BaseModel):
+    _runtime_user_message_id: Optional[int] = PrivateAttr(default=None)
+    _runtime_user_message_index: Optional[int] = PrivateAttr(default=None)
     # Internal provenance is never accepted from serialized client requests.
     _message_source: str = PrivateAttr(default="CHAT")
+    _projection_run_id: str | None = PrivateAttr(default=None)
+    _run_admission_scope: str | None = PrivateAttr(default=None)
+    _track_execution: bool = PrivateAttr(default=False)
     query: str
     clarification_response: Optional[ClarificationResponse] = None
+    # Reply annotations ("add to chat" quotes) attached to this turn's user
+    # message; persisted as a structured unit and merged into the model-facing
+    # text at request time.
+    annotations: Optional[List[MessageAnnotationItem]] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
+    retry_user_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    retry_message_index: Optional[int] = Field(default=None, ge=0, strict=True)
+    resume_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    replay_cursor: Optional[str] = Field(default=None, max_length=64)
+    stream_cursor: bool = False
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
@@ -206,7 +228,7 @@ class AgentRequest(BaseModel):
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
     knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
-    entrypoint: Optional[Literal["workbench"]] = None
+    entrypoint: Optional[Literal["workbench", "automation"]] = None
     workbench: Optional[WorkbenchSessionConfig] = None
     expected_workbench_config_version: Optional[int] = Field(default=None, ge=0)
     context_policy: Optional[Dict[str, Any]] = Field(
@@ -234,7 +256,11 @@ class AgentRequest(BaseModel):
         return _validated_context_policy(value)
 
     @model_validator(mode="after")
-    def validate_workbench_entrypoint(self):
+    def validate_conversation_entrypoint(self):
+        if self.retry_message_index is not None and self.retry_user_message_id is None:
+            raise ValueError("Retry requires an original user message ID")
+        if self.retry_user_message_id is not None and (not self.conversation_id or self.is_debug):
+            raise ValueError("Retry requires a persisted conversation")
         if (
             self.entrypoint == "workbench"
             and self.workbench is None
@@ -243,6 +269,10 @@ class AgentRequest(BaseModel):
             raise ValueError("workbench entrypoint requires a Workbench configuration")
         if self.workbench is not None and self.entrypoint != "workbench":
             raise ValueError("Workbench configuration requires entrypoint='workbench'")
+        if self.entrypoint == "automation" and (
+            not self.agent_id or self.agent_id < 1 or self.is_debug or not self.enable_automation_tool
+        ):
+            raise ValueError("automation entrypoint requires an interactive Agent with the proposal tool enabled")
         return self
 
     enable_plan: Optional[bool] = Field(
@@ -261,6 +291,7 @@ class NL2ModelControlsRequest(BaseModel):
     """The same per-model preferences used by every Agent conversation."""
 
     model_id: Optional[StrictInt] = Field(default=None, gt=0)
+    resume_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
     model_parameter_preferences: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -273,6 +304,7 @@ class NL2AgentRunRequest(NL2ModelControlsRequest):
     """Request payload for an NL2Agent turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = Field(default=None, gt=0)
@@ -288,6 +320,7 @@ class NL2SkillRunRequest(NL2ModelControlsRequest):
     """Request payload for an NL2Skill turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     target: Optional[ConversationTarget] = None
@@ -404,6 +437,7 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    enable_memory: Optional[bool] = Field(default=None, strict=True)
     enable_protocol_repair_retry: Optional[bool] = None
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
@@ -444,6 +478,7 @@ class AgentIDRequest(BaseModel):
 
 
 class ExportAndImportAgentInfo(BaseModel):
+    enable_context_manager: bool = True
     agent_id: int
     tenant_id: Optional[str] = None
     name: str
@@ -456,6 +491,7 @@ class ExportAndImportAgentInfo(BaseModel):
     provide_run_summary: bool
     allow_chat_metadata: bool = False
     allow_mcp_header_passthrough: bool = False
+    enable_memory: bool = Field(default=True, strict=True)
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None

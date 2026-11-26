@@ -5,24 +5,23 @@ from typing import Any, Dict, List
 
 from sqlalchemy import text
 
-from contracts.constants.environment import MAX_MCP_SERVICES_PER_TENANT
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import TenantResourceLimitError
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import McpRecord
 
 logger = logging.getLogger("remote_mcp_db")
-_MCP_SERVICE_LIMIT = MAX_MCP_SERVICES_PER_TENANT if isinstance(MAX_MCP_SERVICES_PER_TENANT, int) else 1_000
 
 
-def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
+def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str) -> int:
     """
     Create new MCP record
 
     :param mcp_data: Dictionary containing MCP information
     :param tenant_id: Tenant ID
     :param user_id: User ID
-    :return: Created MCP record
+    :return: ID of the committed MCP record
 
     """
     allowed_fields = {
@@ -66,16 +65,20 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
             .count()
         )
         mcp_count = mcp_count if isinstance(mcp_count, int) else 0
-        if mcp_count >= _MCP_SERVICE_LIMIT:
+        limit = get_config_snapshot().get("MAX_MCP_SERVICES_PER_TENANT")
+        if mcp_count >= limit:
             raise TenantResourceLimitError(
-                f"MCP service tenant limit reached: maximum {_MCP_SERVICE_LIMIT} MCP services per tenant",
+                f"MCP service tenant limit reached: maximum {limit} MCP services per tenant",
                 resource="mcp_services",
                 scope="tenant",
-                limit=_MCP_SERVICE_LIMIT,
+                limit=limit,
                 current_count=mcp_count,
             )
         new_mcp = McpRecord(**filtered_data)
         session.add(new_mcp)
+        session.flush()
+        mcp_id = new_mcp.mcp_id
+    return mcp_id
 
 
 def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str):

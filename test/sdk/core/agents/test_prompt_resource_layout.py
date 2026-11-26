@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 checks for the language-and-purpose prompt resource layout."""
 
 import hashlib
@@ -9,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).parents[4]
 PROMPTS = ROOT / "sdk/nexent/core/prompts"
-# Baseline captures reviewed SDK resources, including workspace guidance merged in 95c166472.
+# Baseline includes reviewed shared response style, Core protocols and workspace guidance.
 MIGRATED_SHA256 = json.loads(
     (ROOT / "test/assets/sdk_prompt_migration_hashes.json").read_text(encoding="utf-8")
 )

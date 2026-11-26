@@ -16,11 +16,13 @@ from shared.postgres import apply_product_postgres_env
 apply_product_postgres_env()
 
 from management.db.automation import messages, repository as runs
-from management.db.client import db_client
-from management.db.conversation import repository as conversations
+from infrastructure.rdb import agent_execution, conversation_state
+from infrastructure.rdb.client import db_client
+from management.db.conversation import prepared_turn, repository as conversations
+from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from management.db.models import (
-    AgentAutomationRun, AgentAutomationTask, ConversationMessage, ConversationMessageUnit,
-    ConversationRecord, ConversationSourceImage, ConversationSourceSearch,
+    AgentAutomationRun, AgentAutomationTask, AgentInfo, ConversationMessage, ConversationMessageUnit,
+    ConversationRecord, ConversationSourceImage, ConversationSourceSearch, TrajectoryExecution, UserAccount, UserTenant,
 )
 
 
@@ -30,8 +32,10 @@ def run_store(monkeypatch):
     engine = db_client.engine.execution_options(schema_translate_map={"nexent": schema})
     with engine.begin() as connection:
         connection.execute(CreateSchema(schema))
-        for model in (ConversationRecord, ConversationMessage, ConversationMessageUnit,
-                      ConversationSourceSearch, ConversationSourceImage, AgentAutomationTask, AgentAutomationRun):
+        for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
+                      ConversationSourceSearch, ConversationSourceImage, AgentAutomationTask, AgentAutomationRun,
+                      ConversationProjectionReceipt, TrajectoryExecution, UserAccount, UserTenant,
+                      agent_execution.AgentExecution):
             model.__table__.create(connection)
 
     @contextmanager
@@ -44,7 +48,7 @@ def run_store(monkeypatch):
             session.execute(text("SET LOCAL statement_timeout = '5s'"))
             yield session
 
-    for module in (messages, runs, conversations):
+    for module in (messages, runs, conversations, prepared_turn, conversation_state, agent_execution):
         monkeypatch.setattr(module, "get_db_session", sessions)
     now = datetime.now(timezone.utc)
     task_data = dict(
@@ -59,6 +63,8 @@ def run_store(monkeypatch):
     )
     try:
         with sessions() as session:
+            session.add(UserAccount(user_id="owner", user_roles=["USER"], delete_flag="N"))
+            session.add(UserTenant(user_id="owner", tenant_id="tenant", delete_flag="N"))
             session.add(ConversationRecord(conversation_id=1, conversation_title="Fixture",
                                            created_by="owner", updated_by="owner", delete_flag="N"))
         task = runs.create_task(task_data, "owner")

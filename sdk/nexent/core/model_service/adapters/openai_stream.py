@@ -41,6 +41,7 @@ class OpenAIStreamDecoder:
         self._content, self._reasoning, self._refusal = [], [], []
         self._calls = {}
         self._usage_raw = None
+        self._usage_diagnostic = {}
         self._unknown = []
 
     def _fail(self, category):
@@ -59,7 +60,14 @@ class OpenAIStreamDecoder:
 
     def _update_usage(self, raw):
         # Each frame reports a cumulative snapshot, not an increment.
-        _usage(raw, self._profile.capabilities.usage.semantics_id)
+        if self._usage_diagnostic:
+            return
+        try:
+            _usage(raw, self._profile.capabilities.usage.semantics_id)
+        except ModelAdapterError as error:
+            self._usage_diagnostic["usage_diagnostic"] = error.category
+            self._usage_raw = None
+            return
         merged = dict(self._usage_raw or {})
         for key, value in raw.items():
             if value is None:
@@ -104,7 +112,11 @@ class OpenAIStreamDecoder:
             update={
                 "message_id": self._message_id,
                 "tool_calls": calls,
-                "provider_metadata": {**complete.provider_metadata, "unmapped_delta_fields": self._unknown},
+                "provider_metadata": {
+                    **complete.provider_metadata,
+                    **self._usage_diagnostic,
+                    "unmapped_delta_fields": self._unknown,
+                },
             }
         )
         self._closed = True
@@ -225,8 +237,11 @@ class OpenAIStreamDecoder:
         state = self._calls[index]
         if "type" in raw and raw["type"] != "function":
             self._fail("MODEL_TOOL_CALL_INVALID")
-        if raw.get("id") is not None:
-            value = raw["id"]
+        value = raw.get("id")
+        # Some providers repeat an empty placeholder after establishing the call identity.
+        if value == "" and state["id"] is not None:
+            value = None
+        if value is not None:
             if not isinstance(value, str) or not value.strip() or state["id"] is not None and state["id"] != value:
                 self._fail("MODEL_STREAM_IDENTITY_CONFLICT")
             state["id"] = value

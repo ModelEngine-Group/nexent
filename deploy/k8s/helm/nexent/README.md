@@ -104,11 +104,64 @@ Application Secret values are rendered after credentials are finalized and writt
 
 Ordinary backend configuration is injected through these file Secrets instead of being copied field by field into generated common values. The common ConfigMap and Chart values remain the fallback for omitted keys and direct Helm use. The runtime renderer retains timezone and Web's Northbound URL/upload limit, plus Redis URL and part-processor count because they also supply the runtime-state Redis fallback and derived worker concurrency. Deployment overrides, finalized credentials and infrastructure configuration keep their dedicated rendering paths.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; the chart does not pin these workloads to a node. Use this mode only on a single-node cluster so backend Pods see the same workspace. On multiple nodes, use `dynamic` or `existing` with actual shared RWX storage. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
-Config, Runtime, Northbound, and Data Process are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
+Config and Data Process remain single-replica workloads. Runtime also defaults to one replica and retains the Kubernetes `Recreate` strategy. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
+
+### Kubernetes SYSTEM Sandbox
+
+Set `global.sandboxProvider: kubernetes` in this chart's `values.yaml` and deploy with the project script. Kubernetes SYSTEM creates one sandbox Pod per Runtime Pod on first use. Existing Agent sandbox policies at the `docker` level select the Kubernetes provider when this setting is enabled.
+
+Set `global.sandboxNetworkPolicyVerified: true` after verifying that the cluster's CNI enforces the sandbox NetworkPolicy. Use shared RWX workspace storage, or set `global.sandboxSingleNodeDevelopment: true` for a single-node development cluster. The sandbox image configured for Nexent must be available to Kubernetes when the first Agent run needs it.
+
+### Deploying During an Idle Window
+
+Use `bash deploy.sh k8s` (or `--release-scope nexent`) during an idle window with no in-flight work. The script acquires a PostgreSQL session lock, stops and waits for the old business Pods, runs system bootstrap, and starts the configured replica counts. System bootstrap applies pending SQL migrations and initializes the system Agents. The deployment finishes after the enabled workloads are ready.
+
+Before bootstrap, the script waits for each existing business Deployment to report zero replicas for its current generation and for its Pods to disappear.
+
+Reserve the database, Redis keyspace, and workspace for one Nexent application release. The script needs permission to exec into the PostgreSQL Deployment and manage the release's bootstrap Job. Runtime file logs are under `/mnt/nexent-data/logs/<pod-name>` inside its container.
+
+Before pausing the release, the script checks for unfinished bootstrap Jobs, legacy Runtime maintenance Jobs, and their Pods from earlier attempts. If bootstrap or the pre-activation lock check fails, resolve the reported issue and rerun the application deployment during an idle window. An unfinished Job from the earlier attempt must finish or be stopped before the retry.
+
+If an unexpected shutdown leaves abandoned work that requires repair, pause the business Deployments and wait for their Pods and any previous bootstrap or maintenance writers to exit. Provision a one-off Pod using the Management image and the release's database and Redis configuration. Mount the same workspace PVC at `/mnt/nexent`, carry over any custom `AGENT_WORKSPACE_ROOT`, and use a service account that can list Deployments and Pods in the release namespace. In the Pod, run `python -m management.maintenance --namespace <namespace> --release <release>`. Complete repair separately before running the deployment script. Routine idle-window scaling uses the deployment script alone.
+
+### Direct Application Upgrade
+
+Use `--direct-upgrade` during an idle window on an initialized application release. The script checks that the existing `nexent-config` Deployment belongs to the release and has a positive replica count. It acquires the deployment lock, checks for earlier deployment Jobs that may still be running, and verifies bound RWX volumes for multiple Runtime replicas. It then runs one application Helm upgrade and waits for the enabled Deployments to become ready.
+
+```bash
+bash deploy.sh k8s --defaults --release-scope nexent --direct-upgrade --runtime-replicas 4
+```
+
+Omit `--runtime-replicas` to use the existing replica selection rules for `values.yaml` and saved configuration. With the default release scope `all`, the script upgrades the infrastructure release before the application upgrade. The flag applies only to the current command.
+
+Direct upgrade skips the release-wide shutdown, bootstrap Job, official skill synchronization, and system Agent initialization. Config continues to run its normal startup migrations when its Pod is replaced. Use the default deployment for first installation, a paused release, and updates that require bootstrap or have incompatible database changes.
+
+If the Pod templates stay the same, a replica count change only adds or removes Runtime Pods. Changes to an image, configuration, or Secret can replace Pods according to each Deployment's strategy. Services using `Recreate` can be temporarily unavailable.
+
+### Fixed Runtime Replicas
+
+To change the fixed Runtime count on an application release already using shared storage, edit `nexent-runtime.replicaCount` in this chart's `values.yaml` and run the deployment script in an idle window. The default flow pauses the application. The `--direct-upgrade` flow applies the new count directly.
+
+```bash
+bash deploy.sh k8s --release-scope nexent --defaults
+```
+
+You can also set the count explicitly for a deployment.
+
+```bash
+bash deploy.sh k8s --release-scope nexent --defaults --runtime-replicas 3 \
+  --persistence-mode dynamic --storage-class my-rwx-storage
+```
+
+An explicit `--runtime-replicas` takes precedence. Without it, a changed count in `values.yaml` takes precedence over the saved `runtimeReplicas` in `deploy/k8s/deploy.options`. Subsequent deployments reuse the saved count while the chart value is unchanged. For older saved options, the script treats `1` as the previous chart value. Use the release's current persistence settings. To return to a single replica, set the count to `1` and redeploy during an idle window.
+
+More than one Runtime replica requires `dynamic` with an explicit RWX-capable StorageClass, or `existing` with precreated PVCs. The deployment identity needs read access to the Runtime PVCs and their bound PVs. Before starting bootstrap writes, the script requires the workspace, skills, memory-plugin, logs, and trajectory volumes to be `Bound` with `ReadWriteMany` access and `Filesystem` volume mode. PVs with `spec.local` remain unsupported. A `hostPath` PV that meets these checks can be used for single-node deployments. For multi-node deployments, verify cross-node reads and writes on the backing storage. With existing storage, the workspace, skills, and logs claim names honor `--existing-claim-prefix`. The memory-plugin and trajectory claims use `nexent-memory-plugins` and `nexent-trajectory`.
+
+Budget threads, database and Redis connections, object storage, and downstream model traffic for the total number of Runtime processes.
 
 ## Deploy Options
 
@@ -119,7 +172,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
-| `--monitoring-provider` | Provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
+| `--monitoring-provider` | Remote provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith` |
 | `--use-local-config` | Reuse saved local deployment config | Flag |
 | `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
 | `--config` | Open the interactive deployment configuration | Flag |
@@ -127,6 +180,8 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
 | `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
+| `--runtime-replicas` | Fixed Runtime replica count | Positive integer |
+| `--direct-upgrade` | Upgrade an existing application release without scaling the application to zero or running bootstrap | Off |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
 | `--local-node-name` | Deprecated compatibility option | Ignored; local mode uses hostPath and does not require nodeAffinity |
@@ -257,9 +312,7 @@ After successful deployment:
 | Web Application | http://localhost:30000 |
 | SSH Terminal | localhost:30022 (if enabled) |
 | Langfuse | http://localhost:30001 |
-| Grafana | http://localhost:30002 |
 | Phoenix | http://localhost:30006 |
-| Zipkin | http://localhost:30011 |
 
 ## Data Persistence
 
@@ -276,7 +329,8 @@ The following local PersistentVolumes can preserve data:
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
 - `nexent-minio-pv` - Object storage data
-- Monitoring PVs such as Phoenix, Grafana, Tempo, and Langfuse data when monitoring is enabled
+- `nexent-trajectory-pv` - Local trajectory archives
+- Monitoring PVs such as Phoenix and Langfuse data when those providers are selected
 
 ### Deleted Data
 
@@ -291,7 +345,7 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-config | Configuration service | 1 |
 | nexent-runtime | Runtime service | 1 |
 | nexent-mcp | MCP container service | 1 |
-| nexent-northbound | Northbound API service | 1 |
+| nexent-gateway | Northbound API service | 1 |
 | nexent-web | Web frontend | 1 |
 | nexent-data-process | Data processing service | 1 |
 
@@ -313,31 +367,34 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 
 ### Monitoring
 
-The Helm chart includes an optional monitoring stack that mirrors the Docker
-monitoring deployment. The collector is always installed when
-`nexent-monitoring.enabled=true`; the backend stack is selected by
-`global.monitoring.provider`.
+Docker and Kubernetes application deployments capture traces to the persistent
+`/mnt/nexent-data/trajectory` directory by default. Set
+`LOCAL_FILE_MONITORING_ENABLED=false` in `deploy/env/.env` and rerun the deployment
+script to stop new local capture. Existing local traces remain available in
+the observability center. For direct Helm deployments, use
+`--set global.monitoring.localFileEnabled=false` to turn off local capture and
+`--set global.monitoring.trajectoryReadEnabled=true` to keep historical reads.
 
-Supported providers:
+To export new traces to a third-party provider, include the `monitoring`
+component and select a provider in the deployment script. Local capture keeps its
+own setting. With both enabled, Runtime records full traces locally and applies
+the existing remote sampling and content settings to the third-party export.
+Omit the `monitoring` component to turn off remote export.
 
-- `otlp` / `collector` - Collector only, debug exporter
-- `phoenix` - Collector + local Phoenix
-- `grafana` - Collector + Tempo + Grafana
-- `zipkin` - Collector + local Zipkin
-- `langfuse` - Collector + self-hosted Langfuse stack
-- `langsmith` - Collector forwarding to hosted LangSmith
-
-Example:
+If a saved deployment profile used the former `local_file` option, the script
+loads it with remote export off and uses `LOCAL_FILE_MONITORING_ENABLED` for
+local capture. For direct Helm upgrades from `global.monitoring.provider=local_file`,
+set `global.monitoring.provider=otlp`, `global.monitoring.enabled=false`,
+`nexent-monitoring.enabled=false`, and `global.monitoring.localFileEnabled=true`.
 
 ```bash
-helm upgrade --install nexent nexent \
-  --set nexent-monitoring.enabled=true \
-  --set global.monitoring.enabled=true \
-  --set global.monitoring.provider=grafana \
-  --set 'global.monitoring.dashboardUrl=http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+bash deploy.sh docker --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix
+bash deploy.sh k8s --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix
 ```
 
-For LangSmith, also provide an API key:
+The optional monitoring chart supports `otlp` for the Collector with its debug
+exporter, `phoenix`, `langfuse`, and `langsmith`. For direct Helm deployments,
+enable `nexent-monitoring` and select a provider. LangSmith also requires an API key.
 
 ```bash
 helm upgrade --install nexent nexent \
@@ -384,6 +441,10 @@ helm upgrade --install nexent nexent \
 | `global.sharedStorage.workspace.localPath` | Host path for shared workspace data | `/var/lib/nexent` |
 | `global.sharedStorage.skills.size` | Shared `/mnt/nexent-data/skills` PVC size | `5Gi` |
 | `global.sharedStorage.skills.localPath` | Host path for shared skills data | `/var/lib/nexent-data/skills` |
+| `global.sharedStorage.trajectory.size` | Trajectory PVC size | `50Gi` |
+| `global.sharedStorage.trajectory.localPath` | Host path for trajectory archives | `/var/lib/nexent-data/trajectory` |
+| `global.sharedStorage.trajectory.existingClaim` | Existing trajectory PVC in existing-storage mode | `nexent-trajectory` |
+| `global.monitoring.trajectoryRootDir` | Runtime mount and trajectory directory | `/mnt/nexent-data/trajectory` |
 | `global.sharedStorage.projectConfig.size` | Web project configuration PVC size | `1Gi` |
 | `global.sharedStorage.projectConfig.localPath` | Host path for Web project configuration | `/var/lib/nexent-data/project-config` |
 | `global.sharedStorage.projectConfig.existingClaim` | Existing project configuration PVC | `nexent-project-config` |

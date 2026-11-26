@@ -229,6 +229,7 @@ type AgentListApiItem = {
   is_a2a_server?: boolean;
   allow_chat_metadata?: boolean;
   enable_protocol_repair_retry?: boolean;
+  enable_memory?: boolean;
   model_params_override?: Agent["model_params_override"];
   icon_url?: string;
   repository_info?: Agent["repository_info"];
@@ -262,6 +263,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     is_a2a_server: agent.is_a2a_server || false,
     allow_chat_metadata: agent.allow_chat_metadata ?? false,
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+    enable_memory: agent.enable_memory ?? true,
     model_params_override: agent.model_params_override ?? null,
     icon_url: agent.icon_url,
     repository_info: agent.repository_info,
@@ -297,12 +299,18 @@ export type PagedAgentList = {
   creatorCounts?: { all: number; created: number; others: number };
 };
 
-export const fetchAgentList = async (tenantId?: string) => {
+export const fetchAgentList = async (
+  tenantId?: string,
+  includeVersionLabel = false
+) => {
   try {
     const trimmedTenantId = tenantId?.trim();
-    const url = trimmedTenantId
+    let url = trimmedTenantId
       ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(trimmedTenantId)}`
       : API_ENDPOINTS.agent.list;
+    if (includeVersionLabel) {
+      url += `${trimmedTenantId ? "&" : "?"}include_version_label=true`;
+    }
     const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
@@ -438,6 +446,7 @@ export const fetchPublishedAgentList = async () => {
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+      enable_memory: agent.enable_memory ?? true,
       icon_url: agent.icon_url,
       tags: Array.isArray(agent.tags)
         ? agent.tags.filter(
@@ -639,6 +648,7 @@ export interface UpdateAgentInfoPayload {
   provide_run_summary?: boolean;
   allow_chat_metadata?: boolean;
   enable_protocol_repair_retry?: boolean;
+  enable_memory?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;
   verification_config?: Record<string, any>;
@@ -1098,6 +1108,7 @@ export const searchAgentInfo = async (
     // convert backend data to frontend format
     const formattedAgent = {
       id: data.agent_id,
+      enable_context_manager: data.enable_context_manager ?? true,
       name: data.name,
       display_name: data.display_name,
       description: data.description,
@@ -1199,6 +1210,7 @@ export const searchAgentInfo = async (
       current_version_no: data.current_version_no,
       allow_chat_metadata: data.allow_chat_metadata ?? false,
       enable_protocol_repair_retry: data.enable_protocol_repair_retry ?? false,
+      enable_memory: data.enable_memory ?? true,
     };
 
     return {
@@ -1411,11 +1423,16 @@ export const validateTool = async (
  * @param tenantId - Optional tenant ID. If not provided, fetches for the current user's tenant.
  * @returns list of skills with skill_id, name, description, source, etc.
  */
-export const fetchSkills = async (tenantId?: string | null) => {
+export const fetchSkills = async (
+  tenantId?: string | null,
+  view: import("@/types/skill").SkillListView = "full"
+) => {
   try {
-    const url = tenantId
-      ? `${API_ENDPOINTS.skills.list}?tenant_id=${encodeURIComponent(tenantId)}`
-      : API_ENDPOINTS.skills.list;
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenant_id", tenantId);
+    if (view !== "full") params.set("view", view);
+    const query = params.toString();
+    const url = `${API_ENDPOINTS.skills.list}${query ? `?${query}` : ""}`;
     const response = await fetch(url, {
       headers: getAuthHeaders(),
     });

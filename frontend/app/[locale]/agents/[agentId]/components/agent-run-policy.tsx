@@ -2,13 +2,31 @@
 
 "use client";
 
+import { useEffect, useId } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Checkbox, Form, InputNumber, Switch, Row, Col } from "antd";
+import {
+  Checkbox,
+  Form,
+  InputNumber,
+  Switch,
+  Row,
+  Col,
+  Typography,
+} from "antd";
 
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import { useTenantMemorySettings } from "@/hooks/memory/useTenantMemorySettings";
+import {
+  loadMemoryConfig,
+  subscribeMemorySwitch,
+} from "@/services/memoryService";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 import { AgentDeploymentOptions } from "./agent-deployment";
+import ContextManagerSetting from "./context-manager-setting";
 import { AgentSettingHint } from "./agent-setting-hint";
 
 interface AgentRunPolicyProps {
@@ -20,6 +38,8 @@ function AgentProtocolRepairOption() {
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const isReadOnly = useAgentReadOnly();
+  const { agentCore } = useDeployment();
+  const coreUnsupported = agentCore === "jiuwen";
 
   return (
     <AgentSettingHint
@@ -28,7 +48,7 @@ function AgentProtocolRepairOption() {
     >
       <Checkbox
         checked={editedAgent.enable_protocol_repair_retry ?? false}
-        disabled={isReadOnly}
+        disabled={isReadOnly || coreUnsupported}
         onChange={(event) =>
           updateAgent({ enable_protocol_repair_retry: event.target.checked })
         }
@@ -46,10 +66,59 @@ export default function AgentRunPolicy({
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const isReadOnly = useAgentReadOnly();
+  const { agentCore } = useDeployment();
+  const coreUnsupported = agentCore === "jiuwen";
+
+  const { data: tenantMemory, isError: tenantMemoryError } =
+    useTenantMemorySettings();
+  const memoryDisabled =
+    isReadOnly || tenantMemory?.enabled !== true || tenantMemoryError;
+  const { user } = useAuthorizationContext();
+  const canReadPersonalMemory = Boolean(
+    user?.tenantId &&
+    user?.id &&
+    tenantMemory?.enabled === true &&
+    !tenantMemoryError
+  );
+  const {
+    data: personalMemoryEnabled,
+    isSuccess: personalMemoryKnown,
+    refetch: refreshPersonalMemory,
+  } = useQuery({
+    queryKey: ["personal-memory-enabled", user?.tenantId, user?.id],
+    queryFn: async () =>
+      (await loadMemoryConfig({ throwOnError: true })).memoryEnabled,
+    enabled: canReadPersonalMemory,
+  });
+
+  useEffect(() => {
+    if (!canReadPersonalMemory) return;
+    return subscribeMemorySwitch(() => {
+      void refreshPersonalMemory();
+    });
+  }, [canReadPersonalMemory, refreshPersonalMemory]);
+
+  const memoryStatusId = useId();
+  const memoryStatus =
+    tenantMemory?.enabled === false
+      ? t("memory.manager.tenantMemoryDisabledHint")
+      : tenantMemoryError
+        ? t("memory.manager.tenantMemoryLoadError")
+        : canReadPersonalMemory &&
+            personalMemoryKnown &&
+            personalMemoryEnabled === false
+          ? t("memory.manager.personalMemoryDisabledHint")
+          : undefined;
+  const memoryDescription = memoryStatus && (
+    <Typography.Text id={memoryStatusId} type="secondary">
+      {memoryStatus}
+    </Typography.Text>
+  );
 
   if (highFidelity) {
     return (
       <div className="flex w-[296px] max-w-full flex-col gap-4 text-sm leading-[22px] tracking-[0px] text-[#191919] [&_.ant-checkbox-wrapper]:!m-0 [&_.ant-checkbox-wrapper]:!h-[22px] [&_.ant-checkbox-wrapper]:!text-sm [&_.ant-checkbox-wrapper]:!leading-[22px] [&_.ant-checkbox-wrapper]:!text-[#191919] [&_.ant-checkbox-label]:!pl-2 [&_.ant-checkbox-label]:!pr-0">
+        <ContextManagerSetting />
         <div className="flex flex-col gap-2">
           <label htmlFor="agent-max-step">
             {t("agentConfig.layout.maxRunSteps")}
@@ -68,7 +137,7 @@ export default function AgentRunPolicy({
         </div>
         <Checkbox
           checked={editedAgent.provide_run_summary}
-          disabled={isReadOnly}
+          disabled={isReadOnly || coreUnsupported}
           onChange={(event) =>
             updateAgent({ provide_run_summary: event.target.checked })
           }
@@ -95,7 +164,7 @@ export default function AgentRunPolicy({
         >
           <Checkbox
             checked={editedAgent.verification_config?.enabled ?? false}
-            disabled={isReadOnly}
+            disabled={isReadOnly || coreUnsupported}
             onChange={(event) =>
               updateAgent({
                 verification_config: {
@@ -110,6 +179,24 @@ export default function AgentRunPolicy({
           </Checkbox>
         </AgentSettingHint>
         <AgentProtocolRepairOption />
+        <div className="flex flex-col gap-1">
+          <AgentSettingHint
+            label={t("memory.manager.agentAutomaticMemory")}
+            hint={t("memory.manager.agentAutomaticMemoryHint")}
+          >
+            <Checkbox
+              aria-describedby={memoryStatus ? memoryStatusId : undefined}
+              checked={editedAgent.enable_memory ?? true}
+              disabled={memoryDisabled}
+              onChange={(event) =>
+                updateAgent({ enable_memory: event.target.checked })
+              }
+            >
+              {t("memory.manager.agentAutomaticMemory")}
+            </Checkbox>
+          </AgentSettingHint>
+          {memoryDescription}
+        </div>
         <AgentDeploymentOptions highFidelity />
       </div>
     );
@@ -117,6 +204,7 @@ export default function AgentRunPolicy({
 
   return (
     <div className="w-full">
+      <ContextManagerSetting />
       <Row gutter={[16, 0]}>
         {/* Max Steps */}
         <Col xs={24} sm={12}>
@@ -139,6 +227,19 @@ export default function AgentRunPolicy({
         </Col>
       </Row>
 
+      <Form.Item
+        label={t("memory.manager.agentAutomaticMemory")}
+        tooltip={t("memory.manager.agentAutomaticMemoryHint")}
+        extra={memoryDescription}
+      >
+        <Switch
+          aria-label={t("memory.manager.agentAutomaticMemory")}
+          aria-describedby={memoryStatus ? memoryStatusId : undefined}
+          checked={editedAgent.enable_memory ?? true}
+          disabled={memoryDisabled}
+          onChange={(checked) => updateAgent({ enable_memory: checked })}
+        />
+      </Form.Item>
       {/* Self Validation */}
       <Row gutter={[16, 0]}>
         {/* Provide Run Summary */}
@@ -146,6 +247,7 @@ export default function AgentRunPolicy({
           <Form.Item label={t("agent.provideRunSummary")} className="mb-3">
             <Switch
               checked={editedAgent.provide_run_summary}
+              disabled={isReadOnly || coreUnsupported}
               onChange={(checked) =>
                 updateAgent({ provide_run_summary: checked })
               }
@@ -175,7 +277,7 @@ export default function AgentRunPolicy({
           >
             <Switch
               checked={editedAgent.enable_protocol_repair_retry ?? false}
-              disabled={isReadOnly}
+              disabled={isReadOnly || coreUnsupported}
               onChange={(checked) =>
                 updateAgent({ enable_protocol_repair_retry: checked })
               }
@@ -190,6 +292,7 @@ export default function AgentRunPolicy({
           >
             <Switch
               checked={editedAgent.verification_config?.enabled ?? false}
+              disabled={isReadOnly || coreUnsupported}
               onChange={(checked) =>
                 updateAgent({
                   verification_config: {

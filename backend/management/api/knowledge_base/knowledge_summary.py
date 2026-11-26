@@ -13,7 +13,7 @@ from permissions.models import CurrentUser
 from permissions.resource_access import resource_read_tenant
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
-from gateway.authentication.auth import authenticate, get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info, authenticate
 from management.services.configuration.tenant.settings import tenant_config_manager
 
 router = APIRouter(prefix="/summary")
@@ -52,6 +52,7 @@ async def auto_summary(
             index_name=index_name,
             batch_size=batch_size,
             vdb_core=vdb_core,
+            user_id=user_id,
             tenant_id=tenant_id,
             language=language,
             model_id=model_id,

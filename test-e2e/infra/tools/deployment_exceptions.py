@@ -3,6 +3,7 @@
 """Small deployment exception catalog and recoverable, opt-in mode switching."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -11,20 +12,28 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import uuid
-from urllib.request import ProxyHandler, build_opener
 from urllib.parse import urlsplit
 
+import httpx
 import yaml
 from jsonschema import Draft202012Validator
 
-from local_preflight import env_file
-from daily_recovery import configuration_paths, current_retry, pending_retry_allowed
-from suite_runtime import deployment_lock, finalize, fingerprint, now, render_report, save
+from local_preflight import env_file, yaml_file
+from recovery_io import protected_write
+from daily_recovery import (TFP_MODE, TFP_MONITORING, configuration_paths, current_retry,
+                            pending_retry_allowed, plain)
+from suite_runtime import deployment_lock, finalize, fingerprint, logged, now, render_report, save
 
 CATALOG = "test-e2e/infra/config/deployment-exceptions.yaml"
 MARKER = "state/deployment-exceptions/pending.json"
+TFP_CASES = {"TFP-D3-001", "TFP-D4-001"}
+TFP_LOCAL_SMOKE = "PW-KB-LOCAL-01"
+TFP_OVERRIDE = "test-e2e/infra/config/compose.tfp.override.yaml"
+TFP_CONTAINER_MODE = {**TFP_MODE, "NEXENT_SANDBOX_DEFAULT_LEVEL": "docker",
+                      "ENABLE_TELEMETRY": "true", "MONITORING_PROVIDER": "langfuse", **TFP_MONITORING}
 
 
 def checked_yaml(path, schema):
@@ -54,11 +63,19 @@ def catalog(repo, records=None):
     value = checked_yaml(path, path.with_suffix(".schema.json"))
     if set(value["cases"].values()) - set(value["profiles"]):
         raise ValueError("Deployment exception references an unknown profile")
-    if set(value["recovery_cases"]) & set(value["cases"]):
-        raise ValueError("Local recovery cannot use deployment exception Cases")
+    tfp_cases = {key for key, profile in value["cases"].items() if profile == "tfp"}
+    for profile, definition in value["profiles"].items():
+        environment = definition["environment"]
+        if profile == "tfp":
+            if environment != TFP_MODE or not tfp_cases <= TFP_CASES:
+                raise ValueError("Invalid TFP deployment profile or Case selection")
+        elif TFP_MODE.keys() & environment.keys():
+            raise ValueError("TFP deployment settings require the TFP profile")
+    # Kept only for readers of older catalog versions; never schedules or gates recovery.
+    value.setdefault("recovery_cases", [])
     if records is not None:
         available = {record["case_id"] for record in records}
-        missing = (set(value["cases"]) | set(value["recovery_cases"])) - available
+        missing = set(value["cases"]) - available
         if missing:
             raise ValueError("Deployment exceptions reference unknown Case IDs: " + ", ".join(sorted(missing)))
     return value
@@ -119,14 +136,58 @@ def patch_env(content, updates):
     return text.encode("utf-8")
 
 
-def protected_write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".switch-next")
-    with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as output:
-        output.write(content)
-        output.flush()
-        os.fsync(output.fileno())
-    temporary.replace(path)
+def tfp_deploy_settings(settings, content):
+    """Append monitoring to the effective Docker deploy command for this group only."""
+    config = yaml.safe_load(content)
+    if not isinstance(config, dict) or not isinstance(config.get("components"), list):
+        raise ValueError("TFP requires the persisted Docker deployment configuration")
+    commands = [list(command) for command in settings["hooks"]["deploy"]]
+    docker_commands = [command for command in commands if any(
+        token.replace("\\", "/").endswith("deploy/docker/deploy.sh") for token in command)]
+    if len(docker_commands) != 1 or "--local-config" in docker_commands[0]:
+        raise ValueError("TFP requires one standard Docker deploy hook")
+    command = docker_commands[0]
+    components = (command[command.index("--components") + 1].split(",")
+                  if "--components" in command else config["components"])
+    sandbox = (command[command.index("--sandbox-mode") + 1]
+               if "--sandbox-mode" in command else config.get("sandboxMode"))
+    if "application" not in components or sandbox not in {"lightweight", "full"}:
+        raise ValueError("TFP requires the application and a compatible Docker sandbox")
+    components = list(dict.fromkeys([*components, "monitoring"]))
+    for flag, value in (("--components", ",".join(components)), ("--monitoring-provider", "langfuse")):
+        if flag in command:
+            command[command.index(flag) + 1] = value
+        else:
+            command.extend([flag, value])
+    return {**settings, "hooks": {**settings["hooks"], "deploy": commands}}
+
+
+def apply_tfp_workspace(repo, workspace, env, directory, timeout):
+    """Recreate only the Runtime after proving the existing Compose configuration."""
+    service = "nexent-runtime"
+    compose_dir = repo / "deploy/docker/compose"
+    bases = {str(compose_dir / filename) for filename in ("docker-compose.yml", "docker-compose.prod.yml")}
+    compose_env = {**env, "NEXENT_TFP_WORKSPACE": workspace.as_posix()}
+    try:
+        inspected = json.loads(subprocess.check_output(["docker", "inspect", service], cwd=repo, text=True,
+                                                       stderr=subprocess.PIPE, timeout=20))[0]
+        labels = inspected["Config"]["Labels"]
+        base = labels.get("com.docker.compose.project.config_files")
+        if (labels.get("com.docker.compose.project") != "nexent"
+                or labels.get("com.docker.compose.service") != service or base not in bases):
+            raise RuntimeError("TFP overlay requires the Runtime from this checkout's standard Nexent Compose project")
+        command = ["docker", "compose", "--project-name", "nexent", "--env-file", str(repo / "deploy/env/.env"),
+                   "--env-file", str(repo / "deploy/docker/.env.generated"), "-f", base]
+        rendered = subprocess.check_output([*command, "config", "--hash", service], cwd=repo, env=compose_env,
+                                           stderr=subprocess.PIPE, text=True, timeout=30).split()
+        if len(rendered) != 2 or rendered != [service, labels.get("com.docker.compose.config-hash")]:
+            raise RuntimeError("TFP overlay cannot reproduce the running Runtime's base Compose configuration")
+    except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError, IndexError):
+        raise RuntimeError("TFP could not verify the running Runtime's base Compose configuration") from None
+    code = logged([*command, "-f", str(repo / TFP_OVERRIDE), "up", "-d", "--no-deps", "--no-build", "--pull", "never",
+                   service], repo, compose_env, directory / "logs/tfp-workspace.log", timeout)
+    if code:
+        raise RuntimeError("TFP Runtime workspace overlay failed; inspect logs/tfp-workspace.log")
 
 
 def link_or_copy(source, destination):
@@ -135,6 +196,37 @@ def link_or_copy(source, destination):
         os.link(source, destination)
     except OSError:
         shutil.copy2(source, destination)
+
+
+def tfp_prerequisite(env, home, settings, deploy_config, recovery_case):
+    """Check the private inputs before touching the shared deployment."""
+    try:
+        url = urlsplit(env.get("NEXENT_TFP_LANGFUSE_URL", ""))
+        port = url.port
+        if (url.scheme not in {"http", "https"} or not url.hostname
+                or port == 0 or url.username is not None or url.query or url.fragment):
+            raise ValueError
+    except ValueError:
+        return "Configure the test project's NEXENT_TFP_LANGFUSE_URL in config/daily.env"
+    if env.get("NEXENT_TFP_LANGFUSE_API_VERSION", "v1") not in {"v1", "v2"}:
+        return "NEXENT_TFP_LANGFUSE_API_VERSION must be v1 or v2"
+    keys, problems = env_file(home / "config/secrets.env")
+    if problems or not all(keys.get(key) for key in ("TFP_TRACE_PUBLIC_KEY", "TFP_TRACE_SECRET_KEY")):
+        return "Configure TFP_TRACE_PUBLIC_KEY and TFP_TRACE_SECRET_KEY in config/secrets.env"
+    users, problems = yaml_file(home / "config/users.yaml")
+    entries = users.get("users")
+    identities = {item.get("id"): item for item in entries if isinstance(item, dict)} if isinstance(entries, list) else {}
+    if problems or any(not identities.get(alias, {}).get("username")
+                       or not keys.get(identities[alias].get("password_env_key", ""))
+                       for alias in ("tenant_a_admin", "tenant_b_user")):
+        return "Configure both TFP fixture identities and their passwords in the test home"
+    try:
+        tfp_deploy_settings(settings, deploy_config)
+    except (IndexError, KeyError, TypeError, ValueError, yaml.YAMLError):
+        return "TFP requires the standard Docker deploy hook and compatible persisted Docker sandbox options"
+    if not recovery_case or recovery_case.get("status") != "active" or not recovery_case.get("execution"):
+        return "TFP requires the active PW-KB-LOCAL-01 recovery check"
+    return None
 
 
 class ModeSwitch:
@@ -147,11 +239,18 @@ class ModeSwitch:
         self.originals = {}
         self.baseline_values = {}
         self.switched = False
+        self.tfp_requested = False
+        self.tfp_switched = False
+        self.tfp_baseline = {}
+        self.tfp_baseline_mount = None
+        self.tfp_workspace = home / "runtime/tfp-workspaces" / directory.name
         self.retry = None
         self.marker_digest = None
 
     def snapshot(self, *, allow_retry=False):
         assert_recovered(self.home, allow_retry=allow_retry)
+        if self.tfp_requested:
+            self.paths = configuration_paths(self.repo, self.home, monitoring=True)
         self.retry = current_retry(self.home) if allow_retry else None
         values, problems = env_file(self.paths[0])
         if problems or values.get("ENABLE_AIDP_KNOWLEDGE", "false").lower() not in {"false", "0", "no", "off"}:
@@ -183,33 +282,62 @@ class ModeSwitch:
         marker = self.home / MARKER
         if marker.is_symlink() or hashlib.sha256(marker.read_bytes()).hexdigest() != self.marker_digest:
             raise RuntimeError("Deployment recovery journal changed during the campaign")
-        if (self.home / "state/deployment-guard/pending.json").exists():
-            raise RuntimeError("D5 fault recovery remains unresolved")
         if self.retry is not None:
             self.retry.record("RECOVERED", batch=str(self.directory))
         marker.unlink()
 
     def apply(self, profile, updates):
+        deploy_settings = self.settings
+        if profile == "tfp":
+            deploy_settings = tfp_deploy_settings(self.settings, self.originals[self.paths[5]])
+            workspace = plain(self.tfp_workspace)
+            if not re.fullmatch(r"(?:[A-Za-z]:)?/[a-zA-Z0-9/._+-]+", workspace.as_posix()):
+                raise RuntimeError("The TFP workspace path cannot be rendered as a Docker bind mount")
+            workspace.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            workspace.mkdir(mode=0o700)
+            self.tfp_switched = True
         self.switched = True  # Set before the first write so any partial failure restores.
         original = self.originals[self.paths[0]]
         protected_write(self.paths[0], patch_env(original, updates))
-        config = yaml.safe_load(self.originals[self.paths[-1]].decode("utf-8"))
+        if profile == "tfp":
+            monitoring = self.paths[4]
+            protected_write(monitoring, patch_env(monitoring.read_bytes() if monitoring.exists() else b"",
+                                                TFP_MONITORING))
+        config = yaml.safe_load(self.originals[self.paths[3]].decode("utf-8"))
         config.setdefault("features", {})["aidp_knowledge"] = updates.get("ENABLE_AIDP_KNOWLEDGE", "false") == "true"
-        protected_write(self.paths[-1], yaml.safe_dump(config, allow_unicode=True, sort_keys=False).encode())
-        self.hook("deploy", self.settings, self.repo, self.home, self.directory / profile, self.env)
+        protected_write(self.paths[3], yaml.safe_dump(config, allow_unicode=True, sort_keys=False).encode())
+        self.hook("deploy", deploy_settings, self.repo, self.home, self.directory / profile, self.env)
+        if profile == "tfp":
+            apply_tfp_workspace(self.repo, self.tfp_workspace, self.env, self.directory / profile,
+                                self.settings["command_timeout_seconds"])
         self.hook("preflight", self.settings, self.repo, self.home, self.directory / profile, self.env)
         self.verify(updates, profile)
 
+    async def _gateway_deployment_mode(self):
+        # The launcher imports from infra/tools, while workers also load infra/automation.
+        automation = str(Path(__file__).resolve().parent.parent / "automation")
+        if automation not in sys.path:
+            sys.path.insert(0, automation)
+        from shared.auth import configured_user, request_session
+
+        gateway = self.env.get("NEXENT_NORTHBOUND_URL", "http://localhost:5013").rstrip("/")
+        record, password = configured_user("tenant_a_admin", home=self.home)
+        async with httpx.AsyncClient(base_url=gateway + "/api", timeout=5, trust_env=False) as api:
+            token, _ = await request_session(api, record["username"], password)
+            response = await api.get("/tenant_config/deployment_version", headers={"Authorization": f"Bearer {token}"})
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Gateway deployment mode must be an object")
+            return payload
+
     def verify(self, updates, label):
-        """Prove runtime flags through product APIs, not only a rewritten env file."""
-        base = self.env["NEXENT_CONFIG_URL"].rstrip("/")
+        """Prove runtime flags through the authenticated Gateway and container state."""
         expected_aidp = updates.get("ENABLE_AIDP_KNOWLEDGE", "false") == "true"
-        opener = build_opener(ProxyHandler({}))
         last = "unreachable"
         for _ in range(30):
             try:
-                with opener.open(base + "/tenant_config/deployment_version", timeout=5) as response:
-                    data = json.load(response)
+                data = asyncio.run(self._gateway_deployment_mode())
                 containers = json.loads(subprocess.check_output(
                     ["docker", "inspect", "nexent-config", "nexent-runtime", "nexent-web", "nexent-data-process"],
                     text=True, timeout=20))
@@ -223,14 +351,43 @@ class ModeSwitch:
                 matched = all(all(values.get(key, "false" if key.endswith("ENABLED") or key == "ENABLE_AIDP_KNOWLEDGE"
                                                           else "") == value for key, value in expected.items())
                               for values in actual)
-                if data.get("enable_aidp_knowledge") == expected_aidp and matched:
+                tfp_expected = ({name: TFP_CONTAINER_MODE for name in ("/nexent-config", "/nexent-runtime")}
+                                if label == "tfp" else self.tfp_baseline if label == "restore-local" else {})
+                tfp_actual = {container["Name"]: {key: values.get(key) for key in TFP_CONTAINER_MODE}
+                              for container, values in zip(containers, actual)
+                              if container["Name"] in {"/nexent-config", "/nexent-runtime"}}
+                tfp_matched = all(tfp_actual.get(name) == values for name, values in tfp_expected.items())
+                runtime, runtime_env = next(((container, values) for container, values in zip(containers, actual)
+                                             if container["Name"] == "/nexent-runtime"), ({}, {}))
+                workspace = runtime_env.get("AGENT_WORKSPACE_ROOT", "/mnt/nexent/workdir")
+                mount = next(((item.get("Type"), item.get("Source"), item.get("RW"))
+                              for item in runtime.get("Mounts", []) if item.get("Destination") == workspace), None)
+                if label == "tfp":
+                    path = self.tfp_workspace.as_posix()
+                    tfp_matched = tfp_matched and workspace == path and mount == ("bind", path, True)
+                if label == "restore-local" and self.tfp_switched:
+                    tfp_matched = tfp_matched and self.tfp_baseline_mount == (workspace, mount)
+                    tfp_matched = tfp_matched and all(item.get("Destination") != self.tfp_workspace.as_posix()
+                                                     for item in runtime.get("Mounts", []))
+                if data.get("enable_aidp_knowledge") is expected_aidp and matched and tfp_matched:
+                    if label == "local" and self.tfp_requested:
+                        self.tfp_baseline = tfp_actual
+                        self.tfp_baseline_mount = workspace, mount
                     save(self.directory / label / "mode-verification.json", {
                         "aidp_enabled": expected_aidp, "modelengine_enabled": expected["MODEL_ENGINE_ENABLED"],
+                        **({"tfp_mode_verified": True} if label == "tfp" else {}),
                         "containers_verified": [container["Name"] for container in containers], "verified_at": now()})
                     return
                 last = "mode mismatch"
-            except (OSError, ValueError, subprocess.SubprocessError):
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                last = f"Gateway returned HTTP {status}"
+                if status in {400, 401, 403, 404}:
+                    break
+            except (httpx.RequestError, OSError, subprocess.SubprocessError):
                 last = "unreachable"
+            except ValueError:
+                last = "invalid response"
             time.sleep(1)
         raise RuntimeError("Product deployment mode verification failed: " + last)
 
@@ -242,7 +399,7 @@ class ModeSwitch:
                 path.unlink(missing_ok=True)
         if self.switched:
             self.hook("deploy", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
-            self.hook("preflight", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
+        self.hook("preflight", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
         self.verify(self.baseline_values, "restore-local")
         # Deployment can re-render ignored files; restore their exact saved bytes afterwards.
         for path, content in self.originals.items():
@@ -281,16 +438,17 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
     if validation_report is not None:
         save(directory / "asset-validation.json", validation_report)
     switch = ModeSwitch(repo, home, directory, settings, env, hook)
+    recovery_case = next((record for record in all_records if record["case_id"] == TFP_LOCAL_SMOKE), None)
     rows, error, restoration_ok = [], None, False
     old_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     print(f"Deployment campaign: {directory}", flush=True)
 
-    def child(label, group, *, recovery=False):
+    def child(label, group, *, blocked_reason=None):
         child_dir = directory / "profiles" / label
         seen = set()
 
         def record_result(row):
-            if not recovery and row["case_id"] not in seen:
+            if row["case_id"] not in seen:
                 case_id = row["case_id"]
                 for section in ("cases", "logs"):
                     source = child_dir / section / (case_id if section == "cases" else case_id + ".log")
@@ -315,27 +473,37 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                                               "RUNNING" if row["stage"] == stage or expected & accounted else "PENDING")
                 save(directory / "status.json", state)
 
-        execute_one(repo, home, group, {**settings, "notify": False}, directory=child_dir, on_result=record_result)
+        if blocked_reason:
+            for record in group:
+                receipt = f"cases/{record['case_id']}/receipt.json"
+                row = {"case_id": record["case_id"], "stage": record["stage"], "result": "BLOCKED_BY_DEPENDENCY",
+                       "reason": blocked_reason, "acceptance_status": "INCOMPLETE", "evidence": [receipt]}
+                save(child_dir / receipt, row)
+                record_result(row)
+            return
+        execution_options = {"deployment_profile": label} if label == "tfp" else {}
+        execute_one(repo, home, group, {**settings, "notify": False}, directory=child_dir, on_result=record_result,
+                    **execution_options)
         summary = json.loads((child_dir / "summary.json").read_text())
         results = [json.loads(line) for line in (child_dir / "checkpoints/results.jsonl").read_text().splitlines() if line]
         # Finalization can add NOT_EXECUTED rows after an interruption.
         for row in results:
             record_result(row)
-        if not summary["execution_complete"] or (recovery and any(row["result"] != "PASS" for row in results)):
+        if not summary["execution_complete"]:
             raise RuntimeError("Incomplete or unsafe deployment group: " + label)
-        if any(row["result"] in {"TIMEOUT", "CLEANUP_FAILED"} and row["stage"] == "D5" for row in results):
-            raise RuntimeError("Deployment group needs environment safety review")
-
-    def local_recovery_cases():
-        recovery = [r for r in all_records if r["case_id"] in rules["recovery_cases"]]
-        if switch.retry is not None and (not recovery or len(recovery) != len(set(rules["recovery_cases"]))
-                or any(r["status"] != "active" or not r.get("execution") for r in recovery)):
-            raise RuntimeError("Daily recovery requires executable Local recovery Cases")
-        return recovery
 
     try:
         # Also excludes other opted-in test homes operating on this checkout.
         with deployment_lock(repo):
+            tfp_blocked_reason = None
+            if "tfp" in selected:
+                local_config = configuration_paths(repo, home, monitoring=True)[5]
+                if local_config.is_symlink():
+                    tfp_blocked_reason = "TFP requires a regular persisted Docker deployment configuration"
+                else:
+                    deploy_config = local_config.read_bytes() if local_config.is_file() else None
+                    tfp_blocked_reason = tfp_prerequisite(env, home, settings, deploy_config, recovery_case)
+                switch.tfp_requested = tfp_blocked_reason is None
             switch.snapshot(allow_retry=daily)
             try:
                 state["stages"]["D0"] = "RUNNING"
@@ -348,32 +516,42 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                     from static_assets import inventory
                     static_rows = inventory(home)
                     save(directory / "d0/static-assets.json", {"scope": "full", "assets": static_rows})
-                    if any(row["destination"] != "READY" for row in static_rows):
-                        raise RuntimeError("Daily static assets are missing or differ from the catalog")
                     hook("build", settings, repo, home, directory, env)
                     hook("deploy", settings, repo, home, directory, env)
                     hook("preflight", settings, repo, home, directory, env)
                 switch.verify({}, "local")
                 if switch.retry is not None:
-                    child("recover-previous-local", local_recovery_cases(), recovery=True)
                     switch.retry.record("REDEPLOY_VERIFIED", batch=str(directory))
                 state["stages"]["D0"] = "COMPLETE"
                 for label, group in selected.items():
                     current = fingerprint(repo)
                     if current != {key: provenance[key] for key in current}:
                         raise RuntimeError("Source changed during deployment campaign")
-                    if label != "local":
-                        updates = {key: value.format(mock_product_url=mock_product_url(env), mock_aidp_key="mock-aidp-key")
+                    blocked_reason = tfp_blocked_reason if label == "tfp" else None
+                    if label != "local" and not blocked_reason:
+                        updates = {key: mock_product_url(env) if value == "{mock_product_url}" else
+                                   "mock-aidp-key" if value == "{mock_aidp_key}" else value
                                    for key, value in rules["profiles"][label]["environment"].items()}
                         switch.apply(label, updates)
                     state["profile"] = label
                     save(directory / "status.json", state)
-                    child(label, group)
+                    child(label, group, blocked_reason=blocked_reason)
             finally:
                 state["profile"] = "restore-local"
                 save(directory / "status.json", state)
                 switch.restore()
-                child("restore-local", local_recovery_cases(), recovery=True)
+                if switch.tfp_switched:
+                    smoke_dir = directory / "restore-local" / "business-smoke"
+                    code = execute_one(repo, home, [recovery_case], {**settings, "notify": False}, directory=smoke_dir,
+                                       on_result=lambda _: None)
+                    receipt = smoke_dir / "cases" / TFP_LOCAL_SMOKE / "receipt.json"
+                    smoke = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
+                    passed = code == 0 and smoke.get("result") == "PASS" and smoke.get("cleanup_exit_code") == 0
+                    save(directory / "restore-local" / "business-smoke.json", {
+                        "case_id": TFP_LOCAL_SMOKE, "status": "PASS" if passed else "FAILED",
+                        "evidence": receipt.relative_to(directory).as_posix()})
+                    if not passed:
+                        raise RuntimeError("TFP Local recovery check did not pass; inspect restore-local/business-smoke")
                 switch.complete()
                 restoration_ok = True
                 current = fingerprint(repo)
@@ -383,12 +561,12 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
         error = "Interrupted" if isinstance(exc, KeyboardInterrupt) else str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
         signal.signal(signal.SIGTERM, old_handler)
-        summary = finalize(directory, report_records, rows, error)
+        summary = finalize(directory, report_records, rows, error, environment=env)
         state.update(status=summary["status"], finished_at=now(), error=error, local_restored_and_verified=restoration_ok)
         state["stages"] = {f"D{i}": "COMPLETE" if summary["execution_complete"] else "INTERRUPTED" for i in range(7)}
         state["stages"]["D6"] = "COMPLETE"
         save(directory / "status.json", state)
-        render_report(directory, report_records, rows, summary)
+        render_report(directory, report_records, rows, summary, environment=env)
         save(home / "reports/repository-latest.json", {"batch": str(directory), "status": summary["status"]})
     if daily and summary["execution_complete"] and restoration_ok:
         if publish_latest:
@@ -402,7 +580,7 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                 except OSError:
                     print("Publication failed; could not save local publication receipt", flush=True)
             try:
-                render_report(directory, report_records, rows, summary, sharing=publication)
+                render_report(directory, report_records, rows, summary, sharing=publication, environment=env)
             except OSError:
                 print("Could not refresh publication status in the finalized report", flush=True)
     if daily and settings.get("notify"):

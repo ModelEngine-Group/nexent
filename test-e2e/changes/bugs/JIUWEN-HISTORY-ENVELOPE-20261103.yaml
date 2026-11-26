@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-HISTORY-ENVELOPE-20261103
+  change_type: bugfix
+  bug_id: JIUWEN-HISTORY-ENVELOPE-20261103
+  title: Preserve native reasoning step labels across persistence and history reload
+  description: Serialize non-mergeable events once and repair proven duplicate saved envelopes on read.
+  observed_behavior: Live reasoning has a step label, but history displays serialized step_count metadata as text.
+  expected_behavior: Saved native event content matches its live content; old duplicate envelopes project to one
+    event without rewriting audit records, model JSON text or another invocation's payload.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing output D3 checked results and capacity but not non-mergeable content equality. Real UI
+      checked clean final answers without inspecting historical reasoning for serialized metadata.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-REAL-UI-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Non-mergeable native events retain exactly one envelope; merged text and literal JSON remain intact.
+    - Read projection repairs matching duplicate envelopes for root and child events without database mutation.
+    - Mismatched identities, model text, malformed content and legacy units are never recursively decoded.
+    reason: Unit tests own serialization and conservative compatibility boundaries; actual PostgreSQL persistence
+      and browser history provide distinct runtime and journey evidence. No duplicate D1 is needed.
+    test_selectors:
+    - test/backend/utils/test_runtime_output.py
+    - test/backend/utils/test_runtime_history_projection.py
+  notes: Existing runtime-agent-core-factory design/task own this fix. The screenshot's saved step was read-only
+    confirmed to contain identical nested event metadata. Reuse the current public frontend adapter and renderer;
+    no SQL migration, source conversation rewrite, Core-specific UI or change to auth/MCP policy. Existing D3
+    owns isolated PostgreSQL and managed fixture cleanup; D4 owns exported assistant clones and source protection.

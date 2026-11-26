@@ -3,6 +3,7 @@
 import { App, Form } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -108,14 +109,14 @@ beforeEach(() => {
   mocks.updateDraft.mockReset();
 });
 
-function renderEditor() {
+function renderEditor(onOptimizePrompt?: () => boolean) {
   let editorForm: ReturnType<typeof Form.useForm>[0];
   function Editor() {
     const [form] = Form.useForm();
     editorForm = form;
     return (
       <Form form={form}>
-        <AgentPrompt highFidelity />
+        <AgentPrompt highFidelity onOptimizePrompt={onOptimizePrompt} />
       </Form>
     );
   }
@@ -139,6 +140,54 @@ function loadModels() {
   }));
   mocks.modelListLoaded = true;
 }
+
+test("confirms a successful prompt fill for four seconds and renews feedback on another click", () => {
+  vi.useFakeTimers();
+  try {
+    const optimize = vi.fn(() => true);
+    const view = renderEditor(optimize);
+    fireEvent.click(
+      screen.getByRole("button", { name: "agent.highFidelity.optimizePrompt" })
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "agent.highFidelity.optimizePromptFilled",
+      })
+    ).toBeEnabled();
+    act(() => vi.advanceTimersByTime(3000));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agent.highFidelity.optimizePromptFilled",
+      })
+    );
+    act(() => vi.advanceTimersByTime(1000));
+    expect(
+      screen.getByRole("button", {
+        name: "agent.highFidelity.optimizePromptFilled",
+      })
+    ).toBeEnabled();
+    act(() => vi.advanceTimersByTime(3000));
+    expect(
+      screen.getByRole("button", { name: "agent.highFidelity.optimizePrompt" })
+    ).toBeEnabled();
+    expect(optimize).toHaveBeenCalledTimes(2);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("does not announce a skipped prompt fill", () => {
+  const optimize = vi.fn(() => false);
+  renderEditor(optimize);
+  fireEvent.click(
+    screen.getByRole("button", { name: "agent.highFidelity.optimizePrompt" })
+  );
+  expect(optimize).toHaveBeenCalledOnce();
+  expect(
+    screen.queryByText("agent.highFidelity.optimizePromptFilled")
+  ).toBeNull();
+});
 
 test.each(["", " \n\t "])(
   "marks a blank prompt invalid and clears the hint after filling: %j",

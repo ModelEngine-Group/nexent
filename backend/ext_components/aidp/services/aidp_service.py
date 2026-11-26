@@ -17,10 +17,6 @@ from nexent.utils.http_client_manager import http_client_manager
 from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.db.agent.repository import query_knowledge_binding_agents
-from management.db.client import get_db_session
-from management.db.conversation.repository import remove_conversation_knowledge_bindings
-from management.db.tool.repository import remove_tool_knowledge_references
 
 
 logger = logging.getLogger("aidp_service")
@@ -74,20 +70,37 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
 
 
+def _extract_upstream_code(response: httpx.Response) -> int | None:
+    """Read the business code from AIDP's fixed error body.
+
+    AIDP business errors use ``{"error": {"code": <int>, "message": <str>}}``.
+    Non-JSON bodies and plain HTTP-layer errors carry no business code.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    return payload.get("error", {}).get("code")
+
+
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
     """Map an AIDP HTTP error to the common application exception format."""
     response = error.response
     upstream_reason = _extract_upstream_error(response)
+    upstream_code = _extract_upstream_code(response)
     logger.exception(
-        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        "AIDP %s HTTP error: status_code=%s upstream_code=%s upstream_reason=%s",
         operation,
         response.status_code,
+        upstream_code,
         upstream_reason or "unavailable",
     )
     details = {
         "upstream_status": response.status_code,
         "upstream_reason": upstream_reason,
     }
+    if upstream_code is not None:
+        details["upstream_code"] = upstream_code
     error_code = {
         401: ErrorCode.AIDP_AUTH_ERROR,
         403: ErrorCode.AIDP_AUTH_ERROR,
@@ -1108,27 +1121,9 @@ def create_aidp_kb_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        # Body is already logged above before raise_for_status, so we
-        # only re-log the status for correlation with existing searches.
-        logger.exception(
-            "AIDP API HTTP error: %s, status_code: %s",
-            e,
-            e.response.status_code,
-        )
-        if e.response.status_code in (401, 403):
-            raise AppException(
-                ErrorCode.AIDP_AUTH_ERROR,
-                f"AIDP authentication failed: {str(e)}",
-            )
-        if e.response.status_code == 429:
-            raise AppException(
-                ErrorCode.AIDP_RATE_LIMIT,
-                f"AIDP rate limit exceeded: {str(e)}",
-            )
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-        )
+        # Preserve AIDP's business code (e.g. 1022 for a duplicate name) so
+        # the UI can distinguish a rejected request from an outage.
+        _raise_aidp_http_error(e, "create KB")
     except ValueError as e:
         logger.exception("Failed to parse AIDP API response: %s", e)
         raise AppException(
@@ -1283,11 +1278,6 @@ def update_aidp_kb_impl(
         )
 
 
-def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:
-    """Preview agents affected by deleting the selected knowledge bases."""
-    return {"agents": query_knowledge_binding_agents(kds_ids=kds_ids, tenant_id=tenant_id)}
-
-
 def delete_aidp_kb_impl(
     server_url: str,
     api_key: str,
@@ -1352,12 +1342,6 @@ def delete_aidp_kb_impl(
                 f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
             )
 
-    try:
-        with get_db_session() as session:
-            remove_tool_knowledge_references(session, kds_ids=[kds_id])
-            remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
-    except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
-        logger.warning("Failed to clean up bindings for deleted AIDP knowledge base '%s': %s", kds_id, exc)
     return True
 
 

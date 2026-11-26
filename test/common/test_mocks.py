@@ -47,6 +47,8 @@ def bootstrap_test_env() -> Dict[str, Any]:
     _ensure_path(backend_dir)
 
     mock_const = MagicMock()
+    mock_const.NEXENT_SANDBOX_PROVIDER = "docker"
+    mock_const.NEXENT_SANDBOX_ENABLED = True
     consts_module = _create_module("consts", const=mock_const)
     sys.modules["contracts.constants.environment"] = mock_const
     install_business_constant_stubs(mock_const)
@@ -59,7 +61,7 @@ def bootstrap_test_env() -> Dict[str, Any]:
     sys.modules.setdefault("boto3", boto3_mock)
 
     client_module = _create_module(
-        "management.db.client",
+        "infrastructure.rdb.client",
         MinioClient=MagicMock(),
         PostgresClient=MagicMock(),
         db_client=MagicMock(),
@@ -68,11 +70,12 @@ def bootstrap_test_env() -> Dict[str, Any]:
         minio_client=MagicMock(),
         postgres_client=MagicMock(),
     )
-    sys.modules["management.db.client"] = client_module
+    sys.modules["infrastructure.rdb.client"] = client_module
+    sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     if "database" not in sys.modules:
         _create_module("database")
 

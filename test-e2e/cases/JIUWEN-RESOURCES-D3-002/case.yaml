@@ -1,0 +1,148 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D3-002
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  - JIUWEN-TIMEOUT-CONFIG-20261112
+  - JIUWEN-NATIVE-PARALLEL-20261123
+  - JIUWEN-NATIVE-COLLABORATION-20261123
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-004
+  - JIUWEN-RESOURCES-RULE-006
+  - JIUWEN-RESOURCES-RULE-007
+  - JIUWEN-RESOURCES-RULE-008
+  title: Mixed Core children and A2A D3
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove configured child dispatch and owned remote execution.
+  preconditions:
+  - Installed Jiuwen and smolagents; controlled local model HTTP/SSE and A2A endpoints.
+  - A Linux worker with Docker access and the provisioned Nexent full sandbox image for the Python scenario.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run configured children and A2A through the real factory with controlled protocol endpoints. Overlap
+      three roots with three local children each, repeat in native/text mode and stretch the real registration-lock
+      scheduling window.
+    expected: Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote
+      calls contain trusted caller context without parent model overrides. One managed Runner loop serves all calls
+      concurrently; all first-attempt child terminals succeed without extra delegation, foreign invocation events
+      or cross-loop errors.
+  - order: 2
+    action: Complete or cancel/stall the nested execution, then run a fresh invocation.
+    expected: Results and nested observations are balanced; cancellation/deadline closes owned calls and permits
+      recovery without replay or active workers.
+  - order: 3
+    action: Set distinct deployment collaboration and tool deadlines and invoke a delayed A2A response through native
+      and controlled-text Jiuwen protocols.
+    expected: Both configured deadlines reach the actual run and ToolCard; one authorized remote call completes.
+  - order: 4
+    action: Delegate a task with missing information across both local Cores and native/text Jiuwen protocols, then
+      have the parent request the missing information.
+    expected: Child model requests expose no clarification tool or instructions, missing information reaches the
+      parent, and only the root emits one human_interaction without side effects or failure.
+  - order: 5
+    action: Respond to a native Jiuwen root with three separate child tool calls in the same model step.
+      Require all first child requests to arrive before sending any child response. Each child submits two
+      read calls that must both start before either can finish. Also send two calls to the same child
+      with identical arguments and different provider IDs in one response.
+    expected: Each batch overlaps, the provider sees no legacy parallel_executor, and parallel children expose
+      only the approved read tool. Live events and restored message units preserve matching call, result, and
+      invocation IDs. The controlled-text variant continues to use the compatibility helper.
+  - order: 6
+    action: Send three native child calls in one step, with the production-shaped helper injected in every child.
+      Each child uses Python in a real system sandbox to create a file named same.txt and report its execution interval.
+      Repeat with three identical invocations, with one Python action held beyond its collaboration deadline,
+      and with cancellation after all three Python programs reach a shared test barrier in the disposable sandbox.
+    expected: Python intervals overlap in one configured Docker container with distinct Kernel leases. Same-name
+      files contain distinct child data and use distinct object keys. The parent receives the authorized references,
+      live and historical projections keep invocation ownership, and all owned resources are reclaimed. On timeout,
+      the affected call fails and publishes no partial file. Other children and the parent finish normally.
+      Parent cancellation stops all three active programs, publishes no file and releases their Kernel leases.
+  - order: 7
+    action: Exercise native AgentCard dispatch and Jiuwen A2A over JSON-RPC and HTTP+JSON. Stream remote artifact
+      fragments, then exercise a failed terminal state, a partial stream timeout and parent cancellation.
+    expected: Authorized local and remote calls use unique native sessions. Remote endpoints receive trusted identity
+      and bound authentication. Live and restored child cards contain one completed answer. Failed or interrupted
+      calls expose the existing error or stopped state, and known active remote tasks receive a cancellation request.
+  expected_results:
+  - Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote calls contain
+    trusted caller context without parent model overrides. Repeated concurrent roots retain exactly three successful
+    first-attempt child invocations each on one managed Runner loop.
+  - Results and nested observations are balanced; cancellation/deadline closes owned calls and permits recovery
+    without replay or active workers.
+  - Independently configured collaboration and tool deadlines reach real native/text A2A execution; a delayed authorized
+    response completes inside the configured limits with one remote request and no resource leak.
+  - 'Root-only clarification survives actual mixed-Core delegation: no child interaction cards, exactly one parent
+    card and no repeated delegated task.'
+  - Native batches overlap and preserve provider call IDs. The public stream and restored history show the same
+    tool/result pairs, child invocation IDs, and final answer.
+  - Native Python children execute concurrently in distinct Kernel leases with isolated outputs and full cleanup.
+  - Native AgentCards are removed when their owner ends. Both A2A transports use the received terminal state, and
+    no failed partial response, native event envelope, spoofed identity or duplicate remote message is exposed.
+  forbidden_side_effects:
+  - No parent model/credential/history leakage, unauthorized resources, cross-invocation state, orphan calls or
+    false reclamation.
+  acceptance:
+  - id: AC-05
+    description: Native Python children overlap without changing the configured shared sandbox or output permissions.
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Native parallel scheduling overlaps authorized read and child calls without an explicit helper tool.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Configured deadlines reach the real delayed A2A path.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-01
+    description: Prove runtime boundary and forbidden effects.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Only the root can ask the user after a child returns missing information.
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+  - id: AC-06
+    description: Native dispatch and both A2A transports preserve trusted identity, result display and cleanup.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 240
+  integration_boundary:
+  - Real factory, mixed Core runtime, model HTTP/SSE and A2A HTTP protocol.
+  observations:
+  - Provider request capture, execution counter, native events, terminal outcome and production output projections.
+  cleanup:
+  - Release native session/tools and managed threads; close loopback listener and HTTP response.
+  - The Python fixture owns its Docker instance, control network, Kernel leases and temporary workspaces. It restores
+    the local sandbox pool after verifying that no leased kernels or workspaces remain.

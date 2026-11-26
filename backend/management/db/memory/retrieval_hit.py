@@ -15,8 +15,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import Integer, func
 
-from management.utils.orm import filter_property
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import MemoryRetrievalHit
 
 
@@ -114,21 +114,16 @@ def list_hits_for_user(
     since: Optional[datetime] = None,
     limit: int = 5000,
 ) -> List[Dict[str, Any]]:
-    """Return hit rows for a user (used by Dreaming aggregation)."""
+    """Return hit rows for a user, propagating database read failures."""
     with get_db_session() as session:
-        try:
-            query = session.query(MemoryRetrievalHit).filter(
-                MemoryRetrievalHit.tenant_id == tenant_id,
-                MemoryRetrievalHit.user_id == user_id,
-            )
-            if since is not None:
-                query = query.filter(MemoryRetrievalHit.occurred_at >= since)
-            query = query.order_by(MemoryRetrievalHit.occurred_at.asc()).limit(limit)
-            return [_hit_to_dict(row) for row in query.all()]
-        except Exception:
-            session.rollback()
-            logger.exception("list_hits_for_user failed")
-            return []
+        query = session.query(MemoryRetrievalHit).filter(
+            MemoryRetrievalHit.tenant_id == tenant_id,
+            MemoryRetrievalHit.user_id == user_id,
+        )
+        if since is not None:
+            query = query.filter(MemoryRetrievalHit.occurred_at >= since)
+        query = query.order_by(MemoryRetrievalHit.occurred_at.asc()).limit(limit)
+        return [_hit_to_dict(row) for row in query.all()]
 
 
 def aggregate_memory_stats(
@@ -189,35 +184,42 @@ def aggregate_dreaming_stats(
     since: datetime,
 ) -> List[Dict[str, Any]]:
     """Return complete Light/Deep evidence for one isolation scope."""
-    hits = list_hits_for_user(tenant_id, user_id, since=since, limit=10000)
-    grouped: Dict[int, Dict[str, Any]] = {}
-    for hit in hits:
-        if (agent_id is not None and str(hit.get("agent_id")) != str(agent_id)) or hit.get("memory_id") is None:
-            continue
-        memory_id = int(hit["memory_id"])
-        entry = grouped.setdefault(
-            memory_id,
-            {
-                "memory_id": memory_id,
-                "hit_count": 0,
-                "grounded_count": 0,
-                "days": set(),
-                "query_hashes": set(),
-                "total_retrieval_score": 0.0,
-                "last_recalled_at": None,
-            },
+    hit = MemoryRetrievalHit
+    with get_db_session() as session:
+        query = session.query(
+            hit.memory_id,
+            func.count(hit.hit_id).label("hit_count"),
+            func.count().filter(hit.grounded.is_(True)).label("grounded_count"),
+            func.array_agg(hit.day.distinct()).filter(
+                hit.day.isnot(None), hit.day != "",
+            ).label("days"),
+            func.array_agg(hit.query_hash.distinct()).filter(
+                hit.query_hash.isnot(None), hit.query_hash != "",
+            ).label("query_hashes"),
+            func.coalesce(func.sum(hit.retrieval_score), 0).label("total_retrieval_score"),
+            func.max(hit.occurred_at).label("last_recalled_at"),
+        ).filter(
+            hit.tenant_id == tenant_id,
+            hit.user_id == user_id,
+            hit.occurred_at >= since,
+            hit.memory_id.isnot(None),
         )
-        entry["hit_count"] += 1
-        entry["grounded_count"] += int(bool(hit.get("grounded")))
-        if hit.get("day"):
-            entry["days"].add(str(hit["day"]))
-        if hit.get("query_hash"):
-            entry["query_hashes"].add(str(hit["query_hash"]))
-        entry["total_retrieval_score"] += float(hit.get("retrieval_score") or 0)
-        occurred_at = hit.get("occurred_at")
-        if occurred_at and (entry["last_recalled_at"] is None or occurred_at > entry["last_recalled_at"]):
-            entry["last_recalled_at"] = occurred_at
-    return list(grouped.values())
+        if agent_id is not None:
+            query = query.filter(hit.agent_id == agent_id)
+        rows = query.group_by(hit.memory_id).all()
+
+    return [
+        {
+            "memory_id": int(row.memory_id),
+            "hit_count": int(row.hit_count),
+            "grounded_count": int(row.grounded_count),
+            "days": set(row.days or []),
+            "query_hashes": set(row.query_hashes or []),
+            "total_retrieval_score": float(row.total_retrieval_score or 0),
+            "last_recalled_at": row.last_recalled_at,
+        }
+        for row in rows
+    ]
 
 
 def delete_hits_before(cutoff: datetime) -> int:

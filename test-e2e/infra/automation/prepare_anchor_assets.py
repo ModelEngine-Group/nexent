@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Prepare and verify long-lived, non-secret test anchor assets.
 
 The script uses supported Nexent APIs for tenant/user/group/model creation. It
@@ -254,6 +255,10 @@ async def _ensure_models(identity, actions: list[dict[str, str]]) -> dict[str, i
                     "model_repo": model_repo,
                     "model_name": normalized_name,
                 }
+                if target["model_type"] == "llm":
+                    # LLM and VLM anchors share this stored type. Keep the existing outlet's
+                    # output limit; only embedding updates need the legacy dimension field.
+                    update_request.pop("max_tokens")
                 updated = await api.post(
                     "/model/update",
                     params={"display_name": target["display_name"]},

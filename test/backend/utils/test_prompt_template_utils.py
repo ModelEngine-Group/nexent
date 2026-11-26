@@ -3,7 +3,7 @@
 import pytest
 from jinja2 import Environment, meta
 from nexent.core.prompts import load_prompt
-from management.services.skill.prompt import (
+from runtime.agentos.prepared_skill_creator import (
     get_nl2skill_prompt_template,
 )
 
@@ -33,8 +33,7 @@ class TestPromptTemplateUtils:
         assert set(template_config) == {"system_prompt"}
         parsed_template = Environment().parse(template_config["system_prompt"])
         assert meta.find_undeclared_variables(parsed_template) == {
-            "installed_tool_name", "recommend_tool_name", "save_tool_name",
-            "max_results", "uninstalled_tool_name", "wrapper_name",
+            "save_tool_name", "validate_completion_tool_name", "wrapper_name", "target_core",
         }
 
 

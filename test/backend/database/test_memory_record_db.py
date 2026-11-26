@@ -16,18 +16,20 @@ sys.path.insert(
 )
 
 
-# Stub management.db.client
-client_mod = types.ModuleType("management.db.client")
+# Stub infrastructure.rdb.client
+client_mod = types.ModuleType("infrastructure.rdb.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = lambda data, _model: dict(data)
-sys.modules["management.db.client"] = client_mod
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 # Stub SQLAlchemy ``and_``
@@ -709,16 +711,18 @@ def test_list_memory_records_with_status_filter(monkeypatch, mock_session_ctx):
     query.filter.assert_called()
 
 
-def test_list_memory_records_exception(monkeypatch, mock_session_ctx):
+def test_list_memory_records_propagates_read_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    session.query.return_value.outerjoin.side_effect = Exception("boom")
+    failure = RuntimeError("database unavailable")
+    session.query.return_value.outerjoin.side_effect = failure
     monkeypatch.setattr(
         "management.db.memory.record.get_db_session", lambda: ctx
     )
 
-    rows = memory_record_db.list_memory_records("t1")
-    assert rows == []
-    session.rollback.assert_called()
+    with pytest.raises(RuntimeError) as exc_info:
+        memory_record_db.list_memory_records("t1")
+    assert exc_info.value is failure
+    assert ctx.__exit__.call_args.args[1] is failure
 
 
 def test_list_active_memory_ids_by_layer(monkeypatch, mock_session_ctx):

@@ -95,7 +95,7 @@ def test_recovery_preserves_wire_and_rolls_back_failed_attempt():
         assert requests[0]["thinking"] == {"type": "disabled"}
         assert "enable_thinking" not in requests[0]
         assert requests[0]["temperature"] == 0.7 and requests[0]["top_p"] == 0.9
-        assert requests[0]["max_tokens"] == 512
+        assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(requests[0])
         assert phases(observer) == ["begin", "rollback", "begin", "commit"]
         events = [json.loads(raw) for raw in observer.message_query]
         committed_id = next(event["attempt_id"] for event in events if event.get("phase") == "commit")
@@ -134,9 +134,10 @@ def test_terminal_bounds_and_private_diagnostics(caplog, finish, tools, expected
 @pytest.mark.parametrize("scenario", ["recover_empty", "persistent_empty", "recover_malformed", "persistent_malformed"])
 def test_agent_keeps_empty_budget_and_repairs_nonempty_protocol(scenario, shared):
     """Exercise strict Agent recovery over real HTTP for both compatibility entry points."""
-    from nexent.core.agents.core_agent import CoreAgent
-    from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
-    from nexent.core.agents.output_protocol import ModelOutputProtocolExhaustedError
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+    from nexent.core.agents.context import ContextManager, ContextManagerConfig
+    from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+    from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolExhaustedError
 
     empty = "empty" in scenario
     persistent = scenario.startswith("persistent")

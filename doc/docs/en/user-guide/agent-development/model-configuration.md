@@ -1,175 +1,77 @@
 # Model Configuration
 
-The Model Configuration module lets you add and configure AI models — large language models, embedding models, rerank models, multimodal models, and voice models. Nexent supports multiple providers so you can pick the best option for each scenario.
+In the Nexent sidebar, select **Agent Development → Model Configuration**. On the **Model Settings** page, use **Default Configuration** to choose the models Nexent uses when no model is explicitly configured. Use **Model Library** to add and manage models. When setting up Nexent for the first time, add a model to the library, then select it in Default Configuration.
+
+![Default Configuration and Model Library on the Model Settings page](../assets/model-management/model-settings-overview.png)
 
 ## 🤖 Model Configuration
 
-### 🛠️ Add Custom Models
+### Add a single model
 
-#### Add a Single Model
+1. In **Model Library**, select **Add Model → Single**.
+2. Select a **Provider** and **Model Type**. Nexent fills in the service address for preset providers. You can edit it to match your deployment. For a custom service, enter its **Base URL**.
+3. Enter the provider's **Model ID** or **Model Name**, such as `Qwen/Qwen3-8B`. The optional **Display Name** identifies the model in Nexent and defaults to the model name. Enter the **API Key** or other credentials shown in the form as required by your provider.
+4. For a large language model, Nexent tries to match a **Model profile**. Review the match and select a profile manually if needed. A profile can prefill model settings. Review the values against what your service supports before saving. For other model types, use **Advanced Settings** where available, such as to configure chunking for an embedding model.
+5. Select **Verify Connectivity** to test the connection. Review your settings, then select **Add Model**. The new model appears in Model Library.
 
-1. **Add a custom model**
-   - Click **Add Model** to open the dialog.
-2. **Select model type**
-   - Choose Large Language Model, Embedding Model, Image Understanding Model, Image Generation Model, Video Understanding Model, Rerank Model, Speech-to-Text Model or Text-to-Speech Model.
-3. **Configure model parameters**
-   - **Model Name (required):** The name you send in API requests.
-   - **Display Name:** Optional label shown in the UI (defaults to the model name).
-   - **Model URL (required):** API endpoint from the provider.
-   - **API Key:** Your provider key.
+![Single model setup showing the matched LLM profile and a successful connectivity check](../assets/model-management/add-single-model.png)
 
-> ⚠️ **Notes**
-> 1. Model names usually follow `series/model`. Example: `Qwen/Qwen3-8B`.
-> 2. API endpoints come from the provider docs. For SiliconFlow, examples include `https://api.siliconflow.cn/v1` (LLM, VLM) and `https://api.siliconflow.cn/v1/embeddings` (embedding).
-> 3. Generate API keys from the provider's key management console.
+### Add models in batches
 
-4. **Connectivity verification**
-   - Click **Verify** to send a test request and confirm connectivity.
-5. **Save model**
-   - Click **Add** to place the model in the available list.
+1. In **Model Library**, select **Add Model → Batch**.
+2. Select a **Provider**, confirm or enter the **Base URL**, and enter the **API Key** if the provider requires one. Select **Fetch model list**. The endpoint must support model listing.
+3. Search for and select the models to import. Use the controls on individual rows to change the model type or configure a model.
+4. Verify models individually or select **Batch verify** to check the selected models. When ready, select **Add N models**.
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/model-management/add-model.png" style="width: 50%; height: auto;" />
-</div>
+When the ModelEngine integration is enabled, **Sync ModelEngine Models** opens the **Batch** tab directly.
 
-#### Batch Add Models
+![Batch model import with two models selected from the fetched list](../assets/model-management/batch-add-models.png)
 
-Use batch import to speed up onboarding:
+### Set default models
 
-1. Enable the **Batch Add Models** toggle in the dialog.
-2. Select a **model provider**.
-3. Choose the **model type** (LLM/Embedding/VLM/Rerank/STT/TTS).
-4. Enter the **API Key** (required).
-5. Click **Fetch Models** to retrieve the provider list.
-6. Toggle on the models you need (disabled by default).
-7. Click **Add** to save every selected model at once.
+In **Default Configuration**, open a dropdown and choose a model of the corresponding type from the library. Nexent saves your selection automatically. If the model you need is missing, add it to Model Library first.
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/model-management/add-model-batch.png" style="width: 50%; height: auto;" />
-</div>
+| Priority | Models | Purpose |
+| --- | --- | --- |
+| Required | Large language model | Provides default chat, reasoning, and question answering. |
+| Recommended | Text embedding and image understanding | Text embedding supports knowledge base indexing, semantic search, and memory. Image understanding supports questions about images. |
+| Optional | Multimodal embedding, rerank, image generation, video understanding, audio understanding, speech recognition, and speech synthesis | Configure these for multimodal retrieval, reranking, multimodal processing, or voice input and output. |
 
-### 🔧 Edit Custom Models
+Read the confirmation prompt before changing an active embedding model. This may affect existing files, knowledge bases, or memory.
 
-Modify or delete models anytime:
+### Manage the model library
 
-1. Click **Edit Custom Models**.
-2. Select the model type (LLM/Embedding/VLM/Rerank/STT/TTS).
-3. Choose between batch editing or single-model editing.
-4. For batch edits, toggle models on/off or click **Edit Config** in the upper-right to change settings in bulk.
-5. For single models, click the trash icon 🗑️ to delete, or click the model name to open the edit dialog.
+- Search by model name or filter by **Type** and **Provider**. Each row shows the connection status. Models selected in Default Configuration carry a default badge.
+- To change or remove a model, select **Edit** or **Delete** in its **Actions** column. Editable fields vary by model type. To change the model or profile used by a saved LLM outlet, add a new outlet.
+- Select **Batch Edit**, then choose a connection group to update its **API Key** or **Base URL**. Use **Batch Delete** to select and remove one or more models in a single operation.
 
-<div style="display: flex; gap: 8px;">
-  <img src="../assets/model-management/edit-model-1.png" style="width: 50%; height: 100%;" />
-  <img src="../assets/model-management/edit-model-2.png" style="width: 50%; height: 80%;" />
-</div>
-<br>
-<div style="display: flex; gap: 8px;">
-  <img src="../assets/model-management/edit-model-3.png" style="width: 50%; height: 100%;" />
-  <img src="../assets/model-management/edit-model-4.png" style="width: 50%; height: 80%;" />
-</div>
-<br>
-<div style="display: flex; gap: 8px;">
-  <img src="../assets/model-management/edit-model-5.png" style="width: 50%; height: 100%;" />
-  <img src="../assets/model-management/edit-model-6.png" style="width: 50%; height: 80%;" />
-</div>
+Accounts with view-only access cannot change defaults or manage models.
 
-### ⚙️ Configure System Models
+![Model Library with search, filters, batch controls, and row actions](../assets/model-management/model-library.png)
 
-After adding models, assign the platform-level defaults. These models handle system tasks such as title generation, real-time file reading, and multimodal parsing. Individual agents can still choose their own run-time models.
+### Check model connectivity
 
-#### Base Model
+- **Check the default models**. Select **Check Model Connectivity** at the top right of **Default Configuration** to verify the selected defaults. When the check completes, a green dot next to the model name indicates a successful connection. You can view failure details and retry a failed check.
+- **Check one model**. Find the model in **Model Library** and select **Verify Connectivity** on its row. If the check fails, review the **Base URL**, model ID or name, credentials, and provider permissions, then retry.
 
-- Used for core platform features (title generation, real-time file access, basic text processing).
-- Choose any added large language model from the dropdown.
-
-#### Large Language Model
-
-The large language model serves as the system's core reasoning engine, responsible for processing users' natural language requests, generating responses, executing code, analyzing data, and other complex tasks. Choosing an appropriate large language model can significantly improve the agent's conversational quality and task-handling capabilities.
-
-- Click the Large Language Model dropdown and select one from the added large language models.
-
-#### Embedding Model
-
-Embedding models are primarily used for vectorization processing of text, images, and other data in knowledge bases, forming the foundation for efficient retrieval and semantic understanding. Configuring an appropriate embedding model can significantly improve knowledge base search accuracy and multimodal data processing capabilities.
-
-- Click the embedding model dropdown to select one from the added embedding models.
-- Embedding model configuration affects the stable operation of knowledge bases.
-
-Choose appropriate document chunk size and chunks per request based on model capabilities. Smaller chunks provide more stability, but may affect file parsing quality.
-
-<div style="display: flex; gap: 8px;">
-  <img src="../assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
-</div>
-
-#### Rerank Model
-
-The rerank model performs semantic matching and scoring on initially filtered documents to ensure the most relevant answers are ranked first, improving retrieval accuracy and efficiency. Configuring an appropriate rerank model can significantly improve knowledge base retrieval effectiveness.
-
-- Click the Rerank Model dropdown to select one from the added rerank models.
-
-#### Multimodal Models
-
-Multimodal models combine visual and language capabilities to handle complex scenarios containing text, images, and other types of information.
-
-- **Image Understanding Model**: Can analyze and understand image content, extract key information, and answer questions related to images. Click the Image Understanding Model dropdown to select one from the added models.
-- **Image Generation Model**: Can generate images based on text descriptions, supporting creative design, content creation, and other scenarios. Click the Image Generation Model dropdown to select one from the added models.
-- **Video Understanding Model**: Can analyze and understand video content, extract key information, generate summaries, or answer questions related to videos. Click the Video Understanding Model dropdown to select one from the added models.
-
-#### Voice Models
-
-Voice models enable bidirectional conversion between speech and text, supporting voice interaction scenarios.
-
-- **Text-to-Speech Model**: Converts text content into natural, fluent speech output in real-time, enabling the system to interact with users in a near-human voice. With low latency and high-fidelity speech generation capabilities, it ensures a smooth and natural auditory experience during conversations. Click the Text-to-Speech Model dropdown to select one from the added models.
-- **Speech-to-Text Model**: Converts user voice input into text in real-time, enabling accurate understanding and parsing of voice commands and natural language. With high-precision speech transcription and noise robustness, it ensures stable recognition of user intent even in complex environments. Click the Speech-to-Text Model dropdown to select one from the added models.
-
-<div style="display: flex; gap: 8px; flex-wrap: wrap;">
-  <img src="../assets/model-management/select-model-1.png" style="width: 30%; height: auto;" />
-  <img src="../assets/model-management/select-model-2.png" style="width: 30%; height: auto;" />
-  <img src="../assets/model-management/select-model-3.png" style="width: 30%; height: auto;" />
-  <img src="../assets/model-management/select-model-4.png" style="width: 30%; height: auto;" />
-  <img src="../assets/model-management/select-model-5.png" style="width: 30%; height: auto;" />
-</div>
-
-### ✅ Check Model Connectivity
-
-Run regular connectivity checks to keep the platform healthy:
-
-1. Click **Check Model Connectivity**.
-2. Nexent tests every configured system model automatically.
-
-Status indicators:
-
-- 🔵 **Blue dot** – Checking in progress.
-- 🔴 **Red dot** – Connection failed; review configuration or network.
-- 🟢 **Green dot** – Connection is healthy.
-
-Troubleshooting tips:
-
-- Confirm network stability.
-- Ensure the API key is valid and not expired.
-- Check the provider's service status.
-- Review firewall and security policies.
+![A green dot next to the default language model after a successful connectivity check](../assets/model-management/model-connectivity.png)
 
 ### 🤖 Supported Providers
 
 #### Large Language Models
 
-Nexent supports any **OpenAI-compatible** provider, including:
+When adding a single large language model in the current tenant, the **Provider** dropdown offers profiles for SiliconFlow, Alibaba Cloud Model Studio (China), TokenPony, DeepSeek, Volcengine Ark, and Volcengine Ark Coding Plan. Ark pay-as-you-go and Coding Plan use different base URLs.
 
-- [SiliconFlow](https://siliconflow.cn/)
-- [Ali Bailian](https://bailian.console.aliyun.com/)
-- [TokenPony](https://www.tokenpony.cn/)
-- [DeepSeek](https://platform.deepseek.com/)
-- [OpenAI](https://platform.openai.com/)
-- [Anthropic](https://console.anthropic.com/)
-- [Moonshot](https://platform.moonshot.cn/)
+Batch import uses the built-in model catalog, which also lists OpenAI, Z.AI, Anthropic Claude, Google Gemini, Mistral AI, xAI (Grok), and ModelEngine. Batch import requires an endpoint that can return a model list. Use the connectivity check to confirm that a specific model is callable.
+
+For other providers such as Moonshot, select **Custom provider** and enter an **OpenAI Chat Completions**-compatible Base URL, the model ID, and any required credentials.
 
 Getting started:
 
 1. Sign up at the provider's portal.
 2. Create and copy an API key.
-3. Locate the API endpoint (usually ending with `/v1`).
-4. Click **Add Custom Model** in Nexent and fill in the required fields.
+3. Find the Base URL for the API protocol in the provider's documentation.
+4. In Nexent, go to **Model Library → Add Model** and enter the connection details from the provider.
 
 #### Multimodal Models
 

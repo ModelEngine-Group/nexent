@@ -34,6 +34,13 @@ feature:
     description: Configuration-page creator histories and counts are scoped to authenticated
       owner, current-tenant target and public executor; opening history resumes its
       ID and new conversation keeps the target without pre-creating or copying messages.
+      NL2Agent and NL2Skill retain the latest three histories per owner, executor and target by
+      activity time then ID, soft-deleting excess histories on creation, target binding
+      and history listing. Agent editor entry automatically resumes the latest history once;
+      explicit new sessions stay selected. NL2Agent has no pagination and recommends
+      continued optimization in an existing conversation. NL2Skill also has no pagination. Both frontend requests send only kind and target_id; legacy server pagination parameters remain accepted for compatibility and do not change retention.
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-006
+    description: Creator cards terminate a turn gracefully without cancelling queued output. Persisted creator runs survive subscriber departure and reconnect to the owned generation. Latest unanswered cards retain isolated drafts and editability across re-entry; submitted cards remain readonly, and following turns preserve structured questions and answers. Concurrent starts and stale stop requests cannot replace a newer execution.
   required_test_stages:
   - D5
   source:

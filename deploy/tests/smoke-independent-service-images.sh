@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+set -euo pipefail
+
+if [ "$#" -ne 2 ] && [ "$#" -ne 3 ]; then
+  echo "Usage: $0 MANAGEMENT_IMAGE RUNTIME_IMAGE [OPS_IMAGE]" >&2
+  exit 2
+fi
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+if [[ "$OSTYPE" == msys* ]]; then
+  repo="$(cd "$repo" && pwd -W)"
+  export MSYS2_ARG_CONV_EXCL='*'
+fi
+prefix="nexent-image-smoke-$$"
+password="$(openssl rand -hex 16)"
+signing_key="$(openssl rand -hex 32)"
+containers=("$prefix-management" "$prefix-runtime" "$prefix-postgres" "$prefix-redis")
+containers+=("$prefix-mcp" "$prefix-runtime-read")
+if [ "$#" -eq 3 ]; then
+  containers+=("$prefix-ops" "$prefix-elasticsearch")
+fi
+
+cleanup() {
+  local status=$?
+  local name
+  if ((status != 0)); then
+    for name in "${containers[@]}"; do
+      docker logs "$name" >&2 || true
+    done
+  fi
+  docker rm -fv "${containers[@]}" >/dev/null 2>&1 || true
+  docker network rm "$prefix" >/dev/null 2>&1 || true
+  return "$status"
+}
+
+docker network create "$prefix" >/dev/null
+trap cleanup EXIT
+
+for image in "$@"; do
+  ports="$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')"
+  if [ "$ports" != "null" ] && [ "$ports" != "{}" ]; then
+    echo "$image declares exposed ports: $ports" >&2
+    exit 1
+  fi
+done
+
+docker run -d --name "$prefix-postgres" --network "$prefix" --network-alias postgres \
+  -e POSTGRES_USER=root -e POSTGRES_DB=nexent -e "POSTGRES_PASSWORD=$password" postgres:15-alpine >/dev/null
+docker run -d --name "$prefix-redis" --network "$prefix" --network-alias redis redis:7-alpine >/dev/null
+
+if [ "$#" -eq 3 ]; then
+  docker run -d --name "$prefix-elasticsearch" --network "$prefix" --network-alias elasticsearch \
+    --memory 768m -e discovery.type=single-node -e xpack.security.enabled=false \
+    -e 'ES_JAVA_OPTS=-Xms256m -Xmx256m' \
+    docker.elastic.co/elasticsearch/elasticsearch:8.17.4 >/dev/null
+fi
+
+env_args=(
+  -e POSTGRES_HOST=postgres -e POSTGRES_USER=root -e POSTGRES_DB=nexent
+  -e "NEXENT_POSTGRES_PASSWORD=$password" -e REDIS_URL=redis://redis:6379/0
+  -e "JWT_SECRET=$signing_key" -e GATEWAY_AUTH_ENABLED=false -e LANGFUSE_ENABLED=false
+  -e MINIO_ENDPOINT=http://minio:9000
+  -e MINIO_ACCESS_KEY=smoke -e "MINIO_SECRET_KEY=$password"
+  -e RUNTIME_SERVICE_URL=http://runtime:5014 -e MANAGEMENT_AGENTOS_URL=http://management:5010
+  -e ELASTICSEARCH_HOST=http://elasticsearch:9200 -e ELASTICSEARCH_API_KEY=
+)
+
+wait_ready() {
+  local container=$1 port=$2 path=${3:-/health/ready} host=${4:-127.0.0.1}
+  for ((attempt = 1; attempt <= 90; attempt++)); do
+    if docker exec "$container" python -c '
+import sys
+from urllib.request import ProxyHandler, build_opener
+with build_opener(ProxyHandler({})).open(sys.argv[1], timeout=2) as response:
+    print(response.read(4096).decode())
+' "http://$host:$port$path" 2>/dev/null; then
+      printf '\n%s is ready\n' "$container"
+      return 0
+    fi
+    [ "$(docker inspect --format '{{.State.Running}}' "$container")" = true ] || break
+    sleep 2
+  done
+  echo "$container did not become ready" >&2
+  return 1
+}
+
+check_shared_monitoring() {
+  docker exec "$1" sh -ec '
+    test -f /opt/infrastructure/monitoring/runtime.py
+    if [ -d /opt/backend/ops ]; then
+      echo "Unexpected Ops source in producer image" >&2
+      exit 1
+    fi
+    test -x /opt/nexent/scripts/run-sql-migrations.sh
+    for path in /opt/nexent/scripts/start-ops.sh /opt/nexent/scripts/run-ops-sql-migrations.sh /opt/nexent/ops-sql; do
+      if [ -e "$path" ]; then
+        echo "Unexpected Ops SQL initializer in producer image" >&2
+        exit 1
+      fi
+    done
+  '
+}
+
+docker run -d --name "$prefix-management" --network "$prefix" --network-alias management \
+  "${env_args[@]}" --mount "type=bind,source=$repo/deploy/sql,target=/opt/nexent/sql,readonly" \
+  --entrypoint /opt/nexent/scripts/start-backend.sh "$1" python -m backend.http.config_service >/dev/null
+wait_ready "$prefix-management" 5010
+check_shared_monitoring "$prefix-management"
+docker exec "$prefix-management" sh -ec '
+  test ! -d /opt/backend/runtime
+  test ! -d /opt/backend/data_process
+'
+docker exec "$prefix-management" python -c '
+import services.nl2agent_knowledge_recommendations
+import services.nl2agent_resource_flow
+import tool_collection.mcp.nl2agent_configuration_tools
+import tool_collection.mcp.nl2agent_resource_tools
+'
+
+docker run -d --name "$prefix-runtime" --network "$prefix" --network-alias runtime \
+  "${env_args[@]}" -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false \
+  -e LOCAL_FILE_MONITORING_ENABLED=true -e TRAJECTORY_READ_ENABLED=false \
+  --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory \
+  --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
+wait_ready "$prefix-runtime" 5014
+check_shared_monitoring "$prefix-runtime"
+docker exec "$prefix-runtime" sh -ec '
+  test ! -d /opt/backend/management
+  test ! -d /opt/backend/data_process
+  test ! -d /opt/backend/services
+'
+
+if [ "$#" -eq 3 ]; then
+  wait_ready "$prefix-management" 9200 '/_cluster/health?wait_for_status=yellow&timeout=2s' elasticsearch
+  docker run -d --name "$prefix-ops" --network "$prefix" "${env_args[@]}" \
+    -e GATEWAY_AUTH_ENABLED=true -e TRAJECTORY_READ_ENABLED=true \
+    -e REDIS_BACKEND_URL=redis://redis:6379/0 \
+    --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory "$3" >/dev/null
+  wait_ready "$prefix-ops" 5016
+  docker exec "$prefix-runtime" python -c '
+from contracts.constants.environment import OPS_MONITORING_ENABLED
+from infrastructure.monitoring.store import BatchStore, monitoring_engine
+assert OPS_MONITORING_ENABLED
+store = BatchStore(monitoring_engine())
+try:
+    store.verify_schema()
+finally:
+    store.engine.dispose()
+'
+fi
+
+docker run -d --name "$prefix-runtime-read" --network "$prefix" "${env_args[@]}" \
+  -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false \
+  -e LOCAL_FILE_MONITORING_ENABLED=false -e TRAJECTORY_READ_ENABLED=true \
+  --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory \
+  --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
+wait_ready "$prefix-runtime-read" 5014
+
+for runtime in "$prefix-runtime" "$prefix-runtime-read"; do
+  docker exec -i "$runtime" python - <<'PY'
+import asyncio
+
+from sqlalchemy import select
+
+from contracts.constants.environment import LOCAL_FILE_MONITORING_ENABLED
+from infrastructure.rdb.account_record import UserAccount, UserTenant
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.conversation_record import ConversationRecord
+from infrastructure.rdb.trajectory.models import TrajectoryExecution
+from infrastructure.trace.bootstrap import monitoring_manager
+from infrastructure.trace.trajectory_store import CaptureIdentity
+from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
+from nexent.monitor import AgentRunMetadata
+from runtime.trajectory import configure_runtime_trajectory
+
+owner = "trajectory-capture" if LOCAL_FILE_MONITORING_ENABLED else "trajectory-read"
+tenant = "trajectory-smoke"
+with get_db_session() as session:
+    session.add_all([
+        UserAccount(user_id=owner),
+        UserTenant(user_id=owner, tenant_id=tenant),
+    ])
+    conversation = ConversationRecord(conversation_title="trajectory smoke", created_by=owner)
+    session.add(conversation)
+    session.flush()
+    conversation_id = conversation.conversation_id
+
+processor = configure_runtime_trajectory()
+assert processor is not None
+manager = ThreadManager("trajectory-smoke", {"background-service": LanePolicy("background-service", 1, 0)})
+manager.start()
+processor.start(manager, ManagedThreadSpec("trajectory-file-writer", "smoke", close_hook=processor.request_stop))
+try:
+    metadata = AgentRunMetadata(tenant_id=tenant, user_id=owner, agent_id=42, conversation_id=conversation_id)
+    with monitoring_manager.start_agent_run(metadata):
+        monitoring_manager.set_openinference_agent_context(
+            tenant_id=tenant, user_id=owner, agent_id=42, conversation_id=conversation_id, query="trajectory smoke",
+        )
+    assert processor.force_flush(5000)
+    with get_db_session() as session:
+        execution = session.scalars(
+            select(TrajectoryExecution).where(TrajectoryExecution.conversation_id == conversation_id)
+        ).one()
+        assert execution.turn_no == 1
+        expected_status = "unarchived" if LOCAL_FILE_MONITORING_ENABLED else "not_captured"
+        assert execution.status == expected_status, f"{owner}: expected {expected_status}, got {execution.status}"
+        execution_id = str(execution.trajectory_id)
+    if LOCAL_FILE_MONITORING_ENABLED:
+        manifest = processor.store.manifest(CaptureIdentity(tenant, owner, str(conversation_id), "42"))
+        assert any(run["trajectory_id"] == execution_id for run in manifest["runs"])
+        assert any(processor.store.root.rglob("*.otlp.jsonl"))
+    else:
+        assert not any(processor.store.root.rglob("*.otlp.jsonl"))
+    print("Runtime trajectory registration and archive checks passed")
+finally:
+    processor.shutdown()
+    asyncio.run(manager.shutdown(timeout=3))
+PY
+done
+
+docker run -d --name "$prefix-mcp" --network "$prefix" "${env_args[@]}" \
+  -e "NEXENT_MCP_INTERNAL_TOKEN=$signing_key" -e NEXENT_SQL_STARTUP_MODE=off -e OPS_MONITORING_ENABLED=false -e PYTHON_DOTENV_DISABLED=1 \
+  --entrypoint /opt/nexent/scripts/start-backend.sh "$1" python -m backend.http.mcp_service >/dev/null
+wait_ready "$prefix-mcp" 5015 /tools/outer_api
+
+if [ "$#" -eq 3 ]; then
+  docker exec "$prefix-ops" python -c '
+from contracts.constants.environment import ES_HOST, OPS_MONITORING_ENABLED
+from elasticsearch import Elasticsearch
+assert OPS_MONITORING_ENABLED
+with Elasticsearch(ES_HOST) as es:
+    for name in ("monitoring-facts", "monitoring-daily"):
+        assert es.indices.get_index_template(name=name)["index_templates"]
+'
+  docker exec -i "$prefix-ops" python - <<'PY'
+import json
+from urllib.error import HTTPError
+from urllib.request import ProxyHandler, Request, build_opener
+
+from contracts.constants.environment import TRAJECTORY_ROOT_DIR
+from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
+from infrastructure.rdb.client import get_db_session
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
+from management.db.identity.models import UserAccount, UserTenant
+
+TrajectoryFileStore.provision(TRAJECTORY_ROOT_DIR)
+opener = build_opener(ProxyHandler({}))
+base = "http://127.0.0.1:5016"
+actor = {"kind": "session", "user_id": "smoke", "tenant_id": "smoke", "role": "SU", "roles": ["SU"]}
+with get_db_session() as session:
+    session.add_all([
+        UserAccount(user_id=actor["user_id"], user_roles=actor["roles"]),
+        UserTenant(user_id=actor["user_id"], tenant_id=actor["tenant_id"]),
+    ])
+
+
+def request(path, method="GET", payload=None):
+    headers = {IDENTITY_HEADER: sign_identity(actor, "ops", method, path, b"")}
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode()
+    with opener.open(Request(base + path, data=data, headers=headers, method=method), timeout=10) as response:
+        return json.load(response)
+
+
+paths = request("/openapi.json")["paths"]
+assert "patch" in paths["/system_configurations"]
+assert "get" in paths["/trajectory/records"]
+try:
+    opener.open(base + "/system_configurations", timeout=5)
+except HTTPError as error:
+    assert error.code in (401, 403)
+else:
+    raise AssertionError("Ops accepted a configuration request without credentials")
+
+items = {item["key"]: item["value"] for item in request("/system_configurations")["items"]}
+key = "LLM_INCLUDE_LOGPROBS"
+value = not items[key]
+result = request("/system_configurations", "PATCH", {"changes": {key: value}})
+assert result["saved"] and result["notification"] == "published"
+saved = {item["key"]: item["value"] for item in request("/system_configurations")["items"]}
+assert saved[key] is value
+assert isinstance(request("/trajectory/records"), dict)
+print("Ops signed configuration read/write and trajectory query passed")
+PY
+  docker exec "$prefix-ops" python -m ops.scripts.backfill_trajectory_summaries
+fi
+
+docker exec "$prefix-mcp" sh -ec '
+  test -s /opt/backend/configs/model_catalog.json
+  test -s /opt/backend/configs/models_dev_catalog.json
+  test -s /opt/nexent/litellm_models.json
+  test -f /opt/backend/tool_collection/langchain/compute_tool.py
+  python -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
+'
+docker exec -i "$prefix-mcp" python - <<'PY'
+import asyncio
+import os
+from urllib.error import HTTPError
+from urllib.request import ProxyHandler, build_opener
+
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport
+from backend.http.mcp_service import get_registered_openapi_services, register_openapi_service
+
+opener = build_opener(ProxyHandler({}))
+url = "http://127.0.0.1:5011/mcp/smoke/sse"
+try:
+    opener.open(url, timeout=5)
+except HTTPError as error:
+    assert error.code == 403
+else:
+    raise AssertionError("MCP accepted a request without tenant credentials")
+
+headers = {
+    "Accept": "text/event-stream",
+    "X-Tenant-ID": "smoke",
+    "X-Nexent-Internal-Token": os.environ["NEXENT_MCP_INTERNAL_TOKEN"],
+}
+
+async def verify_tools():
+    async with asyncio.timeout(15):
+        async with Client(SSETransport(url, headers=headers)) as client:
+            tools = await client.list_tools()
+            demo, = [tool.name for tool in tools if tool.name.endswith("test_tool_name")]
+            result = await client.call_tool(demo, {"para_1": "smoke", "para_2": 1})
+            assert not result.is_error
+            assert any(part.text == "success" for part in result.content)
+
+asyncio.run(verify_tools())
+print("MCP tenant tool listing and invocation passed")
+
+spec = {
+    "openapi": "3.0.3",
+    "info": {"title": "Smoke API", "version": "1.0"},
+    "paths": {"/ping": {"get": {"operationId": "ping", "responses": {"200": {"description": "OK"}}}}},
+}
+assert register_openapi_service("smoke_api", spec, "http://127.0.0.1:5015", {})
+assert {service["service_name"] for service in get_registered_openapi_services()} == {"smoke_api"}
+assert not get_registered_openapi_services("other-tenant")
+print("MCP OpenAPI registration passed")
+PY
+docker exec "$prefix-mcp" test ! -d /opt/backend/ops
+if [ "$#" -eq 3 ]; then
+  docker exec "$prefix-ops" sh -ec '
+    test ! -e /opt/backend/http/config_service.py
+    test ! -e /opt/backend/http/runtime_service.py
+    test ! -e /opt/backend/management/api/application.py
+    test ! -d /opt/backend/data_process
+    test ! -d /opt/deploy/sql
+    test ! -d /opt/sdk
+  '
+  docker exec "$prefix-ops" test ! -e /opt/backend/http/mcp_service.py
+fi

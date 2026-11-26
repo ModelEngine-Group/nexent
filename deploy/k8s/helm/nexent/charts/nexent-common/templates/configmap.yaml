@@ -1,4 +1,9 @@
 {{- $monitoring := default dict .Values.global.monitoring -}}
+{{- $provider := default .Values.config.telemetry.provider $monitoring.provider -}}
+{{- if eq $provider "local_file" -}}
+{{- fail "Use global.monitoring.localFileEnabled for local trace capture" -}}
+{{- end -}}
+{{- $localCapture := ternary (get $monitoring "localFileEnabled") true (hasKey $monitoring "localFileEnabled") | toString | lower -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,6 +12,8 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "-3"
 data:
+  GATEWAY_AUTH_ENABLED: "true"
+  GATEWAY_SERVICE_URL: {{ .Values.config.services.gatewayUrl | quote }}
   TZ: {{ .Values.config.timezone | quote }}
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
@@ -22,6 +29,7 @@ data:
   CONFIG_SERVICE_URL: {{ .Values.config.services.configUrl | quote }}
   ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
+  MANAGEMENT_AGENTOS_URL: {{ .Values.config.services.managementAgentosUrl | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
@@ -97,7 +105,10 @@ data:
 
   # Telemetry and Monitoring Configuration
   ENABLE_TELEMETRY: {{ ternary (get $monitoring "enabled") .Values.config.telemetry.enabled (hasKey $monitoring "enabled") | quote }}
-  MONITORING_PROVIDER: {{ default .Values.config.telemetry.provider $monitoring.provider | quote }}
+  MONITORING_PROVIDER: {{ $provider | quote }}
+  LOCAL_FILE_MONITORING_ENABLED: {{ $localCapture | quote }}
+  TRAJECTORY_ROOT_DIR: {{ default "/mnt/nexent-data/trajectory" $monitoring.trajectoryRootDir | quote }}
+  TRAJECTORY_READ_ENABLED: {{ ternary true (default false $monitoring.trajectoryReadEnabled) (eq $localCapture "true") | quote }}
   MONITORING_PROJECT_NAME: {{ default .Values.config.telemetry.projectName $monitoring.projectName | quote }}
   OTEL_SERVICE_NAME: {{ default .Values.config.telemetry.serviceName $monitoring.serviceName | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ default .Values.config.telemetry.otlpEndpoint $monitoring.otlpEndpoint | quote }}

@@ -66,7 +66,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 
 # Mock the entire client module
 client_mock = MagicMock()
@@ -78,14 +78,16 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -165,6 +167,20 @@ def mock_session():
     mock_query = MagicMock()
     mock_session.query.return_value = mock_query
     return mock_session, mock_query
+
+
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    monkeypatch.setattr(
+        "management.db.configuration.tenant.get_config_snapshot",
+        _system_config_snapshot,
+    )
 
 
 def test_get_all_configs_by_tenant_id_success(monkeypatch, mock_session):
@@ -616,7 +632,11 @@ def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
-    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_TENANT_COUNT=1),
+    )
 
     with pytest.raises(ResourceLimitError, match="Tenant limit"):
         module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
@@ -638,7 +658,11 @@ def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, shoul
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
-    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_TENANT_COUNT=1),
+    )
 
     if should_reject:
         with pytest.raises(ResourceLimitError):
@@ -662,9 +686,40 @@ def test_create_tenant_with_default_group_rejects_platform_tenant_limit(monkeypa
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
-    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_TENANT_COUNT=1),
+    )
 
     with pytest.raises(ResourceLimitError, match="Tenant limit"):
         create_tenant_with_default_group("tenant-101", "Tenant 101", "admin-1")
 
     session.add.assert_not_called()
+
+
+@pytest.mark.parametrize("already_saved", [False, True])
+def test_update_tenant_memory_setting_serializes_and_preserves_existing_row(monkeypatch, mock_session, already_saved):
+    from management.db.configuration import tenant
+
+    session, query = mock_session
+    saved = MockTenantConfig(config_value="N", created_by="original") if already_saved else None
+    query.filter_by.return_value.first.return_value = saved
+    manager = MagicMock()
+    manager.__enter__.return_value = session
+    monkeypatch.setattr(tenant, "get_db_session", lambda: manager)
+    monkeypatch.setattr(tenant, "TenantConfig", MockTenantConfig)
+
+    tenant.upsert_single_tenant_setting("tenant-1", "TENANT_MEMORY_SWITCH", "Y", "current-admin")
+
+    assert session.execute.call_args.args[1] == {"setting": "tenant-config:tenant-1:TENANT_MEMORY_SWITCH"}
+    query.filter_by.assert_called_once_with(tenant_id="tenant-1", config_key="TENANT_MEMORY_SWITCH", delete_flag="N")
+    if saved is None:
+        row = session.add.call_args.args[0]
+        assert row.created_by == "current-admin"
+    else:
+        row = saved
+        session.add.assert_not_called()
+        assert row.created_by == "original"
+    assert row.config_value == "Y"
+    assert row.user_id == row.updated_by == "current-admin"

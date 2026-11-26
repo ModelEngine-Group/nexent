@@ -1,0 +1,42 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-AGENT-FACTS
+  name: Agent monitoring source facts
+  status: active
+  description: Write Agent execution observations, publish daily metrics and expose tenant-authorized summaries, directory pages, trends and rankings.
+  business_rules:
+  - rule_id: OPS-AGENT-FACTS-RULE-01
+    description: A main Agent's start, end and terminal replay share one Elasticsearch document routed by the execution start time.
+  - rule_id: OPS-AGENT-FACTS-RULE-02
+    description: A formal main Agent run emits start and terminal facts with core run timing independent of trajectory capture. An SSE reconnection replays that run.
+  - rule_id: OPS-AGENT-FACTS-RULE-03
+    description: Publish each confirmed execution once on its start day, preserving measured ended-run durations as an integer sum and sample count.
+  - rule_id: OPS-AGENT-FACTS-RULE-04
+    description: Read execution counts and weighted average durations from published Agent rows with inclusive dates, initiating group and Agent filters, and enforce the Ops tenant scope.
+  - rule_id: OPS-AGENT-FACTS-RULE-05
+    description: Current Agent counts use active draft rows independently of historical date and group filters. Published resource pages, inclusive daily trends and exact top five counts preserve per-tenant identities, known zero, unknown coverage and deterministic ordering.
+  - rule_id: OPS-AGENT-FACTS-RULE-06
+    description: Each actual child Adapter run has its existing independent invocation ID, immediate parent and root ID, two revisions and independent timing. Terminal replay preserves one fact per execution with trajectory capture disabled.
+  - rule_id: OPS-AGENT-FACTS-RULE-07
+    description: Success rate is succeeded_count divided by succeeded_count plus failed_count after merging selected rows. Explicit succeeded and failed or timed_out terminal outcomes enter those counts independently of available timing fields. Cancelled, ongoing and unknown outcomes are excluded, and a zero denominator returns null.
+  - rule_id: OPS-AGENT-FACTS-RULE-08
+    description: Agent Tokens merge attributed published model rows by actual Agent and request start day, excluding requests without Agent execution identity and retaining model usage coverage and independent publication status.
+  - rule_id: OPS-AGENT-FACTS-RULE-09
+    description: Agent TTFT measures actual execution start to its first nonblank public answer fragment, independently per main or child execution. Tools, thinking, missing answers, fallback placeholders and replay do not create samples. Merge measured sums and counts before computing nullable averages.
+  - rule_id: OPS-AGENT-FACTS-RULE-10
+    description: Main Agent monitoring and trajectory consume one complete preparation-through-cleanup timing result independently of capture flags. Actual execution start preserves counting eligibility and date ownership; TTFT retains its actual execution boundary.
+  - rule_id: OPS-AGENT-FACTS-RULE-11
+    description: Each child invocation shares an independent complete allocation-through-release-and-output timing result between monitoring and trajectory, regardless of capture flags. Actual execution start retains counting and date ownership; parent, sibling and nested clocks never mix.
+  - rule_id: OPS-AGENT-FACTS-RULE-12
+    description: The Agent list sorts published per-resource total Tokens as exact integers or merged success rates after authorized filters and before pagination. Nulls remain last in either direction; equal values retain tenant-ID/Agent-ID order. Existing default execution-count ranking behavior is unchanged.
+  - rule_id: OPS-AGENT-FACTS-RULE-13
+    description: The existing Agent rankings route selects execution_count by default, total_tokens or success_rate. It orders filtered published resource aggregates descending with stable tenant/Agent ties, excludes null values, returns up to five resources, and includes merged succeeded-plus-failed success_sample_count for success-rate items.
+  - rule_id: OPS-AGENT-FACTS-RULE-14
+    description: Exclude only Agents identified by system_key workbench_main from monitoring inventory, summaries, trends, lists, rankings, filters and Agent Token projections, including Overview consumers. Resolve IDs across system owners and versions, retaining raw runtime and model records and all dispatched business Agents.
+  required_test_stages: [D3]
+  source:
+    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120, OPS-AGENT-RANKINGS-20261120, OPS-AGENT-WORKBENCH-EXCLUSION-20261125]
+    notes: Agent collection contract and shared Ops monitoring pipeline.

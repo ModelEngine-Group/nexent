@@ -1,17 +1,65 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 import mimetypes
 import os
+import stat
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
+from nexent.core.agents.sandbox_callbacks import SandboxCallbackPublicError
+
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("upload_to_s3_tool")
+
+
+@contextmanager
+def _open_upload_file(abs_path: str, workspace: Path):
+    """Pin the validated file; never follow a replaced path while uploading."""
+    path = Path(abs_path)
+    path.relative_to(workspace)
+    if os.name == 'nt':
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        # Windows lacks openat. Check the opened handle's actual target instead.
+        with open(path, 'rb') as stream:
+            get_path = ctypes.WinDLL('kernel32', use_last_error=True).GetFinalPathNameByHandleW
+            get_path.argtypes = (wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD)
+            get_path.restype = wintypes.DWORD
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = get_path(msvcrt.get_osfhandle(stream.fileno()), buffer, len(buffer), 0)
+            if not length or length >= len(buffer):
+                raise OSError('Cannot verify the opened upload file')
+            def normalized(value):
+                if value.startswith('\\\\?\\UNC\\'):
+                    return Path('\\\\' + value[8:])
+                return Path(value.removeprefix('\\\\?\\'))
+            normalized(buffer.value).relative_to(normalized(str(workspace)))
+            yield stream
+        return
+
+    # Walk the already resolved absolute path, pinning each directory. A leaf
+    # O_NOFOLLOW alone would leave replacement of an ancestor exploitable.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory = os.open(path.anchor, flags)
+    try:
+        for part in path.parts[1:-1]:
+            child = os.open(part, flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    finally:
+        os.close(directory)
+    with os.fdopen(fd, 'rb') as stream:
+        yield stream
 
 
 class UploadToS3Tool(Tool):
@@ -159,21 +207,29 @@ class UploadToS3Tool(Tool):
         ]
 
     def forward(self, file_path: str, target_filename: str = None) -> str:
+        return self._upload(file_path, target_filename, notify=True)
+
+    def upload_artifact(self, file_path: str, target_filename: str) -> dict:
+        """Upload a declared artifact without emitting a local-path progress card."""
+        return json.loads(self._upload(file_path, target_filename, notify=False, allow_empty=True))
+
+    def _upload(self, file_path: str, target_filename: str | None, *, notify: bool, allow_empty: bool = False) -> str:
         try:
-            if self.observer:
+            if notify and self.observer:
                 card_content = [{"icon": "upload", "text": f"Uploading {file_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
             # 1. Validate inputs
             if not file_path or not file_path.strip():
-                raise Exception("File path cannot be empty")
+                raise SandboxCallbackPublicError("File path cannot be empty")
 
             if self.minio_client is None:
                 raise Exception("MinIO client is not configured. Cannot upload files to S3.")
 
             if not self.user_id:
-                raise Exception("User authentication required for uploading files to S3.")
+                raise SandboxCallbackPublicError("User authentication required for uploading files to S3.")
             # 2. Validate local path
+            workspace = Path(self.workspace_path).resolve()
             candidates = self._upload_path_candidates(file_path)
             abs_path = next((path for path in candidates if os.path.exists(path)), candidates[0])
 
@@ -186,30 +242,34 @@ class UploadToS3Tool(Tool):
 
             # 3. Check file exists and is a regular file
             if not os.path.exists(abs_path):
-                raise Exception(f"File does not exist: {file_path}")
+                raise SandboxCallbackPublicError(f"File does not exist: {file_path}")
 
             if not os.path.isfile(abs_path):
-                raise Exception(f"Path is not a regular file: {file_path}")
+                raise SandboxCallbackPublicError(f"Path is not a regular file: {file_path}")
 
-            # 4. Check file size
-            file_size = os.path.getsize(abs_path)
-            if file_size > self.MAX_UPLOAD_SIZE:
-                raise Exception(
-                    f"File too large: {file_size} bytes (max {self.MAX_UPLOAD_SIZE} bytes). "
-                    f"Please use a smaller file."
-                )
-            if file_size == 0:
-                raise Exception(f"File is empty: {file_path}")
+            # 4. Validate metadata and upload through the same pinned handle.
+            with _open_upload_file(abs_path, workspace) as file_obj:
+                info = os.fstat(file_obj.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise SandboxCallbackPublicError(f"Path is not a regular file: {file_path}")
+                file_size = info.st_size
+                if file_size > self.MAX_UPLOAD_SIZE:
+                    raise SandboxCallbackPublicError(
+                        f"File too large: {file_size} bytes (max {self.MAX_UPLOAD_SIZE} bytes). "
+                        f"Please use a smaller file."
+                    )
+                if file_size == 0 and not allow_empty:
+                    raise SandboxCallbackPublicError(f"File is empty: {file_path}")
 
-            # 5. Determine target filename and S3 key
-            target_name = target_filename or os.path.basename(abs_path)
-            filename = os.path.basename(target_name)
-            s3_key = self._build_s3_key(target_name)
+                # 5. Determine target filename and S3 key
+                target_name = target_filename or os.path.basename(abs_path)
+                filename = os.path.basename(target_name)
+                s3_key = self._build_s3_key(target_name)
 
-            # 6. Upload to MinIO
-            success, result = self.minio_client.upload_file(abs_path, s3_key)
-            if not success:
-                raise Exception(f"Failed to upload file to S3: {result}")
+                # 6. Upload to MinIO without reopening the mutable path.
+                success, result = self.minio_client.upload_fileobj(file_obj, s3_key)
+                if not success:
+                    raise Exception(f"Failed to upload file to S3: {result}")
 
             # 7. Build the permanent S3 reference. Browser-facing URLs are
             # derived by the frontend and authenticated file API at render time.
@@ -235,10 +295,13 @@ class UploadToS3Tool(Tool):
                 "message": f"File uploaded successfully to {s3_url}",
             }
             self.uploaded_paths.add(os.path.normcase(os.path.abspath(abs_path)))
-            if self.on_upload is not None:
+            if notify and self.on_upload is not None:
                 self.on_upload(dict(response))
             return json.dumps(response, ensure_ascii=False)
 
+        except SandboxCallbackPublicError as exc:
+            logger.error("Upload rejected: %s", exc.public_message)
+            raise SandboxCallbackPublicError(f"Failed to upload file: {exc.public_message}") from exc
         except Exception as e:
             logger.error(f"Upload failed: {e}")
             raise Exception(f"Failed to upload file: {e}")

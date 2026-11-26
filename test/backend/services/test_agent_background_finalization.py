@@ -1,103 +1,102 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Cancellation joins the owned finalizer while retaining the cancellation outcome."""
+"""Runtime joins its prepared worker before recording the durable terminal."""
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from redis.exceptions import RedisError
 
-from management.services.agent.background import settle_background_projection
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.rdb.agent_execution import RunIdentity
+from runtime.agentos import prepared_run
+
+ACTOR = ServicePrincipal("user", "tenant")
+IDENTITY = RunIdentity("tenant", "user", 42, "a" * 32)
+
+
+@pytest.fixture
+def terminal(mocker):
+    async def inline(_name, fn, *args):
+        return fn(*args)
+
+    mocker.patch.object(prepared_run, "_control_io", side_effect=inline)
+
+    async def monitor(_identity):
+        await asyncio.Event().wait()
+
+    mocker.patch.object(prepared_run, "_wait_for_stop", side_effect=monitor)
+    return SimpleNamespace(
+        finish=mocker.patch.object(prepared_run, "finish_execution", return_value=True),
+        journal=SimpleNamespace(repair_terminal=Mock()),
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fails", [False, True])
-async def test_cancellation_waits_for_finalizer_and_does_not_mask_cancellation(fails):
+@pytest.mark.parametrize("worker_fails", [False, True])
+@pytest.mark.parametrize("cancellations", [1, 2])
+async def test_cancellation_joins_worker_and_records_stopped(mocker, terminal, worker_fails, cancellations):
     entered = asyncio.Event()
+    finalizing = asyncio.Event()
     release = asyncio.Event()
-    settled = asyncio.Event()
+    settled = Mock()
 
-    async def projection():
-        entered.set()
-        try:
-            await release.wait()
-            if fails:
-                raise RuntimeError("controlled finalizer failure")
-            return "committed"
-        finally:
-            settled.set()
-
-    worker = asyncio.create_task(settle_background_projection(projection()))
-    await entered.wait()
-    worker.cancel()
-    await asyncio.sleep(0)
-    assert not worker.done() and not settled.is_set()
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await worker
-    assert settled.is_set()
-
-
-@pytest.mark.asyncio
-async def test_projection_success_and_failure_are_observed():
-    async def success():
-        return "committed"
-
-    async def failure():
-        raise RuntimeError("controlled finalizer failure")
-
-    assert await settle_background_projection(success()) == "committed"
-    with pytest.raises(RuntimeError, match="controlled"):
-        await settle_background_projection(failure())
-
-
-@pytest.mark.asyncio
-async def test_repeated_cancellation_still_joins_one_finalizer():
-    entered = asyncio.Event()
-    release = asyncio.Event()
-    settled = []
-
-    async def projection():
-        entered.set()
-        try:
-            await release.wait()
-        finally:
-            settled.append("settled")
-
-    worker = asyncio.create_task(settle_background_projection(projection()))
-    await entered.wait()
-    worker.cancel()
-    await asyncio.sleep(0)
-    worker.cancel()
-    await asyncio.sleep(0)
-    assert not worker.done() and settled == []
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await worker
-    assert settled == ["settled"]
-
-
-@pytest.mark.asyncio
-async def test_finalizer_deadline_cancels_and_joins_owned_task(monkeypatch):
-    entered = asyncio.Event()
-    settled = asyncio.Event()
-    deadlines = []
-
-    async def projection():
+    async def run(*_args):
         entered.set()
         try:
             await asyncio.Event().wait()
         finally:
-            settled.set()
+            finalizing.set()
+            await release.wait()
+            settled()
+            if worker_fails:
+                raise RuntimeError("worker cleanup failed")
 
-    async def expired(shielded, timeout):
-        deadlines.append(timeout)
-        shielded.cancel()
-        raise asyncio.TimeoutError()
+    mocker.patch.object(prepared_run, "_run_snapshot", side_effect=run)
+    producer = asyncio.create_task(prepared_run._produce(object(), ACTOR, IDENTITY, terminal.journal))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        producer.cancel()
+        await asyncio.wait_for(finalizing.wait(), timeout=2)
+        for _ in range(cancellations - 1):
+            producer.cancel()
+            await asyncio.sleep(0)
+        assert not producer.done()
+        terminal.finish.assert_not_called()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(producer), timeout=2)
+    finally:
+        release.set()
+        await asyncio.gather(producer, return_exceptions=True)
 
-    monkeypatch.setattr(asyncio, "wait_for", expired)
-    worker = asyncio.create_task(settle_background_projection(projection()))
-    await entered.wait()
-    worker.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await worker
-    assert settled.is_set()
-    assert len(deadlines) == 1 and 0 < deadlines[0] <= 5
+    settled.assert_called_once_with()
+    terminal.finish.assert_called_once_with(IDENTITY, "stopped")
+    terminal.journal.repair_terminal.assert_called_once_with("stopped")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", ["completed", "failed"])
+async def test_worker_result_drives_execution_and_journal_terminal(mocker, terminal, result):
+    async def run(*_args):
+        if result == "failed":
+            raise RuntimeError("execution failed")
+        return result
+
+    mocker.patch.object(prepared_run, "_run_snapshot", side_effect=run)
+    await prepared_run._produce(object(), ACTOR, IDENTITY, terminal.journal)
+    terminal.finish.assert_called_once_with(IDENTITY, result)
+    terminal.journal.repair_terminal.assert_called_once_with(result)
+
+
+@pytest.mark.asyncio
+async def test_journal_write_failure_leaves_execution_terminal_for_reconciliation(mocker, terminal, caplog):
+    mocker.patch.object(prepared_run, "_run_snapshot", return_value="completed")
+    terminal.journal.repair_terminal.side_effect = RedisError("journal unavailable")
+
+    await prepared_run._produce(object(), ACTOR, IDENTITY, terminal.journal)
+
+    terminal.finish.assert_called_once_with(IDENTITY, "completed")
+    terminal.journal.repair_terminal.assert_called_once_with("completed")
+    assert "Prepared AgentOS journal will be reconciled" in caplog.text

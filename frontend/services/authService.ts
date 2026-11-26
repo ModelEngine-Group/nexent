@@ -359,8 +359,8 @@ export const authService = {
           permissions: data.data.user.permissions.map((permission: string) =>
             permission.toLowerCase()
           ),
-          accessibleRoutes: data.data.user.accessibleRoutes.map(
-            (router: string) => router.toLowerCase()
+          accessiblePages: data.data.user.accessiblePages.map(
+            (pageId: string) => pageId.toLowerCase()
           ),
         },
       };

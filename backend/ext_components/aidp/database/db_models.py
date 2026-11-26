@@ -27,7 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 
-from management.db.models import SCHEMA
+from infrastructure.rdb.base import SCHEMA
 
 
 # Dedicated Declarative base so the AIDP metadata can be re-declared in

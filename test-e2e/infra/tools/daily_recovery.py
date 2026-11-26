@@ -12,17 +12,34 @@ import re
 import yaml
 
 from local_preflight import env_file
+from recovery_io import protected_write
 from suite_runtime import BatchLock, deployment_lock_owned, now, save
 
 MODE_MARKER = "state/deployment-exceptions/pending.json"
-FAULT_MARKER = "state/deployment-guard/pending.json"
 _RETRY = ContextVar("daily_deployment_retry", default=None)
 MODE_KEYS = {"ENABLE_AIDP_KNOWLEDGE", "MODEL_ENGINE_ENABLED", "AIDP_SERVER_URL", "AIDP_API_KEY", "AIDP_TENANT_ID"}
+TFP_MODE = {
+    "NEXENT_AGENT_CORE": "smolagents",
+    "NEXENT_SANDBOX_DEFAULT_SCOPE": "session",
+    "NEXENT_SANDBOX_WORKSPACE_MODE": "bind",
+    "NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT": "/mnt/nexent/workdir",
+    "NEXENT_SANDBOX_FAILURE_POLICY": "error",
+    "NEXENT_TOOL_FASTPATH_ENABLED": "true",
+    "NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS": "ReadSkillConfigTool",
+}
+TFP_MONITORING = {"MONITORING_INSTRUMENT_REQUESTS": "true", "TELEMETRY_SAMPLE_RATE": "1.0",
+                  "MONITORING_TRACE_CONTENT_MODE": "full"}
+MONITORING_RENDERED_KEYS = {"ENABLE_TELEMETRY", "MONITORING_PROVIDER", "TRAJECTORY_READ_ENABLED",
+                            "MONITORING_DASHBOARD_URL", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL",
+                            "OTEL_COLLECTOR_CONFIG_FILE", "LANGFUSE_OTLP_AUTH_HEADER"}
 
 
-def configuration_paths(repo, home):
-    return [repo / "deploy/env/.env", repo / "deploy/common/local-config.yaml",
-            repo / "deploy/docker/.env.generated", home / "config/environment.yaml"]
+def configuration_paths(repo, home, *, monitoring=False):
+    paths = [repo / "deploy/env/.env", repo / "deploy/common/local-config.yaml",
+             repo / "deploy/docker/.env.generated", home / "config/environment.yaml"]
+    if monitoring:
+        paths.extend([repo / "deploy/env/monitoring.env", repo / "deploy/docker/deploy.options"])
+    return paths
 
 
 def plain(path):
@@ -44,6 +61,30 @@ def document(path):
         return json.loads(plain(path).read_text(encoding="utf-8"), object_pairs_hook=unique)
     except (OSError, ValueError):
         raise RuntimeError("Recovery journal or index is missing or invalid") from None
+
+
+def check_tfp_recovery(repo, backup, originals):
+    """Permit only owned TFP and deploy-rendered changes before replaying the backup."""
+    _, _, _, _, monitoring, deploy_config = originals
+    baseline = yaml.safe_load(originals[deploy_config])
+    current = yaml.safe_load(deploy_config.read_bytes())
+    for config in (baseline, current):
+        if not isinstance(config, dict) or not isinstance(config.get("components"), list):
+            raise ValueError("invalid TFP deployment configuration")
+    if (current.pop("monitoringProvider", None) not in {baseline.pop("monitoringProvider", None), "langfuse"}
+            or [item for item in current.pop("components") if item != "monitoring"]
+            != [item for item in baseline.pop("components") if item != "monitoring"] or current != baseline):
+        raise ValueError("unrelated persisted deployment options changed")
+
+    before, before_issues = env_file(backup / "4") if originals[monitoring] is not None else ({}, [])
+    after, after_issues = env_file(monitoring) if monitoring.exists() else ({}, [])
+    defaults, _ = env_file(repo / "deploy/env/monitoring.env.example")
+    generated = TFP_MONITORING.keys() | MONITORING_RENDERED_KEYS
+    if (before_issues or after_issues or set(after) - set(before) - generated - set(defaults)
+            or any(after.get(key) != value for key, value in before.items() if key not in generated)):
+        raise ValueError("unrelated monitoring settings changed")
+    if any(after.get(key) not in {before.get(key), defaults.get(key), value} for key, value in TFP_MONITORING.items()):
+        raise ValueError("unexpected TFP monitoring setting")
 
 
 def owner_alive(pid):
@@ -112,19 +153,15 @@ class DailyRetry:
             previous = document(batch / "status.json")
             if previous.get("status") not in {"INCOMPLETE", "FAILED", "PASSED", "COMPLETE"}:
                 raise RuntimeError("Deployment journal has no terminal owner evidence")
-            journal = next((p for p in (batch / "checkpoints/results.jsonl", batch / "results.journal.jsonl")
-                            if p.exists() or p.is_symlink()), None)
-            if journal is not None:
-                for line in plain(journal).read_text(encoding="utf-8").splitlines():
-                    row = json.loads(line)
-                    if row.get("stage") == "D5" and row.get("result") in {"TIMEOUT", "CLEANUP_FAILED"}:
-                        raise RuntimeError("Previous D5 timeout/cleanup failure requires environment safety review")
-            elif previous.get("stages", {}).get("D5", "PENDING") != "PENDING":
-                raise RuntimeError("Previous D5 execution has no recovery evidence")
-            if not isinstance(files, list) or len(files) != 4 or document(backup / "index.json") != {"files": files}:
+            # Historical Case receipts are reporting evidence, not deployment recovery authority.
+            # The active fault lease/marker is checked by prepare_daily_retry before any writes.
+            if not isinstance(files, list) or len(files) not in {4, 6} or document(backup / "index.json") != {"files": files}:
                 raise ValueError("incomplete backup index")
+            has_tfp_state = len(files) == 6
+            tfp_settings = TFP_MODE if has_tfp_state else {}
+            mode_keys = MODE_KEYS | tfp_settings.keys()
             originals = {}
-            for index, path in enumerate(configuration_paths(self.repo, self.home)):
+            for index, path in enumerate(configuration_paths(self.repo, self.home, monitoring=has_tfp_state)):
                 plain(path)
                 item = files[index]
                 if (not isinstance(item, dict) or item.get("path") != str(path) or item.get("backup") != str(index)
@@ -138,15 +175,17 @@ class DailyRetry:
                 elif item.get("sha256") is not None:
                     raise ValueError("invalid absent backup")
                 originals[path] = content
-            env_path, *_, config_path = originals
+            env_path, _, _, config_path, *_ = originals
             if originals[env_path] is None or originals[config_path] is None:
                 raise ValueError("Local baseline is missing")
             baseline, problems = env_file(backup / "0")
             if problems or baseline.get("ENABLE_AIDP_KNOWLEDGE", "false").lower() not in {"false", "0", "no", "off"}:
                 raise ValueError("backup is not a Local baseline")
             current, problems = env_file(env_path)
-            if problems or {k: v for k, v in current.items() if k not in MODE_KEYS} != {k: v for k, v in baseline.items() if k not in MODE_KEYS}:
+            if problems or {k: v for k, v in current.items() if k not in mode_keys} != {k: v for k, v in baseline.items() if k not in mode_keys}:
                 raise ValueError("unrelated deployment settings changed")
+            if any(current.get(key) not in {baseline.get(key), target} for key, target in tfp_settings.items()):
+                raise ValueError("unexpected TFP deployment setting")
             config = yaml.safe_load(originals[config_path])
             current_config = yaml.safe_load(config_path.read_bytes())
             for candidate in (config, current_config):
@@ -159,26 +198,56 @@ class DailyRetry:
             current_config["features"].pop("aidp_knowledge", None)
             if config != current_config:
                 raise ValueError("unrelated environment settings changed")
+            if has_tfp_state:
+                check_tfp_recovery(self.repo, backup, originals)
             return originals
         except (OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError):
             raise RuntimeError("Deployment recovery backup/configuration failed safety validation") from None
 
     def prepare(self):
-        from deployment_exceptions import protected_write
         plain(self.archive)
         self.archive.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         self.archive.mkdir(mode=0o700)
         protected_write(self.archive / "pending.json", self.marker_bytes)
         # Preserve every current file before the first configuration write.
+        before_images = {}
         for index, path in enumerate(self.originals):
             if path.exists():
-                protected_write(self.archive / str(index), path.read_bytes())
-        self.record("PREPARED_FOR_REDEPLOY")
+                content = path.read_bytes()
+                protected_write(self.archive / str(index), content)
+                before_images[str(index)] = hashlib.sha256(content).hexdigest()
+            else:
+                before_images[str(index)] = None
+        self.record("PREPARED_FOR_REDEPLOY", before_images=before_images)
         for path, content in self.originals.items():
             if content is None:
                 path.unlink(missing_ok=True)
             else:
                 protected_write(path, content)
+
+    def resume_prepared(self):
+        """Revalidate the supervisor's before-images without writing a second backup."""
+        receipt = document(self.receipt)
+        if (receipt.get("status") != "PREPARED_FOR_REDEPLOY"
+                or receipt.get("evidence_backup") != str(self.archive)
+                or receipt.get("previous_batch") != self.payload["batch"]
+                or plain(self.archive / "pending.json").read_bytes() != self.marker_bytes):
+            raise RuntimeError("Prepared Daily recovery receipt differs from its journal")
+        before_images = receipt.get("before_images")
+        if not isinstance(before_images, dict) or set(before_images) != {str(i) for i in range(len(self.originals))}:
+            raise RuntimeError("Prepared Daily recovery before-image index is incomplete")
+        for index, digest in before_images.items():
+            path = plain(self.archive / index)
+            if digest is None:
+                if path.exists():
+                    raise RuntimeError("Unexpected prepared recovery before-image")
+            elif (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                  or hashlib.sha256(path.read_bytes()).hexdigest() != digest):
+                raise RuntimeError("Prepared recovery before-image checksum differs")
+        for path, content in self.originals.items():
+            actual = plain(path).read_bytes() if path.exists() else None
+            if actual != content:
+                raise RuntimeError("Prepared Local configuration changed before execution")
 
     def record(self, status, **details):
         save(self.receipt, {"status": status, "at": now(), "previous_batch": self.payload["batch"],
@@ -186,17 +255,19 @@ class DailyRetry:
 
 
 @contextmanager
-def prepare_daily_retry(repo, home, directory):
+def prepare_daily_retry(repo, home, directory, *, prepared=False):
     """Require the checkout lease; retain the marker until a verified new campaign owns it."""
     if not deployment_lock_owned(repo):
         raise RuntimeError("Daily recovery requires the checkout deployment lock")
     # A surviving D5 child can retain this lease after its launcher has exited.
+    # The old fault journal itself is evidence, not a batch admission gate.
     with BatchLock(home / "state/deployment-guard/exclusive.lock"):
-        if (home / FAULT_MARKER).exists() or (home / FAULT_MARKER).is_symlink():
-            raise RuntimeError("Pending D5 fault recovery needs container/data safety review before synchronization")
-    retry = DailyRetry(repo, home, directory) if (home / MODE_MARKER).exists() or (home / MODE_MARKER).is_symlink() else None
+        retry = DailyRetry(repo, home, directory) if (home / MODE_MARKER).exists() or (home / MODE_MARKER).is_symlink() else None
+    if retry is None and prepared and (directory / "recovery.json").exists():
+        if document(directory / "recovery.json").get("status") == "PREPARED_FOR_REDEPLOY":
+            raise RuntimeError("Prepared Daily recovery journal disappeared before execution")
     if retry is not None:
-        retry.prepare()
+        retry.resume_prepared() if prepared else retry.prepare()
     token = _RETRY.set(retry)
     try:
         yield retry

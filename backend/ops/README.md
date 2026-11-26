@@ -1,130 +1,441 @@
 # Nexent operations backend
 
-The operations backend runs in its own process and container using the existing
-backend image. It exposes process health, authenticated operations scope and a
-read-only resource inventory. Authenticated requests reuse the existing PostgreSQL
-identity/permission tables and JWT settings. It does not start Redis, MinIO,
-Elasticsearch, telemetry, Agent executors or schedulers.
+The operations backend runs in its own process and container using the shared
+backend image. It owns historical trajectory queries, retrieval, administrator
+cleanup settings and background summary/statistics maintenance. Runtime retains
+Agent execution, capture identity, file writing and conversation-deletion hooks.
+
+Authenticated operations also expose scope and resource inventory metadata using the existing PostgreSQL identity and permission tables.
 
 ## Local startup
 
-Use the existing Python 3.11 backend environment. From `backend/`:
+Use the existing Python 3.11 backend environment. From the repository root,
+with both the root and `backend/` on `PYTHONPATH`:
 
 ```shell
-python ops_service.py
+bash deploy/common/start-ops.sh python -m backend.http.ops_service
 ```
 
-The listener binds to `0.0.0.0`. Defaults: port `5016`, log level `info`. Configure
-`OPS_PORT` and `LOG_LEVEL` through the process environment or
-the existing `.env` workflow. Reads remain centralized in
-`contracts/constants/environment.py`. For a clean environment without loading
-a nearby `.env`, set `PYTHON_DOTENV_DISABLED=1` before starting Python.
+Compose and Helm use this module command through `start-ops.sh`, which
+initializes Ops storage when monitoring is enabled. Running
+`backend/http/ops_service.py` as a script places its directory first on Python's
+import path, where the shared `logging.py` shadows the standard library.
+
+The listener binds to `0.0.0.0`; `OPS_PORT` defaults to `5016`. Configuration
+reads remain centralized in `contracts/constants/environment.py`. Set
+`PYTHON_DOTENV_DISABLED=1` to disable nearby dotenv loading.
+
+Ops enables trajectory routes and managed maintenance when local capture is on,
+historical reads are on, or the deployment selects the legacy `local_file`
+provider. Query reads require `TRAJECTORY_READ_ENABLED=true`. With trajectory
+storage features and model monitoring disabled, Ops serves health and
+documentation without opening their storage clients. Operations use the existing
+PostgreSQL configuration and JWT authentication.
 
 | Endpoint | Contract |
 | --- | --- |
 | `/health/live` | HTTP 200 with `{"status":"alive"}` |
-| `/health/ready` | HTTP 200 with `{"status":"ready"}` after startup; otherwise HTTP 503 with `{"status":"not_ready"}` |
-| `/docs` | OpenAPI UI; health endpoints are omitted from the schema |
+| `/health/ready` | HTTP 200 after local startup; HTTP 503 before startup and during shutdown |
+| `/docs` | OpenAPI UI |
+| `/trajectory/records` | PG-only lists, filter candidates and saved statistics |
+| `/trajectory/conversations/{id}` | Conversation execution list |
+| `/trajectory/conversations/{id}/snapshot` | File-backed nodes and metrics |
+| `/trajectory/conversations/{id}/contents/{content_id}` | Bounded body chunks |
+| `/trajectory/cleanup` | Administrator cleanup batches |
+| `/trajectory/cleanup/schedule` | Read or update tenant cleanup intervals |
+| `/conversation/agent_groups` and its conversations subresource | Administrator directory with `view=trajectory` |
 
-Health checks describe only the operations process and do not probe dependencies.
+Web sends trajectory and system configuration requests through Gateway. Gateway
+uses `GATEWAY_OPS_URL` to reach Ops and attaches a request-bound identity signature.
+Conversation directory requests go to Ops only with `view=trajectory`; ordinary
+history and execution keep their existing routing. Roles, tenant ownership, private-cache headers,
+response envelopes and opaque references retain their existing contracts.
+References are process-local; multi-replica deployments need affinity or must
+restart a query when its reference is unavailable.
+
+When model monitoring is enabled, startup prepares its Elasticsearch mappings
+before reporting ready.
 `GET /ops/authorization`, `/ops/resources` and `/ops/scope` require a valid session.
 OPS is restricted to its tenant; SU can select any tenant or all tenants. The
-dashboard and configuration action grants are permission contracts; monitoring
-and configuration CRUD implementations are outside this change.
+System configuration endpoints enforce the shared read and update grants in Ops.
+Model monitoring is exposed under `/ops/v1/monitoring/models` when enabled.
+The Gateway forwards `/api/ops/v1/monitoring/` to Ops with a signed session identity.
 
-## Container startup
+## Model monitoring setup
 
-Build the normal backend image with this source, then set `NEXENT_IMAGE` to that
-image. Docker deployment starts ops whenever the `application` component is
-selected, including the default full deployment. Development and production
-Compose files extend the same operations service definition. Infrastructure-only
-deployment does not start ops. Kubernetes also includes ops in the application component.
+Monitoring is enabled by default. Normal Compose and Helm deployment creates
+the independent Ops database and applies its versioned migrations automatically;
+no separate database or SQL command is required. Ops uses the existing
+`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` and `NEXENT_POSTGRES_PASSWORD`
+directly. Only the database name differs: the default is `POSTGRES_DB` plus
+`_ops` (`nexent_ops` with the standard configuration). `OPS_POSTGRES_DB` can
+override the name; no separate Ops server or credentials are configured.
 
-Run the normal deployment entry point from the repository root:
+The shared launcher applies business migrations first in `migrate` mode, then
+creates and migrates Ops storage. `wait` consumers wait for both schemas; the
+Ops process keeps business SQL off and initializes only its own database.
+Concurrent initializers serialize database creation and reuse the migration
+ledger and lock. Existing data is preserved. Initialization failure prevents
+application startup. Names equal to the business database or longer than 63
+UTF-8 bytes are rejected before Ops SQL runs.
 
-```shell
-bash deploy/deploy.sh --defaults docker
+The deployment role needs database creation permission when the target does not
+exist and schema creation permission for migration. Existing databases can be
+managed by a role without database creation permission. Set
+`OPS_MONITORING_ENABLED=false` to skip Ops initialization and collection;
+explicit false remains effective during upgrades. Producers stage sanitized
+batches in the Ops database. Ops owns the
+Elasticsearch mappings, writer and publisher. Give its Elasticsearch identity
+template management and monitoring-index permissions, including document
+deletion on `monitoring-daily-*`. The service uses the
+configured Elasticsearch endpoint and `OPS_MONITORING_TIMEZONE` for statistic
+dates.
+
+Model monitoring shares the existing SDK request and response observations.
+Legacy records keep their existing defaults, while Ops preserves missing provider
+usage so coverage can be measured. ModelService and the monitored legacy OpenAI
+chat client share physical attempt measurements with local Trace. A recorded
+attempt span and its ES fact carry the same fact identity. Facts can include the
+native `trace_id` and `span_id`, and publish even when local Trace is disabled.
+
+Model trends include every requested day. Dates without a publication return null
+metrics. Refresh returns HTTP 409 with `message.code=MONITORING_DATES_UNCOVERED`
+and `message.missing_dates` when the requested scope has no confirmed source for
+those dates.
+Unconfirmed failed Elasticsearch batches mark affected query scopes stale until
+they recover and the replacement statistics are published.
+
+Shared collection lives in `infrastructure.monitoring`; producer services do not
+import or package Ops business modules. Register producer schemas in
+`infrastructure.monitoring.facts.FACT_MODELS`. Ops consumes those same schemas.
+
+Define a `MonitoringKind` with the typed fact and Elasticsearch fields. Supply
+a reducer when daily publication is available. Add the kind to `MONITORING_KINDS` in
+`ops.monitoring.runtime`. Ops installs the compatible mappings on its shared
+indices at startup. The two monitoring tables are shared, with date state and
+publication tracked per tenant and kind. SDK callers submit sanitized events
+through `nexent.monitor.facts.emit_fact`; the backend producer owns transport
+and retries. Readers use `Monitoring.publication_snapshot` to pin the published
+documents for the duration of a query.
+
+The Ops worker starts an hourly sweep of superseded daily aggregation documents.
+It keeps the current PostgreSQL publication for each tenant, kind and date, and
+skips dates that have no publication. In-flight queries hold an Elasticsearch
+snapshot through the read. Fact documents are outside this cleanup.
+
+The first implementation starts each tenant's coverage at its first observed fact.
+It uses a single source generation and page-number queries. Configure fact
+retention and coordinate PostgreSQL and Elasticsearch snapshots at deployment.
+Snapshot-bound pagination is follow-up work.
+
+## Main Agent fact sample
+
+The main Agent worker collects facts when Ops monitoring is enabled. It emits
+the start revision before the core adapter runs and measures that call with a
+monotonic clock. The terminal revision uses those timestamps and is offered
+after worker cleanup. Trajectory capture can be disabled independently.
+
+With the monitoring producer configured, submit an execution's revisions through
+the same SDK entry point. Keep the execution ID, start timestamp, initiating
+groups and resource identity stable across revisions. This sample crosses a UTC
+month boundary, so both revisions belong in the October facts index.
+
+```python
+from uuid import uuid4
+
+from nexent.monitor.facts import emit_fact
+
+run_id = str(uuid4())
+started = {
+    "tenant_id": "sample-tenant",
+    "fact_kind": "agent",
+    "fact_id": run_id,
+    "call_context_id": run_id,
+    "root_run_id": run_id,
+    "agent_run_id": run_id,
+    "agent_id": 21,
+    "agent_version_no": 3,
+    "is_root": True,
+    "initiator_group_ids": [12, 13],
+    "started_at": "2026-10-31T23:59:59.800Z",
+    "record_revision": 1,
+    "outcome": "started",
+}
+finished = dict(
+    started, record_revision=2, outcome="succeeded",
+    ended_at="2026-11-01T00:00:00.150Z", duration_ms=350,
+)
+emit_fact(started)
+emit_fact(finished)
+emit_fact(finished)
 ```
 
-To start only ops against an existing deployment, use the same Compose project:
+The fixed case `OPS-AGENT-FACTS-D3-001` sends these revisions in separate
+batches and reads back the same ES document after each write. The shared
+publisher groups Agent executions by start day, tenant, initiating groups
+and Agent ID. It writes the execution count, exact duration sum and number of
+ended executions with a measured duration. A measured zero is a valid sample.
+
+### Child Agent capture
+
+Internal child executions reuse `SubAgentToolWrapper`'s existing invocation ID
+as `fact_id`, `agent_run_id` and `call_context_id`. The wrapper records the
+enclosing execution as `monitoring_parent_run_id`, preserves the root execution
+and initiating group snapshot, and selects the child's configured resource and
+version. Child facts have `is_root=false`, `parent_run_id` and `root_run_id`.
+Nested children point to their immediate parent. Two actual calls of the same
+child resource have different execution IDs.
+
+`orchestration.children.invoke_child` measures `adapter.run` through the same
+observation used by the main Agent. Validation and preparation precede this
+measurement, and terminal reporting follows Adapter cleanup. The existing typed
+`RunResult` supplies completed, failed or stopped status. Exceptions and
+cancellation retain the child's existing propagation behavior. A run stopped
+before entering the measured boundary emits no Agent fact.
+
+Child capture uses the public fact sink independently of trajectory recording.
+Start, terminal and replay retain the same execution identity. The shared writer,
+daily publication and Agent queries count main and child executions separately.
+Parent duration includes the time spent waiting for its child calls, while each
+child retains its independently measured duration. The D3 case executes a main
+Agent calling one child twice and compares all three facts with daily and query
+metrics before and after terminal replay.
+
+## Agent summary query
+
+Use `GET /ops/v1/monitoring/agents/summary` directly on Ops or
+`/api/ops/v1/monitoring/agents/summary` through the Web proxy. Supply a session
+bearer token with `ops.dashboard:read`. Ops operators are scoped to their own
+tenant. Super Admin can select a tenant or omit `tenant_id` for all tenants.
+
+The Gateway registry exposes Agent list, summary, trends and rankings as
+session-only routes to Ops, using the same signed identity boundary as models.
+
+`start_date` and `end_date` are inclusive dates in the Ops monitoring timezone.
+The range can cover up to 366 days. Repeat `group_ids` to match any of those
+initiating groups. A record matching multiple groups contributes once.
+`agent_id` selects a single Agent.
+
+```http
+GET /ops/v1/monitoring/agents/summary?tenant_id=example&start_date=2026-11-18&end_date=2026-11-18&group_ids=12&group_ids=13&agent_id=21
+Authorization: Bearer <session-token>
+```
+
+```json
+{
+  "data": {
+    "execution_count": 2,
+    "avg_duration_ms": 250.0,
+    "duration_sample_count": 2,
+    "succeeded_count": 1,
+    "failed_count": 1,
+    "success_rate": 0.5
+  },
+  "data_as_of": "2026-11-18T08:40:00+00:00",
+  "coverage_state": "covered",
+  "is_stale": false
+}
+```
+
+The endpoint reads the latest published version and averages the total duration
+over all selected duration samples. A covered selection with zero matches
+returns zero executions and samples and a null average. An uncovered
+selection returns null metrics. Partial coverage can report the published
+subset, and `is_stale` indicates that source changes or failed writes are pending.
+
+Summary, resource metrics and daily trends include `succeeded_count`,
+`failed_count` and `success_rate`. An explicit `succeeded` terminal fact counts
+as success. Explicit `failed` and `timed_out` terminal facts count as failure,
+including results with missing timing fields. Cancelled,
+ongoing and unknown outcomes enter neither result counter. The ratio is
+`succeeded_count / (succeeded_count + failed_count)` in the range 0 through 1,
+with null for a zero denominator. Selected dates and groups merge integer
+counts before division. Main and child results belong to their own executions.
+An execution's duration alone never establishes a timeout.
+
+Ops adds the new long counters to existing daily index mappings at startup.
+Previously published daily rows missing these counters keep their existing
+execution and duration metrics, with unknown result counts and a null success
+rate. Normal recomputation of a changed day fills the result counters from
+source facts. Existing historical publications require recomputation before
+their success metrics become available.
+
+## Agent first-answer timing
+
+Agent summary, directory metrics and daily trends include nullable `avg_ttft_ms`
+and `ttft_sample_count`. The interval starts at the actual Adapter run and ends
+at its first nonblank public answer fragment. Each child uses its own execution.
+Tools, thinking, empty-answer placeholders and SSE replay create no sample.
+No measured answer returns null, while a measured zero remains zero. Daily
+statistics use the execution start date; range queries divide combined timing
+sums by combined sample counts. Historical rows without timing remain unmeasured.
+Directory sorting accepts `sort_by=avg_ttft_ms`.
+
+## Agent Token usage
+
+Agent summary responses include `tokens` and `token_status` beside `data`.
+Each item in the Agent directory and each day in Agent trends has its own
+`tokens` and `token_status`. Directory and trend responses also include the
+overall `token_status` for the requested scope.
+
+```json
+{
+  "tokens": {
+    "input_tokens": {"value": "130", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75},
+    "output_tokens": {"value": "5", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75},
+    "total_tokens": {"value": "135", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75}
+  },
+  "token_status": {
+    "data_as_of": "2026-11-19T08:00:00+00:00",
+    "coverage_state": "partial",
+    "is_stale": false
+  }
+}
+```
+
+Tokens come from published model request statistics, filtered by tenant,
+initiating groups, optional Agent ID and model request start dates in the Ops
+timezone. A request belongs to the Agent that actually sends it. Child usage
+belongs to the child, and the combined total counts each request once. A row
+needs both an Agent ID and the model reducer's execution association flag.
+Historical attributed usage can appear without a current Agent catalog entry
+or Agent fact, with `is_current=false` and unavailable execution metrics.
+
+The three fields reuse the model monitoring structures. `value` is the decimal
+string sum of known provider usage. An entirely missing field has null `value`,
+zero `known_count`, the actual attributed request count as `eligible_count` and
+zero `coverage_rate`. Reported zero increments the known count. Values are
+independent per field. A covered zero-use selection returns string zero with
+zero known/eligible counts and null reporting coverage. An uncovered selection
+with no published usage returns null Token fields.
+
+`token_status` describes the model publication and collection coverage. Reporting
+coverage remains in each Token field. Pending model revisions and failed model
+batches mark Token data stale independently of Agent publication. Failed batches
+in the requested date range conservatively mark that range's day views stale.
+All selected tenants' model batch failures are read in one scoped SQL query.
+An empty tenant selection skips that query. Legacy batches without affected
+dates retain their existing failure indication.
+The normal publication tick clears pending revisions once published. Clicking
+refresh reads these latest published results. Counts and duration keep their
+Agent execution start-day semantics, so their daily window can differ from
+the model request window.
+
+## Storage and process resources
+
+Both Runtime and ops must see the same `TRAJECTORY_ROOT_DIR`, default
+`/mnt/nexent-data/trajectory`. Runtime provisions and writes archives. Ops reads
+those files, updates PG projections and performs retention cleanup using the
+existing per-tenant intervals and cross-process file locks. Multi-node deployments
+require the existing `shared_directory` storage mode and a shared filesystem
+supporting the required lock/atomic-replace behavior.
+
+Ops owns its ThreadManager query/cleanup lanes and three managed background
+services: maintenance, summary compensation and statistics refresh. Capture
+publication occurs in another process, so summary compensation discovers durable
+archives through its bounded scan, restarting a completed scan after 60 seconds.
+Readiness describes local resource startup; it does not poll PostgreSQL on each
+health request. Shutdown stops owned services and releases process-local query
+references.
+
+Historical summary backfill is now:
+
+```shell
+python -m ops.scripts.backfill_trajectory_summaries
+```
+
+### Agent directory, trends and rankings
+
+All three routes use the same session authorization, date range, tenant,
+initiating `group_ids` and optional `agent_id` as the Agent summary. They read
+the latest published snapshot on every request. The Web proxy adds `/api`.
+
+| Route | Response `data` |
+| --- | --- |
+| `GET /ops/v1/monitoring/agents` | `items`, `total`, `current_agent_count` |
+| `GET /ops/v1/monitoring/agents/trends` | Daily metrics in ascending date order, with per-day `coverage_state` |
+| `GET /ops/v1/monitoring/agents/rankings` | Up to five Agents by `metric`: `execution_count` (default), `total_tokens` or `success_rate`, descending |
+
+Directory parameters are `search`, `sort_by` (`execution_count`,
+`avg_duration_ms`, `avg_ttft_ms`, `total_tokens` or `success_rate`),
+`descending` (default true), `page` (default 1) and
+`page_size` (default 20, maximum 100). Search matches either current name or
+display name, case-insensitively. Sort precedes pagination, ties use tenant
+and Agent ID, and unknown metrics sort last in both directions. Ordering uses
+authorized, filtered per-resource aggregates before pagination. Total Tokens
+are compared as exact integers; success rates use merged result counts across
+the selected dates. Missing values remain null and are distinct from zero.
+
+The [Agent frontend handoff](agent-monitoring-api.md) lists the four current
+page integration routes, field mappings and request/response examples.
+Rankings reuse the list's filtered resource aggregates and stable ordering,
+exclude null values and preserve valid zero. Success-rate ranking items add
+`metrics.success_sample_count`, the merged succeeded plus failed count.
+Only Token ranking reads and returns Token data and publication status;
+default count and success-rate ranking remain independent of that dependency.
+Count, total-Token and success-rate Top 5 are implemented. Northbound interfaces
+remain deferred.
+
+Each resource includes `tenant_id`, `agent_id`, `is_current` and `metrics`.
+Current metadata includes `name`, `display_name`, `model_ids`,
+`configured_group_ids` and `current_version_no`. Configured groups describe
+the current resource. The historical group filter uses the initiating group
+snapshot of the execution. Active draft rows count once per current Agent,
+independently of date, initiating group and name search. An optional Agent
+selection also scopes this count. Historical usage for an absent catalog
+entry remains in the list with `is_current=false` and without current names.
+
+`metrics` contains `execution_count`, `avg_duration_ms`, `duration_sample_count`,
+`succeeded_count`, `failed_count` and `success_rate`. Resource metrics are null when the selected tenant
+and dates lack complete coverage and no matching observations are available.
+Complete zero-use resources report zero executions and a null average.
+Trends include every requested date. Unknown dates have null metrics, and
+partially covered days retain their observed values and a `partial` label.
+All responses include `data_as_of`, `coverage_state` and `is_stale`.
+
+```http
+GET /ops/v1/monitoring/agents?start_date=2026-11-19&end_date=2026-11-19&group_ids=12&group_ids=13&page=1&page_size=20&sort_by=execution_count&descending=true
+Authorization: Bearer <session-token>
+```
+
+## Deployment
+
+Normal Docker and Kubernetes application selection includes ops. Docker ops
+loads both `deploy/env/.env` and `deploy/env/monitoring.env`, mounts the shared
+logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Gateway
+uses the corresponding `GATEWAY_OPS_URL`.
+
+Build the local Ops image with `bash build.sh --ops --version latest --load`.
+The Ops Dockerfile installs the `ops` dependency group from `backend/pyproject.toml` and declares its copied source paths.
+The deployment uses `NEXENT_OPS_IMAGE` for Ops and `NEXENT_MANAGEMENT_IMAGE`
+for both the Management and MCP backend containers. `NEXENT_MCP_DOCKER_IMAGE`
+selects the image for separately provisioned MCP proxy containers.
 
 ```shell
 docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml up -d nexent-ops
 ```
 
-The Compose file defines only `nexent-ops` and joins the existing shared
-`nexent_network`, matching the optional monitoring deployment. The main stack
-normally creates this network. If running ops before the main stack, create the
-network once with `docker network create nexent_network`.
+Standalone Compose joins the existing external `nexent_network`. The shared
+network and environment files must already exist. Kubernetes mounts the logs
+PVC and, when trajectories are enabled, the trajectory PVC plus existing shared
+configuration/secrets. Ops reads its database and signature settings from the
+shared ConfigMap and Secret in both modes. The normal deployment generator
+sets Gateway `opsUrl` from `OPS_PORT`; direct Helm overrides must set that
+address consistently with the Ops Service port. SQL startup stays disabled in ops.
 
-The default published port is `5016:5016`. Containers on the shared network can
-resolve `nexent-ops` and reach `http://nexent-ops:5016`; host access uses
-`http://localhost:5016`. If `OPS_PORT` is changed, both ports change together.
-
-The service has no business-service `depends_on` entries. Like the other backend
-services, it loads `deploy/env/.env` through `env_file`. Logging parameters come
-from that file rather than repeated Compose defaults. Merely passing component
-addresses does not initialize their clients.
-Only the existing logs directory is mounted; no business data volumes are required. Set
-`ROOT_DIR` in the deployment environment for this mount. SQL startup is explicitly disabled. The container listens on
-`0.0.0.0`. There is no operations destination URL configured in business services.
-The listener address is not an access policy: the published port remains reachable
-according to host networking and firewall rules. Preventing business services from
-accessing operations requires an explicit ingress or network policy.
-
-The shared backend image retains its existing installed dependencies. This
-change reduces runtime service dependencies, not image size. No image build or
-container rollout is performed by the bootstrap code.
+Application, Uvicorn and access logs use `infrastructure.logging`, console and
+rotating persistent files. The file path is `LOG_DIR/ops/nexent_ops.log`; Kubernetes
+uses a per-pod log directory to avoid concurrent rotation.
 
 ## Code boundaries
 
-- `ops_service.py`: process launcher.
-- `ops/api/`: HTTP parsing, responses and application composition.
-- `ops/services/`: operations scope and read-only inventory orchestration.
-- `ops/lifespan.py`: process resources and readiness lifecycle.
+- `backend/http/ops_service.py`: launcher.
+- `ops/api/`: HTTP routes and application composition.
+- `ops/services/trajectory/`: query parsing, file retrieval and maintenance orchestration.
+- `ops/db/trajectory/`: authorized catalogs, list/statistics SQL and cleanup configuration.
+- `ops/concurrency.py`, `ops/lifespan.py`: process-owned resources.
+- `management/db/trajectory/`: shared ORM and transactional capture/projection writes.
+- `infrastructure/trace/`: shared file primitives and Runtime capture wiring.
 
-Database identity/permission access is reused from management. Resource inventory
-selects metadata fields explicitly; it does not return credentials or content.
-
-## Kubernetes
-
-The existing `bash deploy/deploy.sh --defaults k8s` entry point enables the
-`nexent-ops` subchart whenever `application` is selected and waits for its
-Deployment to become ready. It reuses the selected backend image and does not
-mount SQL or business storage. Explicit ops settings and selected logging,
-PostgreSQL and JWT keys from the existing `nexent-env` Secret are passed to its
-container. SQL startup remains off; the Kubernetes API
-service-account token is not mounted.
-
-The only storage mount is the logs PVC, using `global.sharedStorage.logs.existingClaim`
-or the subchart's `logs.existingClaim` (default `nexent-logs`). The parent chart
-creates the standard logs claim; a standalone ops chart needs an existing claim.
-
-The Service and container port default to `5016` (`OPS_PORT` overrides both).
-The default external address is `<node-ip>:30016`; in the same namespace,
-use `http://nexent-ops:5016`. For direct Helm use, configure
-`nexent-ops.service.type=ClusterIP` to keep it internal, or change
-`nexent-ops.service.nodePort` when the default NodePort conflicts. Log level
-uses the shared `LOG_LEVEL` from `.env`, default `INFO`.
-
-Health probes use `/health/live` and `/health/ready`. Image and ops configuration
-checksums participate in rollouts. Resource requests and limits are configurable
-chart defaults, not measured memory or CPU consumption. Helm rendering verifies
-manifest composition; it does not prove an actual cluster deployment.
-
-## Persistent logs
-
-Console output remains available. Application, Uvicorn server and HTTP access
-records also use `get_uvicorn_logging_config(categories=['ops'])`, the same
-logging factory used by the existing backend entrypoints:
-
-- Local: `LOG_DIR/ops/nexent_ops.log`, default `logs/ops/nexent_ops.log`.
-- Docker host: `${ROOT_DIR}/logs/ops/nexent_ops.log`.
-- Kubernetes logs PVC: `<pod-name>/ops/nexent_ops.log`.
-
-Kubernetes assigns `LOG_DIR` per pod so replicas and rolling updates do not rotate
-the same file concurrently. Replacing a pod keeps its previous directory on the
-PVC; old pod directories need cleanup under the deployment's retention policy.
-Shared `LOG_LEVEL`, `IS_DEBUG`, `LOG_MAX_BYTES`, `LOG_ROTATION_INTERVAL` and
-`LOG_BACKUP_COUNT` settings apply. Defaults rotate at 50 MiB or daily and retain
-30 backups per file. No Elasticsearch client or log collection service is required.
+Database identity and permission access is reused from management. Resource inventory
+selects metadata fields explicitly and excludes credentials and content.

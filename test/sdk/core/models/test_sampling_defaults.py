@@ -1,11 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Omitted and null sampling inherit one SDK default without losing zero."""
+"""Omitted Top P uses the service default and explicit values keep precision."""
 
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.models.openai_llm import OpenAIModel
 from nexent.core.models.openai_long_context_model import OpenAILongContextModel
 
@@ -15,11 +15,11 @@ from nexent.core.models.openai_long_context_model import OpenAILongContextModel
 def test_config_and_openai_constructor_share_sampling_defaults(sampling, model_type):
     config = ModelConfig(cite_name="fixture", model_name="fixture", url="http://fixture.invalid", **sampling)
     model = model_type(observer=MagicMock(), model_id="fixture", api_key="fixture", **sampling)
-    assert (config.temperature, config.top_p) == (1.0, 1.0)
-    assert (model.temperature, model.top_p) == (1.0, 1.0)
+    assert (config.temperature, config.top_p) == (None, None)
+    assert (model.temperature, model.top_p) == (None, None)
 
 
-@pytest.mark.parametrize("temperature,top_p", [(0, 0), (2, 1), (0.3, 0.87)])
+@pytest.mark.parametrize("temperature,top_p", [(0, 0.005), (2, 1), (0.3, 0.995)])
 def test_explicit_sampling_remains_unchanged(temperature, top_p):
     config = ModelConfig(cite_name="fixture", model_name="fixture", url="http://fixture.invalid",
                          temperature=temperature, top_p=top_p)
@@ -32,6 +32,6 @@ def test_explicit_sampling_remains_unchanged(temperature, top_p):
 def test_partial_null_only_inherits_missing_field():
     config = ModelConfig(cite_name="fixture", model_name="fixture", url="http://fixture.invalid",
                          temperature=0, top_p=None)
-    model = OpenAIModel(observer=MagicMock(), model_id="fixture", api_key="fixture", temperature=None, top_p=0)
-    assert (config.temperature, config.top_p) == (0, 1.0)
-    assert (model.temperature, model.top_p) == (1.0, 0)
+    model = OpenAIModel(observer=MagicMock(), model_id="fixture", api_key="fixture", temperature=None, top_p=0.995)
+    assert (config.temperature, config.top_p) == (0, None)
+    assert (model.temperature, model.top_p) == (None, 0.995)

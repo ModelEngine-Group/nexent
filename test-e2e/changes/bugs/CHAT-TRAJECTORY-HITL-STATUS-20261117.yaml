@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-HITL-STATUS-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-HITL-STATUS-20261117
+  title: 停止执行的轨迹独立显示已取消
+  description: stop_event结束包括卡片主动停止统一cancelled，修正摘要/列表/筛选映射并保持可读及累计统计。
+  observed_behavior: SDK采集cancelled，ops将取消归类error，列表显示失败。
+  expected_behavior: 取消状态在摘要、列表、详情和筛选保持cancelled/已取消；正常成功和真实失败保持，取消正文及指标继续可读。
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: 既有UT和D3覆盖底层取消事实，未对账cancelled在摘要与PG列表的独立状态；创建入口原使用普通observer最终回答。
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 所有stopped保持cancelled，不按卡片边界改为成功；成功/失败/未知结果保持。
+    - 取消摘要与PG DTO、请求筛选、可读集合及累计统计保持，过期/损坏优先。
+    - 前端显示已取消并可选择取消状态筛选，普通澄清不受影响。
+    reason: UT证明结果映射，D3证明真实卡片入队到归档及冷读，不新增D1。
+    test_selectors:
+    - test/sdk/core/agents/observability/test_local_capture.py
+    - test/sdk/core/agents/test_clarification_runtime.py
+    - test/backend/services/test_nl2agent_service.py::test_boundary_observer_stops_after_queuing_valid_nl2a_payload
+    - test/backend/services/test_nl2agent_service.py::test_boundary_observer_does_not_stop_for_invalid_wrapper
+    - test/backend/services/trajectory/test_cancelled_status.py
+    - test/backend/services/trajectory/test_conversation_view.py
+    - test/backend/services/trajectory/test_summary_lifecycle.py
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: SPEC hitl-status-fix.md与design.md，用户最新口径全部stop_event显示已取消；复用CAPTURE-D3及QUERY-D2，runtime自包含资源准备/清理保持；完整PG/部署验收暂缓。

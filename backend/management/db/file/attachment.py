@@ -6,12 +6,12 @@ import uuid
 from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
-from management.db.client import minio_client
+from infrastructure.object_storage.client import minio_client
 from contracts.constants.constants import S3_URL_PREFIX
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
-from urllib.parse import quote
+from infrastructure.object_storage.read_access import build_attachment_proxy_url
 
-from infrastructure.observability.knowledge import set_span_attributes, trace_knowledge_operation
+from infrastructure.trace.knowledge import set_span_attributes, trace_knowledge_operation
 
 
 def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:
@@ -81,11 +81,7 @@ def _build_mcp_presigned_url(presigned_url: str) -> str:
     Returns:
         str: URL wrapped with northbound API proxy, with presigned_url URL-encoded
     """
-    if not presigned_url:
-        return ""
-    # URL-encode the presigned_url before embedding it as a query parameter
-    encoded_presigned_url = quote(presigned_url, safe="")
-    return f"{NORTHBOUND_EXTERNAL_URL}/nb/v1/file/fetch?presigned_url={encoded_presigned_url}"
+    return build_attachment_proxy_url(presigned_url, NORTHBOUND_EXTERNAL_URL)
 
 
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
@@ -259,7 +255,13 @@ def download_file(object_name: str, file_path: str, bucket: Optional[str] = None
     return response
 
 
-def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Dict[str, Any]:
+def get_file_url(
+    object_name: str,
+    bucket: Optional[str] = None,
+    expires: int = 86400,
+    *,
+    external: bool = False,
+) -> Dict[str, Any]:
     """
     Get presigned URL for file
 
@@ -267,12 +269,14 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
         object_name: Object name
         bucket: Bucket name, if not specified will use default bucket
         expires: URL expiration time in seconds (default 86400 = 24 hours)
+        external: Sign against the configured external endpoint (partner
+            direct-link callers only); default keeps the internal authority
 
     Returns:
         Dict[str, Any]: Result containing success flag, URL and error message (if any)
     """
     # Get presigned URL
-    success, result = minio_client.get_file_url(object_name, bucket, expires)
+    success, result = minio_client.get_file_url(object_name, bucket, expires, external=external)
 
     # Build response
     response = {"success": success, "object_name": object_name, "expires_in": expires}

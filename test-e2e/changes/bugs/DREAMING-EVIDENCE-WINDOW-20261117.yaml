@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: DREAMING-EVIDENCE-WINDOW-20261117
+  change_type: bugfix
+  bug_id: BUG-DREAMING-EVIDENCE-WINDOW
+  title: Restore Dreaming long-term extraction
+  description: Create a model observer and evaluate only recall evidence within the current Dreaming window.
+  observed_behavior: A default SDK model observer is a class and Dreaming candidate statistics can include stale recall evidence.
+  expected_behavior: Dreaming can publish a valid summary from eligible evidence and reports why a run did not publish a version.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Regression tests now exercise the model observer, expired evidence and audit reasons.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-122]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-049, AGT-050, AGT-051]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Isolate model attempts through independent observers.
+    - Exclude out-of-window recall counts and discharge explicit no-publication reasons.
+    - Propagate failed evidence reads and distinguish a failed record-list request from a successful empty list.
+    test_selectors:
+    - test/backend/services/test_memory_dreaming_service.py
+    - test/backend/database/test_memory_record_db.py
+    - test/backend/database/test_memory_retrieval_hit_db.py
+    - test/backend/apps/test_memory_record_app.py
+    - test/sdk/core/models/test_openai_memory_observer.py
+    reason: Existing Dreaming API and worker scenarios retain their behavior and supplement focused unit checks.
+  notes: Split from PR 4349. Live worker and real-model evidence belong to PR 4352.

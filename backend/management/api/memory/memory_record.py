@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from contracts.memory import (
     CreateMemoryRequest,
@@ -37,7 +39,7 @@ from contracts.memory import (
     UpdateMemoryRequest,
 )
 from contracts.roles import has_any_role, roles_from_record
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.context import get_memory_context_service
 from management.services.memory.records import (
@@ -45,6 +47,7 @@ from management.services.memory.records import (
     get_memory_record_service,
 )
 from management.services.memory.retrieval import get_memory_retrieval_service
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger("memory_record_app")
 logger.setLevel(logging.INFO)
@@ -141,17 +144,28 @@ def list_records(
             detail="Tenant and user memory use /memory/long-term/{scope}",
         )
     service = get_memory_record_service()
-    rows = service.list_memories(
-        tenant_id,
-        user_id=None if normalized_layer == "tenant" else user_id,
-        agent_id=agent_id,
-        conversation_id=conversation_id,
-        layer=normalized_layer,
-        memory_type=memory_type,
-        status=status,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        rows = service.list_memories(
+            tenant_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            conversation_id=conversation_id,
+            layer=normalized_layer,
+            memory_type=memory_type,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    except (OperationalError, InterfaceError, SQLAlchemyTimeoutError) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Failed to load memory records",
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to load memory records",
+        ) from exc
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"items": rows, "count": len(rows)},

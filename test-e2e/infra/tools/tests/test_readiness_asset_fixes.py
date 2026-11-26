@@ -22,8 +22,10 @@ def current_routing():
 
 
 @pytest.mark.parametrize("feature_id,domain", [
-    ("AIDP-RETRIEVAL", "knowledge"), ("AUTH-LOCAL", "system"),
-    ("F-003", "system"), ("SYS-AGENT-LIFECYCLE", "system"),
+    ("AIDP-RETRIEVAL", "aidp"), ("AUTH-LOCAL", "user_permissions"),
+    ("F-003", "user_permissions"), ("SYS-AGENT-LIFECYCLE", "system"),
+    ("RESOURCE-TAG-MANAGEMENT", "resource_management"), ("OPS-AGENT-FACTS", "ops_dashboard"),
+    ("CHAT-TRAJECTORY", "observability"), ("SYSTEM-CONFIGURATION", "system_configuration_alerts"),
 ])
 def test_features_use_existing_functional_domains(current_routing, feature_id, domain):
     features, _, rules = current_routing
@@ -34,11 +36,11 @@ def test_features_use_existing_functional_domains(current_routing, feature_id, d
 
 
 @pytest.mark.parametrize("case_id,domain", [
-    ("AIDP-RET-CONFIG-API-D2-001", "knowledge"), ("AIDP-RET-JOURNEY-D4-001", "knowledge"),
-    ("AIDP-RET-MIGRATION-D5-001", "knowledge"), ("AIDP-RET-PROTOCOL-D2-001", "knowledge"),
-    ("AIDP-RET-REAL-D3-001", "knowledge"), ("AIDP-RET-RUNTIME-D3-001", "knowledge"),
-    ("API-005", "system"), ("API-006", "system"),
-    ("AUTH-LOCAL-D2-001", "system"), ("AUTH-LOCAL-D5-001", "system"),
+    ("AIDP-RET-CONFIG-API-D2-001", "aidp"), ("AIDP-RET-JOURNEY-D4-001", "aidp"),
+    ("AIDP-RET-MIGRATION-D5-001", "aidp"), ("AIDP-RET-PROTOCOL-D2-001", "aidp"),
+    ("AIDP-RET-REAL-D3-001", "aidp"), ("AIDP-RET-RUNTIME-D3-001", "aidp"),
+    ("API-005", "user_permissions"), ("API-006", "user_permissions"),
+    ("AUTH-LOCAL-D2-001", "user_permissions"), ("AUTH-LOCAL-D5-001", "user_permissions"),
     ("SYS-AGENT-D5-001", "system"),
 ])
 def test_cases_inherit_their_feature_contact_without_contract_edits(current_routing, case_id, domain):
@@ -66,3 +68,26 @@ def test_protocol_declares_self_owned_http_fixture_without_shared_factories():
     assert not binding.get("required_assets") and not binding.get("required_mock_services")
     assert binding["acceptance_bindings"]["AC-01"] == [
         "test_wire_channels_and_sources", "test_wire_retry_errors_and_no_invalid_http"]
+
+
+def test_northbound_change_uses_current_ut_without_reviving_removed_helm_suite():
+    path = REPO / "test-e2e/changes/bugs/NB-OTEL-20261111.yaml"
+    change = yaml.safe_load(path.read_text(encoding="utf-8"))["change"]
+    plan = change["traditional_ut"]
+    assert traditional_ut_issues(REPO, plan, "implementation", typed_missing=True) == []
+    assert set(plan["test_selectors"]) == {
+        "test/sdk/monitor/test_http_response_lifecycle.py",
+        "test/backend/services/test_runtime_proxy_telemetry.py",
+    }
+    assert "historical evidence" in change["notes"]
+
+
+def test_telemetry_preparation_does_not_substitute_real_trace_dependencies():
+    path = REPO / "test-e2e/cases/NB-OTEL-D3-001/execution.yaml"
+    binding = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert binding["preparation"] == {
+        "families": [], "anchors": False, "special_assets": False, "d4_groups": []}
+    assert not binding.get("required_mock_services")
+    assert "NEXENT_TEST_CREDENTIALS" in binding["notes"]
+    assert "retains its owned conversations" in binding["notes"]
+    assert set(binding["acceptance_bindings"]) == {"AC-STREAM", "AC-AUTH", "AC-DISCONNECT"}

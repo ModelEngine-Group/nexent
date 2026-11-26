@@ -2,6 +2,8 @@
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
+from html import unescape
+
 import pytest
 from nexent.core.agents.context import (
     ContextItemInput,
@@ -9,6 +11,7 @@ from nexent.core.agents.context import (
     ContextManagerConfig,
 )
 from smolagents.memory import ActionStep, TaskStep, ToolCall
+from smolagents.models import get_clean_message_list, tool_role_conversions
 from smolagents.monitoring import Timing
 
 
@@ -208,7 +211,6 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "user",
         "assistant",
-        "assistant",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -216,9 +218,9 @@ def test_context_manager_owns_final_answer_assembly():
         "final instruction",
         "memory fact",
     ]
-    action_history = _message_text(final.messages[4])
-    assert '<CODE_EXEC_RESULT>' in action_history
-    assert "<RETURN_VALUE>work trace</RETURN_VALUE>" in action_history
+    action_history = _message_text(final.messages[3])
+    assert '<completed_action>' in action_history
+    assert "recorded_result:\nwork trace" in action_history
     assert "Calling tools:" not in action_history
     assert "Observation:" not in action_history
     assert final.evidence.purpose == "final_answer"
@@ -292,12 +294,12 @@ def test_completed_skill_read_is_available_to_the_next_model_step():
     action_history = next(
         _message_text(message)
         for message in final.messages
-        if '<CODE_EXEC_RESULT>' in _message_text(message)
+        if '<completed_action>' in _message_text(message)
     )
     assert "read_skill_md" in str(final.messages)
-    assert 'read_skill_md("demo-skill")' in '\n'.join(_message_text(m) for m in final.messages)
+    assert 'tool: python_interpreter\ninput:\nskill_content = read_skill_md("demo-skill")' in unescape(action_history)
     assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
-    assert "Do not copy this record's format as your next response." not in action_history
+    assert "Do not copy this record's format as your next response." in action_history
 
 
 def test_context_manager_attributes_tool_schema_change():
@@ -382,3 +384,38 @@ def test_current_run_preserves_action_clarification_and_guidance_order(purpose):
         if len(expected) == 6:
             memory.steps.append(TaskStep(task="Guidance: include the date"))
             expected.append("Guidance: include the date")
+
+
+
+def test_strict_codeagent_observations_follow_smolagents_message_roles():
+    manager = ContextManager()
+    manager.use_result_observations = True
+    memory = _Memory()
+    action = ToolCall(name="python_interpreter", arguments="print('actual')", id="call_1")
+    step = ActionStep(
+        step_number=1, timing=Timing(start_time=0), tool_calls=[action],
+        model_output="<code>print('actual')</code>",
+        observations="actual", action_output="actual",
+    )
+    memory.steps = [TaskStep(task="Use a tool"), step]
+
+    context = manager.assemble_final_context(model=None, memory=memory, current_run_start_idx=0)
+    wire = get_clean_message_list(context.messages, role_conversions=tool_role_conversions)
+    assert [message["role"] for message in wire[-2:]] == ["assistant", "user"]
+    assert _message_text(wire[-2]) == step.model_output
+    assert "Executed action:" not in str(wire)
+    assert _message_text(wire[-1]) == "<RESULT>\n<OUTPUT>actual</OUTPUT>\n</RESULT>"
+
+
+def test_strict_unexecuted_step_does_not_replay_rejected_model_output():
+    manager = ContextManager()
+    manager.use_result_observations = True
+    memory = _Memory()
+    memory.steps = [TaskStep(task="Use a tool"), ActionStep(
+        step_number=1, timing=Timing(start_time=0), model_output="REJECTED_OUTPUT_NOT_CONTEXT",
+        observations="Execution was blocked", tool_calls=None)]
+    context = manager.assemble_final_context(model=None, memory=memory, current_run_start_idx=0)
+    wire = get_clean_message_list(context.messages, role_conversions=tool_role_conversions)
+    assert "REJECTED_OUTPUT_NOT_CONTEXT" not in str(wire)
+    assert not any(message["role"] == "assistant" for message in wire)
+    assert "Execution was blocked" in _message_text(wire[-1])

@@ -18,61 +18,100 @@ def _install_module(monkeypatch, name, **attributes):
     return module
 
 
-def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
-    fail_messages = MagicMock(
+def test_recover_streaming_runs_finishes_redis_state(monkeypatch):
+    from runtime import recovery
+
+    monkeypatch.setattr(recovery, "fail_streaming_assistant_messages", MagicMock(
         return_value=[
             {"message_id": 1, "conversation_id": 10, "user_id": "user-1"},
             {"message_id": 2, "conversation_id": 20, "user_id": None},
         ]
-    )
-    reap = MagicMock(side_effect=[2, 3])
+    ))
     runtime_state = MagicMock()
-    _install_module(
-        monkeypatch,
-        "management.db.conversation.repository",
-        fail_streaming_assistant_messages=fail_messages,
-    )
-    _install_module(
-        monkeypatch,
-        "management.db.automation.repository",
-        recover_orphaned_runs=MagicMock(return_value=4),
-        release_all_task_locks=MagicMock(return_value=5),
-    )
-    _install_module(
-        monkeypatch,
-        "management.db.evaluation.runs",
-        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1", "tenant-2"]),
-        reap_stale_runs=reap,
-    )
-    _install_module(
-        monkeypatch,
-        "management.services.agent.run_state",
-        runtime_state_service=runtime_state,
-    )
+    monkeypatch.setattr(recovery, "runtime_state_service", runtime_state)
 
-    result = startup_recovery_service.recover_runtime_tasks()
-
-    assert result == {
-        "conversation_messages": 2,
-        "agent_evaluations": 5,
-        "automation_runs": 4,
-        "automation_locks": 5,
-    }
-    assert reap.call_args_list == [
-        call("tenant-1", timeout_minutes=0),
-        call("tenant-2", timeout_minutes=0),
-    ]
+    assert recovery.recover_streaming_runs() == 2
     runtime_state.mark_run_finished.assert_called_once_with("user-1", 10, "failed")
-    runtime_state.mark_stream_completed.assert_called_once_with(
-        "user-1", 10, "failed"
+    runtime_state.mark_stream_completed.assert_called_once_with("user-1", 10, "failed")
+
+
+@pytest.mark.parametrize("sandbox_enabled", [False, True])
+def test_maintenance_redis_failure_leaves_conversation_update_for_transaction_rollback(monkeypatch, sandbox_enabled):
+    from runtime import identity
+
+    monkeypatch.setattr(identity, "uses_distributed_runtime", lambda: sandbox_enabled)
+    session = object()
+    fail_messages = MagicMock(return_value=[{"message_id": 123, "conversation_id": 10, "user_id": "user-1"}])
+    runtime_state = MagicMock()
+    runtime_state.mark_interrupted_run.side_effect = ConnectionError("Redis offline")
+    _install_module(monkeypatch, "infrastructure.rdb.conversation_state", fail_streaming_assistant_messages=fail_messages)
+    automation = _install_module(
+        monkeypatch, "management.db.automation.repository",
+        recover_orphaned_runs=MagicMock(), release_all_task_locks=MagicMock(),
     )
+    _install_module(
+        monkeypatch, "management.db.evaluation.runs",
+        list_evaluation_tenant_ids=MagicMock(), reap_stale_runs=MagicMock(),
+    )
+    _install_module(monkeypatch, "infrastructure.redis.run_state", runtime_state_service=runtime_state)
+
+    with pytest.raises(ConnectionError, match="Redis offline"):
+        startup_recovery_service.recover_runtime_tasks(db_session=session)
+
+    fail_messages.assert_called_once_with(db_session=session)
+    runtime_state.mark_interrupted_run.assert_called_once_with("user-1", 10, 123)
+    automation.release_all_task_locks.assert_not_called()
+
+
+@pytest.mark.parametrize("offline", [False, True])
+def test_runtime_recovery_marks_interrupted_run_and_recovers_tasks(monkeypatch, offline):
+    session = object() if offline else None
+    transaction = {"db_session": session} if offline else {}
+    rows = [
+        {"message_id": "123", "conversation_id": "10", "user_id": "user-1"},
+        {"message_id": "456", "conversation_id": "20", "user_id": None},
+    ]
+    messages = _install_module(
+        monkeypatch, "infrastructure.rdb.conversation_state",
+        fail_streaming_assistant_messages=MagicMock(return_value=rows),
+    )
+    automation = _install_module(
+        monkeypatch, "management.db.automation.repository",
+        recover_orphaned_runs=MagicMock(return_value=2), release_all_task_locks=MagicMock(return_value=3),
+    )
+    evaluations = _install_module(
+        monkeypatch, "management.db.evaluation.runs",
+        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1"]), reap_stale_runs=MagicMock(return_value=1),
+    )
+    runtime_state = MagicMock()
+    _install_module(monkeypatch, "infrastructure.redis.run_state", runtime_state_service=runtime_state)
+
+    result = startup_recovery_service.recover_runtime_tasks(db_session=session)
+
+    assert result == {"conversation_messages": 2, "agent_evaluations": 1, "automation_runs": 2, "automation_locks": 3}
+    if offline:
+        assert runtime_state.mock_calls == [call.mark_interrupted_run("user-1", 10, 123)]
+    else:
+        assert runtime_state.mock_calls == [
+            call.mark_run_finished("user-1", 10, "failed"),
+            call.mark_stream_completed("user-1", 10, "failed"),
+        ]
+    messages.fail_streaming_assistant_messages.assert_called_once_with(**transaction)
+    evaluations.reap_stale_runs.assert_called_once_with(
+        "tenant-1", timeout_minutes=0, **transaction,
+    )
+    automation.recover_orphaned_runs.assert_called_once_with(**transaction)
+    automation.release_all_task_locks.assert_called_once_with(**transaction)
 
 
 def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
+    reap = MagicMock(side_effect=[2, 3])
     _install_module(
         monkeypatch,
         "management.db.evaluation.runs",
         fail_interrupted_no_set_runs_on_startup=MagicMock(return_value=2),
+        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1", "tenant-2"]),
+        reap_stale_runs=reap,
     )
     _install_module(
         monkeypatch,
@@ -82,22 +121,18 @@ def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     )
     _install_module(
         monkeypatch,
-        "management.db.model.repository",
-        fail_detecting_models_on_startup=MagicMock(return_value=5),
-    )
-    _install_module(
-        monkeypatch,
         "management.db.memory.dreaming",
         recover_stale=MagicMock(return_value=6),
     )
 
     assert startup_recovery_service.recover_config_tasks() == {
         "agent_evaluation_setups": 2,
+        "agent_evaluations": 5,
         "evaluation_set_generations": 3,
         "orphaned_virtual_sets": 4,
-        "model_connectivity_checks": 5,
         "dreaming_runs": 6,
     }
+    assert reap.call_args_list == [call("tenant-1", timeout_minutes=0), call("tenant-2", timeout_minutes=0)]
 
 
 def test_recover_data_process_tasks_marks_each_celery_id_cancelled_once(monkeypatch):
@@ -166,7 +201,7 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
     transition = MagicMock(side_effect=[{"file_id": "claimed", "version": 3}, None])
     delete_object = MagicMock(return_value={"success": True})
     _install_module(monkeypatch, "management.db.file.attachment", delete_file=delete_object)
-    _install_module(monkeypatch, "management.db.client", minio_client=MagicMock())
+    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=MagicMock())
     _install_module(
         monkeypatch,
         "management.db.knowledge_base.file_lifecycle",
@@ -213,7 +248,7 @@ def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
         "management.db.file.attachment",
         delete_file=MagicMock(return_value={"success": False, "error": "storage down"}),
     )
-    _install_module(monkeypatch, "management.db.client", minio_client=minio_client)
+    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=minio_client)
     _install_module(
         monkeypatch,
         "management.db.knowledge_base.file_lifecycle",
@@ -235,31 +270,55 @@ def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
     assert failure.kwargs["error_message"] == "storage down"
 
 
+
+
 @pytest.mark.asyncio
-async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
-    monkeypatch,
-):
+async def test_upload_recovery_uses_management_lane_and_returns_owned_task(monkeypatch):
+    from unittest.mock import AsyncMock
+
     fail_uploads = MagicMock(return_value=0)
     monkeypatch.setattr(startup_recovery_service, "fail_interrupted_uploads", fail_uploads)
     monkeypatch.setattr(startup_recovery_service, "UPLOAD_RECOVERY_GRACE_SECONDS", 0)
-    startup_recovery_service._upload_cleanup_tasks.clear()
 
-    await startup_recovery_service.schedule_interrupted_upload_cleanup(
-        "nexent-config"
-    )
-    pending = list(startup_recovery_service._upload_cleanup_tasks)
-    if pending:
-        await asyncio.gather(*pending)
+    async def run(lane, spec, fn, *args):
+        assert lane == "control-io"
+        assert spec.owner == "management.recovery"
+        return fn(*args)
 
+    manager = MagicMock()
+    manager.run = AsyncMock(side_effect=run)
+    task = await startup_recovery_service.schedule_interrupted_upload_cleanup("nexent-config", thread_manager=manager)
+    await task
+    assert manager.run.await_count == 2
     assert fail_uploads.call_count == 2
-    assert (
-        fail_uploads.call_args_list[0].args[0]
-        <= fail_uploads.call_args_list[1].args[0]
-    )
-    assert [call_args.args[1] for call_args in fail_uploads.call_args_list] == [
-        "nexent-config",
-        "nexent-config",
-    ]
+    assert all(call.args[1] == "nexent-config" for call in fail_uploads.call_args_list)
+
+
+def test_durable_recovery_retries_failed_redis_write_without_clearing_repair(monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    from infrastructure.rdb.agent_execution import RunIdentity
+    from runtime import recovery
+
+    identity = RunIdentity("tenant", "user", 42, "a" * 32)
+    renew = MagicMock()
+    reclaim = MagicMock()
+    clear = MagicMock()
+    journal = MagicMock()
+    journal.return_value.repair_terminal.side_effect = [ConnectionError("Redis unavailable"), None]
+    monkeypatch.setattr(recovery, "renew_execution_leases", renew)
+    monkeypatch.setattr(recovery, "recover_expired_executions", reclaim)
+    monkeypatch.setattr(recovery, "pending_journal_repairs", lambda: [(identity, "stopped")])
+    monkeypatch.setattr(recovery, "mark_journal_repaired", clear)
+    monkeypatch.setattr(recovery, "RunJournal", journal)
+    monkeypatch.setattr(recovery, "runtime_state_service", MagicMock(enabled=True))
+
+    recovery.reconcile_executions()
+    clear.assert_not_called()
+    recovery.reconcile_executions()
+    clear.assert_called_once_with(identity)
+    assert renew.call_count == reclaim.call_count == 2
+    assert journal.return_value.repair_terminal.call_args_list == [call("stopped"), call("stopped")]
 
 
 def test_startup_has_no_system_agent_backfill():

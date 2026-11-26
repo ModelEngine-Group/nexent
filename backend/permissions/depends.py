@@ -5,9 +5,10 @@ from typing import Callable
 
 from fastapi import Depends, HTTPException
 
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from permissions.models import CurrentUser
 from permissions.rbac import has_permission
+from management.services.permission.identity.session import authenticate
 
 
 def require(permission: str, *, alternative: str | None = None) -> Callable[[CurrentUser], CurrentUser]:

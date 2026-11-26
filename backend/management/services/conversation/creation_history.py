@@ -4,10 +4,12 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
-from contracts.conversation import MessageRequest, MessageUnit
 from contracts.agent import WorkbenchSessionConfig
+from contracts.conversation import MessageRequest, MessageUnit
+from management.services.conversation.runtime_output import is_runtime_event
 from management.db.conversation.repository import get_conversation_history
 from management.services.conversation.creator_targets import bind_creator_target
 from management.services.conversation.service import (
@@ -29,6 +31,29 @@ def _file_object_names(files: Any) -> list[str]:
     ]
 
 
+def create_creation_conversation(
+    *, mode, query, workbench_config, agent_id, user_id, target, selected_model_id=None,
+    model_parameter_preferences=None, retry_user_message_id=None, retry_message_index=None,
+) -> int:
+    """Allocate a Creator conversation without appending a turn."""
+    if mode not in _CREATION_MODES:
+        raise ValueError("Unsupported Workbench creation mode")
+    if retry_user_message_id is not None or retry_message_index is not None:
+        raise ValueError("Cannot retry without a creation conversation")
+    normalized_config = None
+    if workbench_config is not None:
+        normalized_config = WorkbenchSessionConfig.model_validate(workbench_config).model_dump(mode="json")
+        if normalized_config["mode"] != mode:
+            raise ValueError("Invalid creation configuration")
+    title = "新对话" if normalized_config is not None else (" ".join(query.split()) or "新对话")[:100]
+    created = create_new_conversation(
+        title=title, user_id=user_id, agent_id=agent_id, target=target, workbench_config=normalized_config,
+        **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
+        **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
+    )
+    return int(created["conversation_id"])
+
+
 def prepare_creation_history(
     *,
     conversation_id: int | None,
@@ -44,28 +69,19 @@ def prepare_creation_history(
     selected_model_id: int | None = None,
     retry_user_message_id: int | None = None,
     retry_message_index: int | None = None,
+    message_receipt: dict[str, int | None] | None = None,
 ) -> tuple[int, int]:
     """Verify the owner and creation mode, then persist the current user turn."""
+    if message_receipt is not None:
+        message_receipt.clear()
     if mode not in _CREATION_MODES:
         raise ValueError("Unsupported Workbench creation mode")
     if conversation_id is None:
-        if retry_user_message_id is not None or retry_message_index is not None:
-            raise ValueError("Cannot retry without a creation conversation")
-        normalized_config = None
-        if workbench_config is not None:
-            normalized_config = WorkbenchSessionConfig.model_validate(workbench_config).model_dump(mode="json")
-            if normalized_config["mode"] != mode:
-                raise ValueError("Invalid creation configuration")
-        created = create_new_conversation(
-            title="新对话" if normalized_config is not None else (" ".join(query.split()) or "新对话")[:100],
-            user_id=user_id,
-            agent_id=agent_id,
-            target=target,
-            workbench_config=normalized_config,
-            **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
-            **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
+        resolved_id = create_creation_conversation(
+            mode=mode, query=query, workbench_config=workbench_config, agent_id=agent_id, user_id=user_id,
+            target=target, selected_model_id=selected_model_id, model_parameter_preferences=model_parameter_preferences,
+            retry_user_message_id=retry_user_message_id, retry_message_index=retry_message_index,
         )
-        resolved_id = int(created["conversation_id"])
         next_index = 0
     else:
         history = get_conversation_history(conversation_id, user_id)
@@ -106,13 +122,15 @@ def prepare_creation_history(
                 for item in history["message_records"]
             ):
                 raise ValueError("Creation retry target has no assistant response")
+            if message_receipt is not None:
+                message_receipt["message_id"] = user_record.get("message_id")
             return resolved_id, assistant_index
         next_index = max(
             (int(item["message_index"]) for item in history["message_records"]),
             default=-1,
         ) + 1
 
-    save_message(
+    message_id = save_message(
         MessageRequest(
             conversation_id=resolved_id,
             message_idx=next_index,
@@ -123,6 +141,8 @@ def prepare_creation_history(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if message_receipt is not None:
+        message_receipt["message_id"] = message_id
     return resolved_id, next_index + 1
 
 
@@ -138,32 +158,33 @@ async def persist_creation_stream(
     units: list[tuple[str, str]] = []
     status = "completed"
     try:
-        async for event in stream:
-            for line in event.splitlines():
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    chunk = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(chunk, dict) or not isinstance(chunk.get("type"), str):
-                    continue
-                kind = chunk["type"]
-                raw_content = chunk.get("content")
-                content = (
-                    raw_content
-                    if isinstance(raw_content, str)
-                    else json.dumps(raw_content, ensure_ascii=False)
-                )
-                if kind in {
-                    "skill_body", "file_content", "agent_new_run",
-                    "target_files", "model_attempt_control", "done",
-                }:
-                    content = json.dumps(chunk, ensure_ascii=False)
-                units.append((kind, content))
-                if kind == "error":
-                    status = "failed"
-            yield event
+        async with aclosing(stream):
+            async for event in stream:
+                for line in event.splitlines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(chunk, dict) or not isinstance(chunk.get("type"), str):
+                        continue
+                    kind = chunk["type"]
+                    raw_content = chunk.get("content")
+                    content = (
+                        raw_content
+                        if isinstance(raw_content, str)
+                        else json.dumps(raw_content, ensure_ascii=False)
+                    )
+                    if kind in {
+                        "skill_body", "file_content", "agent_new_run",
+                        "target_files", "model_attempt_control", "run_terminal", "done",
+                    }:
+                        content = json.dumps(chunk, ensure_ascii=False)
+                    units.append((kind, content))
+                    if kind == "error":
+                        status = "failed"
+                yield event
     except BaseException:
         status = "stopped"
         raise

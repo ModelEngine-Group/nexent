@@ -54,15 +54,13 @@ def test_losing_terminal_compare_and_set_leaves_task_unchanged(terminal):
     fixture.update_task.assert_not_called()
 
 
-def test_reclaimed_schedule_can_finish_run_but_cannot_rewrite_task(terminal):
+def test_reclaimed_schedule_cannot_finish_run_or_rewrite_task(terminal):
     fixture = terminal
     result = fixture.runner._finish_run({**fixture.run, "_lease_owner": "old-scheduler"},
                                          fixture.task, "FAILED", {})
-    assert result["status"] == "FAILED" and result["assistant_message_id"] == 102
+    assert result == fixture.run
+    fixture.update_run.assert_not_called()
     fixture.update_task.assert_not_called()
-    assert fixture.update_run.call_args.kwargs == {
-        "expected_statuses": ["QUEUED", "RUNNING"], "db_session": fixture.session,
-    }
 
 
 def test_user_cancel_returns_winner_and_preserves_bound_messages(terminal):
@@ -78,12 +76,16 @@ def test_user_cancel_returns_winner_and_preserves_bound_messages(terminal):
 
 
 @pytest.mark.parametrize("status", [None, "RUNNING", "CANCELED", "SUCCEEDED"])
-def test_active_callback_checks_durable_current_run(monkeypatch, terminal, status):
+def test_late_terminal_write_uses_durable_current_run(monkeypatch, terminal, status):
     fixture = terminal
-    lookup = Mock(return_value={"status": status} if status else None)
-    monkeypatch.setattr(fixture.module.agent_automation_db, "get_run", lookup)
-    assert fixture.runner._run_is_active(fixture.run, fixture.task) is (status == "RUNNING")
-    lookup.assert_called_once_with(77, "tenant", "user")
+    fixture.context.run = {**fixture.run, "status": status} if status else None
+    result = fixture.runner._finish_run(fixture.run, fixture.task, "FAILED", {})
+    if status != "RUNNING":
+        assert result == (fixture.context.run or fixture.run)
+        fixture.update_run.assert_not_called()
+        fixture.update_task.assert_not_called()
+    else:
+        assert result["status"] == "FAILED"
 
 
 @pytest.mark.asyncio
@@ -107,25 +109,27 @@ async def test_durable_user_cancel_is_a_normal_execution_result(monkeypatch, ter
     monkeypatch.setattr(fixture.module.agent_automation_db, "create_run", Mock(return_value=fixture.run))
     monkeypatch.setattr(fixture.module.agent_automation_db, "get_run", Mock(return_value=canceled))
     monkeypatch.setattr(fixture.runner, "_execute_active_run", AsyncMock(side_effect=asyncio.CancelledError()))
-    stop = Mock()
-    monkeypatch.setattr(fixture.module, "stop_agent_tasks", stop)
+    stop = AsyncMock()
+    monkeypatch.setattr(fixture.runner, "cancel_runtime_run", stop)
     result = await fixture.runner.execute_task(fixture.task, trigger_type="MANUAL")
     assert result == canceled
     stop.assert_not_called()
     fixture.update_run.assert_not_called()
 
 
-@pytest.mark.parametrize("run_id", [None, 77])
-def test_conversation_stop_passes_generation_to_runner(monkeypatch, terminal, run_id):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runtime_ids", [[], ["a" * 32], ["a" * 32, "b" * 32]])
+async def test_conversation_stop_fences_each_runtime_execution(monkeypatch, terminal, runtime_ids):
     fixture = terminal
-    stop = Mock()
-    monkeypatch.setattr(fixture.module, "stop_agent_tasks", stop)
-    fixture.runner.cancel_for_conversation(100, "user", run_id)
-    if run_id is None:
-        stop.assert_called_once_with(100, "user")
-    else:
-        stop.assert_called_once_with(100, "user", expected_generation="77")
-    delegate = Mock()
+    monkeypatch.setattr(fixture.module.agent_automation_db, "list_active_runtime_run_ids",
+                        lambda conversation, user, tenant: runtime_ids)
+    stop = AsyncMock()
+    monkeypatch.setattr(fixture.module, "forward_scoped_stop", stop)
+    await fixture.runner.cancel_for_conversation(100, "user", "tenant")
+    assert [call.args[0].run_id for call in stop.await_args_list] == runtime_ids
+    assert all(call.args[0].prevent_start and call.args[0].conversation_id == 100
+               and call.args[1:] == ("user", "tenant") for call in stop.await_args_list)
+    delegate = AsyncMock()
     monkeypatch.setattr(fixture.module.agent_automation_runner, "cancel_for_conversation", delegate)
-    AgentAutomationFacade()._request_conversation_stop(100, "user", run_id)
-    delegate.assert_called_once_with(100, "user", *(() if run_id is None else (77,)))
+    await AgentAutomationFacade()._request_conversation_stop(100, "user", "tenant")
+    delegate.assert_awaited_once_with(100, "user", "tenant")

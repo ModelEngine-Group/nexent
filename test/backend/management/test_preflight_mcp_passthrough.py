@@ -1,290 +1,168 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Unit tests for ``preflight_mcp_header_passthrough`` and the small helpers
-touched for Phase 1 in ``backend/management/services/agent/preparation/run.py``.
+"""Validate Northbound MCP header routing before staging a prepared run."""
 
-These tests target the Codecov-missed diff lines for PR #4329 (patch
-coverage landed at 80.77% on ``preflight_mcp_header_passthrough`` and
-``create_agent_run_info``'s fallback mcp_host append + metadata kwarg).
-"""
-
-from __future__ import annotations
-
-import types
-from unittest.mock import AsyncMock, MagicMock
+from copy import deepcopy
 
 import pytest
 
+from contracts.agent import AgentRequest
+from contracts.agentos import AgentRunReference, PreparedAgentRun
+from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.services.agent.preparation import run as run_mod
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.mcp_execution import build_mcp_tool
+from management.db.agent import repository
+from management.services.agent import mcp_passthrough
+from management.services.agent.preparation import evaluation_snapshot, run
+from management.services.model import run_controls
+from runtime.agentos import prepared_evaluation, prepared_mcp
+from test.backend.app.test_agentos_prepared_evaluation import model_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
+from infrastructure.agent_model_config import create_model_config_from_record
+from nexent.core.agents.contracts.config import AgentConfig
+
+ACTOR = ServicePrincipal("actor", "tenant-a")
+REFERENCE = AgentRunReference(conversation_id=42, run_id="a" * 32)
+BOUND = "https://bound.example/mcp"
+OTHER = "https://other.example/mcp"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _agent_record(*, passthrough=True, version_no=0, **extra):
-    """version_no=0 matches the default version_no kwarg in every test call,
-    so callers don't hit the run_blocking refetch branch."""
-    rec = {
-        "version_no": version_no,
-        "allow_mcp_header_passthrough": passthrough,
+@pytest.fixture
+def preparation(mocker):
+    mocker.patch("contracts.constants.environment.JWT_SECRET", "fixture-mcp-key")
+    row = {
+        "tool_instance_id": 17, "name": "lookup", "class_name": "lookup", "origin_name": "lookup",
+        "description": "Lookup", "inputs": None, "output_type": "object", "usage": "bound",
+        "params": [], "instance_params": {},
     }
-    rec.update(extra)
-    return rec
+    server = {
+        "mcp_id": 29, "mcp_name": "bound", "mcp_server": BOUND, "enabled": True,
+        "authorization_token": "static-fixture", "custom_headers": {"X-Request-ID": "${X-Trace-ID}"},
+    }
+    unbound = {**server, "mcp_id": 30, "mcp_name": "other", "mcp_server": OTHER}
+    model_row = model_record()
+    model = create_model_config_from_record(model_row)
+    agent = AgentConfig(agent_id=7, version_no=3, name="agent", description="", model_name=model.cite_name,
+                        tools=[build_mcp_tool(row)])
+    mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+    mocker.patch.object(run_controls, "validate_agent_model_selection")
+    mocker.patch.object(run_controls, "preflight_agent_turn_controls")
+    agent_policy = mocker.patch.object(repository, "search_agent_info_by_agent_id", return_value={
+        "allow_chat_metadata": True, "allow_mcp_header_passthrough": True,
+    })
+    mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
+    mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})
+    mocker.patch.object(run, "create_model_config_list", return_value=[model])
+    mocker.patch.object(run, "create_agent_config", side_effect=lambda **kw: agent.model_copy(deep=True))
+    mocker.patch.object(evaluation_snapshot, "read_bound_mcp_tools", return_value=[row])
+    mocker.patch.object(evaluation_snapshot, "read_mcp_execution_servers", return_value=[server, unbound])
+    mocker.patch.object(mcp_passthrough, "read_mcp_execution_servers", return_value=[server, unbound])
+    mocker.patch.object(prepared_mcp, "read_bound_mcp_tools", return_value=[row])
+    mocker.patch.object(prepared_mcp, "read_mcp_execution_servers", return_value=[server, unbound])
+    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model_row)
+    mocker.patch("management.services.agent.tool_identity.resolve_tool_user_context", return_value={})
+    stub_resolved_model_catalog(mocker, model_row)
+    return agent_policy
 
 
-def _patch_preflight_deps(monkeypatch, *, agent_record=None, mcp_host=None,
-                          validate_raises=None):
-    """Patch everything preflight touches.
-
-    ``preflight_mcp_header_passthrough`` does **function-local imports** for
-    several of its dependencies (create_agent_config, filter_mcp_servers_and_tools,
-    validate_mcp_header_passthrough, extract_passthrough_headers, run_blocking).
-    A function-local ``from X import Y`` bypasses the importing module's
-    namespace and binds directly to ``X.Y`` — so we MUST patch the *source*
-    module (``compiler.create_agent_config``, etc.), not ``run_mod.<name>``.
-    Patching run_mod would silently be a no-op and the real implementation
-    would run, which is exactly what caused 4 tests to hit PostgreSQL.
-
-    Returns a dict of the patched calls so assertions can inspect them.
-    """
-    calls = {}
-
-    async def _fake_create_agent_config(**kwargs):
-        calls["create_agent_config"] = kwargs
-        return MagicMock()
-
-    async def _fake_get_remote_mcp_server_list(*, tenant_id, is_need_auth):
-        calls["get_remote_mcp_server_list"] = {
-            "tenant_id": tenant_id, "is_need_auth": is_need_auth,
-        }
-        return [
-            {
-                "remote_mcp_server_name": "echo-headers",
-                "remote_mcp_server": "http://rt:5018/mcp",
-                "authorization_token": "Bearer tok-1",
-                "custom_headers": {"X-Shared": "yes"},
-                "status": True,
-            },
-            {
-                "remote_mcp_server_name": "disabled-one",
-                "remote_mcp_server": "http://rt:5099/mcp",
-                "status": False,
-            },
-        ]
-
-    def _fake_get_tenant_local_mcp_server(tenant_id):
-        calls["tenant_local"] = tenant_id
-        return "http://rt-local/mcp"
-
-    def _fake_filter_mcp_servers_and_tools(agent_config, remote_mcp_dict):
-        calls["filter"] = (agent_config, remote_mcp_dict)
-        return ["http://rt:5018/mcp", "http://rt-local/mcp"]
-
-    def _fake_validate(metadata, agent_rec, host):
-        calls["validate"] = (metadata, agent_rec, host)
-        if validate_raises is not None:
-            raise validate_raises
-
-    # Patch on the SOURCE modules — these are the names preflight's local
-    # imports will resolve to at call time.
-    from management.services.agent import mcp_passthrough as mcp_mod
-    from management.services.agent.preparation import compiler as compiler_mod
-    from management.services.agent.preparation import tools as tools_mod
-
-    monkeypatch.setattr(compiler_mod, "create_agent_config", _fake_create_agent_config)
-    monkeypatch.setattr(tools_mod, "filter_mcp_servers_and_tools",
-                        _fake_filter_mcp_servers_and_tools)
-    monkeypatch.setattr(mcp_mod, "validate_mcp_header_passthrough", _fake_validate)
-
-    # These two are NOT re-imported inside preflight — it uses run_mod's
-    # module-level bindings — so run_mod is the correct patch target.
-    monkeypatch.setattr(run_mod, "get_remote_mcp_server_list",
-                        _fake_get_remote_mcp_server_list)
-    monkeypatch.setattr(run_mod, "get_tenant_local_mcp_server",
-                        _fake_get_tenant_local_mcp_server)
-    return calls
-
-
-# ---------------------------------------------------------------------------
-# preflight: early-return paths
-# ---------------------------------------------------------------------------
+async def prepare(metadata, *, northbound=True):
+    request = AgentRequest(
+        agent_id=7, version_no=3, query="hello", conversation_id=42, metadata=metadata,
+    )
+    snapshot = await evaluation_snapshot.prepare_conversation_snapshot(
+        request, REFERENCE, ACTOR.user_id, ACTOR.tenant_id,
+        new_conversation=True, metadata_from_northbound=northbound,
+    )
+    return request, snapshot
 
 
 @pytest.mark.asyncio
-async def test_preflight_no_metadata_returns_early(monkeypatch):
-    """metadata=None → should do nothing (the call site already guards, but
-    preflight itself must tolerate None too)."""
-    calls = _patch_preflight_deps(monkeypatch)
-    await run_mod.preflight_mcp_header_passthrough(
-        agent_id=1, tenant_id="t", metadata=None,
-        agent_record=_agent_record(),
-    )
-    assert "validate" not in calls
+@pytest.mark.parametrize("mode", ["global", "by_server", "disabled", "non_northbound", "business_only", None])
+async def test_prepared_mcp_headers_are_request_scoped_and_keep_static_priority(preparation, mode):
+    business = {"project": {"name": "fixture"}}
+    override = {"Authorization": "request-fixture", "X-Trace-ID": "test-trace"}
+    metadata = None if mode is None else deepcopy(business)
+    if mode == "by_server":
+        metadata["_mcp_headers_by_server"] = {BOUND: override}
+    elif mode in {"global", "disabled", "non_northbound"}:
+        metadata["_mcp_headers"] = override
+    if mode == "disabled":
+        preparation.return_value["allow_mcp_header_passthrough"] = False
+
+    request, snapshot = await prepare(metadata, northbound=mode != "non_northbound")
+    payload = PreparedAgentRun.model_validate_json(snapshot.model_dump_json())
+    active = mode in {"global", "by_server"}
+    assert payload.runtime_metadata == (business if mode is not None else {})
+    assert bool(payload.mcp_header_metadata) is active
+    assert request.metadata == metadata
+    if active or mode == "disabled":
+        preparation.assert_called_once_with(7, "tenant-a", 3)
+
+    info = prepared_evaluation.prepare_run_snapshot(payload, ACTOR)
+    host, = info.mcp_host
+    assert host["url"] == BOUND and host["allowed_tools"] == {"lookup": "lookup"}
+    assert host["headers"] == ({"Authorization": "static-fixture", "X-Request-ID": "test-trace", "x-trace-id": "test-trace"}
+                               if active else {"Authorization": "static-fixture"})
+    assert getattr(info, "runtime_metadata", None) == (business if mode is not None else {})
 
 
 @pytest.mark.asyncio
-async def test_preflight_metadata_without_reserved_fields_returns(monkeypatch):
-    calls = _patch_preflight_deps(monkeypatch)
-    await run_mod.preflight_mcp_header_passthrough(
-        agent_id=1, tenant_id="t",
-        metadata={"project_id": "abc"},
-        agent_record=_agent_record(),
-    )
-    assert "validate" not in calls
+@pytest.mark.parametrize("target", [OTHER, "https://unspecified.example/mcp"])
+async def test_preflight_rejects_registered_but_unbound_or_unknown_servers(preparation, target):
+    with pytest.raises(AppException) as error:
+        await prepare({"_mcp_headers_by_server": {target: {"X-Trace-ID": "test-trace"}}})
+
+    assert error.value.error_code == ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND
+    assert error.value.http_status == 400
+    preparation.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_preflight_agent_switch_off_bails_out(monkeypatch):
-    calls = _patch_preflight_deps(monkeypatch)
-    await run_mod.preflight_mcp_header_passthrough(
-        agent_id=1, tenant_id="t",
-        metadata={"_mcp_headers": {"Cookie": "x"}},
-        agent_record=_agent_record(passthrough=False),
-    )
-    assert "validate" in calls
+async def test_prepared_snapshot_attaches_tenant_monitoring_catalog(preparation, mocker):
+    catalog = [{"url": BOUND, "mcp_server_id": 29, "mcp_server_name": "bound", "mcp_server_type": "remote"}]
+    mocker.patch("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+    mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", "http://local.invalid/mcp")
+    mocker.patch("management.services.mcp.addressing.get_tenant_local_mcp_server",
+                 side_effect=lambda tenant_id: f"http://local.invalid/mcp/{tenant_id}/sse")
+    attach = mocker.patch("management.services.agent.monitoring_catalog.prepare_tenant_monitoring_catalog",
+                          return_value=catalog)
 
+    _, snapshot = await prepare(None)
 
-# ---------------------------------------------------------------------------
-# preflight: happy path + validate integration
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_preflight_happy_path_builds_mcp_host_and_validates(monkeypatch):
-    calls = _patch_preflight_deps(monkeypatch)
-    rec = _agent_record(version_no=5)
-    await run_mod.preflight_mcp_header_passthrough(
-        agent_id=7, tenant_id="tenant-1", user_id="u-1",
-        metadata={"_mcp_headers": {"Cookie": "session=abc"}},
-        agent_record=rec,
-        version_no=5,
-    )
-
-    # create_agent_config invoked with our args
-    cfg_args = calls["create_agent_config"]
-    assert cfg_args["agent_id"] == 7
-    assert cfg_args["tenant_id"] == "tenant-1"
-    assert cfg_args["user_id"] == "u-1"
-    assert cfg_args["version_no"] == 5
-
-    # filter received the agent config and a dict keyed by SERVER NAME,
-    # with the URL living inside each record (run.py:191-195).
-    agent_cfg, remote_dict = calls["filter"]
-    assert set(remote_dict.keys()) == {"echo-headers", "outer-apis"}
-    urls_in_dict = {rec["remote_mcp_server"] for rec in remote_dict.values()}
-    assert urls_in_dict == {"http://rt:5018/mcp", "http://rt-local/mcp"}
-
-    # validate_mcp_header_passthrough received an mcp_host list
-    meta, rec_out, host = calls["validate"]
-    assert meta["_mcp_headers"] == {"Cookie": "session=abc"}
-    assert rec_out is rec
-    urls = {h["url"] for h in host}
-    assert urls == {"http://rt:5018/mcp", "http://rt-local/mcp"}
-    # static headers merged: Authorization + X-Shared from custom_headers
-    headers = {h["url"]: h.get("headers", {}) for h in host}
-    echo_headers = headers["http://rt:5018/mcp"]
-    assert echo_headers["Authorization"] == "Bearer tok-1"
-    assert echo_headers["X-Shared"] == "yes"
-    assert "headers" not in headers["http://rt-local/mcp"]  # no static headers
+    assert snapshot.model_dump().get("monitoring_mcp_servers") == catalog
+    attach.assert_called_once_with("tenant-a", f"http://local.invalid/mcp/{ACTOR.tenant_id}/sse")
 
 
 @pytest.mark.asyncio
-async def test_preflight_run_blocking_refetch_when_record_missing(monkeypatch):
-    """When agent_record=None / version_mismatch, preflight falls through
-    to run_blocking(... search_agent_info_by_agent_id ...) and if that
-    returns {} → bails out (line 160-161)."""
-    from nexent.core import concurrency as concurrency_mod
+async def test_prepared_snapshot_keeps_running_when_monitoring_catalog_is_absent(preparation, mocker):
+    mocker.patch("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+    mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", None)
+    attach = mocker.patch("management.services.agent.monitoring_catalog.prepare_tenant_monitoring_catalog",
+                          return_value=None)
 
-    blocker = AsyncMock(return_value={})  # empty → switch OFF → bail
-    monkeypatch.setattr(concurrency_mod, "run_blocking", blocker)
+    _, snapshot = await prepare(None)
 
-    calls = _patch_preflight_deps(monkeypatch)
-    # agent_record=None + no default version  → enters run_blocking path
-    await run_mod.preflight_mcp_header_passthrough(
-        agent_id=1, tenant_id="t", version_no=0,
-        metadata={"_mcp_headers": {"Cookie": "x"}},
-        agent_record=None,
-    )
-    blocker.assert_awaited_once()
-    # agent_record became {} → switch OFF → bail before AgentConfig
-    assert "validate" not in calls
+    assert snapshot is not None
+    assert snapshot.model_dump().get("monitoring_mcp_servers") is None
+    attach.assert_called_once_with("tenant-a", None)
 
 
 @pytest.mark.asyncio
-async def test_preflight_run_blocking_refetch_with_hit(monkeypatch):
-    """run_blocking returns a real agent_record with switch ON → proceeds
-    through AgentConfig + validate (covers the normal DB-refetch path)."""
-    from nexent.core import concurrency as concurrency_mod
+async def test_prepared_snapshot_skips_monitoring_catalog_when_disabled(preparation, mocker):
+    mocker.patch("contracts.constants.environment.OPS_MONITORING_ENABLED", False)
+    attach = mocker.patch("management.services.agent.monitoring_catalog.prepare_tenant_monitoring_catalog")
 
-    blocker = AsyncMock(return_value=_agent_record(passthrough=True, version_no=0))
-    monkeypatch.setattr(concurrency_mod, "run_blocking", blocker)
+    _, snapshot = await prepare(None)
 
-    calls = _patch_preflight_deps(monkeypatch)
-    await run_mod.preflight_mcp_header_passthrough(
-        agent_id=1, tenant_id="t", version_no=0,
-        metadata={"_mcp_headers": {"Cookie": "x"}},
-        agent_record=None,
-    )
-    blocker.assert_awaited_once()
-    assert "validate" in calls
+    assert snapshot is not None
+    attach.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_preflight_validates_raises_appexception(monkeypatch):
-    from contracts.errors.codes import ErrorCode
+async def test_prepared_snapshot_returns_none_without_a_compiled_run(preparation, mocker):
+    mocker.patch.object(run, "create_agent_run_info", return_value=None)
 
-    calls = _patch_preflight_deps(
-        monkeypatch,
-        validate_raises=AppException(
-            ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND, "route not found"
-        ),
-    )
-    with pytest.raises(AppException) as exc_info:
-        await run_mod.preflight_mcp_header_passthrough(
-            agent_id=1, tenant_id="t",
-            metadata={"_mcp_headers": {"Cookie": "x"}},
-            agent_record=_agent_record(),
-        )
-    assert exc_info.value.error_code == ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND
+    _, snapshot = await prepare(None)
 
-
-# ---------------------------------------------------------------------------
-# create_agent_run_info: mcp_host fallback + metadata kwarg shape
-# ---------------------------------------------------------------------------
-
-
-def test_create_run_info_include_metadata_kwarg_when_sent():
-    """Line 564 is `**({"runtime_metadata": metadata} if metadata is not None
-    else {})` — ensure both branches are exercised in isolation."""
-    # None branch (omit runtime_metadata) — the function is huge, so just
-    # test that the dict spread pattern itself behaves as expected.
-    spread_none = {"a": 1, **({"runtime_metadata": None} if None is not None else {})}
-    assert "runtime_metadata" not in spread_none
-    spread_present = {"a": 1, **({"runtime_metadata": {"k": "v"}} if {"k": "v"} is not None else {})}
-    assert spread_present["runtime_metadata"] == {"k": "v"}
-
-
-# ---------------------------------------------------------------------------
-# subscription.py: the isawaitable guard block on the preflight call site
-# ---------------------------------------------------------------------------
-
-
-def test_preflight_call_site_isawaitable_guard_swallows_plain_magicmock():
-    """Test the exact guard shape we added — a plain MagicMock (non-awaitable)
-    returned by a module-level patch should NOT blow up with
-    `TypeError: object MagicMock can't be used in await expression`."""
-    import inspect
-
-    # Simulate what happens if someone patches preflight_mcp_header_passthrough
-    # with a plain MagicMock instead of AsyncMock: calling it returns a
-    # MagicMock, which is NOT awaitable → guard must skip the await.
-    plain_mock = MagicMock()
-    assert not inspect.isawaitable(plain_mock())
-
-    # AsyncMock() itself is NOT awaitable either; the awaitable is the
-    # coroutine returned by *calling* it.  Guard must take the await branch.
-    async_mock = AsyncMock()
-    assert inspect.isawaitable(async_mock())
+    assert snapshot is None

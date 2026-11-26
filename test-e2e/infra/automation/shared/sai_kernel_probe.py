@@ -10,12 +10,18 @@ import logging
 import re
 import secrets
 import threading
+from html import unescape
 from pathlib import Path
 
-from nexent.core.agents import agent_model, nexent_agent, sandbox, subagent_wrapper
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel, SandboxScope
+import nexent.core.agents.sandbox as sandbox_package
+from nexent.core.agents.contracts import config as agent_configuration, run as agent_running
+from nexent.core.agents.cores.smolagents import agent as nexent_agent
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.resources import subagents as subagent_wrapper
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.agents.sandbox import execution, config, compatibility, tls
 from nexent.core.concurrency import LanePolicy, ThreadManager, cancellation
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.concurrency.context import (
@@ -35,6 +41,8 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
     records, starts, ends, warnings = [], [], [], []
     barrier = threading.Barrier(2)
     skill_workspace = '/home/sandbox/workdir/sai-regression'
+    rendezvous_root = f'{skill_workspace}/rendezvous-{secrets.token_hex(8)}'
+    batch = 0
 
     class Capture(logging.Handler):
         def emit(self, record):
@@ -53,15 +61,28 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
                 raise ModelInvocationTerminalError(ModelErrorCode.TIMEOUT, attempts=1)
             self.calls += 1
             if self.calls > 1:
-                measurements = re.findall(r'\{"marker": "(?:LEFT|RIGHT)", "start": [0-9.]+, "end": [0-9.]+\}', text)
+                # The context renderer escapes execution results before supplying them to the model.
+                measurements = re.findall(
+                    r'\{"marker": "(?:LEFT|RIGHT)", "start": [0-9.]+, "end": [0-9.]+\}', unescape(text),
+                )
                 assert measurements, 'The real kernel must return its measured execution window'
                 return ChatMessage(role='assistant', content=f'<final_answer>{measurements[-1]}</final_answer>')
             marker = 'LEFT' if 'TASK_MARKER=LEFT' in text else 'RIGHT'
+            peer = 'RIGHT' if marker == 'LEFT' else 'LEFT'
             barrier.wait(timeout=30)
             return ChatMessage(role='assistant', content=(
-                "<code>\nimport time\nimport json\n"
+                "<code>\nimport time\nimport json\nfrom pathlib import Path\n"
                 "assert 'probe_marker' not in globals()\n"
-                f"probe_marker = {marker!r}\nstarted = time.time()\ntime.sleep(1)\n"
+                f"probe_marker = {marker!r}\n"
+                f"ready = Path({f'{rendezvous_root}/{batch}'!r})\n"
+                "ready.mkdir(parents=True, exist_ok=True)\n"
+                "started = time.time()\n"
+                "deadline = time.monotonic() + 20\n"
+                "(ready / probe_marker).touch()\n"
+                f"while not (ready / {peer!r}).is_file():\n"
+                "    if time.monotonic() >= deadline:\n"
+                "        raise TimeoutError('Peer kernel did not enter the same batch')\n"
+                "    time.sleep(0.05)\n"
                 "json.dumps({'marker': probe_marker, 'start': started, 'end': time.time()})\n</code>"
             ))
 
@@ -80,7 +101,8 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
 
     fingerprints = {
         module.__name__: hashlib.sha256(Path(inspect.getfile(module)).read_bytes()).hexdigest()
-        for module in (nexent_agent, sandbox, subagent_wrapper, agent_model, cancellation)
+        for module in (nexent_agent, sandbox_package, execution, config, compatibility, tls, subagent_wrapper,
+                       agent_configuration, agent_running, cancellation)
     }
     if expected_sources:
         assert fingerprints == expected_sources, 'Image source differs from worktree'
@@ -148,11 +170,14 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
             assert pair[0]['agent'].model is not pair[1]['agent'].model
             measurements = []
             for key in ('left', 'right'):
-                answer = str(output[key]).rsplit('\n', 1)[-1]
+                answer = str(output[key]).strip().rsplit('\n', 1)[-1].strip()
                 if answer.startswith('<final_answer>') and answer.endswith('</final_answer>'):
                     answer = answer[len('<final_answer>'):-len('</final_answer>')]
-                measurements.append(json.loads(answer))
-            assert [value['marker'] for value in measurements] == ['LEFT', 'RIGHT'], output
+                try:
+                    measurements.append(json.loads(answer))
+                except json.JSONDecodeError:
+                    raise AssertionError(f'Batch {batch}: {key} did not return an execution measurement') from None
+            assert [value['marker'] for value in measurements] == ['LEFT', 'RIGHT']
             assert max(value['start'] for value in measurements) < min(value['end'] for value in measurements)
             assert all(not r['lease']._unhealthy for r in pair)
             assert all(r['kernel'] == r['lease'].kernel_id for r in pair), 'Unexpected kernel replacement'

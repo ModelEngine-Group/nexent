@@ -8,7 +8,9 @@ from sqlalchemy import select, update
 
 from contracts.conversation import MessageSource
 from management.db.automation.models import AgentAutomationRun
-from management.db.client import get_db_session
+from management.db.automation.models import AgentAutomationTask
+from management.db.automation.repository import lease_is_unexpired
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation import repository as conversation_db
 from management.db.conversation.models import ConversationMessage, ConversationRecord
 from management.utils.audit_fields import add_update_tracking
@@ -16,6 +18,7 @@ from management.utils.audit_fields import add_update_tracking
 
 def create_run_message(
     run_id: int, message_data: dict, user_id: str, tenant_id: str,
+    *, lease_owner: str | None = None,
 ) -> int:
     """Serialize with deletion and cancellation; commit both records or neither."""
     role = message_data["role"]
@@ -24,6 +27,17 @@ def create_run_message(
     conversation_id = int(message_data["conversation_id"])
     field = "user_message_id" if role == "user" else "assistant_message_id"
     with get_db_session() as session:
+        if lease_owner is not None:
+            run_task_id = select(AgentAutomationRun.task_id).where(
+                AgentAutomationRun.run_id == run_id, AgentAutomationRun.tenant_id == tenant_id,
+                AgentAutomationRun.user_id == user_id, AgentAutomationRun.delete_flag == "N",
+            ).scalar_subquery()
+            task = session.execute(select(AgentAutomationTask).where(
+                AgentAutomationTask.task_id == run_task_id, AgentAutomationTask.tenant_id == tenant_id,
+                AgentAutomationTask.user_id == user_id, AgentAutomationTask.delete_flag == "N",
+            ).with_for_update()).scalar_one_or_none()
+            if task is None or task.lock_owner != lease_owner or task.lock_until is None:
+                raise ValueError("Automation task lease is no longer owned")
         # All message writers lock the conversation before messages. The run
         # lock prevents creation after cancellation and serializes retries.
         conversation = session.execute(select(ConversationRecord.conversation_id).where(
@@ -42,6 +56,11 @@ def create_run_message(
         ).with_for_update()).scalar_one_or_none()
         if run is None or run.status != "RUNNING":
             raise ValueError("Automation run is no longer active")
+        if lease_owner is not None and (
+            task.status != "ACTIVE" or task.next_fire_at != run.scheduled_fire_at
+            or not lease_is_unexpired(session, task.lock_until)
+        ):
+            raise ValueError("Automation task lease is no longer owned")
         message_id = getattr(run, field)
         if message_id is not None:
             existing = session.execute(select(ConversationMessage).where(

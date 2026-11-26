@@ -8,6 +8,7 @@ import {
   useContext,
   useMemo,
   useReducer,
+  useState,
   type FC,
   type PropsWithChildren,
 } from "react";
@@ -16,6 +17,7 @@ export type Nl2AgentFlowPhase =
   | "idle"
   | "running"
   | "clarifying"
+  | "prompt_pending"
   | "installing"
   | "binding"
   | "generating"
@@ -42,7 +44,19 @@ export interface Nl2AgentConfigFocusRequest {
 interface ActiveNl2AgentCard {
   key: string;
   subtype: string;
+  versioned?: boolean;
 }
+
+const cardPhase = (subtype: string): Nl2AgentFlowPhase => {
+  if (subtype === "prompt_generation") return "prompt_pending";
+  if (subtype === "requirement_clarification") return "clarifying";
+  if (
+    subtype === "installed_resource_binding" ||
+    subtype === "requirement_resources"
+  )
+    return "binding";
+  return "installing";
+};
 
 interface Nl2AgentFlowState {
   phase: Nl2AgentFlowPhase;
@@ -111,12 +125,19 @@ function reducer(
         ...state,
         phase: "running",
         agentId: action.agentId,
-        activeCard: null,
+        activeCard: state.activeCard?.versioned ? state.activeCard : null,
         completionSyncFailed: false,
         isFormLocked: true,
       };
     case "run_finished":
       if (state.agentId !== action.agentId) return state;
+      if (state.activeCard?.versioned) {
+        return {
+          ...state,
+          phase: cardPhase(state.activeCard.subtype),
+          isFormLocked: false,
+        };
+      }
       if (
         state.activeCard !== null ||
         state.phase === "generating" ||
@@ -135,14 +156,7 @@ function reducer(
       // Restoring a card does not start a generation run or acquire its edit lock.
       return {
         ...state,
-        phase:
-          action.card.subtype === "requirement_clarification"
-            ? "clarifying"
-            : action.card.subtype === "suggested_resource_installation"
-              ? "installing"
-              : action.card.subtype === "installed_resource_binding"
-                ? "binding"
-                : state.phase,
+        phase: cardPhase(action.card.subtype),
         activeCard: action.card,
       };
     case "submit_card": {
@@ -239,10 +253,12 @@ function reducer(
 }
 
 interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
+  resourceDrafts: Map<string, unknown>;
+  draftScope?: string;
   resetFlow: (agentId?: number | null) => void;
   markRunStarted: (agentId: number) => void;
   markRunFinished: (agentId: number) => void;
-  registerCard: (key: string, subtype: string) => void;
+  registerCard: (key: string, subtype: string, versioned?: boolean) => void;
   submitCard: (key: string) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
@@ -262,11 +278,17 @@ const Nl2AgentFlowContext = createContext<Nl2AgentFlowContextValue | null>(
   null
 );
 
-export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
+export const Nl2AgentFlowProvider: FC<
+  PropsWithChildren<{ draftScope?: string }>
+> = ({ children, draftScope }) => {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
+  const [resourceDrafts] = useState(() => new Map<string, unknown>());
   const resetFlow = useCallback(
-    (agentId: number | null = null) => dispatch({ type: "reset", agentId }),
-    []
+    (agentId: number | null = null) => {
+      resourceDrafts.clear();
+      dispatch({ type: "reset", agentId });
+    },
+    [resourceDrafts]
   );
   const markRunStarted = useCallback(
     (agentId: number) => dispatch({ type: "run_started", agentId }),
@@ -277,8 +299,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
     []
   );
   const registerCard = useCallback(
-    (key: string, subtype: string) =>
-      dispatch({ type: "register_card", card: { key, subtype } }),
+    (key: string, subtype: string, versioned?: boolean) =>
+      dispatch({ type: "register_card", card: { key, subtype, versioned } }),
     []
   );
   const submitCard = useCallback(
@@ -327,6 +349,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
   const value = useMemo(
     () => ({
       ...state,
+      resourceDrafts,
+      draftScope,
       resetFlow,
       markRunStarted,
       markRunFinished,
@@ -343,6 +367,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       isCardInteractive,
     }),
     [
+      resourceDrafts,
+      draftScope,
       isCardInteractive,
       markGenerationCompleted,
       markCompletionSynced,
@@ -378,4 +404,12 @@ export function useNl2AgentFlow(): Nl2AgentFlowContextValue {
 
 export function useNl2AgentFormLock(): boolean {
   return useContext(Nl2AgentFlowContext)?.isFormLocked ?? false;
+}
+
+/** Read existing workflow state without requiring a provider for standalone panels. */
+export function useNl2AgentFlowPhase(
+  agentId: number | null
+): Nl2AgentFlowPhase {
+  const state = useContext(Nl2AgentFlowContext);
+  return state?.agentId === agentId ? state.phase : "idle";
 }

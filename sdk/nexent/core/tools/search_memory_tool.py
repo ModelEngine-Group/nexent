@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Search memory tool for the new Memory system.
 
 This tool is invoked once by the runtime before the agent model loop. Under
@@ -21,12 +23,12 @@ import asyncio
 import logging
 from typing import Any
 
-from smolagents.tools import Tool
 from pydantic import Field
+from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver
-from ..utils.tools_common_message import ToolSign, ToolCategory
 from ..concurrency import ManagedTaskSpec, get_current_thread_manager
+from ..utils.observer import MessageObserver
+from ..utils.tools_common_message import ToolCategory, ToolSign
 
 
 logger = logging.getLogger("search_memory_tool")
@@ -39,7 +41,7 @@ def _run_coroutine(coro):
         return asyncio.run(coro)
     manager = get_current_thread_manager()
     if manager is None:
-        from ..agents.run_agent import _get_default_agent_thread_manager
+        from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
 
         manager = _get_default_agent_thread_manager()
     return manager.run_sync(
@@ -211,36 +213,27 @@ class SearchMemoryTool(Tool):
         self, query: str, top_k: int
     ) -> str:
         """Run retrieval through the Phase 4 pipeline via MemoryContextService."""
+        from nexent.monitor.phase_capture import trace_phase
+
         async def _build():
-            return await self.memory_context_service.build_context(
-                tenant_id=self.tenant_id,
-                user_id=self.user_id,
-                agent_id=self.agent_id or None,
-                conversation_id=self.conversation_id or None,
-                query=query,
-                top_k=top_k,
-                layers=["agent"],
-                external_results=self.external_results,
-            )
+            with trace_phase(
+                "memory.retrieve", input_value={"query": query, "top_k": top_k, "layers": ["agent"]},
+                attributes={"agent.id": str(self.agent_id or "")},
+            ) as phase:
+                result = await self.memory_context_service.build_context(
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    agent_id=self.agent_id or None,
+                    conversation_id=self.conversation_id or None,
+                    query=query,
+                    top_k=top_k,
+                    layers=["agent"],
+                    external_results=self.external_results,
+                )
+                phase.set_output({"agent_short_term": result.agent_short_term, "external": result.external})
+                return result
 
         context = _run_coroutine(_build())
-        existing_external = {
-            (
-                str(getattr(item, "id", None) or getattr(item, "external_id", None) or ""),
-                str(getattr(item, "content", "")),
-                str(getattr(item, "provider", None) or getattr(item, "source", "")),
-            )
-            for item in context.external
-        }
-        for item in self.external_results or []:
-            identity = (
-                str(getattr(item, "id", None) or getattr(item, "external_id", None) or ""),
-                str(getattr(item, "content", "")),
-                str(getattr(item, "provider", None) or getattr(item, "source", "")),
-            )
-            if identity not in existing_external:
-                context.external.append(item)
-                existing_external.add(identity)
         logger.info(
             "event=memory_tool_completed tool=search_memory tenant_id=%s user_id=%s "
             "agent_id=%s conversation_id=%s path=pipeline result_count=%d",
@@ -250,10 +243,29 @@ class SearchMemoryTool(Tool):
             self.conversation_id,
             len(context.agent_short_term),
         )
+        return self.format_search_context(context, self.external_results)
+
+    def format_search_context(self, context: Any, external_results: Any = None) -> str:
+        """Render short-term hits and retain hits selected by external providers."""
+        existing_external = {
+            (
+                str(getattr(item, "id", None) or getattr(item, "external_id", None) or ""),
+                str(getattr(item, "content", "")),
+                str(getattr(item, "provider", None) or getattr(item, "source", "")),
+            )
+            for item in context.external
+        }
+        for item in external_results or []:
+            identity = (
+                str(getattr(item, "id", None) or getattr(item, "external_id", None) or ""),
+                str(getattr(item, "content", "")),
+                str(getattr(item, "provider", None) or getattr(item, "source", "")),
+            )
+            if identity not in existing_external:
+                context.external.append(item)
+                existing_external.add(identity)
         context.tenant_long_term = []
         context.user_long_term = []
-        # Keep external results - they were already searched in create_agent_info.py
-        # and passed to build_context via external_results parameter
         return self._format_context(context)
 
     def forward(self, query: str, top_k: int = 5) -> str:

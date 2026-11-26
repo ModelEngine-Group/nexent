@@ -160,22 +160,26 @@ mock_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
 mock_nexent_core_utils_observer_module.ProcessType = _MockProcessType
 
 mock_sdk_module = types.ModuleType("sdk")
-mock_sdk_nexent_module = types.ModuleType("sdk.nexent")
-mock_sdk_nexent_core_module = types.ModuleType("sdk.nexent.core")
-mock_sdk_nexent_core_agents_module = types.ModuleType("sdk.nexent.core.agents")
-mock_sdk_nexent_core_tools_module = types.ModuleType("sdk.nexent.core.tools")
-mock_sdk_nexent_core_utils_module = types.ModuleType("sdk.nexent.core.utils")
+mock_sdk_nexent_module = types.ModuleType("nexent")
+mock_sdk_nexent_core_module = types.ModuleType("nexent.core")
+mock_sdk_nexent_core_agents_module = types.ModuleType("nexent.core.agents")
+mock_sdk_nexent_core_tools_module = types.ModuleType("nexent.core.tools")
+mock_sdk_nexent_core_utils_module = types.ModuleType("nexent.core.utils")
 mock_sdk_nexent_core_utils_observer_module = types.ModuleType(
-    "sdk.nexent.core.utils.observer"
+    "nexent.core.utils.observer"
 )
 mock_sdk_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
 mock_sdk_nexent_core_utils_observer_module.ProcessType = _MockProcessType
-mock_sdk_nexent_monitor_module = types.ModuleType("sdk.nexent.monitor")
+mock_sdk_nexent_monitor_module = types.ModuleType("nexent.monitor")
 mock_sdk_nexent_monitor_module.__path__ = []
 mock_sdk_nexent_monitor_module.AgentRunMetadata = _MockAgentRunMetadata
 mock_sdk_nexent_monitor_module.get_agent_monitoring_context = MagicMock(return_value=None)
 mock_sdk_nexent_monitor_module.get_monitoring_manager = MagicMock()
-mock_sdk_nexent_monitor_monitoring_module = types.ModuleType("sdk.nexent.monitor.monitoring")
+from contextlib import nullcontext
+mock_sdk_nexent_monitor_module.OPENINFERENCE_SPAN_KIND_AGENT = "AGENT"
+mock_sdk_nexent_monitor_module.agent_monitoring_context = lambda *args, **kwargs: nullcontext()
+
+mock_sdk_nexent_monitor_monitoring_module = types.ModuleType("nexent.monitor.monitoring")
 mock_sdk_nexent_monitor_monitoring_module.record_model_call = MagicMock()
 
 
@@ -186,9 +190,11 @@ class _MockManagedContextRuntime:
 
 
 class _MockContextManager:
-    def __init__(self, config, max_steps):
+    def __init__(self, config, max_steps, *, message_format="codeagent"):
+        assert message_format == "codeagent"
         self.config = config
         self.max_steps = max_steps
+        self.message_format = message_format
 
 
 class _MockContextManagerConfig:
@@ -198,19 +204,19 @@ class _MockContextManagerConfig:
             setattr(self, key, value)
 
 
-mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
+mock_sdk_context_runtime_module = types.ModuleType("nexent.core.agents.cores.smolagents.context_contracts")
 mock_sdk_context_runtime_module.__path__ = []
-mock_sdk_context_runtime_managed_module = types.ModuleType("sdk.nexent.core.context_runtime.managed")
+mock_sdk_context_runtime_managed_module = types.ModuleType("nexent.core.agents.cores.smolagents.context")
 mock_sdk_context_runtime_managed_module.__path__ = []
 mock_sdk_context_runtime_managed_runtime_module = types.ModuleType(
-    "sdk.nexent.core.context_runtime.managed.runtime"
+    "nexent.core.agents.cores.smolagents.context"
 )
 mock_sdk_context_runtime_managed_runtime_module.ManagedContextRuntime = _MockManagedContextRuntime
-mock_sdk_agent_context_module = types.ModuleType("sdk.nexent.core.agents.agent_context")
+mock_sdk_agent_context_module = types.ModuleType("nexent.core.agents.context")
 mock_sdk_agent_context_module.ContextManager = _MockContextManager
-mock_sdk_summary_config_module = types.ModuleType("sdk.nexent.core.agents.summary_config")
+mock_sdk_summary_config_module = types.ModuleType("nexent.core.agents.context.config")
 mock_sdk_summary_config_module.ContextManagerConfig = _MockContextManagerConfig
-mock_sdk_agent_context_domain_module = types.ModuleType("sdk.nexent.core.agents.context")
+mock_sdk_agent_context_domain_module = types.ModuleType("nexent.core.agents.context")
 mock_sdk_agent_context_domain_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents" / "context")
 ]
@@ -266,10 +272,25 @@ class _MockToolSign:
     FILE_OPERATION = _EnumStub("f")
     TERMINAL_OPERATION = _EnumStub("t")
     MULTIMODAL_OPERATION = _EnumStub("m")
+    MCP_SEARCH = _EnumStub("q")
+
+
+class _MockSearchResultTextMessage:
+    # Mirror the keyword-only constructor of the real SearchResultTextMessage
+    # so that mcp_citation imports and annotation code work against the stub.
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def to_dict(self):
+        return dict(self.__dict__)
+
+    def to_model_dict(self):
+        return dict(self.__dict__)
 
 
 mock_tools_common_message_module.ToolCategory = _MockToolCategory
 mock_tools_common_message_module.ToolSign = _MockToolSign
+mock_tools_common_message_module.SearchResultTextMessage = _MockSearchResultTextMessage
 
 mock_nexent_core_utils_module.observer = mock_nexent_core_utils_observer_module
 mock_nexent_core_utils_module.prompt_template_utils = mock_prompt_template_utils_module
@@ -317,7 +338,7 @@ module_mocks = {
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(ChatCompletionMessage=mock_openai_chat_completion_message),
     "openai.types.chat.chat_completion_message_param": MagicMock(),
-    # Mock exa_py to avoid importing the real package when sdk.nexent.core.tools imports it
+    # Mock exa_py to avoid importing the real package when nexent.core.tools imports it
     "exa_py": MagicMock(Exa=MagicMock()),
     # Mock paramiko to avoid PyO3 import issues in tests
     "paramiko": MagicMock(),
@@ -334,20 +355,21 @@ module_mocks = {
     "nexent.utils": mock_nexent_utils_module,
     "nexent.core.utils.observer": mock_nexent_core_utils_observer_module,
     "sdk": mock_sdk_module,
-    "sdk.nexent": mock_sdk_nexent_module,
-    "sdk.nexent.core": mock_sdk_nexent_core_module,
-    "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
-    "sdk.nexent.core.tools": mock_sdk_nexent_core_tools_module,
-    "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
-    "sdk.nexent.core.context_runtime.managed": mock_sdk_context_runtime_managed_module,
-    "sdk.nexent.core.context_runtime.managed.runtime": mock_sdk_context_runtime_managed_runtime_module,
-    "sdk.nexent.core.agents.agent_context": mock_sdk_agent_context_module,
-    "sdk.nexent.core.agents.context": mock_sdk_agent_context_domain_module,
-    "sdk.nexent.core.agents.summary_config": mock_sdk_summary_config_module,
-    "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
-    "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
-    "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
-    "sdk.nexent.monitor.monitoring": mock_sdk_nexent_monitor_monitoring_module,
+    "nexent": mock_sdk_nexent_module,
+    "nexent.core": mock_sdk_nexent_core_module,
+    "nexent.core.agents": mock_sdk_nexent_core_agents_module,
+    "nexent.core.tools": mock_sdk_nexent_core_tools_module,
+    "nexent.core.agents.cores.smolagents.context_contracts": mock_sdk_context_runtime_module,
+    "nexent.core.agents.cores.smolagents.context": mock_sdk_context_runtime_managed_module,
+    "nexent.core.agents.cores.smolagents.context": mock_sdk_context_runtime_managed_runtime_module,
+    "nexent.core.agents.context": mock_sdk_agent_context_module,
+    "nexent.core.agents.cores.smolagents.context": mock_sdk_context_runtime_managed_runtime_module,
+    "nexent.core.agents.context": mock_sdk_agent_context_domain_module,
+    "nexent.core.agents.context.config": mock_sdk_summary_config_module,
+    "nexent.core.utils": mock_sdk_nexent_core_utils_module,
+    "nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
+    "nexent.monitor": mock_sdk_nexent_monitor_module,
+    "nexent.monitor.monitoring": mock_sdk_nexent_monitor_monitoring_module,
     "nexent.core.management.services.agent.prompt": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
@@ -364,9 +386,9 @@ module_mocks = {
     # Mock linkup to avoid import issues
     "linkup": MagicMock(),
     # Mock the OpenAIModel import
-    "sdk.nexent.core.models.openai_llm": MagicMock(OpenAIModel=mock_openai_model_class),
+    "nexent.core.models.openai_llm": MagicMock(OpenAIModel=mock_openai_model_class),
     # Mock CoreAgent import
-    "sdk.nexent.core.agents.core_agent": MagicMock(
+    "nexent.core.agents.cores.smolagents.core_agent": MagicMock(
         CoreAgent=mock_core_agent_class,
         convert_code_format=lambda s: s if isinstance(s, str) else str(s),
     ),
@@ -375,6 +397,17 @@ module_mocks = {
 # ---------------------------------------------------------------------------
 # Import the classes under test with patched dependencies in place
 # ---------------------------------------------------------------------------
+# Apply existing dependency doubles at canonical lookup sites after module migration.
+for _legacy_name, _double in list(module_mocks.items()):
+    if _legacy_name.startswith("nexent"):
+        _canonical_name = _legacy_name.removeprefix("sdk.")
+        if _canonical_name == "nexent.core.agents.cores.smolagents.core_agent":
+            _canonical_name = "nexent.core.agents.cores.smolagents.core_agent"
+        module_mocks[_canonical_name] = _double
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.monitor"):
+    _package_double = module_mocks.setdefault(_package, types.ModuleType(_package))
+    _package_double.__path__ = [str(Path(__file__).resolve().parents[4] / "sdk" / _package.replace(".", "/"))]
+
 with patch.dict("sys.modules", module_mocks):
     # Create mock http_client_manager module for analyze_text_file_tool
     # This is needed because analyze_text_file_tool.py uses absolute import:
@@ -385,21 +418,32 @@ with patch.dict("sys.modules", module_mocks):
     # We need to add this to sys.modules before the import happens
     sys.modules["nexent.utils.http_client_manager"] = mock_http_client_manager_module
 
-    from sdk.nexent.core.agents import nexent_agent
-    from sdk.nexent.core.agents.nexent_agent import (
-        NexentAgent, ActionStep, TaskStep, _has_host_tools, _is_retriever_tool,
-        _build_tool_input, _wrap_tool_with_monitoring, _tool_name,
-        SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports,
-    )
-    from sdk.nexent.consts.mcp_errors import MCPToolTimeoutError
-    from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
+    from nexent.core.agents.cores.smolagents import agent as nexent_agent
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent, ActionStep, TaskStep, _has_host_tools, _is_retriever_tool, _build_tool_input, _wrap_tool_with_monitoring, _tool_name, SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports
+    from nexent.consts.mcp_errors import MCPToolTimeoutError
+    from nexent.core.agents.contracts.config import ToolConfig, ModelConfig, AgentConfig, ExternalA2AAgentConfig
+    from nexent.core.agents.contracts.run import AgentHistory
+
+    _agent_module_cache = {key: value for key, value in sys.modules.items()
+                           if key.startswith("nexent.core.agents")}
 
     # Clean up after import
     sys.modules.pop("nexent.utils.http_client_manager", None)
 
 # Retain the tested module after patch.dict restores the module registry so it
 # can be reloaded by tests that exercise conditional imports.
-sys.modules["sdk.nexent.core.agents.nexent_agent"] = nexent_agent
+sys.modules["nexent.core.agents.cores.smolagents.agent"] = nexent_agent
+sys.modules[nexent_agent.__name__] = nexent_agent
+sys.modules.update(_agent_module_cache)
+for _key, _double in module_mocks.items():
+    if _key.startswith("nexent"):
+        _canonical = _key.removeprefix("sdk.")
+        if _canonical == "nexent.core.agents.cores.smolagents.core_agent":
+            _canonical = "nexent.core.agents.cores.smolagents.core_agent"
+        sys.modules.setdefault(_canonical, _double)
+from nexent.core.agents.resources import workspace as resource_workspace
+from nexent.core.agents.resources import monitoring as resource_monitoring
+
 
 
 # Keep the lightweight runtime modules available for create_single_agent()
@@ -407,19 +451,19 @@ sys.modules["sdk.nexent.core.agents.nexent_agent"] = nexent_agent
 # context has restored sys.modules, while nexent_agent now performs runtime
 # imports inside create_single_agent().
 sys.modules.setdefault("sdk", mock_sdk_module)
-sys.modules.setdefault("sdk.nexent", mock_sdk_nexent_module)
-sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
-sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
-sys.modules.setdefault("sdk.nexent.core.tools", mock_sdk_nexent_core_tools_module)
-sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
-sys.modules.setdefault("sdk.nexent.core.context_runtime.managed", mock_sdk_context_runtime_managed_module)
+sys.modules.setdefault("nexent", mock_sdk_nexent_module)
+sys.modules.setdefault("nexent.core", mock_sdk_nexent_core_module)
+sys.modules.setdefault("nexent.core.agents", mock_sdk_nexent_core_agents_module)
+sys.modules.setdefault("nexent.core.tools", mock_sdk_nexent_core_tools_module)
+sys.modules.setdefault("nexent.core.agents.cores.smolagents.context_contracts", mock_sdk_context_runtime_module)
+sys.modules.setdefault("nexent.core.agents.cores.smolagents.context", mock_sdk_context_runtime_managed_module)
 sys.modules.setdefault(
-    "sdk.nexent.core.context_runtime.managed.runtime",
+    "nexent.core.agents.cores.smolagents.context",
     mock_sdk_context_runtime_managed_runtime_module,
 )
-sys.modules.setdefault("sdk.nexent.core.agents.agent_context", mock_sdk_agent_context_module)
-sys.modules.setdefault("sdk.nexent.core.agents.summary_config", mock_sdk_summary_config_module)
-sys.modules.setdefault("sdk.nexent.core.agents.context", mock_sdk_agent_context_domain_module)
+sys.modules.setdefault("nexent.core.agents.context", mock_sdk_agent_context_module)
+sys.modules.setdefault("nexent.core.agents.context.config", mock_sdk_summary_config_module)
+sys.modules.setdefault("nexent.core.agents.context", mock_sdk_agent_context_domain_module)
 
 
 # ----------------------------------------------------------------------------
@@ -437,7 +481,7 @@ def reset_mocks():
 def patch_convert_code_format():
     """Ensure convert_code_format returns a plain string for downstream re.sub."""
     import sys
-    module = sys.modules.get("sdk.nexent.core.agents.nexent_agent")
+    module = sys.modules.get("nexent.core.agents.cores.smolagents.agent")
     if module is None:
         # If the module is not imported yet, skip patching to avoid triggering imports
         yield
@@ -551,15 +595,15 @@ def test_get_local_python_authorized_imports_matches_executor_defaults(monkeypat
 
 def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
     """Verify type-only imports resolve their expected public symbols."""
-    context_module = types.ModuleType("sdk.nexent.core.agents.context")
+    context_module = types.ModuleType("nexent.core.agents.context")
     context_item_input = type("ContextItemInput", (), {})
     context_module.ContextItemInput = context_item_input
 
-    subagent_module = types.ModuleType("sdk.nexent.core.agents.subagent_wrapper")
+    subagent_module = types.ModuleType("nexent.core.agents.resources.subagents")
     subagent_tool_wrapper = type("SubAgentToolWrapper", (), {})
     subagent_module.SubAgentToolWrapper = subagent_tool_wrapper
 
-    agent_model_module = types.ModuleType("sdk.nexent.core.agents.agent_model")
+    agent_model_module = types.ModuleType("nexent.core.agents.contracts.config")
     agent_model_module.AgentConfig = AgentConfig
     agent_model_module.AgentHistory = AgentHistory
     agent_model_module.ModelConfig = ModelConfig
@@ -570,9 +614,10 @@ def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
         sys.modules,
         {
             **module_mocks,
-            "sdk.nexent.core.agents.agent_model": agent_model_module,
-            "sdk.nexent.core.agents.context": context_module,
-            "sdk.nexent.core.agents.subagent_wrapper": subagent_module,
+            "nexent.core.agents.contracts.config": agent_model_module,
+            "nexent.core.agents.contracts.run": agent_model_module,
+            "nexent.core.agents.context": context_module,
+            "nexent.core.agents.resources.subagents": subagent_module,
         },
     ):
         reloaded_module = importlib.reload(nexent_agent)
@@ -3947,7 +3992,7 @@ class TestCreateSingleAgent:
         mock_a2a_module = MagicMock()
         mock_a2a_module.ExternalA2AAgentWrapper = mock_wrapper_class
 
-        with patch.dict("sys.modules", {"sdk.nexent.core.agents.a2a_agent_proxy": mock_a2a_module}):
+        with patch.dict("sys.modules", {"nexent.core.agents.resources.a2a": mock_a2a_module}):
             with patch.object(nexent_agent, 'CoreAgent', return_value=mock_core_agent) as mock_core_agent_fn:
                 result = nexent_agent_instance.create_single_agent(agent_config)
 
@@ -4003,7 +4048,7 @@ class TestCreateSingleAgent:
         mock_a2a_module = MagicMock()
         mock_a2a_module.ExternalA2AAgentWrapper = mock_wrapper_class
 
-        with patch.dict("sys.modules", {"sdk.nexent.core.agents.a2a_agent_proxy": mock_a2a_module}):
+        with patch.dict("sys.modules", {"nexent.core.agents.resources.a2a": mock_a2a_module}):
             with patch.object(nexent_agent, 'CoreAgent', return_value=mock_core_agent) as mock_core_agent_fn:
                 result = nexent_agent_instance.create_single_agent(agent_config)
 
@@ -4040,7 +4085,7 @@ class TestCreateSingleAgent:
         mock_a2a_module = MagicMock()
         mock_a2a_module.ExternalA2AAgentWrapper = MagicMock(side_effect=ImportError("Module not found"))
 
-        with patch.dict("sys.modules", {"sdk.nexent.core.agents.a2a_agent_proxy": mock_a2a_module}):
+        with patch.dict("sys.modules", {"nexent.core.agents.resources.a2a": mock_a2a_module}):
             with pytest.raises(ValueError, match="Error in creating external A2A agent wrapper:"):
                 nexent_agent_instance.create_single_agent(agent_config)
 
@@ -4067,7 +4112,7 @@ class TestCreateSingleAgent:
         mock_a2a_module = MagicMock()
         mock_a2a_module.ExternalA2AAgentWrapper = MagicMock(side_effect=Exception("Wrapper creation failed"))
 
-        with patch.dict("sys.modules", {"sdk.nexent.core.agents.a2a_agent_proxy": mock_a2a_module}):
+        with patch.dict("sys.modules", {"nexent.core.agents.resources.a2a": mock_a2a_module}):
             with pytest.raises(ValueError, match="Error in creating external A2A agent wrapper:"):
                 nexent_agent_instance.create_single_agent(agent_config)
 
@@ -4106,7 +4151,7 @@ class TestCreateSingleAgent:
         mock_a2a_module = MagicMock()
         mock_a2a_module.ExternalA2AAgentWrapper = mock_wrapper_class
 
-        with patch.dict("sys.modules", {"sdk.nexent.core.agents.a2a_agent_proxy": mock_a2a_module}):
+        with patch.dict("sys.modules", {"nexent.core.agents.resources.a2a": mock_a2a_module}):
             with patch.object(nexent_agent, 'CoreAgent', return_value=mock_core_agent) as mock_core_agent_fn:
                 result = nexent_agent_instance.create_single_agent(agent_config)
 
@@ -4309,6 +4354,8 @@ class TestSandboxWarmUp:
         class SandboxLevel(str, Enum):
             LOCAL = "local"
             DOCKER = "docker"
+            KUBERNETES = "kubernetes"
+            WASM = "wasm"
 
         mock_sandbox_config = MagicMock()
         mock_sandbox_config.level = SandboxLevel.LOCAL
@@ -4332,7 +4379,7 @@ class TestSandboxWarmUp:
         )
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }), patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
             nexent_agent_instance.create_single_agent(mock_agent_config, _managed_context=True)
 
@@ -4904,8 +4951,8 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         archive_context = MagicMock()
         archive_context.__enter__.return_value = archive_writer
 
-        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
-            nexent_agent.tarfile, "open", return_value=archive_context
+        with patch.object(resource_workspace, "Path", return_value=workspace), patch.object(
+            resource_workspace.tarfile, "open", return_value=archive_context
         ), patch.object(nexent_agent_instance, "_grant_sandbox_output_access") as grant:
             if put_archive_result:
                 nexent_agent_instance._push_file_workspace_to_sandbox()
@@ -4966,7 +5013,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             python_executor=MagicMock(container=container)
         )
 
-        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
+        with patch.object(resource_workspace, "Path", return_value=workspace), patch.object(
             nexent_agent_instance, "_grant_sandbox_output_access"
         ) as grant_access:
             nexent_agent_instance._push_file_workspace_to_sandbox()
@@ -5042,8 +5089,8 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             python_executor=MagicMock(container=container)
         )
 
-        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
-            nexent_agent.tarfile, "open", return_value=archive_context
+        with patch.object(resource_workspace, "Path", return_value=workspace), patch.object(
+            resource_workspace.tarfile, "open", return_value=archive_context
         ):
             nexent_agent_instance._pull_file_workspace_from_sandbox()
 
@@ -5078,9 +5125,9 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             python_executor=MagicMock(container=container)
         )
 
-        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
-            nexent_agent.tarfile, "open", return_value=archive_context
-        ), patch.object(nexent_agent.logger, "warning") as warning:
+        with patch.object(resource_workspace, "Path", return_value=workspace), patch.object(
+            resource_workspace.tarfile, "open", return_value=archive_context
+        ), patch.object(resource_workspace.logger, "warning") as warning:
             nexent_agent_instance._pull_file_workspace_from_sandbox()
 
         warning.assert_called_once()
@@ -5092,7 +5139,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         nexent_agent_instance.agent = MagicMock(tools={})
 
         with patch.object(nexent_agent_instance, "_pull_file_workspace_from_sandbox"), patch.object(
-            nexent_agent.logger, "error"
+            resource_workspace.logger, "error"
         ) as error:
             nexent_agent_instance._finalize_file_workspace()
 
@@ -5206,7 +5253,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             python_executor=MagicMock(container=container)
         )
 
-        with patch.object(nexent_agent.logger, "warning") as warning:
+        with patch.object(resource_workspace.logger, "warning") as warning:
             nexent_agent_instance._cleanup_file_workspace()
 
         warning.assert_called_once()
@@ -5218,8 +5265,8 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         nexent_agent_instance.workspace_run_id = "run"
         nexent_agent_instance.agent = MagicMock(python_executor=None)
 
-        with patch.object(nexent_agent.shutil, "rmtree", side_effect=OSError("busy")), patch.object(
-            nexent_agent.logger, "error"
+        with patch.object(resource_workspace.shutil, "rmtree", side_effect=OSError("busy")), patch.object(
+            resource_workspace.logger, "error"
         ) as error:
             nexent_agent_instance._cleanup_file_workspace()
 
@@ -6027,7 +6074,7 @@ class TestWrapToolMonitoringInvocation:
         tool = NonRetrieverTool()
         tool._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(tool, "test_agent")
             result = wrapped.forward(x=42)
 
@@ -6047,7 +6094,7 @@ class TestWrapToolMonitoringInvocation:
         tool = AsyncTool()
         tool._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(tool, "agent_async")
             result = asyncio.get_event_loop().run_until_complete(
                 wrapped.forward(q="world")
@@ -6068,7 +6115,7 @@ class TestWrapToolMonitoringInvocation:
         tool = KnowledgeBaseSearchTool()
         tool._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(tool, "agent_r")
             result = wrapped.forward(query="test")
 
@@ -6086,7 +6133,7 @@ class TestWrapToolMonitoringInvocation:
 
         my_tool._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(my_tool, "callable_agent")
             result = wrapped(x=21)
 
@@ -6104,7 +6151,7 @@ class TestWrapToolMonitoringInvocation:
 
         async_func._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(async_func, "agent_ac")
             result = asyncio.get_event_loop().run_until_complete(
                 wrapped(val=5)
@@ -6125,7 +6172,7 @@ class TestWrapToolMonitoringInvocation:
         tool = SearchMemoryTool()
         tool._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(tool, "agent_mem")
             result = wrapped(query="hi")
 
@@ -6143,7 +6190,7 @@ class TestWrapToolMonitoringInvocation:
         tool = PlainObject()
         tool._nexent_monitoring_wrapped = False
 
-        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+        with patch.object(resource_monitoring, "get_monitoring_manager", return_value=mm):
             result = _wrap_tool_with_monitoring(tool, "agent_plain")
 
         assert result is tool
@@ -6476,7 +6523,7 @@ class TestCleanupSandboxAdvanced:
         mock_sandbox_module.cleanup_executor = mock_cleanup
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             nexent_agent_instance._cleanup_sandbox()
 
@@ -6510,7 +6557,7 @@ class TestCleanupSandboxAdvanced:
         mock_sandbox_module.cleanup_executor = mock_cleanup
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             nexent_agent_instance._cleanup_sandbox()
 
@@ -6531,7 +6578,7 @@ class TestCleanupSandboxAdvanced:
         mock_sandbox_module.release_python_executor = mock_release
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             nexent_agent_instance._cleanup_sandbox()
 
@@ -6555,7 +6602,7 @@ class TestCleanupSandboxAdvanced:
         mock_sandbox_module.release_python_executor = mock_release
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             nexent_agent_instance._cleanup_sandbox()
 
@@ -6581,7 +6628,7 @@ class TestCleanupSandboxAdvanced:
 
         with patch.dict(
             "sys.modules",
-            {"sdk.nexent.core.agents.sandbox": mock_sandbox_module},
+            {"nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module},
         ):
             nexent_agent_instance._cleanup_sandbox()
 
@@ -6609,7 +6656,7 @@ class TestCleanupSandboxAdvanced:
         mock_sandbox_module.cleanup_executor = mock_cleanup
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             nexent_agent_instance._cleanup_sandbox()
 
@@ -6638,6 +6685,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         class SandboxLevel(str, Enum):
             LOCAL = "local"
             DOCKER = "docker"
+            KUBERNETES = "kubernetes"
             WASM = "wasm"
 
         return SandboxLevel
@@ -6678,7 +6726,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         )
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             result, mock_cls = self._run_create_single_agent(
                 nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
@@ -6715,7 +6763,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         )
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             result, mock_cls = self._run_create_single_agent(
                 nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
@@ -6766,11 +6814,11 @@ class TestCreateSingleAgentSandboxAndPlanning:
 
         with patch.dict(
             "sys.modules",
-            {"sdk.nexent.core.agents.sandbox": sandbox_module},
+            {"nexent.core.agents.sandbox.config": sandbox_module, "nexent.core.agents.sandbox.execution": sandbox_module},
         ), patch.object(
             nexent_agent_instance, "create_tool", return_value=tool
         ), patch.object(
-            nexent_agent, "_wrap_tool_with_monitoring", side_effect=lambda value, _name: value
+            nexent_agent, "_wrap_tool_with_monitoring", side_effect=lambda value, _name, **kwargs: value
         ), patch.object(
             nexent_agent_instance, "_pull_file_workspace_from_sandbox"
         ) as pull_workspace:
@@ -6824,7 +6872,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         )
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             result, _ = self._run_create_single_agent(
                 nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
@@ -6858,7 +6906,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         )
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }):
             # Should NOT raise despite warm-up failure
             result, _ = self._run_create_single_agent(
@@ -6915,7 +6963,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         )
 
         with patch.dict("sys.modules", {
-            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+            "nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module,
         }), patch.object(
             nexent_agent,
             "CoreAgent",
@@ -6990,7 +7038,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
 
         with patch.dict(
             "sys.modules",
-            {"sdk.nexent.core.agents.sandbox": mock_sandbox_module},
+            {"nexent.core.agents.sandbox.config": mock_sandbox_module, "nexent.core.agents.sandbox.execution": mock_sandbox_module},
         ), patch.object(nexent_agent, "CoreAgent", return_value=MagicMock()):
             root = nexent_agent_instance.create_single_agent(parent_config)
             wrapper = nexent_agent.CoreAgent.call_args.kwargs['managed_agents'][0]

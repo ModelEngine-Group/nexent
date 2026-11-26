@@ -17,7 +17,8 @@ from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
-from contracts.constants.environment import DATA_PROCESS_SERVICE, MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.constants.environment import DATA_PROCESS_SERVICE, UPLOAD_FOLDER
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
@@ -29,8 +30,8 @@ from management.services.knowledge_base.service import ElasticSearchService, get
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 from management.services.file.upload import save_upload_file
-from infrastructure.ingestion.errors import ingestion_error_fields
-from infrastructure.observability.knowledge import trace_knowledge_operation
+from contracts.errors.ingestion import ingestion_error_fields
+from infrastructure.trace.knowledge import trace_knowledge_operation
 
 
 # Create upload directory
@@ -205,21 +206,22 @@ async def _validate_knowledge_file_sizes(
     files: List[UploadFile],
 ) -> None:
     """Reject oversized KB documents before any file is written to storage."""
+    limit_mb = get_config_snapshot().get("MAX_KNOWLEDGE_FILE_SIZE_MB")
+    limit_bytes = limit_mb * 1024 * 1024
     for upload in files:
         if not upload:
             continue
         file_size = await _get_upload_size(upload)
-        if file_size <= MAX_KNOWLEDGE_FILE_SIZE_BYTES:
+        if file_size <= limit_bytes:
             continue
 
         filename = upload.filename or "unknown"
-        limit_mb = MAX_KNOWLEDGE_FILE_SIZE_BYTES // (1024 * 1024)
         raise AppException(
             ErrorCode.FILE_TOO_LARGE,
             f"Knowledge base file '{filename}' exceeds the {limit_mb} MB limit",
             details={
                 "resource": "knowledge_file",
-                "limit_bytes": MAX_KNOWLEDGE_FILE_SIZE_BYTES,
+                "limit_bytes": limit_bytes,
                 "limit_mb": limit_mb,
                 "file_name": filename,
                 "actual_bytes": file_size,
@@ -608,12 +610,47 @@ async def upload_to_minio(
     return results
 
 
-async def get_file_url_impl(object_name: str, expires: int):
-    result = get_file_url(object_name=object_name, expires=expires)
+async def get_file_url_impl(object_name: str, expires: int, *, external: bool = False):
+    result = get_file_url(object_name=object_name, expires=expires, external=external)
     if not result["success"]:
-        raise Exception(
+        # Typed domain exception: the shared northbound registry maps it to
+        # 404 (presigned signing never validates existence, so absence is
+        # indistinguishable from an operational failure here — report the
+        # contract's not-found wording either way).
+        raise NotFoundException(
             f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}")
     return result
+
+
+async def get_file_stream_raw_impl(object_name: str):
+    """Open an unbuffered storage stream without blocking the event loop.
+
+    Unlike ``get_file_stream_impl`` (legacy full-object BytesIO buffering),
+    the returned body is the raw storage stream: the caller iterates it in
+    chunks and owns its close. Opening goes through the managed control-io
+    lane so a saturated lane rejects before any response stream is created.
+    """
+    body = await run_blocking(
+        "open-storage-file-stream",
+        get_file_stream_raw,
+        lane="control-io",
+        owner="config",
+        object_name=object_name,
+    )
+    if body is None:
+        # The raw helper collapses missing keys and operational errors;
+        # confirm absence without treating denied/unavailable storage as 404.
+        size = await run_blocking(
+            "probe-storage-file-size",
+            get_file_size_from_minio_strict,
+            lane="control-io",
+            owner="config",
+            object_name=object_name,
+        )
+        if size is None:
+            raise NotFoundException("Storage object does not exist")
+        raise Exception("File not found or failed to read from storage")
+    return body, get_content_type(object_name)
 
 
 async def get_file_stream_impl(object_name: str):

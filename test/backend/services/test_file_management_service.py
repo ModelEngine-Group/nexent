@@ -41,8 +41,8 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 
 # Stub Elasticsearch service module to avoid initializing real client during import
 services_stub = types.ModuleType('services')
@@ -76,6 +76,9 @@ knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
 knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
+knowledge_storage_stub.get_committed_bytes_by_kb = MagicMock(return_value=0)
+knowledge_storage_stub.get_committed_source_bytes_by_paths = MagicMock(return_value=0)
+knowledge_storage_stub.get_tenant_committed_source_bytes = MagicMock(return_value=0)
 sys.modules['management.services.knowledge_base.storage'] = knowledge_storage_stub
 setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
 
@@ -115,7 +118,7 @@ list_files_impl = file_management_service.list_files_impl
 def setup_patches():
     """Setup global patches for the test module"""
     patches = [
-        patch('management.db.client.db_client', MagicMock()),
+        patch('infrastructure.rdb.client.db_client', MagicMock()),
         patch('management.db.file.attachment.minio_client', minio_mock),
         patch('management.db.file.attachment.upload_fileobj', MagicMock()),
         patch('management.db.file.attachment.get_file_url', MagicMock()),
@@ -154,6 +157,18 @@ def reset_knowledge_storage_stub():
         side_effect=True,
     )
     knowledge_storage_stub.resolve_storage_context.return_value = None
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        file_management_service,
+        "get_config_snapshot",
+        lambda: system_config_snapshot(),
+    )
+    knowledge_storage_stub.resolve_storage_context.return_value = None
     knowledge_storage_stub.commit_uploaded_object.reset_mock(
         return_value=True,
         side_effect=True,
@@ -190,19 +205,31 @@ class TestUploadFilesImpl:
 
         assert await _get_upload_size(fallback_upload) == 3
 
-        set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 2)
-        oversized_upload = MagicMock(size=3, filename="large.pdf")
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        monkeypatch.setattr(
+            file_management_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_KNOWLEDGE_FILE_SIZE_MB=2),
+        )
+        oversized_upload = MagicMock(size=2 * 1024 * 1024 + 1, filename="large.pdf")
         with pytest.raises(AppException) as exc_info:
             await _validate_knowledge_file_sizes([None, oversized_upload])
 
         assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
-        assert exc_info.value.details["limit_bytes"] == 2
+        assert exc_info.value.details["limit_bytes"] == 2 * 1024 * 1024
 
     @pytest.mark.asyncio
     async def test_local_knowledge_upload_validates_size_before_writing(self, monkeypatch):
         """Local knowledge-base uploads reject oversized files before save_upload_file."""
-        set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 1)
-        oversized_upload = MagicMock(size=2, filename="large.pdf")
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        monkeypatch.setattr(
+            file_management_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_KNOWLEDGE_FILE_SIZE_MB=1),
+        )
+        oversized_upload = MagicMock(size=1024 * 1024 + 1, filename="large.pdf")
         save_upload = AsyncMock(return_value=True)
 
         with patch_import_object_context(file_management_service, "save_upload_file", save_upload):
@@ -1146,7 +1173,7 @@ class TestGetFileUrlImpl:
             assert result["success"] is True
             assert result["url"] == "https://example.com/file.txt"
             mock_get_url.assert_called_once_with(
-                object_name="test/file.txt", expires=3600)
+                object_name="test/file.txt", expires=3600, external=False)
 
     @pytest.mark.asyncio
     async def test_get_file_url_impl_failure(self):
@@ -1166,7 +1193,17 @@ class TestGetFileUrlImpl:
             assert "File does not exist or cannot be accessed: File not found" in str(
                 exc_info.value)
             mock_get_url.assert_called_once_with(
-                object_name="nonexistent/file.txt", expires=3600)
+                object_name="nonexistent/file.txt", expires=3600, external=False)
+
+    @pytest.mark.asyncio
+    async def test_get_file_url_impl_forwards_external_opt_in(self):
+        """Partner direct-link callers opt into the external signing authority."""
+        mock_result = {"success": True, "url": "https://files.example.com/file.txt"}
+        with patch_import_context('management.services.file.service.get_file_url', MagicMock(return_value=mock_result)) as mock_get_url:
+            result = await get_file_url_impl(object_name="test/file.txt", expires=3600, external=True)
+            assert result == mock_result
+            mock_get_url.assert_called_once_with(
+                object_name="test/file.txt", expires=3600, external=True)
 
 
 class TestGetFileStreamImpl:
@@ -1226,6 +1263,64 @@ class TestGetFileStreamImpl:
                 exc_info.value)
             mock_get_stream.assert_called_once_with(
                 object_name="nonexistent/file.txt")
+
+
+class TestGetFileStreamRawImpl:
+    """True-streaming open: managed lane, unbuffered body, typed absence."""
+
+    @staticmethod
+    def _recording_run_blocking(mocker, calls):
+        async def fake_run_blocking(task_name, fn, *args, lane=None, owner=None, **kwargs):
+            calls.append({"task_name": task_name, "lane": lane, "owner": owner, "kwargs": kwargs})
+            return fn(*args, **kwargs)
+
+        return mocker.patch.object(file_management_service, "run_blocking", side_effect=fake_run_blocking)
+
+    @pytest.mark.asyncio
+    async def test_raw_stream_opens_through_managed_control_io_lane(self, mocker):
+        calls = []
+        self._recording_run_blocking(mocker, calls)
+        body = object()
+        mocker.patch.object(file_management_service, "get_file_stream_raw", return_value=body)
+        mocker.patch.object(file_management_service, "get_content_type", return_value="text/plain")
+
+        stream, content_type = await file_management_service.get_file_stream_raw_impl("test/file.txt")
+
+        assert stream is body  # unbuffered: the raw body itself, not a BytesIO copy
+        assert content_type == "text/plain"
+        assert calls == [{
+            "task_name": "open-storage-file-stream",
+            "lane": "control-io",
+            "owner": "config",
+            "kwargs": {"object_name": "test/file.txt"},
+        }]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [None, 0, 7])
+    async def test_raw_stream_absence_probe_distinguishes_missing_from_existing(self, mocker, size):
+        calls = []
+        self._recording_run_blocking(mocker, calls)
+        mocker.patch.object(file_management_service, "get_file_stream_raw", return_value=None)
+        mocker.patch.object(file_management_service, "get_file_size_from_minio_strict", return_value=size)
+
+        with pytest.raises(Exception) as caught:
+            await file_management_service.get_file_stream_raw_impl("workspace/owner/report.txt")
+
+        assert isinstance(caught.value, file_management_service.NotFoundException) == (size is None)
+        assert calls[-1]["task_name"] == "probe-storage-file-size"
+        assert calls[-1]["lane"] == "control-io"
+
+    @pytest.mark.asyncio
+    async def test_raw_stream_preserves_storage_probe_errors(self, mocker):
+        calls = []
+        self._recording_run_blocking(mocker, calls)
+        mocker.patch.object(file_management_service, "get_file_stream_raw", return_value=None)
+        error = PermissionError("storage permission denied")
+        mocker.patch.object(file_management_service, "get_file_size_from_minio_strict", side_effect=error)
+
+        with pytest.raises(PermissionError) as caught:
+            await file_management_service.get_file_stream_raw_impl("workspace/owner/report.txt")
+        assert caught.value is error
 
 
 class TestDeleteFileImpl:

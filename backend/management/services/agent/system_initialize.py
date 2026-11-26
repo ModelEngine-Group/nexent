@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from infrastructure.rdb.client import get_db_session
+from infrastructure.system_configuration.runtime import load_system_configuration
 from management.db.agent.system import (
     create_workbench_draft, has_legacy_workbench_agents,
     load_system_agent, lock_system_agent_release, replace_workbench_draft_bindings,
 )
-from management.db.client import get_db_session
 from management.services.agent.system import SystemAgentProvider
 
 
@@ -22,6 +23,7 @@ def prepare_shared_resources(provider):
     from management.services.skill.transfer import install_skills_from_zip_for_tenant
     from management.services.tool.configuration import get_local_tools
 
+    load_system_configuration()
     update_tool_table_from_scan_tool_list(ASSET_OWNER_TENANT_ID, "system", get_local_tools())
     # SQL can clone official Skill metadata but cannot populate its shared filesystem directory.
     manager = get_skill_manager()

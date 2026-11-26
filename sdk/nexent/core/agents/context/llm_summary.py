@@ -1,18 +1,21 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """LLM call orchestration for summary generation with retry and error handling."""
 
+import inspect
 import logging
 import re
-import inspect
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from smolagents.models import ChatMessage, MessageRole
+from nexent.core.agents.contracts.context import ContextMessage
 
-from ..summary_cache import CompressionCallRecord
+from ...utils.observer import MessageObserver
 from .budget import _is_context_length_error
 from .config import ContextManagerConfig
-from ...utils.observer import MessageObserver
+from .summary_cache import CompressionCallRecord
 
 
 logger = logging.getLogger("agent_context.llm_summary")
@@ -24,6 +27,9 @@ def _summary_model_call_context(model, *, has_output_override: bool):
     observer = getattr(model, "observer", None)
     budget_snapshot = getattr(model, "context_budget_snapshot", None)
     extra_body = getattr(model, "extra_body", None)
+    agent_context = getattr(model, "_agent_context", None)
+    if hasattr(model, "_agent_context"):
+        model._agent_context = None
     if observer is not None:
         model.observer = MessageObserver(lang=getattr(observer, "lang", "en"))
     # The Agent snapshot is immutable and describes the main request's output
@@ -40,6 +46,8 @@ def _summary_model_call_context(model, *, has_output_override: bool):
     try:
         yield
     finally:
+        if hasattr(model, "_agent_context"):
+            model._agent_context = agent_context
         if observer is not None:
             model.observer = observer
         if hasattr(model, "context_budget_snapshot"):
@@ -82,6 +90,7 @@ class LLMSummary:
         call_type: str = "summary",
         prompt_type: str = "initial",
         max_output_tokens: int | None = None,
+        *, retry_context_error: bool = True,
     ) -> SummaryResult:
         """Generate a summary from text, with retry on context-length errors.
 
@@ -99,7 +108,7 @@ class LLMSummary:
                 text, model, call_type, prompt_type, max_output_tokens
             )
         except Exception as e:
-            if _is_context_length_error(e):
+            if retry_context_error and _is_context_length_error(e):
                 logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
                 shrunk = self._renderer.truncate_text_to_tokens(
                     text, int(self.config.max_summary_input_tokens * 0.66)
@@ -168,12 +177,14 @@ class LLMSummary:
                 f"Conversation content to summarize:\n{text}"
             )
         messages = [
-            ChatMessage(role=MessageRole.SYSTEM,
+            ContextMessage(role="system",
                         content=[{"type": "text", "text": system_prompt}]),
-            ChatMessage(role=MessageRole.USER,
+            ContextMessage(role="user",
                         content=[{"type": "text", "text": user_prompt}]),
         ]
-        parameters = inspect.signature(model.__call__).parameters
+        parameters = getattr(model, "context_call_parameters", None)
+        if not isinstance(parameters, Mapping):
+            parameters = inspect.signature(model.__call__).parameters
         accepts_kwargs = any(
             parameter.kind == inspect.Parameter.VAR_KEYWORD
             for parameter in parameters.values()
@@ -196,6 +207,8 @@ class LLMSummary:
                 if isinstance(block, dict) and block.get("type") == "text"
             )
         if not isinstance(raw_output, str):
+            if call_type.startswith(("history_summary", "history_incremental")):
+                raise ValueError("History summary response must contain text")
             raw_output = str(raw_output)
 
         summary = _strip_code_fences(raw_output)
@@ -229,7 +242,7 @@ class LLMSummary:
 
     @staticmethod
     def _msg_char_count(messages) -> int:
-        """Count characters in a list of ChatMessage objects."""
+        """Count characters in a list of context messages."""
         total = 0
         for msg in messages:
             content = getattr(msg, "content", "")

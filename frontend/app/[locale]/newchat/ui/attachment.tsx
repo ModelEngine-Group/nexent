@@ -53,7 +53,10 @@ const useFileSrc = (file: File | undefined) => {
   return src;
 };
 
-const getFileIcon = (filename: string | undefined, contentType?: string) => {
+export const getFileIcon = (
+  filename: string | undefined,
+  contentType?: string
+) => {
   const ext = filename?.split(".").pop()?.toLowerCase() || "";
   const mimeType = contentType?.toLowerCase() || "";
 
@@ -159,7 +162,7 @@ interface AttachmentViewModel {
   download_url?: string;
 }
 
-const triggerUrlDownload = (url: string, filename: string) => {
+export const triggerUrlDownload = (url: string, filename: string) => {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;

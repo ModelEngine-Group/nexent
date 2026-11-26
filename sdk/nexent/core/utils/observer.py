@@ -10,6 +10,9 @@ from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
+from nexent.core.agents.contracts.identity import root_clarification_allowed
+from nexent.core.agents.output.answer import EXECUTION_RECORD_TAGS, PublicTextFilter
+
 
 _NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
 _NL2A_STATE_PATTERN = re.compile(
@@ -43,6 +46,11 @@ class ProcessType(Enum):
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
     MODEL_ATTEMPT_CONTROL = "model_attempt_control"  # hidden begin/rollback/commit boundary
+
+    MODEL_OUTPUT = "model_output"  # Ordered normal body from a native runtime
+    TOOL_RESULT = "tool_result"  # Exact resource observation, including errors
+    STEP_OBSERVATION = "step_observation"  # Public model-step metrics
+    RUN_TERMINAL = "run_terminal"  # Explicit public Agent result
 
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
@@ -137,6 +145,11 @@ class MessageObserver:
     MAX_TOKEN_BUFFER_SIZE = 10
     MAX_PROTOCOL_LOOKAHEAD_CHARS = 32
 
+    @property
+    def turn_complete(self) -> bool:
+        """Whether a trusted interaction boundary gracefully ends this turn."""
+        return False
+
     def __init__(self, lang="zh", enable_nl2a_wrapper=False):
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []
@@ -205,6 +218,10 @@ class MessageObserver:
         """Identify an untagged body as final after runtime classification."""
         self._step_output()["reclassify_step"] = True
 
+    def mark_answer_fallback(self) -> None:
+        """Keep an empty-answer placeholder outside measured answer output."""
+        self._step_output()["answer_fallback"] = True
+
     def complete_final_answer(self, agent_name: str, answer: str) -> None:
         """Finalize the existing answer slot without appending its body twice."""
         state = self._step_output()
@@ -216,7 +233,14 @@ class MessageObserver:
             ProcessType.FINAL_ANSWER,
             "" if streamed and streamed.strip() == answer.strip() else answer,
             agent_name=agent_name,
-            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
+            metadata={
+                "answer_phase": "complete",
+                "reclassify_step": state.get("reclassify_step", False),
+                # Authoritative answer carried alongside the phase marker so
+                # consumers (evaluation, exports) never have to guess whether
+                # the content field holds the answer or an empty trailer.
+                "accepted_answer": answer,
+            },
         )
 
     @property
@@ -334,6 +358,12 @@ class MessageObserver:
         explicit ``agent_id`` from the tool still wins.
         """
         active = self._active_subagent()
+        if process_type == ProcessType.HUMAN_INTERACTION and (
+            not root_clarification_allowed() or active is not None
+        ):
+            # Legacy Core paths can return missing inputs as child-task text,
+            # but must not publish a child form to the user-facing channel.
+            return
         if active is not None:
             active_invocation, active_agent_id, _active_agent_name = active
         else:
@@ -353,6 +383,15 @@ class MessageObserver:
         step_id = self._step_output().get("step_id")
         if step_id:
             metadata.setdefault("step_id", step_id)
+        if process_type in {ProcessType.FINAL_ANSWER, ProcessType.MODEL_OUTPUT}:
+            from nexent.monitor.agent_fact import record_agent_answer
+
+            state = self._step_output()
+            if not state.get("answer_fallback"):
+                answer = (
+                    state.get("accepted_answer", content) if metadata.get("answer_phase") == "complete" else content
+                )
+                record_agent_answer(answer, agent_id=resolved_agent_id, invocation_id=resolved_invocation)
         self._append_message(
             Message(
                 process_type,
@@ -381,6 +420,7 @@ class MessageObserver:
     def _reset_model_stream_state(self) -> None:
         self.token_buffer.clear()
         self.think_buffer.clear()
+        self._stream_state.public_model_filters = {}
         self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
         self.in_think_mode = False
         self.legacy_code_fence_pending = False
@@ -416,8 +456,21 @@ class MessageObserver:
         )
         self._model_attempt_id.set(None)
 
+    def _filter_model_text(self, channel, text):
+        filters = getattr(self._stream_state, "public_model_filters", None)
+        if filters is None:
+            filters = self._stream_state.public_model_filters = {}
+        if channel not in filters:
+            filters[channel] = PublicTextFilter(preserve_final=True, hidden_tags=EXECUTION_RECORD_TAGS)
+        return filters[channel].push(str(text))
+
     def add_model_new_token(self, new_token):
-        """Stream safe text immediately while retaining only incomplete protocol tags."""
+        """Remove internal records before the token can enter any public event."""
+        if new_token:
+            self._add_public_model_token(self._filter_model_text("body", new_token))
+
+    def _add_public_model_token(self, new_token):
+        """Stream visible text while retaining incomplete output protocol tags."""
         if not new_token:
             return
         pending = "".join(self.think_buffer) + str(new_token)
@@ -538,6 +591,14 @@ class MessageObserver:
         """
         send the remaining tokens in the double-ended queue
         """
+        filters = getattr(self._stream_state, "public_model_filters", {})
+        if "reasoning" in filters:
+            tail = filters["reasoning"].flush_visible_tail()
+            if tail:
+                self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, tail)
+        if "body" in filters:
+            self._add_public_model_token(filters["body"].flush_visible_tail())
+
         # Process the incomplete think marker as literal content at EOF.
         if self.think_buffer:
             think_buffer_text = ''.join(self.think_buffer)
@@ -725,11 +786,21 @@ class MessageObserver:
             agent_name=kwargs.get("agent_name"),
             explicit_agent_id=explicit_agent_id,
             metadata={
-                key: kwargs[key]
-                for key in ("error_code", "retryable")
-                if key in kwargs
+                **{key: kwargs[key] for key in ("error_code", "retryable") if key in kwargs},
+                **{key: value for key, value in (kwargs.get("runtime_envelope") or {}).items()
+                   if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
+                              "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
+                              "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "source_protocol", "call_group_id", "call_index", "call_count", "parent_call_id",
+                              "step_number", "duration", "step_error", "status", "end_reason", "final_content",
+                              "final_block_ids", "error", "context_capacity"}}
             },
         )
+
+    @property
+    def current_tool_call_id(self) -> str | None:
+        """Return the actual invocation in this execution context."""
+        return self._tool_call_id.get()
 
     @contextmanager
     def tool_call_context(self, tool_call_id: str):
@@ -774,6 +845,8 @@ class MessageObserver:
             "task": task if task is not None else "",
             "invocation_id": invocation_id,
         }
+        if stack:
+            payload_data["parent_invocation_id"] = stack[-1][0]
         if invocation_name is not None:
             payload_data["invocation_name"] = invocation_name
         payload_data.update({key: value for key, value in {
@@ -857,10 +930,9 @@ class MessageObserver:
         Handle reasoning content from the model with type MODEL_OUTPUT_DEEP_THINKING
         """
         if reasoning_content:
-            # Provider reasoning is explicitly typed and may quote the output
-            # protocol. Only the visible model body can enter the answer role.
-            self._emit(
-                ProcessType.MODEL_OUTPUT_DEEP_THINKING, reasoning_content)
+            text = self._filter_model_text("reasoning", reasoning_content)
+            if text:
+                self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, text)
 
     def get_cached_message(self):
         with self._message_query_lock:

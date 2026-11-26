@@ -11,7 +11,7 @@ Identifier = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-zA-
 
 def normalize_form(value: dict[str, Any]) -> dict[str, Any]:
     """Apply the runtime form contract without accepting execution fields."""
-    from nexent.core.agents.clarification import ClarificationForm
+    from nexent.core.agents.contracts.clarification import ClarificationForm
 
     raw = dict(value)
     if type(raw.pop("schema_version", None)) is not int or value["schema_version"] != 1:

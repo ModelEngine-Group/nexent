@@ -16,6 +16,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 import pytest
 from unittest.mock import MagicMock
 
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from management.db.mcp import remote
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(remote, "get_config_snapshot", lambda: system_config_snapshot())
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -42,7 +50,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 
 # Mock boto3
 boto3_mock = MagicMock()
@@ -56,14 +64,16 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models
 db_models_mock = MagicMock()
@@ -129,11 +139,15 @@ def test_create_mcp_record_success(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("management.db.mcp.remote.filter_property", lambda data, model: data)
-    monkeypatch.setattr("management.db.mcp.remote.McpRecord", lambda **kwargs: MagicMock())
+    record = MagicMock(mcp_id=None)
+    session.flush.side_effect = lambda: setattr(record, "mcp_id", 42)
+    monkeypatch.setattr("management.db.mcp.remote.McpRecord", lambda **kwargs: record)
 
     mcp_data = {"mcp_name": "test_mcp", "mcp_server": "http://test.server.com", "status": True}
-    create_mcp_record(mcp_data, "tenant1", "user1")
-    session.add.assert_called_once()
+    assert create_mcp_record(mcp_data, "tenant1", "user1") == 42
+    session.add.assert_called_once_with(record)
+    session.flush.assert_called_once()
+    mock_ctx.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_create_mcp_record_with_custom_headers(monkeypatch, mock_session):
@@ -190,7 +204,12 @@ def test_create_mcp_record_rejects_tenant_limit(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("management.db.mcp.remote._MCP_SERVICE_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        "management.db.mcp.remote.get_config_snapshot",
+        lambda: system_config_snapshot(MAX_MCP_SERVICES_PER_TENANT=1),
+    )
 
     class LimitReached(Exception):
         def __init__(self, message, **kwargs):

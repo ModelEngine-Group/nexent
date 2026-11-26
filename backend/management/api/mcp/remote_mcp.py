@@ -9,6 +9,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from http import HTTPStatus
+from nexent.core.concurrency import run_blocking
 
 from contracts.constants.environment import ENABLE_UPLOAD_IMAGE
 from contracts.errors.codes import ErrorCode
@@ -17,10 +18,11 @@ from contracts.tool import MCPConfigRequest, AddMcpServiceRequest, AddContainerM
 from permissions.resource_access import resource_read_tenant
 from management.services.mcp.service import get_remote_mcp_server_list, check_mcp_health_and_update_db, delete_mcp_by_container_id, upload_and_start_mcp_image, update_remote_mcp_server_list, attach_mcp_container_permissions, get_mcp_record_by_id, list_mcp_service_tools_by_id, refresh_mcp_service_tool_count, add_container_mcp_service, update_mcp_service, update_mcp_service_enabled, delete_mcp_service, check_mcp_service_health, test_mcp_connection, check_container_port_conflict, suggest_container_port
 from management.services.mcp.registration import add_mcp_service
+from management.services.mcp.service import list_visible_mcp_records
 from management.services.tool.discovery import get_tool_from_remote_mcp_server
 from management.services.mcp.containers import MCPContainerManager
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.auth import get_current_user_info
+from management.services.permission.identity.session import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")
@@ -124,7 +126,7 @@ async def add_mcp_service_endpoint(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        await add_mcp_service(
+        mcp_id = await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
             name=payload.name,
@@ -164,7 +166,8 @@ async def add_mcp_service_endpoint(
         )
 
         return JSONResponse(
-            status_code=HTTPStatus.OK, content={"message": "Successfully added MCP service", "status": "success"}
+            status_code=HTTPStatus.OK,
+            content={"message": "Successfully added MCP service", "status": "success", "mcp_id": mcp_id},
         )
 
     except MCPNameIllegal as e:
@@ -231,6 +234,7 @@ async def add_container_mcp_service_endpoint(
                 "status": "success",
                 "data": {
                     "service_name": container_info.get("service_name"),
+                    "mcp_id": container_info.get("mcp_id"),
                     "mcp_url": container_info.get("mcp_url"),
                     "container_id": container_info.get("container_id"),
                     "container_name": container_info.get("container_name"),
@@ -503,6 +507,7 @@ async def get_mcp_list(
     tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
+    installation_status_only: bool = False,
 ):
     """
     Get list of MCP services.
@@ -512,6 +517,18 @@ async def get_mcp_list(
     """
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        if installation_status_only:
+            records, _ = await run_blocking(
+                "repository-mcp-installation-status", list_visible_mcp_records, auth_tenant_id, user_id,
+                lane="control-io", owner="management.api.mcp.remote_mcp",
+            )
+            return JSONResponse(content={
+                "status": "success",
+                "remote_mcp_server_list": [
+                    {"market_id": record["market_id"], "enabled": bool(record.get("enabled"))}
+                    for record in records if record.get("market_id") is not None
+                ],
+            })
         effective_tenant_id = tenant_id or auth_tenant_id
 
         if authorized_tenant := resource_read_tenant(http_request, shared=True):

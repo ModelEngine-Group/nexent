@@ -103,9 +103,13 @@ def test_k8s_application_hook_runs_after_skills_and_before_success():
     application = source[source.index("    # Step 8:"):source.index("    # Step 9:")]
     assert "if ! deploy_application_release;" in application
     flow = shell_function("k8s", "deploy_application_release")
-    stages = ["validate_application_release", "stop_old_business_workloads", "helm_upgrade_application_release true",
-              "run_system_agent_bootstrap", "helm_upgrade_application_release false", "wait_for_nexent_ready"]
-    assert [flow.index(stage) for stage in stages] == sorted(flow.index(stage) for stage in stages)
+    stages = ["validate_application_release", "start_runtime_deploy_lock", "require_previous_deployment_jobs_stopped",
+              "stop_old_business_workloads", "helm_upgrade_application_release true", "run_system_agent_bootstrap",
+              "require_runtime_deploy_lock",
+              "helm_upgrade_application_release false", "wait_for_nexent_ready"]
+    position = 0
+    for stage in stages:
+        position = flow.index(stage, position) + len(stage)
     bootstrap = shell_function("k8s", "run_system_agent_bootstrap")
     assert bootstrap.index("sync_official_skills_to_workspace") < bootstrap.index("nexent-bootstrap-start")
     assert 'deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"' in flow
@@ -161,6 +165,7 @@ def test_git_bash_preserves_container_paths_and_converts_host_paths(tmp_path, co
     result = run_shell(shell_function("docker", hook) + r'''
 DEPLOYMENT_SELECTED_DOCKER_SERVICES=nexent-config
 NEXENT_IMAGE=backend:test
+NEXENT_MANAGEMENT_IMAGE=management:test
 docker() { return 0; }
 ROOT_ENV_FILE="$(cygpath -u "$HOST_DIRECTORY")/.env"
 COMPOSE_DIR="$(cygpath -u "$HOST_DIRECTORY")/compose"
@@ -278,6 +283,8 @@ ROOT_ENV_FILE=/deployment/.env
 COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 NEXENT_IMAGE=backend:test
+NEXENT_MANAGEMENT_IMAGE=management:test
+NEXENT_RUNTIME_IMAGE=runtime:test
 NEXENT_WEB_IMAGE=web:test
 failed_stage="''' + failed_stage + r'''"
 DEPLOYMENT_IMAGE_SOURCE=general
@@ -312,7 +319,7 @@ prepare_core_service_deployment nexent-config nexent-runtime nexent-web
         assert "--entrypoint" not in result.stdout
     assert "start-backend.sh" not in result.stdout
     if failed_stage == "pull":
-        assert "PULL:backend:test" in result.stdout
+        assert "PULL:management:test" in result.stdout
     else:
         assert "PULL:" not in result.stdout
 
@@ -324,16 +331,21 @@ ROOT_ENV_FILE=/deployment/.env
 COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 NEXENT_IMAGE=backend:test
+NEXENT_MANAGEMENT_IMAGE=management:test
+NEXENT_RUNTIME_IMAGE=runtime:test
+NEXENT_OPS_IMAGE=ops:test
 docker() {
   if [ "$1" = image ]; then return 1; fi
   printf 'PULL:%s\n' "$2"
 }
 container_command() { printf 'COMPOSE:%s\n' "$*"; }
-prepare_core_service_deployment nexent-config nexent-runtime
+prepare_core_service_deployment nexent-config nexent-runtime nexent-mcp nexent-ops
 ''')
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("PULL:backend:test") == 1
-    assert result.stdout.index("PULL:") < result.stdout.index("run --rm")
+    assert [line for line in result.stdout.splitlines() if line.startswith("PULL:")] == [
+        "PULL:management:test", "PULL:runtime:test", "PULL:ops:test",
+    ]
+    assert result.stdout.index("PULL:ops:test") < result.stdout.index("run --rm")
 
 
 def test_web_only_deployment_does_not_stop_or_run_migration():

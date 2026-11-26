@@ -1,0 +1,35 @@
+replicaCount: 1
+
+# Emergency kill switch: comma-separated capability ids/paths removed from
+# the exposure registry at gateway startup (empty = expose all declared rows).
+nbExcludedCapabilities: ""
+
+strategy:
+  type: RollingUpdate
+
+images:
+  backend:
+    repository: nexent/nexent-gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+
+resources:
+  backend:
+    requests:
+      memory: 256Mi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 1
+
+probes:
+  startup:
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 60
+
+services:
+  northbound:
+    type: NodePort
+    nodePort: 30013

@@ -1,0 +1,41 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-SCALING
+  name: Runtime replica scaling
+feature:
+  feature_id: RUNTIME-REPLICAS
+  name: Runtime 固定多副本与手动扩缩容
+  status: planned
+  description: Kubernetes Runtime 在无在途业务的窗口按目标固定副本部署，正常运行时保持跨实例会话互斥、配额、控制、调度和文件隔离。
+  business_rules:
+  - rule_id: RUNTIME-REPLICAS-RULE-01
+    description: 默认部署流程在无在途业务的窗口先等待全部旧业务 Pod 退出，再启动正整数固定副本，默认 1。部署暂停为 0，运行期间没有自动伸缩控制器。
+  - rule_id: RUNTIME-REPLICAS-RULE-02
+    description: 停机部署确认旧业务 Pod 已退出、部署锁有效且系统初始化成功后激活，不依赖数据库维护完成批次。异常退出后的全局恢复和共享 Run 清理只在相关旧进程全部退出后由独立恢复入口执行。
+  - rule_id: RUNTIME-REPLICAS-RULE-03
+    description: 普通聊天、工作台、北向和 Creator 等绑定持久会话的根执行共享同一执行表与会话互斥。冲突请求不得重置流、保存用户消息或调用模型工具。
+  - rule_id: RUNTIME-REPLICAS-RULE-04
+    description: 持久会话的租户与 Agent 作用域配额跨实例统一，从准备到实际收尾保持占用。本地 lane 有界，协调故障拒绝新会话执行。A2A 和请求级调试沿用各自的临时执行路径。
+  - rule_id: RUNTIME-REPLICAS-RULE-05
+    description: 任意副本可以订阅、查询和停止同一代次运行；断开订阅不取消执行，尾部和历史回退完整。
+  - rule_id: RUNTIME-REPLICAS-RULE-06
+    description: 多调度器每个到期周期只产生一次有效执行；普通启动不得全局恢复其他实例的租约。
+  - rule_id: RUNTIME-REPLICAS-RULE-07
+    description: 跨节点使用实际共享存储；运行目录与日志按所属执行/进程隔离。
+  - rule_id: RUNTIME-REPLICAS-RULE-08
+    description: 普通 Pod 重启不得修改其他 owner；失联执行保留会话及配额占用至异常全停恢复，无自动接管。
+  - rule_id: RUNTIME-REPLICAS-RULE-09
+    description: 稳定 Service 下公开路由、成功响应、运行标识、鉴权、冲突和容量错误兼容；语音 WebSocket 保留连接语义，附件经对象存储跨副本合法可读。
+  - rule_id: RUNTIME-REPLICAS-RULE-10
+    description: 已激活的应用可在无在途业务的窗口使用 --direct-upgrade 更新。仅修改 Runtime 副本数时，按目标增减 Runtime Pod，其他应用 Pod 保持原 UID，历史仍然可读且可继续对话。
+  required_test_stages:
+  - D2
+  - D3
+  - D5
+  source:
+    requirement_ids:
+    - RUNTIME-FIXED-REPLICAS-20261105
+    - RUNTIME-UNIFY-EXECUTION-20261125
+    - RUNTIME-DIRECT-UPGRADE-20261126
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    notes: 固定副本、停机部署和应用直升已实施，直升的 Kubernetes D5 验收待隔离环境执行。SPEC 位于本地文档目录。

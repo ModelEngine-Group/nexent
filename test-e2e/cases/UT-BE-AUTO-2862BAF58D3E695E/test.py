@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from management.services.agent import run_state as rss
-from management.services.agent.run_state import RuntimeStateService
+from infrastructure.redis import run_state as rss
+from infrastructure.redis.run_state import RuntimeStateService
 
 
 CASE_ID = 'UT-BE-AUTO-2862BAF58D3E695E'
@@ -118,6 +118,14 @@ class FakeRedisClient:
             self.store[key] = {}
         self.store[key].update(mapping or {})
         return len(mapping or {})
+
+    def hdel(self, key, *fields):
+        self._record('hdel', (key, *fields), {})
+        values = self.store.get(key, {})
+        found = [field for field in fields if field in values]
+        for field in found:
+            del values[field]
+        return len(found)
 
     def hgetall(self, key):
         self._record('hgetall', (key,), {})
@@ -233,7 +241,7 @@ async def _check_run_managed_routes_through_manager(service, fake_manager):
         call = fake_manager.calls[-1]
         assert call['lane'] == 'control-io'
         assert call['spec'].task_name == task_name
-        assert call['spec'].owner == 'management.services.agent.run_state'
+        assert call['spec'].owner == 'infrastructure.redis.run_state'
         assert call['fn'].__name__ == sync_name
         assert call['fn'].__self__ is service
         assert call['args'] == args
@@ -504,7 +512,7 @@ def _check_client_raises_when_redis_uninstalled(monkeypatch):
 @pytest.mark.stage('D1')
 def _check_no_secrets_in_logs(caplog, service, fake_client):
     fake_client.fail_on('hgetall')
-    with caplog.at_level(logging.WARNING, logger='management.services.agent.run_state'):
+    with caplog.at_level(logging.WARNING, logger='infrastructure.redis.run_state'):
         service.get_run_state(UID, CID)
     text = caplog.text.lower()
     assert text

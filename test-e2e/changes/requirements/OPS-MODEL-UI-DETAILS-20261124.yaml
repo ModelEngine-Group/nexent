@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MODEL-UI-DETAILS-20261124
+  requirement_id: OPS-MODEL-UI-DETAILS-20261124
+  change_type: requirement
+  title: Share column search across Agent and Model details
+  description: Keep the table query state local while sharing the search popover and keyboard behavior.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/modelMonitoring.test.tsx
+    - frontend/tests/component/agentMonitoring.test.tsx
+    behaviors:
+    - Verify Model list search and paging, tenant and group parameters, empty search, and request errors.
+    reason: The browser Case covers the shared component and independent queries. Existing Agent tests cover its API contract.
+  notes: Base 5c96fc0af with the prior uncommitted Agent header change preserved.

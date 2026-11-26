@@ -6,12 +6,13 @@ import logging
 
 from nexent.core.agent_names import AGENT_NAME_MAX_LENGTH, validate_agent_name
 
+from contracts.agentos import ChatOptions
 from contracts.constants.constants import LANGUAGE
+from management.clients.model import invoke_chat_prompt
 from management.db.agent.repository import query_all_agent_info_by_tenant_id
 from management.services.agent.prompt import (
     load_default_generation_prompt,
 )
-from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.meta import (
     compose_name_regeneration,
 )
@@ -69,7 +70,7 @@ def generate_unique_agent_value(
     raise ValueError("Failed to generate unique value after max attempts")
 
 
-def regenerate_agent_value(
+async def regenerate_agent_value(
     field_key: str,
     original_value: str,
     existing_values: list[str],
@@ -79,6 +80,8 @@ def regenerate_agent_value(
     language: str = LANGUAGE["ZH"],
     agents_cache: list[dict] | None = None,
     exclude_agent_id: int | None = None,
+    *,
+    user_id: str,
 ) -> str:
     """Regenerate one naming field with five attempts and suffix fallback."""
     template = load_default_generation_prompt(language)
@@ -97,11 +100,12 @@ def regenerate_agent_value(
     last_error = None
     for attempt in range(1, 6):
         try:
-            value = call_llm_for_system_prompt(
+            value = await invoke_chat_prompt(
                 model_id=model_id,
                 user_prompt=prompt.user,
                 system_prompt=prompt.system,
-                callback=None,
+                user_id=user_id,
+                options=ChatOptions(temperature=0.3, top_p=0.95),
                 tenant_id=tenant_id,
             )
             candidate = (value or "").strip().splitlines()[0].strip()

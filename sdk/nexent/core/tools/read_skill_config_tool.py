@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Skill config reading tool."""
 import logging
 from copy import deepcopy
@@ -29,6 +30,7 @@ class ReadSkillConfigTool(Tool):
         version_no: int = 0,
         config_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         authorized_skill_names: Optional[list[str]] = None,
+        isolated_skills_root: bool = False,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -44,6 +46,9 @@ class ReadSkillConfigTool(Tool):
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        if isolated_skills_root and (not local_skills_dir or not tenant_id or authorized_skill_names is None):
+            raise ValueError("An isolated skill config tool requires a tenant, root and authorized names")
+        self.isolated_skills_root = isolated_skills_root
         self.config_overrides = deepcopy(config_overrides or {})
         self.authorized_skill_names = (
             frozenset(authorized_skill_names) if authorized_skill_names is not None else None
@@ -61,20 +66,31 @@ class ReadSkillConfigTool(Tool):
         if self.authorized_skill_names is not None:
             if skill_name not in self.authorized_skill_names:
                 return "[Error] Skill access is not authorized"
-            import json
-            return json.dumps(self.config_overrides.get(skill_name, {}), ensure_ascii=False, indent=2)
+            if not self.isolated_skills_root:
+                import json
+                return json.dumps(self.config_overrides.get(skill_name, {}), ensure_ascii=False, indent=2)
 
         if not skill_name:
             return "[Error] skill_name is required"
 
-        from nexent.skills import SkillManager
+        if self.isolated_skills_root:
+            from nexent.skills.paths import resolve_skill_path
 
-        manager = SkillManager(self.local_skills_dir)
-        skill_dir = manager.resolve_skill_dir(skill_name, tenant_id=self.tenant_id)
+            tenant_dir = os.path.join(self.local_skills_dir, self.tenant_id)
+            skill_dir = resolve_skill_path(tenant_dir, skill_name, allowed_root=self.local_skills_dir)
+            config_path = resolve_skill_path(
+                tenant_dir, skill_name, "config", "config.yaml", allowed_root=self.local_skills_dir,
+            )
+        else:
+            from nexent.skills import SkillManager
+
+            manager = SkillManager(self.local_skills_dir)
+            skill_dir = manager.resolve_skill_dir(skill_name, tenant_id=self.tenant_id)
+            config_path = os.path.join(skill_dir, "config", "config.yaml")
+
         if not os.path.isdir(skill_dir):
             return f"[Error] Skill directory not found: {skill_name}"
 
-        config_path = os.path.join(skill_dir, "config", "config.yaml")
         if not os.path.isfile(config_path):
             return f"[Error] config.yaml not found in skill: {skill_name}"
 

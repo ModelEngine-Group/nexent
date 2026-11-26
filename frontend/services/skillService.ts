@@ -168,9 +168,13 @@ export const processSkillStream = async (
  * @param tenantId - Optional tenant ID for super admin to query a specific tenant's skills.
  */
 export async function fetchSkillsList(
-  tenantId?: string | null
+  tenantId?: string | null,
+  view: import("@/types/skill").SkillListView = "full"
 ): Promise<SkillListItem[]> {
-  const res = await fetchSkills(tenantId);
+  const res =
+    view === "full"
+      ? await fetchSkills(tenantId)
+      : await fetchSkills(tenantId, view);
   if (!res.success) {
     throw new Error(res.message || "Failed to fetch skills");
   }
@@ -317,12 +321,15 @@ export const submitSkillFromFile = async (
   allSkills: SkillListItem[],
   onSuccess: () => void,
   onCancel: () => void,
-  t: (key: string, options?: Record<string, unknown>) => string
+  t: (key: string, options?: Record<string, unknown>) => string,
+  onSaved?: (id: number) => void,
 ): Promise<boolean> => {
   try {
     const result = await createSkillFromFile(skillName.trim(), file, false);
 
     if (result.success) {
+      const savedId = Number(result.data?.skill_id ?? result.data?.data?.skill_id);
+      if (Number.isSafeInteger(savedId) && savedId > 0) onSaved?.(savedId);
       message.success(t("skillManagement.message.createSuccess"));
       onSuccess();
       onCancel();

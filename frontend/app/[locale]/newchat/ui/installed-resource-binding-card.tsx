@@ -16,38 +16,28 @@ import {
   mergeToolParamValues,
 } from "../../agents/components/capability/tool/utils";
 import { Button } from "@/components/ui/button";
-import {
-  useNl2AgentFlow,
-  type Nl2AgentConfigFocusTarget,
-} from "@/contexts/nl2AgentFlow";
+import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
-import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import {
+  fetchSkillById,
+  fetchSkillInstances,
   searchAgentInfo,
   searchToolConfig,
   updateToolConfig,
   saveSkillInstance,
 } from "@/services/agentConfigService";
-import { toApiError, type ApiError } from "@/services/api";
+import { toApiError } from "@/services/api";
 import { useAgentStore } from "@/stores/agentStore";
-import type {
-  Agent,
-  Skill,
-  SkillParam,
-  Tool,
-  ToolParam,
-} from "@/types/agentConfig";
+import type { Skill, SkillParam, Tool, ToolParam } from "@/types/agentConfig";
 import type {
   Nl2AgentCardAction,
   Nl2aInstalledResourceBindingPayload,
-  Nl2aRecommendedResource,
+  Nl2aUnifiedResourcesPayload,
 } from "../adapter/remote-chat-model-adapter";
 import {
   nl2AgentParamsToRecord,
-  readApiFieldErrors,
   validateNl2AgentResourceConfig,
   type Nl2AgentConfigFieldError,
-  type Nl2AgentResourceParam,
 } from "./nl2agent-resource-config";
 import { Nl2AgentBindingItem } from "./nl2agent-binding-item";
 import {
@@ -55,278 +45,42 @@ import {
   knowledgeSelectionIds,
   mergeKnowledgeConfig,
 } from "./nl2agent-knowledge-config";
+import { formatNl2AgentActionSummary } from "./nl2agent-action-summary";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
+import { RequirementCoverageCard } from "./requirement-coverage-card";
+import { useNl2AgentKnowledgeRecommendations } from "./use-nl2agent-knowledge-recommendations";
+import {
+  restoreUnifiedDraft,
+  type UnifiedResourceDraft,
+} from "./nl2agent-unified-draft";
 
-type ConfigStatus = "unconfigured" | "valid" | "invalid";
-type BindingStatus = "idle" | "binding" | "bound" | "failed";
-
-export interface BindingItemState {
-  resource: Nl2aRecommendedResource;
-  selected: boolean;
-  configStatus: ConfigStatus;
-  bindingStatus: BindingStatus;
-  draftParams: Nl2AgentResourceParam[];
-  fieldErrors: Nl2AgentConfigFieldError[];
-  error?: ApiError;
-  knowledgeEdited?: boolean;
-}
-
-type BindingAction =
-  | { type: "toggle"; ref: string }
-  | {
-      type: "save_config";
-      ref: string;
-      params: Nl2AgentResourceParam[];
-      knowledgeEdited?: boolean;
-    }
-  | {
-      type: "sync_bound_tools";
-      refs: Set<string>;
-      tools: Tool[];
-    }
-  | {
-      type: "validation_failed";
-      errors: Map<string, Nl2AgentConfigFieldError[]>;
-    }
-  | { type: "binding_started"; refs: Set<string> }
-  | { type: "binding_succeeded"; ref: string }
-  | { type: "binding_failed"; ref: string; error: ApiError };
-
-const candidateRef = (item: BindingItemState): string =>
-  item.resource.candidate.candidate_ref;
-
-const parseResourceId = (ref: string, expected: "tool" | "skill"): number => {
-  const match = new RegExp(`^${expected}:(\\d+)$`).exec(ref);
-  const resourceId = Number(match?.[1]);
-  if (!Number.isInteger(resourceId) || resourceId <= 0) {
-    throw new Error(`Invalid ${expected} candidate reference`);
-  }
-  return resourceId;
-};
-
-const findBindingTool = (item: BindingItemState, tools: Tool[]) =>
-  findCanonicalTool(tools, parseResourceId(candidateRef(item), "tool"));
-
-const isManagedKnowledgeBinding = (
-  item: BindingItemState,
-  tools: Tool[]
-): boolean => {
-  if (item.resource.candidate.resource_type !== "tool") return false;
-  const tool = findBindingTool(item, tools);
-  return tool ? isManagedKnowledgeTool(tool) : false;
-};
-
-const isVisibleBinding = (item: BindingItemState, tools: Tool[]): boolean => {
-  if (item.resource.candidate.resource_type === "skill") return true;
-  return findBindingTool(item, tools)?.is_user_selectable !== false;
-};
-
-const resolveBindingFocusTarget = (
-  boundItems: BindingItemState[],
-  tools: Tool[]
-): Nl2AgentConfigFocusTarget | null => {
-  if (boundItems.every((item) => isManagedKnowledgeBinding(item, tools))) {
-    return { section: "knowledge_base" };
-  }
-
-  const visibleBoundItems = boundItems.filter((item) =>
-    isVisibleBinding(item, tools)
-  );
-  if (!visibleBoundItems.length) return null;
-  return {
-    section: "tools_skills",
-    capabilityTab: visibleBoundItems.some(
-      (item) => item.resource.candidate.resource_type === "tool"
-    )
-      ? "tools"
-      : "skills",
-  };
-};
-
-const initializeItems = (
-  resources: Nl2aRecommendedResource[]
-): BindingItemState[] =>
-  resources.map((resource) => {
-    const draftParams = resource.config.map((param) => ({ ...param }));
-    const errors = validateNl2AgentResourceConfig(draftParams);
-    return {
-      resource,
-      selected: resource.is_bound || resource.recommendation === "recommended",
-      configStatus:
-        draftParams.length === 0
-          ? "valid"
-          : errors.length
-            ? "unconfigured"
-            : "valid",
-      bindingStatus: resource.is_bound ? "bound" : "idle",
-      draftParams,
-      fieldErrors: [],
-      knowledgeEdited: Boolean(resource.knowledge_recommendations?.length),
-    };
-  });
-
-function reducer(
-  state: BindingItemState[],
-  action: BindingAction
-): BindingItemState[] {
-  return state.map((item) => {
-    const ref = candidateRef(item);
-    if (
-      action.type === "toggle" &&
-      ref === action.ref &&
-      item.bindingStatus !== "bound"
-    ) {
-      return { ...item, selected: !item.selected };
-    }
-    if (action.type === "save_config" && ref === action.ref) {
-      const fieldErrors = validateNl2AgentResourceConfig(action.params);
-      return {
-        ...item,
-        draftParams: action.params,
-        ...(action.knowledgeEdited
-          ? { knowledgeEdited: true, bindingStatus: "idle" as const }
-          : {}),
-        configStatus: fieldErrors.length ? "invalid" : "valid",
-        fieldErrors,
-        error: undefined,
-      };
-    }
-    if (
-      action.type === "sync_bound_tools" &&
-      item.resource.candidate.resource_type === "tool" &&
-      item.bindingStatus !== "binding"
-    ) {
-      if (item.knowledgeEdited) return item;
-      const isBound = action.refs.has(ref);
-      const tool = findBindingTool(item, action.tools);
-      const managed = knowledgeToolName(item.resource.candidate, tool);
-      const hasSelection =
-        !managed ||
-        knowledgeSelectionIds(tool?.initParams ?? [], managed).length > 0;
-      return {
-        ...item,
-        selected: isBound ? true : item.selected,
-        bindingStatus: isBound && hasSelection ? "bound" : "idle",
-        ...(managed && tool
-          ? {
-              draftParams: mergeKnowledgeConfig(
-                item.draftParams,
-                managed,
-                nl2AgentParamsToRecord(tool.initParams ?? [])
-              ),
-            }
-          : {}),
-        error: undefined,
-      };
-    }
-    if (action.type === "validation_failed") {
-      const fieldErrors = action.errors.get(ref);
-      return fieldErrors
-        ? { ...item, configStatus: "invalid", fieldErrors }
-        : item;
-    }
-    if (action.type === "binding_started" && action.refs.has(ref)) {
-      return { ...item, bindingStatus: "binding", error: undefined };
-    }
-    if (action.type === "binding_succeeded" && ref === action.ref) {
-      return {
-        ...item,
-        selected: true,
-        configStatus: "valid",
-        bindingStatus: "bound",
-        knowledgeEdited: false,
-        fieldErrors: [],
-        error: undefined,
-      };
-    }
-    if (action.type === "binding_failed" && ref === action.ref) {
-      return {
-        ...item,
-        bindingStatus: "failed",
-        fieldErrors: readApiFieldErrors(action.error.details),
-        error: action.error,
-      };
-    }
-    return item;
-  });
-}
-
-const toPersistedBindings = (
-  boundItems: BindingItemState[],
-  toolCatalog: Tool[],
-  skillCatalog: Skill[]
-): { tools?: Tool[]; skills?: Skill[] } => {
-  const tools = boundItems
-    .filter((item) => item.resource.candidate.resource_type === "tool")
-    .map((item) => {
-      const toolId = parseResourceId(candidateRef(item), "tool");
-      const canonical = findCanonicalTool(toolCatalog, toolId);
-      return {
-        ...canonical,
-        id: String(toolId),
-        name: canonical?.name || item.resource.candidate.name,
-        description:
-          canonical?.description || item.resource.candidate.description,
-        source:
-          canonical?.source ||
-          (item.resource.candidate.source === "LOCAL_TOOL" ? "local" : "mcp"),
-        initParams: item.draftParams as ToolParam[],
-        is_available: true,
-      } satisfies Tool;
-    });
-  const skills = boundItems
-    .filter((item) => item.resource.candidate.resource_type === "skill")
-    .map((item) => {
-      const skillId = parseResourceId(candidateRef(item), "skill");
-      const canonical = skillCatalog.find(
-        (skill) => Number(skill.skill_id) === skillId
-      );
-      return {
-        ...canonical,
-        skill_id: skillId,
-        name: canonical?.name || item.resource.candidate.name,
-        description:
-          canonical?.description || item.resource.candidate.description,
-        source: canonical?.source || "custom",
-        config_schemas:
-          canonical?.config_schemas || (item.draftParams as SkillParam[]),
-        config_values: nl2AgentParamsToRecord(item.draftParams),
-      } satisfies Skill;
-    });
-
-  return {
-    ...(tools.length ? { tools } : {}),
-    ...(skills.length ? { skills } : {}),
-  };
-};
-
-const snapshotContainsBindings = (
-  agent: Agent,
-  boundItems: BindingItemState[]
-): boolean => {
-  const toolIds = new Set((agent.tools ?? []).map((tool) => Number(tool.id)));
-  const skillIds = new Set(
-    (agent.skills ?? []).map((skill) => Number(skill.skill_id))
-  );
-  return boundItems.every((item) => {
-    const resourceType = item.resource.candidate.resource_type;
-    const resourceId = parseResourceId(candidateRef(item), resourceType);
-    return resourceType === "tool"
-      ? toolIds.has(resourceId)
-      : skillIds.has(resourceId);
-  });
-};
+import {
+  candidateRef,
+  parseResourceId,
+  findBindingTool,
+  resolveBindingFocusTarget,
+  initializeItems,
+  reducer,
+  toPersistedBindings,
+  snapshotContainsBindings,
+  type BindingItemState,
+} from "./nl2agent-binding-state";
+export type { BindingItemState } from "./nl2agent-binding-state";
 
 export const InstalledResourceBindingCard: FC<{
-  payload: Nl2aInstalledResourceBindingPayload;
+  payload: Nl2aInstalledResourceBindingPayload | Nl2aUnifiedResourcesPayload;
   disabled?: boolean;
-}> = ({ payload, disabled = false }) => {
+  unifiedPayload?: Nl2aUnifiedResourcesPayload;
+}> = ({ payload, disabled = false, unifiedPayload }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const queryClient = useQueryClient();
   const reactId = useId();
-  const cardKey = `installed_resource_binding:${payload.agent_id}:${reactId}`;
+  const cardKey =
+    payload.card_id ??
+    `installed_resource_binding:${payload.agent_id}:${reactId}`;
+  const versioned = payload.protocol_version === 2;
   const {
     agentId: sessionAgentId,
     failedPromptFields,
@@ -336,12 +90,46 @@ export const InstalledResourceBindingCard: FC<{
     markResourcesBound,
     requestConfigFocus,
     isCardInteractive,
+    sessionGeneration,
+    resourceDrafts,
   } = useNl2AgentFlow();
+  const draftKey = `${sessionGeneration}:${payload.agent_id}:${unifiedPayload?.conversation_id ?? ""}`;
+  const [initialDraft] = useState(() => {
+    const previous = unifiedPayload?.previous_card_id
+      ? (resourceDrafts.get(
+          `${draftKey}:${unifiedPayload.previous_card_id}`
+        ) as UnifiedResourceDraft | undefined)
+      : undefined;
+    return unifiedPayload
+      ? restoreUnifiedDraft(
+          unifiedPayload,
+          initializeItems(payload.resources),
+          previous
+        )
+      : undefined;
+  });
   const [items, dispatch] = useReducer(
     reducer,
-    payload.resources,
-    initializeItems
+    initialDraft?.items ?? initializeItems(payload.resources)
   );
+  const [selections, setSelections] = useState<Record<string, string[]>>(
+    initialDraft?.selections ?? {}
+  );
+  const preserveDraft = () => {
+    if (!unifiedPayload) return;
+    resourceDrafts.set(`${draftKey}:${payload.card_id}`, {
+      queries: Object.fromEntries(
+        unifiedPayload.requirements.map((row) => [
+          row.requirement_id,
+          row.query,
+        ])
+      ),
+      selections,
+      items,
+    });
+  };
+  const [requirementEditing, setRequirementEditing] = useState(false);
+  const [resourceOperationBusy, setResourceOperationBusy] = useState(false);
   const [configuringRef, setConfiguringRef] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [loadingConfigRef, setLoadingConfigRef] = useState<string | null>(null);
@@ -359,12 +147,49 @@ export const InstalledResourceBindingCard: FC<{
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
+  const savedAgent = useAgentStore((state) => state.savedAgent);
   const applyPersistedResourceBindings = useAgentStore(
     (state) => state.applyPersistedResourceBindings
   );
   const replaceServerSnapshot = useAgentStore(
     (state) => state.replaceServerSnapshot
   );
+  const hasKnowledgeTools = payload.resources.some((resource) =>
+    knowledgeToolName(
+      resource.candidate,
+      resource.candidate.resource_type === "tool"
+        ? findCanonicalTool(
+            availableTools,
+            parseResourceId(resource.candidate.candidate_ref, "tool")
+          )
+        : undefined
+    )
+  );
+  const knowledgeQuery = useNl2AgentKnowledgeRecommendations(
+    unifiedPayload,
+    !disabled &&
+      !isSubmitted &&
+      !isRunning &&
+      hasKnowledgeTools &&
+      isCardInteractive(cardKey),
+    draftKey
+  );
+  useEffect(() => {
+    if (configuringRef !== null) return;
+    for (const prepared of knowledgeQuery.data ?? []) {
+      const tool = findCanonicalTool(
+        availableTools,
+        parseResourceId(prepared.candidate_ref, "tool")
+      );
+      if (tool)
+        dispatch({
+          type: "knowledge_prepared",
+          ref: prepared.candidate_ref,
+          prepared,
+          params: tool.initParams ?? [],
+        });
+    }
+  }, [knowledgeQuery.data, availableTools, configuringRef]);
 
   useEffect(() => {
     if (currentAgentId !== payload.agent_id || !editedAgent) return;
@@ -375,16 +200,54 @@ export const InstalledResourceBindingCard: FC<{
     });
   }, [currentAgentId, editedAgent, payload.agent_id]);
 
+  const canSyncSavedBindings =
+    !disabled && !isSubmitted && isCardInteractive(cardKey);
   useEffect(() => {
-    if (!disabled) registerCard(cardKey, payload.subtype);
-  }, [cardKey, disabled, payload.subtype, registerCard]);
+    if (
+      !canSyncSavedBindings ||
+      currentAgentId !== payload.agent_id ||
+      !savedAgent ||
+      !Array.isArray(savedAgent.skills)
+    )
+      return;
+    dispatch({ type: "sync_bound_skills", skills: savedAgent.skills });
+  }, [canSyncSavedBindings, currentAgentId, savedAgent, payload.agent_id]);
+
+  useEffect(() => {
+    if (!disabled) registerCard(cardKey, payload.subtype, versioned);
+  }, [
+    cardKey,
+    disabled,
+    payload.subtype,
+    registerCard,
+    versioned,
+    sessionGeneration,
+  ]);
 
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
+  const areResourceOperationsLocked =
+    isLocked ||
+    resourceOperationBusy ||
+    isRunning ||
+    loadingConfigRef !== null ||
+    isSynchronizing ||
+    requirementEditing;
   const isInteractionLocked =
-    isLocked || loadingConfigRef !== null || isSynchronizing;
+    areResourceOperationsLocked || configuringRef !== null;
   const selectedItems = items.filter((item) => item.selected);
   const isBinding = items.some((item) => item.bindingStatus === "binding");
   const hasValidKnowledge = (item: BindingItemState) => {
+    if (
+      item.bindingStatus === "bound" &&
+      item.resource.readiness === "not_ready"
+    )
+      return false;
+    if (
+      item.bindingStatus === "bound" &&
+      item.resource.readiness === "ready" &&
+      !item.knowledgeEdited
+    )
+      return true;
     const name = knowledgeToolName(
       item.resource.candidate,
       item.resource.candidate.resource_type === "tool"
@@ -397,7 +260,19 @@ export const InstalledResourceBindingCard: FC<{
     );
   };
   const canContinue =
-    selectedItems.length === 0 ||
+    (!versioned ||
+      (payload.requirements ?? []).every(
+        (row) =>
+          !row.required ||
+          items.some(
+            (item) =>
+              item.bindingStatus === "bound" &&
+              hasValidKnowledge(item) &&
+              row.covered_resources.some(
+                (resource) => resource.candidate_ref === candidateRef(item)
+              )
+          )
+      )) &&
     selectedItems.every(
       (item) => item.bindingStatus === "bound" && hasValidKnowledge(item)
     );
@@ -451,12 +326,14 @@ export const InstalledResourceBindingCard: FC<{
     canonicalTool?: Tool
   ) => {
     const ref = candidateRef(item);
-    if (item.resource.candidate.resource_type === "skill") {
+    if (item.resource.candidate.resource_type === "skill" && !versioned) {
       setConfiguringRef(ref);
       return;
     }
-    if (!canonicalTool) return;
+    if (item.resource.candidate.resource_type === "tool" && !canonicalTool)
+      return;
     if (
+      canonicalTool &&
       knowledgeToolName(item.resource.candidate, canonicalTool) &&
       item.knowledgeEdited
     ) {
@@ -476,11 +353,35 @@ export const InstalledResourceBindingCard: FC<{
         );
         return;
       }
+      if (item.resource.candidate.resource_type === "skill") {
+        const id = parseResourceId(ref, "skill");
+        const [detail, instances] = await Promise.all([
+          fetchSkillById(id),
+          fetchSkillInstances(payload.agent_id),
+        ]);
+        if (!detail.success || !instances.success)
+          throw new Error("Skill configuration unavailable");
+        const config: SkillParam[] = detail.data?.config_schemas ?? [];
+        const saved = instances.data.find(
+          (instance: { skill_id: string }) => Number(instance.skill_id) === id
+        )?.config_values;
+        dispatch({
+          type: "save_config",
+          ref,
+          params: config.map((param) => ({
+            ...param,
+            value: saved?.[param.name] ?? param.value,
+          })),
+        });
+        setConfiguringRef(ref);
+        return;
+      }
+      if (!canonicalTool) return;
       const result = await searchToolConfig(
         parseResourceId(ref, "tool"),
         payload.agent_id
       );
-      if (!result.success || !result.data) {
+      if ((!result.success || !result.data) && item.bindingStatus === "bound") {
         setSummaryError(
           t(
             "nl2agent.resourceBinding.loadExistingConfigFailed",
@@ -489,18 +390,38 @@ export const InstalledResourceBindingCard: FC<{
         );
         return;
       }
+      const baseParams =
+        versioned && !item.draftParams.length
+          ? (canonicalTool.initParams ?? [])
+          : item.draftParams;
+      const savedValues = { ...result.data?.params };
+      const knowledgeName = knowledgeToolName(
+        item.resource.candidate,
+        canonicalTool
+      );
+      if (knowledgeName && item.knowledgePreparation) {
+        const range =
+          knowledgeName === "aidp_search" ? "kds_list" : "index_names";
+        if (!(range in savedValues))
+          savedValues[range] =
+            knowledgeName === "aidp_search"
+              ? JSON.stringify(
+                  knowledgeSelectionIds(item.draftParams, knowledgeName)
+                )
+              : knowledgeSelectionIds(item.draftParams, knowledgeName);
+      }
       dispatch({
         type: "save_config",
         ref,
         params: knowledgeToolName(item.resource.candidate, canonicalTool)
           ? mergeKnowledgeConfig(
-              item.draftParams,
+              baseParams,
               knowledgeToolName(item.resource.candidate, canonicalTool)!,
-              result.data.params ?? {}
+              savedValues
             )
           : mergeToolParamValues(
-              item.draftParams as ToolParam[],
-              result.data.params
+              baseParams as ToolParam[],
+              result.data?.params
             ),
       });
       setConfiguringRef(ref);
@@ -517,6 +438,20 @@ export const InstalledResourceBindingCard: FC<{
   };
 
   const bindSelected = async () => {
+    if (
+      knowledgeQuery.isFetching &&
+      selectedItems.some(
+        (item) =>
+          !item.knowledgeEdited &&
+          knowledgeToolName(
+            item.resource.candidate,
+            item.resource.candidate.resource_type === "tool"
+              ? findBindingTool(item, availableTools)
+              : undefined
+          )
+      )
+    )
+      return;
     if (isInteractionLocked || isBinding || isSynchronizing) return;
     const pending = items.filter(
       (item) =>
@@ -543,6 +478,14 @@ export const InstalledResourceBindingCard: FC<{
     const validationErrors = new Map<string, Nl2AgentConfigFieldError[]>();
     pending.forEach((item) => {
       const errors = validateNl2AgentResourceConfig(item.draftParams);
+      if (item.resource.has_config && !item.draftParams.length)
+        errors.push({
+          field: "config",
+          message: t(
+            "nl2agent.coverage.configureFirst",
+            "Open configuration before binding."
+          ),
+        });
       if (!hasValidKnowledge(item))
         errors.push({
           field: "knowledge_base",
@@ -571,7 +514,17 @@ export const InstalledResourceBindingCard: FC<{
           "Complete the configuration for every selected resource."
         )} ${invalidNames}`
       );
-      setConfiguringRef(validationErrors.keys().next().value ?? null);
+      const firstInvalidItem = pending.find((item) =>
+        validationErrors.has(candidateRef(item))
+      );
+      if (firstInvalidItem) {
+        await openResourceConfig(
+          firstInvalidItem,
+          firstInvalidItem.resource.candidate.resource_type === "tool"
+            ? findBindingTool(firstInvalidItem, availableTools)
+            : undefined
+        );
+      }
       return;
     }
     if (!pending.length) return;
@@ -681,40 +634,56 @@ export const InstalledResourceBindingCard: FC<{
 
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "continue",
-      result: {
-        bound: items
-          .filter((item) => item.bindingStatus === "bound")
-          .map((item) => ({
-            resource_type: item.resource.candidate.resource_type,
-            resource_id: parseResourceId(
-              candidateRef(item),
-              item.resource.candidate.resource_type
-            ),
-          })),
-        skipped_candidate_refs: items
-          .filter((item) => !item.selected)
-          .map(candidateRef),
-      },
+      result: versioned
+        ? {
+            card_id: payload.card_id,
+            state_version: payload.state_version,
+            selected_resource_refs: selectedItems.map(candidateRef),
+          }
+        : {
+            bound: items
+              .filter((item) => item.bindingStatus === "bound")
+              .map((item) => ({
+                resource_type: item.resource.candidate.resource_type,
+                resource_id: parseResourceId(
+                  candidateRef(item),
+                  item.resource.candidate.resource_type
+                ),
+              })),
+            skipped_candidate_refs: items
+              .filter((item) => !item.selected)
+              .map(candidateRef),
+          },
     };
-    setIsSubmitted(true);
-    submitCard(cardKey);
-    markResourcesBound(payload.agent_id);
+    if (!versioned) {
+      setIsSubmitted(true);
+      submitCard(cardKey);
+      markResourcesBound(payload.agent_id);
+    }
     aui.thread().append({
       runConfig: nl2AgentCardRunConfig(
         aui.thread().composer().getState().runConfig,
-        payload.agent_id
+        payload.agent_id,
+        versioned
+          ? {
+              onAccepted: () => {
+                setIsSubmitted(true);
+                submitCard(cardKey);
+              },
+              onRejected: () =>
+                setSummaryError(t("nl2agent.coverage.submitFailed")),
+            }
+          : undefined
       ),
       role: "user",
       content: [
         {
           type: "text",
-          text: t(
-            "nl2agent.resourceBinding.submittedSummary",
-            "Resource selection completed"
-          ),
+          text: formatNl2AgentActionSummary(payload.subtype, t),
         },
       ],
       metadata: { custom: { nl2agentCardAction: action } },
@@ -727,10 +696,16 @@ export const InstalledResourceBindingCard: FC<{
     markResourcesBound(payload.agent_id);
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "retry_generation",
-      result: { failed_fields: failedPromptFields },
+      result: versioned
+        ? {
+            card_id: payload.card_id,
+            state_version: payload.state_version,
+          }
+        : { failed_fields: failedPromptFields },
     };
     aui.thread().append({
       runConfig: nl2AgentCardRunConfig(
@@ -796,28 +771,86 @@ export const InstalledResourceBindingCard: FC<{
   const pendingItems = items.filter((item) => item.bindingStatus !== "bound");
   const boundItems = items.filter((item) => item.bindingStatus === "bound");
   const pendingSelected = pendingItems.filter((item) => item.selected);
-  const renderResource = (item: BindingItemState) => {
+  const requirementQueries = new Map(
+    payload.requirements?.map(({ requirement_id, query }) => [
+      requirement_id,
+      query,
+    ])
+  );
+  const renderResource = (
+    item: BindingItemState,
+    requirementId?: string,
+    score?: number
+  ) => {
     const ref = candidateRef(item);
     const tool =
       item.resource.candidate.resource_type === "tool"
         ? findCanonicalTool(availableTools, parseResourceId(ref, "tool"))
         : undefined;
+    const ownsConfigDialog =
+      !requirementId ||
+      unifiedPayload?.requirements.find((row) =>
+        row.covered_resources.some((resource) => resource.candidate_ref === ref)
+      )?.requirement_id === requirementId;
     return (
       <Nl2AgentBindingItem
         key={ref}
-        item={item}
+        item={
+          requirementId
+            ? {
+                ...item,
+                selected:
+                  item.bindingStatus === "bound" ||
+                  (selections[requirementId] ?? []).includes(ref),
+              }
+            : item
+        }
+        matchScore={score}
         tool={tool}
+        matchedRequirements={
+          requirementId
+            ? []
+            : [
+                ...new Set(
+                  item.resource.candidate.requirement_ids
+                    .map((id) => requirementQueries.get(id))
+                    .filter((query): query is string => Boolean(query))
+                ),
+              ]
+        }
         ui={{
           locked: isInteractionLocked,
+          configurationLocked: areResourceOperationsLocked || isBinding,
           binding: isBinding,
           catalogFetching: isToolCatalogFetching,
           catalogError: isToolCatalogError,
           configLoading: loadingConfigRef === ref,
-          configuring: configuringRef === ref,
+          configuring: configuringRef === ref && ownsConfigDialog,
+          knowledgeLoading: knowledgeQuery.isFetching,
+          knowledgeError: knowledgeQuery.isError,
         }}
-        onToggle={() => dispatch({ type: "toggle", ref })}
+        onToggle={() => {
+          if (item.bindingStatus === "bound") return;
+          if (!requirementId) {
+            dispatch({ type: "toggle", ref });
+            return;
+          }
+          const old = selections[requirementId] ?? [];
+          const next = {
+            ...selections,
+            [requirementId]: old.includes(ref)
+              ? old.filter((value) => value !== ref)
+              : [...old, ref],
+          };
+          setSelections(next);
+          dispatch({
+            type: "set_selected",
+            refs: new Set(Object.values(next).flat()),
+          });
+        }}
         onConfigure={() => void openResourceConfig(item, tool)}
         onCloseConfig={() => setConfiguringRef(null)}
+        onRetryKnowledge={() => void knowledgeQuery.refetch()}
         onSaveKnowledge={(params) =>
           dispatch({ type: "save_config", ref, params, knowledgeEdited: true })
         }
@@ -825,106 +858,82 @@ export const InstalledResourceBindingCard: FC<{
     );
   };
 
-  return (
-    <section className="my-4 overflow-hidden rounded-2xl border border-border bg-white text-foreground shadow-sm dark:bg-card">
-      <div className="flex items-center gap-3 border-b px-4 py-3.5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-          <Link2 className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold">
-            {t("nl2agent.resourceBinding.title", "Bind installed resources")}
-          </h3>
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-            {t(
-              "nl2agent.resourceBinding.description",
-              "Select and configure matching resources, then bind them together."
-            )}
-          </p>
-        </div>
-      </div>
-      <div
-        role="region"
-        aria-label={t(
-          "nl2agent.resourceBinding.pendingResources",
-          "Resources to bind"
-        )}
-      >
-        <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-muted-foreground">
-          <span>
-            {t(
-              "nl2agent.resourceBinding.pendingResources",
-              "Resources to bind"
-            )}{" "}
-            <span className="ml-1 tabular-nums">{pendingItems.length}</span>
-          </span>
-          <span aria-live="polite">
-            {t("nl2agent.resourceBinding.selectedCountLabel", "Selected")}{" "}
-            <span className="tabular-nums">{pendingSelected.length}</span>{" "}
-            {t("nl2agent.resourceBinding.itemsUnit", "items")}
-          </span>
-        </div>
-        <div className="divide-y">{pendingItems.map(renderResource)}</div>
-        {!pendingItems.length ? (
-          <p className="px-4 pb-3 text-xs text-muted-foreground">
-            {t(
-              "nl2agent.resourceBinding.noPending",
-              "No resources awaiting binding."
-            )}
-          </p>
-        ) : null}
-      </div>
-      {boundItems.length ? (
-        <div
-          role="region"
-          aria-label={t(
-            "nl2agent.resourceBinding.boundResources",
-            "Bound resources"
-          )}
-          className="border-t bg-muted/20"
-        >
-          <button
-            type="button"
-            aria-expanded={boundExpanded}
-            aria-controls={`${cardKey}:bound`}
-            disabled={isInteractionLocked || isBinding}
-            onClick={() => setBoundExpanded((expanded) => !expanded)}
-            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-xs text-muted-foreground hover:bg-muted/40"
-          >
-            <span className="inline-flex items-center gap-2">
-              {t("nl2agent.resourceBinding.boundResources", "Bound resources")}
-              <span className="inline-flex min-w-5 items-center justify-center rounded-full border bg-background px-1 text-[10px] tabular-nums">
-                {boundItems.length}
-              </span>
-            </span>
-            <span className="inline-flex items-center gap-1">
-              {boundExpanded
-                ? t("nl2agent.resourceBinding.collapse", "Collapse")
-                : t("nl2agent.resourceBinding.expand", "Expand")}
-              {boundExpanded ? (
-                <ChevronUp className="size-3" />
-              ) : (
-                <ChevronDown className="size-3" />
-              )}
-            </span>
-          </button>
-          {boundExpanded ? (
-            <div id={`${cardKey}:bound`} className="divide-y px-0">
-              {boundItems.map(renderResource)}
-            </div>
-          ) : null}
-        </div>
+  const bindingFooter = (
+    <footer className="border-t px-4 py-3">
+      {summaryError ? (
+        <p className="mb-3 text-xs text-destructive" role="alert">
+          {summaryError}
+        </p>
       ) : null}
-
-      <div className="border-t px-4 py-3">
-        {summaryError ? (
-          <p className="mb-3 text-xs text-destructive" role="alert">
-            {summaryError}
-          </p>
-        ) : null}
-        <div className="flex flex-wrap justify-end gap-2">
+      {unifiedPayload &&
+      items.some((item) => item.resource.readiness === "not_ready") ? (
+        <p className="mb-2 text-xs text-muted-foreground">
+          {t("nl2agent.unified.fixExisting")}{" "}
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            disabled={isInteractionLocked || isBinding}
+            onClick={() => {
+              aui.thread().append({
+                role: "user",
+                content: [
+                  { type: "text", text: t("nl2agent.unified.refresh") },
+                ],
+                metadata: {
+                  custom: {
+                    nl2agentCardAction: {
+                      type: "nl2agent_card_action",
+                      subtype: "requirement_resources",
+                      agent_id: payload.agent_id,
+                      action: "confirm_requirements",
+                      result: {
+                        card_id: payload.card_id,
+                        state_version: payload.state_version,
+                        requirements: unifiedPayload.requirements.map(
+                          ({ requirement_id, query }) => ({
+                            requirement_id,
+                            query,
+                          })
+                        ),
+                      },
+                    },
+                  },
+                },
+                startRun: true,
+                runConfig: nl2AgentCardRunConfig(
+                  aui.thread().composer().getState().runConfig,
+                  payload.agent_id,
+                  {
+                    onAccepted: () => {
+                      preserveDraft();
+                      submitCard(cardKey);
+                    },
+                    onRejected: () =>
+                      setSummaryError(t("nl2agent.coverage.submitFailed")),
+                  }
+                ),
+              });
+            }}
+          >
+            {t("nl2agent.unified.refresh")}
+          </Button>
+        </p>
+      ) : null}
+      {unifiedPayload && !canContinue ? (
+        <p role="status" className="mb-2 text-xs text-muted-foreground">
+          {t("nl2agent.unified.continueBlocked")}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           {canRetryGeneration ? (
-            <Button disabled={disabled} onClick={retryGeneration}>
+            <Button
+              size="sm"
+              className="h-7 px-2.5 py-0 text-xs"
+              disabled={disabled}
+              onClick={retryGeneration}
+            >
               {t(
                 "nl2agent.resourceBinding.retryGeneration",
                 "Retry Prompt generation"
@@ -932,17 +941,28 @@ export const InstalledResourceBindingCard: FC<{
             </Button>
           ) : null}
           <Button
+            size="sm"
+            className="h-7 gap-1.5 px-2.5 py-0 text-xs [&_svg]:size-3.5"
             disabled={
               isInteractionLocked ||
               isBinding ||
               isSynchronizing ||
+              (knowledgeQuery.isFetching &&
+                selectedItems.some(
+                  (item) =>
+                    !item.knowledgeEdited &&
+                    knowledgeToolName(
+                      item.resource.candidate,
+                      item.resource.candidate.resource_type === "tool"
+                        ? findBindingTool(item, availableTools)
+                        : undefined
+                    )
+                )) ||
               pendingSelected.length === 0
             }
             onClick={bindSelected}
           >
-            {isBinding ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : null}
+            {isBinding ? <Loader2 className="animate-spin" /> : null}
             {items.some((item) => item.bindingStatus === "failed") ? (
               t("nl2agent.resourceBinding.retry", "Retry failed")
             ) : (
@@ -953,25 +973,277 @@ export const InstalledResourceBindingCard: FC<{
             )}
           </Button>
           <Button
-            className="disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+            size="sm"
+            className="h-7 gap-1.5 px-2.5 py-0 text-xs disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 [&_svg]:size-3.5"
             disabled={
               canRetryGeneration ||
-              isLocked ||
+              isInteractionLocked ||
               !canContinue ||
               isSynchronizing ||
               loadingConfigRef !== null
             }
             onClick={continueFlow}
           >
-            {isSynchronizing ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : null}
-            {selectedItems.length === 0
+            {isSynchronizing ? <Loader2 className="animate-spin" /> : null}
+            {!unifiedPayload && selectedItems.length === 0
               ? t("nl2agent.resourceBinding.skip", "Skip")
               : t("nl2agent.resourceBinding.continue", "Continue")}
           </Button>
         </div>
       </div>
+    </footer>
+  );
+  return (
+    <section className="my-4 overflow-hidden rounded-2xl border border-border bg-white text-foreground shadow-sm dark:bg-card">
+      {unifiedPayload ? (
+        <RequirementCoverageCard
+          payload={unifiedPayload}
+          disabled={disabled}
+          binding={{
+            busy:
+              isBinding ||
+              loadingConfigRef !== null ||
+              configuringRef !== null ||
+              isSynchronizing,
+            footer:
+              unifiedPayload.purpose === "recommend" ? (
+                <footer className="flex justify-end border-t px-4 py-3">
+                  <Button
+                    size="sm"
+                    disabled={isInteractionLocked}
+                    onClick={() => {
+                      const action: Nl2AgentCardAction = {
+                        type: "nl2agent_card_action",
+                        subtype: "requirement_resources",
+                        agent_id: payload.agent_id,
+                        action: "use_recommendation",
+                        result: {
+                          card_id: payload.card_id,
+                          state_version: payload.state_version,
+                        },
+                      };
+                      aui.thread().append({
+                        role: "user",
+                        content: [
+                          { type: "text", text: t("nl2agent.coverage.use") },
+                        ],
+                        metadata: { custom: { nl2agentCardAction: action } },
+                        startRun: true,
+                        runConfig: nl2AgentCardRunConfig(
+                          aui.thread().composer().getState().runConfig,
+                          payload.agent_id,
+                          {
+                            onAccepted: () => {
+                              preserveDraft();
+                              submitCard(cardKey);
+                            },
+                            onRejected: () =>
+                              setSummaryError(
+                                t("nl2agent.coverage.submitFailed")
+                              ),
+                          }
+                        ),
+                      });
+                    }}
+                  >
+                    {t("nl2agent.coverage.use")}
+                  </Button>
+                </footer>
+              ) : (
+                bindingFooter
+              ),
+            onEditingChange: setRequirementEditing,
+            onResourceBusyChange: setResourceOperationBusy,
+            onAccepted: preserveDraft,
+            status: (id) => {
+              const row = unifiedPayload.requirements.find(
+                (entry) => entry.requirement_id === id
+              );
+              const candidates = items.filter((item) =>
+                row?.covered_resources.some(
+                  (resource) => resource.candidate_ref === candidateRef(item)
+                )
+              );
+              if (
+                candidates.some(
+                  (item) =>
+                    item.bindingStatus === "bound" && hasValidKnowledge(item)
+                )
+              )
+                return "ready";
+              if (
+                candidates.some((item) =>
+                  (selections[id] ?? []).includes(candidateRef(item))
+                )
+              )
+                return "pending";
+              return row &&
+                (row.covered_resources.length ||
+                  row.installable_resources.length)
+                ? "choose"
+                : "unmatched";
+            },
+            renderResources: (id) => (
+              <div className="overflow-hidden rounded-xl border divide-y">
+                {unifiedPayload.requirements
+                  .find((row) => row.requirement_id === id)
+                  ?.covered_resources.map((resource) => {
+                    const item = items.find(
+                      (entry) => candidateRef(entry) === resource.candidate_ref
+                    );
+                    if (!item) return null;
+                    const owner = unifiedPayload.requirements.find((row) =>
+                      row.covered_resources.some(
+                        (entry) =>
+                          entry.candidate_ref === resource.candidate_ref
+                      )
+                    );
+                    return (
+                      <div key={resource.candidate_ref}>
+                        {unifiedPayload.purpose === "recommend" ? (
+                          <div className="px-3 py-2 text-xs">
+                            <p
+                              className="font-medium"
+                            >
+                              {item.resource.candidate.name}{" "}
+                              <span className="font-normal text-muted-foreground">
+                                {item.resource.candidate.resource_type ===
+                                "skill"
+                                  ? "Skill"
+                                  : item.resource.candidate.source ===
+                                      "MCP_TOOL"
+                                    ? "MCP"
+                                    : "Local"}
+                                {typeof resource.retrieval_score === "number"
+                                  ? ` · ${Math.round(resource.retrieval_score * 100)}`
+                                  : ""}
+                              </span>
+                            </p>
+                            <p className="mt-1 text-muted-foreground">
+                              {item.resource.candidate.description}
+                            </p>
+                          </div>
+                        ) : (
+                          renderResource(item, id, resource.retrieval_score)
+                        )}
+                        {owner && owner.requirement_id !== id ? (
+                          <p className="px-4 pb-2 text-[11px] text-muted-foreground">
+                            {t("nl2agent.unified.shared", {
+                              query: owner.query,
+                            })}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+              </div>
+            ),
+          }}
+        />
+      ) : (
+        <>
+          <div className="flex items-center gap-3 border-b px-4 py-3.5">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <Link2 className="size-4" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">
+                {t("nl2agent.resourceBinding.title", "Resource binding")}
+              </h3>
+              <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                {t(
+                  "nl2agent.resourceBinding.description",
+                  "Select relevant installed resources, configure them, then bind them together."
+                )}
+              </p>
+            </div>
+          </div>
+          <div
+            role="region"
+            aria-label={t(
+              "nl2agent.resourceBinding.pendingResources",
+              "Resources to bind"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-muted-foreground">
+              <span>
+                {t(
+                  "nl2agent.resourceBinding.pendingResources",
+                  "Resources to bind"
+                )}{" "}
+                <span className="ml-1 tabular-nums">{pendingItems.length}</span>
+              </span>
+              <span aria-live="polite">
+                {t("nl2agent.resourceBinding.selectedCountLabel", "Selected")}{" "}
+                <span className="tabular-nums">{pendingSelected.length}</span>{" "}
+                {t("nl2agent.resourceBinding.itemsUnit", "items")}
+              </span>
+            </div>
+            <div className="divide-y">
+              {pendingItems.map((item) => renderResource(item))}
+            </div>
+            {!pendingItems.length ? (
+              <p className="px-4 pb-3 text-xs text-muted-foreground">
+                {t(
+                  "nl2agent.resourceBinding.noPending",
+                  "No resources awaiting binding."
+                )}
+              </p>
+            ) : null}
+          </div>
+          {boundItems.length ? (
+            <div
+              role="region"
+              aria-label={t(
+                "nl2agent.resourceBinding.boundResources",
+                "Bound resources"
+              )}
+              className="border-t bg-muted/20"
+            >
+              <button
+                type="button"
+                aria-expanded={boundExpanded}
+                aria-controls={`${cardKey}:bound`}
+                disabled={isInteractionLocked || isBinding}
+                onClick={() => setBoundExpanded((expanded) => !expanded)}
+                className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-xs text-muted-foreground hover:bg-muted/40"
+              >
+                <span className="inline-flex items-center gap-2">
+                  {t(
+                    "nl2agent.resourceBinding.boundResources",
+                    "Bound resources"
+                  )}
+                  <span className="inline-flex min-w-5 items-center justify-center rounded-full border bg-background px-1 text-[10px] tabular-nums">
+                    {boundItems.length}
+                  </span>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  {boundExpanded
+                    ? t("nl2agent.resourceBinding.collapse", "Collapse")
+                    : t("nl2agent.resourceBinding.expand", "Expand")}
+                  {boundExpanded ? (
+                    <ChevronUp className="size-3" />
+                  ) : (
+                    <ChevronDown className="size-3" />
+                  )}
+                </span>
+              </button>
+              {boundExpanded ? (
+                <div id={`${cardKey}:bound`} className="divide-y px-0">
+                  {boundItems.map((item) => renderResource(item))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      )}
+      {!unifiedPayload && disabled ? (
+        <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+          {t("nl2agent.unified.legacy")}
+        </p>
+      ) : !unifiedPayload ? (
+        bindingFooter
+      ) : null}
 
       {toolForDialog &&
       configuringItem &&

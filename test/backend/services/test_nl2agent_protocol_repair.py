@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from management.services.agent.creation import build_nl2agent_system_prompt
-from services import nl2agent_service as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
+from management.services.agent import nl2agent as service
+from management.services.agent import nl2agent_tools as tools
 
 FIELD = "enable_protocol_repair_retry"
 
@@ -27,7 +27,7 @@ def test_explicit_boolean_patch_preserves_false_and_unrelated_fields(mocker, val
 @pytest.mark.parametrize("value", [None, "true", "false", "yes", 0, 1, [], {}])
 @pytest.mark.asyncio
 async def test_invalid_policy_never_authorizes_or_writes(mocker, value):
-    auth = mocker.patch.object(tools, "get_current_user_id")
+    auth = mocker.patch.object(tools, "authenticate_identity")
     update = mocker.patch.object(service, "update_agent_draft_fields")
     mocker.patch.object(tools, "_resolve_agent_context_id", return_value=42)
     result = await tools.save_agent_draft_fields(42, {FIELD: value})
@@ -57,7 +57,7 @@ async def test_verified_state_includes_effective_policy(mocker, draft, expected)
 def authorized_tool(mocker):
     mocker.patch.object(tools, "_resolve_agent_context_id", return_value=42)
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={"Authorization": "Bearer test"}))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("user", "tenant"))
+    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="user", tenant_id="tenant"))
     mocker.patch.object(service, "require_agent_draft_edit", return_value={"name": "test_assistant"})
 
 
@@ -137,8 +137,8 @@ def test_policy_preparation_does_not_confirm_full_generation_requirements(langua
     prompt = build_nl2agent_system_prompt(language)
     assert ("策略写入只是准备动作，不构成需求确认" in prompt
             or "only a preparatory action, not confirmation of requirements" in prompt)
-    assert ("策略保存成功后的下一个业务动作必须输出澄清卡" in prompt
-            or "next business action after policy persistence MUST produce a clarification card" in prompt)
+    assert ("完整创建仍须等待用户确认需求卡" in prompt
+            or "full generation still requires the user to confirm the requirements card" in prompt)
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])

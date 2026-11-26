@@ -78,7 +78,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 
 # Stub management.utils.serialization to satisfy imports in management.db.agent.repository
 str_utils_mock = MagicMock()
@@ -105,14 +105,16 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # 将模拟的client模块添加到sys.modules中
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # 模拟db_models模块
 # First, try to import real classes before mocking (if possible)
@@ -165,6 +167,7 @@ def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
 class MockAgent:
     def __init__(self):
         self.agent_id = 1
+        self.agent_core = "smolagents"
         self.name = "test_agent"
         self.display_name = "test_agent"
         self.tenant_id = "tenant1"
@@ -1091,8 +1094,8 @@ def test_update_related_agents_delete_existing(monkeypatch, mock_session):
     mock_filter2 = MagicMock()
     mock_filter2.update = mock_update
 
-    # Setup filter chain: first call returns filter1 (for query), subsequent calls return filter2 (for update)
-    query.filter.side_effect = [mock_filter1, mock_filter2]
+    # Query the parent lock first, then existing relations and soft deletion.
+    query.filter.side_effect = [MagicMock(), mock_filter1, mock_filter2]
 
     session.add = MagicMock()
     session.commit = MagicMock()
@@ -1133,8 +1136,8 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
     mock_filter2 = MagicMock()
     mock_filter2.update = mock_update
 
-    # Setup filter chain: first call returns filter1 (for query), subsequent calls return filter2 (for update)
-    query.filter.side_effect = [mock_filter1, mock_filter2]
+    # Query the parent lock first, then existing relations and soft deletion.
+    query.filter.side_effect = [MagicMock(), mock_filter1, mock_filter2]
 
     session.add = MagicMock()
     session.commit = MagicMock()
@@ -1556,7 +1559,7 @@ def test_update_related_agents_with_none_related_agents(monkeypatch, mock_sessio
     mock_filter2 = MagicMock()
     mock_filter2.update = mock_update
 
-    query.filter.side_effect = [mock_filter1, mock_filter2]
+    query.filter.side_effect = [MagicMock(), mock_filter1, mock_filter2]
 
     session.add = MagicMock()
 

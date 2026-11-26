@@ -2,10 +2,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import type { Locator, Response } from "playwright/test";
+import type { Locator, Request, Response } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
+import { waitForTfpRunTransport } from "../../infra/automation/d4/runner/tfp-run-transport";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 
 const execute = promisify(execFile);
@@ -37,12 +38,14 @@ journey("TFP-D4-001", async (context) => {
   const completed: Array<{ conversation: number; promoted: boolean; title: string }> = [];
   const recordings: Promise<void>[] = [];
   let recordingError: unknown;
-  let pending: { prompt: string; promoted: boolean } | undefined;
+  let pending: { prompt: string; promoted: boolean; request?: Request } | undefined;
   const recordResponse = (response: Response) => {
     const request = response.request();
     if (!pending || request.method() !== "POST" || !new URL(response.url()).pathname.endsWith("/api/agent/run")) return;
     const body = request.postDataJSON();
     if (body?.query !== pending.prompt || body?.agent_id !== owned.agent_id) return;
+    if (!response.ok() || !response.headers()["content-type"]?.includes("text/event-stream")) return;
+    pending.request = request;
     const promoted = pending.promoted;
     // Register the server ID as soon as the real run response arrives, even
     // when ChatPage's next DOM assertion fails or the stream is cancelled.
@@ -121,15 +124,26 @@ journey("TFP-D4-001", async (context) => {
     await page.getByRole("dialog").getByRole("button", { name: "执行模式", exact: true }).click();
     await expect(mode).toHaveAttribute("aria-expanded", "false");
     await expect(mode).toHaveText("执行模式");
-    pending = { prompt: `Execute controlled TFP ${promoted ? "promotion" : "cold"} verification.`, promoted };
-    await chat.startMessage(pending.prompt);
-    await Promise.all(recordings);
-    if (recordingError) throw recordingError;
-    expect(recordings).toHaveLength(promoted ? 2 : 1);
+    const attempt: NonNullable<typeof pending> = {
+      prompt: `Execute controlled TFP ${promoted ? "promotion" : "cold"} verification.`, promoted,
+    };
+    pending = attempt;
+    let verifiedAfterAbort: Awaited<ReturnType<typeof inspect>> | undefined;
+    await waitForTfpRunTransport(page, async () => {
+      await chat.startMessage(attempt.prompt);
+      await Promise.all(recordings);
+      if (recordingError) throw recordingError;
+      expect(recordings).toHaveLength(promoted ? 2 : 1);
+      if (!attempt.request) throw new Error("The accepted Agent run request was not recorded");
+      return attempt.request;
+    }, async () => {
+      verifiedAfterAbort = await inspect(chat.currentConversationId(), promoted);
+    });
     const conversation = chat.currentConversationId();
-    await chat.waitForCompletion();
+    await expect(chat.assistantMessages().last()).toContainText(/已完成|Completed/i);
+    await expect(page.locator("button:has(svg.lucide-square)")).toHaveCount(0);
     await visible(promoted);
-    const result = await inspect(conversation, promoted);
+    const result = verifiedAfterAbort ?? await inspect(conversation, promoted);
     if (promoted) await download(result.artifact);
     const title = `TFP-${owned.nonce}-${promoted ? "promoted" : "cold"}`;
     const renamed = await page.request.post("/api/conversation/rename", { data: { conversation_id: conversation, name: title } });

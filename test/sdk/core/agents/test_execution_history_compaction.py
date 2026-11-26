@@ -27,7 +27,9 @@ def summary_model(**kwargs):
 
 def item(fields, **kwargs):
     return ContextItem.from_input(ContextItemInput(id='action', type='current_action', content={
-        'assistant_output': '<code>print(result)</code>', 'execution_fields': fields, **kwargs,
+        'assistant_output': '<code>print(result)</code>',
+        'tool_calls': [{'name': 'python_interpreter', 'arguments': 'print(result)'}],
+        'execution_fields': fields, **kwargs,
     }))
 
 
@@ -38,17 +40,17 @@ def text(messages):
 @pytest.mark.parametrize('value', ['0', 'False', '[]', ''])
 def test_ac002_values_are_not_dropped_or_given_guessed_types(value):
     rendered = text(ContextItemRenderer().render([item({'RETURN_VALUE': value})]))
-    assert f'<RETURN_VALUE>{value}</RETURN_VALUE>' in rendered
+    assert f'recorded_result:\n{value}' in rendered
     assert 'type=' not in rendered
     assert rendered.count('print(result)') == 1
-    assert 'completed_action_history' not in rendered
+    assert rendered.count('<completed_action_history ') == 1
     assert 'index:' not in rendered
 
 
 def test_ac003_partial_output_and_error_are_escaped_and_preserved():
     rendered = text(ContextItemRenderer().render([item({'STDOUT':'partial <data>', 'ERROR':'timeout & retry'})]))
-    assert '<STDOUT>partial &lt;data&gt;</STDOUT>' in rendered
-    assert '<ERROR>timeout &amp; retry</ERROR>' in rendered
+    assert 'outcome:\npartial &lt;data&gt;' in rendered
+    assert 'recorded_error:\ntimeout &amp; retry' in rendered
 
 
 def test_ac001_compact_replaces_output_not_appends():
@@ -134,6 +136,47 @@ def test_ac015_reference_cannot_move_or_collide():
     with pytest.raises(ValueError):store.bind(key,5,3)
     other=store.register('owner',{'STDOUT':'different'})
     with pytest.raises(ValueError):store.bind(other,5,2)
+
+
+@pytest.mark.parametrize("message,index,value,error", [
+    (True, 0, "original", ValueError),
+    (0, 0, "original", ValueError),
+    (5, True, "original", ValueError),
+    (5, -1, "original", ValueError),
+    (5, 0, None, ValueError),
+    (5, 0, "conflicting", PermissionError),
+])
+def test_ac010_restore_batch_is_atomic_when_a_reference_is_invalid(message, index, value, error):
+    store = ExecutionHistory()
+    store.restore_results("owner", [(5, 0, "original")])
+    with pytest.raises(error):
+        store.restore_results("owner", [(6, 0, "must not be committed"), (message, index, value)])
+    assert json.loads(store.read("owner", "message:5/unit-index:0"))["text"] == "original"
+    with pytest.raises(PermissionError):
+        store.read("owner", "message:6/unit-index:0")
+
+
+def test_ac010_conflicting_results_in_one_restore_batch_are_not_committed():
+    store = ExecutionHistory()
+    with pytest.raises(PermissionError, match="Conflicting persisted execution reference"):
+        store.restore_results("owner", [(5, 0, "first"), (5, 0, "second")])
+    with pytest.raises(PermissionError):
+        store.read("owner", "message:5/unit-index:0")
+
+
+def test_ac010_restore_cannot_override_a_bound_current_execution():
+    store, key = bound_history({"STDOUT": "original"})
+    with pytest.raises(PermissionError, match="Conflicting persisted execution reference"):
+        store.restore_results("owner", [(5, 2, "forged")])
+    store.restore_results("owner", [(5, 2, store.get(key).text)])
+    assert json.loads(store.read("owner", "message:5/unit-index:2"))["text"] == store.get(key).text
+
+
+def test_ac001_committed_model_view_is_included_in_execution_payload():
+    store, key = bound_history()
+    record = store.get(key)
+    record.model_view = {"preview": "committed preview"}
+    assert record.payload() == {"content": record.text, "model_view": {"preview": "committed preview"}}
 
 
 def test_ac005_selected_action_compacts_and_ac009_recent_loaded_stays_full():
@@ -249,8 +292,8 @@ def test_ac014_structured_summary_content_and_no_savings_are_handled():
 
 def runtime_agent(prompt_templates=None):
     from smolagents.models import Model
-    from nexent.core.agents.core_agent import CoreAgent
-    from nexent.core.agents.context.runtime import ManagedContextRuntime
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+    from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
     from nexent.core.utils.observer import MessageObserver
 
     class UnitModel(Model):
@@ -295,7 +338,7 @@ def test_ac003_runtime_result_contract_requires_actual_execution_before_final_an
     assert 'Only the runtime emits CODE_EXEC_RESULT, SUMMARIED_RESULT and OUTPUT_REF tags' in contract
     assert 'do not generate these records yourself' in contract
     assert 'wait for the actual execution result' in contract
-    assert 'final answer in a separate response' in contract
+    assert 'the next response must confirm or revise' in contract
 
 
 def test_ac003_ac015_finalize_registers_partial_error_once_and_not_final_answers():
@@ -346,18 +389,21 @@ def test_ac003_legacy_observation_fallback_keeps_masking_and_empty_success(obser
     assert len(observer.execution_history._records) == 1
 
 
-def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs():
+def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs(monkeypatch):
     from smolagents.agents import EMPTY_PROMPT_TEMPLATES
     from smolagents.models import ChatMessage, MessageRole, TokenUsage
     from nexent.core.utils.observer import ProcessType
 
     # Keep prompt cost controlled so the small budget tests reader clipping,
     # independently of the SDK's full default instruction/tool template.
+    # The accepted usage plus new output must fit the hard window before recall.
+    monkeypatch.setattr("nexent.core.agents.prompt.policies.common_behavior_guidance", lambda language="en": "Shared behavior fixture.")
     templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
     templates['system_prompt'] = 'Execute the requested code and return the final answer.'
     agent, observer, runtime, _ = runtime_agent(prompt_templates=templates)
     store = observer.execution_history
     runtime.context_manager.config.effective_input_limit_tokens = 6000
+    runtime.context_manager.config.chars_per_token = 4
     runtime.context_manager.config.policy_layers = {'request': {'processing_mode': 'passthrough'}}
     old_owner = agent._execution_owner
     publish = observer.add_message
@@ -388,7 +434,8 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
         '<final_answer>done</final_answer>',
     ]
     agent.model.generate = Mock(side_effect=[ChatMessage(role=MessageRole.ASSISTANT, content=body,
-        token_usage=TokenUsage(input_tokens=5000, output_tokens=100)) for body in responses])
+        token_usage=TokenUsage(input_tokens=usage, output_tokens=100))
+        for body, usage in zip(responses, (4000, 5000, 5000))])
     assert str(agent.run('Print a report once, read its original range, then finish.', max_steps=3)) == 'done'
     assert agent._execution_owner != old_owner
     assert agent.tools['read_execution_output'].owner == agent._execution_owner
@@ -401,7 +448,9 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
     assert loaded.owner == original.owner == agent._execution_owner
     bounded = [call.kwargs['max_rendered_chars'] for call in store.reset_read_budget.call_args_list
                if 'max_rendered_chars' in call.kwargs]
-    assert len(bounded) == 2 and all(0 < value < 4000 for value in bounded)
+    assert len(bounded) == 2
+    assert bounded[0] > bounded[1] > 0  # Higher second-response usage leaves less reader space.
+    assert bounded[1] < 4000  # The actual recall is clipped, including its rendered wrappers.
     previous_owner = agent._execution_owner
     agent.model.generate = Mock(return_value=ChatMessage(role=MessageRole.ASSISTANT,
                                                         content='<final_answer>fresh run</final_answer>'))

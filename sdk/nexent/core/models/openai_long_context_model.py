@@ -6,7 +6,7 @@ import tiktoken
 from smolagents.models import ChatMessage
 
 from .openai_llm import OpenAIModel
-from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P
+from .sampling import DEFAULT_TEMPERATURE
 from ..utils.observer import MessageObserver
 
 logger = logging.getLogger("openai_long_context_model")
@@ -210,7 +210,7 @@ class LongTextPreparation:
 class OpenAILongContextModel(LongTextPreparation, OpenAIModel):
     """Keep the public model constructor over shared text preparation."""
 
-    def __init__(self, observer: MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
+    def __init__(self, observer: MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=None,
                  max_context_tokens=128000, truncation_strategy="start", ssl_verify=True, *args, **kwargs):
         super().__init__(observer=observer, temperature=temperature, top_p=top_p, ssl_verify=ssl_verify, *args, **kwargs)
         self.initialize_long_text(max_context_tokens, truncation_strategy)

@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-AUTOSCALE-D5-001
+  feature_id: RUNTIME-AUTOSCALING
+  requirement_ids:
+  - RUNTIME-AUTOSCALING-20261105
+  business_rule_ids:
+  - RUNTIME-AUTOSCALING-RULE-02
+  - RUNTIME-AUTOSCALING-RULE-04
+  title: 持续压力触发有界伸缩，断采和维护期间禁止误缩容
+  type: PERFORMANCE
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明真实 HPA/Adapter 的控制结果、边界和固定/自动维护协同；不是静态 Chart 证明。
+  preconditions:
+  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  - 隔离集群中 HPA/Adapter 与周期指标均已实现；基于目标集群测量登记目标值、采集周期、稳定窗口、速率及启动观测预算；未登记时阻塞，不能判通过。
+  test_data:
+    minReplicas: 1
+    maxReplicas: 3
+    target: 本地执行配置中来自测量的每 Pod 目标；本用例同时记录实际值，不把测试参数宣称为通用性能保证。
+    load: 根运行负载足以产生至少 4 个副本的原始建议；确保本地/全局容量及负载生成器允许形成这一已接纳压力。
+    timing: 启动、采集、HPA 同步周期、扩缩速率与稳定窗口由执行配置明确；观测预算至少覆盖对应窗口和实际启动预算。
+  steps:
+  - order: 1
+    action: 从固定 1 切换自动模式，记录 HPA、Deployment 写入来源和指标目标，施加持续压力直到原始建议不少于 4。
+    expected: 只有一个副本控制器，HPA 建议与输入值可复算；实际可用副本按速率扩至 max=3，不超过 3。
+  - order: 2
+    action: 保持指标稳定，再停止接纳新的负载并让原运行收尾，观察完整稳定窗口及速率限制。
+    expected: 窗口内不提前缩容，之后按配置速率回到 min=1；执行/排空效果由排空 Case 另证。
+  - order: 3
+    action: 重新建立高负载扩容，分别断采和提供过期样本，并在故障期移除负载。
+    expected: 缺失或过期指标期间副本不减少，有明确诊断；恢复采集后才按有效样本重新评估。
+  - order: 4
+    action: 进入全停维护，注入一次维护失败并观察 HPA；再完成维护，分别恢复所选自动模式和固定模式。
+    expected: 维护前冻结控制器；失败时业务保持 0，不被 HPA 拉起；成功恢复原选模式，固定模式无 HPA 副本争用。
+  - order: 5
+    action: 关闭自动控制器，按第一阶段全停流程回退固定 1，并清理测试负载、监控和 namespace。
+    expected: 固定模式可运行，测试资源回收，外部集群/存储不受影响。
+  expected_results:
+  - 负载增加/下降触发配置范围和时序内的扩/缩，最大值、速率与稳定窗口生效。
+  - 断采/过期指标不造成缩容；恢复后重新计算。
+  - 维护冻结及固定/自动模式恢复没有副本争用，停机回退与清理成功。
+  forbidden_side_effects:
+  - 固定 replicas 与 HPA 或 KEDA 同时争用 Deployment。
+  - 以缺失/过期值为零缩容，或越过 max/稳定窗口/速率。
+  - 维护失败仍自动拉起业务；自动重放业务或清理外部资源。
+  acceptance:
+  - id: AC-P2-002
+    description: 真实压力控制、上下界、速率、窗口和断采保护。
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 2
+  - id: AC-P2-004
+    description: 维护与固定/自动模式只有一个副本写入者。
+    steps:
+    - 4
+    - 5
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 3
+  tags:
+  - phase-3
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    primary_domain: deployment
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  risk_type: PERFORMANCE
+  risk: 指标错误导致副本振荡、过度扩容或误缩容；HPA 在维护失败时拉起业务。
+  condition:
+  - 真实 HPA/Adapter；持续已接纳根负载、负载下降、断采、过期样本、维护失败与两种模式恢复。
+  metrics:
+  - HPA 当前/期望/原始建议、输入指标及时间戳、Ready 副本时间线、伸缩事件、维护状态和副本写入来源。
+  thresholds:
+  - 正常自动运行 1≤replicas≤3；稳定负载在登记预算内达到受限建议数。
+  - 缩容时间与幅度满足实际配置的窗口/速率；缺失/过期故障期缩容次数=0。
+  - 维护失败期业务 Pod 数=0；自动/固定并发写入者≤1；本次资源泄漏数=0。
+  recovery_expectations:
+  - 采集恢复后依据有效值控制；维护成功后才恢复所选模式；回退固定模式须先关闭自动控制器。

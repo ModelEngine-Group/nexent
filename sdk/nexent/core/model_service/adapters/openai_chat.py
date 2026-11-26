@@ -14,9 +14,10 @@ from nexent.core.model_service.profiles.contracts import VersionedReference
 from nexent.core.model_service.profiles.instruction_mapping import validate_instruction_mapping
 from nexent.core.model_service.profiles.parameter_bindings import validate_parameter_bindings
 from nexent.core.model_service.profiles.parameter_rules import compile_parameter_rules, validate_saved_parameter_values
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
 from nexent.core.model_service.profiles.request_parameters import _set, _tokens, apply_extra_api_parameters
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+from nexent.core.models.sampling import without_unset_sampling
 
 
 class ModelAdapterError(ValueError):
@@ -203,6 +204,8 @@ class OpenAIChatAdapter:
             validate_saved_parameter_values(rules, profile.parameter_values)
             bindings = validate_parameter_bindings(rules, parameter_transform_references())
             for key, binding in bindings.items():
+                if key in {"max_tokens", "max_completion_tokens", "max_output_tokens"}:
+                    continue
                 if key in {"temperature", "top_p"} and (
                     getattr(profile.capabilities.sampling, key).status == "unsupported"
                     or profile.parameter_values.get(key) is None
@@ -212,8 +215,17 @@ class OpenAIChatAdapter:
                     _set(body, _tokens(binding["path"]), transform_parameter(binding, profile.parameter_values[key]),
                          binding["path"])
             body = apply_extra_api_parameters(
-                body, profile.extra_api_parameters, parameter_paths=[binding["path"] for binding in bindings.values()]
+                body, [entry for entry in profile.extra_api_parameters
+                       if entry["path"].split("/")[1] not in
+                       {"max_tokens", "max_completion_tokens", "max_output_tokens"}], parameter_paths=[binding["path"] for binding in bindings.values()]
             )
+            for retired_limit in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+                body.pop(retired_limit, None)
+            try:
+                validate_sampling_parameters(body)
+            except ParameterValidationError as error:
+                raise ModelAdapterError(error.category) from None
+            body = without_unset_sampling(body)
             return PreparedHttpRequest(
                 request_id=request.request_id,
                 method=profile.connection_rules.method,
@@ -226,6 +238,8 @@ class OpenAIChatAdapter:
                 ssl_verify=profile.connection.ssl_verify,
                 stream_protocol="sse" if request.stream else None,
             )
+        except ModelAdapterError:
+            raise
         except (ParameterValidationError, ValueError, TypeError):
             raise ModelAdapterError("MODEL_REQUEST_CONFIGURATION_INVALID") from None
 
@@ -255,14 +269,22 @@ class OpenAIChatAdapter:
             parts = _content_parts(message.get("content"))
             if message.get("audio") is not None:
                 parts.append({"type": "audio", "audio": message["audio"]})
+            usage_diagnostic = {}
+            semantics_id = profile.capabilities.usage.semantics_id
+            try:
+                usage = _usage(body.get("usage"), semantics_id)
+            except ModelAdapterError as error:
+                usage = TokenUsage(semantics_id=semantics_id)
+                usage_diagnostic["usage_diagnostic"] = error.category
             return AssistantMessage(
                 content_parts=parts,
                 reasoning_parts=_content_parts(message.get("reasoning_content")),
                 refusal=message.get("refusal"),
                 tool_calls=[_tool_call(call, index) for index, call in enumerate(calls)],
                 finish_reason=finish,
-                usage=_usage(body.get("usage"), profile.capabilities.usage.semantics_id),
+                usage=usage,
                 provider_metadata={
+                    **usage_diagnostic,
                     "response_id": body.get("id"),
                     "model": body.get("model"),
                     "request_id": request.request_id,

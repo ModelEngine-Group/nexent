@@ -14,39 +14,44 @@ case:
   objective: Verify actual Agent/model/result-store collaboration with Phoenix evidence.
   preconditions:
   - Run the tested source revision in Nexent-Test with real model and Phoenix configured.
-  - Use isolated test conversation and model resources; retain evidence below task
-    worktree.
+  - Use isolated test conversation and model resources; retain evidence below task worktree.
   test_data:
-    legacy_asset_declaration: Deterministic long tool result with a middle sentinel
-      and an error-after-output scenario; no secrets.
+    legacy_asset_declaration: Deterministic long tool result with a middle sentinel and an error-after-output scenario;
+      no secrets.
   steps:
   - order: 1
-    action: Run short and multi-code-block tasks and inspect subsequent real model
-      input.
-    expected: Code appears once, one CODE_EXEC_RESULT follows, false values and partial
+    action: Run short and multi-code-block tasks and inspect subsequent real model input.
+    expected: One assistant read-only completed_action_history contains completed_action, actual tool/input and
+      outcome/recorded_result/recorded_error fields. Code and identical result text appear once, including Docker
+      OUTPUT versus its Python string representation in RETURN_VALUE; false values, distinct returns and partial
       errors remain.
   - order: 2
-    action: Run a long result across the configured context threshold; inspect summary
-      call and repeated assembly.
-    expected: Only selected finished result is summarized once; SUMMARIED_RESULT and
-      real message/unit reference replace full output.
+    action: Run a long result across the configured context threshold; inspect summary call and repeated assembly.
+    expected: Only selected finished result is summarized once; SUMMARIED_RESULT and real message/unit reference
+      replace full output.
   - order: 3
-    action: Ask Agent to recall a middle sentinel using the reference; attempt an
-      unauthorized reference.
-    expected: Read real original text without rerunning original tool; deny unauthorized
-      reference; loaded text reaches next model request.
+    action: Ask Agent to recall a middle sentinel using the reference; attempt an unauthorized reference.
+    expected: Read real original text without rerunning original tool; deny unauthorized reference; loaded text
+      reaches next model request.
   - order: 4
     action: Finish run and inspect stored unit JSON and browser history.
-    expected: Original content and summary preserved; page still shows original code
-      and results.
+    expected: Original content and summary preserved; page still shows original code and results.
   - order: 5
-    action: Inspect Phoenix prompts, tool spans, summary output, latency and final
-      output for all scenarios.
-    expected: No masked raw data returns; record actual source/model/trace IDs and
-      separate missing performance evidence.
+    action: Inspect Phoenix prompts, tool spans, summary output, latency and final output for all scenarios.
+    expected: No masked raw data returns; record actual source/model/trace IDs and separate missing performance
+      evidence.
+  - order: 6
+    action: Complete a CodeAgent step whose interpreter computes a large business-tool argument, then send a second
+      user turn; repeat after accepted post-response summary or preview and with a rejected pre-execution candidate.
+    expected: Authorized persisted history restores the actual dispatched interpreter source and original result
+      or committed compact view exactly once. Expanded business arguments stay in raw storage; uncovered or unproven
+      records remain conservative evidence, rejected code is never promoted to execution, and an irreducible new
+      frame at or above the combined window still fails without an auxiliary request.
   expected_results:
   - Real Agent completes with correct final answer and no repeated side effects.
   - Summary and recall match tested source and persisted execution record.
+  - Cross-turn context retains only proven action coverage and accepted representations while original facts remain
+    authorized and readable.
   forbidden_side_effects:
   - Cross-conversation result access
   - Replacing or deleting original tool results
@@ -56,28 +61,26 @@ case:
   integration_boundary:
   - Actual CoreAgent/provider and result unit storage; real model and Phoenix.
   observations:
-  - Final messages, tool execution count, summary count, recalled sentinel and actual
-    latency.
+  - Final messages, tool execution count, summary count, recalled sentinel and actual latency.
   cleanup:
   - Remove only task test resources after retaining sanitized evidence.
   acceptance:
   - id: AC-01
-    description: Accepted code appears once followed by actual execution evidence,
-      including false values and partial errors.
+    description: Accepted code appears once followed by actual execution evidence, including false values and partial
+      errors.
     steps:
     - 1
     expected_results:
     - 1
   - id: AC-02
-    description: Only selected finished results are summarized once, replacing the
-      full result with a stable reference.
+    description: Only selected finished results are summarized once, replacing the full result with a stable reference.
     steps:
     - 2
     expected_results:
     - 2
   - id: AC-03
-    description: Recall authorized original ranges without rerunning business tools;
-      deny unauthorized references and preserve loaded text for the next request.
+    description: Recall authorized original ranges without rerunning business tools; deny unauthorized references
+      and preserve loaded text for the next request.
     steps:
     - 3
     expected_results:
@@ -86,8 +89,7 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-04
-    description: Persist original content and summary with the real message and unit
-      index; preserve browser history.
+    description: Persist original content and summary with the real message and unit index; preserve browser history.
     steps:
     - 4
     expected_results:
@@ -95,12 +97,25 @@ case:
     forbidden_side_effects:
     - 2
   - id: AC-05
-    description: Inspect Phoenix prompts and results for masking compatibility, observed
-      latency, and the final answer.
+    description: Inspect Phoenix prompts and results for masking compatibility, observed latency, and the final
+      answer.
     steps:
     - 5
     expected_results:
     - 1
     - 2
     forbidden_side_effects:
+    - 3
+  - id: AC-06
+    description: Restore backend-bound completed actions and accepted views across user turns without reinjecting
+      computed argument copies, losing errors, or relaxing the hard guard.
+    steps:
+    - 6
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
     - 3

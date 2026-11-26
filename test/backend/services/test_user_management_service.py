@@ -11,7 +11,7 @@ from management.services.permission.identity.authentication import (
     format_role_permissions, create_token, list_tokens_by_user, delete_token,
 )
 
-from gateway.authentication.auth import get_session_by_authorization
+from management.services.permission.identity.session import get_session_by_authorization
 
 class TestGetProviderUsername(unittest.TestCase):
     """Test provider username lookup for linked OAuth accounts."""
@@ -89,7 +89,7 @@ class TestVerifyInviteCode(unittest.IsolatedAsyncioTestCase):
 class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
     """Test get_session_by_authorization"""
 
-    @patch('gateway.authentication.auth.validate_token')
+    @patch('management.services.permission.identity.session.validate_token')
     async def test_get_session_success(self, mock_validate_token):
         """Test successful session retrieval"""
         mock_user = MagicMock()
@@ -109,7 +109,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(result, expected)
 
-    @patch('gateway.authentication.auth.validate_token')
+    @patch('management.services.permission.identity.session.validate_token')
     async def test_get_session_default_role(self, mock_validate_token):
         """Test session retrieval with default role"""
         mock_user = MagicMock()
@@ -122,7 +122,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["user"]["role"], "user")
 
-    @patch('gateway.authentication.auth.validate_token')
+    @patch('management.services.permission.identity.session.validate_token')
     async def test_get_session_invalid_token(self, mock_validate_token):
         """Test session retrieval with invalid token"""
         mock_validate_token.return_value = (False, None)
@@ -154,7 +154,7 @@ class TestFormatRolePermissions(unittest.TestCase):
         result = format_role_permissions(permissions)
 
         assert result["permissions"] == ["agent:create", "agent:read"]
-        assert result["accessibleRoutes"] == []
+        assert result["accessiblePages"] == []
 
     def test_format_role_permissions_lowercases_mixed_case_types(self):
         """Test formatting normalizes uppercase permission types to lower-case"""
@@ -174,7 +174,7 @@ class TestFormatRolePermissions(unittest.TestCase):
         result = format_role_permissions(permissions)
 
         assert result["permissions"] == ["kb.capacity:read", "kb:create"]
-        assert result["accessibleRoutes"] == []
+        assert result["accessiblePages"] == []
 
     def test_format_role_permissions_LEFT_NAV_MENU_only(self):
         """Test formatting with only LEFT_NAV_MENU permissions"""
@@ -192,7 +192,7 @@ class TestFormatRolePermissions(unittest.TestCase):
         result = format_role_permissions(permissions)
 
         assert result["permissions"] == []
-        assert result["accessibleRoutes"] == ["chat", "agents"]
+        assert result["accessiblePages"] == ["chat", "agents"]
 
     def test_format_role_permissions_mixed(self):
         """Test formatting with mixed permission types"""
@@ -216,7 +216,7 @@ class TestFormatRolePermissions(unittest.TestCase):
         result = format_role_permissions(permissions)
 
         assert result["permissions"] == ["agent:create"]
-        assert result["accessibleRoutes"] == ["chat"]
+        assert result["accessiblePages"] == ["chat"]
 
     def test_format_role_permissions_empty(self):
         """Test formatting with empty permissions list"""
@@ -225,7 +225,7 @@ class TestFormatRolePermissions(unittest.TestCase):
         result = format_role_permissions(permissions)
 
         assert result["permissions"] == []
-        assert result["accessibleRoutes"] == []
+        assert result["accessiblePages"] == []
 
     def test_format_role_permissions_missing_fields(self):
         """Test formatting with missing fields"""
@@ -244,7 +244,7 @@ class TestFormatRolePermissions(unittest.TestCase):
         result = format_role_permissions(permissions)
 
         assert result["permissions"] == []
-        assert result["accessibleRoutes"] == []
+        assert result["accessiblePages"] == []
 
 
 class TestCreateToken(unittest.IsolatedAsyncioTestCase):
@@ -438,7 +438,7 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
 
         mock_format_permissions.return_value = {
             "permissions": ["agent:create"],
-            "accessibleRoutes": ["chat"]
+            "accessiblePages": ["chat"]
         }
 
         # Execute
@@ -452,7 +452,7 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
         assert result["user"]["user_email"] == "test@example.com"
         assert result["user"]["user_role"] == "ADMIN"
         assert result["user"]["permissions"] == ["agent:create"]
-        assert result["user"]["accessibleRoutes"] == ["chat"]
+        assert result["user"]["accessiblePages"] == ["chat"]
 
         mock_get_user_tenant.assert_called_once_with("test_user")
         mock_query_group_ids.assert_called_once_with("test_user")
@@ -501,8 +501,8 @@ class TestAssetOwnerUserManagementtest_format_role_permissions_excludes_asset_ow
             },
         ]
         result = format_role_permissions(permissions)
-        assert ASSET_OWNER_RESOURCES_ROUTE not in result["accessibleRoutes"]
-        assert "/home" in result["accessibleRoutes"]
+        assert ASSET_OWNER_RESOURCES_ROUTE not in result["accessiblePages"]
+        assert "/home" in result["accessiblePages"]
 
 
 class TestAssetOwnerUserManagementtest_get_user_info_resolves_asset_owner_virtual_tenant(unittest.IsolatedAsyncioTestCase):

@@ -6,13 +6,15 @@ import sys
 import types
 from unittest.mock import patch
 
+import pytest
+
 # Mock storage client factory and MinIO config before any imports that would initialize MinIO
 from unittest.mock import MagicMock
 storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-# Note: management.db.client.MinioClient patch is handled later with full module stubs
+# Note: infrastructure.object_storage.client.MinioClient patch is handled later with full module stubs
 # Skipping the direct patch here since we stub the entire backend.database module
 
 # Mock boto3 before any imports
@@ -30,6 +32,7 @@ def _stub_nexent_openai_model():
             self.generated = messages
             return types.SimpleNamespace(content="The Title")
     mod.OpenAIModel = Stub
+    mod.OpenAILongContextModel = Stub
     sys.modules["nexent.core.models"] = mod
 
 _stub_nexent_openai_model()
@@ -37,19 +40,19 @@ _stub_nexent_openai_model()
 # Exercise the real Jinja renderer used by SDK prompt assembly.
 import jinja2
 
-# Stub nexent.core.agents.agent_model to satisfy imports in contracts.agent and agent_run_manager
-agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+# Stub nexent.core.agents.contracts.config to satisfy imports in contracts.agent and agent_run_manager
+agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
-sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
-# Stub nexent.core.agents.agent_context for agent_run_manager import
-agent_context_mod = types.ModuleType("nexent.core.agents.agent_context")
+# Stub nexent.core.agents.context for agent_run_manager import
+agent_context_mod = types.ModuleType("nexent.core.agents.context")
 agent_context_mod.ContextManager = object
 agent_context_mod.ContextManagerConfig = object
-sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
+sys.modules["nexent.core.agents.context"] = agent_context_mod
 
 # Stub management.services.agent.lifecycle to avoid importing the real module
 agent_run_manager_mod = types.ModuleType("management.services.agent.lifecycle")
@@ -134,8 +137,8 @@ class HistoryItem:
 
 consts_model_mod.HistoryItem = HistoryItem
 
-# Stub management.db.client to avoid import-time DB helpers
-db_client_stub = types.ModuleType("management.db.client")
+# Stub infrastructure.rdb.client to avoid import-time DB helpers
+db_client_stub = types.ModuleType("infrastructure.rdb.client")
 db_client_stub.as_dict = lambda obj: {}
 
 # Minimal dummy db_client with clean_string_values and session_maker to satisfy imports.
@@ -160,11 +163,12 @@ class _DummySessionCM:
         return False
 
 db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
-sys.modules["management.db.client"] = db_client_stub
+sys.modules["infrastructure.rdb.client"] = db_client_stub
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Stub management.services.agent.prompt to avoid requiring PyYAML
 prompt_mod = types.ModuleType("management.services.agent.prompt")
@@ -182,15 +186,16 @@ class _DummyMinIOStorageConfig:
 minio_config_mod.MinIOStorageConfig = _DummyMinIOStorageConfig
 sys.modules["nexent.storage.minio_config"] = minio_config_mod
 
-# Stub backend.database module so patch can find management.db.client
+# Stub backend.database module so patch can find infrastructure.rdb.client
 backend_database_mod = types.ModuleType("backend.database")
 
-# Create management.db.client stub
+# Create infrastructure.rdb.client stub
 backend_database_client_mod = db_client_stub
 backend_database_client_mod.MinioClient = lambda *a, **k: minio_client_mock
-sys.modules["management.db.client"] = backend_database_client_mod
+sys.modules["infrastructure.rdb.client"] = backend_database_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 # Add 'client' attribute to backend.database module
 backend_database_mod.client = backend_database_client_mod
 
@@ -218,6 +223,7 @@ from management.services.conversation.service import (
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
+        branch_conversation_service,
         get_conversation_service,
         rename_conversation_service,
         delete_conversation_service,
@@ -388,33 +394,18 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(save_source_search(search_data, user_id="u"), 7)
         mock_create_source_search.assert_called_once_with(search_data, user_id="u")
 
-    @patch('management.services.conversation.service.save_message')
-    def test_save_conversation_user(self, mock_save_message):
-        """User messages only create a message row, no unit records are created."""
-        mock_save_message.return_value = 999
+    @patch('management.services.conversation.service.append_conversation_user_message')
+    def test_save_conversation_user(self, mock_append):
+        """User messages use the database-reserved pair and create no unit records."""
+        mock_append.return_value = (999, 2)
         agent_request = AgentRequest(
-            conversation_id=123,
-            query="What is machine learning?",
-            minio_files=[],
-            history=[
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"}
-            ]
+            conversation_id=123, query="What is machine learning?", minio_files=[],
+            history=[{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there"}],
         )
-
-        # Execute
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
-
-        # Assert: save_message is called exactly once (no unit records for user messages)
-        mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.conversation_id, 123)
-        # Based on 1 user message in history
-        self.assertEqual(request_arg.message_idx, 2)
-        self.assertEqual(request_arg.role, "user")
-        self.assertEqual(request_arg.message[0].type, "string")
-        self.assertEqual(
-            request_arg.message[0].content, "What is machine learning?")
+        mock_append.assert_called_once_with(123, "What is machine learning?", [], self.user_id)
+        self.assertEqual(agent_request._runtime_user_message_id, 999)
+        self.assertEqual(agent_request._runtime_user_message_index, 2)
 
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
@@ -429,10 +420,10 @@ class TestConversationManagementService(unittest.TestCase):
             save_conversation_assistant(
                 agent_request, [], self.user_id, self.tenant_id)
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_strips_runtime_time_marker(self, mock_save_message):
         """Remove the appended runtime time marker before persisting the user request."""
-        mock_save_message.return_value = 1001
+        mock_save_message.return_value = (1001, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="What is the weather?\n\n[Current time: 2026-01-01 20:00:00]",
@@ -443,13 +434,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "What is the weather?")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "What is the weather?")
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_without_prefix_unchanged(self, mock_save_message):
         """When query has no [Current time: ...] prefix, it should be persisted as-is."""
-        mock_save_message.return_value = 1002
+        mock_save_message.return_value = (1002, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="What is machine learning?",
@@ -460,13 +451,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "What is machine learning?")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "What is machine learning?")
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_empty_query(self, mock_save_message):
         """When query is empty, it should be persisted as-is without errors."""
-        mock_save_message.return_value = 1003
+        mock_save_message.return_value = (1003, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="",
@@ -477,13 +468,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "")
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_malformed_prefix_no_bracket(self, mock_save_message):
         """When query has [Current time: prefix but no closing bracket, persist as-is."""
-        mock_save_message.return_value = 1004
+        mock_save_message.return_value = (1004, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="[Current time: no closing bracket here",
@@ -494,15 +485,16 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "[Current time: no closing bracket here")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
         # Setup
         mock_get_model_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://example.com",
@@ -514,24 +506,20 @@ class TestConversationManagementService(unittest.TestCase):
         )
         mock_get_prompt_template.return_value = mock_prompt_template
 
-        mock_llm_instance = mock_openai.return_value
-        mock_response = MagicMock()
-        mock_response.content = "AI Discussion"
-        mock_llm_instance.return_value = mock_response
+        mock_openai.return_value = "AI Discussion"
 
         # Execute
-        result = call_llm_for_title(
-            "What is AI? AI stands for Artificial Intelligence.", tenant_id=self.tenant_id)
+        result = asyncio.run(call_llm_for_title(
+            "What is AI? AI stands for Artificial Intelligence.", tenant_id=self.tenant_id, user_id="actor"))
 
         # Assert
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
-        mock_llm_instance.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(
             'zh', 'chat_title', {'question': 'What is AI? AI stands for Artificial Intelligence.'}
         )
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     @patch('management.services.conversation.service.get_model_by_model_id')
@@ -545,10 +533,10 @@ class TestConversationManagementService(unittest.TestCase):
         }
         mock_get_model.return_value = selected_config
         mock_get_prompt.return_value = types.SimpleNamespace(system="Generate a short title", user="Question")
-        mock_adapter.return_value.return_value = MagicMock(content="Selected title")
+        mock_adapter.return_value = "Selected title"
 
         with self.assertLogs("conversation_management_service", level="INFO") as logs:
-            result = call_llm_for_title("Question", self.tenant_id, "en", model_id=7)
+            result = asyncio.run(call_llm_for_title("Question", self.tenant_id, "en", model_id=7, user_id="actor"))
 
         self.assertEqual(result, "Selected title")
         self.assertIn(
@@ -557,35 +545,30 @@ class TestConversationManagementService(unittest.TestCase):
         )
         mock_get_model.assert_called_once_with(7, self.tenant_id)
         mock_get_default_model.assert_not_called()
-        mock_adapter.assert_called_once_with(
-            selected_config,
-            self.tenant_id,
-            temperature=0.7,
-            top_p=0.95,
-            stream=False,
-            timeout_seconds=None,
-            display_name="Selected LLM",
-        )
+        mock_adapter.assert_awaited_once()
+        sent = mock_adapter.await_args.kwargs
+        self.assertEqual((sent["model_id"], sent["tenant_id"], sent["user_id"]), (7, self.tenant_id, "actor"))
+        self.assertEqual((sent["options"].temperature, sent["options"].top_p), (0.7, 0.95))
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_rejects_unavailable_selected_model(
             self, mock_get_model, mock_adapter):
         mock_get_model.return_value = None
 
         with self.assertRaisesRegex(ValidationError, "Selected model is unavailable"):
-            call_llm_for_title("Question", self.tenant_id, model_id=7)
+            asyncio.run(call_llm_for_title("Question", self.tenant_id, model_id=7, user_id="actor"))
 
         mock_adapter.assert_not_called()
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_rejects_non_llm_selected_model(
             self, mock_get_model, mock_adapter):
         mock_get_model.return_value = {"model_id": 7, "model_type": "embedding"}
 
         with self.assertRaisesRegex(ValidationError, "Selected model is not an LLM model"):
-            call_llm_for_title("Question", self.tenant_id, model_id=7)
+            asyncio.run(call_llm_for_title("Question", self.tenant_id, model_id=7, user_id="actor"))
 
         mock_adapter.assert_not_called()
 
@@ -808,7 +791,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_delete_conversation.return_value = True
 
         # Execute
-        delete_conversation_service(123, self.user_id)
+        asyncio.run(delete_conversation_service(123, self.user_id, "tenant-1"))
 
         # Assert
         mock_delete_conversation.assert_called_once_with(123, self.user_id)
@@ -1154,7 +1137,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
-            "How to use Python effectively?", self.tenant_id, "en", None)
+            "How to use Python effectively?", self.tenant_id, "en", None, user_id=self.user_id)
         mock_update_title.assert_called_once_with(
             123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "title_version": 0})
 
@@ -1171,7 +1154,7 @@ class TestConversationManagementService(unittest.TestCase):
 
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
-            "How to use Python?", self.tenant_id, "en", 7)
+            "How to use Python?", self.tenant_id, "en", 7, user_id=self.user_id)
         mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "title_version": 0})
 
     @patch('management.services.conversation.service.get_conversation', return_value={"conversation_title": "New Conversation", "title_version": 0})
@@ -1188,44 +1171,54 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_title.assert_not_called()
 
 
+    @patch("management.services.conversation.service.get_conversation", return_value=None)
+    @patch("management.services.conversation.service.call_llm_for_title")
+    def test_title_generation_requires_owned_conversation(self, model, lookup):
+        from contracts.errors.exceptions import ConversationNotFoundError
+
+        with self.assertRaises(ConversationNotFoundError):
+            asyncio.run(generate_conversation_title_service(123, "Question", self.user_id, self.tenant_id))
+
+        lookup.assert_called_once_with(123, user_id=self.user_id, tenant_id=self.tenant_id)
+        model.assert_not_awaited()
+
+
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
     """Verify call_llm_for_title sets monitoring context and operation."""
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.tenant_config_manager')
     @patch('management.services.conversation.service.set_monitoring_operation')
     @patch('management.services.conversation.service.set_monitoring_context')
     def test_sets_monitoring_context_with_tenant_id(
             self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
         mock_config_mgr.get_model_config.return_value = {
+            "model_id": 7,
             "model_repo": "openai", "model_name": "gpt-4",
             "base_url": "http://x", "api_key": "k",
             "display_name": "GPT-4",
         }
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model_cls.return_value = mock_llm
+        mock_model_cls.return_value = "Title"
 
-        call_llm_for_title("hello?", "tenant-123", "en")
+        asyncio.run(call_llm_for_title("hello?", "tenant-123", "en", user_id="actor"))
 
-        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
+        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id="actor")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.tenant_config_manager')
     @patch('management.services.conversation.service.set_monitoring_operation')
     @patch('management.services.conversation.service.set_monitoring_context')
     def test_sets_monitoring_operation_with_display_name(
             self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
         mock_config_mgr.get_model_config.return_value = {
+            "model_id": 7,
             "model_repo": "openai", "model_name": "gpt-4",
             "base_url": "http://x", "api_key": "k",
             "display_name": "GPT-4",
         }
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model_cls.return_value = mock_llm
+        mock_model_cls.return_value = "Title"
 
-        call_llm_for_title("hello?", "tenant-123", "zh")
+        asyncio.run(call_llm_for_title("hello?", "tenant-123", "zh", user_id="actor"))
 
         mock_op.assert_called_once_with(
             "title_generation", display_name="GPT-4")
@@ -1331,12 +1324,13 @@ class TestUpdateFunctions(unittest.TestCase):
 class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
-    def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
-        """Should flatten messages when model_factory is modelengine."""
+    def test_modelengine_factory_uses_text_prompts(self, mock_get_config, mock_get_prompt, mock_model):
+        """Pass text prompts to AgentOS for a ModelEngine model."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "modelengine-model",
             "model_repo": "modelengine",
             "model_factory": "modelengine",
@@ -1344,114 +1338,100 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test question")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "Title"
 
-        call_llm_for_title("test question", "tenant-1", "zh")
+        asyncio.run(call_llm_for_title("test question", "tenant-1", "zh", user_id="actor"))
 
-        # Verify messages were flattened
-        call_args = mock_llm.call_args[0][0]
-        self.assertIsInstance(call_args, list)
-        for msg in call_args:
-            self.assertIsInstance(msg, dict)
-            self.assertIn("role", msg)
-            self.assertIn("content", msg)
+        mock_model.assert_awaited_once()
+        self.assertEqual(mock_model.await_args.kwargs["system_prompt"], "SYS")
+        self.assertEqual(mock_model.await_args.kwargs["user_prompt"], "test question")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is empty."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="  ")  # whitespace only
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "  "
 
         with self.assertLogs("conversation_management_service", level="INFO") as logs:
-            result = call_llm_for_title("test", "tenant-1", "zh")
+            result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
         self.assertEqual(result, "新对话")  # DEFAULT_ZH_TITLE
         self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is None."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content=None)
-        mock_model.return_value = mock_llm
+        mock_model.return_value = None
 
-        result = call_llm_for_title("test", "tenant-1", "zh")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
         self.assertEqual(result, "新对话")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default English title for English language."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="  ")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "  "
 
-        result = call_llm_for_title("test", "tenant-1", "en")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "en", user_id="actor"))
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
         """Should remove think blocks from title."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "<think>reasoning</think>Actual Title"
 
-        result = call_llm_for_title("test", "tenant-1", "zh")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
         self.assertEqual(result, "Actual Title")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
         """Should handle None model_config gracefully."""
         mock_get_config.return_value = None
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "Title"
 
-        # Note: This test documents that call_llm_for_title crashes when model_config is None
-        # The production code has a bug where it calls model_config.get() without checking for None first
-        # For now, we skip this test as the edge case is not handled properly
-        # result = call_llm_for_title("test", "tenant-1", "zh")
-        # self.assertEqual(result, "Title")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
+        self.assertEqual(result, "新对话")
+        mock_model.assert_not_called()
 
 
 class TestUpdateConversationTitle(unittest.TestCase):
@@ -1516,7 +1496,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
         self.assertIn("Conversation 123", str(ctx.exception))
 
     @patch('management.services.conversation.service.delete_conversation')
@@ -1525,7 +1505,7 @@ class TestDeleteConversationService(unittest.TestCase):
         mock_delete.return_value = True
         from management.services.conversation.service import delete_conversation_service
 
-        result = delete_conversation_service(123, "user-1")
+        result = asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
 
         self.assertTrue(result)
 
@@ -1536,7 +1516,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1549,7 +1529,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = [101, 102]
         from management.services.conversation.service import delete_conversations_batch_service
 
-        result = delete_conversations_batch_service([101, 102, 999], "user-1")
+        result = asyncio.run(delete_conversations_batch_service([101, 102, 999], "user-1", "tenant-1"))
 
         self.assertEqual(result["deleted_count"], 2)
         self.assertEqual(result["failed_ids"], [999])
@@ -1561,7 +1541,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = []
         from management.services.conversation.service import delete_conversations_batch_service
 
-        result = delete_conversations_batch_service([999], "user-1")
+        result = asyncio.run(delete_conversations_batch_service([999], "user-1", "tenant-1"))
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["failed_ids"], [999])
@@ -1573,7 +1553,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         from management.services.conversation.service import delete_conversations_batch_service
 
         with self.assertRaises(RuntimeError) as ctx:
-            delete_conversations_batch_service([101], "user-1")
+            asyncio.run(delete_conversations_batch_service([101], "user-1", "tenant-1"))
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1584,14 +1564,14 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         calls = []
 
         class _Facade:
-            def on_conversation_deleted(self, conversation_id, user_id):
+            async def on_conversation_deleted(self, conversation_id, user_id, tenant_id):
                 calls.append((conversation_id, user_id))
 
         facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101, 102, 999], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101, 102, 999], "user-1", "tenant-1"))
 
         self.assertEqual(calls, [(101, "user-1"), (102, "user-1"), (999, "user-1")])
         self.assertEqual(result, {"deleted_count": 2, "failed_ids": [999]})
@@ -1603,14 +1583,14 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = [101]
 
         class _Facade:
-            def on_conversation_deleted(self, conversation_id, user_id):
+            async def on_conversation_deleted(self, conversation_id, user_id, tenant_id):
                 raise RuntimeError("automation boom")
 
         facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101, 102], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101, 102], "user-1", "tenant-1"))
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": [102]})
         mock_delete_batch.assert_called_once_with([101, 102], "user-1")
@@ -1623,7 +1603,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         # No agent_automation_facade attribute -> `from ... import` raises AttributeError
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101], "user-1", "tenant-1"))
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": []})
         mock_delete_batch.assert_called_once_with([101], "user-1")
@@ -2061,5 +2041,100 @@ def test_message_database_failure_preserves_unexpected_error():
     assert error.value is failure
 
 
+def test_branch_conversation_service_returns_repository_data():
+    import pytest
+
+    repository_result = {
+        "conversation_id": 42,
+        "conversation_title": "Original（分支）",
+        "branched_message_count": 4,
+    }
+    with patch(
+        'management.services.conversation.service.branch_conversation',
+        return_value=repository_result,
+    ) as mock_branch:
+        result = branch_conversation_service(7, 2, "user-1")
+
+    assert result == repository_result
+    mock_branch.assert_called_once_with(7, 2, user_id="user-1")
+
+
+def test_branch_conversation_service_rejects_non_positive_turn_index():
+    import pytest
+
+    with pytest.raises(ValueError, match="1-based turn number"):
+        branch_conversation_service(7, 0, "user-1")
+
+
+def test_branch_conversation_service_raises_not_found_for_missing_conversation():
+    import pytest
+    from contracts.errors.exceptions import ConversationNotFoundError
+
+    with patch('management.services.conversation.service.branch_conversation', return_value=None):
+        with pytest.raises(ConversationNotFoundError):
+            branch_conversation_service(7, 2, "user-1")
+
+
+def test_branch_conversation_service_wraps_repository_failure():
+    import pytest
+
+    with patch(
+        'management.services.conversation.service.branch_conversation',
+        side_effect=RuntimeError("database unavailable"),
+    ):
+        with pytest.raises(Exception, match="database unavailable"):
+            branch_conversation_service(7, 2, "user-1")
+
+
+@pytest.mark.parametrize("target", [
+    {"source_message_id": 123},
+    {"answer_index": 2},
+    {"source_message_id": 123, "answer_index": 2},
+])
+def test_branch_conversation_service_forwards_selected_answer(target):
+    with patch(
+        "management.services.conversation.service.branch_conversation", return_value={"conversation_id": 42}
+    ) as repo:
+        assert branch_conversation_service(7, 2, "user-1", **target) == {"conversation_id": 42}
+    repo.assert_called_once_with(7, 2, user_id="user-1", **target)
+
+
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_saved_automation_user_keeps_provenance_and_runtime_pair():
+    from contracts.conversation import MessageSource
+    from management.services.conversation import service
+
+    request = AgentRequest(conversation_id=123, query="scheduled task", minio_files=None)
+    request._message_source = MessageSource.AUTOMATION
+    with patch.object(service, "append_conversation_user_message", return_value=(44, 6)) as append:
+        service.save_conversation_user(request, "owner", "tenant")
+    append.assert_called_once_with(123, "scheduled task", None, "owner", message_source=MessageSource.AUTOMATION)
+    assert request._runtime_user_message_id == 44 and request._runtime_user_message_index == 6
+
+
+def test_history_service_projects_old_jiuwen_answer_without_rewriting_user_or_stored_records():
+    import copy
+    import json
+    from management.services.conversation import service
+
+    raw = '<completed_action_history>PRIVATE</completed_action_history><final_answer>Clean link</final_answer>'
+    envelope = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+                "type": "run_terminal", "status": "completed", "final_content": raw, "final_block_ids": ["b"]}
+    history = {"conversation_id": 123, "create_time": "2026-10-20", "search_records": [], "image_records": [],
+               "message_records": [
+                   {"message_id": 1, "role": "user", "message_content": raw, "units": []},
+                   {"message_id": 2, "role": "assistant", "message_content": raw, "opinion_flag": None,
+                    "units": [{"unit_type": "run_terminal", "unit_content": json.dumps(envelope)}]},
+               ]}
+    original = copy.deepcopy(history)
+    with patch.object(service, "get_conversation_history", return_value=history):
+        result = service.get_conversation_history_service(123, "owner")[0]
+    assert result["message"][0]["message"] == raw
+    answer = result["message"][1]
+    assert answer["status"] == "completed"
+    assert next(u for u in answer["message"] if u["type"] == "final_answer")["content"] == "Clean link"
+    assert "PRIVATE" not in json.dumps(answer)
+    assert history == original

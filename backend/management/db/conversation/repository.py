@@ -1,12 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import json
+import logging
+import re
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.clarification import ClarificationResponse, normalize_form
 from contracts.constants.constants import (
     ASSET_OWNER_ROLE,
@@ -16,17 +21,23 @@ from contracts.constants.constants import (
     HISTORY_SUMMARY_UNIT_TYPE,
     MESSAGE_ROLE,
 )
-from contracts.constants.environment import (
-    MAX_CONVERSATION_TURNS,
-    MAX_CONVERSATIONS_PER_USER,
-)
 from contracts.conversation import (
     ConversationHistory,
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
     MessageSource,
     decode_activity_cursor,
     encode_activity_cursor,
+    format_annotations_for_llm,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
 )
 from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.agentos import RUN_ID_PATTERN
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
+from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
+
+from infrastructure.rdb.orm import as_dict
 from contracts.errors.exceptions import (
     AppException,
     ConversationNotFoundError,
@@ -36,24 +47,24 @@ from contracts.errors.exceptions import (
     WorkbenchError,
 )
 from contracts.roles import has_any_role, roles_from_record
-from management.db.client import db_client, get_db_session
+from infrastructure.rdb.client import db_client, get_db_session
+from management.db.conversation.branch_titles import build_branch_title as _build_branch_title
 from management.db.conversation.classification import (
     executor_system_key,
     is_workbench_history,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.db.models import (
-    AgentAutomationProposal,
+from management.db.automation.models import AgentAutomationProposal
+from management.db.conversation.models import (
     ConversationMessage,
     ConversationMessageUnit,
     ConversationRecord,
     ConversationSourceImage,
     ConversationSourceSearch,
-    KnowledgeRecord,
-    UserTenant,
 )
+from management.db.knowledge_base.models import KnowledgeRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 
 def load_execution_result_content(
@@ -61,38 +72,17 @@ def load_execution_result_content(
 ) -> str:
     """Load one execution unit in the caller's current conversation scope."""
 
-    membership = select(UserTenant.user_id).where(
-        UserTenant.user_id == user_id,
-        UserTenant.tenant_id == tenant_id,
-        UserTenant.delete_flag == "N",
-    ).exists()
-    statement = (
-        select(ConversationMessageUnit.unit_content)
-        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
-        .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-        .where(
-            membership,
-            ConversationRecord.created_by == user_id,
-            ConversationRecord.conversation_id == conversation_id,
-            ConversationRecord.delete_flag == "N",
-            ConversationMessage.message_id == message_id,
-            ConversationMessage.delete_flag == "N",
-            ConversationMessageUnit.conversation_id == conversation_id,
-            ConversationMessageUnit.unit_index == unit_index,
-            ConversationMessageUnit.unit_type == "execution_result",
-            ConversationMessageUnit.delete_flag == "N",
-        )
-    )
-    with get_db_session() as session:
-        rows = session.execute(statement).scalars().all()
-    if not rows:
+    from infrastructure.rdb.conversation_state import load_execution_result_record
+
+    record = load_execution_result_record(user_id, tenant_id, conversation_id, message_id, unit_index)
+    if record["record_type"] != "execution_result":
         raise PermissionError("Execution result is unavailable or not authorized")
-    if len(rows) != 1:
-        raise ValueError("Ambiguous execution result reference")
-    payload = json.loads(rows[0])
+    payload = json.loads(record["content"])
     if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
         raise ValueError("Invalid persisted execution content")
     return payload["content"]
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_unit_content(content: Any) -> str:
@@ -100,6 +90,45 @@ def _serialize_unit_content(content: Any) -> str:
     if isinstance(content, str):
         return content
     return json.dumps(content, ensure_ascii=False)
+
+
+def _compact_native_thinking_units(units):
+    """Coalesce Jiuwen text by step and block, retaining the first unit index."""
+    compacted = []
+    groups = {}
+    for unit in units:
+        kind = unit.get("unit_type")
+        if kind not in {"model_output", "model_output_deep_thinking"}:
+            compacted.append(unit)
+            continue
+        payload = unit.get("unit_content")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                compacted.append(unit)
+                continue
+        if (not isinstance(payload, dict) or payload.get("type") != kind
+                or payload.get("schema_version") != 1 or payload.get("runtime_mode") != "native_agent"
+                or payload.get("agent_core") != "jiuwen" or not isinstance(payload.get("content"), str)):
+            compacted.append(unit)
+            continue
+
+        turn_id, step_id, block_id = (payload.get(field) for field in ("turn_id", "step_id", "block_id"))
+        key = (kind, turn_id, step_id, block_id, unit.get("invocation_id"), payload.get("attempt_id"))
+        if not turn_id or not (step_id or block_id) or any(value is not None and not isinstance(value, str) for value in key):
+            compacted.append(unit)
+            continue
+        if key not in groups:
+            stored_kind = "model_output_thinking" if kind == "model_output" else kind
+            envelope = {**payload, "type": stored_kind}
+            groups[key] = (envelope, [])
+            compacted.append({**unit, "unit_type": stored_kind, "unit_content": envelope})
+        groups[key][1].append(payload["content"])
+
+    for envelope, fragments in groups.values():
+        envelope["content"] = "".join(fragments)
+    return compacted
 
 
 def _optional_conversation_column(name: str, fallback: Any):
@@ -159,14 +188,15 @@ def _enforce_user_conversation_limit(session, user_id: Optional[str]) -> None:
         ConversationRecord.delete_flag == "N",
     )
     conversation_count = int(session.scalar(statement) or 0)
-    if conversation_count >= MAX_CONVERSATIONS_PER_USER:
+    limit = get_config_snapshot().get("MAX_CONVERSATIONS_PER_USER")
+    if conversation_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation history limit reached: maximum {MAX_CONVERSATIONS_PER_USER} conversations per user",
+            f"Conversation history limit reached: maximum {limit} conversations per user",
             details={
                 "resource": "conversations",
                 "scope": "user",
-                "limit": MAX_CONVERSATIONS_PER_USER,
+                "limit": limit,
                 "current_count": conversation_count,
             },
         )
@@ -191,14 +221,15 @@ def _enforce_conversation_turn_limit(
         ConversationMessage.delete_flag == "N",
     )
     turn_count = int(session.scalar(statement) or 0)
-    if turn_count >= MAX_CONVERSATION_TURNS:
+    limit = get_config_snapshot().get("MAX_CONVERSATION_TURNS")
+    if turn_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation turn limit reached: maximum {MAX_CONVERSATION_TURNS} turns per conversation",
+            f"Conversation turn limit reached: maximum {limit} turns per conversation",
             details={
                 "resource": "conversation_turns",
                 "scope": "conversation",
-                "limit": MAX_CONVERSATION_TURNS,
+                "limit": limit,
                 "current_count": turn_count,
             },
         )
@@ -212,6 +243,9 @@ def create_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    *,
+    reserved_conversation_id: int | None = None,
+    db_session=None,
     target: Optional[Dict[str, Any]] = None,
     model_parameter_preferences: Optional[Dict[str, Any]] = None,
     selected_model_id: Optional[int] = None,
@@ -229,13 +263,19 @@ def create_conversation(
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
     """
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         _enforce_user_conversation_limit(session, user_id)
+        if user_id and agent_id and target and target.get("type") in ("agent", "skill"):
+            _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{agent_id}:{target['type']}:{target['id']}")
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
+        if reserved_conversation_id is not None:
+            data["conversation_id"] = reserved_conversation_id
         if target is not None:
             data["target"] = deepcopy(target)
+            if target.get("type") in ("agent", "skill"):
+                data["last_activity_time"] = func.timezone("UTC", func.clock_timestamp())
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -243,7 +283,7 @@ def create_conversation(
         if knowledge_scope is not None:
             data["knowledge_scope"] = knowledge_scope
         if runtime_metadata is not None:
-            data["runtime_metadata"] = deepcopy(runtime_metadata)
+            data["runtime_metadata"] = deepcopy(strip_reserved_runtime_metadata_fields(runtime_metadata))
             data["runtime_metadata_version"] = 1
         if workbench_config is not None:
             data["workbench_config"] = deepcopy(workbench_config)
@@ -275,6 +315,9 @@ def create_conversation(
         )
 
         record = session.execute(stmt).fetchone()
+        from infrastructure.rdb.trajectory.repository import seed_conversation
+        seed_conversation(session, record.conversation_id, user_id, agent_id)
+        retain_creator_histories(user_id, agent_id, target, session=session)
 
         # Convert to dictionary and ensure timestamps are integers
         result_dict = {
@@ -284,7 +327,7 @@ def create_conversation(
             "target": record.target if isinstance(getattr(record, "target", None), dict) else None,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
-            "runtime_metadata": record.runtime_metadata or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(record.runtime_metadata),
             "runtime_metadata_version": record.runtime_metadata_version or 0,
             "workbench_config": (
                 record.workbench_config if isinstance(getattr(record, "workbench_config", None), dict) else None
@@ -326,9 +369,10 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
-                                 status: str = 'completed', *,
-                                 message_source: MessageSource = MessageSource.CHAT,
-                                 db_session=None) -> int:
+                                 status: str = 'completed', *, _session=None,
+                                 message_source: MessageSource = MessageSource.CHAT, execution_identity=None,
+                                 streaming_owner: str | None = None, db_session=None,
+                                 expected_clarification_source_id: int | None = None) -> int:
     """
     Create a conversation message record
 
@@ -346,7 +390,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         int: Newly created message ID (auto-increment ID)
     """
     message_source = MessageSource(message_source)
-    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
+    with (nullcontext(_session) if _session is not None else
+          get_db_session() if db_session is None else get_db_session(db_session)) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data["conversation_id"])
         message_idx = int(message_data["message_idx"])
@@ -364,6 +409,12 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             response = _resolve_clarification_response(
                 session, conversation_id, user_id, message_role, message_data['clarification_response'],
             )
+            if (expected_clarification_source_id is not None
+                    and response["source_message_id"] != expected_clarification_source_id):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification source changed")
+        annotations = None
+        if message_data.get('annotations') is not None:
+            annotations = normalize_message_annotations(message_data['annotations'])
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
@@ -376,6 +427,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_role,
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N', "status": status, "message_source": message_source.value}
+        if streaming_owner is not None:
+            data["streaming_owner"] = streaming_owner
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -383,6 +436,10 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         stmt = insert(ConversationMessage).values(**data).returning(ConversationMessage.message_id)
         result = session.execute(stmt)
         message_id = result.scalar()
+        if execution_identity is not None:
+            from infrastructure.rdb.agent_execution import bind_assistant_message
+
+            bind_assistant_message(session, execution_identity, message_id)
         if response is not None:
             unit_data = {
                 'conversation_id': conversation_id, 'message_id': message_id,
@@ -393,11 +450,98 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             if user_id:
                 unit_data = add_creation_tracking(unit_data, user_id)
             session.execute(insert(ConversationMessageUnit).values(**unit_data))
+        if annotations is not None and message_role == MESSAGE_ROLE["USER"]:
+            # Reply annotations ride as a structured unit so the stored
+            # message_content stays clean; the unit drives history rendering
+            # and the model-facing merge for later turns.
+            annotation_unit = {
+                'conversation_id': conversation_id, 'message_id': message_id,
+                'unit_index': 0, 'unit_type': MESSAGE_ANNOTATIONS_UNIT_TYPE,
+                'unit_content': json.dumps(
+                    [item.model_dump(mode="json") for item in annotations],
+                    ensure_ascii=False,
+                ),
+                'unit_status': 'completed', 'delete_flag': 'N',
+            }
+            if user_id:
+                annotation_unit = add_creation_tracking(annotation_unit, user_id)
+            session.execute(insert(ConversationMessageUnit).values(**annotation_unit))
         if message_role == MESSAGE_ROLE["USER"] or (
             message_role == MESSAGE_ROLE["ASSISTANT"] and message_data["content"] and status != "streaming"
         ):
             _touch_conversation_activity(session, conversation_id, user_id)
         return message_id
+
+
+def append_conversation_user_message(
+    conversation_id: int, content: str, minio_files, user_id: str, *,
+    message_source: MessageSource = MessageSource.CHAT,
+    clarification_response=None,
+    annotations=None,
+) -> tuple[int, int]:
+    """Reserve an ordered user/assistant pair independently of client history."""
+    with get_db_session() as session:
+        _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+        allowed = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ))
+        if allowed is None:
+            raise ConversationNotFoundError("Conversation not found")
+        latest = session.scalar(select(func.max(ConversationMessage.message_index)).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == "N",
+        ))
+        index = 0 if latest is None else max(0, (int(latest) // 2 + 1) * 2)
+        message_id = create_conversation_message({
+            "conversation_id": conversation_id, "message_idx": index, "role": MESSAGE_ROLE["USER"],
+            "content": content, "minio_files": minio_files,
+            **({"annotations": annotations} if annotations is not None else {}),
+            **({"clarification_response": clarification_response} if clarification_response is not None else {}),
+        }, user_id, _session=session, **(
+            {"message_source": MessageSource(message_source)} if MessageSource(message_source) != MessageSource.CHAT else {}
+        ))
+        return message_id, index
+
+
+def resolve_conversation_retry_user(
+    conversation_id: int, user_id: str, message_id: int, message_index: Optional[int],
+    content: str, minio_files,
+) -> tuple[int, int]:
+    """Authorize a retry boundary without appending another user turn."""
+    def file_keys(value):
+        if isinstance(value, str):
+            value = json.loads(value)
+        return [item.get("object_name") or item.get("url") or item.get("name")
+                if isinstance(item, dict) else item for item in (value or [])]
+
+    with get_db_session() as session:
+        _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+        ))
+        if owned is None:
+            raise ConversationNotFoundError("Conversation not found")
+        target = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.created_by == user_id,
+            ConversationMessage.message_role == "user", ConversationMessage.delete_flag == "N",
+        ))
+        if (target is None or target.message_index is None or target.message_index < 0
+                or (message_index is not None and target.message_index != message_index)
+                or target.message_content != content or file_keys(target.minio_files) != file_keys(minio_files)):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Invalid retry target")
+        answer = session.scalar(select(ConversationMessage.message_id).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_index == target.message_index + 1,
+            ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ).limit(1))
+        if answer is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Retry target has no answer")
+        return target.message_id, target.message_index
 
 
 def _resolve_clarification_response(session, conversation_id, user_id, role, raw):
@@ -422,7 +566,7 @@ def _resolve_clarification_response(session, conversation_id, user_id, role, raw
     if source is None or source.message_role != 'assistant' or source.status != 'completed':
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification is no longer available")
     units = session.execute(select(
-        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index,
+        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index, ConversationMessageUnit.unit_type,
     ).where(
         ConversationMessageUnit.conversation_id == conversation_id,
         ConversationMessageUnit.message_id == source.message_id,
@@ -434,7 +578,16 @@ def _resolve_clarification_response(session, conversation_id, user_id, role, raw
         if response.unit_index is not None and unit.unit_index != response.unit_index:
             continue
         try:
-            if normalize_form(json.loads(unit.unit_content)) == response.form:
+            saved = json.loads(unit.unit_content)
+            if (isinstance(saved, dict) and type(saved.get('schema_version')) is int
+                    and saved['schema_version'] == 1 and saved.get('runtime_mode') == 'native_agent'
+                    and saved.get('type') == unit.unit_type == 'human_interaction'
+                    and isinstance(saved.get('turn_id'), str) and saved['turn_id'].strip()
+                    and isinstance(saved.get('content'), str)):
+                # Only the owned persisted event may carry a single public envelope.
+                # Client forms remain strict data; nested envelopes are not interpreted.
+                saved = json.loads(saved['content'])
+            if normalize_form(saved) == response.form:
                 matches.append(unit)
         except (TypeError, ValueError):
             continue
@@ -496,6 +649,470 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
+def _lock_projection_conversation(session, conversation_id: int, user_id: str) -> None:
+    conversation = session.scalar(
+        select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update()
+    )
+    if conversation is None:
+        raise ValueError("Conversation does not exist or is not accessible")
+
+
+def get_prepared_projection_receipt(
+    *, projection_run_id: str, conversation_id: int, message_index: int,
+    message_source: MessageSource, user_id: str, tenant_id: str,
+) -> tuple[int, str] | None:
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+
+    receipt = ConversationProjectionReceipt
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return None
+        row = session.execute(
+            select(receipt.message_id, ConversationMessage.status)
+            .join(ConversationMessage, ConversationMessage.message_id == receipt.message_id)
+            .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+            .where(
+                receipt.run_id == projection_run_id, receipt.tenant_id == tenant_id,
+                receipt.created_by == user_id, receipt.delete_flag == "N",
+                ConversationMessage.conversation_id == conversation_id, ConversationMessage.created_by == user_id,
+                ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+                ConversationMessage.message_index == message_index,
+                ConversationMessage.message_source == MessageSource(message_source).value,
+                ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+            )
+        ).one_or_none()
+        return (row.message_id, row.status) if row is not None else None
+
+
+def persist_prepared_assistant_projection(
+    *, projection_run_id: str, conversation_id: int, message_index: int, message_source: MessageSource,
+    user_id: str, tenant_id: str, assistant_message_id: int | None = None, memory_agent_id: int | None = None,
+    memory_source_message_id: int | None = None, **batch,
+) -> int:
+    """Create or replay a remote projection in the same transaction as its receipt."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+
+    if not isinstance(projection_run_id, str) or not re.fullmatch(RUN_ID_PATTERN, projection_run_id):
+        raise ValueError("Invalid assistant projection run ID")
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            raise ValueError("Conversation does not exist or is not accessible")
+        _lock_projection_conversation(session, conversation_id, user_id)
+        receipt = ConversationProjectionReceipt
+        existing = session.execute(
+            select(receipt.message_id, receipt.created_by, receipt.tenant_id, ConversationMessage.conversation_id,
+                   ConversationMessage.message_index, ConversationMessage.message_source)
+            .join(ConversationMessage, ConversationMessage.message_id == receipt.message_id)
+            .where(receipt.run_id == projection_run_id, receipt.delete_flag == "N")
+        ).first()
+        source = MessageSource(message_source).value
+        if existing is not None:
+            if (existing.created_by, existing.tenant_id, existing.conversation_id) != (user_id, tenant_id, conversation_id):
+                raise ValueError("Conversation does not exist or is not accessible")
+            if (existing.message_index, existing.message_source) != (message_index, source):
+                raise ValueError("Assistant projection conflicts with the original message index or source")
+            message_id = existing.message_id
+            if assistant_message_id is not None and assistant_message_id != message_id:
+                raise ValueError("Assistant projection does not match the reserved message")
+        elif assistant_message_id is not None:
+            message_id = session.scalar(select(ConversationMessage.message_id).where(
+                ConversationMessage.message_id == assistant_message_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.created_by == user_id, ConversationMessage.delete_flag == "N",
+                ConversationMessage.message_role == "assistant", ConversationMessage.message_source == source,
+                ConversationMessage.message_index == message_index, ConversationMessage.streaming_owner == "management",
+            ))
+            if message_id is None:
+                raise ValueError("Assistant projection does not match the reserved message")
+        else:
+            message_id = session.scalar(insert(ConversationMessage).values(
+                conversation_id=conversation_id, message_index=message_index, message_role="assistant",
+                message_source=source, message_content="", status="streaming",
+                created_by=user_id, updated_by=user_id, delete_flag="N",
+            ).returning(ConversationMessage.message_id))
+        persist_assistant_run_batch(
+            message_id, conversation_id, user_id=user_id, tenant_id=tenant_id,
+            projection_run_id=projection_run_id, db_session=session, **batch,
+        )
+        if memory_agent_id is not None:
+            from management.db.conversation.memory_completion import enqueue, read_omitted_memory_query
+
+            if (source == MessageSource.AUTOMATION.value and memory_source_message_id is None
+                    and read_omitted_memory_query(session, projection_run_id, conversation_id, message_id,
+                                                 user_id, tenant_id, memory_agent_id, source) is None):
+                raise ValueError("Automation Memory completion requires its original prompt message")
+            enqueue(session, projection_run_id, memory_agent_id, user_id,
+                    batch["terminal_status"], batch["message_content"] or "", source_message_id=memory_source_message_id)
+        return message_id
+def _select_branch_turn_rows(
+    rows: Sequence[ConversationMessage],
+    turn_index: int,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
+) -> List[ConversationMessage]:
+    """Select one answer per turn, ending at the explicitly selected version.
+
+    Keep regenerated assistant rows until version selection. Collapsing them
+    by message_index first would lose older answers still visible in the UI.
+    Runtime answer ordinals follow the same message_index/message_id ordering
+    as history loading; a persisted ID takes precedence when available.
+    """
+    latest_users = {
+        int(row.message_index): row
+        for row in rows
+        if row.message_role == MESSAGE_ROLE["USER"]
+    }
+    turns: List[List[ConversationMessage]] = []
+    preamble: List[ConversationMessage] = []
+    for row in rows:
+        if row.message_role == MESSAGE_ROLE["USER"]:
+            if row is not latest_users[int(row.message_index)]:
+                continue
+            turns.append([row])
+        elif turns:
+            turns[-1].append(row)
+        else:
+            preamble.append(row)
+    if turn_index < 1 or turn_index > len(turns):
+        raise ValueError(f"turn_index {turn_index} exceeds the {len(turns)} turns in the conversation")
+
+    branch_rows = list(preamble)
+    for index, turn in enumerate(turns[:turn_index], start=1):
+        answers = [row for row in turn if row.message_role == MESSAGE_ROLE["ASSISTANT"]]
+        selected = answers[-1] if answers else None
+        if index == turn_index:
+            if source_message_id is not None:
+                selected = next(
+                    (row for row in answers if int(row.message_id) == source_message_id), None
+                )
+                if selected is None:
+                    raise ValueError("source_message_id does not identify an answer in the selected turn")
+            elif answer_index is not None:
+                if not 1 <= answer_index <= len(answers):
+                    raise ValueError("answer_index does not identify an answer in the selected turn")
+                selected = answers[answer_index - 1]
+        for row in turn:
+            if row.message_role != MESSAGE_ROLE["ASSISTANT"] or row is selected:
+                branch_rows.append(row)
+            if row is selected:
+                break
+    return branch_rows
+
+
+def branch_conversation(
+    conversation_id: int,
+    turn_index: int,
+    user_id: Optional[str] = None,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Branch a conversation into a new one up to and including the given turn.
+
+    Copies conversation-level configuration plus the active messages, units and
+    search/image sources of every turn up to and including ``turn_index``
+    (1-based over active user rows). MinIO file references inside
+    ``minio_files`` are shared, not copied; the original conversation and its
+    rows stay untouched.
+
+    Args:
+        conversation_id: Source conversation ID (integer)
+        turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        user_id: User that must own the source conversation
+        source_message_id: Exact persisted answer to retain in the final turn
+        answer_index: 1-based answer version for messages with runtime-only IDs
+
+    Returns:
+        Optional[Dict[str, Any]]: New conversation data, or None when the
+        source conversation does not exist or is not accessible
+    """
+    conversation_id = int(conversation_id)
+    turn_index = int(turn_index)
+    if turn_index < 1:
+        raise ValueError("turn_index must be a 1-based turn number")
+
+    with get_db_session() as session:
+        # Take the user-quota advisory lock before any row lock so the lock
+        # ordering matches create_conversation (advisory -> row).
+        _enforce_user_conversation_limit(session, user_id)
+
+        conversation = session.scalars(
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                *([ConversationRecord.created_by == user_id] if user_id else []),
+            )
+            .with_for_update()
+        ).first()
+        if conversation is None:
+            return None
+
+        message_rows = session.scalars(
+            select(ConversationMessage)
+            .where(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.delete_flag == "N",
+            )
+            .order_by(asc(ConversationMessage.message_index), asc(ConversationMessage.message_id))
+            .with_for_update()
+        ).all()
+
+        branch_rows = _select_branch_turn_rows(
+            message_rows, turn_index, source_message_id=source_message_id, answer_index=answer_index
+        )
+
+        # The existing user advisory lock serializes numbering for branches
+        # created by the same owner. Other users and deleted rows do not count.
+        existing_titles = session.scalars(
+            select(ConversationRecord.conversation_title).where(
+                ConversationRecord.created_by == (user_id or conversation.created_by),
+                ConversationRecord.delete_flag == "N",
+            )
+        ).all()
+        conversation_data = {
+            "conversation_title": _build_branch_title(
+                conversation.conversation_title, existing_titles
+            ),
+            "delete_flag": "N",
+            "agent_id": conversation.agent_id,
+            "chat_mode": conversation.chat_mode,
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(conversation.runtime_metadata)),
+            "runtime_metadata_version": 1,
+        }
+        # SQLAlchemy serializes Python None bound to a JSONB column as the JSON
+        # value null (not SQL NULL), and agent-chat history filters on
+        # "workbench_config IS NULL": binding an absent declaration would hide
+        # the branched conversation from every agent-chat list. Copy nullable
+        # JSONB values only when the source actually declares them, mirroring
+        # create_conversation.
+        if conversation.knowledge_scope is not None:
+            conversation_data["knowledge_scope"] = deepcopy(
+                conversation.knowledge_scope
+            )
+        if conversation.workbench_config is not None:
+            conversation_data["workbench_config"] = deepcopy(
+                conversation.workbench_config
+            )
+            conversation_data["workbench_config_version"] = 1
+        if user_id:
+            conversation_data = add_creation_tracking(conversation_data, user_id)
+
+        new_conversation = session.execute(
+            insert(ConversationRecord)
+            .values(**conversation_data)
+            .returning(
+                ConversationRecord.conversation_id,
+                ConversationRecord.conversation_title,
+                ConversationRecord.agent_id,
+                ConversationRecord.chat_mode,
+                ConversationRecord.knowledge_scope,
+                ConversationRecord.runtime_metadata,
+                ConversationRecord.runtime_metadata_version,
+                _optional_conversation_column("workbench_config", None),
+                _optional_conversation_column("workbench_config_version", 0),
+                (func.extract("epoch", ConversationRecord.create_time) * 1000).label("create_time"),
+                (func.extract("epoch", ConversationRecord.update_time) * 1000).label("update_time"),
+            )
+        ).fetchone()
+
+        new_conversation_id = int(new_conversation.conversation_id)
+        branch_message_ids = [int(row.message_id) for row in branch_rows]
+
+        units_by_message: Dict[int, List[ConversationMessageUnit]] = {}
+        searches_by_message: Dict[int, List[ConversationSourceSearch]] = {}
+        images_by_message: Dict[int, List[ConversationSourceImage]] = {}
+        if branch_message_ids:
+            for unit in session.scalars(
+                select(ConversationMessageUnit)
+                .where(
+                    ConversationMessageUnit.message_id.in_(branch_message_ids),
+                    ConversationMessageUnit.delete_flag == "N",
+                )
+                .order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))
+            ).all():
+                units_by_message.setdefault(int(unit.message_id), []).append(unit)
+
+            for search in session.scalars(
+                select(ConversationSourceSearch).where(
+                    ConversationSourceSearch.message_id.in_(branch_message_ids),
+                    ConversationSourceSearch.delete_flag == "N",
+                )
+            ).all():
+                searches_by_message.setdefault(int(search.message_id), []).append(search)
+
+            for image in session.scalars(
+                select(ConversationSourceImage).where(
+                    ConversationSourceImage.message_id.in_(branch_message_ids),
+                    ConversationSourceImage.delete_flag == "N",
+                )
+            ).all():
+                images_by_message.setdefault(int(image.message_id), []).append(image)
+
+        copied_unit_ids = {
+            int(unit.unit_id)
+            for units in units_by_message.values()
+            for unit in units
+        }
+
+        message_id_map: Dict[int, int] = {}
+        for row in branch_rows:
+            # opinion_flag is intentionally not copied: user feedback stays
+            # attached to the original conversation's messages.
+            message_data = {
+                "conversation_id": new_conversation_id,
+                "message_index": row.message_index,
+                "message_role": row.message_role,
+                "message_source": row.message_source or MessageSource.CHAT.value,
+                "message_content": row.message_content,
+                "minio_files": row.minio_files,
+                "status": row.status or "completed",
+                "delete_flag": "N",
+            }
+            if user_id:
+                message_data = add_creation_tracking(message_data, user_id)
+            message_id_map[int(row.message_id)] = int(
+                session.execute(
+                    insert(ConversationMessage)
+                    .values(**message_data)
+                    .returning(ConversationMessage.message_id)
+                ).scalar_one()
+            )
+
+        unit_id_map: Dict[int, int] = {}
+        for old_message_id, units in units_by_message.items():
+            for unit in units:
+                unit_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_index": unit.unit_index,
+                    "unit_type": unit.unit_type,
+                    "unit_content": unit.unit_content,
+                    "unit_status": unit.unit_status or "completed",
+                    "tool_call_id": unit.tool_call_id,
+                    "invocation_id": unit.invocation_id,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    unit_data = add_creation_tracking(unit_data, user_id)
+                unit_id_map[int(unit.unit_id)] = int(
+                    session.execute(
+                        insert(ConversationMessageUnit)
+                        .values(**unit_data)
+                        .returning(ConversationMessageUnit.unit_id)
+                    ).scalar_one()
+                )
+
+        for old_message_id, searches in searches_by_message.items():
+            for search in searches:
+                search_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_id": (
+                        unit_id_map.get(int(search.unit_id))
+                        if search.unit_id is not None and int(search.unit_id) in copied_unit_ids
+                        else None
+                    ),
+                    "source_type": search.source_type,
+                    "source_title": search.source_title,
+                    "source_location": search.source_location,
+                    "source_content": search.source_content,
+                    "score_overall": search.score_overall,
+                    "score_accuracy": search.score_accuracy,
+                    "score_semantic": search.score_semantic,
+                    "retrieval_highlight_terms": search.retrieval_highlight_terms,
+                    "aidp_metadata": search.aidp_metadata,
+                    "aidp_source_reference": search.aidp_source_reference,
+                    "published_date": search.published_date,
+                    "cite_index": search.cite_index,
+                    "search_type": search.search_type,
+                    "tool_sign": search.tool_sign,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    search_data = add_creation_tracking(search_data, user_id)
+                session.execute(insert(ConversationSourceSearch).values(**search_data))
+
+        for old_message_id, images in images_by_message.items():
+            for image in images:
+                image_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_id": (
+                        unit_id_map.get(int(image.unit_id))
+                        if image.unit_id is not None and int(image.unit_id) in copied_unit_ids
+                        else None
+                    ),
+                    "image_url": image.image_url,
+                    "cite_index": image.cite_index,
+                    "search_type": image.search_type,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    image_data = add_creation_tracking(image_data, user_id)
+                session.execute(insert(ConversationSourceImage).values(**image_data))
+
+        return {
+            "conversation_id": new_conversation_id,
+            "conversation_title": new_conversation.conversation_title,
+            "agent_id": new_conversation.agent_id,
+            "chat_mode": new_conversation.chat_mode or "execution",
+            "knowledge_scope": new_conversation.knowledge_scope,
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(new_conversation.runtime_metadata),
+            "runtime_metadata_version": new_conversation.runtime_metadata_version or 0,
+            "workbench_config": (
+                new_conversation.workbench_config
+                if isinstance(getattr(new_conversation, "workbench_config", None), dict)
+                else None
+            ),
+            "workbench_config_version": (
+                new_conversation.workbench_config_version
+                if isinstance(getattr(new_conversation, "workbench_config_version", None), int)
+                else 0
+            ),
+            "create_time": int(new_conversation.create_time),
+            "update_time": int(new_conversation.update_time),
+            "branched_message_count": len(branch_rows),
+        }
+
+
+def _completed_turn_checkpoint(session, parent, checkpoint):
+    """Resolve a Runtime proposal only inside its authorized completed projection transaction."""
+    from contracts.agentos import CompletedTurnHistoryCheckpointCandidate
+
+    candidate = CompletedTurnHistoryCheckpointCandidate.model_validate(checkpoint)
+    prior = session.scalar(select(ConversationMessage.message_id).where(
+        ConversationMessage.conversation_id == parent.conversation_id,
+        ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index)).limit(1))
+    if prior != candidate.history_tail_message_id:
+        raise HistorySummaryPersistenceError("completed-turn history boundary changed")
+    checkpoints = session.execute(select(ConversationMessageUnit.unit_id, ConversationMessageUnit.unit_content,
+                                         ConversationMessage.message_id)
+        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
+        .where(ConversationMessageUnit.conversation_id == parent.conversation_id,
+            ConversationMessage.conversation_id == parent.conversation_id,
+            ConversationMessageUnit.unit_type == HISTORY_SUMMARY_UNIT_TYPE,
+            ConversationMessageUnit.unit_status == "completed", ConversationMessageUnit.delete_flag == "N",
+            ConversationMessage.status == "completed", ConversationMessage.delete_flag == "N",
+            ConversationMessage.message_index < parent.message_index)
+        .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))).all()
+    latest = next((row.unit_id for row in checkpoints
+                   if (parsed := _parse_history_summary_content(row.unit_content))
+                   and parsed["covered_through_message_id"] == row.message_id), None)
+    if latest != candidate.previous_summary_unit_id:
+        raise HistorySummaryPersistenceError("completed-turn previous checkpoint changed")
+    return {"summary": candidate.summary, "covered_through_message_id": parent.message_id,
+            "previous_summary_unit_id": candidate.previous_summary_unit_id, "trigger": candidate.trigger}
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,
@@ -508,6 +1125,8 @@ def persist_assistant_run_batch(
     automation_proposals: List[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    projection_run_id: str | None = None,
+    *, db_session=None, history_checkpoints: list[dict] | None = None,
 ) -> Dict[int, int]:
     """Persist one completed assistant stream in a single transaction.
 
@@ -519,24 +1138,44 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
+    if history_checkpoints and projection_run_id is None:
+        raise ValueError("History checkpoints require a run projection receipt")
     if terminal_status not in {"completed", "failed", "stopped"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
     message_id = int(message_id)
     conversation_id = int(conversation_id)
 
-    with get_db_session() as session:
+    payload_digest = None
+    if projection_run_id is not None:
+        if not re.fullmatch(RUN_ID_PATTERN, projection_run_id):
+            raise ValueError("Invalid assistant projection run ID")
+        from management.db.conversation.projection_receipt import (
+            ConversationProjectionReceipt,
+            find_projection_receipts,
+            projection_payload_digest,
+        )
+        from infrastructure.rdb.conversation_state import tenant_membership_matches
+
+        digest_payload = {
+            "message_content": message_content or "",
+            "terminal_status": terminal_status,
+            "message_units": message_units,
+            "search_records": search_records,
+            "image_urls": image_urls,
+            "skill_files": skill_files,
+            "automation_proposals": automation_proposals,
+        }
+        if history_checkpoints:
+            digest_payload["history_checkpoints"] = history_checkpoints
+        payload_digest = projection_payload_digest(digest_payload)
+
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
+        if projection_run_id is not None and not tenant_membership_matches(session, user_id, tenant_id):
+            raise ValueError("Conversation does not exist or is not accessible")
         # Match deletion's conversation-before-message lock order and reject
         # finalization if deletion committed while this locking read waited.
-        conversation = session.scalar(
-            select(ConversationRecord.conversation_id).where(
-                ConversationRecord.conversation_id == conversation_id,
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == "N",
-            ).with_for_update()
-        )
-        if conversation is None:
-            raise ValueError("Conversation does not exist or is not accessible")
+        _lock_projection_conversation(session, conversation_id, user_id)
 
         parent = session.execute(
             select(ConversationMessage)
@@ -551,11 +1190,28 @@ def persist_assistant_run_batch(
         ).scalar_one_or_none()
         if parent is None:
             raise ValueError("Assistant streaming message does not exist or is not accessible")
+        if projection_run_id is not None:
+            receipts = find_projection_receipts(session, projection_run_id, message_id)
+            if receipts:
+                existing = receipts[0]
+                if (
+                    len(receipts) == 1
+                    and existing.run_id == projection_run_id
+                    and existing.message_id == message_id
+                    and existing.tenant_id == tenant_id
+                    and existing.created_by == user_id
+                    and existing.payload_sha256 == payload_digest
+                    and parent.status == terminal_status
+                ):
+                    return {int(index): unit_id for index, unit_id in existing.unit_ids.items()}
+                raise ValueError("Assistant projection conflicts with a committed run")
         if parent.status != "streaming":
             raise ValueError(f"Assistant message is already finalized with status {parent.status}")
 
+        # Receipts fingerprint the original projection so pre-upgrade runs can be replayed.
+        stored_units = _compact_native_thinking_units(message_units)
         unit_rows: List[Dict[str, Any]] = []
-        for unit in message_units:
+        for unit in stored_units:
             unit_rows.append(
                 add_creation_tracking(
                     {
@@ -679,6 +1335,22 @@ def persist_assistant_run_batch(
         parent.status = terminal_status
         parent.updated_by = user_id
         parent.update_time = func.current_timestamp()
+        if history_checkpoints:
+            session.flush()
+        for checkpoint in history_checkpoints or ():
+            try:
+                with session.begin_nested():
+                    if checkpoint.get("coverage_scope") == "current_completed_turn":
+                        if terminal_status != "completed" or any(
+                                unit.get("unit_type") == "human_interaction" for unit in message_units):
+                            continue
+                        checkpoint = _completed_turn_checkpoint(session, parent, checkpoint)
+                    save_history_summary(
+                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
+                    )
+            except (HistorySummaryPersistenceError, SQLAlchemyError, ValueError) as exc:
+                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
+                               conversation_id, type(exc).__name__)
 
         if message_content or any(
             unit.get("unit_type") not in {HISTORY_SUMMARY_UNIT_TYPE, "history_summary_candidate"}
@@ -687,7 +1359,39 @@ def persist_assistant_run_batch(
         ):
             _touch_conversation_activity(session, conversation_id, user_id)
 
+        if projection_run_id is not None:
+            session.add(ConversationProjectionReceipt(
+                run_id=projection_run_id,
+                message_id=message_id,
+                tenant_id=tenant_id,
+                payload_sha256=payload_digest,
+                unit_ids={str(index): unit_id for index, unit_id in unit_id_by_index.items()},
+                created_by=user_id,
+                updated_by=user_id,
+            ))
+
         return unit_id_by_index
+
+
+
+def fail_unfinished_assistant_projection(message_id: int, status: str, user_id: str, *, tenant_id: str) -> None:
+    """Preserve a committed projection if the sender lost the commit response."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return
+        session.execute(
+            update(ConversationMessage)
+            .where(
+                ConversationMessage.message_id == message_id,
+                ConversationMessage.created_by == user_id,
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .values(status=status, updated_by=user_id, update_time=func.current_timestamp())
+        )
 
 
 def create_message_unit(
@@ -772,51 +1476,46 @@ def update_conversation_message_status(message_id: int, status: str, user_id: Op
         )
 
 
-def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
-    """Mark assistant messages left streaming by a stopped runtime as failed.
-
-    Returns the affected runtime identities so the caller can finish the
-    corresponding short-lived Redis state with the existing runtime-state API.
-    The conditional update makes repeated startup recovery idempotent.
-    """
+def checkpoint_creator_message(
+    message_id: int, conversation_id: int, user_id: str,
+    units: List[Dict[str, Any]], content: str, status: str = "streaming",
+) -> None:
+    """Append an owned creator checkpoint and its status in one transaction."""
+    if status not in {"streaming", "completed", "failed", "stopped"}:
+        raise ValueError("Invalid creator checkpoint status")
     with get_db_session() as session:
-        rows = (
-            session.query(
-                ConversationMessage.message_id,
-                ConversationMessage.conversation_id,
-                ConversationMessage.created_by,
-            )
-            .filter(
-                ConversationMessage.message_role == "assistant",
-                ConversationMessage.status == "streaming",
-                ConversationMessage.delete_flag == "N",
-            )
-            .with_for_update()
-            .all()
-        )
-        if not rows:
-            return []
-
-        message_ids = [int(row.message_id) for row in rows]
-        session.query(ConversationMessage).filter(
-            ConversationMessage.message_id.in_(message_ids),
-            ConversationMessage.status == "streaming",
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update())
+        if owned is None:
+            raise ValueError("Conversation does not exist or is not accessible")
+        parent = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_role == "assistant",
+            ConversationMessage.created_by == user_id,
             ConversationMessage.delete_flag == "N",
-        ).update(
-            {
-                "status": "failed",
-                "update_time": func.current_timestamp(),
-            },
-            synchronize_session=False,
-        )
-        return [
-            {
-                "message_id": int(row.message_id),
-                "conversation_id": int(row.conversation_id),
-                "user_id": row.created_by,
-            }
-            for row in rows
-        ]
+        ).with_for_update())
+        if parent is None or parent.status != "streaming":
+            raise ValueError("Creator message is not an owned active stream")
+        if units:
+            session.execute(insert(ConversationMessageUnit), [add_creation_tracking({
+                "message_id": message_id, "conversation_id": conversation_id,
+                "unit_index": unit["unit_index"], "unit_type": unit["unit_type"],
+                "unit_content": unit["unit_content"], "unit_status": "completed",
+                "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"), "delete_flag": "N",
+            }, user_id) for unit in units])
+        session.execute(update(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+        ).values(**add_update_tracking({
+            "message_content": content, "status": status,
+            "update_time": func.current_timestamp(),
+        }, user_id)))
+        if status != "streaming":
+            _touch_conversation_activity(session, conversation_id, user_id)
 
 
 def update_conversation_message_content(message_id: int, content: str, user_id: Optional[str] = None) -> None:
@@ -927,7 +1626,12 @@ def get_conversation(
             stmt = stmt.where(ConversationRecord.created_by == user_id)
         # Execute the query
         record = session.scalars(stmt).first()
-        return None if record is None else as_dict(record)
+        if record is None:
+            return None
+        conversation = as_dict(record)
+        if "runtime_metadata" in conversation:
+            conversation["runtime_metadata"] = strip_reserved_runtime_metadata_fields(conversation["runtime_metadata"])
+        return conversation
 
 
 def resolve_conversation_runtime_metadata(
@@ -957,14 +1661,14 @@ def resolve_conversation_runtime_metadata(
         if update_requested:
             if expected_version is not None and expected_version != current_version:
                 raise RuntimeMetadataVersionConflict(current_version)
-            record.runtime_metadata = deepcopy(request_metadata or {})
+            record.runtime_metadata = deepcopy(strip_reserved_runtime_metadata_fields(request_metadata))
             record.runtime_metadata_version = current_version + 1
             record.updated_by = user_id
             record.update_time = func.current_timestamp()
             session.flush()
 
         return {
-            "runtime_metadata": deepcopy(record.runtime_metadata or {}),
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(record.runtime_metadata)),
             "runtime_metadata_version": int(record.runtime_metadata_version or 0),
         }
 
@@ -1076,7 +1780,7 @@ def replace_conversation_workbench_and_metadata(
         record.workbench_config = normalized
         record.workbench_config_version = current_config_version + int(config_changed)
         record.knowledge_scope = deepcopy(normalized.get("knowledge_scope"))
-        record.runtime_metadata = deepcopy(metadata)
+        record.runtime_metadata = deepcopy(strip_reserved_runtime_metadata_fields(metadata))
         record.runtime_metadata_version = current_metadata_version + 1
         record.updated_by = user_id
         record.update_time = func.current_timestamp()
@@ -1086,7 +1790,7 @@ def replace_conversation_workbench_and_metadata(
             "workbench_config_version": int(record.workbench_config_version),
             "agent_id": record.agent_id,
             "knowledge_scope": deepcopy(record.knowledge_scope),
-            "runtime_metadata": deepcopy(record.runtime_metadata),
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(record.runtime_metadata)),
             "runtime_metadata_version": int(record.runtime_metadata_version),
         }
 
@@ -1109,7 +1813,7 @@ def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
         stmt = (
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conversation_id, ConversationMessage.delete_flag == "N")
-            .order_by(asc(ConversationMessage.message_index))
+            .order_by(asc(ConversationMessage.message_index), asc(ConversationMessage.message_id))
         )
 
         # Execute the query
@@ -1489,11 +2193,18 @@ def rename_conversation(
 
 def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> bool:
     """
-    Delete a conversation (soft delete)
+    Delete a conversation owned by the user (soft delete, cascading)
+
+    Only a conversation whose created_by matches user_id is affected. Child
+    rows cascade by conversation_id, and only when the owned conversation
+    row itself matched, so a caller passing an id it does not own cannot
+    touch another user's data (aligned with delete_conversations_batch).
+    A None user_id matches no row (created_by = NULL never compares equal),
+    so the call is a safe no-op; callers must pass the authenticated owner.
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for updated_by field
+        user_id: Conversation owner and updated_by value
 
     Returns:
         bool: Whether the operation was successful
@@ -1507,13 +2218,23 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
-        # 1. Mark conversation as deleted
+        # 1. Mark conversation as deleted (ownership filter: created_by == user_id).
+        # Not owned (or already deleted): rowcount 0 refuses before any child row.
         conversation_stmt = (
             update(ConversationRecord)
-            .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                ConversationRecord.created_by == user_id,
+            )
             .values(update_data)
         )
         conversation_result = session.execute(conversation_stmt)
+        if conversation_result.rowcount == 0:
+            return False
+
+        from infrastructure.rdb.trajectory.repository import delete_summaries
+        delete_summaries(session, [conversation_id], user_id)
 
         # 2. Mark related messages as deleted
         message_stmt = (
@@ -1554,11 +2275,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         )
         session.execute(image_stmt)
 
-        # Check if the conversation record was affected
-        return conversation_result.rowcount > 0
+        # Ownership was already verified in step 1; the cascade only runs
+        # after a successful owned-conversation update.
+        return True
 
 
-def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
+def delete_conversations_batch(
+    conversation_ids: List[int], user_id: Optional[str] = None, *, session: Optional[Session] = None,
+) -> List[int]:
     """
     Soft-delete multiple conversations owned by the user (cascading).
 
@@ -1573,7 +2297,7 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
     Returns:
         List of conversation IDs that were actually deleted
     """
-    with get_db_session() as session:
+    with (nullcontext(session) if session is not None else get_db_session()) as session:
         ids = [int(i) for i in conversation_ids]
         if not ids:
             return []
@@ -1601,6 +2325,9 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
             .where(ConversationRecord.conversation_id.in_(owned_ids), ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+
+        from infrastructure.rdb.trajectory.repository import delete_summaries
+        delete_summaries(session, owned_ids, user_id)
 
         # 2. Mark related messages as deleted
         session.execute(
@@ -1661,6 +2388,9 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             .where(ConversationRecord.conversation_id.in_(conv_ids), ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+
+        from infrastructure.rdb.trajectory.repository import delete_summaries
+        delete_summaries(session, conv_ids, user_id)
 
         # 3) Mark messages as deleted
         session.execute(
@@ -1799,6 +2529,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
                 ConversationMessageUnit.message_id == ConversationMessage.message_id,
                 ConversationMessageUnit.delete_flag == "N",
                 ConversationMessageUnit.unit_type.is_not(None),
+                ConversationMessageUnit.unit_type != "execution_result",
             )
             .scalar_subquery()
         )
@@ -1874,7 +2605,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             "agent_system_key": conversation.get("agent_system_key"),
             "chat_mode": conversation.get("chat_mode") or "execution",
             "knowledge_scope": conversation.get("knowledge_scope"),
-            "runtime_metadata": conversation.get("runtime_metadata") or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(conversation.get("runtime_metadata")),
             "runtime_metadata_version": int(conversation.get("runtime_metadata_version") or 0),
             "workbench_config": conversation.get("workbench_config"),
             "workbench_config_version": int(conversation.get("workbench_config_version") or 0),
@@ -2494,17 +3225,24 @@ def save_history_summary(
     compaction_attempts: Optional[int] = None,
     compaction_trigger_threshold_tokens: Optional[int] = None,
     compaction_target_tokens: Optional[int] = None,
+    *, db_session=None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
     if not user_id or not tenant_id or not isinstance(summary, dict):
         raise HistorySummaryPersistenceError("user_id, tenant_id and an object summary are required")
     conversation_id = int(conversation_id)
     covered_through_message_id = int(covered_through_message_id)
-    user_tenant = _get_user_tenant(user_id)
-    if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
-        raise HistorySummaryPersistenceError("conversation is not accessible")
+    if db_session is None:
+        user_tenant = _get_user_tenant(user_id)
+        if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+    else:
+        from infrastructure.rdb.conversation_state import tenant_membership_matches
 
-    with get_db_session() as session:
+        if not tenant_membership_matches(db_session, user_id, tenant_id):
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         owner = session.execute(
             select(ConversationRecord.conversation_id).where(
                 ConversationRecord.conversation_id == conversation_id,
@@ -2646,9 +3384,15 @@ def _stopped_history_text(message, session, conversation_id: int) -> str:
     return _STOPPED_CONTEXT_NOTE + ("\n" + body if body else "")
 
 
-def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any]:
+def _history_turn(user, assistant_text: str, assistant_id=None,
+                  annotations=None) -> Dict[str, Any]:
+    # Annotations merge into the model-facing user text only; the stored
+    # message_content stays clean.
+    user_message = user.message_content or ""
+    if annotations:
+        user_message = format_annotations_for_llm(user_message, annotations)
     return {
-        "user_message": user.message_content or "",
+        "user_message": user_message,
         "assistant_final_answer": assistant_text,
         "attachments": user.minio_files,
         "user_message_id": user.message_id,
@@ -2658,9 +3402,10 @@ def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any
 
 def get_historical_context(
     conversation_id: int,
-    current_user_message_id: int,
+    current_user_message_id: int | None,
     user_id: str,
     tenant_id: str,
+    *, before_message_index: int | None = None,
 ) -> Optional[Dict[str, Any]]:
     """Load authorized completed and stopped turns after the latest valid checkpoint."""
     if not user_id or not tenant_id:
@@ -2669,25 +3414,32 @@ def get_historical_context(
     if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
         return None
     conversation_id = int(conversation_id)
-    current_user_message_id = int(current_user_message_id)
+    if (current_user_message_id is None) == (before_message_index is None):
+        raise ValueError("Historical context requires one message boundary")
     with get_db_session() as session:
-        current = session.execute(
-            select(
-                ConversationMessage.message_id,
-                ConversationMessage.message_index,
-            )
-            .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-            .where(
-                ConversationMessage.message_id == current_user_message_id,
-                ConversationMessage.conversation_id == conversation_id,
-                ConversationMessage.message_role == "user",
-                ConversationMessage.delete_flag == "N",
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == "N",
-            )
-        ).first()
-        if not current:
-            return None
+        if before_message_index is None:
+            current = session.execute(
+                select(ConversationMessage.message_id, ConversationMessage.message_index)
+                .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+                .where(
+                    ConversationMessage.message_id == int(current_user_message_id),
+                    ConversationMessage.conversation_id == conversation_id,
+                    ConversationMessage.message_role == "user",
+                    ConversationMessage.delete_flag == "N",
+                    ConversationRecord.created_by == user_id,
+                    ConversationRecord.delete_flag == "N",
+                )
+            ).first()
+            if current is None:
+                return None
+            before_message_index = current.message_index
+        else:
+            owned = session.scalar(select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+            ))
+            if owned is None:
+                return None
 
         candidates = session.execute(
             select(
@@ -2704,7 +3456,7 @@ def get_historical_context(
                 ConversationMessageUnit.delete_flag == "N",
                 ConversationMessage.status == "completed",
                 ConversationMessage.delete_flag == "N",
-                ConversationMessage.message_index < current.message_index,
+                ConversationMessage.message_index < before_message_index,
             )
             .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))
         ).all()
@@ -2732,7 +3484,7 @@ def get_historical_context(
                 and boundary.message_role == "assistant"
                 and boundary.status == "completed"
                 and boundary.message_index == candidate.message_index
-                and boundary.message_index < current.message_index
+                and boundary.message_index < before_message_index
             ):
                 summary_record, summary_payload = candidate, payload
                 boundary_index = boundary.message_index
@@ -2750,20 +3502,53 @@ def get_historical_context(
             .where(
                 ConversationMessage.conversation_id == conversation_id,
                 ConversationMessage.message_index > boundary_index,
-                ConversationMessage.message_index < current.message_index,
+                ConversationMessage.message_index < before_message_index,
                 ConversationMessage.status.in_(["completed", "stopped"]),
                 ConversationMessage.delete_flag == "N",
                 ConversationMessage.message_role.in_(["user", "assistant"]),
             )
-            .order_by(asc(ConversationMessage.message_index))
+            .order_by(asc(ConversationMessage.message_index), desc(ConversationMessage.message_id))
         ).all()
+
+        # Fetch reply-annotation units for the historical user messages so the
+        # model keeps seeing quoted excerpts on later turns while the stored
+        # message_content stays clean.
+        user_message_ids = [
+            message.message_id
+            for message in messages
+            if message.message_role == "user"
+        ]
+        annotations_by_message: Dict[int, Any] = {}
+        if user_message_ids:
+            annotation_rows = session.execute(
+                select(
+                    ConversationMessageUnit.message_id,
+                    ConversationMessageUnit.unit_content,
+                ).where(
+                    ConversationMessageUnit.conversation_id == conversation_id,
+                    ConversationMessageUnit.message_id.in_(user_message_ids),
+                    ConversationMessageUnit.unit_type == MESSAGE_ANNOTATIONS_UNIT_TYPE,
+                    ConversationMessageUnit.unit_status == "completed",
+                    ConversationMessageUnit.delete_flag == "N",
+                )
+            ).all()
+            for row in annotation_rows:
+                items = parse_message_annotation_unit(row.unit_content)
+                if items is not None:
+                    annotations_by_message[int(row.message_id)] = items
 
         turns: List[Dict[str, Any]] = []
         pending_user = None
         for message in messages:
             if message.message_role == "user":
                 if pending_user is not None:
-                    turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
+                    turns.append(
+                        _history_turn(
+                            pending_user,
+                            _UNANSWERED_CONTEXT_NOTE,
+                            annotations=annotations_by_message.get(pending_user.message_id),
+                        )
+                    )
                 pending_user = message
             elif pending_user is not None:
                 answer = (
@@ -2771,18 +3556,65 @@ def get_historical_context(
                     if message.status == "stopped"
                     else message.message_content or ""
                 )
-                turns.append(_history_turn(pending_user, answer, message.message_id))
+                turns.append(
+                    _history_turn(
+                        pending_user,
+                        answer,
+                        message.message_id,
+                        annotations=annotations_by_message.get(pending_user.message_id),
+                    )
+                )
                 pending_user = None
         if pending_user is not None:
-            turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
+            turns.append(
+                _history_turn(
+                    pending_user,
+                    _UNANSWERED_CONTEXT_NOTE,
+                    annotations=annotations_by_message.get(pending_user.message_id),
+                )
+            )
+
+        assistant_ids = [turn["assistant_message_id"] for turn in turns if turn["assistant_message_id"] > 0]
+        if assistant_ids:
+            records = session.execute(select(
+                ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
+                ConversationMessageUnit.invocation_id, ConversationMessageUnit.unit_index,
+            ).where(
+                ConversationMessageUnit.conversation_id == conversation_id,
+                ConversationMessageUnit.message_id.in_(assistant_ids),
+                ConversationMessageUnit.unit_type.in_([
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result",
+                ]),
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
+            by_message = {}
+            from nexent.core.agents.context.native_history import decode_history_event
+
+            for record in records:
+                history_record = {
+                    "record_type": record.unit_type, "content": record.unit_content,
+                    "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
+                    "unit_index": record.unit_index,
+                }
+                event = decode_history_event(history_record)
+                if event is not None:
+                    history_record["execution_event"] = event
+                by_message.setdefault(record.message_id, []).append(history_record)
+            for turn in turns:
+                if turn["assistant_message_id"] in by_message:
+                    turn["execution_records"] = by_message[turn["assistant_message_id"]]
 
         summary_result = None
         if summary_record and summary_payload:
             summary_result = {
                 "unit_id": summary_record.unit_id,
-                **summary_payload,
+                **{key: value for key, value in summary_payload.items()
+                   if key not in {"structured_source_proofs", "execution_sources"}},
             }
-        return {"history_summary": summary_result, "conversation_turns": turns}
+        return {"history_summary": summary_result, "conversation_turns": turns,
+                "current_user_message_index": before_message_index}
 
 
 def _remove_scope_references(
@@ -2848,14 +3680,41 @@ def remove_conversation_knowledge_bindings(
         record.update_time = func.current_timestamp()
 
 
+def retain_creator_histories(user_id, executor_id, target, *, session=None):
+    """Keep the latest three owned Agent or Skill creator conversations and cascade soft deletion."""
+    if not user_id or not executor_id or not target or target.get("type") not in ("agent", "skill"):
+        return
+    with (nullcontext(session) if session is not None else get_db_session()) as session:
+        _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{executor_id}:{target['type']}:{target['id']}")
+        excess = session.scalars(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.agent_id == executor_id,
+                ConversationRecord.target == target,
+                ConversationRecord.delete_flag == "N",
+            ).order_by(_activity_time_expression().desc(), ConversationRecord.conversation_id.desc()).offset(3)
+        ).all()
+        if excess:
+            delete_conversations_batch(excess, user_id, session=session)
+
+
 def bind_creation_conversation_target(conversation_id, executor_id, expected_target, target, user_id):
     """Compare-and-set a resource target without changing the executor or messages."""
     with get_db_session() as session:
+        if target.get("type") in ("agent", "skill"):
+            _lock_conversation_limit_scope(session, f"creator-history:{user_id}:{executor_id}:{target['type']}:{target['id']}")
         predicate = ConversationRecord.target.is_(None) if expected_target is None else ConversationRecord.target == expected_target
+        update_data = {"target": target, "updated_by": user_id}
+        if target.get("type") in ("agent", "skill"):
+            update_data.update(update_time=func.current_timestamp(),
+                               last_activity_time=func.timezone("UTC", func.clock_timestamp()))
         result = session.execute(update(ConversationRecord).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.created_by == user_id,
             ConversationRecord.agent_id == executor_id,
             ConversationRecord.delete_flag == "N", predicate,
-        ).values(target=target, updated_by=user_id))
-        return result.rowcount == 1
+        ).values(**update_data))
+        bound = result.rowcount == 1
+        if bound:
+            retain_creator_histories(user_id, executor_id, target, session=session)
+        return bound

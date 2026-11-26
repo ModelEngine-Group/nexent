@@ -1,0 +1,30 @@
+schema_version: '1.0'
+case_id: JIUWEN-RESOURCES-D3-002
+implementations:
+- framework: pytest
+  file: test_collaboration.py
+  selector: test_
+timeout_seconds: 240
+acceptance_bindings:
+  AC-06:
+  - test_configured_collaboration
+  - test_native_a2a_stream_has_same_child_result_live_and_in_history
+  - test_native_a2a_polls_known_task_without_resending_message
+  - test_native_a2a_ends_child_without_publishing_failed_partial_result
+  AC-05:
+  - test_native_python_children_overlap_with_distinct_system_kernel_leases
+  AC-04:
+  - test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop
+  - test_identical_child_calls_keep_read_only_contract
+  AC-03:
+  - test_only_root_clarifies_after_child_returns_missing_information
+  AC-02:
+  - test_configured_deadlines_allow_delayed_a2a_completion
+  AC-01:
+  - test_configured_collaboration
+  - test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

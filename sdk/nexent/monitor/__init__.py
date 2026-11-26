@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Nexent Monitor Package - LLM Performance Monitoring System
 
@@ -17,6 +18,7 @@ from .monitoring import (
     RecordModelCallContext,
     get_monitoring_manager,
     get_monitoring_buffer,
+    configure_monitoring_records,
     is_opentelemetry_available,
     set_monitoring_context,
     get_monitoring_context,
@@ -42,7 +44,6 @@ from .monitoring import (
     OPENINFERENCE_USER_ID,
     OPENINFERENCE_TAG_TAGS,
 )
-
 __version__ = "0.2.0"
 __all__ = [
     'MonitoringConfig',
@@ -54,6 +55,7 @@ __all__ = [
     'RecordModelCallContext',
     'get_monitoring_manager',
     'get_monitoring_buffer',
+    'configure_monitoring_records',
     'is_opentelemetry_available',
     'set_monitoring_context',
     'get_monitoring_context',

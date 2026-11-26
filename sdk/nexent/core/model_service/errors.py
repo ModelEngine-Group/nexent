@@ -2,10 +2,24 @@
 
 """Stable retry classification with shared HTTP-boundary display diagnostics."""
 
+import logging
+
 from nexent.core.model_service.adapters.openai_chat import ModelAdapterError
 from nexent.core.model_service.contracts import ModelError
 from nexent.core.model_service.http_contracts import ModelTransportError
 
+
+logger = logging.getLogger(__name__)
+_PROTOCOL_DIAGNOSTICS = frozenset({
+    "MODEL_RESPONSE_INVALID", "MODEL_RESPONSE_INCOMPLETE", "MODEL_TOOL_CALL_INVALID",
+    "MODEL_STREAM_IDENTITY_CONFLICT", "MODEL_USAGE_CONFLICT", "MODEL_USAGE_INVALID",
+    "MODEL_STREAM_AFTER_FINISH", "MODEL_CONTENT_UNSUPPORTED", "MODEL_MESSAGE_INVALID",
+    "MODEL_ROLE_UNSUPPORTED", "MODEL_RESPONSE_TOO_LARGE", "MODEL_TOOL_CALL_LIMIT",
+    "MODEL_REQUEST_CONFIGURATION_INVALID", "MODEL_REASONING_FORMAT_UNSUPPORTED",
+    "MODEL_SNAPSHOT_MISMATCH", "MODEL_PROTOCOL_UNSUPPORTED", "NATIVE_TOOL_PROTOCOL_UNAVAILABLE",
+    "HTTP_RESPONSE_TOO_LARGE", "HTTP_STREAM_FORMAT_INVALID", "SSE_INVALID_TEXT",
+    "SSE_EVENT_TOO_LARGE", "SSE_INCOMPLETE_EVENT", "SSE_DECODER_CLOSED",
+})
 
 _CATEGORIES = {
     "MODEL_AUTHENTICATION_ERROR": (False, "Model service authentication failed."),
@@ -65,6 +79,8 @@ _DIAGNOSTICS = {
     "MODEL_CONTENT_UNSUPPORTED": ("The request contains an unsupported content type.", "请求包含不支持的内容类型。"),
     "MODEL_MESSAGE_INVALID": ("The request message structure is invalid.", "请求消息的结构无效。"),
     "MODEL_REASONING_FORMAT_UNSUPPORTED": ("The configured reasoning parameter format is unsupported.", "不支持所配置的思考参数格式。"),
+    "TEMPERATURE_OUT_OF_RANGE": ("Temperature must be between 0 and 2. Clear it or enter a valid value.", "温度必须在 0 到 2 之间。请清空或输入合法值。"),
+    "TOP_P_OUT_OF_RANGE": ("Top P must be greater than 0 and at most 1. Clear it or enter a valid value.", "Top P 必须大于 0 且不超过 1。请清空或输入合法值。"),
     "MODEL_REQUEST_CONFIGURATION_INVALID": ("The model request configuration is invalid.", "模型请求配置无效。"),
     "MODEL_ROLE_UNSUPPORTED": ("The request contains an unsupported message role.", "请求包含不支持的消息角色。"),
     "MODEL_SNAPSHOT_MISMATCH": ("The request does not match the model configuration snapshot.", "请求与模型配置快照不一致。"),
@@ -144,6 +160,12 @@ def normalize_model_error(
         if parameter in {"model", "temperature", "top_p", "max_tokens", "reasoning_effort",
                          "thinking_budget", "thinking_token_budget", "enable_thinking", "chat_template_kwargs"}:
             parameter_name = parameter
+    if category == "MODEL_PROTOCOL_ERROR" and response is None:
+        source_code = getattr(error, "category", None)
+        code = next((known for known in (*_PROTOCOL_DIAGNOSTICS, *_DIAGNOSTICS)
+                     if known == source_code), "UNCLASSIFIED")
+        logger.warning("event=model_protocol_error protocol_code=%s request_id=%s", code, request_id,
+                       extra={"protocol_code": code, "request_id": request_id})
     retryable, message = _CATEGORIES[category]
     diagnostic = getattr(error, "category", None)
     diagnostic = diagnostic if diagnostic in _DIAGNOSTICS else category

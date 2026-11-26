@@ -1,0 +1,341 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Real model/A2A HTTP fixtures for configured mixed-Core invocations."""
+
+import asyncio
+import json
+from contextlib import asynccontextmanager, nullcontext
+from threading import Event
+from unittest.mock import Mock
+
+from jiuwen_bridge_fixture import profile_for
+from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.smolagents.adapter import SmolagentsAdapter
+from nexent.core.agents.orchestration.entry import agent_run
+from nexent.core.concurrency import LanePolicy, ThreadManager
+from nexent.core.utils.observer import MessageObserver
+
+
+@asynccontextmanager
+async def collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay=0,
+                                 remote_stream=False, repeat_child=False):
+    state = {"parent": [], "child": [], "remote": [], "closed": False, "errors": [], "handlers": set(),
+             "auth_ok": [], "effects": [], "parent_effects": [], "remote_methods": [], "remote_auth": [],
+             "native_invocations": []}
+    both_children_started = asyncio.Event()
+
+    async def handle(reader, writer):
+        state["handlers"].add(asyncio.current_task())
+        try:
+            headers = await reader.readuntil(b"\r\n\r\n")
+            path = headers.split(b" ")[1].decode()
+            size = int(next(line.split(b":", 1)[1] for line in headers.split(b"\r\n")
+                            if line.lower().startswith(b"content-length:")))
+            body = json.loads(await reader.readexactly(size))
+            key = "remote" if path.startswith("/remote") else "child" if path.startswith("/child") else "parent"
+            state[key].append(body)
+            if key in {"parent", "child"}:
+                expected = b"authorization: bearer " + (b"parent-only" if key == "parent" else b"child-only")
+                state["auth_ok"].append(expected in headers.lower())
+            if fault in {"cancel", "timeout"} and key == ("remote" if child_core == "a2a" else "child"):
+                await reader.read()
+                state["closed"] = True
+                return
+            if key == "remote":
+                state["remote_methods"].append(body.get("method", path))
+                state["remote_auth"].append(
+                    b"authorization: bearer remote-only" in headers.lower()
+                    and b"x-a2a-test: bound" in headers.lower()
+                    and b"authorization: bearer parent-only" not in headers.lower()
+                )
+                await asyncio.sleep(remote_delay)
+                payload = {"message": {"role": "ROLE_AGENT", "messageId": "remote-reply",
+                                       "parts": [{"text": "CHILD_DONE"}]}}
+                if body.get("method") == "CancelTask":
+                    if fault == "partial_timeout_unresponsive_cancel":
+                        await reader.read()
+                        return
+                    payload = {"id": "remote-task", "contextId": "remote-context",
+                               "status": {"state": "TASK_STATE_CANCELED"}}
+                elif body.get("method") == "GetTask":
+                    payload = {"id": "remote-task", "contextId": "remote-context",
+                               "status": {"state": "TASK_STATE_COMPLETED"},
+                               "artifacts": [{"artifactId": "text", "parts": [{"text": "CHILD_DONE"}]}]}
+                elif fault == "remote_poll":
+                    payload = {"task": {"id": "remote-task", "contextId": "remote-context",
+                                        "status": {"state": "TASK_STATE_WORKING"}}}
+                elif remote_stream:
+                    def event(value):
+                        if remote_protocol == "JSONRPC":
+                            value = {"jsonrpc": "2.0", "id": body["id"], "result": value}
+                        writer.write(("data: " + json.dumps(value) + "\n\n").encode())
+
+                    writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
+                    event({"artifactUpdate": {"taskId": "remote-task", "contextId": "remote-context",
+                           "artifact": {"artifactId": "text", "parts": [{"text": "CHILD_"}]}}})
+                    await writer.drain()
+                    if fault in {"partial_timeout", "partial_timeout_unresponsive_cancel", "partial_cancel"}:
+                        await reader.read()
+                        state["closed"] = True
+                        return
+                    event({"artifactUpdate": {"taskId": "remote-task", "contextId": "remote-context",
+                           "append": True, "artifact": {"artifactId": "text", "parts": [{"text": "DONE"}]}}})
+                    terminal = "FAILED" if fault == "remote_failed" else "COMPLETED"
+                    event({"statusUpdate": {"taskId": "remote-task", "contextId": "remote-context",
+                           "status": {"state": "TASK_STATE_" + terminal}}})
+                    await writer.drain()
+                    return
+                if remote_protocol == "JSONRPC":
+                    payload = {"jsonrpc": "2.0", "id": body["id"], "result": payload}
+                encoded = json.dumps(payload).encode()
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                             + str(len(encoded)).encode() + b"\r\nConnection: close\r\n\r\n" + encoded)
+                await writer.drain()
+                return
+            core = parent_core if key == "parent" else child_core
+            first = len(state[key]) == 1
+            call = first and key == "parent"
+            if repeat_child and key == "child":
+                if len(state["child"]) == 2:
+                    both_children_started.set()
+                await asyncio.wait_for(both_children_started.wait(), timeout=3)
+                content, calls = "CHILD_DONE", []
+            elif fault == "missing_information" and key == "child":
+                content, calls = "MISSING_INPUT: birth date", []
+                if core == "smolagents":
+                    content = '<final_answer>' + content + '</final_answer>'
+            elif fault == "missing_information" and key == "parent" and not first:
+                form = {"questions": [{"id": "birth", "type": "text", "title": "Please provide your birth date", "required": True}]}
+                if core == "jiuwen" and protocol == "native":
+                    content = ""
+                    calls = [{"id": "parent-clarify", "type": "function", "function": {
+                        "name": "ask_user", "arguments": json.dumps(form)}}]
+                else:
+                    content, calls = '<code>ask_user(questions=' + repr(form["questions"]) + ')</code>', []
+            elif call and core == "jiuwen" and protocol == "native":
+                content = ""
+                calls = [{"id": "call-child", "type": "function", "function": {
+                    "name": "delegate", "arguments": json.dumps({"task": "CHILD_TASK_ONLY"})}}]
+                if repeat_child:
+                    calls.append({**calls[0], "id": "call-child-repeat"})
+            elif call:
+                content = '<code>\nvalue = delegate(task="CHILD_TASK_ONLY")\nprint(value)\n</code>'
+                calls = []
+            elif key == "child" and first:
+                if core == "jiuwen" and protocol == "native":
+                    content = ""
+                    calls = [{"id": "child-effect", "type": "function", "function": {
+                        "name": "child_echo", "arguments": "{}"}}]
+                else:
+                    content = '<code>\nprint(child_echo())\n</code>'
+                    calls = []
+            else:
+                content = "PARENT_DONE" if key == "parent" else "CHILD_DONE"
+                if core == "smolagents":
+                    content = '<final_answer>' + content + '</final_answer>'
+                calls = []
+            finish = "tool_calls" if calls else "stop"
+            message = {"role": "assistant", "content": content}
+            if calls:
+                message["tool_calls"] = calls
+            value = {"id": "fixture-response", "model": body["model"], "object": "chat.completion",
+                     "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+            if body.get("stream"):
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
+                delta = dict(message)
+                if calls:
+                    delta["tool_calls"] = [{"index": i, **item} for i, item in enumerate(calls)]
+                chunk = {"id": value["id"], "model": value["model"], "object": "chat.completion.chunk",
+                         "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+                writer.write(("data: " + json.dumps(chunk) + "\n\n").encode())
+                chunk["choices"] = [{"index": 0, "delta": {}, "finish_reason": finish}]
+                chunk["usage"] = value["usage"]
+                writer.write(("data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n").encode())
+            else:
+                encoded = json.dumps(value).encode()
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                             + str(len(encoded)).encode() + b"\r\nConnection: close\r\n\r\n" + encoded)
+            await writer.drain()
+        except (ConnectionError, asyncio.IncompleteReadError):
+            pass
+        except Exception as exc:  # noqa: BLE001 - Record unexpected fixture errors for terminal assertions.
+            state["errors"].append(type(exc).__name__)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            state["handlers"].discard(asyncio.current_task())
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    try:
+        async with server:
+            yield f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", state
+    finally:
+        for task in tuple(state["handlers"]):
+            task.cancel()
+        await asyncio.gather(*state["handlers"], return_exceptions=True)
+
+
+async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwen", protocol="native",
+                            remote_protocol="JSONRPC", fault=None, run_timeouts=None, remote_delay=0,
+                            remote_stream=False, repeat_child=False):
+    monitoring = Mock()
+    monitoring.trace_llm_request.side_effect = lambda *args, **kwargs: nullcontext(None)
+    monkeypatch.setattr("nexent.core.model_service.service.get_monitoring_manager", lambda: monitoring)
+    def forbid(*args, **kwargs):
+        raise AssertionError("Native Jiuwen provider client must not be used")
+    monkeypatch.setattr("openjiuwen.core.foundation.llm.model.create_model_client", forbid)
+    cores, cards = [], []
+    for adapter_type in (JiuwenAdapter, SmolagentsAdapter):
+        original = adapter_type.run
+        def run(adapter, _original=original):
+            cores.append((adapter.run_info.agent_config.name, adapter.core_name))
+            return _original(adapter)
+        monkeypatch.setattr(adapter_type, "run", run)
+    original_prepare = JiuwenAdapter.prepare
+    def prepare(adapter):
+        original_prepare(adapter)
+        cards.extend(card.id for card in adapter.native_agent.ability_manager.list())
+    monkeypatch.setattr(JiuwenAdapter, "prepare", prepare)
+    async with collaboration_provider(
+        parent_core, child_core, protocol, remote_protocol, fault, remote_delay, remote_stream, repeat_child,
+    ) as (url, state):
+        from nexent.core.agents.cores.jiuwen.collaboration import CollaborationAgent
+        from nexent.core.agents.cores.smolagents import agent as nexent_agent
+        import nexent.core.tools as shared_tool_types
+        from smolagents import Tool
+
+        original_invoke = CollaborationAgent.invoke
+
+        async def invoke(agent, inputs, session=None):
+            state["native_invocations"].append((agent.card.id, session.get_session_id()))
+            return await original_invoke(agent, inputs, session=session)
+
+        monkeypatch.setattr(CollaborationAgent, "invoke", invoke)
+        remote_task_seen = Event()
+        if fault == "partial_cancel":
+            from nexent.core.agents.cores.jiuwen.a2a import _RemoteResult
+
+            original_accept = _RemoteResult.accept
+
+            def accept(result, event):
+                original_accept(result, event)
+                if result.task_id:
+                    remote_task_seen.set()
+
+            monkeypatch.setattr(_RemoteResult, "accept", accept)
+
+        class ChildEchoTool(Tool):
+            name, description, inputs, output_type = "child_echo", "Child effect", {}, "string"
+
+            def forward(self):
+                state["effects"].append("child")
+                return "CHILD_EFFECT"
+
+        class ParentOnlyTool(Tool):
+            name, description, inputs, output_type = "parent_only", "Parent effect", {}, "string"
+
+            def forward(self):
+                state["parent_effects"].append("parent")
+                raise AssertionError("Child cannot execute parent resources")
+
+        monkeypatch.setattr(nexent_agent, "ChildEchoTool", ChildEchoTool, raising=False)
+        monkeypatch.setattr(shared_tool_types, "ChildEchoTool", ChildEchoTool, raising=False)
+        monkeypatch.setattr(nexent_agent, "ParentOnlyTool", ParentOnlyTool, raising=False)
+        monkeypatch.setattr(shared_tool_types, "ParentOnlyTool", ParentOnlyTool, raising=False)
+
+        def model(path, temperature, credential, outlet):
+            profile = profile_for(url + path, protocol)
+            data = profile.model_dump()
+            data["outlet_id"] = outlet
+            data["connection"]["credential_ref"]["model_id"] = outlet
+            data["parameter_rules"].append({
+                "key": "temperature", "schema": {"type": "number", "minimum": 0, "maximum": 2},
+                "owner": "combination", "allowed_scopes": ["outlet", "conversation"], "required": False,
+                "editable": True, "visible": True, "ui_group": "sampling",
+                "source": {"ref": "controlled_temperature", "version": 1, "evidence": "Controlled fixture"},
+                "api_binding": {"path": "/temperature", "transform_ref": "identity_v1", "transform_version": 1},
+            })
+            data["parameter_values"]["temperature"] = temperature
+            profile = type(profile).model_validate(data)
+            return ModelConfig(cite_name="shared", model_name=profile.identity.request_model_id,
+                url=profile.connection.base_url, api_key=credential, temperature=temperature, resolved_profile=profile)
+        child_model = model("/child", 0.2, "child-only", 8)
+        child = AgentConfig(agent_core="jiuwen" if child_core == "a2a" else child_core,
+            name="delegate", description="Delegate task", invocation_name="delegate", model_name="shared", tools=[ToolConfig(name="child_echo", class_name="ChildEchoTool",
+                source="local", params={})],
+            max_steps=3, runtime_model_config=child_model, instructions="CHILD_SYSTEM_ONLY")
+        if repeat_child:
+            child.tools = []
+        root = AgentConfig(agent_core=parent_core, name="parent", description="Parent", model_name="shared",
+                           tools=[ToolConfig(name="parent_only", class_name="ParentOnlyTool", source="local", params={})],
+                           instructions="PARENT_SYSTEM_ONLY", max_steps=3,
+                           worker_agents=[] if child_core == "a2a" else [child])
+        if child_core == "a2a":
+            root.external_a2a_agents = [ExternalA2AAgentConfig(agent_id="remote-id", name="delegate",
+                url=url + "/remote", protocol_type=remote_protocol, api_key="remote-only",
+                custom_headers={"X-A2A-Test": "bound"}, raw_card={"capabilities": {"streaming": remote_stream}},
+                timeout=0.5 if fault in {"timeout", "partial_timeout", "partial_timeout_unresponsive_cancel"} else 5)]
+        manager = ThreadManager("collaboration-runtime", {
+            # Reserve service ownership for both monitoring and the shared Jiuwen loop.
+            name: LanePolicy(name=name, max_workers=2 if name == "background-service" or
+                             repeat_child and name == "control-io" or
+                             name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
+            for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
+        manager.start()
+        from runtime.adapters.nexent.factory import build_run_info
+
+        timeouts = {"collaboration_timeout_seconds": 0.4 if fault == "capacity" else 5}
+        timeouts.update(run_timeouts or {})
+        info = build_run_info(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,
+            model_config_list=[model("/parent", 0.9, "parent-only", 7)], observer=MessageObserver(lang="en"),
+            stop_event=Event(), thread_manager=manager, **timeouts,
+            tenant_id="spike-tenant", user_context={"user_id": "trusted"})
+        info.runtime_metadata = {"user_context": {"user_id": "spoof"}, "request_tag": "authorized-metadata"}
+
+        async def cancel():
+            async with asyncio.timeout(5):
+                while not (state["child"] or state["remote"]):
+                    await asyncio.sleep(0.01)
+                if fault == "partial_cancel":
+                    while not remote_task_seen.is_set():
+                        await asyncio.sleep(0.01)
+            info.stop_event.set()
+        canceller = asyncio.create_task(cancel()) if fault in {"cancel", "partial_cancel"} else None
+        output = []
+        cancelled = False
+        try:
+            async for event in agent_run(info, thread_manager=manager):
+                output.append(json.loads(event))
+        except asyncio.CancelledError:
+            # The public stream stops immediately on user cancellation. Inspect
+            # only the real owned observer after the worker has drained below.
+            if fault not in {"cancel", "capacity", "timeout", "partial_cancel"} or not info.stop_event.is_set():
+                raise
+            cancelled = True
+        finally:
+            try:
+                if canceller:
+                    await canceller
+                if cancelled and info.thread_future is not None:
+                    # The loopback peer runs on this loop and must be able to
+                    # respond while the worker is sending its cancellation RPC.
+                    await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(info.thread_future)), 4)
+            finally:
+                drained = await manager.shutdown(timeout=5)
+                assert not drained.stuck_execution_ids
+        if cancelled:
+            output.extend(json.loads(event) for event in info.observer.get_cached_message())
+        for _ in range(50):
+            if not fault or state["closed"]:
+                break
+            await asyncio.sleep(0.01)
+        from openjiuwen.core.runner import Runner
+        assert all(Runner.resource_mgr.get_tool(card) is None for card in cards)
+        for card, _session_id in state["native_invocations"]:
+            assert await Runner.resource_mgr.get_agent(card) is None
+        assert manager.snapshot().active_count == 0
+        assert not state["errors"]
+        return info, state, output, cores

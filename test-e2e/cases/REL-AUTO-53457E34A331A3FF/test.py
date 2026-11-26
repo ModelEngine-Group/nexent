@@ -11,8 +11,10 @@ clearing the default thread manager.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict, is_dataclass
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -43,14 +45,38 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
     from fastapi.testclient import TestClient
 
     from management.api import application as config_app
-    from nexent.core.concurrency import ManagerState
+    from management.api import northbound_application as northbound_app
+    from management.services.agent import prepared_turn
+    from management.services.automation import scheduler
+    from management.services.conversation import creator_runtime
+    from management.services.memory import prepared_completion
+    from nexent.core.concurrency import ManagerState, ThreadManager
 
     # --- Static anchors ------------------------------------------------------
     grace = const.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
     assert isinstance(grace, (int, float)) and grace > 0
     assert CONFIG_SERVICE_NAME == 'nexent-config'
 
-    manager = config_app.config_thread_manager
+    manager = ThreadManager("config", config_app.config_thread_manager._policies)
+    monkeypatch.setattr(config_app, "config_thread_manager", manager)
+    monkeypatch.setattr(northbound_app, "config_thread_manager", manager)
+    monkeypatch.setattr(const, "GATEWAY_AUTH_ENABLED", False)
+    monkeypatch.setattr(config_app.app, "middleware_stack", None)
+    # Verify real lifespan dispatch and shutdown without touching deployed data.
+    monkeypatch.setattr(config_app, "migrate_legacy_outlets", Mock(return_value={"migrated": 0, "failed": 0}))
+    monkeypatch.setattr(config_app, "recover_config_tasks", Mock(return_value={}))
+    monkeypatch.setattr(startup_recovery, "recover_northbound_tasks", Mock(return_value={}))
+    monkeypatch.setattr(northbound_app, "start_system_configuration", AsyncMock())
+    monkeypatch.setattr(northbound_app, "stop_system_configuration", AsyncMock())
+    monkeypatch.setattr(config_app.dreaming_scheduler, "start", AsyncMock())
+    monkeypatch.setattr(config_app.dreaming_scheduler, "stop", AsyncMock())
+    monkeypatch.setattr(scheduler, "recover_automation_runs", Mock(return_value={}))
+    monkeypatch.setattr(scheduler.agent_automation_scheduler, "start", AsyncMock())
+    monkeypatch.setattr(scheduler.agent_automation_scheduler, "stop", AsyncMock())
+    monkeypatch.setattr(prepared_turn, "_recover_pending_turns", AsyncMock())
+    monkeypatch.setattr(prepared_completion, "recover_memory_jobs", AsyncMock())
+    monkeypatch.setattr(creator_runtime, "shutdown_creator_streams", AsyncMock())
+    monkeypatch.setattr(evaluation_maintenance, "_run_loop", lambda stop: stop.wait())
 
     events: list[str] = []
     calls: dict[str, list] = {
@@ -84,7 +110,7 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
     monkeypatch.setattr(manager, 'run', spy_run)
     monkeypatch.setattr(manager, 'shutdown', spy_shutdown)
 
-    original_start = evaluation_maintenance.start
+    original_start = config_app.start_eval_maintenance
 
     def spy_start(mgr):
         events.append('start_eval_maintenance')
@@ -98,15 +124,17 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
         calls['stop_eval_maintenance'].append(True)
         return original_stop()
 
-    monkeypatch.setattr(evaluation_maintenance, 'start', spy_start)
+    monkeypatch.setattr(config_app, 'start_eval_maintenance', spy_start)
     monkeypatch.setattr(evaluation_maintenance, 'stop', spy_stop)
 
-    original_schedule = startup_recovery.schedule_interrupted_upload_cleanup
+    cleanup_tasks: list[asyncio.Task] = []
 
     async def spy_schedule(*args, **kwargs):
         events.append('schedule_cleanup')
         calls['schedule_cleanup'].append(args[0] if args else kwargs.get('service_name'))
-        return await original_schedule(*args, **kwargs)
+        task = asyncio.create_task(asyncio.sleep(3600))
+        cleanup_tasks.append(task)
+        return task
 
     monkeypatch.setattr(startup_recovery, 'schedule_interrupted_upload_cleanup', spy_schedule)
 
@@ -119,31 +147,31 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
 
     monkeypatch.setattr(config_app, 'stop_dreaming_scheduler', spy_stop_dreaming)
 
-    original_set_default = config_app.set_default_thread_manager
+    original_set_default = northbound_app.set_default_thread_manager
 
     def spy_set_default(mgr):
         events.append('set_default')
         calls['set_default'].append(mgr)
         return original_set_default(mgr)
 
-    original_clear_default = config_app.clear_default_thread_manager
+    original_clear_default = northbound_app.clear_default_thread_manager
 
     def spy_clear_default(mgr):
         events.append('clear_default')
         calls['clear_default'].append(mgr)
         return original_clear_default(mgr)
 
-    monkeypatch.setattr(config_app, 'set_default_thread_manager', spy_set_default)
-    monkeypatch.setattr(config_app, 'clear_default_thread_manager', spy_clear_default)
+    monkeypatch.setattr(northbound_app, 'set_default_thread_manager', spy_set_default)
+    monkeypatch.setattr(northbound_app, 'clear_default_thread_manager', spy_clear_default)
 
     caplog.set_level(logging.DEBUG)
 
     with TestClient(config_app.app) as client:
-        # Startup path has run (config_app.py:126-131).
+        # Startup has run through the real Management lifespan.
         state_running = manager.state
         assert state_running is not ManagerState.CREATED
 
-        # Capacity probe returns the live snapshot (config_app.py:158-161).
+        # Capacity probe returns the live snapshot.
         response = client.get('/internal/thread-capacity')
         assert response.status_code == 200
         body = response.json()
@@ -156,7 +184,7 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
     assert state_stopped is not ManagerState.CREATED
     assert state_stopped is not state_running
 
-    # --- Startup dispatch (config_app.py:79-95) -----------------------------
+    # --- Startup dispatch ---------------------------------------------------
     recover_runs = [c for c in calls['run'] if c[1] == 'recover-config-tasks']
     assert len(recover_runs) == 1
     pool_name, task_name, owner = recover_runs[0]
@@ -164,10 +192,11 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
     assert owner == 'management.api.application'
 
     assert 'nexent-config' in calls['schedule_cleanup']
+    assert cleanup_tasks and all(task.cancelled() for task in cleanup_tasks)
     assert calls['start_eval_maintenance'] == [manager]
     assert calls['set_default'] == [manager]
 
-    # --- Shutdown ordering (config_app.py:132-146) --------------------------
+    # --- Shutdown ordering --------------------------------------------------
     assert len(calls['shutdown']) == 1
     assert calls['shutdown'][0] == grace
     assert calls['clear_default'] == [manager]

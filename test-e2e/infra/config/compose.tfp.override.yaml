@@ -1,0 +1,11 @@
+# Applied only by the Daily TFP deployment controller.
+services:
+  nexent-runtime:
+    environment:
+      AGENT_WORKSPACE_ROOT: "${NEXENT_TFP_WORKSPACE:?TFP requires an owned workspace}"
+    volumes:
+      - type: bind
+        source: "${NEXENT_TFP_WORKSPACE:?TFP requires an owned workspace}"
+        target: "${NEXENT_TFP_WORKSPACE:?TFP requires an owned workspace}"
+        bind:
+          create_host_path: false

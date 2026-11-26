@@ -24,7 +24,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient',
+patch('infrastructure.object_storage.client.MinioClient',
       return_value=minio_client_mock).start()
 
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError
@@ -664,8 +664,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.user_service.delete_user_and_cleanup') as mock_delete_user, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.delete_model_record') as mock_delete_model, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.delete_knowledge_record') as mock_delete_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
@@ -687,7 +686,6 @@ class TestDeleteTenant:
 
             # Empty lists for resources
             mock_query_groups.return_value = {"data": []}
-            mock_get_models.return_value = []
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
             mock_get_mcp.return_value = []
@@ -738,6 +736,7 @@ class TestDeleteTenant:
 
         # Mock dependencies to raise ValidationError during deletion
         with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models'), \
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users:
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_get_users.side_effect = ValidationError("Database error")
@@ -757,7 +756,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
@@ -778,7 +777,6 @@ class TestDeleteTenant:
                 ]
             }
 
-            mock_get_models.return_value = []
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
             mock_get_mcp.return_value = []
@@ -803,7 +801,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
@@ -826,7 +824,6 @@ class TestDeleteTenant:
             # Make remove_group raise an exception to test error handling
             mock_remove_group.side_effect = Exception("Database error deleting group")
 
-            mock_get_models.return_value = []
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
             mock_get_mcp.return_value = []
@@ -852,8 +849,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.delete_model_record') as mock_delete_model, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
@@ -865,10 +861,6 @@ class TestDeleteTenant:
             mock_query_groups.return_value = {"data": []}
 
             # Mock models
-            mock_get_models.return_value = [
-                {"model_id": 1, "model_name": "Model 1"},
-                {"model_id": 2, "model_name": "Model 2"}
-            ]
 
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
@@ -881,11 +873,11 @@ class TestDeleteTenant:
 
             # Assert
             assert result is True
-            assert mock_delete_model.call_count == 2
+            mock_deactivate.assert_awaited_once_with(deleted_by, tenant_id)
 
     @pytest.mark.asyncio
     async def test_delete_tenant_with_model_deletion_error(self):
-        """Test delete_tenant handles model deletion errors gracefully"""
+        """A failed Runtime cleanup prevents the local cascade."""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
@@ -894,8 +886,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.delete_model_record') as mock_delete_model, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
@@ -906,11 +897,7 @@ class TestDeleteTenant:
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
 
-            # Mock models with one causing error
-            mock_get_models.return_value = [
-                {"model_id": 1, "model_name": "Model 1"},
-            ]
-            mock_delete_model.side_effect = Exception("Database error")
+            mock_deactivate.side_effect = Exception("Runtime unavailable")
 
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
@@ -918,11 +905,10 @@ class TestDeleteTenant:
             mock_get_invitations.return_value = []
             mock_get_all_configs.return_value = []
 
-            # Execute
-            result = await delete_tenant(tenant_id, deleted_by)
-
-            # Assert - should succeed despite error
-            assert result is True
+            with pytest.raises(ValidationError, match="Runtime unavailable"):
+                await delete_tenant(tenant_id, deleted_by)
+            mock_get_users.assert_not_called()
+            mock_delete_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_tenant_with_agents(self):
@@ -935,7 +921,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.delete_tools_by_agent_id') as mock_delete_tools, \
@@ -948,7 +934,6 @@ class TestDeleteTenant:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
-            mock_get_models.return_value = []
             mock_get_knowledge.return_value = []
 
             # Mock agents - both draft and published
@@ -981,7 +966,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
@@ -992,7 +977,6 @@ class TestDeleteTenant:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
-            mock_get_models.return_value = []
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
 
@@ -1023,7 +1007,7 @@ class TestDeleteTenant:
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
+             patch('management.services.permission.identity.tenants.deactivate_tenant_models') as mock_deactivate, \
              patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
              patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
              patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
@@ -1034,7 +1018,6 @@ class TestDeleteTenant:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
-            mock_get_models.return_value = []
             mock_get_knowledge.return_value = []
             mock_get_agents.return_value = []
             mock_get_mcp.return_value = []

@@ -18,42 +18,46 @@ Installation:
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
 try:
-    from opentelemetry.trace.status import Status, StatusCode
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry import metrics, propagate, trace
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPSpanExporterGRPC
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPMetricExporterHTTP
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry import trace, metrics
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.trace.status import Status, StatusCode
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
 
+import functools
+import inspect
+import json
 import logging
 import os
 import threading
 import time
-import functools
-import json
-import inspect
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional, Callable, TypeVar, cast, Iterator
 from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
+from .agent_version import agent_version_attributes
+from .first_token import stream_token_basis, valid_ttft
+from .local_content import local_capture_configured, local_capture_enabled
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
     DEFAULT_EXCLUDED_SPAN_NAMES,
     normalize_span_exclusions,
 )
 from .trace_name import TRACE_NAME_ATTRIBUTE, agent_trace_name_scope
+
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +177,7 @@ SUPPORTED_PROVIDERS = {
     "phoenix",
     "langfuse",
     "langsmith",
-    "grafana",
-    "zipkin",
+    "local_file",
 }
 
 
@@ -196,6 +199,13 @@ class AgentRunMetadata:
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
     user_email: Optional[str] = None
     agent_display_name: Optional[str] = None
+    agent_version_no: Optional[int] = None
+    agent_version_name: Optional[str] = None
+    monitoring_group_ids: Optional[tuple[int, ...]] = None
+    monitoring_run_id: Optional[str] = None
+    monitoring_root_run_id: Optional[str] = None
+    monitoring_mcp_servers: Optional[List[Dict[str, Any]]] = None
+    monitoring_parent_run_id: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""
@@ -212,7 +222,10 @@ class AgentRunMetadata:
             "history_count": self.history_count,
             "minio_files_count": self.minio_files_count,
         }
-        metadata.update(self.extra_metadata or {})
+        metadata.update({
+            key: value for key, value in (self.extra_metadata or {}).items()
+            if key not in {"trajectory_id", "trajectory_turn_no", "trajectory_source_message_id"}
+        })
         return {key: value for key, value in metadata.items() if value is not None}
 
     def tags(self) -> List[str]:
@@ -423,12 +436,15 @@ class MonitoringConfig:
     trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
+    local_span_processor: Any = None
+    local_execution_observer: Any = None
     excluded_elasticsearch_operations: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
     )
     excluded_span_names: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_SPAN_NAMES)
     )
+    capture_local_traces: bool = False
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
@@ -436,14 +452,14 @@ class MonitoringConfig:
         self.excluded_span_names = normalize_span_exclusions(self.excluded_span_names)
         self.provider = (self.provider or "otlp").strip().lower()
         if self.provider not in SUPPORTED_PROVIDERS:
-            logger.warning(
-                f"Unknown monitoring provider '{self.provider}'. Using 'otlp'."
-            )
-            self.provider = "otlp"
+            raise ValueError("Unsupported monitoring provider")
 
         self.enable_telemetry = _as_bool(self.enable_telemetry)
         self.export_traces = _as_bool(self.export_traces, True)
-        self.export_metrics = _as_bool(self.export_metrics, True)
+        self.capture_local_traces = _as_bool(self.capture_local_traces, False)
+        if self.enable_telemetry and local_capture_configured(self) and self.local_span_processor is None:
+            raise ValueError("Local monitoring requires an injected span processor")
+        self.export_metrics = _as_bool(self.export_metrics, True) and self.provider != "local_file"
         self.instrument_requests = _as_bool(self.instrument_requests, False)
         self.fastapi_included_urls = str(self.fastapi_included_urls or "").strip()
         self.fastapi_excluded_urls = str(self.fastapi_excluded_urls or "").strip()
@@ -535,6 +551,7 @@ class MonitoringManager:
 
         self._config: Optional[MonitoringConfig] = None
         self._tracer_provider: Optional[Any] = None
+        self._sampler: Optional[Any] = None
         self._meter_provider: Optional[Any] = None
         self._tracer: Optional[Any] = None
         self._meter: Optional[Any] = None
@@ -566,6 +583,22 @@ class MonitoringManager:
         if config.enable_telemetry:
             self._init_telemetry_otlp()
 
+    def configure_local_capture(self, config: MonitoringConfig) -> None:
+        """Install local capture at startup on the same provider used by remote export."""
+        if not self.is_enabled or self._sampler is None:
+            self.configure(config)
+            return
+        if local_capture_configured(self._config):
+            if self._config.local_span_processor is not config.local_span_processor:
+                raise ValueError("Local monitoring is already configured with a different span processor")
+        else:
+            self._add_local_span_processor(config.local_span_processor)
+        self._config = config
+
+    def _add_local_span_processor(self, processor) -> None:
+        self._sampler.delegate = processor.wrap_sampler(self._sampler.delegate)
+        self._tracer_provider.add_span_processor(processor)
+
     def _init_telemetry_otlp(self) -> None:
         """Initialize OpenTelemetry tracing and metrics with OTLP exporters."""
         if not self._config or not self._config.enable_telemetry:
@@ -592,11 +625,17 @@ class MonitoringManager:
                 resource_attributes["openinference.project.name"] = self._config.project_name
             resource = Resource.create(resource_attributes)
 
-            # Initialize TracerProvider with OTLP exporter
-            self._tracer_provider = TracerProvider(resource=resource)
-            trace.set_tracer_provider(self._tracer_provider)
+            from .span_processor import MonitoringSampler, MonitoringSpanProcessor
 
-            if self._config.export_traces:
+            self._tracer_provider = TracerProvider(resource=resource)
+            self._sampler = MonitoringSampler(self._tracer_provider.sampler)
+            self._tracer_provider.sampler = self._sampler
+            if local_capture_configured(self._config):
+                self._add_local_span_processor(self._config.local_span_processor)
+            trace.set_tracer_provider(self._tracer_provider)
+            self._tracer = trace.get_tracer(self._config.service_name)
+
+            if self._config.export_traces and self._config.provider != "local_file":
                 # Choose exporter based on protocol
                 if self._config.otlp_protocol == "grpc":
                     span_exporter = OTLPSpanExporterGRPC(
@@ -616,8 +655,6 @@ class MonitoringManager:
                     schedule_delay_millis=1000,  # 1 second
                     max_export_batch_size=512
                 )
-                from .span_processor import MonitoringSpanProcessor
-
                 self._tracer_provider.add_span_processor(MonitoringSpanProcessor(
                     span_processor,
                     excluded_elasticsearch_operations=self._config.excluded_elasticsearch_operations,
@@ -651,7 +688,6 @@ class MonitoringManager:
             metrics.set_meter_provider(self._meter_provider)
 
             # Get tracer and meter instances
-            self._tracer = trace.get_tracer(self._config.service_name)
             self._meter = metrics.get_meter(self._config.service_name)
 
             # Create LLM-specific metrics (OpenInference semantic conventions)
@@ -730,6 +766,18 @@ class MonitoringManager:
     def tracer(self):
         """Get the tracer instance."""
         return self._tracer
+
+    def get_trace_headers(self) -> Dict[str, str]:
+        """Propagate only W3C trace context across internal HTTP boundaries."""
+        if not self.is_enabled:
+            return {}
+        carrier: Dict[str, str] = {}
+        try:
+            propagate.inject(carrier)
+        except Exception:
+            logger.debug("Unable to inject telemetry context", exc_info=True)
+            return {}
+        return {key: value for key, value in carrier.items() if key in {"traceparent", "tracestate"}}
 
     def setup_fastapi_app(self, app) -> bool:
         """Setup monitoring for a FastAPI application."""
@@ -856,6 +904,11 @@ class MonitoringManager:
         if attributes:
             plain_attrs.update(attributes)
 
+        if span_kind == OPENINFERENCE_SPAN_KIND_AGENT:
+            plain_attrs.update(agent_version_attributes(
+                agent_metadata.agent_version_no, agent_metadata.agent_version_name,
+            ))
+
         return self.build_openinference_attributes(
             span_kind=span_kind,
             input_value=agent_metadata.query if include_query else None,
@@ -878,44 +931,51 @@ class MonitoringManager:
         self,
         metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
         operation_name: str = "agent.run",
+        *,
+        start_time: Optional[int] = None,
+        run_timing=None,
     ) -> Iterator[Optional[Any]]:
         """Create the SDK-owned top-level Agent span."""
         agent_metadata = _coerce_agent_run_metadata(metadata)
-        with agent_monitoring_context(agent_metadata):
-            if _monitoring_agent_run_active.get():
+        if _monitoring_agent_run_active.get():
+            with agent_monitoring_context(agent_metadata):
                 yield self.get_current_span()
-                return
-
-            active_token = _monitoring_agent_run_active.set(True)
-            attributes = self.build_agent_run_attributes(
-                agent_metadata,
-                span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
-                include_query=True,
-            )
-            trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
-            if trace_name:
-                # The main Agent owns the trace name; children retain their own node identities.
-                attributes[TRACE_NAME_ATTRIBUTE] = trace_name
-            parent_span = self.get_current_span()
-            try:
-                with self.trace_operation(
-                    operation_name,
-                    OPENINFERENCE_SPAN_KIND_AGENT,
-                    **attributes,
-                ) as span:
-                    with agent_trace_name_scope(span, trace_name, parent_span):
-                        self.add_span_event(f"{operation_name}.started")
-                        try:
-                            yield span
-                            self.add_span_event(f"{operation_name}.completed")
-                        except Exception as error:
-                            self.add_span_event(f"{operation_name}.error", {
-                                "error.type": type(error).__name__,
-                                "error.message": str(error),
-                            })
-                            raise
-            finally:
-                _monitoring_agent_run_active.reset(active_token)
+            return
+        observer = getattr(self._config, "local_execution_observer", None) if operation_name == "agent.run" else None
+        with (observer(agent_metadata) if observer else nullcontext(agent_metadata)) as agent_metadata:
+            with agent_monitoring_context(agent_metadata):
+                active_token = _monitoring_agent_run_active.set(True)
+                attributes = self.build_agent_run_attributes(
+                    agent_metadata,
+                    span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
+                    include_query=True,
+                )
+                trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
+                if trace_name:
+                    # The main Agent owns the trace name; children retain their own node identities.
+                    attributes[TRACE_NAME_ATTRIBUTE] = trace_name
+                parent_span = self.get_current_span()
+                try:
+                    with self.trace_operation(
+                        operation_name,
+                        OPENINFERENCE_SPAN_KIND_AGENT,
+                        start_time=start_time,
+                        **({"run_timing": run_timing} if run_timing is not None else {}),
+                        **attributes,
+                    ) as span:
+                        with agent_trace_name_scope(span, trace_name, parent_span):
+                            self.add_span_event(f"{operation_name}.started")
+                            try:
+                                yield span
+                                self.add_span_event(f"{operation_name}.completed")
+                            except Exception as error:
+                                self.add_span_event(f"{operation_name}.error", {
+                                    "error.type": type(error).__name__,
+                                    "error.message": str(error),
+                                })
+                                raise
+                finally:
+                    _monitoring_agent_run_active.reset(active_token)
 
     @contextmanager
     def with_agent_monitoring(
@@ -959,6 +1019,8 @@ class MonitoringManager:
         self,
         operation_name: str,
         span_kind: str = OPENINFERENCE_SPAN_KIND_CHAIN,
+        start_time: Optional[int] = None,
+        run_timing=None,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """Trace a non-LLM operation using OpenInference span kind semantics."""
@@ -969,7 +1031,7 @@ class MonitoringManager:
         span_attrs = {
             OPENINFERENCE_SPAN_KIND: span_kind,
         }
-        
+
         # Process input.value and output.value through payload preview (same as trace_llm_request)
         input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
         output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
@@ -983,12 +1045,17 @@ class MonitoringManager:
             if output_preview != "":
                 span_attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
             span_attrs.update(self._trace_payload_attributes("output", output_value))
-        
+
         span_attrs.update(attributes)
+        if run_timing is not None:
+            start_time = run_timing.started_at_ns
+            span_attrs["nexent.agent_run_id"] = run_timing.run_id
 
         with self._tracer.start_as_current_span(
             operation_name,
-            attributes=span_attrs
+            attributes=span_attrs,
+            start_time=start_time,
+            **({"end_on_exit": False} if run_timing is not None else {}),
         ) as span:
             try:
                 yield span
@@ -999,6 +1066,20 @@ class MonitoringManager:
                 raise
             else:
                 span.set_status(Status(StatusCode.OK))
+            finally:
+                if run_timing is not None:
+                    result = run_timing.finish()
+                    try:
+                        if result.duration_ms is None:
+                            span.set_attribute("nexent.availability.duration_ms", "unavailable")
+                        else:
+                            span.set_attribute("nexent.duration_ms", result.duration_ms)
+                    except Exception:
+                        logger.debug("Unable to attach shared Agent timing", exc_info=True)
+                    try:
+                        span.end(end_time=result.ended_at_ns)
+                    except Exception:
+                        logger.debug("Unable to archive completed Agent span", exc_info=True)
 
     def set_openinference_output(
         self,
@@ -1298,6 +1379,16 @@ class MonitoringManager:
                 summary["keys"],
                 ensure_ascii=False,
             )
+        if local_capture_configured(self._config):
+            slot = "output" if prefix.endswith("output") else "input" if prefix.endswith("input") else None
+            if slot:
+                from .local_content import safe_local_content
+
+                try:
+                    attrs[f"nexent.local.{slot}.value"] = safe_local_content(value)
+                except (ValueError, TypeError, RecursionError):
+                    attrs["nexent.trajectory.gap"] = True
+                    attrs[f"nexent.availability.{slot}"] = "serialization_failed"
         return attrs
 
     def _trace_payload_preview(self, value: Any) -> str:
@@ -1415,6 +1506,9 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
+            "context.maintenance_phase": getattr(evidence, "maintenance_phase", "prepare"),
+            "context.usage_source": getattr(evidence, "usage_source", "estimated"),
+            "context.calibrated_input_estimate": getattr(evidence, "calibrated_input_estimate", 0),
             "context.effective_input_limit_tokens": getattr(
                 evidence, "effective_input_limit_tokens", 0
             ),
@@ -1475,6 +1569,7 @@ class MonitoringManager:
         tool_name: str,
         agent_name: str,
         tool_input: Optional[Dict] = None,
+        safe_diagnostics: bool = False,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """
@@ -1535,17 +1630,21 @@ class MonitoringManager:
 
         with self._tracer.start_as_current_span(
             span_name,
-            attributes=openinference_attrs
+            attributes=openinference_attrs,
+            **({"record_exception": False, "set_status_on_exception": False} if safe_diagnostics else {}),
         ) as span:
             start_time = time.time()
             success = True
             try:
                 yield span
-            except Exception as e:
+            except BaseException as e:
+                if not safe_diagnostics and not isinstance(e, Exception):
+                    raise
                 success = False
-                span.set_status(Status(StatusCode.ERROR, str(e)))
+                detail = type(e).__name__ if safe_diagnostics else str(e)
+                span.set_status(Status(StatusCode.ERROR, detail))
                 span.set_attribute("error.type", type(e).__name__)
-                span.set_attribute("error.message", str(e))
+                span.set_attribute("error.message", detail)
                 span.set_attribute("agent.tool.success", False)
                 if self._agent_error_count:
                     self._agent_error_count.add(
@@ -1717,6 +1816,29 @@ class MonitoringManager:
         span = trace.get_current_span()
         if span:
             span.set_attributes(attributes)
+
+    def record_model_http_request(self, body: Dict[str, Any], *, request_id: str, attempt: int,
+                                  method: str, url: str) -> None:
+        """Observe prepared JSON; keep first-send input and separate retry events."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+        from .local_content import safe_local_content
+
+        attributes = self._trace_payload_attributes("input", body)
+        attributes.update({
+            "input.value": attributes.get("input.preview", ""),
+            "input.preview": attributes.get("input.preview", ""),
+            "input.mime_type": "application/json",
+            "http.request.method": method,
+            "url.full": safe_local_content(url),
+            "model.request_id": request_id,
+            "model.request.attempt": attempt,
+        })
+        if attempt == 1:
+            self.set_span_attributes(**attributes)
+        self.add_span_event("model_attempt_begin", {
+            "request_id": request_id, "attempt": attempt, **attributes,
+        })
 
     def create_token_tracker(self, model_name: str, span: Optional[Any] = None) -> 'LLMTokenTracker':
         """Create a token tracker for LLM calls."""
@@ -1938,55 +2060,66 @@ class LLMTokenTracker:
         self.manager = manager
         self.model_name = model_name
         self.span = span
+        self.remote_span = None
         self.start_time = time.time()
+        self._start_monotonic = time.perf_counter()
+        self.ttft_seconds: Optional[float] = None
         self.first_token_time: Optional[float] = None
         self.token_count = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.attempt_observation = None
         # Snapshot context at creation time (caller's async scope) so that
         # downstream code running in a different thread can still access it.
         self._context_snapshot: Dict[str, Any] = get_monitoring_context()
 
-    def record_first_token(self) -> None:
-        """Record the time when first token is received."""
-        if not getattr(self.manager, "is_enabled", False):
+    def record_first_token(self, basis: str = "content") -> None:
+        """Publish the first nonempty output immediately, including partial failures."""
+        if not getattr(self.manager, "is_enabled", False) or self.first_token_time is not None:
             return
-
-        if self.first_token_time is None:
-            self.first_token_time = time.time()
-            ttft = self.first_token_time - self.start_time
-
-            if self.span:
-                self.span.add_event("first_token_received",
-                                    {"llm.time_to_first_token": ttft})
-
-            self.manager.record_llm_metrics(
-                "ttft", ttft, {"llm.model_name": self.model_name})
+        if self.attempt_observation is None:
+            ttft = valid_ttft(time.perf_counter() - self._start_monotonic)
+        else:
+            milliseconds = self.attempt_observation.ttft_ms
+            ttft = milliseconds / 1000 if milliseconds is not None else None
+        if ttft is None:
+            return
+        self.ttft_seconds = ttft
+        self.first_token_time = time.time()
+        attributes = {
+            "llm.time_to_first_token": ttft,
+            "llm.ttft_ms": ttft * 1000,
+            "llm.ttft_basis": basis,
+        }
+        if self.span:
+            self.span.set_attributes(attributes)
+            self.span.add_event("first_token_received", attributes)
+        self.manager.record_llm_metrics("ttft", ttft, {"llm.model_name": self.model_name})
 
     def record_token(self, token: str) -> None:
-        """Record a new token generated."""
-        if not getattr(self.manager, "is_enabled", False):
+        """Record a nonempty content increment without estimating token usage."""
+        if not getattr(self.manager, "is_enabled", False) or not token:
             return
-
         if self.first_token_time is None:
             self.record_first_token()
-
         self.token_count += 1
-
-        if self.span:
-            self.span.add_event("token_generated", {
+        span = self.remote_span if local_capture_enabled(self.manager) else self.span
+        if span:
+            span.add_event("token_generated", {
                 "token_count": self.token_count,
                 "token_length": len(token)
             })
 
     def record_completion(self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Any = ...) -> None:
         """Preserve legacy inferred totals; explicit None means the provider did not report one."""
+        if total_tokens is not ... and total_tokens is not None and (type(total_tokens) is not int or total_tokens < 0):
+            raise ValueError("total_tokens must be a non-negative integer or None")
         if not self.manager.is_enabled:
             return
 
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
-        total_duration = time.time() - self.start_time
+        total_duration = time.perf_counter() - self._start_monotonic
         generation_rate = 0.0
 
         # Calculate token generation rate (tokens per second)
@@ -2003,7 +2136,7 @@ class LLMTokenTracker:
             "llm.model_name": self.model_name})
 
         # Add span attributes using OpenInference naming
-        if self.span:
+        if self.span and self.attempt_observation is None:
             usage_details = {
                 "input": input_tokens,
                 "output": output_tokens,
@@ -2017,8 +2150,7 @@ class LLMTokenTracker:
                 "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
-                "llm.duration.total": total_duration,
-                "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
+                "llm.duration.total": total_duration
             }
             if total is not None:
                 attributes["llm.token_count.total"] = total
@@ -2205,7 +2337,7 @@ class RecordModelCallContext:
                 "model_name": self.model_name,
                 "operation": f"{self.model_type}_call",
                 "request_duration_ms": request_duration_ms,
-                "ttft_ms": 0,
+                "ttft_ms": None,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
@@ -2256,11 +2388,25 @@ class RecordModelCallContext:
             pass
 
 
+def read_openai_token_counts(usage) -> dict | None:
+    """Read provider usage once while preserving explicit zero and absence."""
+    if usage is None:
+        return None
+    read = usage.get if isinstance(usage, dict) else lambda field: getattr(usage, field, None)
+    return {
+        "input_tokens": read("prompt_tokens"),
+        "output_tokens": read("completion_tokens"),
+        "total_tokens": read("total_tokens"),
+    }
+
+
 class _MonitoredStreamIterator:
 
-    def __init__(self, stream, start_time: float, model_name: str, model_type: str):
+    def __init__(self, stream, start_time: float, model_name: str, model_type: str, *, start_monotonic=None):
         self._stream = stream
         self._start_time = start_time
+        self._start_monotonic = time.perf_counter() if start_monotonic is None else start_monotonic
+        self._ttft_seconds: Optional[float] = None
         self._model_name = model_name
         self._model_type = model_type
         self._error: Optional[Exception] = None
@@ -2269,7 +2415,9 @@ class _MonitoredStreamIterator:
         self._output_tokens: int = 0
         self._state_lock = threading.Lock()
         self._closed = False
+        self._aborted = False
         self._finalized = False
+        self.attempt_observation = None
 
     def __iter__(self):
         return self
@@ -2282,6 +2430,28 @@ class _MonitoredStreamIterator:
             self._error = exc_value
         self.close()
         return False
+
+    def abort(self):
+        """Wake a blocked HTTP read before closing a cancelled stream."""
+        import socket
+
+        import httpx
+
+        with self._state_lock:
+            if self._closed or self._aborted:
+                return
+            self._aborted = True
+        try:
+            response = getattr(self._stream, "response", None)
+            if isinstance(response, httpx.Response):
+                network = response.extensions.get("network_stream")
+                connection = network.get_extra_info("socket") if network is not None else None
+                if connection is not None:
+                    connection.shutdown(socket.SHUT_RDWR)
+        except (OSError, AttributeError, ValueError):
+            pass
+        finally:
+            self.close()
 
     def close(self):
         with self._state_lock:
@@ -2296,24 +2466,38 @@ class _MonitoredStreamIterator:
             self._error = self._error or exc
             raise
         finally:
+            if self.attempt_observation is not None:
+                self.attempt_observation.finish(self._error or GeneratorExit())
             self._finalize()
 
     def __next__(self):
         try:
             chunk = next(self._stream)
-            if self._first_chunk_time is None:
-                self._first_chunk_time = time.time()
-            if hasattr(chunk, "usage") and chunk.usage is not None:
-                self._input_tokens = getattr(
-                    chunk.usage, "prompt_tokens", 0) or 0
-                self._output_tokens = getattr(
-                    chunk.usage, "completion_tokens", 0) or 0
+            basis = stream_token_basis(chunk)
+            if self._first_chunk_time is None and basis is not None:
+                elapsed = valid_ttft(time.perf_counter() - self._start_monotonic)
+                if elapsed is not None:
+                    self._ttft_seconds = elapsed
+                    self._first_chunk_time = time.time()
+            counts = read_openai_token_counts(getattr(chunk, "usage", None))
+            if self.attempt_observation is not None:
+                self.attempt_observation.record_provider_counts(counts)
+                if basis is not None:
+                    self.attempt_observation.content()
+            if counts is not None:
+                self._input_tokens = counts["input_tokens"] or 0
+                self._output_tokens = counts["output_tokens"] or 0
             return chunk
         except StopIteration:
+            if self.attempt_observation is not None:
+                self.attempt_observation.complete(None)
+                self.attempt_observation.finish()
             self._finalize()
             raise
         except Exception as exc:
             self._error = exc
+            if self.attempt_observation is not None:
+                self.attempt_observation.finish(exc)
             self._finalize()
             raise
 
@@ -2323,13 +2507,10 @@ class _MonitoredStreamIterator:
                 return
             self._finalized = True
         try:
-            request_duration_ms = int((time.time() - self._start_time) * 1000)
-
-            if self._first_chunk_time is not None:
-                ttft_ms = int(
-                    (self._first_chunk_time - self._start_time) * 1000)
-            else:
-                ttft_ms = 0
+            duration = time.perf_counter() - self._start_monotonic
+            request_duration_ms = int(duration * 1000) if valid_ttft(duration) is not None else 0
+            ttft = valid_ttft(self._ttft_seconds, duration)
+            ttft_ms = int(ttft * 1000) if ttft is not None else None
 
             duration_seconds = request_duration_ms / 1000.0
             if duration_seconds > 0 and self._output_tokens > 0:
@@ -2361,37 +2542,61 @@ class _MonitoredChatCompletions:
         self._original = original
         self._model_name = model_name
         self._model_type = model_type
+        self.catalog_identity = None
 
-    def create(self, **kwargs):
+    def create(self, *, _trajectory_capture=None, **kwargs):
         stream = kwargs.get("stream", False)
         start_time = time.time()
+        start_monotonic = time.perf_counter()
+        observation = self._observe_dispatch(_trajectory_capture)
         try:
             response = self._original.create(**kwargs)
         except Exception as exc:
-            self._record_non_streaming(start_time, error=exc)
+            self._record_non_streaming(start_time, error=exc, observation=observation)
             raise
 
         if stream:
-            return _MonitoredStreamIterator(response, start_time, self._model_name, self._model_type)
+            iterator = _MonitoredStreamIterator(
+                response, start_time, self._model_name, self._model_type, start_monotonic=start_monotonic
+            )
+            if observation is not None:
+                iterator.attempt_observation = observation
+            return iterator
         else:
-            self._record_non_streaming(start_time, response=response)
+            self._record_non_streaming(start_time, response=response, observation=observation)
             return response
 
-    def _record_non_streaming(self, start_time: float, response=None, error: Optional[Exception] = None):
+    def _observe_dispatch(self, capture):
+        if _monitoring_operation.get() in {"connectivity_check", "tool_validation", "model_validation"}:
+            return None
+        from nexent.monitor.model_fact import AttemptObservation
+
+        identity = self.catalog_identity or (None, None, self._model_type)
+        observation = AttemptObservation.for_client(*identity, trace_enabled=capture is not None and capture.enabled)
+        if observation is not None:
+            if capture is not None:
+                capture.bind_observation(observation)
+            observation.dispatch()
+        return observation
+
+    def _record_non_streaming(self, start_time: float, response=None, error: Optional[Exception] = None,
+                              observation=None):
         try:
             request_duration_ms = int((time.time() - start_time) * 1000)
-            input_tokens = 0
-            output_tokens = 0
-            if response is not None and hasattr(response, "usage") and response.usage:
-                input_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-                output_tokens = getattr(
-                    response.usage, "completion_tokens", 0) or 0
+            counts = read_openai_token_counts(getattr(response, "usage", None))
+            if observation is not None:
+                observation.record_provider_counts(counts)
+                if error is None:
+                    observation.complete(None)
+                observation.finish(error)
+            input_tokens = (counts or {}).get("input_tokens") or 0
+            output_tokens = (counts or {}).get("output_tokens") or 0
 
             _enqueue_client_monitoring_record(
                 model_name=self._model_name,
                 model_type=self._model_type,
                 request_duration_ms=request_duration_ms,
-                ttft_ms=0,
+                ttft_ms=None,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=input_tokens + output_tokens,
@@ -2450,7 +2655,7 @@ def _enqueue_client_monitoring_record(
     model_name: str,
     model_type: str,
     request_duration_ms: int,
-    ttft_ms: int,
+    ttft_ms: Optional[int],
     input_tokens: int,
     output_tokens: int,
     total_tokens: int,
@@ -2519,18 +2724,22 @@ def _enqueue_client_monitoring_record(
 def _extract_tracker_metrics(tracker):
     """Extract timing and token metrics from an LLMTokenTracker."""
     request_duration_ms = 0
-    ttft_ms = 0
+    ttft_ms = None
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
     generation_rate = 0.0
 
     if tracker is not None:
-        request_duration_ms = int(
-            (time.time() - tracker.start_time) * 1000)
-        if tracker.first_token_time is not None:
-            ttft_ms = int((tracker.first_token_time -
-                          tracker.start_time) * 1000)
+        monotonic_start = getattr(tracker, "_start_monotonic", None)
+        duration = (
+            time.perf_counter() - monotonic_start
+            if type(monotonic_start) in (int, float) else time.time() - tracker.start_time
+        )
+        request_duration_ms = int(duration * 1000) if valid_ttft(duration) is not None else 0
+        ttft = valid_ttft(getattr(tracker, "ttft_seconds", None), duration)
+        if ttft is not None:
+            ttft_ms = int(ttft * 1000)
         input_tokens = tracker.input_tokens
         output_tokens = tracker.output_tokens
         total_tokens = input_tokens + output_tokens
@@ -2634,7 +2843,7 @@ def _enqueue_monitoring_record(
 
 
 class MonitoringRecordBuffer:
-    """Thread-safe buffer that batches LLM monitoring records and flushes to PostgreSQL.
+    """Thread-safe buffer that batches LLM monitoring records for an injected writer.
 
     Uses collections.deque for non-blocking, lock-free appends. A daemon background
     thread periodically flushes records to the database in batches.
@@ -2643,19 +2852,24 @@ class MonitoringRecordBuffer:
     Automatically retries after 30 seconds.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        write_record: Optional[Callable[[dict], None]] = None,
+        *,
+        enabled: bool = True,
+        batch_size: int = 100,
+        flush_interval: int = 30,
+    ):
         from ..core.concurrency import (
             get_current_thread_manager,
             get_default_thread_manager,
         )
 
         self._buffer: deque = deque(maxlen=5000)
-        self._enabled: bool = os.getenv(
-            "ENABLE_MODEL_MONITORING", "true").lower() == "true"
-        self._batch_size: int = int(
-            os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
-        self._flush_interval: int = int(
-            os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30"))
+        self._write_record = write_record
+        self._enabled = enabled and write_record is not None
+        self._batch_size = batch_size
+        self._flush_interval = flush_interval
         self._consecutive_failures: int = 0
         self._max_failures: int = 3
         self._degraded_until: float = 0.0
@@ -2761,31 +2975,15 @@ class MonitoringRecordBuffer:
                     f"Monitoring buffer: degraded mode for 30s after {self._max_failures} failures")
 
     def _write_batch(self, batch: List[dict]) -> None:
-        try:
-            import sys
-            import os
+        write_record = self._write_record
+        if write_record is None:
+            raise RuntimeError("No model monitoring record writer is configured")
 
-            backend_path = os.path.join(os.getcwd(), "backend")
-            if os.path.exists(backend_path) and backend_path not in sys.path:
-                sys.path.insert(0, backend_path)
-
-            from management.db.client import get_monitoring_db_session
-            from management.db.models import ModelMonitoringRecord
-        except ImportError as e:
-            logger.debug(
-                f"Monitoring buffer: backend database not available: {e}")
-            raise RuntimeError("Backend database module not available")
-
-        # Write records individually so that one bad record (e.g. missing
-        # tenant_id) does not abort the entire batch.
         succeeded = 0
         failed = 0
         for record in batch:
             try:
-                with get_monitoring_db_session() as session:
-                    row = ModelMonitoringRecord(**record)
-                    session.add(row)
-                    session.flush()
+                write_record(record)
                 succeeded += 1
             except Exception as rec_err:
                 failed += 1
@@ -2825,13 +3023,29 @@ class MonitoringRecordBuffer:
 
 
 _monitoring_buffer: Optional[MonitoringRecordBuffer] = None
+_monitoring_buffer_factory: Optional[Callable[[], MonitoringRecordBuffer]] = None
+_monitoring_buffer_lock = threading.Lock()
+
+
+def configure_monitoring_records(
+    write_record: Optional[Callable[[dict], None]], *, batch_size: int = 100, flush_interval: int = 30,
+) -> None:
+    """Install the host application's record writer before models start running."""
+    global _monitoring_buffer_factory
+    with _monitoring_buffer_lock:
+        _monitoring_buffer_factory = (
+            functools.partial(
+                MonitoringRecordBuffer, write_record, batch_size=batch_size, flush_interval=flush_interval,
+            ) if write_record is not None else None
+        )
 
 
 def get_monitoring_buffer() -> Optional[MonitoringRecordBuffer]:
     global _monitoring_buffer
-    if _monitoring_buffer is None:
-        _monitoring_buffer = MonitoringRecordBuffer()
-    return _monitoring_buffer
+    with _monitoring_buffer_lock:
+        if _monitoring_buffer is None and _monitoring_buffer_factory is not None:
+            _monitoring_buffer = _monitoring_buffer_factory()
+        return _monitoring_buffer
 
 
 # Global singleton instance
@@ -2870,6 +3084,7 @@ __all__ = [
     'RecordModelCallContext',
     'get_monitoring_manager',
     'get_monitoring_buffer',
+    'configure_monitoring_records',
     'is_opentelemetry_available',
     'set_monitoring_context',
     'get_monitoring_context',

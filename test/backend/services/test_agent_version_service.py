@@ -86,7 +86,7 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 )
 
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
@@ -94,7 +94,7 @@ sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Mock management.db.client
+# Mock infrastructure.rdb.client
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
@@ -102,17 +102,17 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock management.db.models
 db_models_mock = MagicMock()
@@ -3919,3 +3919,31 @@ def test_list_published_agents_impl_model_not_found(monkeypatch):
     assert result[0]["model_ids"] == []
     assert result[0]["model_names"] == []
     assert result[0]["model_name"] is None
+
+
+@pytest.fixture(autouse=True)
+def batch_list_collaborators(monkeypatch):
+    """Keep legacy service assertions isolated from the new repository batch API."""
+    svc = agent_version_service_module
+    monkeypatch.setattr(svc, "query_version_lists", lambda ids, tenant: {
+        aid: svc.query_version_list(agent_id=aid, tenant_id=tenant) for aid in ids
+    })
+    monkeypatch.setattr(svc, "query_agent_snapshots", lambda versions, tenant: {
+        aid: svc.query_agent_snapshot(agent_id=aid, tenant_id=tenant, version_no=no)
+        for aid, no in versions.items()
+    })
+
+    class Context:
+        def model_cache(self):
+            return {}
+
+        def valid_model_ids(self, ids):
+            return svc.get_valid_model_ids(ids, current_tenant[0])
+
+    current_tenant = [None]
+
+    def context(agents, tenant):
+        current_tenant[0] = tenant
+        return Context()
+
+    monkeypatch.setattr(svc, "load_agent_list_context", context)

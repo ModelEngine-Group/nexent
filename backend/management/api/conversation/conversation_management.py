@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.conversation import ConversationModelPreferencePatch, ConversationModelSelectionPatch, ConversationTarget, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
+from contracts.conversation import ConversationModelPreferencePatch, ConversationModelSelectionPatch, ConversationTarget, BranchConversationRequest, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
 from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
 from contracts.agent import WorkbenchConfigUpdateRequest
 from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError, AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, AgentDraftEditError, WorkbenchConfigVersionConflict, WorkbenchError
@@ -12,6 +12,7 @@ from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 
 from management.db.conversation.repository import get_conversation_list_page
 from management.services.conversation.service import (
+    branch_conversation_service,
     create_new_conversation,
     delete_conversation_service,
     delete_conversations_batch_service,
@@ -29,10 +30,11 @@ from management.services.conversation.agent_history import (
     list_agent_group_conversations,
     list_agent_groups,
 )
-from gateway.authentication.auth import get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from contracts.clarification import ClarificationResponse
 from contracts.errors.exceptions import UnauthorizedError
 from management.services.conversation.creation_mode import confirm_creation_mode
+
 
 router = APIRouter(prefix="/conversation")
 
@@ -61,14 +63,21 @@ def confirm_creation_mode_endpoint(
 
 @router.get("/agent_groups", response_model=ConversationResponse)
 async def list_agent_groups_endpoint(
+    request: Request,
     authorization: Optional[str] = Header(None),
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    cursor: Annotated[Optional[str], Query(max_length=2048)] = None,
     search: Annotated[str, Query(max_length=200)] = "",
     include_agent_id: list[int] = Query(default=[]),
     include_other: bool = False,
+    view: Optional[str] = None,
+    target_user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    category: Literal["agent_chat", "workbench"] = "agent_chat",
 ):
     """Return paginated Agent-chat groups and pinned groups outside the page."""
+    if view is not None or target_user_id is not None or tenant_id is not None or (cursor and len(cursor) > 512):
+        raise HTTPException(status_code=422, detail="Invalid conversation directory parameters")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         if len(include_agent_id) > 100 or any(agent_id <= 0 for agent_id in include_agent_id):
@@ -100,13 +109,20 @@ async def list_agent_groups_endpoint(
 
 @router.get("/agent_groups/{group_key}/conversations", response_model=ConversationResponse)
 async def list_agent_group_conversations_endpoint(
+    request: Request,
     group_key: str,
     authorization: Optional[str] = Header(None),
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    cursor: Annotated[Optional[str], Query(max_length=2048)] = None,
     search: Annotated[str, Query(max_length=200)] = "",
+    view: Optional[str] = None,
+    target_user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    category: Literal["agent_chat", "workbench"] = "agent_chat",
 ):
     """Return a paginated Agent-chat history group without message bodies."""
+    if view is not None or target_user_id is not None or tenant_id is not None or (cursor and len(cursor) > 512):
+        raise HTTPException(status_code=422, detail="Invalid conversation directory parameters")
     try:
         user_id, _ = get_current_user_id(authorization)
         data = list_agent_group_conversations(user_id, group_key, limit, cursor, search)
@@ -279,6 +295,55 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post("/branch", response_model=ConversationResponse)
+async def branch_conversation_endpoint(
+    request: BranchConversationRequest, authorization: Optional[str] = Header(None)
+):
+    """
+    Branch a conversation into a new one up to and including the given turn
+
+    Args:
+        request: BranchConversationRequest object containing:
+            - conversation_id: Source conversation ID
+            - turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        authorization: Authorization header
+
+    Returns:
+        ConversationResponse object containing:
+            - conversation_id: New conversation ID
+            - conversation_title: New conversation title (suffixed with the branch marker)
+            - branched_message_count: Number of copied messages
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        target = {
+            key: value
+            for key, value in request.model_dump(include={"source_message_id", "answer_index"}).items()
+            if value is not None
+        }
+        branched = branch_conversation_service(
+            request.conversation_id, request.turn_index, user_id, **target
+        )
+        return ConversationResponse(code=0, message="success", data=branched)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except AppException:
+        raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception(f"Failed to branch conversation: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to branch conversation",
+        ) from e
+
+
 @router.delete("/{conversation_id}", response_model=ConversationResponse)
 async def delete_conversation_endpoint(conversation_id: int, authorization: Optional[str] = Header(None)):
     """
@@ -293,7 +358,7 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        delete_conversation_service(conversation_id, user_id)
+        await delete_conversation_service(conversation_id, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -318,8 +383,8 @@ async def delete_conversations_batch_endpoint(
         ConversationResponse with deleted_count and failed_ids
     """
     try:
-        user_id, _ = get_current_user_id(authorization)
-        result = delete_conversations_batch_service(request.conversation_ids, user_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await delete_conversations_batch_service(request.conversation_ids, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=result)
     except TokenExpiredError as e:
         logging.warning("Session expired")

@@ -1,7 +1,14 @@
 # Default values for nexent helm chart.
 global:
-  # Deployment scripts keep business Pods stopped until the bootstrap Job succeeds.
+  # Kubernetes SYSTEM execution is opt-in.
+  sandboxProvider: "docker"
+  # Only for local verification; sandbox Pods stay on the Runtime node.
+  sandboxSingleNodeDevelopment: false
+  # Confirm only after the target cluster passes the network-policy negative probe.
+  sandboxNetworkPolicyVerified: false
+  # Deployment scripts keep business Pods stopped until bootstrap succeeds.
   businessPaused: false
+  bootstrapRunId: ""
   systemBootstrapTimeoutSeconds: 1800
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
@@ -26,6 +33,10 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/logs"
       existingClaim: "nexent-logs"
+    trajectory:
+      size: "50Gi"
+      localPath: "/var/lib/nexent-data/trajectory"
+      existingClaim: "nexent-trajectory"
     projectConfig:
       size: "1Gi"
       localPath: "/var/lib/nexent-data/project-config"
@@ -42,6 +53,9 @@ global:
   monitoring:
     enabled: false
     provider: otlp
+    localFileEnabled: true
+    trajectoryRootDir: "/mnt/nexent-data/trajectory"
+    trajectoryReadEnabled: false
     projectName: "nexent"
     serviceName: nexent-backend
     otlpEndpoint: http://nexent-otel-collector:4318
@@ -67,7 +81,7 @@ global:
     traceMaxItems: "20"
 
 # Optional monitoring stack. Set provider to one of:
-# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
+# otlp, phoenix, langfuse, langsmith.
 nexent-common:
   # Shared ConfigMap values rendered into the Kubernetes nexent-config ConfigMap.
   config:
@@ -110,7 +124,7 @@ nexent-runtime:
   replicaCount: 1
 nexent-mcp:
   enabled: true
-nexent-northbound:
+nexent-gateway:
   enabled: true
   replicaCount: 1
 nexent-web:

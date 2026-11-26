@@ -16,12 +16,11 @@ import pytest
 from shared.tool_fastpath import FinalEnvelopeModel, OrdinaryExecutor
 from smolagents.default_tools import FinalAnswerTool
 
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel, SandboxScope
-from nexent.core.agents.tool_fastpath import (
-    DeferredToolExecutor,
-)
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -30,8 +29,8 @@ pytestmark = [pytest.mark.case_id("TFP-D1-006"), pytest.mark.stage("D1")]
 @pytest.mark.parametrize("activate_child", [False, True])
 def test_tfp_d1_006(monkeypatch, tmp_path, activate_child):
     """TFP-D1-006: deferred tree activation, workspace, cleanup and disabled mode."""
-    import nexent.core.agents.nexent_agent as factory_module
-    import nexent.core.agents.sandbox as sandbox_module
+    import nexent.core.agents.cores.smolagents.agent as factory_module
+    import nexent.core.agents.sandbox.execution as sandbox_module
 
     group = object()
     builds = []
@@ -149,8 +148,8 @@ def test_tfp_d1_006(monkeypatch, tmp_path, activate_child):
 ])
 def test_tfp_d1_006_backends(monkeypatch, level, backend):
     """TFP-D1-006: only Docker is deferred and its local fallback stays sticky."""
-    import nexent.core.agents.nexent_agent as factory_module
-    import nexent.core.agents.sandbox as sandbox_module
+    import nexent.core.agents.cores.smolagents.agent as factory_module
+    import nexent.core.agents.sandbox.execution as sandbox_module
 
     raw = OrdinaryExecutor()
     raw._nexent_backend = backend
@@ -219,8 +218,9 @@ def test_tfp_d1_006_configuration(enabled, allowed, expected):
 @pytest.mark.parametrize("setting", ["default", "missing", "disabled", "enabled"])
 def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
     """TFP-D1-006: actual run construction stays cold by default and honors false."""
-    import nexent.core.agents.run_agent as run_module
-    import nexent.core.agents.sandbox as sandbox_module
+    import nexent.core.agents.orchestration.entry as run_module
+    import nexent.core.agents.sandbox.execution as sandbox_module
+    from nexent.core.agents.cores.smolagents import runner
 
     acquisitions, releases, runtimes, outputs = [], [], [], []
     ordinary = OrdinaryExecutor()
@@ -232,7 +232,7 @@ def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
     monkeypatch.setattr(sandbox_module, "build_python_executor", acquire)
     monkeypatch.setattr(sandbox_module, "cleanup_executor", lambda executor, *args, **kwargs: releases.append(executor))
     monkeypatch.setattr(
-        run_module, "ManagedMCPToolCollection",
+        runner, "ManagedMCPToolCollection",
         lambda **kwargs: nullcontext(SimpleNamespace(tools=[])),
     )
 
@@ -242,12 +242,13 @@ def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
         monkeypatch.setattr(runtime, "create_model", lambda _: FinalEnvelopeModel())
 
         def execute(**kwargs):
+            assert isinstance(runtime.agent.python_executor, DeferredToolExecutor) is enabled
             outputs.append(runtime.agent.run("fixture", max_steps=1))
 
         monkeypatch.setattr(runtime, "agent_run_with_observer", execute)
         return runtime
 
-    monkeypatch.setattr(run_module, "NexentAgent", construct)
+    monkeypatch.setattr(runner, "NexentAgent", construct)
     info = AgentRunInfo(
         query="fixture", model_config_list=[], observer=MessageObserver(),
         agent_config=AgentConfig(
@@ -270,7 +271,6 @@ def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
         assert len(runtimes) == 1
         runtime = runtimes[0]
         assert runtime.tool_fastpath_enabled is enabled
-        assert isinstance(runtime.agent.python_executor, DeferredToolExecutor) is enabled
         assert len(outputs) == 1
         assert runtime.agent.memory.steps[-1].is_final_answer is True
         assert str(outputs[0]) == "answer"

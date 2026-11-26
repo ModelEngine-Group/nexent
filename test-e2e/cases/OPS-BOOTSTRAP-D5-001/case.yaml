@@ -11,11 +11,13 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Prove the real launcher serves process health without importing business stacks or opening outbound connections.
+  objective: Prove the real launcher serves process health and configuration routes without importing business service modules or opening outbound connections. Shared ORM, identity, configuration, security and concurrency imports are allowed.
   preconditions:
   - Python 3.11 with the existing backend dependencies is available.
   - A free loopback port and subprocess execution are available.
   - Results use a machine-local test home outside Git.
+  - Bash and Helm 3 are available for the deployed-command proof.
+  - OPS_MONITORING_ENABLED is explicitly false to isolate infrastructure-free process startup.
   test_data:
     environment: Minimal process environment with dotenv disabled and no infrastructure credentials.
   steps:
@@ -24,20 +26,24 @@ case:
     expected: The launcher starts without an import violation or outbound connection.
   - order: 2
     action: Request liveness, readiness and OpenAPI through real HTTP.
-    expected: Health returns 200 with alive and ready; no business routes appear in OpenAPI.
+    expected: Health returns 200 with alive and ready; health, operations-access and system-configuration routes appear in OpenAPI, and an anonymous configuration request returns 401 without a database connection.
   - order: 3
     action: Terminate the process, restart it on the same port, and repeat health requests before cleanup.
     expected: The replacement process becomes ready within the deadline and all child processes are reaped.
   - order: 4
     action: Read the same log directory after each start and restart.
     expected: The ops file contains both server startups and health access records; the first run is retained after restart.
+  - order: 5
+    action: Read the Ops entrypoint from Compose and the rendered Helm Deployment, execute each command through the repository startup wrapper, and restart it on the same loopback port.
+    expected: Both deployed commands reach readiness and liveness without standard-library module shadowing, retain file logs, and release their child processes.
   expected_results:
   - Startup and restart each reach readiness within 20 seconds without configured external services.
-  - Health responses match the process-local contract and no business API is exposed.
+  - Health responses match the process-local contract and health, operations-access and system-configuration APIs are exposed.
   - All owned subprocesses exit during cleanup.
   - Server and access logs are appended to the persistent ops file across process restarts.
+  - Compose and Helm launch the real Ops service without shadowing the Python standard library.
   forbidden_side_effects:
-  - Importing management, runtime, infrastructure clients or the Agent SDK.
+  - Importing business services, runtime or external storage clients; shared ORM, identity, configuration, security and concurrency imports are allowed.
   - Opening outbound connections or running SQL migrations.
   acceptance:
   - id: AC-01
@@ -49,10 +55,15 @@ case:
     description: File logging retains startup and access evidence across a process restart without external clients.
     steps: [4]
     expected_results: [4]
+  - id: AC-03
+    description: Actual Compose and rendered Helm commands start and restart Ops with healthy responses and persistent logs.
+    steps: [5]
+    expected_results: [1, 3, 4, 5]
+    forbidden_side_effects: [2]
   risk_type: RELIABILITY
   risk: A shared backend import or startup hook silently makes operations depend on the business stack.
   condition:
-  - Start with no business configuration and forbid business-package imports and outbound socket connections.
+  - Start with no business configuration and forbid business-service imports and outbound socket connections.
   metrics: [Startup latency, HTTP status and payload, child process exit]
   thresholds: [Ready within 20 seconds per start, zero forbidden imports or connections, zero surviving child processes]
   recovery_expectations: [A fresh process on the same port returns ready after the previous process exits.]

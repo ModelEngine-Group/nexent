@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Exercise the real CodeAgent loop with a deterministic model and executor."""
 import json
 import threading
@@ -10,8 +9,9 @@ import pytest
 from smolagents import Tool
 from smolagents.models import ChatMessage, Model
 
-from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
-from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents.context import ContextManager, ContextManagerConfig
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.utils.observer import MessageObserver
 
@@ -49,12 +49,14 @@ class RecordTool(Tool):
 
 @pytest.fixture
 def build_agent():
-    def build(outputs, tools=None, **kwargs):
+    def build(outputs, tools=None, *, context_window=128000, **kwargs):
         observer = MessageObserver()
         model = ScriptedModel(outputs)
         agent = CoreAgent(
             observer=observer, model=model, tools=tools or [], enable_clarification=True,
-            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig())),
+            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig(
+                context_window_tokens=context_window, effective_input_limit_tokens=context_window,
+            ))),
             verbosity_level=0, **kwargs,
         )
         return agent, model, observer
@@ -180,7 +182,7 @@ def test_successful_business_action_resets_consecutive_clarification_failures(bu
 
 
 def test_cancellation_preempts_legacy_invalid_form_repair(build_agent, monkeypatch):
-    from nexent.core.agents import core_agent
+    from nexent.core.agents.cores.smolagents import core_agent
 
     agent, model, observer = build_agent([f"<code>{CODE}; record()</code>"])
     extract = core_agent.extract_clarification_form
@@ -202,7 +204,7 @@ def test_cancellation_preempts_legacy_invalid_form_repair(build_agent, monkeypat
 
 
 def test_strict_invalid_forms_keep_existing_three_generation_limit(build_agent):
-    from nexent.core.agents.output_protocol import ModelOutputProtocolExhaustedError
+    from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolExhaustedError
 
     agent, model, observer = build_agent(
         [f"<code>{CODE}; record()</code>"] * 3, enable_protocol_repair_retry=True,
@@ -255,9 +257,10 @@ def test_cancel_exception_bypasses_ordinary_exception_handlers():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("invalid_output", [False, True])
 async def test_worker_drains_card_or_terminal_protocol_error(monkeypatch, invalid_output):
-    from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.run_agent import agent_run
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.orchestration.entry import agent_run
     from nexent.core.concurrency import LanePolicy, ThreadManager
 
     model = ScriptedModel(["bare answer"] * 3 if invalid_output else [f"思考：请用户补充信息。\n代码：\n<code>{CODE}</code>"])
@@ -320,3 +323,17 @@ def test_clarification_uses_existing_content_guardrail(build_agent, action):
         assert len(cards) == 1
         assert cards[0]["content"]["questions"][0]["title"] == "Filtered question"
         assert result == "1. Filtered question"
+
+
+def test_clarification_small_window_remains_advisory_before_inference(build_agent, monkeypatch):
+    """An over-window estimate still reaches inference without pre-send compression."""
+    agent, model, observer = build_agent([f"<code>{CODE}</code>"], context_window=1000)
+    manager = agent.context_runtime.context_manager
+    summary = MagicMock(side_effect=AssertionError("Unexpected pre-send summary"))
+    monkeypatch.setattr(manager._llm, "generate_summary", summary)
+    result = str(agent.run("Help with " * 1000, max_steps=1))
+    assert len(model.calls) == 1
+    assert manager._message_tokens(model.calls[0]) > manager.config.context_window_tokens == 1000
+    summary.assert_not_called()
+    assert result == "1. Which region?"
+    assert len([event for event in events(observer) if event["type"] == "human_interaction"]) == 1
