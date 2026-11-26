@@ -84,7 +84,9 @@ COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nex
 RUN chmod +x /opt/nexent/scripts/*.sh
 RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bind9-dnsutils btop file iproute2 jq less lsof nano netcat-openbsd \
+        postgresql-client procps psmisc redis-tools strace tcpdump
 
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
@@ -99,7 +101,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        fontconfig fonts-noto-cjk && \
+        fontconfig fonts-noto-cjk unzip && \
     fc-cache -f
 RUN --mount=type=bind,from=builder,source=/usr/local/bin/uv,target=/tmp/uv \
     --mount=type=bind,from=builder,source=/opt/backend/management-requirements.txt,target=/tmp/management-requirements.txt \
@@ -143,6 +145,10 @@ COPY backend/gateway/identity /opt/backend/gateway/identity
 
 # Runtime target excludes Management business code.
 FROM backend-common AS runtime
+
+RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sysstat
 
 ENV NEXENT_SQL_STARTUP_MODE=off
 
